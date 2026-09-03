@@ -7,20 +7,20 @@ import React, {
   useRef,
   useState,
   type ReactNode,
-} from 'react';
-import { apiClient } from '../../shared/api/apiClient';
-import { queryClient } from '../../shared/api/queryClient';
-import { logError } from '../../shared/observability/errorLogger';
+} from "react";
+import { apiClient } from "../../shared/api/apiClient";
+import { queryClient } from "../../shared/api/queryClient";
+import { logError } from "../../shared/observability/errorLogger";
 import {
   authService,
   type AuthSession,
   type AuthUserRole,
   type StudentEntryResult,
-} from './api/authGateway';
+} from "./api/authGateway";
 
-export type { StudentQueuedAdmission } from './api/authGateway';
+export type { StudentQueuedAdmission } from "./api/authGateway";
 
-type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
+type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
 interface AuthSessionContextValue {
   session: AuthSession | null;
@@ -42,7 +42,7 @@ interface AuthSessionContextValue {
   activateAccount: (
     token: string,
     password: string,
-    displayName?: string | undefined,
+    displayName?: string | undefined
   ) => Promise<AuthSession>;
 }
 
@@ -60,33 +60,33 @@ function applySessionHeaders(session: AuthSession | null): void {
 function setSessionState(
   nextSession: AuthSession | null,
   setSession: React.Dispatch<React.SetStateAction<AuthSession | null>>,
-  setStatus: React.Dispatch<React.SetStateAction<AuthStatus>>,
+  setStatus: React.Dispatch<React.SetStateAction<AuthStatus>>
 ): AuthSession | null {
   applySessionHeaders(nextSession);
   setSession(nextSession);
-  setStatus(nextSession ? 'authenticated' : 'unauthenticated');
+  setStatus(nextSession ? "authenticated" : "unauthenticated");
   return nextSession;
 }
 
 export function resolveRoleLandingPath(role: AuthUserRole): string {
   switch (role) {
-    case 'admin':
-    case 'builder':
-      return '/admin/exams';
-    case 'grader':
-      return '/admin/grading';
-    case 'proctor':
-      return '/proctor';
-    case 'student':
-      return '/login';
+    case "admin":
+    case "builder":
+      return "/admin/exams";
+    case "grader":
+      return "/admin/grading";
+    case "proctor":
+      return "/proctor";
+    case "student":
+      return "/login";
   }
 }
 
 export function resolvePostLoginPath(
   role: AuthUserRole,
-  nextPath?: string | null | undefined,
+  nextPath?: string | null | undefined
 ): string {
-  if (nextPath && nextPath.startsWith('/') && !nextPath.startsWith('//')) {
+  if (nextPath && nextPath.startsWith("/") && !nextPath.startsWith("//")) {
     return nextPath;
   }
 
@@ -95,7 +95,7 @@ export function resolvePostLoginPath(
 
 export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
-  const [status, setStatus] = useState<AuthStatus>('loading');
+  const [status, setStatus] = useState<AuthStatus>("loading");
   const sessionRef = useRef<AuthSession | null>(null);
   const sessionRequestGenerationRef = useRef(0);
 
@@ -112,7 +112,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
 
       // Student attempt flows use different credentials and may legitimately return 401
       // while the studentAttemptRepository refreshes attempt tokens and retries.
-      if (endpoint.startsWith('/v1/student/')) {
+      if (endpoint.startsWith("/v1/student/")) {
         return;
       }
 
@@ -137,8 +137,8 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       if (requestGeneration !== sessionRequestGenerationRef.current) {
         return sessionRef.current;
       }
-      logError(error instanceof Error ? error : new Error('Failed to refresh session'), {
-        scope: 'authSession.refresh',
+      logError(error instanceof Error ? error : new Error("Failed to refresh session"), {
+        scope: "authSession.refresh",
       });
       return setSessionState(null, setSession, setStatus);
     }
@@ -154,21 +154,24 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     return setSessionState(nextSession, setSession, setStatus) as AuthSession;
   }, []);
 
-  const studentEntry = useCallback(async (payload: {
-    scheduleId: string;
-    wcode: string;
-    email: string;
-    studentName: string;
-    nickname: string;
-    ieltsCourse: string;
-  }) => {
-    sessionRequestGenerationRef.current += 1;
-    const result = await authService.studentEntry(payload);
-    if (!('user' in result)) {
-      return result;
-    }
-    return setSessionState(result, setSession, setStatus) as AuthSession;
-  }, []);
+  const studentEntry = useCallback(
+    async (payload: {
+      scheduleId: string;
+      wcode: string;
+      email: string;
+      studentName: string;
+      nickname: string;
+      ieltsCourse: string;
+    }) => {
+      sessionRequestGenerationRef.current += 1;
+      const result = await authService.studentEntry(payload);
+      if (!("user" in result)) {
+        return result;
+      }
+      return setSessionState(result, setSession, setStatus) as AuthSession;
+    },
+    []
+  );
 
   const logout = useCallback(async () => {
     sessionRequestGenerationRef.current += 1;
@@ -208,7 +211,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       });
       return setSessionState(nextSession, setSession, setStatus) as AuthSession;
     },
-    [],
+    []
   );
 
   const value = useMemo<AuthSessionContextValue>(
@@ -235,20 +238,16 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       requestPasswordReset,
       session,
       status,
-    ],
+    ]
   );
 
-  return (
-    <AuthSessionContext.Provider value={value}>
-      {children}
-    </AuthSessionContext.Provider>
-  );
+  return <AuthSessionContext.Provider value={value}>{children}</AuthSessionContext.Provider>;
 }
 
 export function useAuthSession() {
   const context = useContext(AuthSessionContext);
   if (!context) {
-    throw new Error('useAuthSession must be used within AuthSessionProvider');
+    throw new Error("useAuthSession must be used within AuthSessionProvider");
   }
   return context;
 }

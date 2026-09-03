@@ -1,5 +1,5 @@
-import { logger } from '../utils/logger';
-import { isBackendGradingEnabled } from './backendBridge';
+import { logger } from "../utils/logger";
+import { isBackendGradingEnabled } from "./backendBridge";
 
 export async function seedDevelopmentFixtures() {
   if (!import.meta.env.DEV) {
@@ -10,13 +10,13 @@ export async function seedDevelopmentFixtures() {
     return;
   }
 
-  const { seedGradingData } = await import('../utils/gradingSeedData');
+  const { seedGradingData } = await import("../utils/gradingSeedData");
   try {
     await seedGradingData();
   } catch (error) {
     logger.warn(
-      'Optional development grading fixtures were not seeded; continuing without them.',
-      error,
+      "Optional development grading fixtures were not seeded; continuing without them.",
+      error
     );
   }
 }

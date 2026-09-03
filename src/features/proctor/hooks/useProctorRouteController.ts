@@ -1,25 +1,25 @@
-import type { Dispatch, SetStateAction } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQueries, useQueryClient } from '@tanstack/react-query';
-import { useLiveUpdates, type LiveUpdateEvent } from '@shared/hooks/useLiveUpdates';
+import type { Dispatch, SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { useLiveUpdates, type LiveUpdateEvent } from "@shared/hooks/useLiveUpdates";
 import {
   fetchProctorSessionDetail,
   liveQueryPolicy,
   proctorKeys,
   type ProctorSessionDetailPayload,
   useProctorSessionSummaries,
-} from '../api/proctorQueries';
-import { proctorFacade } from '../application/proctorFacade';
+} from "../api/proctorQueries";
+import { proctorFacade } from "../application/proctorFacade";
 import type {
   ProctorAlert,
   SessionAuditLog,
   SessionNote,
   StudentSession,
   ViolationRule,
-} from '../../../types';
-import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
-import type { ProctorPresence } from '../../../types/domain';
-import type { ProctorScheduleMetrics } from '../contracts';
+} from "../../../types";
+import type { ExamSchedule, ExamSessionRuntime } from "../../../types/domain";
+import type { ProctorPresence } from "../../../types/domain";
+import type { ProctorScheduleMetrics } from "../contracts";
 
 function mapBackendSessionSummary(payload: {
   attemptId: string;
@@ -27,15 +27,15 @@ function mapBackendSessionSummary(payload: {
   studentName: string;
   studentEmail: string;
   scheduleId: string;
-  status: StudentSession['status'];
-  currentSection: StudentSession['currentSection'];
+  status: StudentSession["status"];
+  currentSection: StudentSession["currentSection"];
   timeRemaining: number;
-  runtimeStatus: StudentSession['runtimeStatus'];
-  runtimeCurrentSection?: StudentSession['runtimeCurrentSection'] | null | undefined;
+  runtimeStatus: StudentSession["runtimeStatus"];
+  runtimeCurrentSection?: StudentSession["runtimeCurrentSection"] | null | undefined;
   runtimeTimeRemainingSeconds: number;
-  runtimeSectionStatus?: StudentSession['runtimeSectionStatus'] | null | undefined;
+  runtimeSectionStatus?: StudentSession["runtimeSectionStatus"] | null | undefined;
   runtimeWaiting: boolean;
-  violations: StudentSession['violations'];
+  violations: StudentSession["violations"];
   warnings: number;
   lastActivity: string;
   examId: string;
@@ -52,7 +52,7 @@ function mapBackendSessionSummary(payload: {
     status: payload.status,
     currentSection: payload.currentSection,
     timeRemaining: payload.timeRemaining,
-    runtimeStatus: payload.runtimeStatus ?? 'not_started',
+    runtimeStatus: payload.runtimeStatus ?? "not_started",
     runtimeCurrentSection: payload.runtimeCurrentSection ?? null,
     runtimeTimeRemainingSeconds: payload.runtimeTimeRemainingSeconds,
     runtimeSectionStatus: payload.runtimeSectionStatus ?? undefined,
@@ -67,7 +67,7 @@ function mapBackendSessionSummary(payload: {
 
 function mapBackendAlert(payload: {
   id: string;
-  severity: ProctorAlert['severity'];
+  severity: ProctorAlert["severity"];
   type: string;
   studentName: string;
   studentId: string;
@@ -91,7 +91,7 @@ function mapBackendAuditLog(payload: {
   id: string;
   scheduleId: string;
   actor: string;
-  actionType: SessionAuditLog['actionType'];
+  actionType: SessionAuditLog["actionType"];
   targetStudentId?: string | null | undefined;
   payload?: Record<string, unknown> | null | undefined;
   createdAt: string;
@@ -111,7 +111,7 @@ function mapBackendNote(payload: {
   id: string;
   scheduleId: string;
   author: string;
-  category: SessionNote['category'] | string;
+  category: SessionNote["category"] | string;
   content: string;
   isResolved?: boolean | undefined;
   createdAt: string;
@@ -123,9 +123,9 @@ function mapBackendNote(payload: {
     timestamp: payload.createdAt,
     content: payload.content,
     category:
-      payload.category === 'incident' || payload.category === 'handover'
+      payload.category === "incident" || payload.category === "handover"
         ? payload.category
-        : 'general',
+        : "general",
     isResolved: payload.isResolved ?? false,
   };
 }
@@ -133,11 +133,11 @@ function mapBackendNote(payload: {
 function mapBackendViolationRule(payload: {
   id: string;
   scheduleId: string;
-  triggerType: ViolationRule['triggerType'];
+  triggerType: ViolationRule["triggerType"];
   threshold: number;
   specificViolationType?: string | null | undefined;
-  specificSeverity?: ViolationRule['specificSeverity'] | null | undefined;
-  action: ViolationRule['action'];
+  specificSeverity?: ViolationRule["specificSeverity"] | null | undefined;
+  action: ViolationRule["action"];
   isEnabled: boolean;
   createdAt: string;
   createdBy: string;
@@ -183,11 +183,15 @@ function getLiveUpdateScheduleId(event: LiveUpdateEvent): string | null {
     return event.scheduleId;
   }
 
-  if (event.kind === 'schedule_runtime' || event.kind === 'schedule_roster' || event.kind === 'schedule_alert') {
+  if (
+    event.kind === "schedule_runtime" ||
+    event.kind === "schedule_roster" ||
+    event.kind === "schedule_alert"
+  ) {
     return event.id;
   }
 
-  if (event.kind === 'attempt') {
+  if (event.kind === "attempt") {
     return proctorFacade.getAttemptSchedule(event.id) ?? null;
   }
 
@@ -231,7 +235,7 @@ export function useProctorRouteController(): ProctorRouteController {
   const [notes, setNotes] = useState<SessionNote[]>([]);
   const [violationRules, setViolationRules] = useState<ViolationRule[]>([]);
   const [scheduleMetrics, setScheduleMetrics] = useState<Record<string, ProctorScheduleMetrics>>(
-    {},
+    {}
   );
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -251,7 +255,9 @@ export function useProctorRouteController(): ProctorRouteController {
       return;
     }
 
-    const scheduleStillExists = summaries.some((summary) => summary.schedule.id === selectedScheduleId);
+    const scheduleStillExists = summaries.some(
+      (summary) => summary.schedule.id === selectedScheduleId
+    );
     if (!scheduleStillExists) {
       setSelectedScheduleId(null);
       return;
@@ -283,10 +289,10 @@ export function useProctorRouteController(): ProctorRouteController {
   const applyMonitoringState = useCallback(
     (nextSummaries: typeof summaries, details: ProctorSessionDetailPayload[]) => {
       const filteredSummaries = nextSummaries.filter(
-        (summary) => !proctorFacade.isPreviewRuntimeCohortName(summary.schedule.cohortName),
+        (summary) => !proctorFacade.isPreviewRuntimeCohortName(summary.schedule.cohortName)
       );
       const filteredDetails = details.filter(
-        (detail) => !proctorFacade.isPreviewRuntimeCohortName(detail.schedule.cohortName),
+        (detail) => !proctorFacade.isPreviewRuntimeCohortName(detail.schedule.cohortName)
       );
 
       if (filteredSummaries.length === 0) {
@@ -327,15 +333,15 @@ export function useProctorRouteController(): ProctorRouteController {
       setSchedules(filteredSummaries.map((summary) => proctorFacade.mapSchedule(summary.schedule)));
       setRuntimeSnapshots(
         filteredSummaries.map((summary) =>
-          proctorFacade.mapRuntime(summary.runtime, proctorFacade.mapSchedule(summary.schedule)),
-        ),
+          proctorFacade.mapRuntime(summary.runtime, proctorFacade.mapSchedule(summary.schedule))
+        )
       );
 
       for (const detail of filteredDetails) {
         const scheduleId = detail.schedule.id;
         scheduleStudentIdsRef.current.set(
           scheduleId,
-          new Set(detail.sessions.map((session) => session.studentId)),
+          new Set(detail.sessions.map((session) => session.studentId))
         );
       }
 
@@ -355,21 +361,21 @@ export function useProctorRouteController(): ProctorRouteController {
         filteredDetails
           .flatMap((detail) => detail.sessions)
           .map(mapBackendSessionSummary)
-          .sort(sortSessionsByLastActivity),
+          .sort(sortSessionsByLastActivity)
       );
       setAlerts(
         filteredDetails
           .flatMap((detail) => detail.alerts)
           .map(mapBackendAlert)
-          .sort(sortAlertsByTimestamp),
+          .sort(sortAlertsByTimestamp)
       );
       setAuditLogs(filteredDetails.flatMap((detail) => detail.auditLogs).map(mapBackendAuditLog));
       setNotes(filteredDetails.flatMap((detail) => detail.notes).map(mapBackendNote));
       setViolationRules(
-        filteredDetails.flatMap((detail) => detail.violationRules).map(mapBackendViolationRule),
+        filteredDetails.flatMap((detail) => detail.violationRules).map(mapBackendViolationRule)
       );
     },
-    [],
+    []
   );
 
   useEffect(() => {
@@ -377,7 +383,7 @@ export function useProctorRouteController(): ProctorRouteController {
       setError(
         summariesQuery.error instanceof Error
           ? summariesQuery.error.message
-          : 'Failed to load proctor data',
+          : "Failed to load proctor data"
       );
       setIsLoading(false);
       return;
@@ -402,17 +408,20 @@ export function useProctorRouteController(): ProctorRouteController {
     await queryClient.refetchQueries({ queryKey: proctorKeys.sessions() });
     await Promise.all(
       detailScheduleIds.map((scheduleId) =>
-        queryClient.refetchQueries({ queryKey: proctorKeys.detail(scheduleId) }),
-      ),
+        queryClient.refetchQueries({ queryKey: proctorKeys.detail(scheduleId) })
+      )
     );
   }, [detailScheduleIds, queryClient]);
 
-  const refreshSchedule = useCallback(async (scheduleId: string) => {
-    await Promise.all([
-      queryClient.refetchQueries({ queryKey: proctorKeys.sessions() }),
-      queryClient.refetchQueries({ queryKey: proctorKeys.detail(scheduleId) }),
-    ]);
-  }, [queryClient]);
+  const refreshSchedule = useCallback(
+    async (scheduleId: string) => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: proctorKeys.sessions() }),
+        queryClient.refetchQueries({ queryKey: proctorKeys.detail(scheduleId) }),
+      ]);
+    },
+    [queryClient]
+  );
 
   const loadMonitoringState = refresh;
 
@@ -426,16 +435,16 @@ export function useProctorRouteController(): ProctorRouteController {
 
       if (selectedScheduleId !== scheduleId) {
         void refresh().catch((loadError) => {
-          setError(loadError instanceof Error ? loadError.message : 'Failed to refresh live data');
+          setError(loadError instanceof Error ? loadError.message : "Failed to refresh live data");
         });
         return;
       }
 
       void refreshSchedule(scheduleId).catch((loadError) => {
-        setError(loadError instanceof Error ? loadError.message : 'Failed to refresh live data');
+        setError(loadError instanceof Error ? loadError.message : "Failed to refresh live data");
       });
     },
-    [refresh, refreshSchedule, selectedScheduleId],
+    [refresh, refreshSchedule, selectedScheduleId]
   );
 
   useLiveUpdates({
@@ -445,79 +454,81 @@ export function useProctorRouteController(): ProctorRouteController {
 
   const handleStartScheduledSession = useCallback(
     async (scheduleId: string) => {
-      const result = await proctorFacade.delivery.startRuntime(scheduleId, 'Proctor');
+      const result = await proctorFacade.delivery.startRuntime(scheduleId, "Proctor");
       if (!result.success) {
-        setError(result.error ?? 'Failed to start exam');
+        setError(result.error ?? "Failed to start exam");
         return;
       }
 
       setError(null);
       await loadMonitoringState();
     },
-    [loadMonitoringState],
+    [loadMonitoringState]
   );
 
   const handlePauseCohort = useCallback(
     async (scheduleId: string) => {
-      await proctorFacade.delivery.pauseRuntime(scheduleId, 'Proctor');
+      await proctorFacade.delivery.pauseRuntime(scheduleId, "Proctor");
       await loadMonitoringState();
     },
-    [loadMonitoringState],
+    [loadMonitoringState]
   );
 
   const handleResumeCohort = useCallback(
     async (scheduleId: string) => {
-      await proctorFacade.delivery.resumeRuntime(scheduleId, 'Proctor');
+      await proctorFacade.delivery.resumeRuntime(scheduleId, "Proctor");
       await loadMonitoringState();
     },
-    [loadMonitoringState],
+    [loadMonitoringState]
   );
 
   const handleEndSectionNow = useCallback(
     async (scheduleId: string) => {
       const runtime = runtimeSnapshots.find((candidate) => candidate.scheduleId === scheduleId);
-      const expectedActiveSectionKey = runtime?.activeSectionKey ?? runtime?.currentSectionKey ?? undefined;
+      const expectedActiveSectionKey =
+        runtime?.activeSectionKey ?? runtime?.currentSectionKey ?? undefined;
       const result = await proctorFacade.delivery.endCurrentSectionNow(
         scheduleId,
-        'Proctor',
-        expectedActiveSectionKey,
+        "Proctor",
+        expectedActiveSectionKey
       );
       if (!result.success) {
-        setError(result.error ?? 'Failed to end section');
+        setError(result.error ?? "Failed to end section");
       } else {
         setError(null);
       }
       await loadMonitoringState();
     },
-    [loadMonitoringState, runtimeSnapshots],
+    [loadMonitoringState, runtimeSnapshots]
   );
 
   const handleExtendCurrentSection = useCallback(
     async (scheduleId: string, minutes: number) => {
       const runtime = runtimeSnapshots.find((candidate) => candidate.scheduleId === scheduleId);
-      const expectedActiveSectionKey = runtime?.activeSectionKey ?? runtime?.currentSectionKey ?? undefined;
+      const expectedActiveSectionKey =
+        runtime?.activeSectionKey ?? runtime?.currentSectionKey ?? undefined;
       const result = await proctorFacade.delivery.extendCurrentSection(
         scheduleId,
-        'Proctor',
+        "Proctor",
         minutes,
-        expectedActiveSectionKey,
+        expectedActiveSectionKey
       );
       if (!result.success) {
-        setError(result.error ?? 'Failed to extend section');
+        setError(result.error ?? "Failed to extend section");
       } else {
         setError(null);
       }
       await loadMonitoringState();
     },
-    [loadMonitoringState, runtimeSnapshots],
+    [loadMonitoringState, runtimeSnapshots]
   );
 
   const handleCompleteExam = useCallback(
     async (scheduleId: string) => {
-      await proctorFacade.delivery.completeRuntime(scheduleId, 'Proctor');
+      await proctorFacade.delivery.completeRuntime(scheduleId, "Proctor");
       await loadMonitoringState();
     },
-    [loadMonitoringState],
+    [loadMonitoringState]
   );
 
   const evaluateViolationRules = useCallback(
@@ -540,19 +551,19 @@ export function useProctorRouteController(): ProctorRouteController {
           let shouldTrigger = false;
 
           switch (rule.triggerType) {
-            case 'violation_count':
+            case "violation_count":
               shouldTrigger = session.violations.length >= rule.threshold;
               break;
-            case 'specific_violation_type':
+            case "specific_violation_type":
               shouldTrigger =
                 session.violations.filter(
-                  (violation) => violation.type === rule.specificViolationType,
+                  (violation) => violation.type === rule.specificViolationType
                 ).length >= rule.threshold;
               break;
-            case 'severity_threshold':
+            case "severity_threshold":
               shouldTrigger =
                 session.violations.filter(
-                  (violation) => violation.severity === rule.specificSeverity,
+                  (violation) => violation.severity === rule.specificSeverity
                 ).length >= rule.threshold;
               break;
           }
@@ -561,28 +572,28 @@ export function useProctorRouteController(): ProctorRouteController {
             continue;
           }
 
-          if (rule.action === 'warn') {
+          if (rule.action === "warn") {
             await proctorFacade.delivery.warnStudent(
               session.id,
               `Auto-warning triggered by ${rule.triggerType}`,
-              'system',
+              "system"
             );
-          } else if (rule.action === 'pause') {
-            await proctorFacade.delivery.pauseStudentAttempt(session.id, 'system');
-          } else if (rule.action === 'notify_proctor') {
-            const latestViolationId = session.violations.at(-1)?.id ?? 'none';
+          } else if (rule.action === "pause") {
+            await proctorFacade.delivery.pauseStudentAttempt(session.id, "system");
+          } else if (rule.action === "notify_proctor") {
+            const latestViolationId = session.violations.at(-1)?.id ?? "none";
             notifyAlerts.push({
               id: `auto-rule-notify:${rule.id}:${session.id}:${latestViolationId}:${session.violations.length}`,
-              severity: rule.specificSeverity ?? 'high',
-              type: 'RULE_NOTIFY_PROCTOR',
+              severity: rule.specificSeverity ?? "high",
+              type: "RULE_NOTIFY_PROCTOR",
               studentName: session.name,
               studentId: session.studentId,
               timestamp: new Date().toISOString(),
               message: `Auto-rule notification: ${rule.triggerType} threshold reached for ${session.name}.`,
               isAcknowledged: false,
             });
-          } else if (rule.action === 'terminate') {
-            await proctorFacade.delivery.terminateStudentAttempt(session.id, 'system');
+          } else if (rule.action === "terminate") {
+            await proctorFacade.delivery.terminateStudentAttempt(session.id, "system");
           }
         }
       }
@@ -600,7 +611,7 @@ export function useProctorRouteController(): ProctorRouteController {
         });
       }
     },
-    [loadMonitoringState, violationRules],
+    [loadMonitoringState, violationRules]
   );
 
   return {

@@ -1,41 +1,41 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { Header } from '@components/Header';
-import { Sidebar } from '@components/Sidebar';
-import { Workspace } from '@components/Workspace';
-import { CommandPalette, type CommandPaletteCommand } from '@components/CommandPalette';
-import { GlobalToast, type GlobalToastItem } from '@components/GlobalToast';
-import { BandScoreMatrix } from '@components/scoring/BandScoreMatrix';
-import { GradingWorkspace } from '@components/scoring/GradingWorkspace';
-import { ErrorSurface, LoadingSurface } from '@components/ui';
-import { useBuilderRouteController } from '@builder/hooks/useBuilderRouteController';
-import { useBuilderAutosave } from '@builder/hooks/useBuilderAutosave';
-import { useUndoRedo } from '../../../hooks/useUndoRedo';
-import { useKeyboardShortcuts } from '../../../hooks/useKeyboardShortcuts';
-import type { ExamState, GradeHistoryEntry } from '../../../types';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Header } from "@components/Header";
+import { Sidebar } from "@components/Sidebar";
+import { Workspace } from "@components/Workspace";
+import { CommandPalette, type CommandPaletteCommand } from "@components/CommandPalette";
+import { GlobalToast, type GlobalToastItem } from "@components/GlobalToast";
+import { BandScoreMatrix } from "@components/scoring/BandScoreMatrix";
+import { GradingWorkspace } from "@components/scoring/GradingWorkspace";
+import { ErrorSurface, LoadingSurface } from "@components/ui";
+import { useBuilderRouteController } from "@builder/hooks/useBuilderRouteController";
+import { useBuilderAutosave } from "@builder/hooks/useBuilderAutosave";
+import { useUndoRedo } from "../../../hooks/useUndoRedo";
+import { useKeyboardShortcuts } from "../../../hooks/useKeyboardShortcuts";
+import type { ExamState, GradeHistoryEntry } from "../../../types";
 import {
   DEFAULT_LISTENING_BAND_TABLE,
   DEFAULT_READING_ACADEMIC_BAND_TABLE,
   DEFAULT_READING_GT_BAND_TABLE,
   syncConfigWithStandards,
-} from '../../../constants/examDefaults';
+} from "../../../constants/examDefaults";
 import {
   buildSpeakingRubric,
   buildWritingRubric,
   OFFICIAL_SPEAKING_RUBRIC,
   OFFICIAL_WRITING_RUBRIC,
-} from '../../../utils/builderEnhancements';
-import { normalizeWritingTaskContents } from '../../../utils/writingTaskUtils';
+} from "../../../utils/builderEnhancements";
+import { normalizeWritingTaskContents } from "../../../utils/writingTaskUtils";
 import {
   cloneListeningPartWithNewIds,
   cloneReadingPassageWithNewIds,
-} from '../../../utils/cloneExamContent';
-import { getBuilderStateRecoveryIssue, reconcileBuilderState } from '../utils/builderStateRecovery';
-import { createAcademicSampleExamState } from '../../../utils/academicSampleExam';
-import { getActScienceTotalQuestions } from '../../../utils/examUtils';
+} from "../../../utils/cloneExamContent";
+import { getBuilderStateRecoveryIssue, reconcileBuilderState } from "../utils/builderStateRecovery";
+import { createAcademicSampleExamState } from "../../../utils/academicSampleExam";
+import { getActScienceTotalQuestions } from "../../../utils/examUtils";
 
-const nowLabel = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const nowLabel = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 function ScoringAside({
   state,
@@ -46,13 +46,13 @@ function ScoringAside({
   onUpdateState: (next: ExamState) => void;
   state: ExamState;
 }) {
-  if (state.activeModule === 'reading' || state.activeModule === 'listening') {
+  if (state.activeModule === "reading" || state.activeModule === "listening") {
     const officialReading =
-      state.type === 'General Training'
+      state.type === "General Training"
         ? DEFAULT_READING_GT_BAND_TABLE
         : DEFAULT_READING_ACADEMIC_BAND_TABLE;
     const deviationThreshold = state.config.standards.rubricDeviationThreshold;
-    const updateConfig = (nextConfig: ExamState['config']) =>
+    const updateConfig = (nextConfig: ExamState["config"]) =>
       onUpdateState({
         ...state,
         config: syncConfigWithStandards(nextConfig),
@@ -72,9 +72,9 @@ function ScoringAside({
                 ...state.config.standards,
                 bandScoreTables: {
                   ...state.config.standards.bandScoreTables,
-                  [state.config.general.type === 'General Training'
-                    ? 'readingGeneralTraining'
-                    : 'readingAcademic']: table,
+                  [state.config.general.type === "General Training"
+                    ? "readingGeneralTraining"
+                    : "readingAcademic"]: table,
                 },
               },
             })
@@ -102,9 +102,12 @@ function ScoringAside({
     );
   }
 
-  if (state.activeModule === 'writing') {
-    const writingTasks = normalizeWritingTaskContents(state.writing, state.config.sections.writing.tasks);
-    const previewTask = writingTasks.find((task) => task.taskId === 'task2') ?? writingTasks.at(-1);
+  if (state.activeModule === "writing") {
+    const writingTasks = normalizeWritingTaskContents(
+      state.writing,
+      state.config.sections.writing.tasks
+    );
+    const previewTask = writingTasks.find((task) => task.taskId === "task2") ?? writingTasks.at(-1);
 
     return (
       <div className="w-[520px] flex-shrink-0 border-l border-gray-200 bg-gray-50/90 backdrop-blur-sm overflow-y-auto p-4">
@@ -114,10 +117,10 @@ function ScoringAside({
           rubric={buildWritingRubric(state.config, state.writing.rubric ?? OFFICIAL_WRITING_RUBRIC)}
           history={state.writing.gradeHistory ?? []}
           submission={{
-            title: 'Writing preview submission',
+            title: "Writing preview submission",
             text:
               previewTask?.prompt ||
-              'Student response preview will appear here once writing content is attached.',
+              "Student response preview will appear here once writing content is attached.",
             wordCount: previewTask?.prompt.trim().split(/\s+/).filter(Boolean).length ?? 0,
           }}
           onSubmitGrade={onSubmitGrade}
@@ -126,19 +129,24 @@ function ScoringAside({
     );
   }
 
-  if (state.activeModule === 'science') {
+  if (state.activeModule === "science") {
     const questionCount = getActScienceTotalQuestions(state.science.stimuli);
     return (
       <div className="w-[430px] flex-shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50/90 p-5 backdrop-blur-sm">
-        <p className="text-xs font-bold uppercase tracking-widest text-violet-700">ACT Science Scoring</p>
+        <p className="text-xs font-bold uppercase tracking-widest text-violet-700">
+          ACT Science Scoring
+        </p>
         <h3 className="mt-2 text-lg font-bold text-gray-900">Raw score preview</h3>
         <p className="mt-2 text-sm text-gray-600">
-          Current draft contains {questionCount} question{questionCount === 1 ? '' : 's'}.
+          Current draft contains {questionCount} question{questionCount === 1 ? "" : "s"}.
         </p>
         <div className="mt-5 rounded-xl border border-violet-100 bg-violet-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-violet-800">Scoring rule</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-violet-800">
+            Scoring rule
+          </p>
           <p className="mt-2 text-sm text-violet-950">
-            The first release will report correct answers and percentage. Scale score 1–36 and percentile are deferred.
+            The first release will report correct answers and percentage. Scale score 1–36 and
+            percentile are deferred.
           </p>
         </div>
       </div>
@@ -150,20 +158,23 @@ function ScoringAside({
       <GradingWorkspace
         module="speaking"
         deviationThreshold={state.config.standards.rubricDeviationThreshold}
-        rubric={buildSpeakingRubric(state.config, state.speaking.rubric ?? OFFICIAL_SPEAKING_RUBRIC)}
+        rubric={buildSpeakingRubric(
+          state.config,
+          state.speaking.rubric ?? OFFICIAL_SPEAKING_RUBRIC
+        )}
         history={state.speaking.gradeHistory ?? []}
         submission={{
-          title: 'Speaking transcript preview',
+          title: "Speaking transcript preview",
           text: [
             state.speaking.cueCardDetails?.topic || state.speaking.cueCard,
-            '',
+            "",
             ...(state.speaking.part3Discussion ?? []),
           ]
             .filter(Boolean)
-            .join('\n'),
+            .join("\n"),
           timeSpentSeconds: state.config.sections.speaking.parts.reduce(
             (sum, part) => sum + part.speakingTime + part.prepTime,
-            0,
+            0
           ),
         }}
         onSubmitGrade={onSubmitGrade}
@@ -197,13 +208,13 @@ export function BuilderRoot() {
     handleUpdateExamContent,
     reload,
   } = useBuilderRouteController(examId);
-  const history = useUndoRedo<ExamState | null>(null, { initialLabel: 'Loaded exam', limit: 50 });
+  const history = useUndoRedo<ExamState | null>(null, { initialLabel: "Loaded exam", limit: 50 });
   const [initializedExamId, setInitializedExamId] = useState<string | undefined>(undefined);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isScoringOpen, setIsScoringOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('builder-sidebar-collapsed');
-    return saved === 'true';
+    const saved = localStorage.getItem("builder-sidebar-collapsed");
+    return saved === "true";
   });
   const [toasts, setToasts] = useState<GlobalToastItem[]>([]);
   const currentStateRef = useRef<ExamState | null>(null);
@@ -216,13 +227,13 @@ export function BuilderRoot() {
   }, [examId, initializedExamId]);
 
   useEffect(() => {
-    localStorage.setItem('builder-sidebar-collapsed', isSidebarCollapsed.toString());
+    localStorage.setItem("builder-sidebar-collapsed", isSidebarCollapsed.toString());
   }, [isSidebarCollapsed]);
 
   useEffect(() => {
     if (state && examId && initializedExamId !== examId) {
       const recoveredState = reconcileBuilderState(state);
-      history.reset(recoveredState, 'Loaded exam');
+      history.reset(recoveredState, "Loaded exam");
       currentStateRef.current = recoveredState;
       setInitializedExamId(examId);
     }
@@ -235,37 +246,39 @@ export function BuilderRoot() {
   }, [historyState, state]);
   const builderRecoveryIssue = useMemo(
     () => (currentState ? getBuilderStateRecoveryIssue(currentState) : null),
-    [currentState],
+    [currentState]
   );
   const canInteractWithBuilder = !!currentState && !builderRecoveryIssue;
   const handledJumpFieldRef = useRef<string | null>(null);
 
   const jumpTarget = useMemo(() => {
-    const jumpField = new URLSearchParams(location.search).get('jumpField');
+    const jumpField = new URLSearchParams(location.search).get("jumpField");
     if (!jumpField) {
       return null;
     }
 
     const contentMatch = jumpField.match(
-      /^content\.(listening|reading|science)\.(parts|passages|stimuli)\[(\d+)\]\.blocks\[(\d+)\]/,
+      /^content\.(listening|reading|science)\.(parts|passages|stimuli)\[(\d+)\]\.blocks\[(\d+)\]/
     );
     if (contentMatch) {
-      const module = contentMatch[1] as 'listening' | 'reading' | 'science';
+      const module = contentMatch[1] as "listening" | "reading" | "science";
       const container = contentMatch[2];
-      const sectionIndex = Number.parseInt(contentMatch[3] ?? '', 10);
-      const blockIndex = Number.parseInt(contentMatch[4] ?? '', 10);
+      const sectionIndex = Number.parseInt(contentMatch[3] ?? "", 10);
+      const blockIndex = Number.parseInt(contentMatch[4] ?? "", 10);
       if (Number.isFinite(sectionIndex) && Number.isFinite(blockIndex)) {
         return { jumpField, module, container, sectionIndex, blockIndex };
       }
     }
 
-    const shortMatch = jumpField.match(/^(listening|reading|science)\.(parts|passages|stimuli)\[(\d+)\]\.blocks\[(\d+)\]/);
+    const shortMatch = jumpField.match(
+      /^(listening|reading|science)\.(parts|passages|stimuli)\[(\d+)\]\.blocks\[(\d+)\]/
+    );
     if (shortMatch) {
-      const module = shortMatch[1] as 'listening' | 'reading' | 'science';
-      const sectionIndex = Number.parseInt(shortMatch[3] ?? '', 10);
-      const blockIndex = Number.parseInt(shortMatch[4] ?? '', 10);
+      const module = shortMatch[1] as "listening" | "reading" | "science";
+      const sectionIndex = Number.parseInt(shortMatch[3] ?? "", 10);
+      const blockIndex = Number.parseInt(shortMatch[4] ?? "", 10);
       if (Number.isFinite(sectionIndex) && Number.isFinite(blockIndex)) {
-        return { jumpField, module, container: 'parts', sectionIndex, blockIndex };
+        return { jumpField, module, container: "parts", sectionIndex, blockIndex };
       }
     }
 
@@ -287,52 +300,59 @@ export function BuilderRoot() {
     handledJumpFieldRef.current = jumpTarget.jumpField;
     const nextState = { ...currentState };
 
-    if (jumpTarget.module === 'listening') {
-      nextState.activeModule = 'listening';
+    if (jumpTarget.module === "listening") {
+      nextState.activeModule = "listening";
       const targetPart = nextState.listening.parts[jumpTarget.sectionIndex];
       if (targetPart?.id) {
         nextState.activeListeningPartId = targetPart.id;
       }
-    } else if (jumpTarget.module === 'reading') {
-      nextState.activeModule = 'reading';
+    } else if (jumpTarget.module === "reading") {
+      nextState.activeModule = "reading";
       const targetPassage = nextState.reading.passages[jumpTarget.sectionIndex];
       if (targetPassage?.id) {
         nextState.activePassageId = targetPassage.id;
       }
     } else {
-      nextState.activeModule = 'science';
+      nextState.activeModule = "science";
       const targetStimulus = nextState.science.stimuli[jumpTarget.sectionIndex];
       if (targetStimulus?.id) {
         nextState.activeScienceStimulusId = targetStimulus.id;
       }
     }
 
-    updateBuilderState(nextState, 'Jump to validation field');
+    updateBuilderState(nextState, "Jump to validation field");
 
     window.setTimeout(() => {
       window.dispatchEvent(
-        new CustomEvent('builder:jump-to-block', {
+        new CustomEvent("builder:jump-to-block", {
           detail: { blockIndex: jumpTarget.blockIndex },
-        }),
+        })
       );
     }, 50);
 
     const nextParams = new URLSearchParams(location.search);
-    nextParams.delete('jumpField');
+    nextParams.delete("jumpField");
     navigate(
       {
         pathname: location.pathname,
-        search: nextParams.toString() ? `?${nextParams.toString()}` : '',
+        search: nextParams.toString() ? `?${nextParams.toString()}` : "",
       },
-      { replace: true },
+      { replace: true }
     );
-  }, [canInteractWithBuilder, currentState, jumpTarget, location.pathname, location.search, navigate]);
+  }, [
+    canInteractWithBuilder,
+    currentState,
+    jumpTarget,
+    location.pathname,
+    location.search,
+    navigate,
+  ]);
 
   useEffect(() => {
     handleUpdateExamContentRef.current = handleUpdateExamContent;
   }, [handleUpdateExamContent]);
 
-  const pushToast = (toast: Omit<GlobalToastItem, 'id'>) => {
+  const pushToast = (toast: Omit<GlobalToastItem, "id">) => {
     setToasts((current) => [
       ...current,
       {
@@ -355,10 +375,10 @@ export function BuilderRoot() {
     save: (nextState) => handleUpdateExamContentRef.current(nextState),
     onError: (error) => {
       pushToast({
-        variant: 'error',
-        title: 'Save failed',
-        message: error instanceof Error ? error.message : 'Latest change could not be saved.',
-        actionLabel: 'Retry',
+        variant: "error",
+        title: "Save failed",
+        message: error instanceof Error ? error.message : "Latest change could not be saved.",
+        actionLabel: "Retry",
         onAction: () => {
           const latest = currentStateRef.current;
           if (latest) {
@@ -383,9 +403,9 @@ export function BuilderRoot() {
 
     if (result.isLatest) {
       pushToast({
-        variant: 'success',
-        title: 'Saved',
-        message: 'All changes saved.',
+        variant: "success",
+        title: "Saved",
+        message: "All changes saved.",
         timestamp: nowLabel(),
       });
     }
@@ -394,14 +414,14 @@ export function BuilderRoot() {
 
   const updateBuilderState = (
     nextState: ExamState | ((previous: ExamState) => ExamState),
-    label = 'Updated exam',
+    label = "Updated exam"
   ) => {
     const baseState = currentStateRef.current;
     if (!baseState) {
       return;
     }
 
-    const resolvedState = typeof nextState === 'function' ? nextState(baseState) : nextState;
+    const resolvedState = typeof nextState === "function" ? nextState(baseState) : nextState;
     const recoveredState = reconcileBuilderState(resolvedState);
     history.setState(recoveredState, label);
     currentStateRef.current = recoveredState;
@@ -417,8 +437,8 @@ export function BuilderRoot() {
     currentStateRef.current = history.undoState;
     scheduleAutosave(history.undoState);
     pushToast({
-      variant: 'info',
-      title: 'Undo',
+      variant: "info",
+      title: "Undo",
       message: history.lastActionLabel,
       timestamp: nowLabel(),
     });
@@ -433,9 +453,9 @@ export function BuilderRoot() {
     currentStateRef.current = history.redoState;
     scheduleAutosave(history.redoState);
     pushToast({
-      variant: 'info',
-      title: 'Redo',
-      message: history.redoStackLabels[0] ?? 'Restored change',
+      variant: "info",
+      title: "Redo",
+      message: history.redoStackLabels[0] ?? "Restored change",
       timestamp: nowLabel(),
     });
   };
@@ -451,12 +471,8 @@ export function BuilderRoot() {
         return;
       }
 
-      const module = currentStateRef.current?.activeModule ?? 'reading';
-      window.open(
-        `/builder/${examId}/preview?module=${module}`,
-        '_blank',
-        'noopener,noreferrer',
-      );
+      const module = currentStateRef.current?.activeModule ?? "reading";
+      window.open(`/builder/${examId}/preview?module=${module}`, "_blank", "noopener,noreferrer");
     })();
   };
 
@@ -467,7 +483,7 @@ export function BuilderRoot() {
     }
 
     const confirmed = window.confirm(
-      'Replace all Listening/Reading/Writing content with an IELTS-style Academic sample exam?\n\nThis will overwrite the current draft content for this exam.',
+      "Replace all Listening/Reading/Writing content with an IELTS-style Academic sample exam?\n\nThis will overwrite the current draft content for this exam."
     );
     if (!confirmed) {
       return;
@@ -475,22 +491,22 @@ export function BuilderRoot() {
 
     try {
       const seeded = createAcademicSampleExamState(base);
-      updateBuilderState(seeded, 'Loaded Academic sample exam');
+      updateBuilderState(seeded, "Loaded Academic sample exam");
       const saved = await saveDraftNow();
       if (!saved) {
         return;
       }
       pushToast({
-        variant: 'success',
-        title: 'Sample loaded',
-        message: 'Academic sample exam content loaded (Listening/Reading/Writing).',
+        variant: "success",
+        title: "Sample loaded",
+        message: "Academic sample exam content loaded (Listening/Reading/Writing).",
         timestamp: nowLabel(),
       });
     } catch (error) {
       pushToast({
-        variant: 'error',
-        title: 'Sample load failed',
-        message: error instanceof Error ? error.message : 'Unable to load sample exam.',
+        variant: "error",
+        title: "Sample load failed",
+        message: error instanceof Error ? error.message : "Unable to load sample exam.",
         timestamp: nowLabel(),
       });
     }
@@ -543,9 +559,9 @@ export function BuilderRoot() {
       return;
     }
 
-    if (nextState.activeModule === 'reading') {
+    if (nextState.activeModule === "reading") {
       const activePassage = nextState.reading.passages.find(
-        (passage) => passage.id === nextState.activePassageId,
+        (passage) => passage.id === nextState.activePassageId
       );
       if (!activePassage) {
         return;
@@ -566,14 +582,14 @@ export function BuilderRoot() {
             ],
           },
         },
-        'Duplicate passage',
+        "Duplicate passage"
       );
       return;
     }
 
-    if (nextState.activeModule === 'listening') {
+    if (nextState.activeModule === "listening") {
       const activePart = nextState.listening.parts.find(
-        (part) => part.id === nextState.activeListeningPartId,
+        (part) => part.id === nextState.activeListeningPartId
       );
       if (!activePart) {
         return;
@@ -594,7 +610,7 @@ export function BuilderRoot() {
             ],
           },
         },
-        'Duplicate part',
+        "Duplicate part"
       );
     }
   };
@@ -605,7 +621,7 @@ export function BuilderRoot() {
       return;
     }
 
-    if (nextState.activeModule === 'writing') {
+    if (nextState.activeModule === "writing") {
       updateBuilderState(
         {
           ...nextState,
@@ -614,7 +630,7 @@ export function BuilderRoot() {
             gradeHistory: [...(nextState.writing.gradeHistory ?? []), entry],
           },
         },
-        'Submit writing grade',
+        "Submit writing grade"
       );
     } else {
       updateBuilderState(
@@ -625,13 +641,13 @@ export function BuilderRoot() {
             gradeHistory: [...(nextState.speaking.gradeHistory ?? []), entry],
           },
         },
-        'Submit speaking grade',
+        "Submit speaking grade"
       );
     }
 
     pushToast({
-      variant: 'success',
-      title: 'Grade saved',
+      variant: "success",
+      title: "Grade saved",
       message: `Band ${entry.finalBand.toFixed(1)} recorded.`,
       timestamp: nowLabel(),
     });
@@ -644,79 +660,83 @@ export function BuilderRoot() {
 
     return [
       {
-        id: 'nav-reading',
-        title: 'Open Reading',
-        subtitle: 'Jump to reading builder',
-        category: 'Navigation',
-        keywords: ['reading', 'module'],
-        perform: () => updateBuilderState({ ...currentState, activeModule: 'reading' }, 'Open reading'),
+        id: "nav-reading",
+        title: "Open Reading",
+        subtitle: "Jump to reading builder",
+        category: "Navigation",
+        keywords: ["reading", "module"],
+        perform: () =>
+          updateBuilderState({ ...currentState, activeModule: "reading" }, "Open reading"),
       },
       {
-        id: 'nav-listening',
-        title: 'Open Listening',
-        subtitle: 'Jump to listening builder',
-        category: 'Navigation',
-        keywords: ['listening', 'module'],
-        perform: () => updateBuilderState({ ...currentState, activeModule: 'listening' }, 'Open listening'),
+        id: "nav-listening",
+        title: "Open Listening",
+        subtitle: "Jump to listening builder",
+        category: "Navigation",
+        keywords: ["listening", "module"],
+        perform: () =>
+          updateBuilderState({ ...currentState, activeModule: "listening" }, "Open listening"),
       },
       {
-        id: 'nav-writing',
-        title: 'Open Writing',
-        subtitle: 'Jump to writing builder',
-        category: 'Navigation',
-        keywords: ['writing', 'module'],
-        perform: () => updateBuilderState({ ...currentState, activeModule: 'writing' }, 'Open writing'),
+        id: "nav-writing",
+        title: "Open Writing",
+        subtitle: "Jump to writing builder",
+        category: "Navigation",
+        keywords: ["writing", "module"],
+        perform: () =>
+          updateBuilderState({ ...currentState, activeModule: "writing" }, "Open writing"),
       },
       {
-        id: 'nav-speaking',
-        title: 'Open Speaking',
-        subtitle: 'Jump to speaking builder',
-        category: 'Navigation',
-        keywords: ['speaking', 'module'],
-        perform: () => updateBuilderState({ ...currentState, activeModule: 'speaking' }, 'Open speaking'),
+        id: "nav-speaking",
+        title: "Open Speaking",
+        subtitle: "Jump to speaking builder",
+        category: "Navigation",
+        keywords: ["speaking", "module"],
+        perform: () =>
+          updateBuilderState({ ...currentState, activeModule: "speaking" }, "Open speaking"),
       },
       {
-        id: 'save',
-        title: 'Save Exam',
-        subtitle: 'Persist latest builder state',
-        category: 'Actions',
-        keywords: ['save', 'draft'],
+        id: "save",
+        title: "Save Exam",
+        subtitle: "Persist latest builder state",
+        category: "Actions",
+        keywords: ["save", "draft"],
         perform: () => {
           void saveDraftNow();
         },
       },
       {
-        id: 'undo',
-        title: 'Undo',
+        id: "undo",
+        title: "Undo",
         subtitle:
-          (history.undoStackLabels[history.undoStackLabels.length - 1] ?? 'No previous action'),
-        category: 'Actions',
-        keywords: ['undo', 'history'],
+          history.undoStackLabels[history.undoStackLabels.length - 1] ?? "No previous action",
+        category: "Actions",
+        keywords: ["undo", "history"],
         perform: handleUndo,
       },
       {
-        id: 'redo',
-        title: 'Redo',
-        subtitle: (history.redoStackLabels[0] ?? 'No next action'),
-        category: 'Actions',
-        keywords: ['redo', 'history'],
+        id: "redo",
+        title: "Redo",
+        subtitle: history.redoStackLabels[0] ?? "No next action",
+        category: "Actions",
+        keywords: ["redo", "history"],
         perform: handleRedo,
       },
       {
-        id: 'toggle-scoring',
-        title: isScoringOpen ? 'Hide Scoring Panel' : 'Open Scoring Panel',
-        subtitle: 'Show scoring, rubrics, and grader preview',
-        category: 'Tools',
-        keywords: ['grading', 'rubric', 'score'],
+        id: "toggle-scoring",
+        title: isScoringOpen ? "Hide Scoring Panel" : "Open Scoring Panel",
+        subtitle: "Show scoring, rubrics, and grader preview",
+        category: "Tools",
+        keywords: ["grading", "rubric", "score"],
         perform: () => setIsScoringOpen((open) => !open),
       },
       {
-        id: 'add-block',
-        title: 'Add Question Block',
-        subtitle: 'Open question block picker',
-        category: 'Tools',
-        keywords: ['question', 'block', 'new'],
-        perform: () => window.dispatchEvent(new Event('builder:add-question-block')),
+        id: "add-block",
+        title: "Add Question Block",
+        subtitle: "Open question block picker",
+        category: "Tools",
+        keywords: ["question", "block", "new"],
+        perform: () => window.dispatchEvent(new Event("builder:add-question-block")),
       },
     ];
   }, [
@@ -730,39 +750,39 @@ export function BuilderRoot() {
 
   useKeyboardShortcuts([
     {
-      combo: 'mod+s',
+      combo: "mod+s",
       enabled: canInteractWithBuilder,
       handler: () => {
         void saveDraftNow();
       },
     },
     {
-      combo: 'mod+z',
+      combo: "mod+z",
       enabled: canInteractWithBuilder,
       handler: handleUndo,
     },
     {
-      combo: 'mod+shift+z',
+      combo: "mod+shift+z",
       enabled: canInteractWithBuilder,
       handler: handleRedo,
     },
     {
-      combo: 'mod+k',
+      combo: "mod+k",
       enabled: canInteractWithBuilder,
       handler: () => setIsPaletteOpen(true),
     },
     {
-      combo: 'mod+f',
+      combo: "mod+f",
       enabled: canInteractWithBuilder,
       handler: () => setIsPaletteOpen(true),
     },
     {
-      combo: 'mod+n',
+      combo: "mod+n",
       enabled: canInteractWithBuilder,
-      handler: () => window.dispatchEvent(new Event('builder:add-question-block')),
+      handler: () => window.dispatchEvent(new Event("builder:add-question-block")),
     },
     {
-      combo: 'mod+d',
+      combo: "mod+d",
       enabled: canInteractWithBuilder,
       handler: duplicateActiveLocation,
     },
@@ -809,25 +829,36 @@ export function BuilderRoot() {
 
   return (
     <div className="flex h-screen w-full bg-gray-50 text-gray-900 font-sans overflow-hidden">
-      <div className={`flex-shrink-0 transition-all duration-300 ease-in-out ${isSidebarCollapsed ? 'w-0 overflow-hidden' : 'w-56'}`}>
-        <Sidebar state={currentState} setState={(next) => updateBuilderState(next, 'Update navigation')} />
+      <div
+        className={`flex-shrink-0 transition-all duration-300 ease-in-out ${isSidebarCollapsed ? "w-0 overflow-hidden" : "w-56"}`}
+      >
+        <Sidebar
+          state={currentState}
+          setState={(next) => updateBuilderState(next, "Update navigation")}
+        />
       </div>
       <button
         onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         className="absolute left-0 top-1/2 -translate-y-1/2 z-20 bg-white border border-gray-200 shadow-sm hover:bg-gray-50 hover:border-blue-300 transition-all duration-200 rounded-r-md p-1 group"
-        style={{ left: isSidebarCollapsed ? '0' : '14rem' }}
-        aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        style={{ left: isSidebarCollapsed ? "0" : "14rem" }}
+        aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
         {isSidebarCollapsed ? (
-          <ChevronRight size={16} className="text-gray-600 group-hover:text-blue-600 transition-colors" />
+          <ChevronRight
+            size={16}
+            className="text-gray-600 group-hover:text-blue-600 transition-colors"
+          />
         ) : (
-          <ChevronLeft size={16} className="text-gray-600 group-hover:text-blue-600 transition-colors" />
+          <ChevronLeft
+            size={16}
+            className="text-gray-600 group-hover:text-blue-600 transition-colors"
+          />
         )}
       </button>
       <div className="flex flex-col flex-1 min-w-0">
         <Header
           state={currentState}
-          onUpdateState={(next) => updateBuilderState(next, 'Update exam header')}
+          onUpdateState={(next) => updateBuilderState(next, "Update exam header")}
           onReturnToAdmin={handleReturnToAdmin}
           onNavigateToConfig={handleNavigateToConfig}
           onNavigateToReview={() => {
@@ -842,24 +873,24 @@ export function BuilderRoot() {
             void saveDraftNow();
           }}
           saveStatusLabel={
-            saveStatus === 'saving'
-              ? 'Saving…'
-              : saveStatus === 'unsaved'
-                ? 'Unsaved changes'
-                : saveStatus === 'error'
-                  ? 'Save failed'
-                  : 'All changes saved'
+            saveStatus === "saving"
+              ? "Saving…"
+              : saveStatus === "unsaved"
+                ? "Unsaved changes"
+                : saveStatus === "error"
+                  ? "Save failed"
+                  : "All changes saved"
           }
         />
         <div className="flex flex-1 min-w-0 overflow-hidden">
           <Workspace
             state={currentState}
-            setState={(next) => updateBuilderState(next, 'Update workspace')}
+            setState={(next) => updateBuilderState(next, "Update workspace")}
           />
           {isScoringOpen && (
             <ScoringAside
               state={currentState}
-              onUpdateState={(next) => updateBuilderState(next, 'Update scoring')}
+              onUpdateState={(next) => updateBuilderState(next, "Update scoring")}
               onSubmitGrade={submitGrade}
             />
           )}

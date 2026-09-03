@@ -1,7 +1,7 @@
-import React from 'react';
-import { AlertCircle, CheckCircle2, Circle, Info } from 'lucide-react';
-import type { PublishReadiness } from '../../../types/domain';
-import type { ValidationScope } from '../../../types';
+import React from "react";
+import { AlertCircle, CheckCircle2, Circle, Info } from "lucide-react";
+import type { PublishReadiness } from "../../../types/domain";
+import type { ValidationScope } from "../../../types";
 
 interface ValidationSummaryProps {
   publishReadiness: PublishReadiness;
@@ -23,33 +23,33 @@ export function ValidationSummary({
   const defaultValidationScope: ValidationScope = {
     checked: isActScience
       ? [
-          'ACT Science question structure is valid',
-          'Four answer choices and one correct answer per question',
-          'ACT Science skill categories are valid',
-          'Time allocation is within acceptable ranges',
-          'Required fields are populated',
-          'Module configuration is valid',
+          "ACT Science question structure is valid",
+          "Four answer choices and one correct answer per question",
+          "ACT Science skill categories are valid",
+          "Time allocation is within acceptable ranges",
+          "Required fields are populated",
+          "Module configuration is valid",
         ]
       : [
-          'All questions have correct answers',
-          'Scoring tables match IELTS band conversions',
-          'Time allocations are within acceptable ranges',
-          'Question types match module requirements',
-          'Required fields are populated',
-          'Module configurations are valid',
+          "All questions have correct answers",
+          "Scoring tables match IELTS band conversions",
+          "Time allocations are within acceptable ranges",
+          "Question types match module requirements",
+          "Required fields are populated",
+          "Module configurations are valid",
         ],
     notChecked: isActScience
       ? [
-          'Scientific content quality and appropriateness',
-          'Evidence interpretation quality',
-          'Distractor quality',
-          'Alignment with learning objectives',
+          "Scientific content quality and appropriateness",
+          "Evidence interpretation quality",
+          "Distractor quality",
+          "Alignment with learning objectives",
         ]
       : [
-          'Content quality and appropriateness',
-          'Passage difficulty level',
-          'Distractor quality',
-          'Alignment with learning objectives',
+          "Content quality and appropriateness",
+          "Passage difficulty level",
+          "Distractor quality",
+          "Alignment with learning objectives",
         ],
   };
 
@@ -63,7 +63,9 @@ export function ValidationSummary({
     <div className="space-y-4" role="status" aria-live="polite">
       <div
         className={`flex items-center gap-3 p-4 rounded-xl border ${
-          publishReadiness.canPublish ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'
+          publishReadiness.canPublish
+            ? "bg-emerald-50 border-emerald-200"
+            : "bg-amber-50 border-amber-200"
         }`}
       >
         {publishReadiness.canPublish ? (
@@ -72,13 +74,17 @@ export function ValidationSummary({
           <AlertCircle size={20} className="text-amber-600" aria-hidden="true" />
         )}
         <div>
-          <p className={`text-sm font-semibold ${publishReadiness.canPublish ? 'text-emerald-900' : 'text-amber-900'}`}>
-            {publishReadiness.canPublish ? 'Technical Validation Passed' : 'Technical Validation Issues'}
+          <p
+            className={`text-sm font-semibold ${publishReadiness.canPublish ? "text-emerald-900" : "text-amber-900"}`}
+          >
+            {publishReadiness.canPublish
+              ? "Technical Validation Passed"
+              : "Technical Validation Issues"}
           </p>
           <p className="text-xs text-slate-600">
             {publishReadiness.canPublish
-              ? 'All technical checks passed. Content review and scheduling still required.'
-              : `${publishReadiness.errors.filter((error) => error.severity === 'error').length} error(s) must be fixed before publishing.`}
+              ? "All technical checks passed. Content review and scheduling still required."
+              : `${publishReadiness.errors.filter((error) => error.severity === "error").length} error(s) must be fixed before publishing.`}
           </p>
         </div>
       </div>
@@ -94,7 +100,11 @@ export function ValidationSummary({
               className="w-full text-left flex items-start gap-2 p-3 bg-red-50 rounded-lg border border-red-100 hover:border-red-300 hover:bg-red-100/60 transition-colors"
               aria-label={`Go to field ${error.field}`}
             >
-              <AlertCircle size={14} className="text-red-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
+              <AlertCircle
+                size={14}
+                className="text-red-600 mt-0.5 flex-shrink-0"
+                aria-hidden="true"
+              />
               <div>
                 <p className="text-xs font-medium text-red-900">{error.message}</p>
                 <p className="text-[10px] text-red-600 capitalize">Field: {error.field}</p>
@@ -108,8 +118,15 @@ export function ValidationSummary({
         <div className="space-y-2">
           <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider">Warnings</p>
           {publishReadiness.warnings.map((warning, idx) => (
-            <div key={idx} className="flex items-start gap-2 p-3 bg-amber-50 rounded-lg border border-amber-100">
-              <AlertCircle size={14} className="text-amber-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
+            <div
+              key={idx}
+              className="flex items-start gap-2 p-3 bg-amber-50 rounded-lg border border-amber-100"
+            >
+              <AlertCircle
+                size={14}
+                className="text-amber-600 mt-0.5 flex-shrink-0"
+                aria-hidden="true"
+              />
               <div>
                 <p className="text-xs font-medium text-amber-900">{warning.message}</p>
                 <p className="text-[10px] text-amber-600 capitalize">Field: {warning.field}</p>
@@ -119,7 +136,10 @@ export function ValidationSummary({
         </div>
       )}
 
-      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200" title="Technical checks performed automatically">
+      <div
+        className="p-4 bg-slate-50 rounded-xl border border-slate-200"
+        title="Technical checks performed automatically"
+      >
         <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2 flex items-center gap-2">
           <CheckCircle2 size={14} className="text-emerald-600" aria-hidden="true" />
           Checked:
@@ -127,14 +147,21 @@ export function ValidationSummary({
         <ul className="space-y-1.5" role="list">
           {scope.checked.map((item, idx) => (
             <li key={idx} className="flex items-start gap-2 text-xs text-slate-600">
-              <CheckCircle2 size={12} className="text-emerald-500 mt-0.5 flex-shrink-0" aria-hidden="true" />
+              <CheckCircle2
+                size={12}
+                className="text-emerald-500 mt-0.5 flex-shrink-0"
+                aria-hidden="true"
+              />
               <span>{item}</span>
             </li>
           ))}
         </ul>
       </div>
 
-      <div className="p-4 bg-blue-50 rounded-xl border border-blue-200" title="Items requiring manual review by content experts">
+      <div
+        className="p-4 bg-blue-50 rounded-xl border border-blue-200"
+        title="Items requiring manual review by content experts"
+      >
         <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-2 flex items-center gap-2">
           <Circle size={14} className="text-blue-600" aria-hidden="true" />
           Not checked:
@@ -152,19 +179,28 @@ export function ValidationSummary({
       <div className="flex items-start gap-2 p-3 bg-sky-50 rounded-lg border border-sky-100">
         <Info size={14} className="text-sky-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
         <p className="text-xs text-sky-900">
-          <span className="font-semibold">Next steps:</span> Fix validation issues, review content, then schedule access time and publish when ready.
+          <span className="font-semibold">Next steps:</span> Fix validation issues, review content,
+          then schedule access time and publish when ready.
         </p>
       </div>
 
       <div className="pt-4 border-t border-slate-100">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Content Summary</p>
-        <div className={`grid gap-3 ${scienceQuestions !== undefined ? 'grid-cols-4' : 'grid-cols-3'}`}>
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+          Content Summary
+        </p>
+        <div
+          className={`grid gap-3 ${scienceQuestions !== undefined ? "grid-cols-4" : "grid-cols-3"}`}
+        >
           <div className="text-center p-3 bg-slate-50 rounded-xl border border-slate-100">
-            <p className="text-lg font-bold text-slate-900">{publishReadiness.questionCounts.reading}</p>
+            <p className="text-lg font-bold text-slate-900">
+              {publishReadiness.questionCounts.reading}
+            </p>
             <p className="text-[10px] font-medium text-slate-500 uppercase">Reading</p>
           </div>
           <div className="text-center p-3 bg-slate-50 rounded-xl border border-slate-100">
-            <p className="text-lg font-bold text-slate-900">{publishReadiness.questionCounts.listening}</p>
+            <p className="text-lg font-bold text-slate-900">
+              {publishReadiness.questionCounts.listening}
+            </p>
             <p className="text-[10px] font-medium text-slate-500 uppercase">Listening</p>
           </div>
           {scienceQuestions !== undefined && (
@@ -174,7 +210,9 @@ export function ValidationSummary({
             </div>
           )}
           <div className="text-center p-3 bg-slate-50 rounded-xl border border-slate-100">
-            <p className="text-lg font-bold text-slate-900">{publishReadiness.questionCounts.total}</p>
+            <p className="text-lg font-bold text-slate-900">
+              {publishReadiness.questionCounts.total}
+            </p>
             <p className="text-[10px] font-medium text-slate-500 uppercase">Total</p>
           </div>
         </div>

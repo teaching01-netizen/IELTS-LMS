@@ -1,14 +1,14 @@
-import { getStudentQuestionsForModule } from '../features/exam-authoring/infrastructure/examAuthoringGateway';
-import type { ExamState, QuestionBlock, TableCompletionBlock } from '../types';
+import { getStudentQuestionsForModule } from "../features/exam-authoring/infrastructure/examAuthoringGateway";
+import type { ExamState, QuestionBlock, TableCompletionBlock } from "../types";
 
 export type ExamIntegrityIssue = {
   field: string;
   message: string;
-  severity: 'error' | 'warning';
+  severity: "error" | "warning";
 };
 
 function formatExamples(values: string[], limit = 5): string {
-  return values.slice(0, limit).join(', ');
+  return values.slice(0, limit).join(", ");
 }
 
 function findDuplicateValues(values: string[]): Map<string, number> {
@@ -31,15 +31,15 @@ function collectEnabledDescriptors(state: ExamState) {
   const descriptors = [];
 
   if (state.config.sections.reading.enabled) {
-    descriptors.push(...getStudentQuestionsForModule(state, 'reading'));
+    descriptors.push(...getStudentQuestionsForModule(state, "reading"));
   }
 
   if (state.config.sections.listening.enabled) {
-    descriptors.push(...getStudentQuestionsForModule(state, 'listening'));
+    descriptors.push(...getStudentQuestionsForModule(state, "listening"));
   }
 
   if (state.config.sections.science.enabled) {
-    descriptors.push(...getStudentQuestionsForModule(state, 'science'));
+    descriptors.push(...getStudentQuestionsForModule(state, "science"));
   }
 
   return descriptors;
@@ -78,8 +78,8 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
   const passageDuplicates = findDuplicateValues(passageIds);
   if (passageDuplicates.size > 0) {
     issues.push({
-      field: 'integrity.duplicate_passage_ids',
-      severity: 'error',
+      field: "integrity.duplicate_passage_ids",
+      severity: "error",
       message: `Duplicate reading passage IDs detected: ${formatExamples(Array.from(passageDuplicates.keys()))}.`,
     });
   }
@@ -90,8 +90,8 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
   const partDuplicates = findDuplicateValues(listeningPartIds);
   if (partDuplicates.size > 0) {
     issues.push({
-      field: 'integrity.duplicate_listening_part_ids',
-      severity: 'error',
+      field: "integrity.duplicate_listening_part_ids",
+      severity: "error",
       message: `Duplicate listening part IDs detected: ${formatExamples(Array.from(partDuplicates.keys()))}.`,
     });
   }
@@ -102,8 +102,8 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
   const scienceStimulusDuplicates = findDuplicateValues(scienceStimulusIds);
   if (scienceStimulusDuplicates.size > 0) {
     issues.push({
-      field: 'integrity.duplicate_science_stimulus_ids',
-      severity: 'error',
+      field: "integrity.duplicate_science_stimulus_ids",
+      severity: "error",
       message: `Duplicate ACT Science stimulus IDs detected: ${formatExamples(Array.from(scienceStimulusDuplicates.keys()))}.`,
     });
   }
@@ -130,8 +130,8 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
   const blockDuplicates = findDuplicateValues(blockIds);
   if (blockDuplicates.size > 0) {
     issues.push({
-      field: 'integrity.duplicate_block_ids',
-      severity: 'error',
+      field: "integrity.duplicate_block_ids",
+      severity: "error",
       message:
         `Duplicate question-block IDs detected (will break navigation/answers): ` +
         `${formatExamples(Array.from(blockDuplicates.keys()))}.`,
@@ -144,10 +144,9 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
   const descriptorDuplicates = findDuplicateValues(descriptorIds);
   if (descriptorDuplicates.size > 0) {
     issues.push({
-      field: 'integrity.duplicate_question_slot_ids',
-      severity: 'error',
-      message:
-        `Duplicate student question-slot IDs detected: ${formatExamples(Array.from(descriptorDuplicates.keys()))}.`,
+      field: "integrity.duplicate_question_slot_ids",
+      severity: "error",
+      message: `Duplicate student question-slot IDs detected: ${formatExamples(Array.from(descriptorDuplicates.keys()))}.`,
     });
   }
 
@@ -174,8 +173,8 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
     .map(([key]) => key);
   if (scalarCollisions.length > 0) {
     issues.push({
-      field: 'integrity.answer_key_scalar_collision',
-      severity: 'error',
+      field: "integrity.answer_key_scalar_collision",
+      severity: "error",
       message:
         `Duplicate answer keys detected (will overwrite student answers): ` +
         `${formatExamples(scalarCollisions)}.`,
@@ -187,8 +186,8 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
     .map(([key]) => key);
   if (indexedCollisions.length > 0) {
     issues.push({
-      field: 'integrity.answer_key_index_collision',
-      severity: 'error',
+      field: "integrity.answer_key_index_collision",
+      severity: "error",
       message:
         `Duplicate answer slots detected (same answerKey + index used twice): ` +
         `${formatExamples(indexedCollisions)}.`,
@@ -198,8 +197,8 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
   const mixedAnswerKeys = Array.from(hasScalar).filter((key) => hasIndexed.has(key));
   if (mixedAnswerKeys.length > 0) {
     issues.push({
-      field: 'integrity.answer_key_mixed_shape',
-      severity: 'error',
+      field: "integrity.answer_key_mixed_shape",
+      severity: "error",
       message:
         `Answer keys used by both single-slot and multi-slot questions detected: ` +
         `${formatExamples(mixedAnswerKeys)}.`,
@@ -210,14 +209,14 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
   const tableCellIdMissing: string[] = [];
 
   collectEnabledBlocks(state).forEach((block) => {
-    if (block.type !== 'TABLE_COMPLETION') return;
+    if (block.type !== "TABLE_COMPLETION") return;
 
     const tableBlock = block as TableCompletionBlock;
     const idCounts = new Map<string, number>();
     let missingCount = 0;
 
     tableBlock.cells.forEach((cell) => {
-      const id = typeof cell.id === 'string' ? cell.id.trim() : '';
+      const id = typeof cell.id === "string" ? cell.id.trim() : "";
       if (!id) {
         missingCount += 1;
         return;
@@ -241,20 +240,20 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
 
   if (tableCellIdCollisions.length > 0) {
     issues.push({
-      field: 'integrity.table_cell_id_collision',
-      severity: 'warning',
+      field: "integrity.table_cell_id_collision",
+      severity: "warning",
       message:
-        'Duplicate table cell IDs detected (can link answer editing across blanks): ' +
+        "Duplicate table cell IDs detected (can link answer editing across blanks): " +
         `${formatExamples(tableCellIdCollisions)}.`,
     });
   }
 
   if (tableCellIdMissing.length > 0) {
     issues.push({
-      field: 'integrity.table_cell_id_missing',
-      severity: 'warning',
+      field: "integrity.table_cell_id_missing",
+      severity: "warning",
       message:
-        'Missing table cell IDs detected (auto-heal recommended): ' +
+        "Missing table cell IDs detected (auto-heal recommended): " +
         `${formatExamples(tableCellIdMissing)}.`,
     });
   }

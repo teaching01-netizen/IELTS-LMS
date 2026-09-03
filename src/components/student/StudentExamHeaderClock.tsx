@@ -1,17 +1,17 @@
-import React from 'react';
-import { StudentHeader } from './StudentHeader';
-import { CompactStudentHeader } from './layout/CompactStudentHeader';
-import type { StudentHighlightColor } from './highlightPalette';
-import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
-import type { ExamType } from '../../types';
-import { useStudentRuntimeClock } from './providers/StudentRuntimeProvider';
+import React from "react";
+import { StudentHeader } from "./StudentHeader";
+import { CompactStudentHeader } from "./layout/CompactStudentHeader";
+import type { StudentHighlightColor } from "./highlightPalette";
+import type { StudentHighlightToolMode } from "./providers/StudentUIProvider";
+import type { ExamType } from "../../types";
+import { useStudentRuntimeClock } from "./providers/StudentRuntimeProvider";
 
 interface StudentExamHeaderClockProps {
   compact: boolean;
   examType?: ExamType | undefined;
   moduleLabel: string;
   testTakerId?: string | undefined;
-  autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | 'error' | null | undefined;
+  autoSaveStatus?: "saved" | "saving" | "syncing" | "offline" | "error" | null | undefined;
   highlightEnabled?: boolean | undefined;
   highlightToolMode?: StudentHighlightToolMode | undefined;
   highlightColor?: StudentHighlightColor | undefined;
@@ -29,7 +29,7 @@ interface StudentExamHeaderClockProps {
 
 export const StudentExamHeaderClock = React.memo(function StudentExamHeaderClock({
   compact,
-  examType = 'Academic',
+  examType = "Academic",
   moduleLabel,
   testTakerId,
   autoSaveStatus,

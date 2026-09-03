@@ -185,7 +185,9 @@ export function StudentExamWorkspace({
         ) : null}
       </main>
 
-      {currentModule === "reading" || currentModule === "listening" || currentModule === "science" ? (
+      {currentModule === "reading" ||
+      currentModule === "listening" ||
+      currentModule === "science" ? (
         <StudentFooter
           questions={allQuestions}
           currentQuestionId={currentQuestionId}

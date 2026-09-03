@@ -1,10 +1,28 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const backendApiUrl = process.env['VITE_BACKEND_API_URL'] ?? 'http://localhost:4000';
+const e2eDatabaseUrl =
+  process.env['E2E_DATABASE_URL'] ?? 'mysql://root@127.0.0.1:4000/ielts';
 const backendCookieEnv = {
-  AUTH_COOKIE_SECURE: process.env['AUTH_COOKIE_SECURE'] ?? 'false',
-  AUTH_SESSION_COOKIE_NAME: process.env['AUTH_SESSION_COOKIE_NAME'] ?? 'session',
-  AUTH_CSRF_COOKIE_NAME: process.env['AUTH_CSRF_COOKIE_NAME'] ?? 'csrf',
+  AUTH_COOKIE_SECURE: 'false',
+  AUTH_SESSION_COOKIE_NAME: 'session',
+  AUTH_CSRF_COOKIE_NAME: 'csrf',
+  AUTH_SECRET: process.env['E2E_AUTH_SECRET'] ?? 'e2e-local-auth-secret',
+  MASTER_KEY_ENABLED: 'false',
+};
+const backendE2eEnv = {
+  API_HOST: '0.0.0.0',
+  API_PORT: '4000',
+  DATABASE_URL: e2eDatabaseUrl,
+  DATABASE_DIRECT_URL: e2eDatabaseUrl,
+  DATABASE_MIGRATOR_URL: e2eDatabaseUrl,
+  DATABASE_WORKER_URL: e2eDatabaseUrl,
+  OBJECT_STORAGE_BACKEND: 'minio',
+  OBJECT_STORAGE_ENDPOINT: 'http://127.0.0.1:9000',
+  OBJECT_STORAGE_BUCKET: 'ielts-media',
+  OBJECT_STORAGE_ACCESS_KEY: 'minioadmin',
+  OBJECT_STORAGE_SECRET_KEY: 'minioadmin',
+  OBJECT_STORAGE_FORCE_PATH_STYLE: 'true',
 };
 const backendFeatureEnv = {
   VITE_BACKEND_API_URL: backendApiUrl,
@@ -60,10 +78,11 @@ export default defineConfig({
   webServer: [
     {
       command:
-        'cd backend && set -a && . ./.env && set +a && cargo build -p ielts-backend-api && exec ./target/debug/ielts-backend-api',
+        'cd backend && cargo build -p ielts-backend-api && exec ./target/debug/ielts-backend-api',
       env: {
         ...process.env,
         ...backendCookieEnv,
+        ...backendE2eEnv,
       },
       url: 'http://localhost:4000/healthz',
       timeout: 180_000,

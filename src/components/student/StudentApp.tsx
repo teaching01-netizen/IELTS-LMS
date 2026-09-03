@@ -1,125 +1,125 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   countAnsweredQuestions,
   countQuestionSlots,
-} from '@student/application/studentExamContentFacade';
-import { Button } from '../ui/Button';
-import { AlertTriangle } from 'lucide-react';
-import { AccessibilitySettings } from './AccessibilitySettings';
-import { StudentExamPhaseRenderer } from './StudentExamPhaseRenderer';
-import { StudentExamWorkspaceSession } from './StudentExamWorkspaceSession';
-import './StudentHeader';
-import './layout/CompactStudentHeader';
-import { StudentExamShell } from './layout/StudentExamShell';
-import { StudentExamViewport } from './layout/StudentExamViewport';
-import { useStudentExamViewport } from './layout/useStudentExamViewport';
-import { useStudentExamPageLock } from './layout/useStudentExamPageLock';
-import { useStudentFocusedControlVisibility } from './layout/useStudentFocusedControlVisibility';
-import { useStudentLayoutEnvironment } from './layout/useStudentLayoutEnvironment';
-import './SubmitConfirmation';
-import { WarningOverlay } from './WarningOverlay';
-import './useStudentAutoSubmitBoundary';
+} from "@student/application/studentExamContentFacade";
+import { Button } from "../ui/Button";
+import { AlertTriangle } from "lucide-react";
+import { AccessibilitySettings } from "./AccessibilitySettings";
+import { StudentExamPhaseRenderer } from "./StudentExamPhaseRenderer";
+import { StudentExamWorkspaceSession } from "./StudentExamWorkspaceSession";
+import "./StudentHeader";
+import "./layout/CompactStudentHeader";
+import { StudentExamShell } from "./layout/StudentExamShell";
+import { StudentExamViewport } from "./layout/StudentExamViewport";
+import { useStudentExamViewport } from "./layout/useStudentExamViewport";
+import { useStudentExamPageLock } from "./layout/useStudentExamPageLock";
+import { useStudentFocusedControlVisibility } from "./layout/useStudentFocusedControlVisibility";
+import { useStudentLayoutEnvironment } from "./layout/useStudentLayoutEnvironment";
+import "./SubmitConfirmation";
+import { WarningOverlay } from "./WarningOverlay";
+import "./useStudentAutoSubmitBoundary";
 import {
   getStudentPassageReadabilityGeometry,
   getStudentTypographyScale,
-} from './accessibilityScale';
-import { StudentHighlightSelectionManagerProvider } from './highlightSelectionManager';
-import { useStudentSubmissionOrchestration } from './useStudentSubmissionOrchestration';
-import './timeExtensionPolicy';
-import { useStudentWarningVisibility } from './useStudentWarningVisibility';
-import { useStudentAttempt } from './providers/StudentAttemptProvider';
-import { useStudentRuntime, useStudentRuntimeSession } from './providers/StudentRuntimeProvider';
-import { useStudentUI } from './providers/StudentUIProvider';
-import { useKeyboardSubmitHandler } from './providers/StudentKeyboardProvider';
-import { useExamCommands } from '@student/hooks/exam-session/useExamCommands';
-import { useStudentExamSessionStore } from '@student/hooks/exam-session/StudentExamSessionProvider';
-import { createStudentSubmissionCommands } from '@student/application/exam-session/submissionCommands';
+} from "./accessibilityScale";
+import { StudentHighlightSelectionManagerProvider } from "./highlightSelectionManager";
+import { useStudentSubmissionOrchestration } from "./useStudentSubmissionOrchestration";
+import "./timeExtensionPolicy";
+import { useStudentWarningVisibility } from "./useStudentWarningVisibility";
+import { useStudentAttempt } from "./providers/StudentAttemptProvider";
+import { useStudentRuntime, useStudentRuntimeSession } from "./providers/StudentRuntimeProvider";
+import { useStudentUI } from "./providers/StudentUIProvider";
+import { useKeyboardSubmitHandler } from "./providers/StudentKeyboardProvider";
+import { useExamCommands } from "@student/hooks/exam-session/useExamCommands";
+import { useStudentExamSessionStore } from "@student/hooks/exam-session/StudentExamSessionProvider";
+import { createStudentSubmissionCommands } from "@student/application/exam-session/submissionCommands";
 import {
   isRuntimeStructurallyCompleted,
   isVerifiedTerminalStudentState,
-} from './providers/verifiedTerminalState';
-import { resolveObjectiveAnswerUpdate } from './resolveObjectiveAnswerUpdate';
-import { useZoomScrollAnchoring } from './useZoomScrollAnchoring';
-import { emitAnswerMutationDebugLog } from './answerMutationDebug';
-import { isStudentHighlightToolContextActive } from './studentHighlightToolContext';
-import type { StudentAnswerMutationMeta, StudentAnswerValue } from '../../types/studentAttempt';
+} from "./providers/verifiedTerminalState";
+import { resolveObjectiveAnswerUpdate } from "./resolveObjectiveAnswerUpdate";
+import { useZoomScrollAnchoring } from "./useZoomScrollAnchoring";
+import { emitAnswerMutationDebugLog } from "./answerMutationDebug";
+import { isStudentHighlightToolContextActive } from "./studentHighlightToolContext";
+import type { StudentAnswerMutationMeta, StudentAnswerValue } from "../../types/studentAttempt";
 
-import { StudentExamHeaderClock } from './StudentExamHeaderClock';
-import { StudentExamClockEffects } from './StudentExamClockEffects';
-import { StudentExamTimeRemaining } from './StudentExamTimeRemaining';
+import { StudentExamHeaderClock } from "./StudentExamHeaderClock";
+import { StudentExamClockEffects } from "./StudentExamClockEffects";
+import { StudentExamTimeRemaining } from "./StudentExamTimeRemaining";
 
 function getBlockingCopy(
-  reason: ReturnType<typeof useStudentRuntime>['state']['blocking']['reason']
+  reason: ReturnType<typeof useStudentRuntime>["state"]["blocking"]["reason"]
 ) {
   switch (reason) {
-    case 'cohort_paused':
+    case "cohort_paused":
       return {
-        title: 'Cohort paused',
+        title: "Cohort paused",
         message:
-          'The proctor has paused delivery. Your current section will resume when the cohort restarts.',
-        badge: 'Paused',
-        contextLabel: 'Cohort Runtime',
+          "The proctor has paused delivery. Your current section will resume when the cohort restarts.",
+        badge: "Paused",
+        contextLabel: "Cohort Runtime",
       };
-    case 'proctor_paused':
+    case "proctor_paused":
       return {
-        title: 'Individual session paused',
-        message: 'This session is paused for review. Wait for resume instructions.',
-        badge: 'Paused',
-        contextLabel: 'Proctor Review',
+        title: "Individual session paused",
+        message: "This session is paused for review. Wait for resume instructions.",
+        badge: "Paused",
+        contextLabel: "Proctor Review",
       };
-    case 'not_started':
+    case "not_started":
       return {
-        title: 'Waiting for start',
-        message: 'The proctor has not started this cohort yet.',
-        badge: 'Locked',
-        contextLabel: 'Cohort Runtime',
+        title: "Waiting for start",
+        message: "The proctor has not started this cohort yet.",
+        badge: "Locked",
+        contextLabel: "Cohort Runtime",
       };
-    case 'waiting_for_advance':
+    case "waiting_for_advance":
       return {
-        title: 'Waiting for cohort advance',
+        title: "Waiting for cohort advance",
         message:
-          'The proctor is preparing the next section. Please wait for the cohort to advance.',
-        badge: 'Waiting',
-        contextLabel: 'Cohort Runtime',
+          "The proctor is preparing the next section. Please wait for the cohort to advance.",
+        badge: "Waiting",
+        contextLabel: "Cohort Runtime",
       };
-    case 'waiting_for_runtime':
+    case "waiting_for_runtime":
       return {
-        title: 'Waiting for runtime',
-        message: 'The exam runtime is synchronizing before the next section can continue.',
-        badge: 'Waiting',
-        contextLabel: 'Session Runtime',
+        title: "Waiting for runtime",
+        message: "The exam runtime is synchronizing before the next section can continue.",
+        badge: "Waiting",
+        contextLabel: "Session Runtime",
       };
-    case 'offline':
+    case "offline":
       return {
-        title: 'Connection lost',
+        title: "Connection lost",
         message:
-          'Your session is paused while connectivity is unavailable. Recovery will resume after reconnection.',
-        badge: 'Offline',
-        contextLabel: 'Session Recovery',
+          "Your session is paused while connectivity is unavailable. Recovery will resume after reconnection.",
+        badge: "Offline",
+        contextLabel: "Session Recovery",
       };
-    case 'heartbeat_lost':
+    case "heartbeat_lost":
       return {
-        title: 'Heartbeat lost',
+        title: "Heartbeat lost",
         message:
-          'The secure session heartbeat was interrupted. The exam remains paused until continuity is restored.',
-        badge: 'Review',
-        contextLabel: 'Integrity Hold',
+          "The secure session heartbeat was interrupted. The exam remains paused until continuity is restored.",
+        badge: "Review",
+        contextLabel: "Integrity Hold",
       };
-    case 'device_mismatch':
+    case "device_mismatch":
       return {
-        title: 'Device review required',
+        title: "Device review required",
         message:
-          'This session no longer matches the original device continuity check. Wait for proctor review.',
-        badge: 'Blocked',
-        contextLabel: 'Integrity Hold',
+          "This session no longer matches the original device continuity check. Wait for proctor review.",
+        badge: "Blocked",
+        contextLabel: "Integrity Hold",
       };
-    case 'storage_unavailable':
+    case "storage_unavailable":
       return {
-        title: 'Answer storage unavailable',
+        title: "Answer storage unavailable",
         message:
-          'Your browser cannot safely store new answers right now. Keep this tab open and contact the proctor.',
-        badge: 'Blocked',
-        contextLabel: 'Session Recovery',
+          "Your browser cannot safely store new answers right now. Keep this tab open and contact the proctor.",
+        badge: "Blocked",
+        contextLabel: "Session Recovery",
       };
     default:
       return null;
@@ -130,7 +130,7 @@ function formatRuntimeTime(seconds: number) {
   const safeSeconds = Math.max(0, Math.floor(seconds));
   const minutes = Math.floor(safeSeconds / 60);
   const remainingSeconds = safeSeconds % 60;
-  return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
 interface StudentAppProps {
@@ -159,12 +159,12 @@ export function StudentApp({
   const layoutEnvironment = useStudentLayoutEnvironment();
   const layoutMode = layoutEnvironment.layoutMode;
   const tabletMode =
-    layoutMode === 'medium' &&
-    (layoutEnvironment.hasTouch || layoutEnvironment.primaryPointer === 'coarse');
+    layoutMode === "medium" &&
+    (layoutEnvironment.hasTouch || layoutEnvironment.primaryPointer === "coarse");
   const autoSaveStatus =
-    runtimeState.attemptSyncState === 'syncing_reconnect'
-      ? 'syncing'
-      : runtimeState.attemptSyncState === 'idle'
+    runtimeState.attemptSyncState === "syncing_reconnect"
+      ? "syncing"
+      : runtimeState.attemptSyncState === "idle"
         ? null
         : runtimeState.attemptSyncState;
   const studentTypography = useMemo(
@@ -173,16 +173,14 @@ export function StudentApp({
   );
   const passageReadabilityGeometry = useMemo(
     () =>
-      getStudentPassageReadabilityGeometry(
-        uiState.accessibilitySettings.passageReadabilityLevel
-      ),
+      getStudentPassageReadabilityGeometry(uiState.accessibilitySettings.passageReadabilityLevel),
     [uiState.accessibilitySettings.passageReadabilityLevel]
   );
   useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
   const { resetHighlightTool } = uiActions;
   const timeExtensionReason =
-    typeof uiState.timeExtensionReason === 'string' ? uiState.timeExtensionReason : '';
+    typeof uiState.timeExtensionReason === "string" ? uiState.timeExtensionReason : "";
   const timeExtensionDialogRef = useRef<HTMLDialogElement>(null);
   const highlightColor = uiState.accessibilitySettings.highlightColor;
   const highlightEnabled = true;
@@ -204,22 +202,22 @@ export function StudentApp({
         zoom: tabletMode ? 1 : uiState.accessibilitySettings.zoom,
         fontSize: studentTypography.rootFontSize,
         lineHeight: studentTypography.lineHeight,
-        ['--student-meta-font-size' as string]: studentTypography.metaFontSize,
-        ['--student-chip-font-size' as string]: studentTypography.chipFontSize,
-        ['--student-control-font-size' as string]: studentTypography.controlFontSize,
-        ['--student-preview-font-size' as string]: studentTypography.previewFontSize,
-        ['--student-passage-font-size' as string]: studentTypography.passageFontSize,
-        ['--student-passage-title-font-size' as string]: studentTypography.passageTitleFontSize,
-        ['--student-passage-h1-font-size' as string]: studentTypography.passageH1FontSize,
-        ['--student-passage-h2-font-size' as string]: studentTypography.passageH2FontSize,
-        ['--student-passage-h3-font-size' as string]: studentTypography.passageH3FontSize,
-        ['--student-passage-line-height' as string]: (
+        ["--student-meta-font-size" as string]: studentTypography.metaFontSize,
+        ["--student-chip-font-size" as string]: studentTypography.chipFontSize,
+        ["--student-control-font-size" as string]: studentTypography.controlFontSize,
+        ["--student-preview-font-size" as string]: studentTypography.previewFontSize,
+        ["--student-passage-font-size" as string]: studentTypography.passageFontSize,
+        ["--student-passage-title-font-size" as string]: studentTypography.passageTitleFontSize,
+        ["--student-passage-h1-font-size" as string]: studentTypography.passageH1FontSize,
+        ["--student-passage-h2-font-size" as string]: studentTypography.passageH2FontSize,
+        ["--student-passage-h3-font-size" as string]: studentTypography.passageH3FontSize,
+        ["--student-passage-line-height" as string]: (
           Number.parseFloat(studentTypography.passageLineHeight) *
           passageReadabilityGeometry.lineHeightFactor
         ).toFixed(2),
-        ['--student-passage-measure' as string]: passageReadabilityGeometry.measure,
-        ['--student-question-font-size' as string]: studentTypography.questionFontSize,
-        ['--student-question-line-height' as string]: studentTypography.questionLineHeight,
+        ["--student-passage-measure" as string]: passageReadabilityGeometry.measure,
+        ["--student-question-font-size" as string]: studentTypography.questionFontSize,
+        ["--student-question-line-height" as string]: studentTypography.questionLineHeight,
       }) as React.CSSProperties,
     [passageReadabilityGeometry, studentTypography, tabletMode, uiState.accessibilitySettings.zoom]
   );
@@ -234,8 +232,8 @@ export function StudentApp({
   const liveWritingAnswersRef = useRef(attemptWritingAnswers);
   const writingDraftCommitRef = useRef<(() => void) | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
-  const [warningMessage, setWarningMessage] = useState('');
-  const [warningSeverity, setWarningSeverity] = useState<'medium' | 'high' | 'critical'>('medium');
+  const [warningMessage, setWarningMessage] = useState("");
+  const [warningSeverity, setWarningSeverity] = useState<"medium" | "high" | "critical">("medium");
   const blockingOverlayRef = useRef<HTMLDivElement | null>(null);
   const finalSubmitOverlayRef = useRef<HTMLDivElement | null>(null);
   const submitConfirmModuleRef = useRef<string | null>(null);
@@ -255,7 +253,7 @@ export function StudentApp({
   const latestPendingWarning = useMemo(() => {
     const warnings =
       attemptState.attempt?.violations.filter(
-        (violation) => violation.type === 'PROCTOR_WARNING'
+        (violation) => violation.type === "PROCTOR_WARNING"
       ) ?? [];
     const latestWarning = warnings[warnings.length - 1];
     if (!latestWarning) {
@@ -278,13 +276,15 @@ export function StudentApp({
     [attemptState.attempt, runtimeState.runtimeSnapshot]
   );
   const shouldRenderPostExam =
-    verifiedTerminalState !== 'not_terminal' ||
-    (!runtimeState.runtimeBacked && runtimeState.phase === 'post-exam');
+    verifiedTerminalState !== "not_terminal" ||
+    (!runtimeState.runtimeBacked && runtimeState.phase === "post-exam");
   const effectivePhase =
-    runtimeState.phase === 'post-exam' && !shouldRenderPostExam ? 'exam' : runtimeState.phase;
+    runtimeState.phase === "post-exam" && !shouldRenderPostExam ? "exam" : runtimeState.phase;
   const [choiceEliminationEnabled, setChoiceEliminationEnabled] = useState(false);
   const choiceEliminationAvailable =
-    examState.type === 'ACT' && runtimeState.currentModule === 'science' && effectivePhase === 'exam';
+    examState.type === "ACT" &&
+    runtimeState.currentModule === "science" &&
+    effectivePhase === "exam";
   const toggleChoiceElimination = useCallback(() => {
     if (!choiceEliminationAvailable) {
       return;
@@ -295,10 +295,10 @@ export function StudentApp({
   const runtimeCompletionVerified = isRuntimeStructurallyCompleted(runtimeState.runtimeSnapshot);
   const runtimeSubmissionPending =
     runtimeState.runtimeBacked &&
-    runtimeState.runtimeStatus === 'completed' &&
+    runtimeState.runtimeStatus === "completed" &&
     runtimeCompletionVerified &&
-    verifiedTerminalState === 'not_terminal';
-  const examViewportActive = effectivePhase === 'exam';
+    verifiedTerminalState === "not_terminal";
+  const examViewportActive = effectivePhase === "exam";
   const examViewport = useStudentExamViewport(examViewportActive);
   useStudentExamPageLock(examViewportActive);
   useStudentFocusedControlVisibility(examViewportActive && examViewport.keyboardOpen);
@@ -369,10 +369,10 @@ export function StudentApp({
       module: runtimeState.currentModule,
       blockingReason: runtimeState.blocking.reason,
       submitConfirmOpen: uiState.showSubmitConfirm,
-      finalSubmitIdle: finalSubmitStatus === 'idle',
+      finalSubmitIdle: finalSubmitStatus === "idle",
     });
 
-    if (!isHighlightCapableContext && uiState.accessibilitySettings.highlightToolMode !== 'off') {
+    if (!isHighlightCapableContext && uiState.accessibilitySettings.highlightToolMode !== "off") {
       resetHighlightTool();
     }
   }, [
@@ -405,9 +405,9 @@ export function StudentApp({
   useEffect(() => {
     if (
       runtimeState.runtimeBacked &&
-      runtimeState.runtimeStatus === 'completed' &&
+      runtimeState.runtimeStatus === "completed" &&
       runtimeCompletionVerified &&
-      finalSubmitStatus !== 'idle'
+      finalSubmitStatus !== "idle"
     ) {
       finalSubmitOverlayRef.current?.focus();
     }
@@ -426,7 +426,7 @@ export function StudentApp({
 
     setWarningMessage(latestPendingWarning.description);
     setWarningSeverity(
-      latestPendingWarning.severity === 'low' ? 'medium' : latestPendingWarning.severity
+      latestPendingWarning.severity === "low" ? "medium" : latestPendingWarning.severity
     );
     setWarningOpen(true);
   }, [latestPendingWarning]);
@@ -483,15 +483,15 @@ export function StudentApp({
   const answeredCount = countAnsweredQuestions(runtimeState.allQuestions, attemptAnswers);
   const totalQuestions = countQuestionSlots(runtimeState.allQuestions);
   const unansweredSubmissionPolicy =
-    examState.config.progression.unansweredSubmissionPolicy ?? 'confirm';
+    examState.config.progression.unansweredSubmissionPolicy ?? "confirm";
   const submitRequiresConfirmation =
-    effectivePhase === 'exam' &&
-    (runtimeState.currentModule === 'reading' ||
-      runtimeState.currentModule === 'listening' ||
-      runtimeState.currentModule === 'science') &&
+    effectivePhase === "exam" &&
+    (runtimeState.currentModule === "reading" ||
+      runtimeState.currentModule === "listening" ||
+      runtimeState.currentModule === "science") &&
     totalQuestions > 0 &&
     answeredCount < totalQuestions &&
-    unansweredSubmissionPolicy !== 'allow';
+    unansweredSubmissionPolicy !== "allow";
 
   const performModuleSubmit = useCallback(async () => {
     const currentRuntimeState = runtimeStateRef.current;
@@ -531,12 +531,12 @@ export function StudentApp({
 
   const handleAnswerChange = useCallback(
     (questionId: string, answer: StudentAnswerValue, meta?: StudentAnswerMutationMeta) => {
-      if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
+      if (runtimeStateRef.current.blocking.reason === "storage_unavailable") {
         return;
       }
       const currentValue = latestAnswersRef.current[questionId];
       const resolvedAnswer = resolveObjectiveAnswerUpdate(currentValue, answer, meta);
-      emitAnswerMutationDebugLog('StudentApp.handleAnswerChange', {
+      emitAnswerMutationDebugLog("StudentApp.handleAnswerChange", {
         questionId,
         incomingAnswer: answer,
         currentValue,
@@ -559,7 +559,7 @@ export function StudentApp({
   );
 
   const handleFlagToggle = useCallback((questionId: string) => {
-    if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
+    if (runtimeStateRef.current.blocking.reason === "storage_unavailable") {
       return;
     }
     const nextFlagged = !attemptFlagsRef.current[questionId];
@@ -585,7 +585,7 @@ export function StudentApp({
   }, []);
 
   const handleWritingChange = useCallback((taskId: string, text: string) => {
-    if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
+    if (runtimeStateRef.current.blocking.reason === "storage_unavailable") {
       return;
     }
     liveWritingAnswersRef.current = {
@@ -615,10 +615,10 @@ export function StudentApp({
     uiActionsRef.current.setShowNavigator(false);
   }, []);
   const showNavigatorForModule =
-    runtimeState.currentModule === 'reading' ||
-    runtimeState.currentModule === 'listening' ||
-    runtimeState.currentModule === 'writing' ||
-    runtimeState.currentModule === 'science';
+    runtimeState.currentModule === "reading" ||
+    runtimeState.currentModule === "listening" ||
+    runtimeState.currentModule === "writing" ||
+    runtimeState.currentModule === "science";
 
   const blockingOverlay =
     runtimeState.blocking.active && blockingCopy ? (
@@ -634,7 +634,9 @@ export function StudentApp({
           <p className="text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide text-gray-500 mb-3">
             {blockingCopy.contextLabel}
           </p>
-          <h2 id="blocking-overlay-title" className="text-2xl font-black text-gray-900 mb-3">{blockingCopy.title}</h2>
+          <h2 id="blocking-overlay-title" className="text-2xl font-black text-gray-900 mb-3">
+            {blockingCopy.title}
+          </h2>
           <p className="text-sm text-gray-700 leading-6">
             {runtimeState.proctorNote ?? blockingCopy.message}
           </p>
@@ -652,9 +654,9 @@ export function StudentApp({
 
   const finalSubmitOverlay =
     runtimeState.runtimeBacked &&
-    runtimeState.runtimeStatus === 'completed' &&
+    runtimeState.runtimeStatus === "completed" &&
     runtimeCompletionVerified &&
-    finalSubmitStatus !== 'idle' ? (
+    finalSubmitStatus !== "idle" ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
         <div
           ref={finalSubmitOverlayRef}
@@ -667,31 +669,38 @@ export function StudentApp({
           <p className="text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide text-gray-500 mb-3">
             Submission
           </p>
-          <h2 id="final-submit-overlay-title" className="text-2xl font-black text-gray-900 mb-3">Submitting your exam</h2>
+          <h2 id="final-submit-overlay-title" className="text-2xl font-black text-gray-900 mb-3">
+            Submitting your exam
+          </h2>
           <p className="text-sm text-gray-700 leading-6">
-            {finalSubmitStatus === 'failed'
-              ? 'We could not confirm submission yet. Stay on this page and check your connection.'
-              : 'Please keep this page open while we finalize your submission.'}
+            {finalSubmitStatus === "failed"
+              ? "We could not confirm submission yet. Stay on this page and check your connection."
+              : "Please keep this page open while we finalize your submission."}
           </p>
           <div className="mt-6 flex items-center justify-center gap-3">
             <div className="px-3 py-1 rounded-sm bg-gray-50 border border-gray-100 text-xs font-bold uppercase tracking-widest text-gray-700">
-              {finalSubmitStatus === 'submitting'
-                ? 'Submitting'
-                : finalSubmitStatus === 'retrying'
-                  ? 'Retrying'
-                  : 'Needs attention'}
+              {finalSubmitStatus === "submitting"
+                ? "Submitting"
+                : finalSubmitStatus === "retrying"
+                  ? "Retrying"
+                  : "Needs attention"}
             </div>
             <div className="px-3 py-1 rounded-sm bg-amber-50 border border-amber-700 text-xs font-bold uppercase tracking-widest text-amber-900">
               Do not close
             </div>
           </div>
-          {finalSubmitStatus === 'failed' ? (
+          {finalSubmitStatus === "failed" ? (
             <div className="mt-6 flex flex-col items-stretch gap-2">
-              <Button variant="primary" onClick={retryFinalSubmit} className="h-11 text-base font-semibold">
+              <Button
+                variant="primary"
+                onClick={retryFinalSubmit}
+                className="h-11 text-base font-semibold"
+              >
                 Retry Submission
               </Button>
               <p className="text-xs text-gray-500 leading-5">
-                Your answers are safe on this device. If submission keeps failing, contact your proctor.
+                Your answers are safe on this device. If submission keeps failing, contact your
+                proctor.
               </p>
             </div>
           ) : null}
@@ -706,13 +715,17 @@ export function StudentApp({
       className="fixed inset-x-0 bottom-20 z-30 flex justify-center px-4 pointer-events-none"
     >
       <div className="pointer-events-auto w-full max-w-lg rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 shadow-xl flex items-start gap-3">
-        <AlertTriangle size={16} className="text-amber-700 mt-0.5 flex-shrink-0" aria-hidden="true" />
+        <AlertTriangle
+          size={16}
+          className="text-amber-700 mt-0.5 flex-shrink-0"
+          aria-hidden="true"
+        />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-amber-900">Some answers could not be saved</p>
           <p className="mt-0.5 text-xs leading-5 text-amber-800">
-            {droppedMutations.count} change{droppedMutations.count === 1 ? '' : 's'}{' '}
-            {droppedMutations.count === 1 ? 'was' : 'were'} not recorded. Check with your proctor
-            if you think an answer is missing.
+            {droppedMutations.count} change{droppedMutations.count === 1 ? "" : "s"}{" "}
+            {droppedMutations.count === 1 ? "was" : "were"} not recorded. Check with your proctor if
+            you think an answer is missing.
           </p>
         </div>
         <button
@@ -726,7 +739,7 @@ export function StudentApp({
     </div>
   ) : null;
 
-  if (shouldRenderPostExam || effectivePhase !== 'exam') {
+  if (shouldRenderPostExam || effectivePhase !== "exam") {
     return (
       <StudentExamPhaseRenderer
         phase={effectivePhase}
@@ -775,7 +788,7 @@ export function StudentApp({
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
-      {layoutMode === 'compact' ? (
+      {layoutMode === "compact" ? (
         <StudentExamHeaderClock
           compact={true}
           examType={examState.type}
@@ -815,7 +828,7 @@ export function StudentApp({
           tabletMode={tabletMode}
           onOpenAccessibility={openAccessibility}
           onOpenNavigator={showNavigatorForModule ? openNavigator : undefined}
-          isExamActive={effectivePhase === 'exam'}
+          isExamActive={effectivePhase === "exam"}
         />
       )}
       <StudentExamViewport>
@@ -870,7 +883,7 @@ export function StudentApp({
           appearance="blackout"
           message={
             latestScreenshotViolation?.description ??
-            'Screenshot attempt detected. The exam screen has been hidden. Acknowledge to continue.'
+            "Screenshot attempt detected. The exam screen has been hidden. Acknowledge to continue."
           }
           showCountdown={false}
           onAcknowledge={() => {
@@ -884,7 +897,7 @@ export function StudentApp({
           severity={tabSwitchSeverity}
           message={
             latestTabSwitchViolation?.description ??
-            'Tab switching detected. You must remain on the examination page at all times.'
+            "Tab switching detected. You must remain on the examination page at all times."
           }
           showCountdown={false}
           onAcknowledge={() => {
@@ -898,7 +911,7 @@ export function StudentApp({
           severity="medium"
           message={
             latestTranslationViolation?.description ??
-            'Translation tools detected. Please disable translation and continue in the original language.'
+            "Translation tools detected. Please disable translation and continue in the original language."
           }
           showCountdown={false}
           onAcknowledge={() => {
@@ -912,7 +925,7 @@ export function StudentApp({
           severity="high"
           message={
             latestSecondaryScreenViolation?.description ??
-            'Multiple screens detected. Please disconnect additional displays to continue.'
+            "Multiple screens detected. Please disconnect additional displays to continue."
           }
           showCountdown={false}
           onAcknowledge={() => {
@@ -969,7 +982,11 @@ export function StudentApp({
           >
             Cancel
           </Button>
-          <Button type="button" onClick={handleTimeExtensionRequest} disabled={!timeExtensionReason.trim()}>
+          <Button
+            type="button"
+            onClick={handleTimeExtensionRequest}
+            disabled={!timeExtensionReason.trim()}
+          >
             Request +5 Minutes
           </Button>
         </div>

@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Check,
   CheckCircle,
@@ -14,20 +14,24 @@ import {
   RefreshCw,
   Wifi,
   X,
-} from 'lucide-react';
-import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
-import { getStudentHighlightPaletteEntry, studentHighlightPalette, type StudentHighlightColor } from './highlightPalette';
-import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
-import type { ExamType } from '../../types';
+} from "lucide-react";
+import { LoadingMark, SrLoadingText } from "../ui/LoadingMark";
+import {
+  getStudentHighlightPaletteEntry,
+  studentHighlightPalette,
+  type StudentHighlightColor,
+} from "./highlightPalette";
+import type { StudentHighlightToolMode } from "./providers/StudentUIProvider";
+import type { ExamType } from "../../types";
 
 const pressClassName =
-  'transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]';
+  "transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]";
 
 interface StudentHeaderProps {
   examType?: ExamType | undefined;
   testTakerId?: string | undefined;
   timeRemaining?: number | undefined;
-  autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | 'error' | null | undefined;
+  autoSaveStatus?: "saved" | "saving" | "syncing" | "offline" | "error" | null | undefined;
   highlightEnabled?: boolean | undefined;
   highlightToolMode?: StudentHighlightToolMode | undefined;
   highlightColor?: StudentHighlightColor | undefined;
@@ -49,13 +53,13 @@ interface StudentHeaderProps {
 }
 
 export function StudentHeader({
-  examType = 'Academic',
+  examType = "Academic",
   testTakerId,
   timeRemaining,
   autoSaveStatus,
   highlightEnabled = false,
-  highlightToolMode = 'off',
-  highlightColor = 'yellow',
+  highlightToolMode = "off",
+  highlightColor = "yellow",
   onToggleHighlightMode,
   onSelectHighlightColor,
   onSelectEraseMode,
@@ -73,7 +77,7 @@ export function StudentHeader({
   isExamActive = false,
 }: StudentHeaderProps) {
   void onClearHighlights;
-  const examLabel = examType === 'ACT' ? 'ACT' : 'IELTS';
+  const examLabel = examType === "ACT" ? "ACT" : "IELTS";
   const [showTabletZoomControls, setShowTabletZoomControls] = useState(false);
   const [showHighlightOptions, setShowHighlightOptions] = useState(false);
   const highlightOptionsTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -93,17 +97,17 @@ export function StudentHeader({
   const showZoomControls = zoom !== undefined && onZoomIn && onZoomOut && onZoomReset;
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
   const shouldShowHighlightTool = Boolean(
-    highlightEnabled && isExamActive && onToggleHighlightMode && onSelectEraseMode,
+    highlightEnabled && isExamActive && onToggleHighlightMode && onSelectEraseMode
   );
   const activePaletteEntry = getStudentHighlightPaletteEntry(highlightColor);
-  const highlightButtonLabel = highlightToolMode === 'highlight' ? 'Highlighting' : 'Highlight';
+  const highlightButtonLabel = highlightToolMode === "highlight" ? "Highlighting" : "Highlight";
   const shouldShowChoiceEliminationTool = Boolean(
-    examType === 'ACT' && choiceEliminationAvailable && onToggleChoiceElimination,
+    examType === "ACT" && choiceEliminationAvailable && onToggleChoiceElimination
   );
   const highlightButtonLayoutClassName =
-    examType === 'ACT' ? 'min-w-[9.5rem] justify-center whitespace-nowrap' : '';
+    examType === "ACT" ? "min-w-[9.5rem] justify-center whitespace-nowrap" : "";
   const highlightButtonLabelClassName =
-    examType === 'ACT' ? 'inline whitespace-nowrap' : 'hidden md:inline';
+    examType === "ACT" ? "inline whitespace-nowrap" : "hidden md:inline";
 
   const closeHighlightOptions = useCallback(() => {
     setShowHighlightOptions(false);
@@ -118,7 +122,7 @@ export function StudentHeader({
     const width = Math.min(240, Math.max(192, window.innerWidth - 24));
     const left = Math.min(
       Math.max(12, rect.right - width),
-      Math.max(12, window.innerWidth - width - 12),
+      Math.max(12, window.innerWidth - width - 12)
     );
 
     setHighlightOptionsStyle({
@@ -132,33 +136,39 @@ export function StudentHeader({
     if (!showHighlightOptions) return;
     updateHighlightOptionsPosition();
     const panel = highlightOptionsPanelRef.current;
-    const preferred = panel?.querySelector<HTMLButtonElement>(`button[data-highlight-color="${highlightColor}"]`);
-    (preferred ?? panel?.querySelector<HTMLButtonElement>('button'))?.focus();
+    const preferred = panel?.querySelector<HTMLButtonElement>(
+      `button[data-highlight-color="${highlightColor}"]`
+    );
+    (preferred ?? panel?.querySelector<HTMLButtonElement>("button"))?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeHighlightOptions();
+      if (event.key === "Escape") closeHighlightOptions();
     };
     const onPointerDown = (event: MouseEvent | TouchEvent) => {
       const target = event.target as Node | null;
-      if (target && (panel?.contains(target) || highlightOptionsTriggerRef.current?.contains(target))) return;
+      if (
+        target &&
+        (panel?.contains(target) || highlightOptionsTriggerRef.current?.contains(target))
+      )
+        return;
       closeHighlightOptions();
     };
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('touchstart', onPointerDown);
-    window.addEventListener('resize', updateHighlightOptionsPosition);
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    window.addEventListener("resize", updateHighlightOptionsPosition);
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('touchstart', onPointerDown);
-      window.removeEventListener('resize', updateHighlightOptionsPosition);
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      window.removeEventListener("resize", updateHighlightOptionsPosition);
     };
   }, [closeHighlightOptions, highlightColor, showHighlightOptions, updateHighlightOptionsPosition]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
   const updateTabletZoomControlsPosition = useCallback(() => {
@@ -169,7 +179,10 @@ export function StudentHeader({
 
     const rect = button.getBoundingClientRect();
     const width = Math.min(300, Math.max(248, window.innerWidth - 24));
-    const left = Math.min(Math.max(12, rect.right - width), Math.max(12, window.innerWidth - width - 12));
+    const left = Math.min(
+      Math.max(12, rect.right - width),
+      Math.max(12, window.innerWidth - width - 12)
+    );
 
     setTabletZoomControlsStyle({
       top: Math.round(rect.bottom + 10),
@@ -190,7 +203,7 @@ export function StudentHeader({
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setShowTabletZoomControls(false);
       }
     };
@@ -199,7 +212,8 @@ export function StudentHeader({
       const target = event.target as Node | null;
       if (
         target &&
-        (tabletZoomButtonRef.current?.contains(target) || tabletZoomPanelRef.current?.contains(target))
+        (tabletZoomButtonRef.current?.contains(target) ||
+          tabletZoomPanelRef.current?.contains(target))
       ) {
         return;
       }
@@ -207,21 +221,21 @@ export function StudentHeader({
       setShowTabletZoomControls(false);
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('touchstart', handlePointerDown);
-    window.addEventListener('resize', handleResize);
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    window.addEventListener("resize", handleResize);
 
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('touchstart', handlePointerDown);
-      window.removeEventListener('resize', handleResize);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      window.removeEventListener("resize", handleResize);
     };
   }, [showTabletZoomControls, tabletMode, updateTabletZoomControlsPosition]);
 
   const renderOverlayPanel = useCallback((panel: React.ReactNode) => {
-    if (typeof document === 'undefined') {
+    if (typeof document === "undefined") {
       return null;
     }
 
@@ -280,7 +294,7 @@ export function StudentHeader({
               <RefreshCw size={14} />
             </button>
           </div>
-        </div>,
+        </div>
       )
     : null;
 
@@ -291,14 +305,16 @@ export function StudentHeader({
     >
       <div className="flex items-center gap-3 md:gap-4 lg:gap-6 min-w-0 justify-self-start">
         <div className="bg-white border border-gray-900 px-1.5 md:px-2 lg:px-3 py-0.5 rounded-sm flex-shrink-0">
-          <div className="text-gray-900 font-bold text-lg md:text-xl lg:text-2xl tracking-tight">{examLabel}</div>
+          <div className="text-gray-900 font-bold text-lg md:text-xl lg:text-2xl tracking-tight">
+            {examLabel}
+          </div>
         </div>
         <div className="flex flex-col min-w-0 hidden sm:flex">
           <div className="font-semibold text-[length:var(--student-meta-font-size)] text-gray-600 uppercase tracking-wide">
             Test taker ID
           </div>
           <div className="text-[length:var(--student-control-font-size)] font-semibold text-gray-900 truncate">
-            {testTakerId ?? '—'}
+            {testTakerId ?? "—"}
           </div>
         </div>
         {shouldShowChoiceEliminationTool ? (
@@ -307,8 +323,8 @@ export function StudentHeader({
             onClick={onToggleChoiceElimination}
             className={`${pressClassName} flex min-h-11 min-w-11 shrink-0 items-center gap-1.5 rounded-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
               choiceEliminationEnabled
-                ? 'border-blue-700 bg-blue-50 text-blue-900'
-                : 'border-gray-300 bg-white text-gray-800'
+                ? "border-blue-700 bg-blue-50 text-blue-900"
+                : "border-gray-300 bg-white text-gray-800"
             }`}
             aria-pressed={choiceEliminationEnabled}
             aria-label="Eliminate choices"
@@ -326,8 +342,10 @@ export function StudentHeader({
       >
         {timeRemaining !== undefined ? (
           <div className="flex items-center gap-1.5 md:gap-2 lg:gap-3 flex-shrink-0">
-            <div className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-semibold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? 'student-timer-urgent bg-red-100 border-red-700 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-900'}`}>
-              <Clock size={14} className={timeRemaining < 300 ? 'text-red-900' : 'text-gray-700'} />
+            <div
+              className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-semibold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? "student-timer-urgent bg-red-100 border-red-700 text-red-900" : "bg-gray-50 border-gray-100 text-gray-900"}`}
+            >
+              <Clock size={14} className={timeRemaining < 300 ? "text-red-900" : "text-gray-700"} />
               <span
                 className="font-mono"
                 role="timer"
@@ -351,16 +369,19 @@ export function StudentHeader({
               type="button"
               onClick={onToggleHighlightMode}
               className={`${pressClassName} flex min-h-11 items-center gap-1.5 rounded-l-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${highlightButtonLayoutClassName} ${
-                highlightToolMode === 'highlight'
-                  ? 'border-blue-700 bg-blue-50 text-blue-900'
-                  : 'border-gray-300 bg-white text-gray-800'
+                highlightToolMode === "highlight"
+                  ? "border-blue-700 bg-blue-50 text-blue-900"
+                  : "border-gray-300 bg-white text-gray-800"
               }`}
-              aria-pressed={highlightToolMode === 'highlight'}
+              aria-pressed={highlightToolMode === "highlight"}
               aria-label={highlightButtonLabel}
             >
               <Highlighter size={16} />
               <span className={highlightButtonLabelClassName}>{highlightButtonLabel}</span>
-              <span className={`h-3 w-3 rounded-full border border-gray-700 ${activePaletteEntry.swatchClassName}`} aria-hidden="true" />
+              <span
+                className={`h-3 w-3 rounded-full border border-gray-700 ${activePaletteEntry.swatchClassName}`}
+                aria-hidden="true"
+              />
             </button>
             <button
               ref={highlightOptionsTriggerRef}
@@ -375,38 +396,43 @@ export function StudentHeader({
             {showHighlightOptions
               ? renderOverlayPanel(
                   <div
-                ref={highlightOptionsPanelRef}
-                role="group"
-                className="fixed z-[130] max-h-[calc(100vh-5rem)] min-w-48 overflow-y-auto rounded-md border border-gray-200 bg-white p-1.5 shadow-xl"
-                style={highlightOptionsStyle}
-                aria-label="Highlight options"
-              >
-                {studentHighlightPalette.map((entry) => (
-                  <button
-                    key={entry.id}
-                    data-highlight-color={entry.id}
-                    type="button"
-                    onClick={() => {
-                      onSelectHighlightColor?.(entry.id);
-                      closeHighlightOptions();
-                    }}
-                    className={`${pressClassName} flex min-h-11 w-full items-center gap-2 rounded-sm px-3 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700`}
-                    aria-label={entry.label}
+                    ref={highlightOptionsPanelRef}
+                    role="group"
+                    className="fixed z-[130] max-h-[calc(100vh-5rem)] min-w-48 overflow-y-auto rounded-md border border-gray-200 bg-white p-1.5 shadow-xl"
+                    style={highlightOptionsStyle}
+                    aria-label="Highlight options"
                   >
-                    <span className={`h-5 w-5 rounded-sm border border-gray-500 ${entry.swatchClassName}`} aria-hidden="true" />
-                    <span className="flex-1 text-left">{entry.label}</span>
-                    {highlightToolMode === 'highlight' && highlightColor === entry.id ? <Check size={16} aria-hidden="true" /> : null}
-                  </button>
-                ))}
-                  </div>,
+                    {studentHighlightPalette.map((entry) => (
+                      <button
+                        key={entry.id}
+                        data-highlight-color={entry.id}
+                        type="button"
+                        onClick={() => {
+                          onSelectHighlightColor?.(entry.id);
+                          closeHighlightOptions();
+                        }}
+                        className={`${pressClassName} flex min-h-11 w-full items-center gap-2 rounded-sm px-3 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-700`}
+                        aria-label={entry.label}
+                      >
+                        <span
+                          className={`h-5 w-5 rounded-sm border border-gray-500 ${entry.swatchClassName}`}
+                          aria-hidden="true"
+                        />
+                        <span className="flex-1 text-left">{entry.label}</span>
+                        {highlightToolMode === "highlight" && highlightColor === entry.id ? (
+                          <Check size={16} aria-hidden="true" />
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
                 )
               : null}
             <span className="sr-only" role="status" aria-live="polite">
-              {highlightToolMode === 'highlight'
+              {highlightToolMode === "highlight"
                 ? `Highlighting with ${activePaletteEntry.label}`
-                : highlightToolMode === 'erase'
-                  ? 'Erasing highlights'
-                  : ''}
+                : highlightToolMode === "erase"
+                  ? "Erasing highlights"
+                  : ""}
             </span>
           </div>
         ) : null}
@@ -415,11 +441,11 @@ export function StudentHeader({
             type="button"
             onClick={onSelectEraseMode}
             className={`${pressClassName} flex min-h-11 min-w-11 shrink-0 items-center gap-1.5 rounded-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
-              highlightToolMode === 'erase'
-                ? 'border-blue-700 bg-blue-50 text-blue-900'
-                : 'border-gray-300 bg-white text-gray-800'
+              highlightToolMode === "erase"
+                ? "border-blue-700 bg-blue-50 text-blue-900"
+                : "border-gray-300 bg-white text-gray-800"
             }`}
-            aria-pressed={highlightToolMode === 'erase'}
+            aria-pressed={highlightToolMode === "erase"}
             aria-label="Erase highlights"
           >
             <Eraser size={16} aria-hidden="true" />
@@ -432,20 +458,22 @@ export function StudentHeader({
             role="status"
             aria-live="polite"
           >
-            {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (
+            {autoSaveStatus === "saving" || autoSaveStatus === "syncing" ? (
               <>
                 <LoadingMark size="xs" className="bg-gray-300" />
-                <SrLoadingText>{autoSaveStatus === 'syncing' ? 'Syncing…' : 'Saving…'}</SrLoadingText>
+                <SrLoadingText>
+                  {autoSaveStatus === "syncing" ? "Syncing…" : "Saving…"}
+                </SrLoadingText>
                 <span className="text-gray-600">
-                  {autoSaveStatus === 'syncing' ? 'Syncing' : 'Saving'}
+                  {autoSaveStatus === "syncing" ? "Syncing" : "Saving"}
                 </span>
               </>
-            ) : autoSaveStatus === 'offline' ? (
+            ) : autoSaveStatus === "offline" ? (
               <>
                 <Wifi size={10} className="text-amber-600" />
                 <span className="text-amber-700">Offline</span>
               </>
-            ) : autoSaveStatus === 'error' ? (
+            ) : autoSaveStatus === "error" ? (
               <>
                 <RefreshCw size={10} className="text-red-600" />
                 <span className="text-red-700">Not synced — retrying</span>

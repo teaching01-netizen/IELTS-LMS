@@ -1,26 +1,51 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { 
-  ArrowLeft, Save, CheckCircle, Clock, FileText,
-  MessageSquare, ChevronLeft, ChevronRight, Eye, Calendar,
-  CheckSquare, AlertTriangle, Printer, Menu
-} from 'lucide-react';
-import { 
-  StudentSubmission, SectionSubmission, WritingTaskSubmission, ReviewDraft,
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import {
+  ArrowLeft,
+  Save,
+  CheckCircle,
+  Clock,
+  FileText,
+  MessageSquare,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  Calendar,
+  CheckSquare,
+  AlertTriangle,
+  Printer,
+  Menu,
+} from "lucide-react";
+import {
+  StudentSubmission,
+  SectionSubmission,
+  WritingTaskSubmission,
+  ReviewDraft,
   StudentResult,
-  RubricAssessment, ReleaseStatus, GradingChecklist,
-  WritingAnnotation, DrawingAnnotation, CommentBankItem, WritingAnswers
-} from '../../types/grading';
-import { gradingService, gradingRepository } from '../../features/grading/infrastructure/gradingGateway';
-import { examRepository, hydrateExamState } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
-import type { ExamState, WritingTaskContent } from '../../types';
-import { WritingAnnotationCanvas } from './WritingAnnotationCanvas';
-import { StudentReportPreview } from './StudentReportPreview';
-import { QuestionTracebackPanel } from './QuestionTracebackPanel';
-import { logger } from '../../utils/logger';
-import { SectionLoadingSkeleton } from '@components/ui';
-import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
-import { sanitizeHtml } from '../../utils/sanitizeHtml';
-import { subscribeObjectiveGradingUpdates } from '../../utils/objectiveGradingSync';
+  RubricAssessment,
+  ReleaseStatus,
+  GradingChecklist,
+  WritingAnnotation,
+  DrawingAnnotation,
+  CommentBankItem,
+  WritingAnswers,
+} from "../../types/grading";
+import {
+  gradingService,
+  gradingRepository,
+} from "../../features/grading/infrastructure/gradingGateway";
+import {
+  examRepository,
+  hydrateExamState,
+} from "../../features/exam-authoring/infrastructure/examAuthoringGateway";
+import type { ExamState, WritingTaskContent } from "../../types";
+import { WritingAnnotationCanvas } from "./WritingAnnotationCanvas";
+import { StudentReportPreview } from "./StudentReportPreview";
+import { QuestionTracebackPanel } from "./QuestionTracebackPanel";
+import { logger } from "../../utils/logger";
+import { SectionLoadingSkeleton } from "@components/ui";
+import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from "../../utils/htmlText";
+import { sanitizeHtml } from "../../utils/sanitizeHtml";
+import { subscribeObjectiveGradingUpdates } from "../../utils/objectiveGradingSync";
 
 export interface StudentReviewWorkspaceProps {
   submissionId: string;
@@ -31,54 +56,58 @@ export interface StudentReviewWorkspaceProps {
   currentTeacherName: string;
 }
 
-type WritingPrintSlot = 'task1' | 'task2';
-type WritingBandKey = 'taskResponseBand' | 'coherenceBand' | 'lexicalBand' | 'grammarBand';
-type WritingNotesKey = 'taskResponseNotes' | 'coherenceNotes' | 'lexicalNotes' | 'grammarNotes';
-type ReviewSection = 'listening' | 'reading' | 'writing' | 'speaking' | 'science';
-type ObjectiveReviewSection = 'listening' | 'reading' | 'science';
+type WritingPrintSlot = "task1" | "task2";
+type WritingBandKey = "taskResponseBand" | "coherenceBand" | "lexicalBand" | "grammarBand";
+type WritingNotesKey = "taskResponseNotes" | "coherenceNotes" | "lexicalNotes" | "grammarNotes";
+type ReviewSection = "listening" | "reading" | "writing" | "speaking" | "science";
+type ObjectiveReviewSection = "listening" | "reading" | "science";
 
 const getWritingPrintSlot = (taskId: string): WritingPrintSlot | null => {
   const normalized = taskId.trim().toLowerCase();
-  if (normalized === 'task1' || normalized === 'task-1') {
-    return 'task1';
+  if (normalized === "task1" || normalized === "task-1") {
+    return "task1";
   }
-  if (normalized === 'task2' || normalized === 'task-2') {
-    return 'task2';
+  if (normalized === "task2" || normalized === "task-2") {
+    return "task2";
   }
   return null;
 };
 
-type WritingTaskEntry = WritingAnswers['tasks'][number];
-const writingCriterionDefs: Array<{ key: WritingBandKey; label: string; notesKey: WritingNotesKey }> = [
-  { key: 'taskResponseBand', label: 'Task Response', notesKey: 'taskResponseNotes' },
-  { key: 'coherenceBand', label: 'Coherence & Cohesion', notesKey: 'coherenceNotes' },
-  { key: 'lexicalBand', label: 'Lexical Resource', notesKey: 'lexicalNotes' },
-  { key: 'grammarBand', label: 'Grammar', notesKey: 'grammarNotes' },
+type WritingTaskEntry = WritingAnswers["tasks"][number];
+const writingCriterionDefs: Array<{
+  key: WritingBandKey;
+  label: string;
+  notesKey: WritingNotesKey;
+}> = [
+  { key: "taskResponseBand", label: "Task Response", notesKey: "taskResponseNotes" },
+  { key: "coherenceBand", label: "Coherence & Cohesion", notesKey: "coherenceNotes" },
+  { key: "lexicalBand", label: "Lexical Resource", notesKey: "lexicalNotes" },
+  { key: "grammarBand", label: "Grammar", notesKey: "grammarNotes" },
 ];
 
 function isWritingTaskEntry(value: unknown): value is WritingTaskEntry {
   return (
-    typeof value === 'object' &&
+    typeof value === "object" &&
     value !== null &&
-    typeof (value as Partial<WritingTaskEntry>).taskId === 'string'
+    typeof (value as Partial<WritingTaskEntry>).taskId === "string"
   );
 }
 
 function requiresExplicitReleaseOverride(errorMessage: string): boolean {
   const normalized = errorMessage.toLowerCase();
   return (
-    normalized.includes('explicit grader override confirmation is required') ||
-    normalized.includes('merge_incomplete_override_required')
+    normalized.includes("explicit grader override confirmation is required") ||
+    normalized.includes("merge_incomplete_override_required")
   );
 }
 
-export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace({ 
-  submissionId, 
-  onBack, 
+export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace({
+  submissionId,
+  onBack,
   onNextStudent,
   onPreviousStudent,
-  currentTeacherId, 
-  currentTeacherName 
+  currentTeacherId,
+  currentTeacherName,
 }: StudentReviewWorkspaceProps) {
   void onNextStudent;
   void onPreviousStudent;
@@ -90,8 +119,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const [examState, setExamState] = useState<ExamState | null>(null);
   const [examLoading, setExamLoading] = useState(false);
   const [examError, setExamError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<ReviewSection>('reading');
-  const [activeTask, setActiveTask] = useState<string>('task1');
+  const [activeSection, setActiveSection] = useState<ReviewSection>("reading");
+  const [activeTask, setActiveTask] = useState<string>("task1");
   const [loading, setLoading] = useState(true);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [sectionsLoading, setSectionsLoading] = useState(false);
@@ -100,27 +129,63 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const [writingError, setWritingError] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [objectiveOverrideError, setObjectiveOverrideError] = useState<string | null>(null);
-  const [pendingObjectiveOverrideQuestionIds, setPendingObjectiveOverrideQuestionIds] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [pendingObjectiveOverrideQuestionIds, setPendingObjectiveOverrideQuestionIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const examLoadSeq = useRef(0);
   const [releaseAction, setReleaseAction] = useState<
-    | 'mark_grading_complete'
-    | 'mark_ready_to_release'
-    | 'release_now'
-    | 'schedule_release'
-    | 'reopen'
+    | "mark_grading_complete"
+    | "mark_ready_to_release"
+    | "release_now"
+    | "schedule_release"
+    | "reopen"
     | null
   >(null);
   const [releaseError, setReleaseError] = useState<string | null>(null);
   const [showReportPreview, setShowReportPreview] = useState(false);
   const [commentBank] = useState<CommentBankItem[]>([
-    { id: '1', category: 'grammar', label: 'Subject-verb agreement', text: 'Check subject-verb agreement in this sentence.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
-    { id: '2', category: 'vocabulary', label: 'Word choice', text: 'Consider using a more precise vocabulary word here.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
-    { id: '3', category: 'coherence', label: 'Transition needed', text: 'Add a transition word to improve flow between ideas.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
-    { id: '4', category: 'task_response', label: 'Address the prompt', text: 'Ensure you fully address all parts of the prompt.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
+    {
+      id: "1",
+      category: "grammar",
+      label: "Subject-verb agreement",
+      text: "Check subject-verb agreement in this sentence.",
+      isStudentVisible: true,
+      createdBy: "system",
+      createdAt: "",
+      usageCount: 0,
+    },
+    {
+      id: "2",
+      category: "vocabulary",
+      label: "Word choice",
+      text: "Consider using a more precise vocabulary word here.",
+      isStudentVisible: true,
+      createdBy: "system",
+      createdAt: "",
+      usageCount: 0,
+    },
+    {
+      id: "3",
+      category: "coherence",
+      label: "Transition needed",
+      text: "Add a transition word to improve flow between ideas.",
+      isStudentVisible: true,
+      createdBy: "system",
+      createdAt: "",
+      usageCount: 0,
+    },
+    {
+      id: "4",
+      category: "task_response",
+      label: "Address the prompt",
+      text: "Ensure you fully address all parts of the prompt.",
+      isStudentVisible: true,
+      createdBy: "system",
+      createdAt: "",
+      usageCount: 0,
+    },
   ]);
   const submissionLoadSeq = useRef(0);
 
@@ -152,17 +217,17 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
         if (!version) {
           setExamState(null);
-          setExamError('Exam version not found for this submission.');
+          setExamError("Exam version not found for this submission.");
           return;
         }
 
         const nextExamState = hydrateExamState(version.contentSnapshot as ExamState);
         setExamState(nextExamState);
-        setActiveSection(nextExamState.type === 'ACT' ? 'science' : 'reading');
+        setActiveSection(nextExamState.type === "ACT" ? "science" : "reading");
       } catch (error) {
         if (seq !== examLoadSeq.current) return;
         setExamState(null);
-        setExamError(error instanceof Error ? error.message : 'Failed to load exam version.');
+        setExamError(error instanceof Error ? error.message : "Failed to load exam version.");
       } finally {
         if (seq === examLoadSeq.current) {
           setExamLoading(false);
@@ -189,7 +254,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
       if (!subData) {
         setSubmission(null);
-        setSummaryError('Submission not found.');
+        setSummaryError("Submission not found.");
         return;
       }
 
@@ -206,15 +271,19 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         setReviewDraft(existingDraft);
       } else if (
         subData &&
-        ['submitted', 'in_progress', 'reopened'].includes(subData.gradingStatus)
+        ["submitted", "in_progress", "reopened"].includes(subData.gradingStatus)
       ) {
-        const result = await gradingService.startReview(submissionId, currentTeacherId, currentTeacherName);
+        const result = await gradingService.startReview(
+          submissionId,
+          currentTeacherId,
+          currentTeacherName
+        );
         if (seq !== submissionLoadSeq.current) return;
         if (result.success && result.data) {
           // Initialize with default checklist
           const initializedDraft = {
             ...result.data,
-            releaseStatus: 'draft' as ReleaseStatus,
+            releaseStatus: "draft" as ReleaseStatus,
             drawings: [],
             checklist: {
               listeningReviewed: false,
@@ -224,8 +293,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               speakingReviewed: false,
               overallFeedbackWritten: false,
               rubricComplete: false,
-              annotationsComplete: false
-            }
+              annotationsComplete: false,
+            },
           };
           setReviewDraft(initializedDraft);
         }
@@ -233,12 +302,15 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
       setSectionsLoading(true);
       try {
-        const sectionsData = await gradingRepository.getSectionSubmissionsBySubmissionId(submissionId);
+        const sectionsData =
+          await gradingRepository.getSectionSubmissionsBySubmissionId(submissionId);
         if (seq !== submissionLoadSeq.current) return;
         setSectionSubmissions(sectionsData);
       } catch (error) {
         if (seq !== submissionLoadSeq.current) return;
-        setSectionsError(error instanceof Error ? error.message : 'Failed to load section answers.');
+        setSectionsError(
+          error instanceof Error ? error.message : "Failed to load section answers."
+        );
       } finally {
         if (seq === submissionLoadSeq.current) {
           setSectionsLoading(false);
@@ -247,12 +319,13 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
       setWritingLoading(true);
       try {
-        const writingsData = await gradingRepository.getWritingSubmissionsBySubmissionId(submissionId);
+        const writingsData =
+          await gradingRepository.getWritingSubmissionsBySubmissionId(submissionId);
         if (seq !== submissionLoadSeq.current) return;
         setWritingSubmissions(writingsData);
       } catch (error) {
         if (seq !== submissionLoadSeq.current) return;
-        setWritingError(error instanceof Error ? error.message : 'Failed to load writing payload.');
+        setWritingError(error instanceof Error ? error.message : "Failed to load writing payload.");
       } finally {
         if (seq === submissionLoadSeq.current) {
           setWritingLoading(false);
@@ -265,16 +338,18 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
         if (existingDraft) {
           setReviewDraft(existingDraft);
-        } else if (
-          ['submitted', 'in_progress', 'reopened'].includes(subData.gradingStatus)
-        ) {
-          const result = await gradingService.startReview(submissionId, currentTeacherId, currentTeacherName);
+        } else if (["submitted", "in_progress", "reopened"].includes(subData.gradingStatus)) {
+          const result = await gradingService.startReview(
+            submissionId,
+            currentTeacherId,
+            currentTeacherName
+          );
           if (seq !== submissionLoadSeq.current) return;
           if (result.success && result.data) {
             // Initialize with default checklist
             const initializedDraft = {
               ...result.data,
-              releaseStatus: 'draft' as ReleaseStatus,
+              releaseStatus: "draft" as ReleaseStatus,
               drawings: [],
               checklist: {
                 listeningReviewed: false,
@@ -284,19 +359,19 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 speakingReviewed: false,
                 overallFeedbackWritten: false,
                 rubricComplete: false,
-                annotationsComplete: false
-              }
+                annotationsComplete: false,
+              },
             };
             setReviewDraft(initializedDraft);
           }
         }
       } catch (error) {
         if (seq !== submissionLoadSeq.current) return;
-        setDraftError(error instanceof Error ? error.message : 'Failed to load review draft.');
+        setDraftError(error instanceof Error ? error.message : "Failed to load review draft.");
       }
     } catch (error) {
       if (seq !== submissionLoadSeq.current) return;
-      logger.error('Failed to load submission:', error);
+      logger.error("Failed to load submission:", error);
     } finally {
       if (seq === submissionLoadSeq.current) {
         setLoading(false);
@@ -311,12 +386,15 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     setSectionsError(null);
 
     try {
-      const sectionsData = await gradingRepository.getSectionSubmissionsBySubmissionId(submissionId);
+      const sectionsData =
+        await gradingRepository.getSectionSubmissionsBySubmissionId(submissionId);
       if (seq !== submissionLoadSeq.current) return;
       setSectionSubmissions(sectionsData);
     } catch (error) {
       if (seq !== submissionLoadSeq.current) return;
-      setSectionsError(error instanceof Error ? error.message : 'Failed to reload section answers.');
+      setSectionsError(
+        error instanceof Error ? error.message : "Failed to reload section answers."
+      );
     } finally {
       if (seq === submissionLoadSeq.current) {
         setSectionsLoading(false);
@@ -333,8 +411,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     setReviewDraft(null);
     setExamState(null);
     setExamError(null);
-    setActiveSection('reading');
-    setActiveTask('task1');
+    setActiveSection("reading");
+    setActiveTask("task1");
     setSaving(false);
     setReleaseAction(null);
     setReleaseError(null);
@@ -355,7 +433,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const handleSaveDraft = async () => {
     if (!reviewDraft) return;
     setSaving(true);
-    const result = await gradingService.saveReviewDraft(reviewDraft, currentTeacherId, currentTeacherName);
+    const result = await gradingService.saveReviewDraft(
+      reviewDraft,
+      currentTeacherId,
+      currentTeacherName
+    );
     if (result.success && result.data) {
       setReviewDraft(result.data);
     }
@@ -365,7 +447,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const handleObjectiveOverride = async (
     section: ObjectiveReviewSection,
     questionId: string,
-    isCorrect: boolean,
+    isCorrect: boolean
   ) => {
     setPendingObjectiveOverrideQuestionIds((current) => {
       const next = new Set(current);
@@ -378,20 +460,20 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         submissionId,
         section,
         questionId,
-        { isCorrect, reason: 'Manual grader correctness decision' },
+        { isCorrect, reason: "Manual grader correctness decision" }
       );
       if (result.success && result.data) {
         setSectionSubmissions((current) =>
           current.map((sectionSubmission) =>
-            sectionSubmission.id === result.data?.id ? result.data : sectionSubmission,
-          ),
+            sectionSubmission.id === result.data?.id ? result.data : sectionSubmission
+          )
         );
       } else {
-        setObjectiveOverrideError(result.error ?? 'Failed to update answer correctness.');
+        setObjectiveOverrideError(result.error ?? "Failed to update answer correctness.");
       }
     } catch (error) {
       setObjectiveOverrideError(
-        error instanceof Error ? error.message : 'Failed to update answer correctness.',
+        error instanceof Error ? error.message : "Failed to update answer correctness."
       );
     } finally {
       setPendingObjectiveOverrideQuestionIds((current) => {
@@ -404,22 +486,22 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
   const handleMarkGradingComplete = async () => {
     if (!reviewDraft) return;
-    setReleaseAction('mark_grading_complete');
+    setReleaseAction("mark_grading_complete");
     setReleaseError(null);
     try {
       const result = await gradingService.markGradingComplete(
         submissionId,
         currentTeacherId,
-        currentTeacherName,
+        currentTeacherName
       );
       if (result.success && result.data) {
         setReviewDraft(result.data);
       } else {
-        throw new Error(result.error ?? 'Failed to mark grading complete');
+        throw new Error(result.error ?? "Failed to mark grading complete");
       }
     } catch (error) {
-      logger.error('Failed to mark grading complete:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to mark grading complete.');
+      logger.error("Failed to mark grading complete:", error);
+      setReleaseError(error instanceof Error ? error.message : "Failed to mark grading complete.");
     } finally {
       setReleaseAction(null);
     }
@@ -427,22 +509,22 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
   const handleMarkReadyToRelease = async () => {
     if (!reviewDraft) return;
-    setReleaseAction('mark_ready_to_release');
+    setReleaseAction("mark_ready_to_release");
     setReleaseError(null);
     try {
       const result = await gradingService.markReadyToRelease(
         submissionId,
         currentTeacherId,
-        currentTeacherName,
+        currentTeacherName
       );
       if (result.success && result.data) {
         setReviewDraft(result.data);
       } else {
-        throw new Error(result.error ?? 'Failed to mark ready to release');
+        throw new Error(result.error ?? "Failed to mark ready to release");
       }
     } catch (error) {
-      logger.error('Failed to mark ready to release:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to mark ready to release.');
+      logger.error("Failed to mark ready to release:", error);
+      setReleaseError(error instanceof Error ? error.message : "Failed to mark ready to release.");
     } finally {
       setReleaseAction(null);
     }
@@ -450,27 +532,27 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
   const handleReleaseNow = async () => {
     if (!reviewDraft) return;
-    setReleaseAction('release_now');
+    setReleaseAction("release_now");
     setReleaseError(null);
     try {
       let result = await gradingService.releaseResult(
         submissionId,
         currentTeacherId,
         currentTeacherName,
-        false,
+        false
       );
       if (!result.success) {
-        const releaseMessage = result.error ?? 'Failed to release result';
+        const releaseMessage = result.error ?? "Failed to release result";
         if (requiresExplicitReleaseOverride(releaseMessage)) {
           const confirmed = window.confirm(
-            'This submission requires explicit grader override before release. Continue?',
+            "This submission requires explicit grader override before release. Continue?"
           );
           if (confirmed) {
             result = await gradingService.releaseResult(
               submissionId,
               currentTeacherId,
               currentTeacherName,
-              true,
+              true
             );
           }
         }
@@ -478,11 +560,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       if (result.success) {
         await loadData();
       } else {
-        throw new Error(result.error ?? 'Failed to release result');
+        throw new Error(result.error ?? "Failed to release result");
       }
     } catch (error) {
-      logger.error('Failed to release result:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to release result.');
+      logger.error("Failed to release result:", error);
+      setReleaseError(error instanceof Error ? error.message : "Failed to release result.");
     } finally {
       setReleaseAction(null);
     }
@@ -490,23 +572,23 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
   const handleScheduleRelease = async (date: string) => {
     if (!reviewDraft) return;
-    setReleaseAction('schedule_release');
+    setReleaseAction("schedule_release");
     setReleaseError(null);
     try {
       const result = await gradingService.scheduleRelease(
         submissionId,
         date,
         currentTeacherId,
-        currentTeacherName,
+        currentTeacherName
       );
       if (result.success && result.data) {
         setReviewDraft(result.data);
       } else {
-        throw new Error(result.error ?? 'Failed to schedule release');
+        throw new Error(result.error ?? "Failed to schedule release");
       }
     } catch (error) {
-      logger.error('Failed to schedule release:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to schedule release.');
+      logger.error("Failed to schedule release:", error);
+      setReleaseError(error instanceof Error ? error.message : "Failed to schedule release.");
     } finally {
       setReleaseAction(null);
     }
@@ -514,47 +596,51 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
   const handleReopen = async () => {
     if (!reviewDraft) return;
-    setReleaseAction('reopen');
+    setReleaseAction("reopen");
     setReleaseError(null);
     try {
       const result = await gradingService.reopenReview(
         submissionId,
         currentTeacherId,
         currentTeacherName,
-        'Manual reopen',
+        "Manual reopen"
       );
       if (result.success && result.data) {
         setReviewDraft(result.data);
       } else {
-        throw new Error(result.error ?? 'Failed to reopen review');
+        throw new Error(result.error ?? "Failed to reopen review");
       }
     } catch (error) {
-      logger.error('Failed to reopen review:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to reopen review.');
+      logger.error("Failed to reopen review:", error);
+      setReleaseError(error instanceof Error ? error.message : "Failed to reopen review.");
     } finally {
       setReleaseAction(null);
     }
   };
 
-  const updateRubricAssessment = (section: 'listening' | 'reading' | 'writing' | 'speaking', assessment: Partial<RubricAssessment>, taskId?: string) => {
+  const updateRubricAssessment = (
+    section: "listening" | "reading" | "writing" | "speaking",
+    assessment: Partial<RubricAssessment>,
+    taskId?: string
+  ) => {
     if (!reviewDraft) return;
-    
+
     const updatedDraft = { ...reviewDraft };
-    if (section === 'writing' && taskId) {
+    if (section === "writing" && taskId) {
       if (!updatedDraft.sectionDrafts.writing) {
         updatedDraft.sectionDrafts.writing = {};
       }
-      updatedDraft.sectionDrafts.writing[taskId as 'task1' | 'task2'] = {
-        ...updatedDraft.sectionDrafts.writing[taskId as 'task1' | 'task2'],
-        ...assessment
+      updatedDraft.sectionDrafts.writing[taskId as "task1" | "task2"] = {
+        ...updatedDraft.sectionDrafts.writing[taskId as "task1" | "task2"],
+        ...assessment,
       } as RubricAssessment;
     } else {
       updatedDraft.sectionDrafts[section] = {
         ...updatedDraft.sectionDrafts[section],
-        ...assessment
+        ...assessment,
       } as RubricAssessment;
     }
-    
+
     updatedDraft.hasUnsavedChanges = true;
     setReviewDraft(updatedDraft);
   };
@@ -564,7 +650,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     const updatedDraft = {
       ...reviewDraft,
       checklist: { ...reviewDraft.checklist, ...updates },
-      hasUnsavedChanges: true
+      hasUnsavedChanges: true,
     };
     setReviewDraft(updatedDraft);
   };
@@ -574,7 +660,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     const updatedDraft = {
       ...reviewDraft,
       annotations: [...reviewDraft.annotations, annotation],
-      hasUnsavedChanges: true
+      hasUnsavedChanges: true,
     };
     setReviewDraft(updatedDraft);
   };
@@ -583,8 +669,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     if (!reviewDraft) return;
     const updatedDraft = {
       ...reviewDraft,
-      annotations: reviewDraft.annotations.filter(a => a.id !== annotationId),
-      hasUnsavedChanges: true
+      annotations: reviewDraft.annotations.filter((a) => a.id !== annotationId),
+      hasUnsavedChanges: true,
     };
     setReviewDraft(updatedDraft);
   };
@@ -594,17 +680,17 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     const updatedDraft = {
       ...reviewDraft,
       drawings: [...reviewDraft.drawings, drawing],
-      hasUnsavedChanges: true
+      hasUnsavedChanges: true,
     };
     setReviewDraft(updatedDraft);
   };
 
   const getSectionSubmission = (section: ReviewSection) => {
-    return sectionSubmissions.find(s => s.section === section);
+    return sectionSubmissions.find((s) => s.section === section);
   };
 
   const getWritingTaskSubmission = (taskId: string) => {
-    return writingSubmissions.find(w => w.taskId === taskId);
+    return writingSubmissions.find((w) => w.taskId === taskId);
   };
 
   const writingTasks = useMemo<WritingTaskContent[]>(() => {
@@ -615,83 +701,95 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
     return [
       {
-        taskId: 'task1',
-        prompt: examState?.writing?.task1Prompt ?? '',
+        taskId: "task1",
+        prompt: examState?.writing?.task1Prompt ?? "",
         chart: examState?.writing?.task1Chart,
       },
       {
-        taskId: 'task2',
-        prompt: examState?.writing?.task2Prompt ?? '',
+        taskId: "task2",
+        prompt: examState?.writing?.task2Prompt ?? "",
       },
     ];
   }, [examState]);
 
   useEffect(() => {
-    if (activeSection !== 'writing') return;
+    if (activeSection !== "writing") return;
     if (writingTasks.some((task) => task.taskId === activeTask)) return;
-    setActiveTask(writingTasks[0]?.taskId ?? 'task1');
+    setActiveTask(writingTasks[0]?.taskId ?? "task1");
   }, [activeSection, activeTask, writingTasks]);
 
-  const getWritingPrompt = useCallback((taskId: string) => {
-    const fromSubmission = getWritingTaskSubmission(taskId)?.prompt;
-    if (typeof fromSubmission === 'string' && fromSubmission.trim() !== '') {
-      return fromSubmission;
-    }
-    return writingTasks.find((task) => task.taskId === taskId)?.prompt ?? '';
-  }, [writingSubmissions, writingTasks]);
-
-  const getWritingResponseText = useCallback((taskId: string) => {
-    const fromWritingTasks = getWritingTaskSubmission(taskId)?.studentText;
-    if (typeof fromWritingTasks === 'string') {
-      return fromWritingTasks;
-    }
-
-    const writingSection = getSectionSubmission('writing');
-    const sectionAnswers = writingSection?.answers;
-    const tasks =
-      sectionAnswers?.type === 'writing' && Array.isArray(sectionAnswers.tasks)
-        ? sectionAnswers.tasks
-        : null;
-    if (Array.isArray(tasks)) {
-      const match = tasks.find((entry) => isWritingTaskEntry(entry) && entry.taskId === taskId);
-      const text = match?.text;
-      if (typeof text === 'string') {
-        return text;
+  const getWritingPrompt = useCallback(
+    (taskId: string) => {
+      const fromSubmission = getWritingTaskSubmission(taskId)?.prompt;
+      if (typeof fromSubmission === "string" && fromSubmission.trim() !== "") {
+        return fromSubmission;
       }
-    }
+      return writingTasks.find((task) => task.taskId === taskId)?.prompt ?? "";
+    },
+    [writingSubmissions, writingTasks]
+  );
 
-    return '';
-  }, [sectionSubmissions, writingSubmissions]);
+  const getWritingResponseText = useCallback(
+    (taskId: string) => {
+      const fromWritingTasks = getWritingTaskSubmission(taskId)?.studentText;
+      if (typeof fromWritingTasks === "string") {
+        return fromWritingTasks;
+      }
+
+      const writingSection = getSectionSubmission("writing");
+      const sectionAnswers = writingSection?.answers;
+      const tasks =
+        sectionAnswers?.type === "writing" && Array.isArray(sectionAnswers.tasks)
+          ? sectionAnswers.tasks
+          : null;
+      if (Array.isArray(tasks)) {
+        const match = tasks.find((entry) => isWritingTaskEntry(entry) && entry.taskId === taskId);
+        const text = match?.text;
+        if (typeof text === "string") {
+          return text;
+        }
+      }
+
+      return "";
+    },
+    [sectionSubmissions, writingSubmissions]
+  );
 
   const getReleaseStatusBadge = (status: ReleaseStatus) => {
     const styles = {
-      draft: 'bg-gray-100 text-gray-700',
-      grading_complete: 'bg-blue-100 text-blue-700',
-      ready_to_release: 'bg-amber-100 text-amber-700',
-      released: 'bg-emerald-100 text-emerald-700',
-      reopened: 'bg-purple-100 text-purple-700'
+      draft: "bg-gray-100 text-gray-700",
+      grading_complete: "bg-blue-100 text-blue-700",
+      ready_to_release: "bg-amber-100 text-amber-700",
+      released: "bg-emerald-100 text-emerald-700",
+      reopened: "bg-purple-100 text-purple-700",
     };
     const labels = {
-      draft: 'Draft',
-      grading_complete: 'Grading Complete',
-      ready_to_release: 'Ready to Release',
-      released: 'Released',
-      reopened: 'Reopened'
+      draft: "Draft",
+      grading_complete: "Grading Complete",
+      ready_to_release: "Ready to Release",
+      released: "Released",
+      reopened: "Reopened",
     };
     return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status]}`}>
+      <span
+        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status]}`}
+      >
         {labels[status]}
       </span>
     );
   };
 
   const currentSectionSubmission = getSectionSubmission(activeSection);
-  const currentWritingTaskId = activeSection === 'writing' ? activeTask : null;
-  const currentWritingPrompt = currentWritingTaskId ? htmlToPlainText(getWritingPrompt(currentWritingTaskId)) : '';
+  const currentWritingTaskId = activeSection === "writing" ? activeTask : null;
+  const currentWritingPrompt = currentWritingTaskId
+    ? htmlToPlainText(getWritingPrompt(currentWritingTaskId))
+    : "";
   const currentWritingText = currentWritingTaskId
     ? htmlToPlainTextPreserveLineBreaks(getWritingResponseText(currentWritingTaskId))
-    : '';
-  const currentWritingTaskSubmission = currentWritingTaskId ? getWritingTaskSubmission(currentWritingTaskId) : null;
+    : "";
+  const currentWritingTaskSubmission = currentWritingTaskId
+    ? getWritingTaskSubmission(currentWritingTaskId)
+    : null;
   const currentWritingAssessment = useMemo(() => {
     if (!currentWritingTaskId) {
       return undefined;
@@ -703,13 +801,14 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     return reviewDraft?.sectionDrafts.writing?.[writingSlot];
   }, [currentWritingTaskId, reviewDraft]);
   const currentWritingAnnotationCount = currentWritingTaskId
-    ? reviewDraft?.annotations.filter((annotation) => annotation.taskId === currentWritingTaskId).length ?? 0
+    ? (reviewDraft?.annotations.filter((annotation) => annotation.taskId === currentWritingTaskId)
+        .length ?? 0)
     : 0;
   const currentWritingVisibleAnnotationCount = currentWritingTaskId
-    ? reviewDraft?.annotations.filter(
+    ? (reviewDraft?.annotations.filter(
         (annotation) =>
-          annotation.taskId === currentWritingTaskId && annotation.visibility === 'student_visible',
-      ).length ?? 0
+          annotation.taskId === currentWritingTaskId && annotation.visibility === "student_visible"
+      ).length ?? 0)
     : 0;
   const printableWritingTasks = useMemo(() => {
     const promptTaskIdsBySlot = new Map<WritingPrintSlot, string>();
@@ -729,7 +828,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       }
     }
 
-    return (['task1', 'task2'] as const).map((slot) => {
+    return (["task1", "task2"] as const).map((slot) => {
       const taskIdForPrompt = promptTaskIdsBySlot.get(slot) ?? slot;
       const rawText = getWritingResponseText(taskIdForPrompt);
       const text = htmlToPlainTextPreserveLineBreaks(rawText);
@@ -737,14 +836,21 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
       return {
         taskId: slot,
-        label: slot === 'task1' ? 'Task 1' : 'Task 2',
-        submittedAt: taskSubmission?.submittedAt ?? submission?.submittedAt ?? '',
+        label: slot === "task1" ? "Task 1" : "Task 2",
+        submittedAt: taskSubmission?.submittedAt ?? submission?.submittedAt ?? "",
         promptHtml: sanitizeHtml(getWritingPrompt(taskIdForPrompt)),
         text,
-        wordCount: taskSubmission?.wordCount ?? (text ? text.trim().split(/\s+/).filter(Boolean).length : 0),
+        wordCount:
+          taskSubmission?.wordCount ?? (text ? text.trim().split(/\s+/).filter(Boolean).length : 0),
       };
     });
-  }, [getWritingPrompt, getWritingResponseText, submission?.submittedAt, writingSubmissions, writingTasks]);
+  }, [
+    getWritingPrompt,
+    getWritingResponseText,
+    submission?.submittedAt,
+    writingSubmissions,
+    writingTasks,
+  ]);
   const previewSectionBands = useMemo(() => {
     if (!reviewDraft) {
       return {
@@ -786,7 +892,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       reviewDraft.sectionDrafts.writing?.task1?.overallBand,
       reviewDraft.sectionDrafts.writing?.task2?.overallBand,
       reviewDraft.sectionDrafts.speaking?.overallBand,
-    ].filter((band): band is number => typeof band === 'number' && band > 0);
+    ].filter((band): band is number => typeof band === "number" && band > 0);
 
     if (bands.length === 0) {
       return 0;
@@ -795,20 +901,20 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     return Math.round((bands.reduce((sum, band) => sum + band, 0) / bands.length) * 2) / 2;
   }, [reviewDraft]);
 
-  const previewWritingResults = useMemo<StudentResult['writingResults']>(() => {
-    const results: StudentResult['writingResults'] = {};
+  const previewWritingResults = useMemo<StudentResult["writingResults"]>(() => {
+    const results: StudentResult["writingResults"] = {};
 
     if (!reviewDraft) {
       return results;
     }
 
     writingTasks.forEach((task) => {
-      const slot = task.taskId === 'task2' ? 'task2' : 'task1';
+      const slot = task.taskId === "task2" ? "task2" : "task1";
       const rubric = reviewDraft.sectionDrafts.writing?.[slot];
       const taskText = htmlToPlainTextPreserveLineBreaks(getWritingResponseText(task.taskId));
       results[slot] = {
         taskId: task.taskId,
-        taskLabel: task.taskId === 'task1' ? 'Task 1' : 'Task 2',
+        taskLabel: task.taskId === "task1" ? "Task 1" : "Task 2",
         prompt: getWritingPrompt(task.taskId),
         studentText: taskText,
         wordCount: taskText.trim() ? taskText.trim().split(/\s+/).filter(Boolean).length : 0,
@@ -819,10 +925,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           grammar: rubric?.grammarBand ?? 0,
         },
         annotations: reviewDraft.annotations.filter(
-          (annotation) => annotation.taskId === task.taskId && annotation.visibility === 'student_visible',
+          (annotation) =>
+            annotation.taskId === task.taskId && annotation.visibility === "student_visible"
         ),
         drawings: reviewDraft.drawings.filter(
-          (drawing) => drawing.taskId === task.taskId && drawing.visibility === 'student_visible',
+          (drawing) => drawing.taskId === task.taskId && drawing.visibility === "student_visible"
         ),
         criterionFeedback: {
           taskResponse: rubric?.taskResponseNotes,
@@ -837,18 +944,18 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   }, [getWritingPrompt, getWritingResponseText, reviewDraft, writingTasks]);
 
   const isActReview =
-    submission?.sectionStatuses.science !== undefined
-    || examState?.type === 'ACT'
-    || sectionSubmissions.some((section) => section.section === 'science');
+    submission?.sectionStatuses.science !== undefined ||
+    examState?.type === "ACT" ||
+    sectionSubmissions.some((section) => section.section === "science");
   const reviewSections: ReviewSection[] = isActReview
-    ? ['science']
-    : ['listening', 'reading', 'writing', 'speaking'];
+    ? ["science"]
+    : ["listening", "reading", "writing", "speaking"];
 
   useEffect(() => {
-    if (isActReview && activeSection !== 'science') {
-      setActiveSection('science');
-    } else if (!isActReview && activeSection === 'science') {
-      setActiveSection('reading');
+    if (isActReview && activeSection !== "science") {
+      setActiveSection("science");
+    } else if (!isActReview && activeSection === "science") {
+      setActiveSection("reading");
     }
   }, [activeSection, isActReview]);
 
@@ -1027,22 +1134,32 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         {printableWritingTasks.map((task, index) => (
           <section
             key={task.taskId}
-            className={`writing-print-task-page${index === 0 ? ' writing-print-task-page-first' : ''}`}
+            className={`writing-print-task-page${index === 0 ? " writing-print-task-page-first" : ""}`}
           >
             <header className="writing-print-page-header">
               <h1>{submission.studentName}</h1>
               <div className="writing-print-meta">
-                <div><strong>Student ID</strong></div>
+                <div>
+                  <strong>Student ID</strong>
+                </div>
                 <div>{submission.studentId || submission.submissionId}</div>
-                <div><strong>Task</strong></div>
+                <div>
+                  <strong>Task</strong>
+                </div>
                 <div>{task.label}</div>
-                <div><strong>Submitted</strong></div>
-                <div>{task.submittedAt ? new Date(task.submittedAt).toLocaleString() : 'Not submitted'}</div>
+                <div>
+                  <strong>Submitted</strong>
+                </div>
+                <div>
+                  {task.submittedAt ? new Date(task.submittedAt).toLocaleString() : "Not submitted"}
+                </div>
               </div>
             </header>
             <article className="writing-print-task">
               <h2>{task.label}</h2>
-              <div className="writing-print-task-summary"><strong>Word Count:</strong> {task.wordCount}</div>
+              <div className="writing-print-task-summary">
+                <strong>Word Count:</strong> {task.wordCount}
+              </div>
               <div className="writing-print-block">
                 <h3>Prompt</h3>
                 {task.promptHtml ? (
@@ -1073,15 +1190,19 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     </tr>
                   </thead>
                   <tbody>
-                    {['Task Response', 'Coherence & Cohesion', 'Lexical Resource', 'Grammar'].map((criterion) => (
-                      <tr key={`${task.taskId}-${criterion}`}>
-                        <td className="writing-print-criterion">{criterion}</td>
-                        <td className="writing-print-band writing-print-band-box" />
-                        <td className="writing-print-comment writing-print-comment-box" />
-                      </tr>
-                    ))}
+                    {["Task Response", "Coherence & Cohesion", "Lexical Resource", "Grammar"].map(
+                      (criterion) => (
+                        <tr key={`${task.taskId}-${criterion}`}>
+                          <td className="writing-print-criterion">{criterion}</td>
+                          <td className="writing-print-band writing-print-band-box" />
+                          <td className="writing-print-comment writing-print-comment-box" />
+                        </tr>
+                      )
+                    )}
                     <tr>
-                      <td className="writing-print-criterion"><strong>Overall Band</strong></td>
+                      <td className="writing-print-criterion">
+                        <strong>Overall Band</strong>
+                      </td>
                       <td className="writing-print-band writing-print-band-box" />
                       <td className="writing-print-comment writing-print-comment-box" />
                     </tr>
@@ -1100,7 +1221,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       <div className="bg-white border-b border-gray-200 px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-            <button onClick={onBack} aria-label="Back" className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <button
+              onClick={onBack}
+              aria-label="Back"
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            >
               <ArrowLeft size={20} className="text-gray-600" />
             </button>
             <button
@@ -1118,25 +1243,30 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               </div>
               <div>
                 <h1 className="text-lg font-bold text-gray-900">{submission.studentName}</h1>
-                <p className="text-sm text-gray-500">{submission.cohortName} • {submission.examId}</p>
+                <p className="text-sm text-gray-500">
+                  {submission.cohortName} • {submission.examId}
+                </p>
                 {(submission.nickname || submission.ieltsCourse) && (
                   <p className="text-xs text-gray-500">
-                    {[submission.nickname ? `Nickname: ${submission.nickname}` : null, submission.ieltsCourse ? `Course: ${submission.ieltsCourse}` : null]
+                    {[
+                      submission.nickname ? `Nickname: ${submission.nickname}` : null,
+                      submission.ieltsCourse ? `Course: ${submission.ieltsCourse}` : null,
+                    ]
                       .filter(Boolean)
-                      .join(' • ')}
+                      .join(" • ")}
                   </p>
                 )}
               </div>
             </div>
           </div>
-          
+
           <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             {reviewDraft && getReleaseStatusBadge(reviewDraft.releaseStatus)}
             <div className="hidden items-center gap-2 text-sm text-gray-600 sm:flex">
               <Clock size={16} />
               <span>Submitted {new Date(submission.submittedAt).toLocaleString()}</span>
             </div>
-            {activeSection === 'writing' && (
+            {activeSection === "writing" && (
               <button
                 onClick={() => window.print()}
                 className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
@@ -1151,7 +1281,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save size={16} />
-              {saving ? 'Saving...' : 'Save Draft'}
+              {saving ? "Saving..." : "Save Draft"}
             </button>
           </div>
         </div>
@@ -1170,11 +1300,13 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
         {/* Left Rail - Student Info, Navigation, Checklist */}
         <div
-          className={`${mobileRailOpen ? 'absolute inset-y-0 left-0 z-30 flex w-72 max-w-[85vw] shadow-xl' : 'hidden'} flex-col overflow-hidden border-r border-gray-200 bg-white lg:relative lg:z-auto lg:flex lg:w-72 lg:shadow-none`}
+          className={`${mobileRailOpen ? "absolute inset-y-0 left-0 z-30 flex w-72 max-w-[85vw] shadow-xl" : "hidden"} flex-col overflow-hidden border-r border-gray-200 bg-white lg:relative lg:z-auto lg:flex lg:w-72 lg:shadow-none`}
         >
           {/* Student Overview */}
           <div className="p-4 border-b border-gray-200">
-            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Student Overview</h2>
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
+              Student Overview
+            </h2>
             <div className="space-y-2 text-sm">
               {submission.studentEmail && (
                 <div className="flex items-center justify-between gap-3">
@@ -1202,7 +1334,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               )}
               <div className="flex items-center justify-between">
                 <span className="text-gray-600">Status</span>
-                {getReleaseStatusBadge(reviewDraft?.releaseStatus || 'draft')}
+                {getReleaseStatusBadge(reviewDraft?.releaseStatus || "draft")}
               </div>
               {submission.assignedTeacherName && (
                 <div className="flex items-center justify-between">
@@ -1221,7 +1353,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
           {/* Section Navigation */}
           <div className="p-4 border-b border-gray-200 overflow-y-auto flex-1">
-            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Sections</h2>
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
+              Sections
+            </h2>
             <div className="space-y-1">
               {reviewSections.map((section) => {
                 const sectionSub = getSectionSubmission(section);
@@ -1231,23 +1365,25 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     onClick={() => {
                       setActiveSection(section);
                       setMobileRailOpen(false);
-                      if (section === 'writing') setActiveTask('task1');
+                      if (section === "writing") setActiveTask("task1");
                     }}
                     className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      activeSection === section 
-                        ? 'bg-blue-50 text-blue-700' 
-                        : 'text-gray-700 hover:bg-gray-50'
+                      activeSection === section
+                        ? "bg-blue-50 text-blue-700"
+                        : "text-gray-700 hover:bg-gray-50"
                     }`}
                   >
-                    <span>{section === 'science' ? 'ACT Science' : section}</span>
+                    <span>{section === "science" ? "ACT Science" : section}</span>
                     {sectionSub && (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                        sectionSub.gradingStatus === 'finalized' 
-                          ? 'bg-emerald-100 text-emerald-700' 
-                          : sectionSub.gradingStatus === 'in_review'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-gray-100 text-gray-600'
-                      }`}>
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                          sectionSub.gradingStatus === "finalized"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : sectionSub.gradingStatus === "in_review"
+                              ? "bg-blue-100 text-blue-700"
+                              : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
                         {sectionSub.gradingStatus}
                       </span>
                     )}
@@ -1256,9 +1392,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               })}
             </div>
 
-            {activeSection === 'writing' && (
+            {activeSection === "writing" && (
               <>
-                <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 mt-6">Writing Tasks</h2>
+                <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 mt-6">
+                  Writing Tasks
+                </h2>
                 <div className="space-y-1">
                   {writingTasks.map((task, index) => (
                     <button
@@ -1266,23 +1404,25 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                       onClick={() => setActiveTask(task.taskId)}
                       className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                         activeTask === task.taskId
-                          ? 'bg-blue-50 text-blue-700' 
-                          : 'text-gray-700 hover:bg-gray-50'
+                          ? "bg-blue-50 text-blue-700"
+                          : "text-gray-700 hover:bg-gray-50"
                       }`}
                     >
                       <span className="capitalize">
-                        {task.taskId === 'task1'
-                          ? 'Task 1'
-                          : task.taskId === 'task2'
-                            ? 'Task 2'
+                        {task.taskId === "task1"
+                          ? "Task 1"
+                          : task.taskId === "task2"
+                            ? "Task 2"
                             : `Task ${index + 1}`}
                       </span>
                       {getWritingTaskSubmission(task.taskId) && (
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                          getWritingTaskSubmission(task.taskId)!.gradingStatus === 'finalized' 
-                            ? 'bg-emerald-100 text-emerald-700' 
-                            : 'bg-amber-100 text-amber-700'
-                        }`}>
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                            getWritingTaskSubmission(task.taskId)!.gradingStatus === "finalized"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
                           {getWritingTaskSubmission(task.taskId)!.gradingStatus}
                         </span>
                       )}
@@ -1295,7 +1435,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
           {/* Grading Checklist */}
           <div className="p-4 border-t border-gray-200 bg-gray-50">
-            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Grading Checklist</h2>
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
+              Grading Checklist
+            </h2>
             <div className="space-y-2">
               {Object.entries(reviewDraft?.checklist || {}).map(([key, value]) => (
                 <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -1306,7 +1448,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
                   <span className="text-gray-700 capitalize">
-                    {key.replace(/([A-Z])/g, ' $1').trim()}
+                    {key.replace(/([A-Z])/g, " $1").trim()}
                   </span>
                 </label>
               ))}
@@ -1342,9 +1484,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             {/* Section Header */}
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-2">
-                {activeSection === 'science' ? 'ACT Science' : activeSection}
+                {activeSection === "science" ? "ACT Science" : activeSection}
               </h2>
-              {activeSection !== 'writing' && sectionsLoading && (
+              {activeSection !== "writing" && sectionsLoading && (
                 <div role="status" aria-live="polite" className="mt-3 space-y-3">
                   <p className="sr-only text-sm text-gray-500">Loading section answers...</p>
                   <div className="h-24 animate-pulse rounded-lg bg-gray-100" />
@@ -1352,8 +1494,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                   <div className="h-24 animate-pulse rounded-lg bg-gray-100" />
                 </div>
               )}
-              {sectionsError && activeSection !== 'writing' && (
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
+              {sectionsError && activeSection !== "writing" && (
+                <div
+                  className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+                  role="alert"
+                >
                   <span>{sectionsError}</span>
                   <button
                     type="button"
@@ -1364,7 +1509,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                   </button>
                 </div>
               )}
-              {activeSection === 'writing' && writingLoading && (
+              {activeSection === "writing" && writingLoading && (
                 <div role="status" aria-live="polite" className="mt-3 space-y-3">
                   <p className="sr-only text-sm text-gray-500">Loading writing payload...</p>
                   <div className="h-24 animate-pulse rounded-lg bg-gray-100" />
@@ -1374,13 +1519,15 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               {currentSectionSubmission && (
                 <div className="flex items-center gap-2 text-sm text-gray-500">
                   <Clock size={14} />
-                  <span>Submitted {new Date(currentSectionSubmission.submittedAt).toLocaleString()}</span>
+                  <span>
+                    Submitted {new Date(currentSectionSubmission.submittedAt).toLocaleString()}
+                  </span>
                 </div>
               )}
             </div>
 
             {/* Writing Task with Annotation Canvas */}
-            {activeSection === 'writing' && currentWritingTaskId && (
+            {activeSection === "writing" && currentWritingTaskId && (
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                 {writingSubmissions.length === 0 && (
                   <div className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-900 flex items-start gap-2">
@@ -1388,7 +1535,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     <div>
                       <p className="font-medium">Writing response may be missing</p>
                       <p className="text-amber-800">
-                        No `writingTasks` rows were returned for this submission. The student may not have answered writing, or writing was not persisted.
+                        No `writingTasks` rows were returned for this submission. The student may
+                        not have answered writing, or writing was not persisted.
                       </p>
                     </div>
                   </div>
@@ -1397,29 +1545,49 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                   <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
                     <div className="grid gap-3 md:grid-cols-4">
                       <div className="rounded-xl border border-gray-200 bg-white p-3">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">Task</p>
-                        <p className="mt-2 text-sm font-medium text-gray-900">{currentWritingTaskSubmission.taskLabel}</p>
-                        <p className="text-xs text-gray-500">{currentWritingTaskSubmission.taskId}</p>
-                      </div>
-                      <div className="rounded-xl border border-gray-200 bg-white p-3">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">Word Count</p>
-                        <p className="mt-2 text-2xl font-bold text-gray-900">{currentWritingTaskSubmission.wordCount}</p>
-                      </div>
-                      <div className="rounded-xl border border-gray-200 bg-white p-3">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">Annotations</p>
-                        <p className="mt-2 text-2xl font-bold text-gray-900">{currentWritingAnnotationCount}</p>
-                        <p className="text-xs text-gray-500">{currentWritingVisibleAnnotationCount} student-visible</p>
-                      </div>
-                      <div className="rounded-xl border border-gray-200 bg-white p-3">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">Assessment</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">
+                          Task
+                        </p>
                         <p className="mt-2 text-sm font-medium text-gray-900">
-                          Band {currentWritingAssessment?.overallBand ?? '—'}
+                          {currentWritingTaskSubmission.taskLabel}
                         </p>
                         <p className="text-xs text-gray-500">
-                          TR {currentWritingAssessment?.taskResponseBand ?? '—'} · CC {currentWritingAssessment?.coherenceBand ?? '—'}
+                          {currentWritingTaskSubmission.taskId}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 bg-white p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">
+                          Word Count
+                        </p>
+                        <p className="mt-2 text-2xl font-bold text-gray-900">
+                          {currentWritingTaskSubmission.wordCount}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 bg-white p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">
+                          Annotations
+                        </p>
+                        <p className="mt-2 text-2xl font-bold text-gray-900">
+                          {currentWritingAnnotationCount}
                         </p>
                         <p className="text-xs text-gray-500">
-                          LR {currentWritingAssessment?.lexicalBand ?? '—'} · G {currentWritingAssessment?.grammarBand ?? '—'}
+                          {currentWritingVisibleAnnotationCount} student-visible
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-gray-200 bg-white p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">
+                          Assessment
+                        </p>
+                        <p className="mt-2 text-sm font-medium text-gray-900">
+                          Band {currentWritingAssessment?.overallBand ?? "—"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          TR {currentWritingAssessment?.taskResponseBand ?? "—"} · CC{" "}
+                          {currentWritingAssessment?.coherenceBand ?? "—"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          LR {currentWritingAssessment?.lexicalBand ?? "—"} · G{" "}
+                          {currentWritingAssessment?.grammarBand ?? "—"}
                         </p>
                       </div>
                     </div>
@@ -1432,7 +1600,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     <h3 className="font-bold text-gray-900">Prompt</h3>
                   </div>
                   <div className="prose prose-sm max-w-none text-gray-800 whitespace-pre-wrap">
-                    {currentWritingPrompt || <span className="text-gray-500">Prompt unavailable.</span>}
+                    {currentWritingPrompt || (
+                      <span className="text-gray-500">Prompt unavailable.</span>
+                    )}
                   </div>
                   {!currentWritingText && (
                     <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -1446,8 +1616,12 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                   <WritingAnnotationCanvas
                     taskId={currentWritingTaskId}
                     studentText={currentWritingText}
-                    annotations={(reviewDraft?.annotations || []).filter(a => a.taskId === currentWritingTaskId)}
-                    drawings={(reviewDraft?.drawings || []).filter(d => d.taskId === currentWritingTaskId)}
+                    annotations={(reviewDraft?.annotations || []).filter(
+                      (a) => a.taskId === currentWritingTaskId
+                    )}
+                    drawings={(reviewDraft?.drawings || []).filter(
+                      (d) => d.taskId === currentWritingTaskId
+                    )}
                     commentBank={commentBank}
                     currentTeacherId={currentTeacherId}
                     onAnnotationAdd={handleAnnotationAdd}
@@ -1461,23 +1635,26 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             )}
 
             {/* Reading/Listening Content */}
-            {(activeSection === 'reading' || activeSection === 'listening' || activeSection === 'science') && currentSectionSubmission && (
-              <QuestionTracebackPanel
-                section={activeSection}
-                examState={examState}
-                sectionSubmission={currentSectionSubmission}
-                examLoading={examLoading}
-                examError={examError}
-                onOverride={(questionId, isCorrect) =>
-                  void handleObjectiveOverride(activeSection, questionId, isCorrect)
-                }
-                pendingOverrideQuestionIds={pendingObjectiveOverrideQuestionIds}
-                overrideError={objectiveOverrideError}
-              />
-            )}
+            {(activeSection === "reading" ||
+              activeSection === "listening" ||
+              activeSection === "science") &&
+              currentSectionSubmission && (
+                <QuestionTracebackPanel
+                  section={activeSection}
+                  examState={examState}
+                  sectionSubmission={currentSectionSubmission}
+                  examLoading={examLoading}
+                  examError={examError}
+                  onOverride={(questionId, isCorrect) =>
+                    void handleObjectiveOverride(activeSection, questionId, isCorrect)
+                  }
+                  pendingOverrideQuestionIds={pendingObjectiveOverrideQuestionIds}
+                  overrideError={objectiveOverrideError}
+                />
+              )}
 
             {/* Speaking Content */}
-            {activeSection === 'speaking' && (
+            {activeSection === "speaking" && (
               <div className="bg-white rounded-xl border border-gray-200 p-6">
                 <div className="flex items-center gap-2 mb-4">
                   <MessageSquare size={18} className="text-blue-600" />
@@ -1485,7 +1662,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 </div>
                 <div className="text-sm text-gray-600">
                   <p>Speaking submissions will display audio recordings and transcripts here.</p>
-                  <p className="mt-2">This section is deferred until recording/transcript persistence is implemented.</p>
+                  <p className="mt-2">
+                    This section is deferred until recording/transcript persistence is implemented.
+                  </p>
                 </div>
               </div>
             )}
@@ -1496,15 +1675,15 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         <div className="hidden w-96 bg-white border-l border-gray-200 flex-col overflow-hidden lg:flex">
           {/* Rubric Assessment */}
           <div className="flex-1 overflow-y-auto p-4">
-            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Rubric Assessment</h2>
-            
-            {activeSection === 'writing' && currentWritingTaskId && (
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">
+              Rubric Assessment
+            </h2>
+
+            {activeSection === "writing" && currentWritingTaskId && (
               <div className="space-y-4">
                 {writingCriterionDefs.map((criterion) => (
                   <div key={criterion.key} className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700">
-                      {criterion.label}
-                    </label>
+                    <label className="text-sm font-medium text-gray-700">{criterion.label}</label>
                     <input
                       type="number"
                       min="0"
@@ -1512,19 +1691,31 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                       step="0.5"
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                       placeholder="0-9"
-                      value={currentWritingAssessment?.[criterion.key] ?? ''}
-                      onChange={(e) => updateRubricAssessment('writing', {
-                        [criterion.key]: parseFloat(e.target.value) || 0
-                      }, activeTask)}
+                      value={currentWritingAssessment?.[criterion.key] ?? ""}
+                      onChange={(e) =>
+                        updateRubricAssessment(
+                          "writing",
+                          {
+                            [criterion.key]: parseFloat(e.target.value) || 0,
+                          },
+                          activeTask
+                        )
+                      }
                     />
                     <textarea
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                       rows={2}
                       placeholder="Notes..."
-                      value={currentWritingAssessment?.[criterion.notesKey] ?? ''}
-                      onChange={(e) => updateRubricAssessment('writing', {
-                        [criterion.notesKey]: e.target.value
-                      }, activeTask)}
+                      value={currentWritingAssessment?.[criterion.notesKey] ?? ""}
+                      onChange={(e) =>
+                        updateRubricAssessment(
+                          "writing",
+                          {
+                            [criterion.notesKey]: e.target.value,
+                          },
+                          activeTask
+                        )
+                      }
                     />
                   </div>
                 ))}
@@ -1532,30 +1723,42 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             )}
 
             <div className="mt-6 pt-6 border-t border-gray-200">
-              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Student-Visible Feedback</h2>
+              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">
+                Student-Visible Feedback
+              </h2>
               <textarea
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                 rows={4}
                 placeholder="Summary feedback visible to student..."
-                value={reviewDraft?.overallFeedback || ''}
+                value={reviewDraft?.overallFeedback || ""}
                 onChange={(e) => {
                   if (reviewDraft) {
-                    setReviewDraft({ ...reviewDraft, overallFeedback: e.target.value, hasUnsavedChanges: true });
+                    setReviewDraft({
+                      ...reviewDraft,
+                      overallFeedback: e.target.value,
+                      hasUnsavedChanges: true,
+                    });
                   }
                 }}
               />
             </div>
 
             <div className="mt-6 pt-6 border-t border-gray-200">
-              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Internal Notes</h2>
+              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">
+                Internal Notes
+              </h2>
               <textarea
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                 rows={4}
                 placeholder="Private grader notes (not visible to student)..."
-                value={reviewDraft?.internalNotes || ''}
+                value={reviewDraft?.internalNotes || ""}
                 onChange={(e) => {
                   if (reviewDraft) {
-                    setReviewDraft({ ...reviewDraft, internalNotes: e.target.value, hasUnsavedChanges: true });
+                    setReviewDraft({
+                      ...reviewDraft,
+                      internalNotes: e.target.value,
+                      hasUnsavedChanges: true,
+                    });
                   }
                 }}
               />
@@ -1563,7 +1766,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
             {/* Teacher Summary for Result */}
             <div className="mt-6 pt-6 border-t border-gray-200">
-              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Teacher Summary</h2>
+              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">
+                Teacher Summary
+              </h2>
               <div className="space-y-3">
                 <div>
                   <label className="text-sm font-medium text-gray-700 block mb-1">Strengths</label>
@@ -1571,30 +1776,34 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                     rows={2}
                     placeholder="List strengths (one per line)"
-                    value={reviewDraft?.teacherSummary?.strengths?.join('\n') || ''}
+                    value={reviewDraft?.teacherSummary?.strengths?.join("\n") || ""}
                     onChange={(e) => {
                       if (reviewDraft) {
                         setReviewDraft({
                           ...reviewDraft,
                           teacherSummary: {
                             ...reviewDraft.teacherSummary,
-                            strengths: e.target.value.split('\n').filter(s => s.trim()),
-                            improvementPriorities: reviewDraft.teacherSummary?.improvementPriorities || [],
-                            recommendedPractice: reviewDraft.teacherSummary?.recommendedPractice || []
+                            strengths: e.target.value.split("\n").filter((s) => s.trim()),
+                            improvementPriorities:
+                              reviewDraft.teacherSummary?.improvementPriorities || [],
+                            recommendedPractice:
+                              reviewDraft.teacherSummary?.recommendedPractice || [],
                           },
-                          hasUnsavedChanges: true
+                          hasUnsavedChanges: true,
                         });
                       }
                     }}
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1">Top 3 Improvement Priorities</label>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">
+                    Top 3 Improvement Priorities
+                  </label>
                   <textarea
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                     rows={2}
                     placeholder="List priorities (one per line)"
-                    value={reviewDraft?.teacherSummary?.improvementPriorities?.join('\n') || ''}
+                    value={reviewDraft?.teacherSummary?.improvementPriorities?.join("\n") || ""}
                     onChange={(e) => {
                       if (reviewDraft) {
                         setReviewDraft({
@@ -1602,22 +1811,27 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                           teacherSummary: {
                             ...reviewDraft.teacherSummary,
                             strengths: reviewDraft.teacherSummary?.strengths || [],
-                            improvementPriorities: e.target.value.split('\n').filter(s => s.trim()),
-                            recommendedPractice: reviewDraft.teacherSummary?.recommendedPractice || []
+                            improvementPriorities: e.target.value
+                              .split("\n")
+                              .filter((s) => s.trim()),
+                            recommendedPractice:
+                              reviewDraft.teacherSummary?.recommendedPractice || [],
                           },
-                          hasUnsavedChanges: true
+                          hasUnsavedChanges: true,
                         });
                       }
                     }}
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1">Recommended Practice</label>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">
+                    Recommended Practice
+                  </label>
                   <textarea
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                     rows={2}
                     placeholder="List practice tasks (one per line)"
-                    value={reviewDraft?.teacherSummary?.recommendedPractice?.join('\n') || ''}
+                    value={reviewDraft?.teacherSummary?.recommendedPractice?.join("\n") || ""}
                     onChange={(e) => {
                       if (reviewDraft) {
                         setReviewDraft({
@@ -1625,10 +1839,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                           teacherSummary: {
                             ...reviewDraft.teacherSummary,
                             strengths: reviewDraft.teacherSummary?.strengths || [],
-                            improvementPriorities: reviewDraft.teacherSummary?.improvementPriorities || [],
-                            recommendedPractice: e.target.value.split('\n').filter(s => s.trim())
+                            improvementPriorities:
+                              reviewDraft.teacherSummary?.improvementPriorities || [],
+                            recommendedPractice: e.target.value.split("\n").filter((s) => s.trim()),
                           },
-                          hasUnsavedChanges: true
+                          hasUnsavedChanges: true,
                         });
                       }
                     }}
@@ -1640,37 +1855,43 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
           {/* Release Controls */}
           <div className="p-4 border-t border-gray-200 bg-gray-50 space-y-3">
-            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Release Workflow</h2>
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+              Release Workflow
+            </h2>
 
             {releaseError ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="status" aria-live="polite">
+              <div
+                className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                role="status"
+                aria-live="polite"
+              >
                 {releaseError}
               </div>
             ) : null}
-            
-            {reviewDraft?.releaseStatus === 'draft' && (
+
+            {reviewDraft?.releaseStatus === "draft" && (
               <button
                 onClick={handleMarkGradingComplete}
                 disabled={releaseAction !== null}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <CheckSquare size={16} />
-                {releaseAction === 'mark_grading_complete' ? 'Working…' : 'Mark Grading Complete'}
+                {releaseAction === "mark_grading_complete" ? "Working…" : "Mark Grading Complete"}
               </button>
             )}
-            
-            {reviewDraft?.releaseStatus === 'grading_complete' && (
+
+            {reviewDraft?.releaseStatus === "grading_complete" && (
               <button
                 onClick={handleMarkReadyToRelease}
                 disabled={releaseAction !== null}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <CheckSquare size={16} />
-                {releaseAction === 'mark_ready_to_release' ? 'Working…' : 'Mark Ready to Release'}
+                {releaseAction === "mark_ready_to_release" ? "Working…" : "Mark Ready to Release"}
               </button>
             )}
-            
-            {reviewDraft?.releaseStatus === 'ready_to_release' && (
+
+            {reviewDraft?.releaseStatus === "ready_to_release" && (
               <>
                 <button
                   onClick={() => setShowReportPreview(true)}
@@ -1686,29 +1907,29 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                   className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <CheckCircle size={16} />
-                  {releaseAction === 'release_now' ? 'Releasing…' : 'Release Now'}
+                  {releaseAction === "release_now" ? "Releasing…" : "Release Now"}
                 </button>
                 <button
                   onClick={() => {
-                    const date = prompt('Enter release date (YYYY-MM-DD):');
+                    const date = prompt("Enter release date (YYYY-MM-DD):");
                     if (date) handleScheduleRelease(date);
                   }}
                   disabled={releaseAction !== null}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Calendar size={16} />
-                  {releaseAction === 'schedule_release' ? 'Scheduling…' : 'Schedule Release'}
+                  {releaseAction === "schedule_release" ? "Scheduling…" : "Schedule Release"}
                 </button>
               </>
             )}
-            
-            {reviewDraft?.releaseStatus === 'released' && (
+
+            {reviewDraft?.releaseStatus === "released" && (
               <button
                 onClick={handleReopen}
                 disabled={releaseAction !== null}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {releaseAction === 'reopen' ? 'Working…' : 'Reopen Result'}
+                {releaseAction === "reopen" ? "Working…" : "Reopen Result"}
               </button>
             )}
           </div>
@@ -1719,7 +1940,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       {showReportPreview && reviewDraft && (
         <StudentReportPreview
           result={{
-            id: 'preview',
+            id: "preview",
             submissionId: reviewDraft.submissionId,
             studentId: reviewDraft.studentId,
             studentName: submission.studentName,
@@ -1730,11 +1951,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             teacherSummary: reviewDraft.teacherSummary || {
               strengths: [],
               improvementPriorities: [],
-              recommendedPractice: []
+              recommendedPractice: [],
             },
             version: 1,
             createdAt: reviewDraft.createdAt,
-            updatedAt: reviewDraft.updatedAt
+            updatedAt: reviewDraft.updatedAt,
           }}
           writingAnnotations={reviewDraft.annotations}
           writingDrawings={reviewDraft.drawings}

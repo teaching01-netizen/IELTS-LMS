@@ -3,12 +3,12 @@
  * Provides type-safe, cached, and optimized data fetching with automatic refetching
  */
 
-import { useQuery, useMutation, useQueryClient, UseMutationOptions } from '@tanstack/react-query';
-import { examAuthoringFacade } from '../../features/exam-authoring/application/examAuthoringFacade';
-import { liveQueryPolicy, queryKeys } from './queryClient';
-import { ExamState, ExamType } from '../../types';
-import { ExamSchedule, ExamSessionRuntime, ExamStatus } from '../../types/domain';
-import { TransitionResult } from '../../types/domain';
+import { useQuery, useMutation, useQueryClient, UseMutationOptions } from "@tanstack/react-query";
+import { examAuthoringFacade } from "../../features/exam-authoring/application/examAuthoringFacade";
+import { liveQueryPolicy, queryKeys } from "./queryClient";
+import { ExamState, ExamType } from "../../types";
+import { ExamSchedule, ExamSessionRuntime, ExamStatus } from "../../types/domain";
+import { TransitionResult } from "../../types/domain";
 
 /**
  * Hook to fetch all exams
@@ -85,7 +85,7 @@ export function useExamSchedules(examId: string) {
  */
 export function useScheduleRuntime(scheduleId: string) {
   return useQuery({
-    queryKey: ['schedule-runtime', scheduleId],
+    queryKey: ["schedule-runtime", scheduleId],
     queryFn: () => examAuthoringFacade.repository.getRuntimeByScheduleId(scheduleId),
     enabled: !!scheduleId,
     ...liveQueryPolicy,
@@ -96,11 +96,17 @@ export function useScheduleRuntime(scheduleId: string) {
 /**
  * Mutation to create a new exam
  */
-export function useCreateExam(options?: UseMutationOptions<TransitionResult, Error, { title: string; type: ExamType; initialState: ExamState; owner?: string }>) {
+export function useCreateExam(
+  options?: UseMutationOptions<
+    TransitionResult,
+    Error,
+    { title: string; type: ExamType; initialState: ExamState; owner?: string }
+  >
+) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: ({ title, type, initialState, owner }) => 
+    mutationFn: ({ title, type, initialState, owner }) =>
       examAuthoringFacade.lifecycle.createExam(title, type, initialState, owner),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.exams.lists() });
@@ -115,11 +121,17 @@ export function useCreateExam(options?: UseMutationOptions<TransitionResult, Err
 /**
  * Mutation to save exam draft
  */
-export function useSaveDraft(options?: UseMutationOptions<TransitionResult, Error, { examId: string; content: ExamState; actor?: string }>) {
+export function useSaveDraft(
+  options?: UseMutationOptions<
+    TransitionResult,
+    Error,
+    { examId: string; content: ExamState; actor?: string }
+  >
+) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: ({ examId, content, actor }) => 
+    mutationFn: ({ examId, content, actor }) =>
       examAuthoringFacade.lifecycle.saveDraft(examId, content, actor),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.exams.lists() });
@@ -133,11 +145,17 @@ export function useSaveDraft(options?: UseMutationOptions<TransitionResult, Erro
 /**
  * Mutation to publish an exam
  */
-export function usePublishExam(options?: UseMutationOptions<TransitionResult, Error, { examId: string; actor?: string; publishNotes?: string }>) {
+export function usePublishExam(
+  options?: UseMutationOptions<
+    TransitionResult,
+    Error,
+    { examId: string; actor?: string; publishNotes?: string }
+  >
+) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: ({ examId, actor, publishNotes }) => 
+    mutationFn: ({ examId, actor, publishNotes }) =>
       examAuthoringFacade.lifecycle.publishExam(examId, actor, publishNotes),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.exams.lists() });
@@ -151,12 +169,13 @@ export function usePublishExam(options?: UseMutationOptions<TransitionResult, Er
 /**
  * Mutation to delete an exam
  */
-export function useDeleteExam(options?: UseMutationOptions<TransitionResult, Error, { examId: string; actor?: string }>) {
+export function useDeleteExam(
+  options?: UseMutationOptions<TransitionResult, Error, { examId: string; actor?: string }>
+) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: ({ examId, actor }) => 
-      examAuthoringFacade.lifecycle.deleteExam(examId, actor),
+    mutationFn: ({ examId, actor }) => examAuthoringFacade.lifecycle.deleteExam(examId, actor),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.exams.lists() });
       queryClient.removeQueries({ queryKey: queryKeys.exams.details(variables.examId) });
@@ -168,11 +187,17 @@ export function useDeleteExam(options?: UseMutationOptions<TransitionResult, Err
 /**
  * Mutation to transition exam status
  */
-export function useTransitionStatus(options?: UseMutationOptions<TransitionResult, Error, { examId: string; toStatus: ExamStatus; actor?: string; notes?: string }>) {
+export function useTransitionStatus(
+  options?: UseMutationOptions<
+    TransitionResult,
+    Error,
+    { examId: string; toStatus: ExamStatus; actor?: string; notes?: string }
+  >
+) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: ({ examId, toStatus, actor, notes }) => 
+    mutationFn: ({ examId, toStatus, actor, notes }) =>
       examAuthoringFacade.lifecycle.transitionStatus(examId, toStatus, actor, notes),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.exams.lists() });
@@ -187,7 +212,7 @@ export function useTransitionStatus(options?: UseMutationOptions<TransitionResul
  */
 export function useSaveSchedule(options?: UseMutationOptions<void, Error, ExamSchedule>) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (schedule) => examAuthoringFacade.repository.saveSchedule(schedule),
     onSuccess: () => {
@@ -202,7 +227,7 @@ export function useSaveSchedule(options?: UseMutationOptions<void, Error, ExamSc
  */
 export function useDeleteSchedule(options?: UseMutationOptions<void, Error, string>) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (scheduleId) => examAuthoringFacade.repository.deleteSchedule(scheduleId),
     onSuccess: () => {
@@ -217,11 +242,11 @@ export function useDeleteSchedule(options?: UseMutationOptions<void, Error, stri
  */
 export function useSaveRuntime(options?: UseMutationOptions<void, Error, ExamSessionRuntime>) {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (runtime) => examAuthoringFacade.repository.saveRuntime(runtime),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['schedule-runtime', variables.scheduleId] });
+      queryClient.invalidateQueries({ queryKey: ["schedule-runtime", variables.scheduleId] });
     },
     ...options,
   });

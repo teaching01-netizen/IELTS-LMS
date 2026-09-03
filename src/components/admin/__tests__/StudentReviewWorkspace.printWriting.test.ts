@@ -19,8 +19,10 @@ describe('StudentReviewWorkspace print writing layout', () => {
     expect(source).toContain('white-space: pre-wrap');
     expect(source).toContain('overflow-wrap: anywhere');
     expect(source).toContain('word-break: break-word');
-    expect(source).toContain('<div><strong>Task</strong></div>');
-    expect(source).toContain('<div className="writing-print-response">{task.text}</div>');
+    expect(source).toMatch(/<div>\s*<strong>Task<\/strong>\s*<\/div>/);
+    expect(source).toMatch(
+      /<div className="writing-print-response">\s*\{task\.text\}\s*<\/div>/,
+    );
     expect(source).toContain('.writing-print-assessment-table');
     expect(source).not.toContain('responseHtml');
     expect(source).not.toContain('font-family: Arial, "Times New Roman", serif');

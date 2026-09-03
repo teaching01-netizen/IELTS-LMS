@@ -1,8 +1,8 @@
-import React from 'react';
-import { Info, Layers, SlidersHorizontal, Clock, Shield } from 'lucide-react';
-import type { ExamType } from '../../../types';
+import React from "react";
+import { Info, Layers, SlidersHorizontal, Clock, Shield } from "lucide-react";
+import type { ExamType } from "../../../types";
 
-export type ConfigTab = 'basic' | 'modules' | 'standards' | 'timing' | 'security';
+export type ConfigTab = "basic" | "modules" | "standards" | "timing" | "security";
 
 interface ExamConfigTabsProps {
   activeTab: ConfigTab;
@@ -12,12 +12,12 @@ interface ExamConfigTabsProps {
 
 export function ExamConfigTabs({ activeTab, onTabChange, examType }: ExamConfigTabsProps) {
   const tabs = [
-    { id: 'basic' as ConfigTab, label: 'Basic Info', icon: Info },
-    { id: 'modules' as ConfigTab, label: 'Modules', icon: Layers },
-    { id: 'standards' as ConfigTab, label: 'Standards', icon: SlidersHorizontal },
-    { id: 'timing' as ConfigTab, label: 'Timing', icon: Clock },
-    { id: 'security' as ConfigTab, label: 'Security', icon: Shield },
-  ].filter((tab) => examType !== 'ACT' || tab.id !== 'standards');
+    { id: "basic" as ConfigTab, label: "Basic Info", icon: Info },
+    { id: "modules" as ConfigTab, label: "Modules", icon: Layers },
+    { id: "standards" as ConfigTab, label: "Standards", icon: SlidersHorizontal },
+    { id: "timing" as ConfigTab, label: "Timing", icon: Clock },
+    { id: "security" as ConfigTab, label: "Security", icon: Shield },
+  ].filter((tab) => examType !== "ACT" || tab.id !== "standards");
 
   return (
     <div className="flex border-b border-slate-100 bg-white/50 backdrop-blur-sm">
@@ -29,9 +29,9 @@ export function ExamConfigTabs({ activeTab, onTabChange, examType }: ExamConfigT
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
             className={`flex-1 flex flex-col items-center py-3 gap-1.5 border-b-2 transition-all duration-200 ${
-              isActive 
-                ? 'border-blue-600 text-blue-700 bg-blue-50/50 font-semibold' 
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+              isActive
+                ? "border-blue-600 text-blue-700 bg-blue-50/50 font-semibold"
+                : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
             }`}
           >
             <Icon size={18} />

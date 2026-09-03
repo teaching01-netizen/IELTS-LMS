@@ -2,17 +2,24 @@ import {
   backendPost,
   buildCreateSchedulePayload,
   mapBackendSchedule,
-} from '../../exam-authoring/api/examAuthoringBackendGateway';
-import { examDeliveryService, examRepository, getEnabledModules } from '../../exam-authoring/api/examAuthoringGateway';
-import { ensureClientSessionIdForAttempt, studentAttemptRepository } from '../../student/api/studentAttemptGateway';
-import { studentSessionTransport } from '../../student/api/studentSessionGateway';
-import type { ExamState, ModuleType } from '../../../types';
-import type { ExamEntity, ExamSchedule } from '../../../types/domain';
+} from "../../exam-authoring/api/examAuthoringBackendGateway";
+import {
+  examDeliveryService,
+  examRepository,
+  getEnabledModules,
+} from "../../exam-authoring/api/examAuthoringGateway";
+import {
+  ensureClientSessionIdForAttempt,
+  studentAttemptRepository,
+} from "../../student/api/studentAttemptGateway";
+import { studentSessionTransport } from "../../student/api/studentSessionGateway";
+import type { ExamState, ModuleType } from "../../../types";
+import type { ExamEntity, ExamSchedule } from "../../../types/domain";
 
-const PREVIEW_COHORT_PREFIX = '__preview_runtime__';
-const PREVIEW_ACTOR = 'preview-runtime';
-const PREVIEW_CANDIDATE_NAME = 'Preview Candidate';
-const PREVIEW_CANDIDATE_EMAIL = 'preview@example.local';
+const PREVIEW_COHORT_PREFIX = "__preview_runtime__";
+const PREVIEW_ACTOR = "preview-runtime";
+const PREVIEW_CANDIDATE_NAME = "Preview Candidate";
+const PREVIEW_CANDIDATE_EMAIL = "preview@example.local";
 const PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface PreviewRuntimeSession {
@@ -33,21 +40,29 @@ export function isPreviewRuntimeCohortName(cohortName: string): boolean {
   return cohortName.startsWith(`${PREVIEW_COHORT_PREFIX}:`);
 }
 
-function buildPreviewRuntimeCohortName(examId: string, authorUserId: string, module: ModuleType): string {
+function buildPreviewRuntimeCohortName(
+  examId: string,
+  authorUserId: string,
+  module: ModuleType
+): string {
   const authorToken = sanitizeToken(authorUserId);
   return `${PREVIEW_COHORT_PREFIX}:${examId}:${authorToken}:${module}`;
 }
 
 function sanitizeToken(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
-function parsePreviewRuntimeSection(
-  schedule: Pick<ExamSchedule, 'cohortName'>,
-): ModuleType | null {
-  const parts = schedule.cohortName.split(':');
+function parsePreviewRuntimeSection(schedule: Pick<ExamSchedule, "cohortName">): ModuleType | null {
+  const parts = schedule.cohortName.split(":");
   const raw = parts[parts.length - 1]?.trim().toLowerCase();
-  if (raw === 'listening' || raw === 'reading' || raw === 'writing' || raw === 'speaking' || raw === 'science') {
+  if (
+    raw === "listening" ||
+    raw === "reading" ||
+    raw === "writing" ||
+    raw === "speaking" ||
+    raw === "science"
+  ) {
     return raw;
   }
   return null;
@@ -68,7 +83,7 @@ function hashToSixDigits(value: string): string {
     hash = Math.imul(hash, 16777619);
   }
   const normalized = Math.abs(hash >>> 0) % 1_000_000;
-  return normalized.toString().padStart(6, '0');
+  return normalized.toString().padStart(6, "0");
 }
 
 function buildPreviewCandidateId(examId: string, authorUserId: string, module: ModuleType): string {
@@ -83,46 +98,46 @@ function createPrecheckPayload() {
   const completedAt = new Date().toISOString();
   return {
     completedAt,
-    browserFamily: 'chrome' as const,
+    browserFamily: "chrome" as const,
     browserVersion: 120,
     screenDetailsSupported: true,
     heartbeatReady: true,
     acknowledgedSafariLimitation: false,
     checks: [
       {
-        id: 'browser' as const,
-        label: 'Browser compatibility',
-        message: 'Preview runtime precheck bypass.',
+        id: "browser" as const,
+        label: "Browser compatibility",
+        message: "Preview runtime precheck bypass.",
         required: true,
-        status: 'pass' as const,
+        status: "pass" as const,
       },
       {
-        id: 'javascript' as const,
-        label: 'JavaScript runtime',
-        message: 'Preview runtime precheck bypass.',
+        id: "javascript" as const,
+        label: "JavaScript runtime",
+        message: "Preview runtime precheck bypass.",
         required: true,
-        status: 'pass' as const,
+        status: "pass" as const,
       },
       {
-        id: 'storage' as const,
-        label: 'Secure local storage',
-        message: 'Preview runtime precheck bypass.',
+        id: "storage" as const,
+        label: "Secure local storage",
+        message: "Preview runtime precheck bypass.",
         required: true,
-        status: 'pass' as const,
+        status: "pass" as const,
       },
       {
-        id: 'online' as const,
-        label: 'Network connectivity',
-        message: 'Preview runtime precheck bypass.',
+        id: "online" as const,
+        label: "Network connectivity",
+        message: "Preview runtime precheck bypass.",
         required: true,
-        status: 'pass' as const,
+        status: "pass" as const,
       },
       {
-        id: 'screen-details' as const,
-        label: 'Secondary screen detection',
-        message: 'Preview runtime precheck bypass.',
+        id: "screen-details" as const,
+        label: "Secondary screen detection",
+        message: "Preview runtime precheck bypass.",
         required: false,
-        status: 'pass' as const,
+        status: "pass" as const,
       },
     ],
   };
@@ -133,7 +148,7 @@ async function createPreviewSchedule(
   versionId: string,
   module: ModuleType,
   authorUserId: string,
-  now: Date,
+  now: Date
 ): Promise<ExamSchedule> {
   const startTime = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
   const endTime = new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString();
@@ -144,21 +159,21 @@ async function createPreviewSchedule(
     cohortName: buildPreviewRuntimeCohortName(exam.id, authorUserId, module),
     proctorDisplayName: `${exam.title} (Preview)`,
     gradingDisplayName: `${exam.title} (Preview)`,
-    institution: 'preview-runtime',
+    institution: "preview-runtime",
     startTime,
     endTime,
     autoStart: true,
     autoStop: false,
   });
 
-  const created = await backendPost<any>('/v1/schedules', payload);
+  const created = await backendPost<any>("/v1/schedules", payload);
   return mapBackendSchedule(created);
 }
 
 async function ensureRuntimeAtSection(scheduleId: string, targetModule: ModuleType): Promise<void> {
   const started = await examDeliveryService.startRuntime(scheduleId, PREVIEW_ACTOR);
   if (!started.success) {
-    throw new Error(started.error ?? 'Failed to start preview runtime.');
+    throw new Error(started.error ?? "Failed to start preview runtime.");
   }
 
   const maxTransitions = 6;
@@ -166,37 +181,37 @@ async function ensureRuntimeAtSection(scheduleId: string, targetModule: ModuleTy
   while (transitions < maxTransitions) {
     const runtime = await examDeliveryService.getRuntimeSnapshot(scheduleId);
     if (!runtime) {
-      throw new Error('Preview runtime snapshot unavailable.');
+      throw new Error("Preview runtime snapshot unavailable.");
     }
 
-    if (runtime.currentSectionKey === targetModule && runtime.status === 'live') {
+    if (runtime.currentSectionKey === targetModule && runtime.status === "live") {
       return;
     }
 
-    if (runtime.status === 'completed' || runtime.status === 'cancelled') {
-      throw new Error('Preview runtime completed before reaching the selected section.');
+    if (runtime.status === "completed" || runtime.status === "cancelled") {
+      throw new Error("Preview runtime completed before reaching the selected section.");
     }
 
     const endSectionResult = await examDeliveryService.endCurrentSectionNow(
       scheduleId,
       PREVIEW_ACTOR,
-      runtime.currentSectionKey,
+      runtime.currentSectionKey
     );
     if (!endSectionResult.success) {
-      throw new Error(endSectionResult.error ?? 'Failed to switch preview section.');
+      throw new Error(endSectionResult.error ?? "Failed to switch preview section.");
     }
 
     transitions += 1;
   }
 
-  throw new Error('Unable to position preview runtime on the selected section.');
+  throw new Error("Unable to position preview runtime on the selected section.");
 }
 
 async function ensurePreviewAttemptWithPrecheck(
   schedule: ExamSchedule,
   exam: ExamEntity,
   module: ModuleType,
-  authorUserId: string,
+  authorUserId: string
 ): Promise<{ studentId: string }> {
   const studentId = buildPreviewCandidateId(exam.id, authorUserId, module);
   const studentKey = buildStudentKey(schedule.id, studentId);
@@ -210,7 +225,7 @@ async function ensurePreviewAttemptWithPrecheck(
     candidateName: PREVIEW_CANDIDATE_NAME,
     candidateEmail: PREVIEW_CANDIDATE_EMAIL,
     currentModule: module,
-    phase: 'exam',
+    phase: "exam",
   });
 
   await backendPost<any>(
@@ -224,30 +239,30 @@ async function ensurePreviewAttemptWithPrecheck(
       preCheck: createPrecheckPayload(),
       deviceFingerprintHash: attempt.integrity.deviceFingerprintHash ?? undefined,
     },
-    { retries: 0 },
+    { retries: 0 }
   );
 
   return { studentId };
 }
 
 export async function resolvePreviewRuntimeSession(
-  options: ResolvePreviewRuntimeSessionOptions,
+  options: ResolvePreviewRuntimeSessionOptions
 ): Promise<PreviewRuntimeSession> {
   const now = options.now ?? new Date();
   const enabledModules = getEnabledModules(options.state.config);
   if (enabledModules.length === 0) {
-    throw new Error('Preview unavailable: no enabled exam sections.');
+    throw new Error("Preview unavailable: no enabled exam sections.");
   }
 
   const draftVersionId =
     options.exam.currentDraftVersionId ?? options.exam.currentPublishedVersionId;
   if (!draftVersionId) {
-    throw new Error('Preview unavailable: exam has no draft version.');
+    throw new Error("Preview unavailable: exam has no draft version.");
   }
 
   const schedules = await examRepository.getSchedulesByExam(options.exam.id);
   const previewSchedules = schedules.filter((schedule) =>
-    isPreviewRuntimeCohortName(schedule.cohortName),
+    isPreviewRuntimeCohortName(schedule.cohortName)
   );
 
   const sectionSchedules = new Map<ModuleType, ExamSchedule>();
@@ -260,7 +275,7 @@ export async function resolvePreviewRuntimeSession(
     const expectedCohortName = buildPreviewRuntimeCohortName(
       options.exam.id,
       options.authorUserId,
-      section,
+      section
     );
     if (schedule.cohortName !== expectedCohortName) {
       continue;
@@ -285,12 +300,10 @@ export async function resolvePreviewRuntimeSession(
     resolvedModule = options.requestedModule;
   } else {
     const mostRecentSection = [...sectionSchedules.entries()]
-      .sort((left, right) =>
-        Date.parse(right[1].updatedAt) - Date.parse(left[1].updatedAt),
-      )
+      .sort((left, right) => Date.parse(right[1].updatedAt) - Date.parse(left[1].updatedAt))
       .find(([section]) => enabledModules.includes(section))?.[0];
 
-    resolvedModule = mostRecentSection ?? enabledModules[0] ?? 'reading';
+    resolvedModule = mostRecentSection ?? enabledModules[0] ?? "reading";
   }
 
   let schedule = sectionSchedules.get(resolvedModule);
@@ -300,7 +313,7 @@ export async function resolvePreviewRuntimeSession(
       draftVersionId,
       resolvedModule,
       options.authorUserId,
-      now,
+      now
     );
   }
 
@@ -309,7 +322,7 @@ export async function resolvePreviewRuntimeSession(
     schedule,
     options.exam,
     resolvedModule,
-    options.authorUserId,
+    options.authorUserId
   );
 
   return {

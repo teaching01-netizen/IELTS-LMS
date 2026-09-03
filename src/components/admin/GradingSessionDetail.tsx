@@ -1,12 +1,34 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight, FileCheck2 } from 'lucide-react';
-import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus, WritingTaskSubmission } from '../../types/grading';
-import { gradingService, gradingRepository } from '../../features/grading/infrastructure/gradingGateway';
-import { examRepository, seedDevelopmentFixtures } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
-import { TableLoadingSkeleton } from '@components/ui';
-import { GradingExportButtons } from './GradingExportButtons';
-import { ObjectiveOverridesPanel } from './ObjectiveOverridesPanel';
-import { ExamObjectiveOverviewPanel } from './ExamObjectiveOverviewPanel';
+import React, { useState, useEffect, useRef } from "react";
+import {
+  Search,
+  ArrowLeft,
+  Clock,
+  AlertCircle,
+  CheckCircle,
+  User,
+  ChevronRight,
+  FileCheck2,
+} from "lucide-react";
+import type {
+  GradingSession,
+  StudentSubmission,
+  SessionDetailFilters,
+  OverallGradingStatus,
+  SectionGradingStatus,
+  WritingTaskSubmission,
+} from "../../types/grading";
+import {
+  gradingService,
+  gradingRepository,
+} from "../../features/grading/infrastructure/gradingGateway";
+import {
+  examRepository,
+  seedDevelopmentFixtures,
+} from "../../features/exam-authoring/infrastructure/examAuthoringGateway";
+import { TableLoadingSkeleton } from "@components/ui";
+import { GradingExportButtons } from "./GradingExportButtons";
+import { ObjectiveOverridesPanel } from "./ObjectiveOverridesPanel";
+import { ExamObjectiveOverviewPanel } from "./ExamObjectiveOverviewPanel";
 import {
   buildCsvContent,
   buildCsvFilename,
@@ -14,18 +36,18 @@ import {
   downloadCsvFile,
   resolveObjectiveGradingVersionId,
   type GradingExportSection,
-} from './gradingReviewUtils';
-import { PerStudentZipPdfExportDialog } from './PerStudentZipPdfExportDialog';
-import type { ExamState } from '../../types';
-import { sanitizeHtml } from '../../utils/sanitizeHtml';
-import { htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
+} from "./gradingReviewUtils";
+import { PerStudentZipPdfExportDialog } from "./PerStudentZipPdfExportDialog";
+import type { ExamState } from "../../types";
+import { sanitizeHtml } from "../../utils/sanitizeHtml";
+import { htmlToPlainTextPreserveLineBreaks } from "../../utils/htmlText";
 
 interface SessionWritingPrintDocument {
   pages: SessionWritingPrintPage[];
   requestId: number;
 }
 
-type WritingTaskSlot = 'task1' | 'task2';
+type WritingTaskSlot = "task1" | "task2";
 
 interface SessionWritingPrintPage {
   id: string;
@@ -38,12 +60,12 @@ interface SessionWritingPrintPage {
 
 const waitForPrintPaint = () =>
   new Promise<void>((resolve) => {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       resolve();
       return;
     }
 
-    if (typeof window.requestAnimationFrame !== 'function') {
+    if (typeof window.requestAnimationFrame !== "function") {
       window.setTimeout(resolve, 0);
       return;
     }
@@ -54,7 +76,7 @@ const waitForPrintPaint = () =>
   });
 
 const waitForFontsReady = async () => {
-  if (typeof document === 'undefined' || !document.fonts?.ready) {
+  if (typeof document === "undefined" || !document.fonts?.ready) {
     return;
   }
 
@@ -67,35 +89,37 @@ const waitForFontsReady = async () => {
 
 const formatPrintDate = (value?: string) => {
   if (!value) {
-    return 'Not submitted';
+    return "Not submitted";
   }
 
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
+  return new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeStyle: "short",
   }).format(new Date(value));
 };
 
-const getWritingTaskSlot = (task: Pick<WritingTaskSubmission, 'taskId' | 'taskLabel'>): WritingTaskSlot | null => {
+const getWritingTaskSlot = (
+  task: Pick<WritingTaskSubmission, "taskId" | "taskLabel">
+): WritingTaskSlot | null => {
   const normalizedId = task.taskId.trim().toLowerCase();
   const normalizedLabel = task.taskLabel.trim().toLowerCase();
 
-  if (normalizedId === 'task1' || normalizedId === 'task-1' || normalizedLabel === 'task 1') {
-    return 'task1';
+  if (normalizedId === "task1" || normalizedId === "task-1" || normalizedLabel === "task 1") {
+    return "task1";
   }
 
-  if (normalizedId === 'task2' || normalizedId === 'task-2' || normalizedLabel === 'task 2') {
-    return 'task2';
+  if (normalizedId === "task2" || normalizedId === "task-2" || normalizedLabel === "task 2") {
+    return "task2";
   }
 
   return null;
 };
 
-const getTaskLabelForSlot = (slot: WritingTaskSlot) => (slot === 'task1' ? 'Task 1' : 'Task 2');
+const getTaskLabelForSlot = (slot: WritingTaskSlot) => (slot === "task1" ? "Task 1" : "Task 2");
 
 const buildWritingPrintPages = (
   submission: StudentSubmission,
-  writing: WritingTaskSubmission[],
+  writing: WritingTaskSubmission[]
 ): SessionWritingPrintPage[] => {
   const taskBySlot = new Map<WritingTaskSlot, WritingTaskSubmission>();
 
@@ -106,7 +130,7 @@ const buildWritingPrintPages = (
     }
   }
 
-  return (['task1', 'task2'] as const).map((slot) => {
+  return (["task1", "task2"] as const).map((slot) => {
     const task = taskBySlot.get(slot) ?? null;
     return {
       id: `${submission.id}-${slot}`,
@@ -121,29 +145,30 @@ const buildWritingPrintPages = (
 
 const getAssessmentRows = (task: WritingTaskSubmission | null) => [
   {
-    criterion: 'Task Response / Achievement',
+    criterion: "Task Response / Achievement",
     band: task?.rubricAssessment?.taskResponseBand,
     notes: task?.rubricAssessment?.taskResponseNotes,
   },
   {
-    criterion: 'Coherence and Cohesion',
+    criterion: "Coherence and Cohesion",
     band: task?.rubricAssessment?.coherenceBand,
     notes: task?.rubricAssessment?.coherenceNotes,
   },
   {
-    criterion: 'Lexical Resource',
+    criterion: "Lexical Resource",
     band: task?.rubricAssessment?.lexicalBand,
     notes: task?.rubricAssessment?.lexicalNotes,
   },
   {
-    criterion: 'Grammatical Range and Accuracy',
+    criterion: "Grammatical Range and Accuracy",
     band: task?.rubricAssessment?.grammarBand,
     notes: task?.rubricAssessment?.grammarNotes,
   },
   {
-    criterion: 'Overall Band',
+    criterion: "Overall Band",
     band: task?.rubricAssessment?.overallBand,
-    notes: task?.overallFeedback || task?.studentVisibleNotes || task?.rubricAssessment?.internalNotes,
+    notes:
+      task?.overallFeedback || task?.studentVisibleNotes || task?.rubricAssessment?.internalNotes,
   },
 ];
 
@@ -153,17 +178,22 @@ interface GradingSessionDetailProps {
   onStudentSelect: (submissionId: string) => void;
 }
 
-export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: GradingSessionDetailProps) {
+export function GradingSessionDetail({
+  sessionId,
+  onBack,
+  onStudentSelect,
+}: GradingSessionDetailProps) {
   const [session, setSession] = useState<GradingSession | null>(null);
   const [submissions, setSubmissions] = useState<StudentSubmission[]>([]);
   const [loading, setLoading] = useState(true);
   const [exportingSection, setExportingSection] = useState<GradingExportSection | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [perStudentDialogOpen, setPerStudentDialogOpen] = useState(false);
-  const [writingPrintDocument, setWritingPrintDocument] = useState<SessionWritingPrintDocument | null>(null);
+  const [writingPrintDocument, setWritingPrintDocument] =
+    useState<SessionWritingPrintDocument | null>(null);
   const [showOverallAnswerCheck, setShowOverallAnswerCheck] = useState(false);
   const [filters, setFilters] = useState<SessionDetailFilters>({});
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const writingPrintRequestIdRef = useRef(0);
   const lastPrintedRequestIdRef = useRef<number | null>(null);
 
@@ -181,7 +211,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     return () => {
       cancelled = true;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, filters]);
 
   const loadSubmissions = async () => {
@@ -203,28 +233,30 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
   };
 
   const hasScienceSubmissions = submissions.some(
-    (submission) => submission.sectionStatuses.science !== undefined,
+    (submission) => submission.sectionStatuses.science !== undefined
   );
 
   const getSectionBadge = (status: SectionGradingStatus) => {
     const styles = {
-      pending: 'bg-gray-100 text-gray-600',
-      auto_graded: 'bg-green-100 text-green-700',
-      needs_review: 'bg-amber-100 text-amber-700',
-      in_review: 'bg-blue-100 text-blue-700',
-      finalized: 'bg-emerald-100 text-emerald-700',
-      reopened: 'bg-purple-100 text-purple-700'
+      pending: "bg-gray-100 text-gray-600",
+      auto_graded: "bg-green-100 text-green-700",
+      needs_review: "bg-amber-100 text-amber-700",
+      in_review: "bg-blue-100 text-blue-700",
+      finalized: "bg-emerald-100 text-emerald-700",
+      reopened: "bg-purple-100 text-purple-700",
     };
     const labels = {
-      pending: 'Pending',
-      auto_graded: 'Auto',
-      needs_review: 'Review',
-      in_review: 'In Progress',
-      finalized: 'Done',
-      reopened: 'Reopened'
+      pending: "Pending",
+      auto_graded: "Auto",
+      needs_review: "Review",
+      in_review: "In Progress",
+      finalized: "Done",
+      reopened: "Reopened",
     };
     return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[status]}`}>
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${styles[status]}`}
+      >
         {labels[status]}
       </span>
     );
@@ -236,34 +268,36 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     </span>
   );
 
-  const getIeltsSectionBadge = (
-    submission: StudentSubmission,
-    status: SectionGradingStatus,
-  ) => submission.sectionStatuses.science !== undefined ? getNotApplicableBadge() : getSectionBadge(status);
+  const getIeltsSectionBadge = (submission: StudentSubmission, status: SectionGradingStatus) =>
+    submission.sectionStatuses.science !== undefined
+      ? getNotApplicableBadge()
+      : getSectionBadge(status);
 
   const getOverallStatusBadge = (status: OverallGradingStatus) => {
     const styles: Record<string, string> = {
-      not_submitted: 'bg-gray-100 text-gray-700',
-      submitted: 'bg-blue-100 text-blue-700',
-      in_progress: 'bg-yellow-100 text-yellow-700',
-      grading_complete: 'bg-green-100 text-green-700',
-      ready_to_release: 'bg-indigo-100 text-indigo-700',
-      released: 'bg-emerald-100 text-emerald-700',
-      finalized: 'bg-emerald-100 text-emerald-700',
-      reopened: 'bg-purple-100 text-purple-700'
+      not_submitted: "bg-gray-100 text-gray-700",
+      submitted: "bg-blue-100 text-blue-700",
+      in_progress: "bg-yellow-100 text-yellow-700",
+      grading_complete: "bg-green-100 text-green-700",
+      ready_to_release: "bg-indigo-100 text-indigo-700",
+      released: "bg-emerald-100 text-emerald-700",
+      finalized: "bg-emerald-100 text-emerald-700",
+      reopened: "bg-purple-100 text-purple-700",
     };
     const labels: Record<string, string> = {
-      not_submitted: 'Not Submitted',
-      submitted: 'Submitted',
-      in_progress: 'In Progress',
-      grading_complete: 'Grading Complete',
-      ready_to_release: 'Ready to Release',
-      released: 'Released',
-      finalized: 'Finalized',
-      reopened: 'Reopened'
+      not_submitted: "Not Submitted",
+      submitted: "Submitted",
+      in_progress: "In Progress",
+      grading_complete: "Grading Complete",
+      ready_to_release: "Ready to Release",
+      released: "Released",
+      finalized: "Finalized",
+      reopened: "Reopened",
     };
     return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status]}`}>
+      <span
+        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status]}`}
+      >
         {labels[status]}
       </span>
     );
@@ -275,20 +309,20 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     const diffMs = now.getTime() - date.getTime();
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffDays = Math.floor(diffHours / 24);
-    
+
     if (diffDays > 0) return `${diffDays}d ago`;
     if (diffHours > 0) return `${diffHours}h ago`;
-    return 'Just now';
+    return "Just now";
   };
 
   const resolveExamState = async (
     scheduleId: string,
-    publishedVersionId?: string,
+    publishedVersionId?: string
   ): Promise<ExamState | null> => {
     const sourceResult = await gradingService.getObjectiveGradingSource(scheduleId);
     const versionId = resolveObjectiveGradingVersionId(
       publishedVersionId,
-      sourceResult.success ? sourceResult.data?.draftVersionId : null,
+      sourceResult.success ? sourceResult.data?.draftVersionId : null
     );
     if (!versionId) {
       return null;
@@ -304,9 +338,9 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         submission,
         pages: buildWritingPrintPages(
           submission,
-          await gradingRepository.getWritingSubmissionsBySubmissionId(submission.id),
+          await gradingRepository.getWritingSubmissionsBySubmissionId(submission.id)
         ),
-      })),
+      }))
     );
 
     const requestId = writingPrintRequestIdRef.current + 1;
@@ -363,33 +397,32 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       ]);
 
       if (!fullSession) {
-        throw new Error('Could not load grading session metadata.');
+        throw new Error("Could not load grading session metadata.");
       }
 
-      if (section === 'writing') {
+      if (section === "writing") {
         await prepareWritingPrint(fullSubmissions);
         return;
       }
 
       const objectiveSection =
-        section === 'reading_manual'
-          ? 'reading'
-          : section === 'listening_manual'
-            ? 'listening'
+        section === "reading_manual"
+          ? "reading"
+          : section === "listening_manual"
+            ? "listening"
             : section;
-      const exportMode = section === 'reading_manual' || section === 'listening_manual'
-        ? 'manual'
-        : 'auto';
+      const exportMode =
+        section === "reading_manual" || section === "listening_manual" ? "manual" : "auto";
 
       const examState = await resolveExamState(
         fullSession.scheduleId,
-        fullSession.publishedVersionId,
+        fullSession.publishedVersionId
       );
       const bundles = await Promise.all(
         fullSubmissions.map(async (submission) => ({
           submission,
           sections: await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id),
-        })),
+        }))
       );
       const sessionContext = {
         sessionId: fullSession.id,
@@ -412,12 +445,12 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           fullSession.examTitle,
           objectiveSection,
           fullSession.cohortName,
-          exportMode === 'manual' ? 'manual-check' : undefined,
+          exportMode === "manual" ? "manual-check" : undefined
         ),
-        buildCsvContent(exportPayload.columns, exportPayload.rows),
+        buildCsvContent(exportPayload.columns, exportPayload.rows)
       );
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'Failed to export or print section.');
+      setExportError(error instanceof Error ? error.message : "Failed to export or print section.");
     } finally {
       setExportingSection(null);
     }
@@ -615,7 +648,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           {writingPrintDocument.pages.map((page, index) => (
             <section
               key={page.id}
-              className={`session-writing-print-task-page${index === 0 ? ' session-writing-print-task-page-first' : ''}`}
+              className={`session-writing-print-task-page${index === 0 ? " session-writing-print-task-page-first" : ""}`}
             >
               <header className="session-writing-print-page-header">
                 <h2>{page.studentName}</h2>
@@ -646,7 +679,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                   <div
                     className="session-writing-print-rich"
                     dangerouslySetInnerHTML={{
-                      __html: sanitizeHtml(page.task?.prompt || '<p>Prompt unavailable.</p>'),
+                      __html: sanitizeHtml(page.task?.prompt || "<p>Prompt unavailable.</p>"),
                     }}
                   />
                 </div>
@@ -655,7 +688,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                   <h4>Student Response</h4>
                   {page.task ? (
                     <div className="session-writing-print-response">
-                      {htmlToPlainTextPreserveLineBreaks(page.task.studentText) || 'No writing response recorded.'}
+                      {htmlToPlainTextPreserveLineBreaks(page.task.studentText) ||
+                        "No writing response recorded."}
                     </div>
                   ) : (
                     <div className="session-writing-print-empty">No writing response recorded.</div>
@@ -676,8 +710,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                       {getAssessmentRows(page.task).map((row) => (
                         <tr key={`${page.id}-${row.criterion}`}>
                           <td className="session-writing-print-criterion">{row.criterion}</td>
-                          <td className="session-writing-print-band">{row.band ?? ''}</td>
-                          <td className="session-writing-print-comment">{row.notes || ''}</td>
+                          <td className="session-writing-print-band">{row.band ?? ""}</td>
+                          <td className="session-writing-print-comment">{row.notes || ""}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -690,27 +724,25 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       ) : null}
       {/* Header */}
       <div className="flex items-center gap-4">
-        <button 
-          onClick={onBack}
-          className="p-2 hover:bg-gray-100 rounded-md transition-colors"
-        >
+        <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-md transition-colors">
           <ArrowLeft size={20} className="text-gray-600" />
         </button>
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-gray-900">
-            {session?.examTitle || 'Session Students'}
+            {session?.examTitle || "Session Students"}
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            {session?.cohortName || 'Grading session'} • {submissions.length} students in this session
+            {session?.cohortName || "Grading session"} • {submissions.length} students in this
+            session
           </p>
         </div>
-        
+
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
-            <input 
-              type="text" 
-              placeholder="Search students..." 
+            <input
+              type="text"
+              placeholder="Search students..."
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
               aria-label="Search students"
@@ -727,20 +759,22 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             >
               <FileCheck2 size={16} />
               <span className="hidden sm:inline">
-                {showOverallAnswerCheck ? 'Hide overall check' : 'Overall answer check'}
+                {showOverallAnswerCheck ? "Hide overall check" : "Overall answer check"}
               </span>
               <span className="sm:hidden">Overall</span>
             </button>
           ) : null}
           <GradingExportButtons
             exportingSection={exportingSection}
-            onExportReading={() => void handleExportSection('reading')}
-            onExportReadingManual={() => void handleExportSection('reading_manual')}
-            onExportListening={() => void handleExportSection('listening')}
-            onExportListeningManual={() => void handleExportSection('listening_manual')}
-            onExportScience={hasScienceSubmissions ? () => void handleExportSection('science') : undefined}
+            onExportReading={() => void handleExportSection("reading")}
+            onExportReadingManual={() => void handleExportSection("reading_manual")}
+            onExportListening={() => void handleExportSection("listening")}
+            onExportListeningManual={() => void handleExportSection("listening_manual")}
+            onExportScience={
+              hasScienceSubmissions ? () => void handleExportSection("science") : undefined
+            }
             scienceOnly={hasScienceSubmissions}
-            onPrintWriting={() => void handleExportSection('writing')}
+            onPrintWriting={() => void handleExportSection("writing")}
             onOpenExportBuilder={openPerStudentExportDialog}
           />
         </div>
@@ -761,10 +795,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       ) : null}
 
       {showOverallAnswerCheck && session ? (
-        <ExamObjectiveOverviewPanel
-          session={session}
-          onStudentSelect={onStudentSelect}
-        />
+        <ExamObjectiveOverviewPanel session={session} onStudentSelect={onStudentSelect} />
       ) : null}
 
       {/* Quick Stats */}
@@ -774,7 +805,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             <div>
               <p className="text-sm text-gray-500 font-medium">Submitted</p>
               <p className="text-xl md:text-2xl font-bold text-gray-900">
-                {submissions.filter(s => s.gradingStatus !== 'not_submitted').length}
+                {submissions.filter((s) => s.gradingStatus !== "not_submitted").length}
               </p>
             </div>
             <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
@@ -787,7 +818,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             <div>
               <p className="text-sm text-gray-500 font-medium">Needs Review</p>
               <p className="text-2xl font-bold text-amber-600">
-                {submissions.filter(s => s.gradingStatus === 'submitted').length}
+                {submissions.filter((s) => s.gradingStatus === "submitted").length}
               </p>
             </div>
             <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center">
@@ -800,7 +831,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             <div>
               <p className="text-sm text-gray-500 font-medium">In Progress</p>
               <p className="text-2xl font-bold text-blue-600">
-                {submissions.filter(s => s.gradingStatus === 'in_progress').length}
+                {submissions.filter((s) => s.gradingStatus === "in_progress").length}
               </p>
             </div>
             <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
@@ -813,7 +844,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             <div>
               <p className="text-sm text-gray-500 font-medium">Finalized</p>
               <p className="text-2xl font-bold text-emerald-600">
-                {submissions.filter(s => s.gradingStatus === 'released').length}
+                {submissions.filter((s) => s.gradingStatus === "released").length}
               </p>
             </div>
             <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
@@ -831,7 +862,9 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
           <div className="flex flex-col items-center justify-center h-64 text-gray-500">
             <User size={48} className="mb-4 text-gray-300" />
             <p className="font-medium text-gray-900">No student submissions found</p>
-            <p className="text-sm mt-1 text-gray-500">Students will appear here when they submit exams</p>
+            <p className="text-sm mt-1 text-gray-500">
+              Students will appear here when they submit exams
+            </p>
             <button
               onClick={loadSubmissions}
               className="mt-4 px-4 py-2 bg-blue-50 text-blue-600 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors"
@@ -859,8 +892,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
               </thead>
               <tbody className="divide-y divide-gray-200 text-sm">
                 {submissions.map((submission) => (
-                  <tr 
-                    key={submission.id} 
+                  <tr
+                    key={submission.id}
                     className="hover:bg-gray-50 cursor-pointer"
                     onClick={() => onStudentSelect(submission.id)}
                   >
@@ -870,19 +903,22 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                           {submission.studentName.charAt(0)}
                         </div>
                         <div className="min-w-0">
-                          <p className="font-medium text-gray-900 truncate">{submission.studentName}</p>
+                          <p className="font-medium text-gray-900 truncate">
+                            {submission.studentName}
+                          </p>
                           <p className="text-xs text-gray-500 hidden sm:block truncate">
-                            {submission.studentEmail ? submission.studentEmail : ''}
+                            {submission.studentEmail ? submission.studentEmail : ""}
                           </p>
                           <p className="text-xs text-gray-500 hidden md:block truncate">
-                            {[submission.nickname ? `Nickname: ${submission.nickname}` : null, submission.ieltsCourse ? `Course: ${submission.ieltsCourse}` : null]
+                            {[
+                              submission.nickname ? `Nickname: ${submission.nickname}` : null,
+                              submission.ieltsCourse ? `Course: ${submission.ieltsCourse}` : null,
+                            ]
                               .filter(Boolean)
-                              .join(' • ')}
+                              .join(" • ")}
                           </p>
                         </div>
-                        {submission.isFlagged && (
-                          <AlertCircle size={16} className="text-red-500" />
-                        )}
+                        {submission.isFlagged && <AlertCircle size={16} className="text-red-500" />}
                       </div>
                     </td>
                     <td className="px-3 md:px-6 py-4 text-gray-700 hidden sm:table-cell">
@@ -911,7 +947,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                       {getOverallStatusBadge(submission.gradingStatus)}
                     </td>
                     <td className="px-3 md:px-6 py-4 text-right">
-                      <button 
+                      <button
                         className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md text-sm font-medium transition-colors flex items-center gap-1 ml-auto"
                         onClick={(e) => {
                           e.stopPropagation();

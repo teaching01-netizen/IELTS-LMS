@@ -1,6 +1,6 @@
 /**
  * Domain Model for Grading Workflow
- * 
+ *
  * This file defines the authoritative domain entities for the grading system.
  * Grading is a 3-level workflow: Session Queue -> Session Detail -> Student Review Workspace.
  */
@@ -8,68 +8,63 @@
 /**
  * Grading session status
  */
-export type GradingSessionStatus = 
-  | 'scheduled'
-  | 'live'
-  | 'in_progress'
-  | 'completed'
-  | 'cancelled';
+export type GradingSessionStatus = "scheduled" | "live" | "in_progress" | "completed" | "cancelled";
 
 /**
  * Student submission status per section
  */
-export type SectionGradingStatus = 
-  | 'pending'
-  | 'auto_graded'
-  | 'needs_review'
-  | 'in_review'
-  | 'finalized'
-  | 'reopened';
+export type SectionGradingStatus =
+  | "pending"
+  | "auto_graded"
+  | "needs_review"
+  | "in_review"
+  | "finalized"
+  | "reopened";
 
 /**
  * Overall grading status for a student attempt
  */
-export type OverallGradingStatus = 
-  | 'not_submitted'
-  | 'submitted'
-  | 'in_progress'
-  | 'grading_complete'
-  | 'ready_to_release'
-  | 'released'
-  | 'reopened';
+export type OverallGradingStatus =
+  | "not_submitted"
+  | "submitted"
+  | "in_progress"
+  | "grading_complete"
+  | "ready_to_release"
+  | "released"
+  | "reopened";
 
 /**
  * Release workflow states - separate from grading status
  */
-export type ReleaseStatus = 
-  | 'draft'
-  | 'grading_complete'
-  | 'ready_to_release'
-  | 'released'
-  | 'reopened';
+export type ReleaseStatus =
+  | "draft"
+  | "grading_complete"
+  | "ready_to_release"
+  | "released"
+  | "reopened";
 
 export type ObjectiveVerificationStatus =
-  | 'verified_correct'
-  | 'verified_incorrect'
-  | 'verified_unanswered'
-  | 'needs_recheck'
-  | 'invalid';
+  | "verified_correct"
+  | "verified_incorrect"
+  | "verified_unanswered"
+  | "needs_recheck"
+  | "invalid";
 
 export type ObjectiveIntegrityIssueCode =
-  | 'missing_answer_key'
-  | 'invalid_answer_key'
-  | 'answer_key_violates_scoring_rule'
-  | 'unsupported_question_type'
-  | 'duplicate_question_id'
-  | 'unknown_student_answer_id'
-  | 'answer_payload_type_invalid'
-  | 'section_mapping_unavailable'
-  | 'section_mapping_ambiguous'
-  | 'submission_merge_incomplete'
-  | 'grading_source_stale'
-  | 'manual_override_stale';
+  | "missing_answer_key"
+  | "invalid_answer_key"
+  | "answer_key_violates_scoring_rule"
+  | "unsupported_question_type"
+  | "duplicate_question_id"
+  | "unknown_student_answer_id"
+  | "answer_payload_type_invalid"
+  | "section_mapping_unavailable"
+  | "section_mapping_ambiguous"
+  | "submission_merge_incomplete"
+  | "grading_source_stale"
+  | "manual_override_stale";
 
-export type ObjectiveIntegrityStatus = 'verified' | 'needs_recheck' | 'invalid';
+export type ObjectiveIntegrityStatus = "verified" | "needs_recheck" | "invalid";
 
 export interface ObjectiveQuestionAudit {
   questionId: string;
@@ -133,7 +128,7 @@ export interface ActScienceScoreReport {
   submittedAt: string;
   gradingStatus: string;
   score: {
-    section: 'science';
+    section: "science";
     correctCount: number;
     totalQuestions: number;
     percentage: number;
@@ -143,23 +138,23 @@ export interface ActScienceScoreReport {
 /**
  * Visibility for comments and notes
  */
-export type CommentVisibility = 'student_visible' | 'internal_only';
+export type CommentVisibility = "student_visible" | "internal_only";
 
 /**
  * Writing annotation types
  */
-export type AnnotationType = 
-  | 'inline_comment'
-  | 'rubric_note'
-  | 'overall_feedback'
-  | 'private_grader_note'
-  | 'highlight'
-  | 'underline'
-  | 'strike_through'
-  | 'circle'
-  | 'freehand_draw'
-  | 'arrow'
-  | 'margin_comment';
+export type AnnotationType =
+  | "inline_comment"
+  | "rubric_note"
+  | "overall_feedback"
+  | "private_grader_note"
+  | "highlight"
+  | "underline"
+  | "strike_through"
+  | "circle"
+  | "freehand_draw"
+  | "arrow"
+  | "margin_comment";
 
 /**
  * Drawing annotation for freehand and shapes
@@ -167,15 +162,15 @@ export type AnnotationType =
 export interface DrawingAnnotation {
   id: string;
   taskId: string;
-  type: 'freehand_draw' | 'arrow' | 'circle' | 'underline' | 'strike_through';
-  
+  type: "freehand_draw" | "arrow" | "circle" | "underline" | "strike_through";
+
   // Coordinates (relative to text container)
   points: Array<{ x: number; y: number }>;
   color: string;
   strokeWidth: number;
-  
+
   visibility: CommentVisibility;
-  
+
   createdBy: string;
   createdAt: string;
   updatedAt?: string | undefined;
@@ -193,14 +188,14 @@ export interface GradingSession {
   publishedVersionId: string;
   cohortName: string;
   institution?: string | undefined;
-  
+
   // Session timing
   startTime: string;
   endTime: string;
-  
+
   // Status
   status: GradingSessionStatus;
-  
+
   // Counters (denormalized for performance)
   totalStudents: number;
   submittedCount: number;
@@ -208,10 +203,10 @@ export interface GradingSession {
   inProgressReviews: number;
   finalizedReviews: number;
   overdueReviews: number;
-  
+
   // Assigned teachers
   assignedTeachers: string[];
-  
+
   // Metadata
   createdAt: string;
   createdBy: string;
@@ -236,24 +231,24 @@ export interface StudentSubmission {
   /** Canonical level when supplied by registration metadata; kept separate from course. */
   level?: string | undefined;
   cohortName: string;
-  
+
   // Submission timing
   submittedAt: string;
   timeSpentSeconds: number;
-  
+
   // Overall grading status
   gradingStatus: OverallGradingStatus;
-  
+
   // Assignment
   assignedTeacherId?: string | undefined;
   assignedTeacherName?: string | undefined;
-  
+
   // Flags
   isFlagged: boolean;
   flagReason?: string | undefined;
   isOverdue: boolean;
   dueDate?: string | undefined;
-  
+
   // Section-level status badges
   sectionStatuses: {
     listening: SectionGradingStatus;
@@ -262,7 +257,7 @@ export interface StudentSubmission {
     speaking: SectionGradingStatus;
     science?: SectionGradingStatus | undefined;
   };
-  
+
   // Metadata
   createdAt: string;
   updatedAt: string;
@@ -274,23 +269,23 @@ export interface StudentSubmission {
 export interface SectionSubmission {
   id: string;
   submissionId: string;
-  section: 'listening' | 'reading' | 'writing' | 'speaking' | 'science';
-  
+  section: "listening" | "reading" | "writing" | "speaking" | "science";
+
   // Immutable snapshot of student answers
   answers: SectionAnswers;
-  
+
   // Auto-grading results (for objective sections)
   autoGradingResults?: AutoGradingResult | undefined;
-  
+
   // Grading status
   gradingStatus: SectionGradingStatus;
-  
+
   // Review metadata
   reviewedBy?: string | undefined;
   reviewedAt?: string | undefined;
   finalizedBy?: string | undefined;
   finalizedAt?: string | undefined;
-  
+
   // Metadata
   submittedAt: string;
 }
@@ -298,14 +293,10 @@ export interface SectionSubmission {
 /**
  * Section answers - discriminated union by section type
  */
-export type SectionAnswers = 
-  | ListeningAnswers
-  | ReadingAnswers
-  | WritingAnswers
-  | SpeakingAnswers;
+export type SectionAnswers = ListeningAnswers | ReadingAnswers | WritingAnswers | SpeakingAnswers;
 
 export interface ListeningAnswers {
-  type: 'listening';
+  type: "listening";
   parts: ListeningPartAnswers[];
 }
 
@@ -315,7 +306,7 @@ export interface ListeningPartAnswers {
 }
 
 export interface ReadingAnswers {
-  type: 'reading';
+  type: "reading";
   passages: ReadingPassageAnswers[];
 }
 
@@ -325,7 +316,7 @@ export interface ReadingPassageAnswers {
 }
 
 export interface WritingAnswers {
-  type: 'writing';
+  type: "writing";
   tasks: WritingTaskAnswer[];
 }
 
@@ -338,7 +329,7 @@ export interface WritingTaskAnswer {
 }
 
 export interface SpeakingAnswers {
-  type: 'speaking';
+  type: "speaking";
   part1Answers?: string[] | undefined;
   part2Recording?: string | undefined; // URL to audio file
   part2Transcript?: string | undefined; // Optional transcript
@@ -471,25 +462,25 @@ export interface WritingTaskSubmission {
   submissionId: string;
   taskId: string;
   taskLabel: string;
-  
+
   // Immutable snapshot
   prompt: string;
   studentText: string;
   wordCount: number;
-  
+
   // Grading
   rubricAssessment?: RubricAssessment | undefined;
-  
+
   // Comments/annotations
   annotations: WritingAnnotation[];
-  
+
   // Overall feedback
   overallFeedback?: string | undefined;
   studentVisibleNotes?: string | undefined;
-  
+
   // Grading status
   gradingStatus: SectionGradingStatus;
-  
+
   // Metadata
   submittedAt: string;
   gradedBy?: string | undefined;
@@ -505,24 +496,24 @@ export interface RubricAssessment {
   // Task Response / Task Achievement
   taskResponseBand: number;
   taskResponseNotes?: string | undefined;
-  
+
   // Coherence and Cohesion
   coherenceBand: number;
   coherenceNotes?: string | undefined;
-  
+
   // Lexical Resource
   lexicalBand: number;
   lexicalNotes?: string | undefined;
-  
+
   // Grammatical Range and Accuracy
   grammarBand: number;
   grammarNotes?: string | undefined;
-  
+
   // Overall
   overallBand: number;
   wordCount: number;
   gradingStatus: SectionGradingStatus;
-  
+
   // Internal grader notes (not visible to student)
   internalNotes?: string | undefined;
 }
@@ -534,19 +525,19 @@ export interface WritingAnnotation {
   id: string;
   taskId: string;
   type: AnnotationType;
-  
+
   // Text anchor (for inline comments)
   startOffset: number;
   endOffset: number;
   selectedText: string;
-  
+
   // Comment content
   comment: string;
   visibility: CommentVisibility;
-  
+
   // Color (for highlights, drawings)
   color?: string | undefined;
-  
+
   // Metadata
   createdBy: string;
   createdAt: string;
@@ -561,46 +552,50 @@ export interface ReviewDraft {
   submissionId: string;
   studentId: string;
   teacherId: string;
-  
+
   // Release workflow status
   releaseStatus: ReleaseStatus;
-  
+
   // Draft rubric assessments per section
   sectionDrafts: {
     listening?: RubricAssessment | undefined;
     reading?: RubricAssessment | undefined;
-    writing?: {
-      task1?: RubricAssessment | undefined;
-      task2?: RubricAssessment | undefined;
-    } | undefined;
+    writing?:
+      | {
+          task1?: RubricAssessment | undefined;
+          task2?: RubricAssessment | undefined;
+        }
+      | undefined;
     speaking?: RubricAssessment | undefined;
   };
-  
+
   // Draft annotations (text comments)
   annotations: WritingAnnotation[];
-  
+
   // Draft drawings (freehand, shapes)
   drawings: DrawingAnnotation[];
-  
+
   // Draft overall feedback
   overallFeedback?: string | undefined;
   studentVisibleNotes?: string | undefined;
   internalNotes?: string | undefined;
-  
+
   // Teacher summary for result
-  teacherSummary?: {
-    strengths: string[];
-    improvementPriorities: string[];
-    recommendedPractice: string[];
-  } | undefined;
-  
+  teacherSummary?:
+    | {
+        strengths: string[];
+        improvementPriorities: string[];
+        recommendedPractice: string[];
+      }
+    | undefined;
+
   // Grading checklist
   checklist: GradingChecklist;
-  
+
   // State
   hasUnsavedChanges: boolean;
   lastAutoSaveAt?: string | undefined;
-  
+
   // Metadata
   createdAt: string;
   updatedAt: string;
@@ -610,16 +605,16 @@ export interface ReviewDraft {
  * Review Event - Audit trail for grading actions
  */
 export type ReviewAction =
-  | 'review_started'
-  | 'review_assigned'
-  | 'draft_saved'
-  | 'comment_added'
-  | 'comment_updated'
-  | 'rubric_updated'
-  | 'review_finalized'
-  | 'review_reopened'
-  | 'score_override'
-  | 'feedback_updated';
+  | "review_started"
+  | "review_assigned"
+  | "draft_saved"
+  | "comment_added"
+  | "comment_updated"
+  | "rubric_updated"
+  | "review_finalized"
+  | "review_reopened"
+  | "score_override"
+  | "feedback_updated";
 
 export interface ReviewEvent {
   id: string;
@@ -627,20 +622,20 @@ export interface ReviewEvent {
   teacherId: string;
   teacherName: string;
   action: ReviewAction;
-  
+
   // Context
-  section?: 'listening' | 'reading' | 'writing' | 'speaking' | undefined;
+  section?: "listening" | "reading" | "writing" | "speaking" | undefined;
   taskId?: string | undefined;
   annotationId?: string | undefined;
   questionId?: string | undefined;
-  
+
   // State changes
   fromStatus?: SectionGradingStatus | OverallGradingStatus | undefined;
   toStatus?: SectionGradingStatus | OverallGradingStatus | undefined;
-  
+
   // Payload
   payload?: Record<string, unknown> | undefined;
-  
+
   // Metadata
   timestamp: string;
 }
@@ -696,13 +691,13 @@ export interface StudentResult {
   submissionId: string;
   studentId: string;
   studentName: string;
-  
+
   // Release status
   releaseStatus: ReleaseStatus;
   releasedAt?: string | undefined;
   releasedBy?: string | undefined;
   scheduledReleaseDate?: string | undefined;
-  
+
   // Overall scores
   overallBand: number;
   sectionBands: {
@@ -711,7 +706,7 @@ export interface StudentResult {
     writing: number;
     speaking: number;
   };
-  
+
   // Section breakdowns
   listeningResult?: ListeningResult | undefined;
   readingResult?: ReadingResult | undefined;
@@ -720,19 +715,19 @@ export interface StudentResult {
     task2?: WritingResult | undefined;
   };
   speakingResult?: SpeakingResult | undefined;
-  
+
   // Teacher summary
   teacherSummary: {
     strengths: string[];
     improvementPriorities: string[];
     recommendedPractice: string[];
   };
-  
+
   // Versioning for revised results
   version: number;
   previousVersionId?: string | undefined;
   revisionReason?: string | undefined;
-  
+
   // Metadata
   createdAt: string;
   updatedAt: string;
@@ -769,7 +764,7 @@ export interface WritingResult {
   prompt: string;
   studentText: string;
   wordCount: number;
-  
+
   // Rubric scores
   rubricScores: {
     taskResponse: number;
@@ -777,11 +772,11 @@ export interface WritingResult {
     lexical: number;
     grammar: number;
   };
-  
+
   // Annotations (student-visible only)
   annotations: WritingAnnotation[];
   drawings: DrawingAnnotation[];
-  
+
   // Feedback
   criterionFeedback: {
     taskResponse?: string | undefined;
@@ -823,13 +818,13 @@ export interface TimestampComment {
 /**
  * Release workflow action
  */
-export type ReleaseAction = 
-  | 'mark_grading_complete'
-  | 'mark_ready_to_release'
-  | 'release_now'
-  | 'schedule_release'
-  | 'reopen_result'
-  | 'revise_result';
+export type ReleaseAction =
+  | "mark_grading_complete"
+  | "mark_ready_to_release"
+  | "release_now"
+  | "schedule_release"
+  | "reopen_result"
+  | "revise_result";
 
 /**
  * Release event for audit trail
@@ -865,7 +860,7 @@ export interface GradingChecklist {
  */
 export interface CommentBankItem {
   id: string;
-  category: 'grammar' | 'vocabulary' | 'coherence' | 'task_response' | 'general';
+  category: "grammar" | "vocabulary" | "coherence" | "task_response" | "general";
   label: string;
   text: string;
   isStudentVisible: boolean;
@@ -878,7 +873,15 @@ export interface CommentBankItem {
  * Annotation tool state
  */
 export interface AnnotationToolState {
-  activeTool: 'select' | 'highlight' | 'underline' | 'strike_through' | 'freehand' | 'arrow' | 'circle' | 'comment';
+  activeTool:
+    | "select"
+    | "highlight"
+    | "underline"
+    | "strike_through"
+    | "freehand"
+    | "arrow"
+    | "circle"
+    | "comment";
   color: string;
   strokeWidth: number;
   visibility: CommentVisibility;

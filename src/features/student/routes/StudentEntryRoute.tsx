@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useAuthSession, type StudentQueuedAdmission } from '../../auth/api/authSession';
-import { studentAttemptRepository } from '@student/application/studentAttemptFacade';
-import { commonSchemas } from '@shared/lib/validateApiResponse';
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useAuthSession, type StudentQueuedAdmission } from "../../auth/api/authSession";
+import { studentAttemptRepository } from "@student/application/studentAttemptFacade";
+import { commonSchemas } from "@shared/lib/validateApiResponse";
 
 interface EntryFormData {
   wcode: string;
@@ -12,8 +12,8 @@ interface EntryFormData {
   ieltsCourse: string;
 }
 
-const LAST_WCODE_STORAGE_PREFIX = 'ielts-student-last-wcode:';
-const PROFILE_STORAGE_PREFIX = 'ielts-student-profile:';
+const LAST_WCODE_STORAGE_PREFIX = "ielts-student-last-wcode:";
+const PROFILE_STORAGE_PREFIX = "ielts-student-profile:";
 
 function normalizeAccessCode(value: string): string {
   const trimmed = value.trim();
@@ -32,7 +32,7 @@ function validateEmail(email: string): boolean {
 }
 
 function loadLastWcode(scheduleId: string): string | null {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return null;
   }
 
@@ -40,7 +40,7 @@ function loadLastWcode(scheduleId: string): string | null {
 }
 
 function storeLastWcode(scheduleId: string, wcode: string): void {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return;
   }
 
@@ -50,23 +50,23 @@ function storeLastWcode(scheduleId: string, wcode: string): void {
 function storeCandidateProfile(
   scheduleId: string,
   wcode: string,
-  profile: { studentName: string; email: string; nickname: string; ieltsCourse: string },
+  profile: { studentName: string; email: string; nickname: string; ieltsCourse: string }
 ): void {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return;
   }
 
   window.localStorage.setItem(
     `${PROFILE_STORAGE_PREFIX}${scheduleId}:${wcode}`,
-    JSON.stringify(profile),
+    JSON.stringify(profile)
   );
 }
 
 function loadCandidateProfile(
   scheduleId: string,
-  wcode: string,
+  wcode: string
 ): { studentName: string; email: string; nickname: string; ieltsCourse: string } | null {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return null;
   }
 
@@ -82,10 +82,10 @@ function loadCandidateProfile(
       nickname?: unknown;
       ieltsCourse?: unknown;
     };
-    const studentName = typeof parsed.studentName === 'string' ? parsed.studentName.trim() : '';
-    const email = typeof parsed.email === 'string' ? parsed.email.trim() : '';
-    const nickname = typeof parsed.nickname === 'string' ? parsed.nickname.trim() : '';
-    const ieltsCourse = typeof parsed.ieltsCourse === 'string' ? parsed.ieltsCourse.trim() : '';
+    const studentName = typeof parsed.studentName === "string" ? parsed.studentName.trim() : "";
+    const email = typeof parsed.email === "string" ? parsed.email.trim() : "";
+    const nickname = typeof parsed.nickname === "string" ? parsed.nickname.trim() : "";
+    const ieltsCourse = typeof parsed.ieltsCourse === "string" ? parsed.ieltsCourse.trim() : "";
 
     if (!studentName || !email || !nickname || !ieltsCourse) {
       return null;
@@ -105,36 +105,36 @@ export function StudentEntryRoute() {
 
   const initialWcode = useMemo(() => {
     if (!scheduleId) {
-      return '';
+      return "";
     }
 
-    const queryWcode = searchParams.get('wcode');
+    const queryWcode = searchParams.get("wcode");
     if (queryWcode) {
       return normalizeAccessCode(queryWcode);
     }
 
     const stored = loadLastWcode(scheduleId);
-    return stored ? normalizeAccessCode(stored) : '';
+    return stored ? normalizeAccessCode(stored) : "";
   }, [scheduleId, searchParams]);
 
   const [formData, setFormData] = useState<EntryFormData>({
     wcode: initialWcode,
     email:
       scheduleId && initialWcode
-        ? loadCandidateProfile(scheduleId, initialWcode)?.email ?? ''
-        : '',
+        ? (loadCandidateProfile(scheduleId, initialWcode)?.email ?? "")
+        : "",
     studentName:
       scheduleId && initialWcode
-        ? loadCandidateProfile(scheduleId, initialWcode)?.studentName ?? ''
-        : '',
+        ? (loadCandidateProfile(scheduleId, initialWcode)?.studentName ?? "")
+        : "",
     nickname:
       scheduleId && initialWcode
-        ? loadCandidateProfile(scheduleId, initialWcode)?.nickname ?? ''
-        : '',
+        ? (loadCandidateProfile(scheduleId, initialWcode)?.nickname ?? "")
+        : "",
     ieltsCourse:
       scheduleId && initialWcode
-        ? loadCandidateProfile(scheduleId, initialWcode)?.ieltsCourse ?? ''
-        : '',
+        ? (loadCandidateProfile(scheduleId, initialWcode)?.ieltsCourse ?? "")
+        : "",
   });
   const [errors, setErrors] = useState<Partial<Record<keyof EntryFormData, string>>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -143,16 +143,15 @@ export function StudentEntryRoute() {
   const [queuedPayload, setQueuedPayload] = useState<EntryFormData | null>(null);
 
   useEffect(() => {
-    const profile = scheduleId && initialWcode
-      ? loadCandidateProfile(scheduleId, initialWcode)
-      : null;
+    const profile =
+      scheduleId && initialWcode ? loadCandidateProfile(scheduleId, initialWcode) : null;
 
     setFormData({
       wcode: initialWcode,
-      email: profile?.email ?? '',
-      studentName: profile?.studentName ?? '',
-      nickname: profile?.nickname ?? '',
-      ieltsCourse: profile?.ieltsCourse ?? '',
+      email: profile?.email ?? "",
+      studentName: profile?.studentName ?? "",
+      nickname: profile?.nickname ?? "",
+      ieltsCourse: profile?.ieltsCourse ?? "",
     });
     setErrors({});
     setSubmitError(null);
@@ -166,7 +165,7 @@ export function StudentEntryRoute() {
     }
 
     const normalizedWcode = normalizeAccessCode(initialWcode);
-    if (!normalizedWcode || authStatus !== 'authenticated') {
+    if (!normalizedWcode || authStatus !== "authenticated") {
       return;
     }
 
@@ -176,8 +175,8 @@ export function StudentEntryRoute() {
         const attempts = await studentAttemptRepository.getAttemptsByScheduleId(scheduleId);
         const activeAttempt = attempts.find(
           (candidate) =>
-            candidate.phase !== 'post-exam' &&
-            normalizeAccessCode(candidate.candidateId) === normalizedWcode,
+            candidate.phase !== "post-exam" &&
+            normalizeAccessCode(candidate.candidateId) === normalizedWcode
         );
 
         if (activeAttempt && !cancelled) {
@@ -195,12 +194,12 @@ export function StudentEntryRoute() {
 
   const handleInputChange = (field: keyof EntryFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-    setErrors((prev) => ({ ...prev, [field]: '' }));
+    setErrors((prev) => ({ ...prev, [field]: "" }));
 
-    if (field === 'email' && value && !validateEmail(value)) {
+    if (field === "email" && value && !validateEmail(value)) {
       setErrors((prev) => ({
         ...prev,
-        email: 'Invalid email format',
+        email: "Invalid email format",
       }));
     }
   };
@@ -217,25 +216,25 @@ export function StudentEntryRoute() {
     const newErrors: Partial<Record<keyof EntryFormData, string>> = {};
 
     if (!normalizedWcode) {
-      newErrors.wcode = 'Wcode is required';
+      newErrors.wcode = "Wcode is required";
     }
 
     if (!normalizedEmail || !validateEmail(normalizedEmail)) {
-      newErrors.email = 'Email is required and must be valid';
+      newErrors.email = "Email is required and must be valid";
     }
 
     if (!normalizedName) {
-      newErrors.studentName = 'Name is required';
+      newErrors.studentName = "Name is required";
     }
 
     if (!normalizedNickname) {
-      newErrors.nickname = 'Nickname is required';
+      newErrors.nickname = "Nickname is required";
     } else if (normalizedNickname.length > 50) {
-      newErrors.nickname = 'Nickname must be 50 characters or less';
+      newErrors.nickname = "Nickname must be 50 characters or less";
     }
 
     if (!normalizedIeltsCourse) {
-      newErrors.ieltsCourse = 'Course is required';
+      newErrors.ieltsCourse = "Course is required";
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -244,7 +243,7 @@ export function StudentEntryRoute() {
     }
 
     if (!scheduleId) {
-      setSubmitError('Invalid schedule id');
+      setSubmitError("Invalid schedule id");
       return;
     }
 
@@ -262,7 +261,7 @@ export function StudentEntryRoute() {
         ieltsCourse: normalizedIeltsCourse,
       });
 
-      if ('state' in result && result.state === 'queued') {
+      if ("state" in result && result.state === "queued") {
         setQueuedAdmission(result);
         setQueuedPayload({
           wcode: normalizedWcode,
@@ -283,9 +282,7 @@ export function StudentEntryRoute() {
       });
       navigate(buildStudentRoute(scheduleId, normalizedWcode));
     } catch (error) {
-      setSubmitError(
-        error instanceof Error ? error.message : 'Check-in failed. Please try again.',
-      );
+      setSubmitError(error instanceof Error ? error.message : "Check-in failed. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -311,7 +308,7 @@ export function StudentEntryRoute() {
         if (cancelled) {
           return;
         }
-        if ('state' in result && result.state === 'queued') {
+        if ("state" in result && result.state === "queued") {
           setQueuedAdmission(result);
           return;
         }
@@ -327,7 +324,7 @@ export function StudentEntryRoute() {
       } catch (error) {
         if (!cancelled) {
           setSubmitError(
-            error instanceof Error ? error.message : 'Admission polling failed. Please retry.',
+            error instanceof Error ? error.message : "Admission polling failed. Please retry."
           );
         }
       }
@@ -366,12 +363,12 @@ export function StudentEntryRoute() {
                 id="wcode"
                 type="text"
                 value={formData.wcode}
-                onChange={(e) => handleInputChange('wcode', e.target.value)}
+                onChange={(e) => handleInputChange("wcode", e.target.value)}
                 placeholder="Enter your wcode"
                 aria-label="Wcode"
                 disabled={isLoading || Boolean(queuedAdmission)}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.wcode ? 'border-red-300' : 'border-gray-300'
+                  errors.wcode ? "border-red-300" : "border-gray-300"
                 } focus:outline-none focus:ring-2 focus:ring-blue-500`}
               />
             </label>
@@ -386,12 +383,12 @@ export function StudentEntryRoute() {
                 id="email"
                 type="email"
                 value={formData.email}
-                onChange={(e) => handleInputChange('email', e.target.value)}
+                onChange={(e) => handleInputChange("email", e.target.value)}
                 placeholder="student@example.com"
                 aria-label="Email"
                 disabled={isLoading || Boolean(queuedAdmission)}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.email ? 'border-red-300' : 'border-gray-300'
+                  errors.email ? "border-red-300" : "border-gray-300"
                 } focus:outline-none focus:ring-2 focus:ring-blue-500`}
               />
             </label>
@@ -405,12 +402,12 @@ export function StudentEntryRoute() {
                 id="studentName"
                 type="text"
                 value={formData.studentName}
-                onChange={(e) => handleInputChange('studentName', e.target.value)}
+                onChange={(e) => handleInputChange("studentName", e.target.value)}
                 placeholder="John Doe"
                 aria-label="Full Name"
                 disabled={isLoading || Boolean(queuedAdmission)}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.studentName ? 'border-red-300' : 'border-gray-300'
+                  errors.studentName ? "border-red-300" : "border-gray-300"
                 } focus:outline-none focus:ring-2 focus:ring-blue-500`}
               />
             </label>
@@ -426,13 +423,13 @@ export function StudentEntryRoute() {
                 id="nickname"
                 type="text"
                 value={formData.nickname}
-                onChange={(e) => handleInputChange('nickname', e.target.value)}
+                onChange={(e) => handleInputChange("nickname", e.target.value)}
                 placeholder="Nickname"
                 aria-label="Nickname"
                 disabled={isLoading || Boolean(queuedAdmission)}
                 maxLength={50}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.nickname ? 'border-red-300' : 'border-gray-300'
+                  errors.nickname ? "border-red-300" : "border-gray-300"
                 } focus:outline-none focus:ring-2 focus:ring-blue-500`}
               />
             </label>
@@ -446,12 +443,12 @@ export function StudentEntryRoute() {
                 id="ieltsCourse"
                 type="text"
                 value={formData.ieltsCourse}
-                onChange={(e) => handleInputChange('ieltsCourse', e.target.value)}
+                onChange={(e) => handleInputChange("ieltsCourse", e.target.value)}
                 placeholder="Course"
                 aria-label="Course"
                 disabled={isLoading || Boolean(queuedAdmission)}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.ieltsCourse ? 'border-red-300' : 'border-gray-300'
+                  errors.ieltsCourse ? "border-red-300" : "border-gray-300"
                 } focus:outline-none focus:ring-2 focus:ring-blue-500`}
               />
             </label>
@@ -465,7 +462,11 @@ export function StudentEntryRoute() {
             disabled={isLoading || Boolean(queuedAdmission)}
             className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
-            {queuedAdmission ? 'Waiting for Admission...' : isLoading ? 'Checking in...' : 'Continue'}
+            {queuedAdmission
+              ? "Waiting for Admission..."
+              : isLoading
+                ? "Checking in..."
+                : "Continue"}
           </button>
         </form>
       </div>

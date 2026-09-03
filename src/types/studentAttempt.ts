@@ -1,10 +1,10 @@
-import type { ModuleType, StudentStatus, Violation } from '../types';
-export type { StudentAnswerValue } from './answers';
-import type { StudentAnswerValue } from './answers';
+import type { ModuleType, StudentStatus, Violation } from "../types";
+export type { StudentAnswerValue } from "./answers";
+import type { StudentAnswerValue } from "./answers";
 
 export interface StudentAnswerMutationMeta {
-  interactionType?: 'typing' | 'discrete' | undefined;
-  arrayUpdateMode?: 'replace' | undefined;
+  interactionType?: "typing" | "discrete" | undefined;
+  arrayUpdateMode?: "replace" | undefined;
   slotIndex?: number | undefined;
   slotId?: string | undefined;
   slotCount?: number | undefined;
@@ -12,38 +12,38 @@ export interface StudentAnswerMutationMeta {
 }
 
 export type AttemptSyncState =
-  | 'idle'
-  | 'saving'
-  | 'saved'
-  | 'offline'
-  | 'syncing_reconnect'
-  | 'error';
+  | "idle"
+  | "saving"
+  | "saved"
+  | "offline"
+  | "syncing_reconnect"
+  | "error";
 
 export type StudentAttemptMutationType =
-  | 'answer'
-  | 'writing_answer'
-  | 'flag'
-  | 'violation'
-  | 'position'
-  | 'precheck'
-  | 'network'
-  | 'heartbeat'
-  | 'device_fingerprint'
-  | 'sync';
+  | "answer"
+  | "writing_answer"
+  | "flag"
+  | "violation"
+  | "position"
+  | "precheck"
+  | "network"
+  | "heartbeat"
+  | "device_fingerprint"
+  | "sync";
 
-export type HeartbeatEventType = 'heartbeat' | 'disconnect' | 'reconnect' | 'lost';
+export type HeartbeatEventType = "heartbeat" | "disconnect" | "reconnect" | "lost";
 
 export interface StudentPreCheckCheckResult {
-  id: 'browser' | 'javascript' | 'storage' | 'online' | 'screen-details';
+  id: "browser" | "javascript" | "storage" | "online" | "screen-details";
   label: string;
   message: string;
   required: boolean;
-  status: 'pass' | 'warn' | 'fail';
+  status: "pass" | "warn" | "fail";
 }
 
 export interface StudentPreCheckResult {
   completedAt: string;
-  browserFamily: 'chrome' | 'edge' | 'safari' | 'firefox' | 'other';
+  browserFamily: "chrome" | "edge" | "safari" | "firefox" | "other";
   browserVersion: number | null;
   screenDetailsSupported: boolean;
   heartbeatReady: boolean;
@@ -52,7 +52,7 @@ export interface StudentPreCheckResult {
 }
 
 export interface StudentScoreSummary {
-  section: 'science';
+  section: "science";
   correctCount: number;
   totalQuestions: number;
   percentage: number;
@@ -61,9 +61,9 @@ export interface StudentScoreSummary {
 export interface StudentFinalSubmissionReceipt {
   submissionId: string;
   submittedAt: string;
-  answers?: StudentAttempt['answers'] | undefined;
-  writingAnswers?: StudentAttempt['writingAnswers'] | undefined;
-  flags?: StudentAttempt['flags'] | undefined;
+  answers?: StudentAttempt["answers"] | undefined;
+  writingAnswers?: StudentAttempt["writingAnswers"] | undefined;
+  flags?: StudentAttempt["flags"] | undefined;
   score?: StudentScoreSummary | undefined;
 }
 
@@ -78,7 +78,7 @@ export interface StudentAttempt {
   candidateId: string;
   candidateName: string;
   candidateEmail: string;
-  phase: 'pre-check' | 'lobby' | 'exam' | 'post-exam' | 'submitted';
+  phase: "pre-check" | "lobby" | "exam" | "post-exam" | "submitted";
   currentModule: ModuleType;
   currentQuestionId: string | null;
   answers: Record<string, StudentAnswerValue>;
@@ -100,7 +100,7 @@ export interface StudentAttempt {
     lastDisconnectAt: string | null;
     lastReconnectAt: string | null;
     lastHeartbeatAt: string | null;
-    lastHeartbeatStatus: 'idle' | 'ok' | 'lost';
+    lastHeartbeatStatus: "idle" | "ok" | "lost";
   };
   recovery: {
     finalSubmissionPending: boolean;
@@ -110,7 +110,7 @@ export interface StudentAttempt {
     lastDroppedMutations: {
       at: string;
       count: number;
-      fromModule: ModuleType | 'multiple' | null;
+      fromModule: ModuleType | "multiple" | null;
       toModule: ModuleType | null;
       reason: string;
       affectedAnswers?: string[] | undefined;
@@ -133,9 +133,9 @@ export interface StudentAttempt {
 }
 
 export interface StudentFinalAnswerPatch {
-  answers: StudentAttempt['answers'];
-  writingAnswers: StudentAttempt['writingAnswers'];
-  flags: StudentAttempt['flags'];
+  answers: StudentAttempt["answers"];
+  writingAnswers: StudentAttempt["writingAnswers"];
+  flags: StudentAttempt["flags"];
 }
 
 export interface StudentAttemptSeed {
@@ -148,7 +148,7 @@ export interface StudentAttemptSeed {
   candidateEmail: string;
   currentModule?: ModuleType | undefined;
   currentQuestionId?: string | null | undefined;
-  phase?: StudentAttempt['phase'] | undefined;
+  phase?: StudentAttempt["phase"] | undefined;
 }
 
 export interface StudentAttemptMutationBase {
@@ -163,7 +163,7 @@ export type StudentAttemptMutationPayloadMap = {
     questionId: string;
     value: StudentAnswerValue;
     module?: ModuleType | undefined;
-    interactionType?: StudentAnswerMutationMeta['interactionType'] | undefined;
+    interactionType?: StudentAnswerMutationMeta["interactionType"] | undefined;
     slotIndex?: number | undefined;
     slotId?: string | undefined;
     slotCount?: number | undefined;
@@ -188,7 +188,7 @@ export type StudentAttemptMutationPayloadMap = {
   position: {
     currentModule?: ModuleType | undefined;
     currentQuestionId?: string | null | undefined;
-    phase?: StudentAttempt['phase'] | undefined;
+    phase?: StudentAttempt["phase"] | undefined;
     changedAreas?: string[] | undefined;
   } & Record<string, unknown>;
   precheck: Record<string, unknown>;

@@ -1,17 +1,17 @@
 /**
  * Exam Statistics Utilities
- * 
+ *
  * Shared helpers for calculating exam statistics (question counts, etc.)
  * Used across validation, search, export, and UI components.
  */
 
-import { Exam, ExamState } from '../types';
-import { ExamEntity, ExamVersion } from '../types/domain';
+import { Exam, ExamState } from "../types";
+import { ExamEntity, ExamVersion } from "../types/domain";
 import {
   getReadingTotalQuestions,
   getListeningTotalQuestions,
   getActScienceTotalQuestions,
-} from './examUtils';
+} from "./examUtils";
 
 /**
  * Statistics summary for an exam
@@ -34,7 +34,7 @@ export function getExamStatsFromExam(exam: Exam): ExamStats {
   const readingQuestions = getReadingTotalQuestions(exam.content.reading.passages);
   const listeningQuestions = getListeningTotalQuestions(exam.content.listening.parts);
   const scienceQuestions = getActScienceTotalQuestions(exam.content.science?.stimuli ?? []);
-  
+
   return {
     totalQuestions: readingQuestions + listeningQuestions + scienceQuestions,
     readingQuestions,
@@ -43,7 +43,7 @@ export function getExamStatsFromExam(exam: Exam): ExamStats {
     readingPassages: exam.content.reading.passages.length,
     listeningParts: exam.content.listening.parts.length,
     hasWriting: exam.content.config.sections.writing.enabled,
-    hasSpeaking: exam.content.config.sections.speaking.enabled
+    hasSpeaking: exam.content.config.sections.speaking.enabled,
   };
 }
 
@@ -54,7 +54,7 @@ export function getExamStatsFromState(state: ExamState): ExamStats {
   const readingQuestions = getReadingTotalQuestions(state.reading.passages);
   const listeningQuestions = getListeningTotalQuestions(state.listening.parts);
   const scienceQuestions = getActScienceTotalQuestions(state.science.stimuli);
-  
+
   return {
     totalQuestions: readingQuestions + listeningQuestions + scienceQuestions,
     readingQuestions,
@@ -63,7 +63,7 @@ export function getExamStatsFromState(state: ExamState): ExamStats {
     readingPassages: state.reading.passages.length,
     listeningParts: state.listening.parts.length,
     hasWriting: state.config.sections.writing.enabled,
-    hasSpeaking: state.config.sections.speaking.enabled
+    hasSpeaking: state.config.sections.speaking.enabled,
   };
 }
 
@@ -87,7 +87,7 @@ export async function getExamStatsFromEntity(
       return getExamStatsFromVersion(version);
     }
   }
-  
+
   // Fallback to published version if no draft
   if (entity.currentPublishedVersionId) {
     const version = await getVersionById(entity.currentPublishedVersionId);
@@ -95,7 +95,7 @@ export async function getExamStatsFromEntity(
       return getExamStatsFromVersion(version);
     }
   }
-  
+
   // Return empty stats if no version available
   const emptyStats: ExamStats = {
     totalQuestions: 0,
@@ -105,7 +105,7 @@ export async function getExamStatsFromEntity(
     readingPassages: 0,
     listeningParts: 0,
     hasWriting: false,
-    hasSpeaking: false
+    hasSpeaking: false,
   };
   return emptyStats;
 }
@@ -115,7 +115,7 @@ export async function getExamStatsFromEntity(
  */
 export function formatExamStats(stats: ExamStats): string {
   const parts: string[] = [];
-  
+
   if (stats.readingQuestions > 0) {
     parts.push(`${stats.readingQuestions} Reading`);
   }
@@ -126,13 +126,13 @@ export function formatExamStats(stats: ExamStats): string {
     parts.push(`${stats.scienceQuestions} Science`);
   }
   if (stats.hasWriting) {
-    parts.push('Writing');
+    parts.push("Writing");
   }
   if (stats.hasSpeaking) {
-    parts.push('Speaking');
+    parts.push("Speaking");
   }
-  
-  return parts.length > 0 ? parts.join(', ') : 'No content';
+
+  return parts.length > 0 ? parts.join(", ") : "No content";
 }
 
 /**
@@ -140,8 +140,8 @@ export function formatExamStats(stats: ExamStats): string {
  */
 export function getCompactStatsString(stats: ExamStats): string {
   const total = stats.totalQuestions;
-  if (total === 0) return '0 questions';
-  return `${total} question${total === 1 ? '' : 's'}`;
+  if (total === 0) return "0 questions";
+  return `${total} question${total === 1 ? "" : "s"}`;
 }
 
 /**
@@ -152,37 +152,41 @@ export interface ExamFilterOptions {
   status: string[];
   type: string[];
   creator: string[];
-  dateRange?: {
-    start?: string | undefined;
-    end?: string | undefined;
-  } | undefined;
-  questionCount?: {
-    min?: number | undefined;
-    max?: number | undefined;
-  } | undefined;
+  dateRange?:
+    | {
+        start?: string | undefined;
+        end?: string | undefined;
+      }
+    | undefined;
+  questionCount?:
+    | {
+        min?: number | undefined;
+        max?: number | undefined;
+      }
+    | undefined;
 }
 
 export interface ExamSortOptions {
-  field: 'title' | 'modified' | 'published' | 'created' | 'questionCount';
-  direction: 'asc' | 'desc';
+  field: "title" | "modified" | "published" | "created" | "questionCount";
+  direction: "asc" | "desc";
 }
 
 /**
  * Default filter options
  */
 export const DEFAULT_FILTERS: ExamFilterOptions = {
-  search: '',
+  search: "",
   status: [],
   type: [],
-  creator: []
+  creator: [],
 };
 
 /**
  * Default sort options
  */
 export const DEFAULT_SORT: ExamSortOptions = {
-  field: 'modified',
-  direction: 'desc'
+  field: "modified",
+  direction: "desc",
 };
 
 /**
@@ -193,9 +197,15 @@ export function hasActiveFilters(filters: ExamFilterOptions): boolean {
   const hasStatus: boolean = filters.status.length > 0;
   const hasType: boolean = filters.type.length > 0;
   const hasCreator: boolean = filters.creator.length > 0;
-  const hasDateRange: boolean = !!(filters.dateRange && (filters.dateRange.start || filters.dateRange.end));
-  const hasQuestionCount: boolean = !!(filters.questionCount && (filters.questionCount.min !== undefined || filters.questionCount.max !== undefined));
-  
+  const hasDateRange: boolean = !!(
+    filters.dateRange &&
+    (filters.dateRange.start || filters.dateRange.end)
+  );
+  const hasQuestionCount: boolean = !!(
+    filters.questionCount &&
+    (filters.questionCount.min !== undefined || filters.questionCount.max !== undefined)
+  );
+
   return hasSearch || hasStatus || hasType || hasCreator || hasDateRange || hasQuestionCount;
 }
 
@@ -204,46 +214,51 @@ export function hasActiveFilters(filters: ExamFilterOptions): boolean {
  */
 export function serializeFilters(filters: ExamFilterOptions, sort: ExamSortOptions): string {
   const params = new URLSearchParams();
-  
-  if (filters.search) params.set('q', filters.search);
-  if (filters.status.length > 0) params.set('status', filters.status.join(','));
-  if (filters.type.length > 0) params.set('type', filters.type.join(','));
-  if (filters.creator.length > 0) params.set('creator', filters.creator.join(','));
-  if (filters.dateRange?.start) params.set('dateStart', filters.dateRange.start);
-  if (filters.dateRange?.end) params.set('dateEnd', filters.dateRange.end);
-  if (filters.questionCount?.min !== undefined) params.set('qMin', filters.questionCount.min.toString());
-  if (filters.questionCount?.max !== undefined) params.set('qMax', filters.questionCount.max.toString());
-  
-  params.set('sort', sort.field);
-  params.set('order', sort.direction);
-  
+
+  if (filters.search) params.set("q", filters.search);
+  if (filters.status.length > 0) params.set("status", filters.status.join(","));
+  if (filters.type.length > 0) params.set("type", filters.type.join(","));
+  if (filters.creator.length > 0) params.set("creator", filters.creator.join(","));
+  if (filters.dateRange?.start) params.set("dateStart", filters.dateRange.start);
+  if (filters.dateRange?.end) params.set("dateEnd", filters.dateRange.end);
+  if (filters.questionCount?.min !== undefined)
+    params.set("qMin", filters.questionCount.min.toString());
+  if (filters.questionCount?.max !== undefined)
+    params.set("qMax", filters.questionCount.max.toString());
+
+  params.set("sort", sort.field);
+  params.set("order", sort.direction);
+
   return params.toString();
 }
 
 /**
  * Deserialize filters from URL query string
  */
-export function deserializeFilters(queryString: string): { filters: ExamFilterOptions; sort: ExamSortOptions } {
+export function deserializeFilters(queryString: string): {
+  filters: ExamFilterOptions;
+  sort: ExamSortOptions;
+} {
   const params = new URLSearchParams(queryString);
-  
+
   return {
     filters: {
-      search: params.get('q') || '',
-      status: params.get('status')?.split(',').filter(Boolean) || [],
-      type: params.get('type')?.split(',').filter(Boolean) || [],
-      creator: params.get('creator')?.split(',').filter(Boolean) || [],
+      search: params.get("q") || "",
+      status: params.get("status")?.split(",").filter(Boolean) || [],
+      type: params.get("type")?.split(",").filter(Boolean) || [],
+      creator: params.get("creator")?.split(",").filter(Boolean) || [],
       dateRange: {
-        start: params.get('dateStart') || undefined,
-        end: params.get('dateEnd') || undefined
+        start: params.get("dateStart") || undefined,
+        end: params.get("dateEnd") || undefined,
       },
       questionCount: {
-        min: params.get('qMin') ? parseInt(params.get('qMin')!) : undefined,
-        max: params.get('qMax') ? parseInt(params.get('qMax')!) : undefined
-      }
+        min: params.get("qMin") ? parseInt(params.get("qMin")!) : undefined,
+        max: params.get("qMax") ? parseInt(params.get("qMax")!) : undefined,
+      },
     },
     sort: {
-      field: (params.get('sort') as ExamSortOptions['field']) || DEFAULT_SORT.field,
-      direction: (params.get('order') as ExamSortOptions['direction']) || DEFAULT_SORT.direction
-    }
+      field: (params.get("sort") as ExamSortOptions["field"]) || DEFAULT_SORT.field,
+      direction: (params.get("order") as ExamSortOptions["direction"]) || DEFAULT_SORT.direction,
+    },
   };
 }

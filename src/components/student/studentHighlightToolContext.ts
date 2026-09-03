@@ -6,11 +6,11 @@ export function isStudentHighlightToolContextActive(input: {
   finalSubmitIdle: boolean;
 }): boolean {
   return (
-    input.phase === 'exam' &&
-    (input.module === 'reading' ||
-      input.module === 'listening' ||
-      input.module === 'writing' ||
-      input.module === 'science') &&
+    input.phase === "exam" &&
+    (input.module === "reading" ||
+      input.module === "listening" ||
+      input.module === "writing" ||
+      input.module === "science") &&
     input.blockingReason === null &&
     !input.submitConfirmOpen &&
     input.finalSubmitIdle

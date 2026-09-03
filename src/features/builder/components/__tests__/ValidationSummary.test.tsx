@@ -1,11 +1,11 @@
-import React from 'react';
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { ValidationSummary } from '../ValidationSummary';
-import type { PublishReadiness } from '../../../../types/domain';
-import type { ValidationScope } from '../../../../types';
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { ValidationSummary } from "../ValidationSummary";
+import type { PublishReadiness } from "../../../../types/domain";
+import type { ValidationScope } from "../../../../types";
 
-describe('ValidationSummary', () => {
+describe("ValidationSummary", () => {
   const mockPublishReadiness: PublishReadiness = {
     canPublish: true,
     errors: [],
@@ -14,27 +14,27 @@ describe('ValidationSummary', () => {
     questionCounts: {
       reading: 40,
       listening: 40,
-      total: 80
-    }
+      total: 80,
+    },
   };
 
   const mockValidationScope: ValidationScope = {
     checked: [
-      'All questions have correct answers',
-      'Scoring tables match IELTS band conversions',
-      'Time allocations are within acceptable ranges',
-      'Question types match module requirements'
+      "All questions have correct answers",
+      "Scoring tables match IELTS band conversions",
+      "Time allocations are within acceptable ranges",
+      "Question types match module requirements",
     ],
     notChecked: [
-      'Content quality and appropriateness',
-      'Passage difficulty level',
-      'Distractor quality'
-    ]
+      "Content quality and appropriateness",
+      "Passage difficulty level",
+      "Distractor quality",
+    ],
   };
 
-  it('renders validation scope with Checked and Not checked sections', () => {
+  it("renders validation scope with Checked and Not checked sections", () => {
     render(
-      <ValidationSummary 
+      <ValidationSummary
         publishReadiness={mockPublishReadiness}
         validationScope={mockValidationScope}
       />
@@ -44,9 +44,9 @@ describe('ValidationSummary', () => {
     expect(screen.getByText(/^not checked:$/i)).toBeTruthy();
   });
 
-  it('displays correct color states for passed validation', () => {
+  it("displays correct color states for passed validation", () => {
     render(
-      <ValidationSummary 
+      <ValidationSummary
         publishReadiness={{ ...mockPublishReadiness, canPublish: true }}
         validationScope={mockValidationScope}
       />
@@ -55,13 +55,13 @@ describe('ValidationSummary', () => {
     expect(screen.getByText(/technical validation passed/i)).toBeTruthy();
   });
 
-  it('displays correct color states for failed validation', () => {
+  it("displays correct color states for failed validation", () => {
     render(
-      <ValidationSummary 
-        publishReadiness={{ 
-          ...mockPublishReadiness, 
+      <ValidationSummary
+        publishReadiness={{
+          ...mockPublishReadiness,
           canPublish: false,
-          errors: [{ field: 'title', message: 'Title is required', severity: 'error' }]
+          errors: [{ field: "title", message: "Title is required", severity: "error" }],
         }}
         validationScope={mockValidationScope}
       />
@@ -70,9 +70,9 @@ describe('ValidationSummary', () => {
     expect(screen.getByText(/technical validation issues/i)).toBeTruthy();
   });
 
-  it('shows Next steps guidance', () => {
+  it("shows Next steps guidance", () => {
     render(
-      <ValidationSummary 
+      <ValidationSummary
         publishReadiness={mockPublishReadiness}
         validationScope={mockValidationScope}
       />
@@ -82,10 +82,10 @@ describe('ValidationSummary', () => {
     expect(screen.getByText(/schedule access time and publish when ready/i)).toBeTruthy();
   });
 
-  it('calls onScheduleClick when schedule item clicked', () => {
+  it("calls onScheduleClick when schedule item clicked", () => {
     const onScheduleClick = vi.fn();
     render(
-      <ValidationSummary 
+      <ValidationSummary
         publishReadiness={mockPublishReadiness}
         validationScope={mockValidationScope}
         onScheduleClick={onScheduleClick}
@@ -96,10 +96,10 @@ describe('ValidationSummary', () => {
     // This is a placeholder for the actual implementation
   });
 
-  it('calls onNavigateToConfig when config item clicked', () => {
+  it("calls onNavigateToConfig when config item clicked", () => {
     const onNavigateToConfig = vi.fn();
     render(
-      <ValidationSummary 
+      <ValidationSummary
         publishReadiness={mockPublishReadiness}
         validationScope={mockValidationScope}
         onNavigateToConfig={onNavigateToConfig}
@@ -107,10 +107,10 @@ describe('ValidationSummary', () => {
     );
   });
 
-  it('calls onNavigateToBuilder when builder item clicked', () => {
+  it("calls onNavigateToBuilder when builder item clicked", () => {
     const onNavigateToBuilder = vi.fn();
     render(
-      <ValidationSummary 
+      <ValidationSummary
         publishReadiness={mockPublishReadiness}
         validationScope={mockValidationScope}
         onNavigateToBuilder={onNavigateToBuilder}
@@ -118,9 +118,9 @@ describe('ValidationSummary', () => {
     );
   });
 
-  it('has correct aria-labels for accessibility', () => {
+  it("has correct aria-labels for accessibility", () => {
     const { container } = render(
-      <ValidationSummary 
+      <ValidationSummary
         publishReadiness={mockPublishReadiness}
         validationScope={mockValidationScope}
       />
@@ -129,25 +129,25 @@ describe('ValidationSummary', () => {
     expect(container.querySelector('[role="status"]')).toBeTruthy();
   });
 
-  it('handles loading state', () => {
+  it("handles loading state", () => {
     render(
-      <ValidationSummary 
+      <ValidationSummary
         publishReadiness={mockPublishReadiness}
         validationScope={mockValidationScope}
       />
     );
   });
 
-  it('handles error state', () => {
+  it("handles error state", () => {
     render(
-      <ValidationSummary 
-        publishReadiness={{ 
-          ...mockPublishReadiness, 
+      <ValidationSummary
+        publishReadiness={{
+          ...mockPublishReadiness,
           canPublish: false,
           errors: [
-            { field: 'title', message: 'Title is required', severity: 'error' },
-            { field: 'content', message: 'Content is missing', severity: 'error' }
-          ]
+            { field: "title", message: "Title is required", severity: "error" },
+            { field: "content", message: "Content is missing", severity: "error" },
+          ],
         }}
         validationScope={mockValidationScope}
       />
@@ -157,26 +157,26 @@ describe('ValidationSummary', () => {
     expect(screen.getByText(/content is missing/i)).toBeTruthy();
   });
 
-  it('displays content summary with question counts', () => {
+  it("displays content summary with question counts", () => {
     render(
-      <ValidationSummary 
+      <ValidationSummary
         publishReadiness={mockPublishReadiness}
         validationScope={mockValidationScope}
       />
     );
 
-    expect(screen.getAllByText('40')).toHaveLength(2); // reading + listening
-    expect(screen.getByText('80')).toBeTruthy(); // total
+    expect(screen.getAllByText("40")).toHaveLength(2); // reading + listening
+    expect(screen.getByText("80")).toBeTruthy(); // total
   });
 
-  it('shows errors before the checked and not checked sections', () => {
+  it("shows errors before the checked and not checked sections", () => {
     render(
       <ValidationSummary
         publishReadiness={{
           ...mockPublishReadiness,
           canPublish: false,
-          errors: [{ field: 'title', message: 'Title is required', severity: 'error' }],
-          warnings: [{ field: 'review', message: 'Review recommended before publish' }],
+          errors: [{ field: "title", message: "Title is required", severity: "error" }],
+          warnings: [{ field: "review", message: "Review recommended before publish" }],
         }}
         validationScope={mockValidationScope}
       />
@@ -190,7 +190,7 @@ describe('ValidationSummary', () => {
     ).toBeTruthy();
   });
 
-  it('uses ACT Science checks instead of IELTS band-score checks for ACT readiness', () => {
+  it("uses ACT Science checks instead of IELTS band-score checks for ACT readiness", () => {
     render(
       <ValidationSummary
         publishReadiness={{
@@ -205,7 +205,9 @@ describe('ValidationSummary', () => {
       />
     );
 
-    expect(screen.queryByText(/scoring tables match IELTS band conversions/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/scoring tables match IELTS band conversions/i)
+    ).not.toBeInTheDocument();
     expect(screen.getByText(/ACT Science question structure is valid/i)).toBeInTheDocument();
   });
 });

@@ -1,16 +1,16 @@
 /**
  * Exam Lifecycle Service - Business Logic Layer
- * 
+ *
  * This service handles all exam lifecycle operations including:
  * - Status transitions with guards
  * - Version management
  * - Audit logging
  * - Publish readiness validation
- * 
+ *
  * UI components should call this service, not the repository directly.
  */
 
-import { examRepository, type IExamRepository } from './examRepository';
+import { examRepository, type IExamRepository } from "./examRepository";
 import {
   ExamEntity,
   ExamVersion,
@@ -24,9 +24,9 @@ import {
   CloneResult,
   RestoreResult,
   VersionDiff,
-  BulkOperationResult
-} from '../types/domain';
-import { ExamState, ExamType, ModuleType } from '../types';
+  BulkOperationResult,
+} from "../types/domain";
+import { ExamState, ExamType, ModuleType } from "../types";
 import {
   validateReadingModule,
   validateListeningModule,
@@ -34,11 +34,11 @@ import {
   getReadingTotalQuestions,
   getListeningTotalQuestions,
   getActScienceTotalQuestions,
-} from '../utils/examUtils';
-import { normalizeExamStateTableCompletionBlocks } from '../utils/tableCompletion';
-import { hydrateExamState } from './examAdapterService';
-import { getWritingTaskContent } from '../utils/writingTaskUtils';
-import { getExamIdCollisionIssues } from '../utils/examIdCollisionCheck';
+} from "../utils/examUtils";
+import { normalizeExamStateTableCompletionBlocks } from "../utils/tableCompletion";
+import { hydrateExamState } from "./examAdapterService";
+import { getWritingTaskContent } from "../utils/writingTaskUtils";
+import { getExamIdCollisionIssues } from "../utils/examIdCollisionCheck";
 import {
   backendDelete,
   backendGet,
@@ -48,9 +48,9 @@ import {
   isBackendBuilderEnabled,
   mapBackendExamVersion,
   rememberExamRevision,
-} from './backendBridge';
-import { canTransition, type ExamTransitionActorRole } from './policies/examStatusTransitions';
-import { notifyObjectiveGradingUpdated } from '../utils/objectiveGradingSync';
+} from "./backendBridge";
+import { canTransition, type ExamTransitionActorRole } from "./policies/examStatusTransitions";
+import { notifyObjectiveGradingUpdated } from "../utils/objectiveGradingSync";
 
 /**
  * Generate a slug from a title
@@ -58,8 +58,8 @@ import { notifyObjectiveGradingUpdated } from '../utils/objectiveGradingSync';
 function generateSlug(title: string): string {
   return title
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
 }
 
 /**
@@ -83,24 +83,24 @@ export class ExamLifecycleService {
       return null;
     }
 
-    if (normalizedActor === 'system') {
-      return 'system';
+    if (normalizedActor === "system") {
+      return "system";
     }
 
     if (normalizedActor === normalizedOwner) {
-      return 'owner';
+      return "owner";
     }
 
-    if (normalizedActor.includes('admin')) {
-      return 'admin';
+    if (normalizedActor.includes("admin")) {
+      return "admin";
     }
 
-    if (normalizedActor.includes('review')) {
-      return 'reviewer';
+    if (normalizedActor.includes("review")) {
+      return "reviewer";
     }
 
-    if (normalizedActor.includes('builder')) {
-      return 'owner';
+    if (normalizedActor.includes("builder")) {
+      return "owner";
     }
 
     return null;
@@ -135,7 +135,7 @@ export class ExamLifecycleService {
 
     return getExamRevision(examId) ?? null;
   }
-  
+
   /**
    * Create a new exam
    */
@@ -143,16 +143,16 @@ export class ExamLifecycleService {
     title: string,
     type: ExamType,
     initialState: ExamState,
-    owner: string = 'System'
+    owner: string = "System"
   ): Promise<TransitionResult> {
     if (this.useBackendBuilder()) {
       try {
         const slug = generateSlug(title);
-        const createdExam = await backendPost<any>('/v1/exams', {
+        const createdExam = await backendPost<any>("/v1/exams", {
           slug,
           title,
           examType: type,
-          visibility: 'organization',
+          visibility: "organization",
         });
 
         rememberExamRevision(createdExam.id, createdExam.revision);
@@ -174,23 +174,23 @@ export class ExamLifecycleService {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to create exam',
+          error: error instanceof Error ? error.message : "Failed to create exam",
         };
       }
     }
 
-    const examId = generateId('exam');
+    const examId = generateId("exam");
     const slug = generateSlug(title);
     const now = new Date().toISOString();
-    
+
     // Create exam entity
     const exam: ExamEntity = {
       id: examId,
       slug,
       title,
       type,
-      status: 'draft',
-      visibility: 'organization',
+      status: "draft",
+      visibility: "organization",
       owner,
       createdAt: now,
       updatedAt: now,
@@ -199,12 +199,12 @@ export class ExamLifecycleService {
       canEdit: true,
       canPublish: true,
       canDelete: true,
-      schemaVersion: SCHEMA_VERSION
+      schemaVersion: SCHEMA_VERSION,
     };
-    
+
     // Create initial version
     const version: ExamVersion = {
-      id: generateId('ver'),
+      id: generateId("ver"),
       examId,
       versionNumber: 1,
       parentVersionId: null,
@@ -214,39 +214,39 @@ export class ExamLifecycleService {
         isValid: true,
         errorCount: 0,
         warningCount: 0,
-        lastValidatedAt: now
+        lastValidatedAt: now,
       },
       createdBy: owner,
       createdAt: now,
       isDraft: true,
-      isPublished: false
+      isPublished: false,
     };
-    
+
     exam.currentDraftVersionId = version.id;
-    
+
     // Create audit event
     const event: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId,
       versionId: version.id,
       actor: owner,
-      action: 'created',
-      timestamp: now
+      action: "created",
+      timestamp: now,
     };
-    
+
     // Persist
     await this.repository.saveExam(exam);
     await this.repository.saveVersion(version);
     await this.repository.saveEvent(event);
-    
+
     return {
       success: true,
       exam,
       version,
-      event
+      event,
     };
   }
-  
+
   /**
    * Save a draft version
    * If exam is published, editing creates a new draft version without affecting the published version
@@ -254,7 +254,7 @@ export class ExamLifecycleService {
   async saveDraft(
     examId: string,
     content: ExamState,
-    actor: string = 'System'
+    actor: string = "System"
   ): Promise<TransitionResult> {
     const normalizedContent = normalizeExamStateTableCompletionBlocks(content);
 
@@ -262,7 +262,7 @@ export class ExamLifecycleService {
       try {
         const revision = await this.ensureBackendExamRevision(examId);
         if (revision === null) {
-          return { success: false, error: 'Exam not found' };
+          return { success: false, error: "Exam not found" };
         }
 
         const savedVersion = await backendPatch<any>(`/v1/exams/${examId}/draft`, {
@@ -271,12 +271,16 @@ export class ExamLifecycleService {
           revision,
         });
         const exam = await this.repository.getExamById(examId);
-        const desiredTitle = (normalizedContent.config?.general?.title ?? normalizedContent.title ?? '').trim();
+        const desiredTitle = (
+          normalizedContent.config?.general?.title ??
+          normalizedContent.title ??
+          ""
+        ).trim();
 
         if (exam && desiredTitle && exam.title !== desiredTitle) {
           const nextRevision = getExamRevision(examId);
           if (nextRevision === undefined) {
-            throw new Error('Missing exam revision after draft save.');
+            throw new Error("Missing exam revision after draft save.");
           }
 
           await backendPatch(`/v1/exams/${examId}`, {
@@ -296,25 +300,25 @@ export class ExamLifecycleService {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to save draft',
+          error: error instanceof Error ? error.message : "Failed to save draft",
         };
       }
     }
 
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
 
     const now = new Date().toISOString();
 
     // Get current version to determine next version number
     const allVersions = await this.repository.getAllVersions(examId);
-    const maxVersion = Math.max(...allVersions.map(v => v.versionNumber), 0);
+    const maxVersion = Math.max(...allVersions.map((v) => v.versionNumber), 0);
 
     // Determine parent version - if published, parent should be the published version
     let parentVersionId: string | null;
-    if (exam.status === 'published' && exam.currentPublishedVersionId) {
+    if (exam.status === "published" && exam.currentPublishedVersionId) {
       parentVersionId = exam.currentPublishedVersionId;
     } else {
       parentVersionId = exam.currentDraftVersionId;
@@ -322,7 +326,7 @@ export class ExamLifecycleService {
 
     // Create new draft version
     const version: ExamVersion = {
-      id: generateId('ver'),
+      id: generateId("ver"),
       examId,
       versionNumber: maxVersion + 1,
       parentVersionId,
@@ -332,12 +336,12 @@ export class ExamLifecycleService {
         isValid: true,
         errorCount: 0,
         warningCount: 0,
-        lastValidatedAt: now
+        lastValidatedAt: now,
       },
       createdBy: actor,
       createdAt: now,
       isDraft: true,
-      isPublished: false
+      isPublished: false,
     };
 
     // Update exam - always point draft version to the new version
@@ -350,13 +354,13 @@ export class ExamLifecycleService {
 
     // Create audit event
     const event: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId,
       versionId: version.id,
       actor,
-      action: exam.status === 'published' ? 'version_created' : 'draft_saved',
+      action: exam.status === "published" ? "version_created" : "draft_saved",
       timestamp: now,
-      payload: exam.status === 'published' ? { editingPublished: true } : undefined
+      payload: exam.status === "published" ? { editingPublished: true } : undefined,
     };
 
     // Persist
@@ -369,27 +373,27 @@ export class ExamLifecycleService {
       success: true,
       exam,
       version,
-      event
+      event,
     };
   }
-  
+
   /**
    * Transition exam status
    */
   async transitionStatus(
     examId: string,
     toStatus: ExamStatus,
-    actor: string = 'System',
+    actor: string = "System",
     notes?: string
   ): Promise<TransitionResult> {
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
     const actorRole = this.resolveTransitionActorRole(actor, exam.owner);
 
     if (this.useBackendBuilder()) {
-      if (toStatus === 'published') {
+      if (toStatus === "published") {
         return this.publishExam(examId, actor, notes);
       }
 
@@ -404,7 +408,7 @@ export class ExamLifecycleService {
       try {
         const revision = await this.ensureBackendExamRevision(examId);
         if (revision === null) {
-          return { success: false, error: 'Exam not found' };
+          return { success: false, error: "Exam not found" };
         }
 
         await backendPatch(`/v1/exams/${examId}`, {
@@ -420,86 +424,86 @@ export class ExamLifecycleService {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to update exam',
+          error: error instanceof Error ? error.message : "Failed to update exam",
         };
       }
     }
-    
+
     // Check if transition is allowed
     if (!canTransition(exam.status, toStatus, actorRole)) {
       return {
         success: false,
-        error: `Cannot transition from ${exam.status} to ${toStatus}`
+        error: `Cannot transition from ${exam.status} to ${toStatus}`,
       };
     }
-    
+
     const fromStatus = exam.status;
     const now = new Date().toISOString();
-    
+
     // Update exam status and timestamps
     exam.status = toStatus;
     exam.updatedAt = now;
-    
-    if (toStatus === 'published') {
+
+    if (toStatus === "published") {
       exam.publishedAt = now;
-    } else if (toStatus === 'archived') {
+    } else if (toStatus === "archived") {
       exam.archivedAt = now;
     }
-    
+
     // Determine action type
     let action: ExamAction;
     switch (toStatus) {
-      case 'in_review':
-        action = 'submitted_for_review';
+      case "in_review":
+        action = "submitted_for_review";
         break;
-      case 'approved':
-        action = 'approved';
+      case "approved":
+        action = "approved";
         break;
-      case 'rejected':
-        action = 'rejected';
+      case "rejected":
+        action = "rejected";
         break;
-      case 'published':
-        action = 'published';
+      case "published":
+        action = "published";
         break;
-      case 'unpublished':
-        action = 'unpublished';
+      case "unpublished":
+        action = "unpublished";
         break;
-      case 'archived':
-        action = 'archived';
+      case "archived":
+        action = "archived";
         break;
       default:
-        action = 'draft_saved';
+        action = "draft_saved";
     }
-    
+
     // Create audit event
     const event: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId,
       actor,
       action,
       fromState: fromStatus,
       toState: toStatus,
       timestamp: now,
-      payload: notes ? { notes } : undefined
+      payload: notes ? { notes } : undefined,
     };
-    
+
     // Persist
     await this.repository.saveExam(exam);
     await this.repository.saveEvent(event);
-    
+
     return {
       success: true,
       exam,
-      event
+      event,
     };
   }
-  
+
   /**
    * Publish an exam (creates an immutable published version)
    */
   async publishExam(
     examId: string,
-    actor: string = 'System',
+    actor: string = "System",
     publishNotes?: string
   ): Promise<TransitionResult> {
     if (this.useBackendBuilder()) {
@@ -508,7 +512,7 @@ export class ExamLifecycleService {
         const exam = await this.repository.getExamById(examId);
         return {
           success: false,
-          error: 'Exam is not ready for publication',
+          error: "Exam is not ready for publication",
           exam: exam ?? undefined,
         };
       }
@@ -516,7 +520,7 @@ export class ExamLifecycleService {
       try {
         const revision = await this.refreshBackendExamRevision(examId);
         if (revision === null) {
-          return { success: false, error: 'Exam not found' };
+          return { success: false, error: "Exam not found" };
         }
 
         const publishedVersion = await backendPost<any>(`/v1/exams/${examId}/publish`, {
@@ -534,146 +538,143 @@ export class ExamLifecycleService {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to publish exam',
+          error: error instanceof Error ? error.message : "Failed to publish exam",
         };
       }
     }
 
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
-    
+
     // Check if exam can be published
     const readiness = await this.getPublishReadiness(examId);
     if (!readiness.canPublish) {
       return {
         success: false,
-        error: 'Exam is not ready for publication',
-        exam
+        error: "Exam is not ready for publication",
+        exam,
       };
     }
-    
+
     const now = new Date().toISOString();
-    
+
     // Get current draft version
     if (!exam.currentDraftVersionId) {
-      return { success: false, error: 'No draft version to publish' };
+      return { success: false, error: "No draft version to publish" };
     }
-    
+
     const draftVersion = await this.repository.getVersionById(exam.currentDraftVersionId);
     if (!draftVersion) {
-      return { success: false, error: 'Draft version not found' };
+      return { success: false, error: "Draft version not found" };
     }
-    
+
     // Create published version (immutable copy)
     const publishedVersion: ExamVersion = {
       ...draftVersion,
-      id: generateId('ver'),
+      id: generateId("ver"),
       versionNumber: draftVersion.versionNumber,
       parentVersionId: draftVersion.id,
       isDraft: false,
       isPublished: true,
       publishNotes,
-      createdAt: now
+      createdAt: now,
     };
-    
+
     // Update exam
     const previousStatus = exam.status;
     exam.currentPublishedVersionId = publishedVersion.id;
-    exam.status = 'published';
+    exam.status = "published";
     exam.publishedAt = now;
     exam.updatedAt = now;
-    
+
     // Create audit event
     const event: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId,
       versionId: publishedVersion.id,
       actor,
-      action: 'published',
+      action: "published",
       fromState: previousStatus,
-      toState: 'published',
+      toState: "published",
       timestamp: now,
-      payload: publishNotes ? { notes: publishNotes } : undefined
+      payload: publishNotes ? { notes: publishNotes } : undefined,
     };
-    
+
     // Persist
     await this.repository.saveExam(exam);
     await this.repository.saveVersion(publishedVersion);
     await this.repository.saveEvent(event);
-    
+
     return {
       success: true,
       exam,
       version: publishedVersion,
-      event
+      event,
     };
   }
-  
+
   /**
    * Unpublish an exam (withdraw from live)
    */
   async unpublishExam(
     examId: string,
-    actor: string = 'System',
+    actor: string = "System",
     reason?: string
   ): Promise<TransitionResult> {
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
-    
-    if (exam.status !== 'published') {
-      return { success: false, error: 'Exam is not published' };
+
+    if (exam.status !== "published") {
+      return { success: false, error: "Exam is not published" };
     }
-    
+
     const now = new Date().toISOString();
-    
+
     // Update exam status
-    exam.status = 'unpublished';
+    exam.status = "unpublished";
     exam.updatedAt = now;
-    
+
     // Create audit event
     const event: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId,
       actor,
-      action: 'unpublished',
-      fromState: 'published',
-      toState: 'unpublished',
+      action: "unpublished",
+      fromState: "published",
+      toState: "unpublished",
       timestamp: now,
-      payload: reason ? { reason } : undefined
+      payload: reason ? { reason } : undefined,
     };
-    
+
     // Persist
     await this.repository.saveExam(exam);
     await this.repository.saveEvent(event);
-    
+
     return {
       success: true,
       exam,
-      event
+      event,
     };
   }
-  
+
   /**
    * Submit exam for review
    */
-  async submitForReview(
-    examId: string,
-    actor: string = 'System'
-  ): Promise<TransitionResult> {
+  async submitForReview(examId: string, actor: string = "System"): Promise<TransitionResult> {
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
 
     // Check if exam is in draft status
-    if (exam.status !== 'draft') {
+    if (exam.status !== "draft") {
       return {
         success: false,
-        error: `Cannot submit exam for review from status: ${exam.status}. Only draft exams can be submitted.`
+        error: `Cannot submit exam for review from status: ${exam.status}. Only draft exams can be submitted.`,
       };
     }
 
@@ -682,12 +683,12 @@ export class ExamLifecycleService {
     if (!readiness.canPublish) {
       return {
         success: false,
-        error: 'Exam has validation errors that must be fixed before submission',
-        exam
+        error: "Exam has validation errors that must be fixed before submission",
+        exam,
       };
     }
 
-    return this.transitionStatus(examId, 'in_review', actor);
+    return this.transitionStatus(examId, "in_review", actor);
   }
 
   /**
@@ -695,22 +696,22 @@ export class ExamLifecycleService {
    */
   async approveExam(
     examId: string,
-    actor: string = 'System',
+    actor: string = "System",
     notes?: string
   ): Promise<TransitionResult> {
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
 
-    if (exam.status !== 'in_review') {
+    if (exam.status !== "in_review") {
       return {
         success: false,
-        error: `Cannot approve exam from status: ${exam.status}. Only exams in review can be approved.`
+        error: `Cannot approve exam from status: ${exam.status}. Only exams in review can be approved.`,
       };
     }
 
-    const result = await this.transitionStatus(examId, 'approved', actor, notes);
+    const result = await this.transitionStatus(examId, "approved", actor, notes);
     return result;
   }
 
@@ -719,22 +720,22 @@ export class ExamLifecycleService {
    */
   async rejectExam(
     examId: string,
-    actor: string = 'System',
+    actor: string = "System",
     reason?: string
   ): Promise<TransitionResult> {
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
 
-    if (exam.status !== 'in_review') {
+    if (exam.status !== "in_review") {
       return {
         success: false,
-        error: `Cannot reject exam from status: ${exam.status}. Only exams in review can be rejected.`
+        error: `Cannot reject exam from status: ${exam.status}. Only exams in review can be rejected.`,
       };
     }
 
-    return this.transitionStatus(examId, 'rejected', actor, reason);
+    return this.transitionStatus(examId, "rejected", actor, reason);
   }
 
   /**
@@ -742,19 +743,19 @@ export class ExamLifecycleService {
    */
   async schedulePublish(
     examId: string,
-    actor: string = 'System',
+    actor: string = "System",
     scheduledTime?: string
   ): Promise<TransitionResult> {
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
 
     // Check if exam is approved or published
-    if (exam.status !== 'approved' && exam.status !== 'published') {
+    if (exam.status !== "approved" && exam.status !== "published") {
       return {
         success: false,
-        error: `Cannot schedule exam from status: ${exam.status}. Exam must be approved or published first.`
+        error: `Cannot schedule exam from status: ${exam.status}. Exam must be approved or published first.`,
       };
     }
 
@@ -763,8 +764,8 @@ export class ExamLifecycleService {
     if (!readiness.canPublish) {
       return {
         success: false,
-        error: 'Exam has validation errors that must be fixed before scheduling',
-        exam
+        error: "Exam has validation errors that must be fixed before scheduling",
+        exam,
       };
     }
 
@@ -772,19 +773,19 @@ export class ExamLifecycleService {
 
     // Update exam status
     const previousStatus = exam.status;
-    exam.status = 'scheduled';
+    exam.status = "scheduled";
     exam.updatedAt = now;
 
     // Create audit event
     const event: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId,
       actor,
-      action: 'scheduled',
+      action: "scheduled",
       fromState: previousStatus,
-      toState: 'scheduled',
+      toState: "scheduled",
       timestamp: now,
-      payload: scheduledTime ? { scheduledTime } : undefined
+      payload: scheduledTime ? { scheduledTime } : undefined,
     };
 
     // Persist
@@ -794,27 +795,21 @@ export class ExamLifecycleService {
     return {
       success: true,
       exam,
-      event
+      event,
     };
   }
 
   /**
    * Archive an exam
    */
-  async archiveExam(
-    examId: string,
-    actor: string = 'System'
-  ): Promise<TransitionResult> {
-    return this.transitionStatus(examId, 'archived', actor);
+  async archiveExam(examId: string, actor: string = "System"): Promise<TransitionResult> {
+    return this.transitionStatus(examId, "archived", actor);
   }
-  
+
   /**
    * Delete an exam
    */
-  async deleteExam(
-    examId: string,
-    actor: string = 'System'
-  ): Promise<TransitionResult> {
+  async deleteExam(examId: string, actor: string = "System"): Promise<TransitionResult> {
     if (this.useBackendBuilder()) {
       try {
         await backendDelete(`/v1/exams/${examId}`);
@@ -822,46 +817,46 @@ export class ExamLifecycleService {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to delete exam',
+          error: error instanceof Error ? error.message : "Failed to delete exam",
         };
       }
     }
 
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
-    
+
     // Check if exam can be deleted (only draft or archived)
-    if (exam.status === 'published' || exam.status === 'scheduled') {
+    if (exam.status === "published" || exam.status === "scheduled") {
       return {
         success: false,
-        error: 'Cannot delete published or scheduled exams. Unpublish or archive first.'
+        error: "Cannot delete published or scheduled exams. Unpublish or archive first.",
       };
     }
-    
+
     const now = new Date().toISOString();
-    
+
     // Create audit event before deletion
     const event: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId,
       actor,
-      action: 'permissions_updated', // Using this as a proxy for deletion
+      action: "permissions_updated", // Using this as a proxy for deletion
       timestamp: now,
-      payload: { deleted: true }
+      payload: { deleted: true },
     };
-    
+
     // Delete exam
     await this.repository.deleteExam(examId);
     await this.repository.saveEvent(event);
-    
+
     return {
       success: true,
-      event
+      event,
     };
   }
-  
+
   /**
    * Check if exam is ready for publication with comprehensive validation
    */
@@ -874,7 +869,11 @@ export class ExamLifecycleService {
           warnings: Array<{ field: string; message: string }>;
         }>(`/v1/exams/${examId}/validation`);
 
-        let questionCounts: PublishReadiness['questionCounts'] = { reading: 0, listening: 0, total: 0 };
+        let questionCounts: PublishReadiness["questionCounts"] = {
+          reading: 0,
+          listening: 0,
+          total: 0,
+        };
         let integrityIssues: ReturnType<typeof getExamIdCollisionIssues> = [];
         try {
           const exam = await this.repository.getExamById(examId);
@@ -890,15 +889,16 @@ export class ExamLifecycleService {
               const listeningQuestions = config.sections.listening.enabled
                 ? getListeningTotalQuestions(content.listening.parts)
                 : 0;
-              const scienceQuestions = config.general.type === 'ACT' && config.sections.science?.enabled
-                ? getActScienceTotalQuestions(content.science.stimuli)
-                : 0;
+              const scienceQuestions =
+                config.general.type === "ACT" && config.sections.science?.enabled
+                  ? getActScienceTotalQuestions(content.science.stimuli)
+                  : 0;
               integrityIssues = getExamIdCollisionIssues(content);
               questionCounts = {
                 reading: readingQuestions,
                 listening: listeningQuestions,
                 total: readingQuestions + listeningQuestions + scienceQuestions,
-                ...(config.general.type === 'ACT' ? { science: scienceQuestions } : {}),
+                ...(config.general.type === "ACT" ? { science: scienceQuestions } : {}),
               };
             }
           }
@@ -916,19 +916,21 @@ export class ExamLifecycleService {
           ...summary.errors.map((error) => ({
             field: error.field,
             message: error.message,
-            severity: 'error' as const,
+            severity: "error" as const,
           })),
           ...mappedIntegrityErrors,
         ];
 
-        const hasIntegrityError = mappedIntegrityErrors.some((issue) => issue.severity === 'error');
+        const hasIntegrityError = mappedIntegrityErrors.some((issue) => issue.severity === "error");
         return {
           canPublish: summary.canPublish && !hasIntegrityError,
           errors: combinedErrors,
           warnings: summary.warnings,
           missingFields: [
             ...summary.errors.map((error) => error.field),
-            ...mappedIntegrityErrors.filter((issue) => issue.severity === 'error').map((issue) => issue.field),
+            ...mappedIntegrityErrors
+              .filter((issue) => issue.severity === "error")
+              .map((issue) => issue.field),
           ],
           questionCounts,
         };
@@ -937,13 +939,13 @@ export class ExamLifecycleService {
           canPublish: false,
           errors: [
             {
-              field: 'exam',
-              message: error instanceof Error ? error.message : 'Failed to validate exam',
-              severity: 'error',
+              field: "exam",
+              message: error instanceof Error ? error.message : "Failed to validate exam",
+              severity: "error",
             },
           ],
           warnings: [],
-          missingFields: ['exam'],
+          missingFields: ["exam"],
           questionCounts: { reading: 0, listening: 0, total: 0 },
         };
       }
@@ -953,10 +955,10 @@ export class ExamLifecycleService {
     if (!exam) {
       return {
         canPublish: false,
-        errors: [{ field: 'exam', message: 'Exam not found', severity: 'error' }],
+        errors: [{ field: "exam", message: "Exam not found", severity: "error" }],
         warnings: [],
-        missingFields: ['exam'],
-        questionCounts: { reading: 0, listening: 0, total: 0 }
+        missingFields: ["exam"],
+        questionCounts: { reading: 0, listening: 0, total: 0 },
       };
     }
 
@@ -967,14 +969,14 @@ export class ExamLifecycleService {
     if (!version) {
       return {
         canPublish: false,
-        errors: [{ field: 'version', message: 'No draft version found', severity: 'error' }],
+        errors: [{ field: "version", message: "No draft version found", severity: "error" }],
         warnings: [],
-        missingFields: ['draft_version'],
-        questionCounts: { reading: 0, listening: 0, total: 0 }
+        missingFields: ["draft_version"],
+        questionCounts: { reading: 0, listening: 0, total: 0 },
       };
     }
 
-    const errors: Array<{ field: string; message: string; severity: 'error' | 'warning' }> = [];
+    const errors: Array<{ field: string; message: string; severity: "error" | "warning" }> = [];
     const warnings: Array<{ field: string; message: string }> = [];
     const missingFields: string[] = [];
     const content = hydrateExamState(version.contentSnapshot);
@@ -982,83 +984,109 @@ export class ExamLifecycleService {
 
     // 1. Title validation
     if (!exam.title.trim()) {
-      errors.push({ field: 'title', message: 'Exam title is required', severity: 'error' });
-      missingFields.push('title');
+      errors.push({ field: "title", message: "Exam title is required", severity: "error" });
+      missingFields.push("title");
     }
 
     // 2. General config validation
     if (!config.general.summary.trim()) {
-      warnings.push({ field: 'summary', message: 'Exam summary is empty' });
+      warnings.push({ field: "summary", message: "Exam summary is empty" });
     }
 
     // 3. Enabled module completeness check
     const enabledModules: ModuleType[] = [];
-    if (config.sections.reading.enabled) enabledModules.push('reading');
-    if (config.sections.listening.enabled) enabledModules.push('listening');
-    if (config.sections.writing.enabled) enabledModules.push('writing');
-    if (config.sections.speaking.enabled) enabledModules.push('speaking');
-    if (config.sections.science.enabled) enabledModules.push('science');
+    if (config.sections.reading.enabled) enabledModules.push("reading");
+    if (config.sections.listening.enabled) enabledModules.push("listening");
+    if (config.sections.writing.enabled) enabledModules.push("writing");
+    if (config.sections.speaking.enabled) enabledModules.push("speaking");
+    if (config.sections.science.enabled) enabledModules.push("science");
 
     if (enabledModules.length === 0) {
-      errors.push({ field: 'modules', message: 'At least one module must be enabled', severity: 'error' });
-      missingFields.push('modules');
+      errors.push({
+        field: "modules",
+        message: "At least one module must be enabled",
+        severity: "error",
+      });
+      missingFields.push("modules");
     }
 
     // 4. Reading module validation
     if (config.sections.reading.enabled) {
       const readingErrors = validateReadingModule(content.reading.passages);
-      readingErrors.forEach(e => {
-        const field = e.field || 'reading';
-        if (e.type === 'warning') {
+      readingErrors.forEach((e) => {
+        const field = e.field || "reading";
+        if (e.type === "warning") {
           warnings.push({ field, message: e.message });
-        } else if (e.type === 'error') {
-          errors.push({ field, message: e.message, severity: 'error' });
+        } else if (e.type === "error") {
+          errors.push({ field, message: e.message, severity: "error" });
           missingFields.push(field);
         }
       });
 
       const readingQCount = getReadingTotalQuestions(content.reading.passages);
       if (readingQCount === 0) {
-        errors.push({ field: 'reading.questions', message: 'Reading module has no questions', severity: 'error' });
-        missingFields.push('reading.questions');
+        errors.push({
+          field: "reading.questions",
+          message: "Reading module has no questions",
+          severity: "error",
+        });
+        missingFields.push("reading.questions");
       } else if (readingQCount < 20) {
-        warnings.push({ field: 'reading.questions', message: `Reading has only ${readingQCount} questions (recommended: 40)` });
+        warnings.push({
+          field: "reading.questions",
+          message: `Reading has only ${readingQCount} questions (recommended: 40)`,
+        });
       }
 
       // Band table validation
       const bandTable = config.sections.reading.bandScoreTable;
       if (!bandTable || Object.keys(bandTable).length === 0) {
-        errors.push({ field: 'reading.bandTable', message: 'Reading band score table is missing', severity: 'error' });
-        missingFields.push('reading.bandTable');
+        errors.push({
+          field: "reading.bandTable",
+          message: "Reading band score table is missing",
+          severity: "error",
+        });
+        missingFields.push("reading.bandTable");
       }
     }
 
     // 5. Listening module validation
     if (config.sections.listening.enabled) {
       const listeningErrors = validateListeningModule(content.listening.parts);
-      listeningErrors.forEach(e => {
-        const field = e.field || 'listening';
-        if (e.type === 'warning') {
+      listeningErrors.forEach((e) => {
+        const field = e.field || "listening";
+        if (e.type === "warning") {
           warnings.push({ field, message: e.message });
-        } else if (e.type === 'error') {
-          errors.push({ field, message: e.message, severity: 'error' });
+        } else if (e.type === "error") {
+          errors.push({ field, message: e.message, severity: "error" });
           missingFields.push(field);
         }
       });
 
       const listeningQCount = getListeningTotalQuestions(content.listening.parts);
       if (listeningQCount === 0) {
-        errors.push({ field: 'listening.questions', message: 'Listening module has no questions', severity: 'error' });
-        missingFields.push('listening.questions');
+        errors.push({
+          field: "listening.questions",
+          message: "Listening module has no questions",
+          severity: "error",
+        });
+        missingFields.push("listening.questions");
       } else if (listeningQCount < 20) {
-        warnings.push({ field: 'listening.questions', message: `Listening has only ${listeningQCount} questions (recommended: 40)` });
+        warnings.push({
+          field: "listening.questions",
+          message: `Listening has only ${listeningQCount} questions (recommended: 40)`,
+        });
       }
 
       // Band table validation
       const bandTable = config.sections.listening.bandScoreTable;
       if (!bandTable || Object.keys(bandTable).length === 0) {
-        errors.push({ field: 'listening.bandTable', message: 'Listening band score table is missing', severity: 'error' });
-        missingFields.push('listening.bandTable');
+        errors.push({
+          field: "listening.bandTable",
+          message: "Listening band score table is missing",
+          severity: "error",
+        });
+        missingFields.push("listening.bandTable");
       }
     }
 
@@ -1066,11 +1094,11 @@ export class ExamLifecycleService {
     if (config.sections.science.enabled) {
       const scienceErrors = validateActScienceModule(content.science.stimuli);
       scienceErrors.forEach((error) => {
-        const field = error.field || 'science';
-        if (error.type === 'warning') {
+        const field = error.field || "science";
+        if (error.type === "warning") {
           warnings.push({ field, message: error.message });
         } else {
-          errors.push({ field, message: error.message, severity: 'error' });
+          errors.push({ field, message: error.message, severity: "error" });
           missingFields.push(field);
         }
       });
@@ -1079,14 +1107,26 @@ export class ExamLifecycleService {
     // 7. Writing module validation
     if (config.sections.writing.enabled) {
       if (!config.sections.writing.tasks || config.sections.writing.tasks.length === 0) {
-        errors.push({ field: 'writing.config', message: 'Writing task configuration is missing', severity: 'error' });
-        missingFields.push('writing.config');
+        errors.push({
+          field: "writing.config",
+          message: "Writing task configuration is missing",
+          severity: "error",
+        });
+        missingFields.push("writing.config");
       } else {
         config.sections.writing.tasks.forEach((task) => {
-          const prompt = getWritingTaskContent(content.writing, config.sections.writing.tasks, task.id).prompt;
+          const prompt = getWritingTaskContent(
+            content.writing,
+            config.sections.writing.tasks,
+            task.id
+          ).prompt;
 
           if (!prompt.trim()) {
-            errors.push({ field: `writing.${task.id}`, message: `${task.label} prompt is empty`, severity: 'error' });
+            errors.push({
+              field: `writing.${task.id}`,
+              message: `${task.label} prompt is empty`,
+              severity: "error",
+            });
             missingFields.push(`writing.${task.id}`);
           }
         });
@@ -1096,51 +1136,81 @@ export class ExamLifecycleService {
     // 8. Speaking module validation
     if (config.sections.speaking.enabled) {
       if (!content.speaking.part1Topics || content.speaking.part1Topics.length === 0) {
-        errors.push({ field: 'speaking.part1', message: 'Speaking Part 1 topics are empty', severity: 'error' });
-        missingFields.push('speaking.part1');
+        errors.push({
+          field: "speaking.part1",
+          message: "Speaking Part 1 topics are empty",
+          severity: "error",
+        });
+        missingFields.push("speaking.part1");
       }
       if (!content.speaking.cueCard.trim()) {
-        errors.push({ field: 'speaking.cueCard', message: 'Speaking cue card prompt is empty', severity: 'error' });
-        missingFields.push('speaking.cueCard');
+        errors.push({
+          field: "speaking.cueCard",
+          message: "Speaking cue card prompt is empty",
+          severity: "error",
+        });
+        missingFields.push("speaking.cueCard");
       }
       if (!content.speaking.part3Discussion || content.speaking.part3Discussion.length === 0) {
-        errors.push({ field: 'speaking.part3', message: 'Speaking Part 3 discussion topics are empty', severity: 'error' });
-        missingFields.push('speaking.part3');
+        errors.push({
+          field: "speaking.part3",
+          message: "Speaking Part 3 discussion topics are empty",
+          severity: "error",
+        });
+        missingFields.push("speaking.part3");
       }
 
       // Validate speaking config
       if (!config.sections.speaking.parts || config.sections.speaking.parts.length === 0) {
-        errors.push({ field: 'speaking.config', message: 'Speaking part configuration is missing', severity: 'error' });
-        missingFields.push('speaking.config');
+        errors.push({
+          field: "speaking.config",
+          message: "Speaking part configuration is missing",
+          severity: "error",
+        });
+        missingFields.push("speaking.config");
       }
     }
 
     // 9. Visibility and permissions check
-    if (exam.visibility === 'private') {
-      warnings.push({ field: 'visibility', message: 'Exam visibility is set to private - it will not be visible to other users' });
+    if (exam.visibility === "private") {
+      warnings.push({
+        field: "visibility",
+        message: "Exam visibility is set to private - it will not be visible to other users",
+      });
     }
 
     if (!exam.canPublish) {
-      errors.push({ field: 'permissions', message: 'You do not have permission to publish this exam', severity: 'error' });
-      missingFields.push('permissions');
+      errors.push({
+        field: "permissions",
+        message: "You do not have permission to publish this exam",
+        severity: "error",
+      });
+      missingFields.push("permissions");
     }
 
     // 10. Schedule conflicts check
     const schedules = await this.repository.getSchedulesByExam(examId);
-    const activeSchedules = schedules.filter(s => s.status === 'scheduled' || s.status === 'live');
-    if (activeSchedules.length > 0 && exam.status === 'published') {
+    const activeSchedules = schedules.filter(
+      (s) => s.status === "scheduled" || s.status === "live"
+    );
+    if (activeSchedules.length > 0 && exam.status === "published") {
       warnings.push({
-        field: 'schedules',
-        message: `Exam has ${activeSchedules.length} active schedule(s). Publishing a new version may affect scheduled sessions.`
+        field: "schedules",
+        message: `Exam has ${activeSchedules.length} active schedule(s). Publishing a new version may affect scheduled sessions.`,
       });
     }
 
     // Calculate question counts
-    const readingQuestions = config.sections.reading.enabled ? getReadingTotalQuestions(content.reading.passages) : 0;
-    const listeningQuestions = config.sections.listening.enabled ? getListeningTotalQuestions(content.listening.parts) : 0;
-    const scienceQuestions = config.general.type === 'ACT' && config.sections.science?.enabled
-      ? getActScienceTotalQuestions(content.science.stimuli)
+    const readingQuestions = config.sections.reading.enabled
+      ? getReadingTotalQuestions(content.reading.passages)
       : 0;
+    const listeningQuestions = config.sections.listening.enabled
+      ? getListeningTotalQuestions(content.listening.parts)
+      : 0;
+    const scienceQuestions =
+      config.general.type === "ACT" && config.sections.science?.enabled
+        ? getActScienceTotalQuestions(content.science.stimuli)
+        : 0;
 
     const integrityIssues = getExamIdCollisionIssues(content);
     integrityIssues.forEach((issue) => {
@@ -1149,12 +1219,12 @@ export class ExamLifecycleService {
         message: issue.message,
         severity: issue.severity,
       });
-      if (issue.severity === 'error') {
+      if (issue.severity === "error") {
         missingFields.push(issue.field);
       }
     });
 
-    const hasErrors = errors.some(e => e.severity === 'error');
+    const hasErrors = errors.some((e) => e.severity === "error");
 
     return {
       canPublish: !hasErrors,
@@ -1165,32 +1235,32 @@ export class ExamLifecycleService {
         reading: readingQuestions,
         listening: listeningQuestions,
         total: readingQuestions + listeningQuestions + scienceQuestions,
-        ...(config.general.type === 'ACT' ? { science: scienceQuestions } : {}),
-      }
+        ...(config.general.type === "ACT" ? { science: scienceQuestions } : {}),
+      },
     };
   }
-  
+
   /**
    * Get exam history
    */
   async getExamHistory(examId: string, limit = 50): Promise<ExamEvent[]> {
     return this.repository.getEvents(examId, limit);
   }
-  
+
   /**
    * Get all exams
    */
   async getAllExams(): Promise<ExamEntity[]> {
     return this.repository.getAllExams();
   }
-  
+
   /**
    * Get exam by ID
    */
   async getExamById(examId: string): Promise<ExamEntity | null> {
     return this.repository.getExamById(examId);
   }
-  
+
   /**
    * Get exam versions
    */
@@ -1223,7 +1293,7 @@ export class ExamLifecycleService {
       parentVersionChanged: versionA.parentVersionId !== versionB.parentVersionId,
       creatorChanged: versionA.createdBy !== versionB.createdBy,
       createdAtChanged: versionA.createdAt !== versionB.createdAt,
-      publishNotesChanged: versionA.publishNotes !== versionB.publishNotes
+      publishNotesChanged: versionA.publishNotes !== versionB.publishNotes,
     };
 
     // Config diffs - deep compare
@@ -1233,14 +1303,19 @@ export class ExamLifecycleService {
     const configDiff = {
       generalChanged: JSON.stringify(configA.general) !== JSON.stringify(configB.general),
       sectionsChanged: {
-        listening: JSON.stringify(configA.sections.listening) !== JSON.stringify(configB.sections.listening),
-        reading: JSON.stringify(configA.sections.reading) !== JSON.stringify(configB.sections.reading),
-        writing: JSON.stringify(configA.sections.writing) !== JSON.stringify(configB.sections.writing),
-        speaking: JSON.stringify(configA.sections.speaking) !== JSON.stringify(configB.sections.speaking)
+        listening:
+          JSON.stringify(configA.sections.listening) !== JSON.stringify(configB.sections.listening),
+        reading:
+          JSON.stringify(configA.sections.reading) !== JSON.stringify(configB.sections.reading),
+        writing:
+          JSON.stringify(configA.sections.writing) !== JSON.stringify(configB.sections.writing),
+        speaking:
+          JSON.stringify(configA.sections.speaking) !== JSON.stringify(configB.sections.speaking),
       },
-      progressionChanged: JSON.stringify(configA.progression) !== JSON.stringify(configB.progression),
+      progressionChanged:
+        JSON.stringify(configA.progression) !== JSON.stringify(configB.progression),
       scoringChanged: JSON.stringify(configA.scoring) !== JSON.stringify(configB.scoring),
-      securityChanged: JSON.stringify(configA.security) !== JSON.stringify(configB.security)
+      securityChanged: JSON.stringify(configA.security) !== JSON.stringify(configB.security),
     };
 
     // Content counts diff
@@ -1261,23 +1336,23 @@ export class ExamLifecycleService {
       readingPassages: {
         a: readingPassagesA,
         b: readingPassagesB,
-        changed: readingPassagesA !== readingPassagesB
+        changed: readingPassagesA !== readingPassagesB,
       },
       readingQuestions: {
         a: readingQuestionsA,
         b: readingQuestionsB,
-        changed: readingQuestionsA !== readingQuestionsB
+        changed: readingQuestionsA !== readingQuestionsB,
       },
       listeningParts: {
         a: listeningPartsA,
         b: listeningPartsB,
-        changed: listeningPartsA !== listeningPartsB
+        changed: listeningPartsA !== listeningPartsB,
       },
       listeningQuestions: {
         a: listeningQuestionsA,
         b: listeningQuestionsB,
-        changed: listeningQuestionsA !== listeningQuestionsB
-      }
+        changed: listeningQuestionsA !== listeningQuestionsB,
+      },
     };
 
     // Determine if there are any changes
@@ -1306,7 +1381,7 @@ export class ExamLifecycleService {
       hasChanges,
       metadataDiff,
       configDiff,
-      countsDiff
+      countsDiff,
     };
   }
 
@@ -1316,12 +1391,12 @@ export class ExamLifecycleService {
    */
   async saveAsNewVersion(
     examId: string,
-    actor: string = 'System',
+    actor: string = "System",
     notes?: string
   ): Promise<TransitionResult> {
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
 
     const now = new Date().toISOString();
@@ -1329,21 +1404,21 @@ export class ExamLifecycleService {
     // Get current draft version to save from
     const currentVersionId = exam.currentDraftVersionId;
     if (!currentVersionId) {
-      return { success: false, error: 'No current version to save from' };
+      return { success: false, error: "No current version to save from" };
     }
 
     const currentVersion = await this.repository.getVersionById(currentVersionId);
     if (!currentVersion) {
-      return { success: false, error: 'Current version not found' };
+      return { success: false, error: "Current version not found" };
     }
 
     // Get all versions to determine next version number
     const allVersions = await this.repository.getAllVersions(examId);
-    const maxVersion = Math.max(...allVersions.map(v => v.versionNumber), 0);
+    const maxVersion = Math.max(...allVersions.map((v) => v.versionNumber), 0);
 
     // Create new version as a snapshot
     const newVersion: ExamVersion = {
-      id: generateId('ver'),
+      id: generateId("ver"),
       examId,
       versionNumber: maxVersion + 1,
       parentVersionId: currentVersion.id,
@@ -1354,7 +1429,7 @@ export class ExamLifecycleService {
       createdAt: now,
       publishNotes: notes,
       isDraft: true,
-      isPublished: false
+      isPublished: false,
     };
 
     // Update exam to point to new version as draft
@@ -1363,13 +1438,13 @@ export class ExamLifecycleService {
 
     // Create audit event
     const event: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId,
       versionId: newVersion.id,
       actor,
-      action: 'version_created',
+      action: "version_created",
       timestamp: now,
-      payload: notes ? { notes, explicitSave: true } : { explicitSave: true }
+      payload: notes ? { notes, explicitSave: true } : { explicitSave: true },
     };
 
     // Persist
@@ -1381,7 +1456,7 @@ export class ExamLifecycleService {
       success: true,
       exam,
       version: newVersion,
-      event
+      event,
     };
   }
 
@@ -1391,26 +1466,26 @@ export class ExamLifecycleService {
   async cloneExam(
     examId: string,
     newTitle: string,
-    actor: string = 'System'
+    actor: string = "System"
   ): Promise<CloneResult> {
     if (this.useBackendBuilder()) {
       try {
         const sourceExam = await this.repository.getExamById(examId);
         if (!sourceExam) {
-          return { success: false, error: 'Source exam not found' };
+          return { success: false, error: "Source exam not found" };
         }
 
         const versionId = sourceExam.currentDraftVersionId || sourceExam.currentPublishedVersionId;
         if (!versionId) {
-          return { success: false, error: 'No version to clone from' };
+          return { success: false, error: "No version to clone from" };
         }
 
         const sourceVersion = await this.repository.getVersionById(versionId);
         if (!sourceVersion) {
-          return { success: false, error: 'Source version not found' };
+          return { success: false, error: "Source version not found" };
         }
 
-        const createdExam = await backendPost<any>('/v1/exams', {
+        const createdExam = await backendPost<any>("/v1/exams", {
           slug: generateSlug(newTitle),
           title: newTitle,
           examType: sourceExam.type,
@@ -1421,10 +1496,10 @@ export class ExamLifecycleService {
         const clonedContent = JSON.parse(JSON.stringify(sourceVersion.contentSnapshot));
         const clonedConfig = JSON.parse(JSON.stringify(sourceVersion.configSnapshot));
 
-        if (clonedContent && typeof clonedContent === 'object') {
+        if (clonedContent && typeof clonedContent === "object") {
           clonedContent.title = newTitle;
         }
-        if (clonedConfig?.general && typeof clonedConfig.general === 'object') {
+        if (clonedConfig?.general && typeof clonedConfig.general === "object") {
           clonedConfig.general.title = newTitle;
         }
 
@@ -1442,29 +1517,29 @@ export class ExamLifecycleService {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to clone exam',
+          error: error instanceof Error ? error.message : "Failed to clone exam",
         };
       }
     }
 
     const sourceExam = await this.repository.getExamById(examId);
     if (!sourceExam) {
-      return { success: false, error: 'Source exam not found' };
+      return { success: false, error: "Source exam not found" };
     }
 
     const now = new Date().toISOString();
-    const newExamId = generateId('exam');
+    const newExamId = generateId("exam");
     const newSlug = generateSlug(newTitle);
 
     // Get current version to clone from
     const versionId = sourceExam.currentDraftVersionId || sourceExam.currentPublishedVersionId;
     if (!versionId) {
-      return { success: false, error: 'No version to clone from' };
+      return { success: false, error: "No version to clone from" };
     }
 
     const sourceVersion = await this.repository.getVersionById(versionId);
     if (!sourceVersion) {
-      return { success: false, error: 'Source version not found' };
+      return { success: false, error: "Source version not found" };
     }
 
     // Create new exam entity
@@ -1473,7 +1548,7 @@ export class ExamLifecycleService {
       slug: newSlug,
       title: newTitle,
       type: sourceExam.type,
-      status: 'draft',
+      status: "draft",
       visibility: sourceExam.visibility,
       owner: actor,
       createdAt: now,
@@ -1483,53 +1558,55 @@ export class ExamLifecycleService {
       canEdit: true,
       canPublish: true,
       canDelete: true,
-      schemaVersion: SCHEMA_VERSION
+      schemaVersion: SCHEMA_VERSION,
     };
 
     // Create new version with cloned content
     const newVersion: ExamVersion = {
-      id: generateId('ver'),
+      id: generateId("ver"),
       examId: newExamId,
       versionNumber: 1,
       parentVersionId: null,
       contentSnapshot: JSON.parse(JSON.stringify(sourceVersion.contentSnapshot)),
       configSnapshot: JSON.parse(JSON.stringify(sourceVersion.configSnapshot)),
-      validationSnapshot: sourceVersion.validationSnapshot ? {
-        ...sourceVersion.validationSnapshot,
-        lastValidatedAt: now
-      } : {
-        isValid: true,
-        errorCount: 0,
-        warningCount: 0,
-        lastValidatedAt: now
-      },
+      validationSnapshot: sourceVersion.validationSnapshot
+        ? {
+            ...sourceVersion.validationSnapshot,
+            lastValidatedAt: now,
+          }
+        : {
+            isValid: true,
+            errorCount: 0,
+            warningCount: 0,
+            lastValidatedAt: now,
+          },
       createdBy: actor,
       createdAt: now,
       isDraft: true,
-      isPublished: false
+      isPublished: false,
     };
 
     newExam.currentDraftVersionId = newVersion.id;
 
     // Create audit event for source exam
     const sourceEvent: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId: sourceExam.id,
       actor,
-      action: 'cloned',
+      action: "cloned",
       timestamp: now,
-      payload: { clonedTo: newExamId, newTitle }
+      payload: { clonedTo: newExamId, newTitle },
     };
 
     // Create audit event for new exam
     const newEvent: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId: newExamId,
       versionId: newVersion.id,
       actor,
-      action: 'created',
+      action: "created",
       timestamp: now,
-      payload: { clonedFrom: examId, sourceTitle: sourceExam.title }
+      payload: { clonedFrom: examId, sourceTitle: sourceExam.title },
     };
 
     // Persist
@@ -1542,7 +1619,7 @@ export class ExamLifecycleService {
       success: true,
       exam: newExam,
       version: newVersion,
-      event: newEvent
+      event: newEvent,
     };
   }
 
@@ -1552,15 +1629,18 @@ export class ExamLifecycleService {
    */
   async createPublishCandidateFromExam(
     examId: string,
-    actor: string = 'System',
+    actor: string = "System"
   ): Promise<CloneResult> {
     const sourceExam = await this.repository.getExamById(examId);
     if (!sourceExam) {
-      return { success: false, error: 'Source exam not found' };
+      return { success: false, error: "Source exam not found" };
     }
 
     if (!sourceExam.canPublish) {
-      return { success: false, error: 'You do not have permission to create a publish candidate copy.' };
+      return {
+        success: false,
+        error: "You do not have permission to create a publish candidate copy.",
+      };
     }
 
     const dateSuffix = new Date().toISOString().slice(0, 10);
@@ -1575,7 +1655,7 @@ export class ExamLifecycleService {
   async createFromTemplate(
     templateExamId: string,
     newTitle: string,
-    actor: string = 'System'
+    actor: string = "System"
   ): Promise<CloneResult> {
     const result = await this.cloneExam(templateExamId, newTitle, actor);
 
@@ -1583,13 +1663,13 @@ export class ExamLifecycleService {
       // Override the event to indicate template usage
       const now = new Date().toISOString();
       const templateEvent: ExamEvent = {
-        id: generateId('evt'),
+        id: generateId("evt"),
         examId: result.exam.id,
         versionId: result.version?.id,
         actor,
-        action: 'created',
+        action: "created",
         timestamp: now,
-        payload: { createdFromTemplate: templateExamId }
+        payload: { createdFromTemplate: templateExamId },
       };
 
       await this.repository.saveEvent(templateEvent);
@@ -1606,50 +1686,52 @@ export class ExamLifecycleService {
   async restoreVersionAsDraft(
     examId: string,
     versionId: string,
-    actor: string = 'System',
+    actor: string = "System",
     notes?: string
   ): Promise<RestoreResult> {
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
 
     const versionToRestore = await this.repository.getVersionById(versionId);
     if (!versionToRestore) {
-      return { success: false, error: 'Version not found' };
+      return { success: false, error: "Version not found" };
     }
 
     if (versionToRestore.examId !== examId) {
-      return { success: false, error: 'Version does not belong to this exam' };
+      return { success: false, error: "Version does not belong to this exam" };
     }
 
     const now = new Date().toISOString();
 
     // Get all versions to determine next version number
     const allVersions = await this.repository.getAllVersions(examId);
-    const maxVersion = Math.max(...allVersions.map(v => v.versionNumber), 0);
+    const maxVersion = Math.max(...allVersions.map((v) => v.versionNumber), 0);
 
     // Create new draft version from the restored version's content
     const restoredVersion: ExamVersion = {
-      id: generateId('ver'),
+      id: generateId("ver"),
       examId,
       versionNumber: maxVersion + 1,
       parentVersionId: versionToRestore.id,
       contentSnapshot: JSON.parse(JSON.stringify(versionToRestore.contentSnapshot)),
       configSnapshot: JSON.parse(JSON.stringify(versionToRestore.configSnapshot)),
-      validationSnapshot: versionToRestore.validationSnapshot ? {
-        ...versionToRestore.validationSnapshot,
-        lastValidatedAt: now
-      } : {
-        isValid: true,
-        errorCount: 0,
-        warningCount: 0,
-        lastValidatedAt: now
-      },
+      validationSnapshot: versionToRestore.validationSnapshot
+        ? {
+            ...versionToRestore.validationSnapshot,
+            lastValidatedAt: now,
+          }
+        : {
+            isValid: true,
+            errorCount: 0,
+            warningCount: 0,
+            lastValidatedAt: now,
+          },
       createdBy: actor,
       createdAt: now,
       isDraft: true,
-      isPublished: false
+      isPublished: false,
     };
 
     // Update exam to point to restored version as draft
@@ -1658,24 +1740,24 @@ export class ExamLifecycleService {
 
     // If exam was published, it stays published with its published version intact
     // If exam was in another state, transition to draft
-    if (exam.status !== 'published') {
-      exam.status = 'draft';
+    if (exam.status !== "published") {
+      exam.status = "draft";
     }
 
     // Create audit event
     const event: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId,
       versionId: restoredVersion.id,
       actor,
-      action: 'version_restored',
+      action: "version_restored",
       fromState: exam.status,
       toState: exam.status,
       timestamp: now,
       payload: {
         restoredFromVersion: versionToRestore.versionNumber,
-        notes
-      }
+        notes,
+      },
     };
 
     // Persist
@@ -1687,7 +1769,7 @@ export class ExamLifecycleService {
       success: true,
       exam,
       version: restoredVersion,
-      event
+      event,
     };
   }
 
@@ -1701,7 +1783,7 @@ export class ExamLifecycleService {
   async republishVersion(
     examId: string,
     versionId: string,
-    actor: string = 'System',
+    actor: string = "System",
     publishNotes?: string
   ): Promise<TransitionResult> {
     // `versionId` is retained for backward compatibility with older admin tooling,
@@ -1714,7 +1796,7 @@ export class ExamLifecycleService {
         const exam = await this.repository.getExamById(examId);
         return {
           success: false,
-          error: 'Exam is not ready for publication',
+          error: "Exam is not ready for publication",
           exam: exam ?? undefined,
         };
       }
@@ -1722,7 +1804,7 @@ export class ExamLifecycleService {
       try {
         const revision = await this.refreshBackendExamRevision(examId);
         if (revision === null) {
-          return { success: false, error: 'Exam not found' };
+          return { success: false, error: "Exam not found" };
         }
 
         const publishedVersion = await backendPost<any>(`/v1/exams/${examId}/publish`, {
@@ -1740,21 +1822,21 @@ export class ExamLifecycleService {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to republish exam',
+          error: error instanceof Error ? error.message : "Failed to republish exam",
         };
       }
     }
 
     const exam = await this.repository.getExamById(examId);
     if (!exam) {
-      return { success: false, error: 'Exam not found' };
+      return { success: false, error: "Exam not found" };
     }
 
     const readiness = await this.getPublishReadiness(examId);
     if (!readiness.canPublish) {
       return {
         success: false,
-        error: 'Exam is not ready for publication',
+        error: "Exam is not ready for publication",
         exam,
       };
     }
@@ -1762,17 +1844,17 @@ export class ExamLifecycleService {
     const now = new Date().toISOString();
 
     if (!exam.currentDraftVersionId) {
-      return { success: false, error: 'No draft version to publish' };
+      return { success: false, error: "No draft version to publish" };
     }
 
     const draftVersion = await this.repository.getVersionById(exam.currentDraftVersionId);
     if (!draftVersion) {
-      return { success: false, error: 'Draft version not found' };
+      return { success: false, error: "Draft version not found" };
     }
 
     const publishedVersion: ExamVersion = {
       ...draftVersion,
-      id: generateId('ver'),
+      id: generateId("ver"),
       parentVersionId: draftVersion.id,
       isDraft: false,
       isPublished: true,
@@ -1782,20 +1864,20 @@ export class ExamLifecycleService {
 
     const previousStatus = exam.status;
     exam.currentPublishedVersionId = publishedVersion.id;
-    exam.status = 'published';
+    exam.status = "published";
     if (!exam.publishedAt) {
       exam.publishedAt = now;
     }
     exam.updatedAt = now;
 
     const event: ExamEvent = {
-      id: generateId('evt'),
+      id: generateId("evt"),
       examId,
       versionId: publishedVersion.id,
       actor,
-      action: 'published',
+      action: "published",
       fromState: previousStatus,
-      toState: 'published',
+      toState: "published",
       timestamp: now,
       payload: publishNotes ? { notes: publishNotes } : undefined,
     };
@@ -1816,20 +1898,17 @@ export class ExamLifecycleService {
    * Bulk publish multiple exams
    * Returns per-item success/failure with reasons
    */
-  async bulkPublish(
-    examIds: string[],
-    actor: string = 'System'
-  ): Promise<BulkOperationResult> {
-    const results: BulkOperationResult['results'] = [];
-    
+  async bulkPublish(examIds: string[], actor: string = "System"): Promise<BulkOperationResult> {
+    const results: BulkOperationResult["results"] = [];
+
     for (const examId of examIds) {
       const exam = await this.repository.getExamById(examId);
       if (!exam) {
         results.push({
           examId,
-          examTitle: 'Unknown',
+          examTitle: "Unknown",
           success: false,
-          error: 'Exam not found'
+          error: "Exam not found",
         });
         continue;
       }
@@ -1839,19 +1918,19 @@ export class ExamLifecycleService {
         examId,
         examTitle: exam.title,
         success: result.success,
-        error: result.error
+        error: result.error,
       });
     }
 
-    const succeeded = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
 
     return {
       success: succeeded > 0,
       total: examIds.length,
       succeeded,
       failed,
-      results
+      results,
     };
   }
 
@@ -1859,20 +1938,17 @@ export class ExamLifecycleService {
    * Bulk unpublish multiple exams
    * Returns per-item success/failure with reasons
    */
-  async bulkUnpublish(
-    examIds: string[],
-    actor: string = 'System'
-  ): Promise<BulkOperationResult> {
-    const results: BulkOperationResult['results'] = [];
-    
+  async bulkUnpublish(examIds: string[], actor: string = "System"): Promise<BulkOperationResult> {
+    const results: BulkOperationResult["results"] = [];
+
     for (const examId of examIds) {
       const exam = await this.repository.getExamById(examId);
       if (!exam) {
         results.push({
           examId,
-          examTitle: 'Unknown',
+          examTitle: "Unknown",
           success: false,
-          error: 'Exam not found'
+          error: "Exam not found",
         });
         continue;
       }
@@ -1882,19 +1958,19 @@ export class ExamLifecycleService {
         examId,
         examTitle: exam.title,
         success: result.success,
-        error: result.error
+        error: result.error,
       });
     }
 
-    const succeeded = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
 
     return {
       success: succeeded > 0,
       total: examIds.length,
       succeeded,
       failed,
-      results
+      results,
     };
   }
 
@@ -1902,20 +1978,17 @@ export class ExamLifecycleService {
    * Bulk archive multiple exams
    * Returns per-item success/failure with reasons
    */
-  async bulkArchive(
-    examIds: string[],
-    actor: string = 'System'
-  ): Promise<BulkOperationResult> {
-    const results: BulkOperationResult['results'] = [];
-    
+  async bulkArchive(examIds: string[], actor: string = "System"): Promise<BulkOperationResult> {
+    const results: BulkOperationResult["results"] = [];
+
     for (const examId of examIds) {
       const exam = await this.repository.getExamById(examId);
       if (!exam) {
         results.push({
           examId,
-          examTitle: 'Unknown',
+          examTitle: "Unknown",
           success: false,
-          error: 'Exam not found'
+          error: "Exam not found",
         });
         continue;
       }
@@ -1925,19 +1998,19 @@ export class ExamLifecycleService {
         examId,
         examTitle: exam.title,
         success: result.success,
-        error: result.error
+        error: result.error,
       });
     }
 
-    const succeeded = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
 
     return {
       success: succeeded > 0,
       total: examIds.length,
       succeeded,
       failed,
-      results
+      results,
     };
   }
 
@@ -1945,20 +2018,17 @@ export class ExamLifecycleService {
    * Bulk delete multiple exams
    * Returns per-item success/failure with reasons
    */
-  async bulkDelete(
-    examIds: string[],
-    actor: string = 'System'
-  ): Promise<BulkOperationResult> {
-    const results: BulkOperationResult['results'] = [];
+  async bulkDelete(examIds: string[], actor: string = "System"): Promise<BulkOperationResult> {
+    const results: BulkOperationResult["results"] = [];
 
     for (const examId of examIds) {
       const exam = await this.repository.getExamById(examId);
       if (!exam) {
         results.push({
           examId,
-          examTitle: 'Unknown',
+          examTitle: "Unknown",
           success: false,
-          error: 'Exam not found',
+          error: "Exam not found",
         });
         continue;
       }
@@ -1990,25 +2060,25 @@ export class ExamLifecycleService {
    */
   async bulkDuplicate(
     examIds: string[],
-    actor: string = 'System',
+    actor: string = "System",
     titlePattern?: string
   ): Promise<BulkOperationResult> {
-    const results: BulkOperationResult['results'] = [];
-    
+    const results: BulkOperationResult["results"] = [];
+
     for (const examId of examIds) {
       const exam = await this.repository.getExamById(examId);
       if (!exam) {
         results.push({
           examId,
-          examTitle: 'Unknown',
+          examTitle: "Unknown",
           success: false,
-          error: 'Exam not found'
+          error: "Exam not found",
         });
         continue;
       }
 
-      const pattern = (titlePattern ?? '{title} (Copy)').trim();
-      const computedTitle = pattern.includes('{title}')
+      const pattern = (titlePattern ?? "{title} (Copy)").trim();
+      const computedTitle = pattern.includes("{title}")
         ? pattern.replace(/\{title\}/g, exam.title)
         : pattern.length > 0
           ? `${pattern} ${exam.title}`
@@ -2019,19 +2089,19 @@ export class ExamLifecycleService {
         examId,
         examTitle: exam.title,
         success: result.success,
-        error: result.error
+        error: result.error,
       });
     }
 
-    const succeeded = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
 
     return {
       success: succeeded > 0,
       total: examIds.length,
       succeeded,
       failed,
-      results
+      results,
     };
   }
 
@@ -2041,7 +2111,7 @@ export class ExamLifecycleService {
    */
   async bulkExport(
     examIds: string[],
-    actor: string = 'System'
+    actor: string = "System"
   ): Promise<{
     success: boolean;
     total: number;
@@ -2056,22 +2126,22 @@ export class ExamLifecycleService {
         schemaVersion: number;
         exportedAt: string;
         exportedBy: string;
-        exam: import('../types/domain').ExamEntity;
-        versions: import('../types/domain').ExamVersion[];
-        events: import('../types/domain').ExamEvent[];
+        exam: import("../types/domain").ExamEntity;
+        versions: import("../types/domain").ExamVersion[];
+        events: import("../types/domain").ExamEvent[];
       };
     }>;
   }> {
     const results = [];
-    
+
     for (const examId of examIds) {
       const exam = await this.repository.getExamById(examId);
       if (!exam) {
         results.push({
           examId,
-          examTitle: 'Unknown',
+          examTitle: "Unknown",
           success: false,
-          error: 'Exam not found'
+          error: "Exam not found",
         });
         continue;
       }
@@ -2081,41 +2151,41 @@ export class ExamLifecycleService {
         const versions = await this.repository.getAllVersions(examId);
         // Get exam events
         const events = await this.repository.getEvents(examId);
-        
+
         const exportData = {
           schemaVersion: SCHEMA_VERSION,
           exportedAt: new Date().toISOString(),
           exportedBy: actor,
           exam,
           versions,
-          events
+          events,
         };
 
         results.push({
           examId,
           examTitle: exam.title,
           success: true,
-          data: exportData
+          data: exportData,
         });
       } catch (error) {
         results.push({
           examId,
           examTitle: exam.title,
           success: false,
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: error instanceof Error ? error.message : "Unknown error",
         });
       }
     }
 
-    const succeeded = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
 
     return {
       success: succeeded > 0,
       total: examIds.length,
       succeeded,
       failed,
-      results
+      results,
     };
   }
 }

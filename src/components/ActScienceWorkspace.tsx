@@ -1,13 +1,13 @@
-import React, { useEffect, useMemo } from 'react';
-import { FlaskConical, Plus, Trash2 } from 'lucide-react';
-import { ActScienceStimulus, ExamState } from '../types';
-import { createId } from '../utils/idUtils';
-import { getBlockQuestionCount } from '../utils/examUtils';
-import { StimulusPane } from './StimulusPane';
+import React, { useEffect, useMemo } from "react";
+import { FlaskConical, Plus, Trash2 } from "lucide-react";
+import { ActScienceStimulus, ExamState } from "../types";
+import { createId } from "../utils/idUtils";
+import { getBlockQuestionCount } from "../utils/examUtils";
+import { StimulusPane } from "./StimulusPane";
 import {
   ActScienceQuestionBuilderPane,
   createActScienceBlock,
-} from './ActScienceQuestionBuilderPane';
+} from "./ActScienceQuestionBuilderPane";
 
 type ExamStateUpdate = ExamState | ((previous: ExamState) => ExamState);
 
@@ -18,9 +18,9 @@ export interface ActScienceWorkspaceProps {
 
 function createActScienceStimulus(index: number): ActScienceStimulus {
   return {
-    id: createId('act_stimulus'),
+    id: createId("act_stimulus"),
     title: `Stimulus ${index}`,
-    content: '',
+    content: "",
     blocks: [createActScienceBlock()],
     images: [],
     wordCount: 0,
@@ -46,24 +46,34 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
   }, [activeStimulus, setState, stimuli]);
 
   const totalQuestions = useMemo(
-    () => stimuli.reduce(
-      (total, stimulus) => total + stimulus.blocks.reduce(
-        (blockTotal, block) => blockTotal + getBlockQuestionCount(block),
-        0,
+    () =>
+      stimuli.reduce(
+        (total, stimulus) =>
+          total +
+          stimulus.blocks.reduce(
+            (blockTotal, block) => blockTotal + getBlockQuestionCount(block),
+            0
+          ),
+        0
       ),
-      0,
-    ),
-    [stimuli],
+    [stimuli]
   );
 
   const activeStartNumber = activeStimulus
-    ? stimuli.slice(0, stimuli.findIndex((stimulus) => stimulus.id === activeStimulus.id)).reduce(
-      (total, stimulus) => total + stimulus.blocks.reduce(
-        (blockTotal, block) => blockTotal + getBlockQuestionCount(block),
-        0,
-      ),
-      1,
-    )
+    ? stimuli
+        .slice(
+          0,
+          stimuli.findIndex((stimulus) => stimulus.id === activeStimulus.id)
+        )
+        .reduce(
+          (total, stimulus) =>
+            total +
+            stimulus.blocks.reduce(
+              (blockTotal, block) => blockTotal + getBlockQuestionCount(block),
+              0
+            ),
+          1
+        )
     : 1;
 
   const addStimulus = () => {
@@ -90,9 +100,10 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
   const deleteStimulus = (stimulusId: string) => {
     void setState((previous) => {
       const nextStimuli = previous.science.stimuli.filter((stimulus) => stimulus.id !== stimulusId);
-      const nextActiveId = previous.activeScienceStimulusId === stimulusId
-        ? nextStimuli[0]?.id ?? ''
-        : previous.activeScienceStimulusId;
+      const nextActiveId =
+        previous.activeScienceStimulusId === stimulusId
+          ? (nextStimuli[0]?.id ?? "")
+          : previous.activeScienceStimulusId;
       return {
         ...previous,
         science: { ...previous.science, stimuli: nextStimuli },
@@ -107,7 +118,7 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
       science: {
         ...previous.science,
         stimuli: previous.science.stimuli.map((stimulus) =>
-          stimulus.id === nextStimulus.id ? nextStimulus : stimulus,
+          stimulus.id === nextStimulus.id ? nextStimulus : stimulus
         ),
       },
     }));
@@ -157,8 +168,8 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
               key={stimulus.id}
               className={`flex items-center gap-2 rounded-lg border p-2 ${
                 stimulus.id === activeStimulus.id
-                  ? 'border-blue-300 bg-blue-50'
-                  : 'border-gray-200 bg-white'
+                  ? "border-blue-300 bg-blue-50"
+                  : "border-gray-200 bg-white"
               }`}
             >
               <button
@@ -170,7 +181,11 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
                   {index + 1}. {stimulus.title || `Stimulus ${index + 1}`}
                 </span>
                 <span className="block text-xs text-gray-500">
-                  {stimulus.blocks.reduce((total, block) => total + getBlockQuestionCount(block), 0)} questions
+                  {stimulus.blocks.reduce(
+                    (total, block) => total + getBlockQuestionCount(block),
+                    0
+                  )}{" "}
+                  questions
                 </span>
               </button>
               <button
@@ -186,13 +201,18 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
         </div>
         <div className="mt-5 rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
           <p className="font-semibold text-gray-800">Total questions: {totalQuestions}/40</p>
-          <p className="mt-1">Drafts may be incomplete. Publish will show a warning when the count is not 40.</p>
+          <p className="mt-1">
+            Drafts may be incomplete. Publish will show a warning when the count is not 40.
+          </p>
         </div>
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col border-r border-gray-200">
         <div className="border-b border-gray-200 bg-white px-5 py-3">
-          <label className="mb-1 block text-xs font-semibold text-gray-600" htmlFor="act-stimulus-title">
+          <label
+            className="mb-1 block text-xs font-semibold text-gray-600"
+            htmlFor="act-stimulus-title"
+          >
             Stimulus title
           </label>
           <input

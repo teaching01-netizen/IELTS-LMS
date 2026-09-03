@@ -1,17 +1,17 @@
-import { ACT_SCIENCE_SKILL_CATEGORIES } from '../../types';
-import type { ActScienceSkillCategory, ExamState, SentenceCompletionQuestion } from '../../types';
+import { ACT_SCIENCE_SKILL_CATEGORIES } from "../../types";
+import type { ActScienceSkillCategory, ExamState, SentenceCompletionQuestion } from "../../types";
 import type {
   ObjectiveManualOverride,
   ObjectiveQuestionResult,
   SectionSubmission,
   StudentSubmission,
   WritingTaskSubmission,
-} from '../../types/grading';
+} from "../../types/grading";
 import {
   getQuestionNumberLabel,
   getStudentQuestionsForModule,
-} from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
-import type { StudentQuestionDescriptor } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+} from "../../features/exam-authoring/infrastructure/examAuthoringGateway";
+import type { StudentQuestionDescriptor } from "../../features/exam-authoring/infrastructure/examAuthoringGateway";
 import {
   extractObjectiveAnswerMap,
   getCorrectAnswerDisplay,
@@ -20,18 +20,18 @@ import {
   getStudentAnswerDisplay,
   isStudentAnswerCorrect,
   resolveSentenceCompletionCorrectness,
-} from './gradingAnswerUtils';
-import type { AnswerDisplayOptions } from './gradingAnswerUtils';
-import type { StudentAnswerValue } from '../../types/answers';
-import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
+} from "./gradingAnswerUtils";
+import type { AnswerDisplayOptions } from "./gradingAnswerUtils";
+import type { StudentAnswerValue } from "../../types/answers";
+import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from "../../utils/htmlText";
 
 export type GradingExportSection =
-  | 'reading'
-  | 'listening'
-  | 'science'
-  | 'reading_manual'
-  | 'listening_manual'
-  | 'writing';
+  | "reading"
+  | "listening"
+  | "science"
+  | "reading_manual"
+  | "listening_manual"
+  | "writing";
 
 export interface CsvColumn {
   key: string;
@@ -39,24 +39,23 @@ export interface CsvColumn {
 }
 
 const ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS: Record<ActScienceSkillCategory, string> = {
-  interpretation_of_data: 'IOD',
-  scientific_investigation: 'SIN',
-  evaluating_scientific_arguments_and_models_with_evidence: 'ESA',
+  interpretation_of_data: "IOD",
+  scientific_investigation: "SIN",
+  evaluating_scientific_arguments_and_models_with_evidence: "ESA",
 };
 
 export const ACT_SCIENCE_CATEGORY_CORRECT_COLUMNS: CsvColumn[] = ACT_SCIENCE_SKILL_CATEGORIES.map(
   (category) => ({
     key: `scienceCategory:${category.value}`,
     label: `${category.label} (${ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS[category.value]}) Correct`,
-  }),
+  })
 );
 
-export const ACT_SCIENCE_CATEGORY_PERCENTAGE_COLUMNS: CsvColumn[] = ACT_SCIENCE_SKILL_CATEGORIES.map(
-  (category) => ({
+export const ACT_SCIENCE_CATEGORY_PERCENTAGE_COLUMNS: CsvColumn[] =
+  ACT_SCIENCE_SKILL_CATEGORIES.map((category) => ({
     key: `scienceCategoryPercentage:${category.value}`,
     label: `${ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS[category.value]} Percentage`,
-  }),
-);
+  }));
 
 export interface ExportSessionContext {
   sessionId: string;
@@ -65,7 +64,7 @@ export interface ExportSessionContext {
 
 export function resolveObjectiveGradingVersionId(
   publishedVersionId: string | undefined,
-  draftVersionId: string | null | undefined,
+  draftVersionId: string | null | undefined
 ): string | undefined {
   return draftVersionId || publishedVersionId;
 }
@@ -106,139 +105,139 @@ export interface ObjectiveTracebackGroup {
 }
 
 export const READING_EXPORT_COLUMNS: CsvColumn[] = [
-  { key: 'examTitle', label: 'Exam Title' },
-  { key: 'sessionId', label: 'Session ID' },
-  { key: 'scheduleId', label: 'Schedule ID' },
-  { key: 'submissionId', label: 'Submission ID' },
-  { key: 'studentName', label: 'Student Name' },
-  { key: 'studentId', label: 'Student ID' },
-  { key: 'studentEmail', label: 'Student Email' },
-  { key: 'nickname', label: 'Nickname' },
-  { key: 'ieltsCourse', label: 'IELTS Course' },
-  { key: 'cohortName', label: 'Cohort Name' },
-  { key: 'section', label: 'Section' },
-  { key: 'groupLabel', label: 'Passage / Part' },
-  { key: 'questionNumber', label: 'Question Number' },
-  { key: 'questionId', label: 'Question ID' },
-  { key: 'prompt', label: 'Prompt' },
-  { key: 'studentAnswer', label: 'Student Answer' },
-  { key: 'correctAnswer', label: 'Correct Answer' },
-  { key: 'isCorrect', label: 'Correctness' },
-  { key: 'autoScore', label: 'Auto Score' },
-  { key: 'maxScore', label: 'Max Score' },
-  { key: 'submittedAt', label: 'Submitted At' },
+  { key: "examTitle", label: "Exam Title" },
+  { key: "sessionId", label: "Session ID" },
+  { key: "scheduleId", label: "Schedule ID" },
+  { key: "submissionId", label: "Submission ID" },
+  { key: "studentName", label: "Student Name" },
+  { key: "studentId", label: "Student ID" },
+  { key: "studentEmail", label: "Student Email" },
+  { key: "nickname", label: "Nickname" },
+  { key: "ieltsCourse", label: "IELTS Course" },
+  { key: "cohortName", label: "Cohort Name" },
+  { key: "section", label: "Section" },
+  { key: "groupLabel", label: "Passage / Part" },
+  { key: "questionNumber", label: "Question Number" },
+  { key: "questionId", label: "Question ID" },
+  { key: "prompt", label: "Prompt" },
+  { key: "studentAnswer", label: "Student Answer" },
+  { key: "correctAnswer", label: "Correct Answer" },
+  { key: "isCorrect", label: "Correctness" },
+  { key: "autoScore", label: "Auto Score" },
+  { key: "maxScore", label: "Max Score" },
+  { key: "submittedAt", label: "Submitted At" },
 ];
 
 export const LISTENING_EXPORT_COLUMNS: CsvColumn[] = READING_EXPORT_COLUMNS.map((column) => column);
 
 export const OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS: CsvColumn[] = [
-  { key: 'examTitle', label: 'Exam Title' },
-  { key: 'sessionId', label: 'Session ID' },
-  { key: 'scheduleId', label: 'Schedule ID' },
-  { key: 'submissionId', label: 'Submission ID' },
-  { key: 'studentName', label: 'Student Name' },
-  { key: 'studentId', label: 'Student ID' },
-  { key: 'studentEmail', label: 'Student Email' },
-  { key: 'nickname', label: 'Nickname' },
-  { key: 'ieltsCourse', label: 'IELTS Course' },
-  { key: 'cohortName', label: 'Cohort Name' },
-  { key: 'section', label: 'Section' },
-  { key: 'submittedAt', label: 'Submitted At' },
-  { key: 'totalScore', label: 'Total Score' },
-  { key: 'maxScore', label: 'Max Score' },
-  { key: 'percentage', label: 'Percentage' },
-  { key: 'correctCount', label: 'Correct Count' },
+  { key: "examTitle", label: "Exam Title" },
+  { key: "sessionId", label: "Session ID" },
+  { key: "scheduleId", label: "Schedule ID" },
+  { key: "submissionId", label: "Submission ID" },
+  { key: "studentName", label: "Student Name" },
+  { key: "studentId", label: "Student ID" },
+  { key: "studentEmail", label: "Student Email" },
+  { key: "nickname", label: "Nickname" },
+  { key: "ieltsCourse", label: "IELTS Course" },
+  { key: "cohortName", label: "Cohort Name" },
+  { key: "section", label: "Section" },
+  { key: "submittedAt", label: "Submitted At" },
+  { key: "totalScore", label: "Total Score" },
+  { key: "maxScore", label: "Max Score" },
+  { key: "percentage", label: "Percentage" },
+  { key: "correctCount", label: "Correct Count" },
 ];
 
 export const OBJECTIVE_WIDE_MANUAL_EXPORT_BASE_COLUMNS: CsvColumn[] = [
-  { key: 'examTitle', label: 'Exam Title' },
-  { key: 'studentName', label: 'Student Name' },
-  { key: 'studentId', label: 'Student ID' },
-  { key: 'studentEmail', label: 'Student Email' },
-  { key: 'nickname', label: 'Nickname' },
-  { key: 'ieltsCourse', label: 'IELTS Course' },
-  { key: 'section', label: 'Section' },
-  { key: 'totalScore', label: 'Total Score' },
+  { key: "examTitle", label: "Exam Title" },
+  { key: "studentName", label: "Student Name" },
+  { key: "studentId", label: "Student ID" },
+  { key: "studentEmail", label: "Student Email" },
+  { key: "nickname", label: "Nickname" },
+  { key: "ieltsCourse", label: "IELTS Course" },
+  { key: "section", label: "Section" },
+  { key: "totalScore", label: "Total Score" },
 ];
 
 export const WRITING_EXPORT_COLUMNS: CsvColumn[] = [
-  { key: 'examTitle', label: 'Exam Title' },
-  { key: 'sessionId', label: 'Session ID' },
-  { key: 'scheduleId', label: 'Schedule ID' },
-  { key: 'submissionId', label: 'Submission ID' },
-  { key: 'studentName', label: 'Student Name' },
-  { key: 'studentId', label: 'Student ID' },
-  { key: 'studentEmail', label: 'Student Email' },
-  { key: 'nickname', label: 'Nickname' },
-  { key: 'ieltsCourse', label: 'IELTS Course' },
-  { key: 'cohortName', label: 'Cohort Name' },
-  { key: 'section', label: 'Section' },
-  { key: 'taskId', label: 'Task ID' },
-  { key: 'taskLabel', label: 'Task Label' },
-  { key: 'prompt', label: 'Prompt' },
-  { key: 'studentText', label: 'Student Text' },
-  { key: 'wordCount', label: 'Word Count' },
-  { key: 'taskResponseBand', label: 'Task Response Band' },
-  { key: 'coherenceBand', label: 'Coherence Band' },
-  { key: 'lexicalBand', label: 'Lexical Band' },
-  { key: 'grammarBand', label: 'Grammar Band' },
-  { key: 'overallBand', label: 'Overall Band' },
-  { key: 'overallFeedback', label: 'Overall Feedback' },
-  { key: 'studentVisibleNotes', label: 'Student Visible Notes' },
-  { key: 'annotationCount', label: 'Annotation Count' },
-  { key: 'studentVisibleAnnotationCount', label: 'Student Visible Annotation Count' },
-  { key: 'gradingStatus', label: 'Grading Status' },
-  { key: 'submittedAt', label: 'Submitted At' },
-  { key: 'gradedBy', label: 'Graded By' },
-  { key: 'gradedAt', label: 'Graded At' },
+  { key: "examTitle", label: "Exam Title" },
+  { key: "sessionId", label: "Session ID" },
+  { key: "scheduleId", label: "Schedule ID" },
+  { key: "submissionId", label: "Submission ID" },
+  { key: "studentName", label: "Student Name" },
+  { key: "studentId", label: "Student ID" },
+  { key: "studentEmail", label: "Student Email" },
+  { key: "nickname", label: "Nickname" },
+  { key: "ieltsCourse", label: "IELTS Course" },
+  { key: "cohortName", label: "Cohort Name" },
+  { key: "section", label: "Section" },
+  { key: "taskId", label: "Task ID" },
+  { key: "taskLabel", label: "Task Label" },
+  { key: "prompt", label: "Prompt" },
+  { key: "studentText", label: "Student Text" },
+  { key: "wordCount", label: "Word Count" },
+  { key: "taskResponseBand", label: "Task Response Band" },
+  { key: "coherenceBand", label: "Coherence Band" },
+  { key: "lexicalBand", label: "Lexical Band" },
+  { key: "grammarBand", label: "Grammar Band" },
+  { key: "overallBand", label: "Overall Band" },
+  { key: "overallFeedback", label: "Overall Feedback" },
+  { key: "studentVisibleNotes", label: "Student Visible Notes" },
+  { key: "annotationCount", label: "Annotation Count" },
+  { key: "studentVisibleAnnotationCount", label: "Student Visible Annotation Count" },
+  { key: "gradingStatus", label: "Grading Status" },
+  { key: "submittedAt", label: "Submitted At" },
+  { key: "gradedBy", label: "Graded By" },
+  { key: "gradedAt", label: "Graded At" },
 ];
 
 const WRITING_WIDE_EXPORT_BASE_COLUMNS: CsvColumn[] = [
-  { key: 'examTitle', label: 'Exam Title' },
-  { key: 'sessionId', label: 'Session ID' },
-  { key: 'scheduleId', label: 'Schedule ID' },
-  { key: 'submissionId', label: 'Submission ID' },
-  { key: 'studentName', label: 'Student Name' },
-  { key: 'studentId', label: 'Student ID' },
-  { key: 'studentEmail', label: 'Student Email' },
-  { key: 'nickname', label: 'Nickname' },
-  { key: 'ieltsCourse', label: 'IELTS Course' },
-  { key: 'cohortName', label: 'Cohort Name' },
-  { key: 'section', label: 'Section' },
-  { key: 'submittedAt', label: 'Submitted At' },
+  { key: "examTitle", label: "Exam Title" },
+  { key: "sessionId", label: "Session ID" },
+  { key: "scheduleId", label: "Schedule ID" },
+  { key: "submissionId", label: "Submission ID" },
+  { key: "studentName", label: "Student Name" },
+  { key: "studentId", label: "Student ID" },
+  { key: "studentEmail", label: "Student Email" },
+  { key: "nickname", label: "Nickname" },
+  { key: "ieltsCourse", label: "IELTS Course" },
+  { key: "cohortName", label: "Cohort Name" },
+  { key: "section", label: "Section" },
+  { key: "submittedAt", label: "Submitted At" },
 ];
 
 const WRITING_WIDE_TASK_FIELDS = [
-  { key: 'wordCount', label: 'Word Count' },
-  { key: 'response', label: 'Response' },
-  { key: 'taskResponseBand', label: 'Task Response Band' },
-  { key: 'coherenceBand', label: 'Coherence Band' },
-  { key: 'lexicalBand', label: 'Lexical Band' },
-  { key: 'grammarBand', label: 'Grammar Band' },
-  { key: 'overallBand', label: 'Overall Band' },
-  { key: 'overallFeedback', label: 'Overall Feedback' },
-  { key: 'studentVisibleNotes', label: 'Student Visible Notes' },
-  { key: 'annotationCount', label: 'Annotation Count' },
-  { key: 'studentVisibleAnnotationCount', label: 'Student Visible Annotation Count' },
-  { key: 'gradingStatus', label: 'Grading Status' },
-  { key: 'gradedBy', label: 'Graded By' },
-  { key: 'gradedAt', label: 'Graded At' },
+  { key: "wordCount", label: "Word Count" },
+  { key: "response", label: "Response" },
+  { key: "taskResponseBand", label: "Task Response Band" },
+  { key: "coherenceBand", label: "Coherence Band" },
+  { key: "lexicalBand", label: "Lexical Band" },
+  { key: "grammarBand", label: "Grammar Band" },
+  { key: "overallBand", label: "Overall Band" },
+  { key: "overallFeedback", label: "Overall Feedback" },
+  { key: "studentVisibleNotes", label: "Student Visible Notes" },
+  { key: "annotationCount", label: "Annotation Count" },
+  { key: "studentVisibleAnnotationCount", label: "Student Visible Annotation Count" },
+  { key: "gradingStatus", label: "Grading Status" },
+  { key: "gradedBy", label: "Graded By" },
+  { key: "gradedAt", label: "Graded At" },
 ] as const;
 
 export const WRITING_WIDE_EXPORT_COLUMNS: CsvColumn[] = [
   ...WRITING_WIDE_EXPORT_BASE_COLUMNS,
-  ...['task1', 'task2'].flatMap((taskKey, index) =>
+  ...["task1", "task2"].flatMap((taskKey, index) =>
     WRITING_WIDE_TASK_FIELDS.map((field) => ({
       key: `${taskKey}:${field.key}`,
       label: `Task ${index + 1} ${field.label}`,
-    })),
+    }))
   ),
 ];
 
 function toPlainText(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (value instanceof Date) return value.toISOString();
   try {
     return JSON.stringify(value);
@@ -247,8 +246,8 @@ function toPlainText(value: unknown): string {
   }
 }
 
-function toOptionalNumber(value: number | null | undefined): number | '' {
-  return value === null || value === undefined ? '' : value;
+function toOptionalNumber(value: number | null | undefined): number | "" {
+  return value === null || value === undefined ? "" : value;
 }
 
 function calculateCategoryPercentage(correctCount: number, questionCount: number): number {
@@ -258,9 +257,8 @@ function calculateCategoryPercentage(correctCount: number, questionCount: number
 
 export function escapeCsvValue(value: unknown): string {
   const text = toPlainText(value);
-  if (text === '') return '';
-  const shouldProtectForExcel =
-    typeof value === 'string' && /^[\s]*[=+\-@]/.test(text);
+  if (text === "") return "";
+  const shouldProtectForExcel = typeof value === "string" && /^[\s]*[=+\-@]/.test(text);
   const escapedText = shouldProtectForExcel ? `'${text}` : text;
   if (/["\r\n,]/.test(escapedText)) {
     return `"${escapedText.replace(/"/g, '""')}"`;
@@ -268,21 +266,26 @@ export function escapeCsvValue(value: unknown): string {
   return escapedText;
 }
 
-export function buildCsvContent(columns: CsvColumn[], rows: Array<Record<string, unknown>>): string {
-  const header = columns.map((column) => escapeCsvValue(column.label)).join(',');
-  const body = rows.map((row) => columns.map((column) => escapeCsvValue(row[column.key])).join(','));
-  return [header, ...body].join('\r\n');
+export function buildCsvContent(
+  columns: CsvColumn[],
+  rows: Array<Record<string, unknown>>
+): string {
+  const header = columns.map((column) => escapeCsvValue(column.label)).join(",");
+  const body = rows.map((row) =>
+    columns.map((column) => escapeCsvValue(row[column.key])).join(",")
+  );
+  return [header, ...body].join("\r\n");
 }
 
 export function downloadCsvFile(filename: string, csvContent: string): void {
-  if (typeof document === 'undefined') return;
+  if (typeof document === "undefined") return;
 
-  const blob = new Blob(['\ufeff', csvContent], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob(["\ufeff", csvContent], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
+  const link = document.createElement("a");
   link.href = url;
   link.download = filename;
-  link.rel = 'noopener';
+  link.rel = "noopener";
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -292,32 +295,34 @@ export function downloadCsvFile(filename: string, csvContent: string): void {
 export function downloadBinaryFile(
   filename: string,
   bytes: Uint8Array | ArrayBuffer,
-  contentType: string,
+  contentType: string
 ): void {
-  if (typeof document === 'undefined') return;
+  if (typeof document === "undefined") return;
 
   const blob = new Blob([bytes], { type: contentType });
   const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
+  const link = document.createElement("a");
   link.href = url;
   link.download = filename;
-  link.rel = 'noopener';
+  link.rel = "noopener";
   document.body.appendChild(link);
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-function buildQuestionResultMap(results: ObjectiveQuestionResult[] | undefined): Map<string, ObjectiveQuestionResult> {
+function buildQuestionResultMap(
+  results: ObjectiveQuestionResult[] | undefined
+): Map<string, ObjectiveQuestionResult> {
   return new Map((results ?? []).map((result) => [result.questionId, result] as const));
 }
 
 function getExportCorrectAnswerDisplay(
   descriptor: StudentQuestionDescriptor,
   questionResult: ObjectiveQuestionResult | undefined,
-  options: AnswerDisplayOptions = {},
+  options: AnswerDisplayOptions = {}
 ): string {
-  if (questionResult?.hasOverride && questionResult.correctAnswer.trim() !== '') {
+  if (questionResult?.hasOverride && questionResult.correctAnswer.trim() !== "") {
     return getCorrectAnswerDisplay(descriptor, {
       ...options,
       correctAnswerOverride: questionResult.correctAnswer,
@@ -334,9 +339,11 @@ function getQuestionTypeLabel(descriptor: StudentQuestionDescriptor): string | u
     : undefined;
 }
 
-function getQuestionSkillCategory(descriptor: StudentQuestionDescriptor): ActScienceSkillCategory | undefined {
+function getQuestionSkillCategory(
+  descriptor: StudentQuestionDescriptor
+): ActScienceSkillCategory | undefined {
   const question = descriptor.question;
-  if (!question || !('skillCategory' in question)) {
+  if (!question || !("skillCategory" in question)) {
     return undefined;
   }
 
@@ -347,12 +354,12 @@ function getQuestionSkillCategory(descriptor: StudentQuestionDescriptor): ActSci
 }
 
 function getGroupedScoringSlotKey(descriptor: StudentQuestionDescriptor): string | null {
-  if (typeof descriptor.rootId !== 'string') {
+  if (typeof descriptor.rootId !== "string") {
     return null;
   }
   // Only collapse slots explicitly marked as grouped scoring (e.g. 2-for-1),
   // not other uses of rootId such as the sub-answer tree.
-  return descriptor.rootId.includes('::group::') ? descriptor.rootId : null;
+  return descriptor.rootId.includes("::group::") ? descriptor.rootId : null;
 }
 
 function resolveGroupedScoringRequiredCorrect(groupQuestions: StudentQuestionDescriptor[]): number {
@@ -360,10 +367,10 @@ function resolveGroupedScoringRequiredCorrect(groupQuestions: StudentQuestionDes
 
   for (const question of groupQuestions) {
     if (
-      question.block.type === 'SENTENCE_COMPLETION'
-      && question.question
-      && 'blanks' in question.question
-      && question.answerIndex !== undefined
+      question.block.type === "SENTENCE_COMPLETION" &&
+      question.question &&
+      "blanks" in question.question &&
+      question.answerIndex !== undefined
     ) {
       const blank = (question.question as SentenceCompletionQuestion).blanks[question.answerIndex];
       if (blank?.requiredCorrect !== undefined) {
@@ -372,7 +379,7 @@ function resolveGroupedScoringRequiredCorrect(groupQuestions: StudentQuestionDes
       continue;
     }
 
-    if (question.block.type === 'TABLE_COMPLETION' && question.answerIndex !== undefined) {
+    if (question.block.type === "TABLE_COMPLETION" && question.answerIndex !== undefined) {
       const block = question.block as unknown as { cells?: Array<{ requiredCorrect?: number }> };
       const cell = Array.isArray(block.cells) ? block.cells[question.answerIndex] : undefined;
       if (cell?.requiredCorrect !== undefined) {
@@ -391,12 +398,16 @@ function resolveGroupedScoringRequiredCorrect(groupQuestions: StudentQuestionDes
 function getGroupedSlotLabel(descriptor: StudentQuestionDescriptor, index: number): string {
   const fallback = `Answer ${index + 1}`;
 
-  if (descriptor.block.type === 'SENTENCE_COMPLETION') {
-    return typeof descriptor.answerIndex === 'number' ? `Blank ${descriptor.answerIndex + 1}` : fallback;
+  if (descriptor.block.type === "SENTENCE_COMPLETION") {
+    return typeof descriptor.answerIndex === "number"
+      ? `Blank ${descriptor.answerIndex + 1}`
+      : fallback;
   }
 
-  if (descriptor.block.type === 'TABLE_COMPLETION') {
-    return typeof descriptor.answerIndex === 'number' ? `Cell ${descriptor.answerIndex + 1}` : fallback;
+  if (descriptor.block.type === "TABLE_COMPLETION") {
+    return typeof descriptor.answerIndex === "number"
+      ? `Cell ${descriptor.answerIndex + 1}`
+      : fallback;
   }
 
   return fallback;
@@ -407,35 +418,34 @@ function buildTracebackItem(
   descriptors: StudentQuestionDescriptor[],
   answerMap: Record<string, StudentAnswerValue | undefined>,
   results: Map<string, ObjectiveQuestionResult>,
-  correctnessByDescriptor: Map<string, boolean | null>,
+  correctnessByDescriptor: Map<string, boolean | null>
 ): ObjectiveTracebackItem {
   const questionResult = results.get(descriptor.id);
   const computedCorrectness = correctnessByDescriptor.has(descriptor.id)
-    ? correctnessByDescriptor.get(descriptor.id) ?? null
+    ? (correctnessByDescriptor.get(descriptor.id) ?? null)
     : isStudentAnswerCorrect(descriptor, answerMap);
-  const fallbackScore = descriptor.block.type === 'MULTI_MCQ'
-    ? getMultiSelectAnswerScore(descriptor, answerMap)
-    : {
-      awardedScore: computedCorrectness === null ? null : computedCorrectness ? 1 : 0,
-      maxScore: computedCorrectness === null ? null : 1,
-    };
+  const fallbackScore =
+    descriptor.block.type === "MULTI_MCQ"
+      ? getMultiSelectAnswerScore(descriptor, answerMap)
+      : {
+          awardedScore: computedCorrectness === null ? null : computedCorrectness ? 1 : 0,
+          maxScore: computedCorrectness === null ? null : 1,
+        };
   const useMultiSelectFallback =
-    descriptor.block.type === 'MULTI_MCQ' && questionResult?.hasOverride !== true;
-  const persistedCorrectness = questionResult?.hasOverride === true
-    ? questionResult.isCorrect
-    : computedCorrectness;
-  const persistedAwardedScore = questionResult?.hasOverride === true
-    ? questionResult.awardedScore
-    : fallbackScore.awardedScore;
-  const correctness = questionResult?.manualOverride?.isCorrect ?? (
-    useMultiSelectFallback ? computedCorrectness : persistedCorrectness
-  );
-  const awardedScore = questionResult?.manualOverride?.awardedScore ?? (
-    useMultiSelectFallback ? fallbackScore.awardedScore : persistedAwardedScore
-  );
+    descriptor.block.type === "MULTI_MCQ" && questionResult?.hasOverride !== true;
+  const persistedCorrectness =
+    questionResult?.hasOverride === true ? questionResult.isCorrect : computedCorrectness;
+  const persistedAwardedScore =
+    questionResult?.hasOverride === true ? questionResult.awardedScore : fallbackScore.awardedScore;
+  const correctness =
+    questionResult?.manualOverride?.isCorrect ??
+    (useMultiSelectFallback ? computedCorrectness : persistedCorrectness);
+  const awardedScore =
+    questionResult?.manualOverride?.awardedScore ??
+    (useMultiSelectFallback ? fallbackScore.awardedScore : persistedAwardedScore);
   const maxScore = useMultiSelectFallback
     ? fallbackScore.maxScore
-    : questionResult?.maxScore ?? fallbackScore.maxScore;
+    : (questionResult?.maxScore ?? fallbackScore.maxScore);
   const questionType = getQuestionTypeLabel(descriptor);
 
   return {
@@ -451,7 +461,7 @@ function buildTracebackItem(
     maxScore,
     answerKey: descriptor.answerKey,
     ...(descriptor.rootId === undefined ? {} : { rootId: descriptor.rootId }),
-    ...(typeof descriptor.rootNumber === 'number'
+    ...(typeof descriptor.rootNumber === "number"
       ? { rootNumberLabel: String(descriptor.rootNumber) }
       : {}),
   };
@@ -463,21 +473,23 @@ function buildGroupedTracebackItem(
   allDescriptors: StudentQuestionDescriptor[],
   answerMap: Record<string, StudentAnswerValue | undefined>,
   results: Map<string, ObjectiveQuestionResult>,
-  correctnessByDescriptor: Map<string, boolean | null>,
+  correctnessByDescriptor: Map<string, boolean | null>
 ): ObjectiveTracebackItem {
-  const sorted = [...groupDescriptors].sort((left, right) => (left.answerIndex ?? 0) - (right.answerIndex ?? 0));
+  const sorted = [...groupDescriptors].sort(
+    (left, right) => (left.answerIndex ?? 0) - (right.answerIndex ?? 0)
+  );
   const representative = sorted[0];
   if (!representative) {
     return {
-      numberLabel: '',
+      numberLabel: "",
       questionId: groupKey,
-      prompt: '',
-      studentAnswer: '',
-      correctAnswer: '',
+      prompt: "",
+      studentAnswer: "",
+      correctAnswer: "",
       correctness: null,
       awardedScore: null,
       maxScore: null,
-      answerKey: '',
+      answerKey: "",
       rootId: groupKey,
     };
   }
@@ -485,14 +497,15 @@ function buildGroupedTracebackItem(
   const slotCorrectness = sorted.map((descriptor) => {
     const questionResult = results.get(descriptor.id);
     const computed = correctnessByDescriptor.has(descriptor.id)
-      ? correctnessByDescriptor.get(descriptor.id) ?? null
+      ? (correctnessByDescriptor.get(descriptor.id) ?? null)
       : isStudentAnswerCorrect(descriptor, answerMap);
-    return questionResult?.manualOverride?.isCorrect ?? (
-      questionResult?.hasOverride === true ? questionResult.isCorrect : computed
+    return (
+      questionResult?.manualOverride?.isCorrect ??
+      (questionResult?.hasOverride === true ? questionResult.isCorrect : computed)
     );
   });
   const slotManualOverrides = sorted.map(
-    (descriptor) => results.get(descriptor.id)?.manualOverride ?? null,
+    (descriptor) => results.get(descriptor.id)?.manualOverride ?? null
   );
 
   const requiredCorrect = resolveGroupedScoringRequiredCorrect(sorted);
@@ -504,15 +517,19 @@ function buildGroupedTracebackItem(
   const maxScore = correctness === null ? null : 1;
 
   const slotLabels = sorted.map((descriptor, index) => getGroupedSlotLabel(descriptor, index));
-  const studentAnswerSlots = sorted.map((descriptor) => getStudentAnswerDisplay(descriptor, answerMap));
-  const correctAnswerSlots = sorted.map((descriptor) => (
+  const studentAnswerSlots = sorted.map((descriptor) =>
+    getStudentAnswerDisplay(descriptor, answerMap)
+  );
+  const correctAnswerSlots = sorted.map((descriptor) =>
     getExportCorrectAnswerDisplay(descriptor, results.get(descriptor.id))
-  ));
+  );
   const answerKeys = sorted.map((descriptor) => descriptor.answerKey).filter(Boolean);
 
   const prompt =
-    representative.block.type === 'SENTENCE_COMPLETION' && representative.question && 'sentence' in representative.question
-      ? representative.question.sentence ?? ''
+    representative.block.type === "SENTENCE_COMPLETION" &&
+    representative.question &&
+    "sentence" in representative.question
+      ? (representative.question.sentence ?? "")
       : representative.block.instruction || getQuestionPrompt(representative);
   const questionType = getQuestionTypeLabel(representative);
 
@@ -521,14 +538,14 @@ function buildGroupedTracebackItem(
     questionId: representative.id,
     prompt,
     ...(questionType ? { questionType } : {}),
-    studentAnswer: studentAnswerSlots.join(' | '),
-    correctAnswer: correctAnswerSlots.join(' | '),
+    studentAnswer: studentAnswerSlots.join(" | "),
+    correctAnswer: correctAnswerSlots.join(" | "),
     correctness,
     awardedScore,
     maxScore,
     answerKey: representative.answerKey,
     rootId: groupKey,
-    ...(typeof representative.rootNumber === 'number'
+    ...(typeof representative.rootNumber === "number"
       ? { rootNumberLabel: String(representative.rootNumber) }
       : {}),
     requiredCorrect,
@@ -545,7 +562,7 @@ function buildGroupedTracebackItem(
 export function buildQuestionTracebackGroups(
   examState: ExamState | null,
   sectionSubmission: SectionSubmission | null,
-  moduleType: 'reading' | 'listening' | 'science',
+  moduleType: "reading" | "listening" | "science"
 ): ObjectiveTracebackGroup[] {
   if (!examState || !sectionSubmission) {
     return [];
@@ -559,8 +576,8 @@ export function buildQuestionTracebackGroups(
   const groupedSlotsByGroup = new Map<string, Map<string, StudentQuestionDescriptor[]>>();
 
   for (const descriptor of descriptors) {
-    const groupId = descriptor.groupId || 'group';
-    const groupLabel = descriptor.groupLabel || 'Group';
+    const groupId = descriptor.groupId || "group";
+    const groupLabel = descriptor.groupLabel || "Group";
     if (!groups.has(groupId)) {
       groups.set(groupId, {
         groupId,
@@ -584,15 +601,26 @@ export function buildQuestionTracebackGroups(
     const slots = groupedSlotsByGroup.get(groupId);
     if (!slots) continue;
     for (const [slotKey, slotDescriptors] of slots.entries()) {
-      const groupKey = getGroupedScoringSlotKey(slotDescriptors[0] ?? ({} as StudentQuestionDescriptor));
+      const groupKey = getGroupedScoringSlotKey(
+        slotDescriptors[0] ?? ({} as StudentQuestionDescriptor)
+      );
       if (groupKey) {
         group.items.push(
-          buildGroupedTracebackItem(slotKey, slotDescriptors, descriptors, answerMap, results, correctnessByDescriptor),
+          buildGroupedTracebackItem(
+            slotKey,
+            slotDescriptors,
+            descriptors,
+            answerMap,
+            results,
+            correctnessByDescriptor
+          )
         );
       } else {
         const descriptor = slotDescriptors[0];
         if (!descriptor) continue;
-        group.items.push(buildTracebackItem(descriptor, descriptors, answerMap, results, correctnessByDescriptor));
+        group.items.push(
+          buildTracebackItem(descriptor, descriptors, answerMap, results, correctnessByDescriptor)
+        );
       }
     }
   }
@@ -605,7 +633,7 @@ export interface ObjectiveExportRowInput {
   submission: StudentSubmission;
   sectionSubmission: SectionSubmission;
   examState: ExamState | null;
-  moduleType: 'reading' | 'listening' | 'science';
+  moduleType: "reading" | "listening" | "science";
 }
 
 export interface WideObjectiveExportInput {
@@ -616,7 +644,7 @@ export interface WideObjectiveExportInput {
     sectionSubmission: SectionSubmission | null | undefined;
   }>;
   examState: ExamState | null;
-  moduleType: 'reading' | 'listening' | 'science';
+  moduleType: "reading" | "listening" | "science";
   mode?: ObjectiveWideExportMode;
 }
 
@@ -625,7 +653,7 @@ export interface WideObjectiveExport {
   rows: Array<Record<string, unknown>>;
 }
 
-export type ObjectiveWideExportMode = 'auto' | 'manual';
+export type ObjectiveWideExportMode = "auto" | "manual";
 
 export interface WideWritingExportInput {
   session: ExportSessionContext;
@@ -660,9 +688,9 @@ export function buildObjectiveExportRows({
         submissionId: submission.id,
         studentName: submission.studentName,
         studentId: submission.studentId,
-        studentEmail: submission.studentEmail ?? '',
-        nickname: submission.nickname ?? '',
-        ieltsCourse: submission.ieltsCourse ?? '',
+        studentEmail: submission.studentEmail ?? "",
+        nickname: submission.nickname ?? "",
+        ieltsCourse: submission.ieltsCourse ?? "",
         cohortName: submission.cohortName,
         section: moduleType,
         groupLabel: group.groupLabel,
@@ -672,11 +700,7 @@ export function buildObjectiveExportRows({
         studentAnswer: item.studentAnswer,
         correctAnswer: item.correctAnswer,
         isCorrect:
-          item.correctness === null
-            ? 'Not Scored'
-            : item.correctness
-              ? 'Correct'
-              : 'Incorrect',
+          item.correctness === null ? "Not Scored" : item.correctness ? "Correct" : "Incorrect",
         autoScore: toOptionalNumber(item.awardedScore),
         maxScore: toOptionalNumber(item.maxScore),
         submittedAt: sectionSubmission.submittedAt,
@@ -687,18 +711,19 @@ export function buildObjectiveExportRows({
   return rows;
 }
 
-function getQuestionColumnLabel(descriptor: StudentQuestionDescriptor, descriptors: StudentQuestionDescriptor[]): string {
+function getQuestionColumnLabel(
+  descriptor: StudentQuestionDescriptor,
+  descriptors: StudentQuestionDescriptor[]
+): string {
   const numberLabel = getQuestionNumberLabel(descriptors, descriptor.id);
   return `Q${numberLabel}`;
 }
 
 function countCorrectAnswers(groups: ObjectiveTracebackGroup[]): number {
   return groups.reduce(
-    (count, group) => count + group.items.reduce(
-      (groupCount, item) => groupCount + (item.awardedScore ?? 0),
-      0,
-    ),
-    0,
+    (count, group) =>
+      count + group.items.reduce((groupCount, item) => groupCount + (item.awardedScore ?? 0), 0),
+    0
   );
 }
 
@@ -744,39 +769,45 @@ function calculateBandScore(rawScore: number, table: Record<number, number>): nu
 
 function getObjectiveBandTable(
   examState: ExamState | null,
-  moduleType: 'reading' | 'listening' | 'science',
+  moduleType: "reading" | "listening" | "science"
 ): Record<number, number> | null {
   if (!examState) return null;
-  if (moduleType === 'science') return null;
+  if (moduleType === "science") return null;
 
-  if (moduleType === 'listening') {
-    return examState.config.standards.bandScoreTables.listening
-      ?? examState.config.sections.listening.bandScoreTable
-      ?? null;
+  if (moduleType === "listening") {
+    return (
+      examState.config.standards.bandScoreTables.listening ??
+      examState.config.sections.listening.bandScoreTable ??
+      null
+    );
   }
 
-  if (examState.type === 'General Training') {
-    return examState.config.standards.bandScoreTables.readingGeneralTraining
-      ?? examState.config.sections.reading.bandScoreTable
-      ?? null;
+  if (examState.type === "General Training") {
+    return (
+      examState.config.standards.bandScoreTables.readingGeneralTraining ??
+      examState.config.sections.reading.bandScoreTable ??
+      null
+    );
   }
 
-  return examState.config.standards.bandScoreTables.readingAcademic
-    ?? examState.config.sections.reading.bandScoreTable
-    ?? null;
+  return (
+    examState.config.standards.bandScoreTables.readingAcademic ??
+    examState.config.sections.reading.bandScoreTable ??
+    null
+  );
 }
 
 function deriveIeltsBandScore(
   examState: ExamState | null,
-  moduleType: 'reading' | 'listening' | 'science',
-  totalScore: number | null | undefined,
-): number | '' {
-  if (typeof totalScore !== 'number' || !Number.isFinite(totalScore)) {
-    return '';
+  moduleType: "reading" | "listening" | "science",
+  totalScore: number | null | undefined
+): number | "" {
+  if (typeof totalScore !== "number" || !Number.isFinite(totalScore)) {
+    return "";
   }
   const table = getObjectiveBandTable(examState, moduleType);
   if (!table) {
-    return '';
+    return "";
   }
 
   return calculateBandScore(totalScore, table);
@@ -788,10 +819,10 @@ export function buildWideObjectiveExport({
   sectionSubmissions,
   examState,
   moduleType,
-  mode = 'auto',
+  mode = "auto",
 }: WideObjectiveExportInput): WideObjectiveExport {
   const descriptors = examState ? getStudentQuestionsForModule(examState, moduleType) : [];
-  const answerDisplayOptions = moduleType === 'science' ? { includeChoiceLabels: true } : undefined;
+  const answerDisplayOptions = moduleType === "science" ? { includeChoiceLabels: true } : undefined;
 
   type ExportSlot = {
     slotKey: string;
@@ -810,19 +841,25 @@ export function buildWideObjectiveExport({
     slotMap.get(slotKey)?.push(descriptor);
   }
 
-  const exportSlots: ExportSlot[] = Array.from(slotMap.entries()).map(([slotKey, slotDescriptors]) => {
-    const sorted = [...slotDescriptors].sort((left, right) => (left.answerIndex ?? 0) - (right.answerIndex ?? 0));
-    const representative = sorted[0];
-    const representativeId = representative?.id ?? slotKey;
-    const numberLabel = representative ? getQuestionNumberLabel(descriptors, representativeId) : '';
-    return {
-      slotKey,
-      isGrouped: slotKey.includes('::group::'),
-      representativeId,
-      baseLabel: `Q${numberLabel}`,
-      descriptors: sorted,
-    };
-  });
+  const exportSlots: ExportSlot[] = Array.from(slotMap.entries()).map(
+    ([slotKey, slotDescriptors]) => {
+      const sorted = [...slotDescriptors].sort(
+        (left, right) => (left.answerIndex ?? 0) - (right.answerIndex ?? 0)
+      );
+      const representative = sorted[0];
+      const representativeId = representative?.id ?? slotKey;
+      const numberLabel = representative
+        ? getQuestionNumberLabel(descriptors, representativeId)
+        : "";
+      return {
+        slotKey,
+        isGrouped: slotKey.includes("::group::"),
+        representativeId,
+        baseLabel: `Q${numberLabel}`,
+        descriptors: sorted,
+      };
+    }
+  );
 
   const answerColumns: CsvColumn[] = [];
   const rightAnswerColumns: CsvColumn[] = [];
@@ -831,18 +868,27 @@ export function buildWideObjectiveExport({
 
   for (const slot of exportSlots) {
     if (!slot.isGrouped) {
-      answerColumns.push({ key: `answer:${slot.representativeId}`, label: `${slot.baseLabel} Answer` });
-      if (mode === 'auto') {
+      answerColumns.push({
+        key: `answer:${slot.representativeId}`,
+        label: `${slot.baseLabel} Answer`,
+      });
+      if (mode === "auto") {
         rightAnswerColumns.push({
           key: `rightAnswer:${slot.representativeId}`,
           label: `${slot.baseLabel} Right Answer`,
         });
-        scoreColumns.push({ key: `score:${slot.representativeId}`, label: `${slot.baseLabel} Score` });
+        scoreColumns.push({
+          key: `score:${slot.representativeId}`,
+          label: `${slot.baseLabel} Score`,
+        });
       } else {
         manualQuestionColumns.push(
           { key: `answer:${slot.representativeId}`, label: `${slot.baseLabel} Answer` },
-          { key: `rightAnswer:${slot.representativeId}`, label: `${slot.baseLabel} Right Answer/Answer Key` },
-          { key: `manualCorrect:${slot.representativeId}`, label: `Correct ${slot.baseLabel}` },
+          {
+            key: `rightAnswer:${slot.representativeId}`,
+            label: `${slot.baseLabel} Right Answer/Answer Key`,
+          },
+          { key: `manualCorrect:${slot.representativeId}`, label: `Correct ${slot.baseLabel}` }
         );
       }
       continue;
@@ -850,8 +896,11 @@ export function buildWideObjectiveExport({
 
     slot.descriptors.forEach((descriptor, index) => {
       const suffix = `(${index + 1})`;
-      answerColumns.push({ key: `answer:${descriptor.id}`, label: `${slot.baseLabel} Answer ${suffix}` });
-      if (mode === 'auto') {
+      answerColumns.push({
+        key: `answer:${descriptor.id}`,
+        label: `${slot.baseLabel} Answer ${suffix}`,
+      });
+      if (mode === "auto") {
         rightAnswerColumns.push({
           key: `rightAnswer:${descriptor.id}`,
           label: `${slot.baseLabel} Right Answer ${suffix}`,
@@ -859,20 +908,26 @@ export function buildWideObjectiveExport({
       } else {
         manualQuestionColumns.push(
           { key: `answer:${descriptor.id}`, label: `${slot.baseLabel} Answer ${suffix}` },
-          { key: `rightAnswer:${descriptor.id}`, label: `${slot.baseLabel} Right Answer/Answer Key ${suffix}` },
+          {
+            key: `rightAnswer:${descriptor.id}`,
+            label: `${slot.baseLabel} Right Answer/Answer Key ${suffix}`,
+          }
         );
       }
     });
 
-    if (mode === 'auto') {
+    if (mode === "auto") {
       scoreColumns.push({ key: `scoreGroup:${slot.slotKey}`, label: `${slot.baseLabel} Score` });
     } else {
-      manualQuestionColumns.push({ key: `manualCorrectGroup:${slot.slotKey}`, label: `Correct ${slot.baseLabel}` });
+      manualQuestionColumns.push({
+        key: `manualCorrectGroup:${slot.slotKey}`,
+        label: `Correct ${slot.baseLabel}`,
+      });
     }
   }
 
   const sectionBySubmissionId = new Map(
-    sectionSubmissions.map((entry) => [entry.submissionId, entry.sectionSubmission] as const),
+    sectionSubmissions.map((entry) => [entry.submissionId, entry.sectionSubmission] as const)
   );
 
   const rows = submissions.map((submission) => {
@@ -886,20 +941,22 @@ export function buildWideObjectiveExport({
     const derivedPercentage = derivedTotals.percentage ?? autoGradingResults?.percentage ?? null;
     const scoredResults = buildQuestionResultMap(autoGradingResults?.questionResults);
     const tracebackItemsById = new Map(
-      groups.flatMap((group) => group.items).map((item) => [item.questionId, item] as const),
+      groups.flatMap((group) => group.items).map((item) => [item.questionId, item] as const)
     );
     const scienceCategoryCorrectCounts: Partial<Record<ActScienceSkillCategory, number>> = {};
     const scienceCategoryQuestionCounts: Partial<Record<ActScienceSkillCategory, number>> = {};
-    if (moduleType === 'science') {
+    if (moduleType === "science") {
       for (const descriptor of descriptors) {
         const skillCategory = getQuestionSkillCategory(descriptor);
         if (!skillCategory) {
           continue;
         }
-        scienceCategoryQuestionCounts[skillCategory] = (scienceCategoryQuestionCounts[skillCategory] ?? 0) + 1;
+        scienceCategoryQuestionCounts[skillCategory] =
+          (scienceCategoryQuestionCounts[skillCategory] ?? 0) + 1;
         const tracebackItem = tracebackItemsById.get(descriptor.id);
         if (tracebackItem?.correctness !== true) continue;
-        scienceCategoryCorrectCounts[skillCategory] = (scienceCategoryCorrectCounts[skillCategory] ?? 0) + 1;
+        scienceCategoryCorrectCounts[skillCategory] =
+          (scienceCategoryCorrectCounts[skillCategory] ?? 0) + 1;
       }
     }
     const row: Record<string, unknown> = {
@@ -909,35 +966,35 @@ export function buildWideObjectiveExport({
       submissionId: submission.id,
       studentName: submission.studentName,
       studentId: submission.studentId,
-      studentEmail: submission.studentEmail ?? '',
-      nickname: submission.nickname ?? '',
-      ieltsCourse: submission.ieltsCourse ?? '',
+      studentEmail: submission.studentEmail ?? "",
+      nickname: submission.nickname ?? "",
+      ieltsCourse: submission.ieltsCourse ?? "",
       cohortName: submission.cohortName,
       section: moduleType,
       submittedAt: sectionSubmission?.submittedAt ?? submission.submittedAt,
-      totalScore: mode === 'manual' ? '' : toOptionalNumber(derivedTotalScore),
+      totalScore: mode === "manual" ? "" : toOptionalNumber(derivedTotalScore),
       maxScore: toOptionalNumber(derivedMaxScore),
       percentage: toOptionalNumber(derivedPercentage),
       correctCount: countCorrectAnswers(groups),
       ieltsBandScore: deriveIeltsBandScore(examState, moduleType, derivedTotalScore),
-      ...(moduleType === 'science'
+      ...(moduleType === "science"
         ? Object.fromEntries(
-          ACT_SCIENCE_SKILL_CATEGORIES.map((category) => [
-            `scienceCategory:${category.value}`,
-            scienceCategoryCorrectCounts[category.value] ?? 0,
-          ]),
-        )
-        : {}),
-      ...(moduleType === 'science'
-        ? Object.fromEntries(
-          ACT_SCIENCE_SKILL_CATEGORIES.map((category) => [
-            `scienceCategoryPercentage:${category.value}`,
-            calculateCategoryPercentage(
+            ACT_SCIENCE_SKILL_CATEGORIES.map((category) => [
+              `scienceCategory:${category.value}`,
               scienceCategoryCorrectCounts[category.value] ?? 0,
-              scienceCategoryQuestionCounts[category.value] ?? 0,
-            ),
-          ]),
-        )
+            ])
+          )
+        : {}),
+      ...(moduleType === "science"
+        ? Object.fromEntries(
+            ACT_SCIENCE_SKILL_CATEGORIES.map((category) => [
+              `scienceCategoryPercentage:${category.value}`,
+              calculateCategoryPercentage(
+                scienceCategoryCorrectCounts[category.value] ?? 0,
+                scienceCategoryQuestionCounts[category.value] ?? 0
+              ),
+            ])
+          )
         : {}),
     };
 
@@ -950,21 +1007,21 @@ export function buildWideObjectiveExport({
         row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(
           descriptor,
           answerMap,
-          answerDisplayOptions,
+          answerDisplayOptions
         );
         row[`rightAnswer:${descriptor.id}`] = getExportCorrectAnswerDisplay(
           descriptor,
           scoredResult,
-          answerDisplayOptions,
+          answerDisplayOptions
         );
-        if (mode === 'auto') {
+        if (mode === "auto") {
           row[`score:${descriptor.id}`] = toOptionalNumber(
-            descriptor.block.type === 'MULTI_MCQ' && scoredResult?.hasOverride !== true
+            descriptor.block.type === "MULTI_MCQ" && scoredResult?.hasOverride !== true
               ? fallbackItem?.awardedScore
-              : scoredResult?.awardedScore,
+              : scoredResult?.awardedScore
           );
         } else {
-          row[`manualCorrect:${descriptor.id}`] = '';
+          row[`manualCorrect:${descriptor.id}`] = "";
         }
         continue;
       }
@@ -973,58 +1030,59 @@ export function buildWideObjectiveExport({
         row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(
           descriptor,
           answerMap,
-          answerDisplayOptions,
+          answerDisplayOptions
         );
         row[`rightAnswer:${descriptor.id}`] = getExportCorrectAnswerDisplay(
           descriptor,
           scoredResults.get(descriptor.id),
-          answerDisplayOptions,
+          answerDisplayOptions
         );
-        if (mode === 'manual') {
-          row[`manualCorrect:${descriptor.id}`] = '';
+        if (mode === "manual") {
+          row[`manualCorrect:${descriptor.id}`] = "";
         }
       }
 
-      if (mode === 'auto') {
+      if (mode === "auto") {
         const groupResults = slot.descriptors.map((descriptor) => scoredResults.get(descriptor.id));
         if (groupResults.some((result) => !result)) {
-          row[`scoreGroup:${slot.slotKey}`] = '';
+          row[`scoreGroup:${slot.slotKey}`] = "";
         } else {
           const requiredCorrect = resolveGroupedScoringRequiredCorrect(slot.descriptors);
           const correctSlots = groupResults.filter((result) => result?.isCorrect).length;
           row[`scoreGroup:${slot.slotKey}`] = correctSlots >= requiredCorrect ? 1 : 0;
         }
       } else {
-        row[`manualCorrectGroup:${slot.slotKey}`] = '';
+        row[`manualCorrectGroup:${slot.slotKey}`] = "";
       }
     }
 
     return row;
   });
 
-  const baseColumns = mode === 'auto'
-    ? OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS
-    : OBJECTIVE_WIDE_MANUAL_EXPORT_BASE_COLUMNS;
-  const summaryColumns = mode === 'auto' && moduleType === 'science'
-    ? ACT_SCIENCE_CATEGORY_CORRECT_COLUMNS
-    : [];
-  const percentageColumns = mode === 'auto' && moduleType === 'science'
-    ? ACT_SCIENCE_CATEGORY_PERCENTAGE_COLUMNS
-    : [];
-  const exportBaseColumns = baseColumns.flatMap((column) => (
-    column.key === 'totalScore'
+  const baseColumns =
+    mode === "auto"
+      ? OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS
+      : OBJECTIVE_WIDE_MANUAL_EXPORT_BASE_COLUMNS;
+  const summaryColumns =
+    mode === "auto" && moduleType === "science" ? ACT_SCIENCE_CATEGORY_CORRECT_COLUMNS : [];
+  const percentageColumns =
+    mode === "auto" && moduleType === "science" ? ACT_SCIENCE_CATEGORY_PERCENTAGE_COLUMNS : [];
+  const exportBaseColumns = baseColumns.flatMap((column) =>
+    column.key === "totalScore"
       ? [column, ...summaryColumns]
-      : column.key === 'percentage'
+      : column.key === "percentage"
         ? [column, ...percentageColumns]
         : [column]
-  ));
+  );
 
   return {
     columns: [
       ...exportBaseColumns,
-      ...(mode === 'auto' ? [...answerColumns, ...rightAnswerColumns, ...scoreColumns] : manualQuestionColumns),
-      ...(mode === 'auto' && moduleType !== 'science'
-        ? [{ key: 'ieltsBandScore', label: 'IELTS Band Score' }]
+      ...(mode === "auto"
+        ? [...answerColumns, ...rightAnswerColumns, ...scoreColumns]
+        : manualQuestionColumns),
+      ...(mode === "auto" && moduleType !== "science"
+        ? [{ key: "ieltsBandScore", label: "IELTS Band Score" }]
         : []),
     ],
     rows,
@@ -1034,10 +1092,12 @@ export function buildWideObjectiveExport({
 export function buildWritingExportRows(
   session: ExportSessionContext,
   submission: StudentSubmission,
-  writingSubmissions: WritingTaskSubmission[],
+  writingSubmissions: WritingTaskSubmission[]
 ): Array<Record<string, unknown>> {
   return writingSubmissions.map((task) => {
-    const visibleAnnotations = task.annotations.filter((annotation) => annotation.visibility === 'student_visible');
+    const visibleAnnotations = task.annotations.filter(
+      (annotation) => annotation.visibility === "student_visible"
+    );
     const rubric = task.rubricAssessment;
 
     return {
@@ -1047,71 +1107,77 @@ export function buildWritingExportRows(
       submissionId: submission.id,
       studentName: submission.studentName,
       studentId: submission.studentId,
-      studentEmail: submission.studentEmail ?? '',
+      studentEmail: submission.studentEmail ?? "",
       cohortName: submission.cohortName,
-      section: 'writing',
+      section: "writing",
       taskId: task.taskId,
       taskLabel: task.taskLabel,
       prompt: task.prompt,
       studentText: task.studentText,
       wordCount: task.wordCount,
-      taskResponseBand: rubric?.taskResponseBand ?? '',
-      coherenceBand: rubric?.coherenceBand ?? '',
-      lexicalBand: rubric?.lexicalBand ?? '',
-      grammarBand: rubric?.grammarBand ?? '',
-      overallBand: rubric?.overallBand ?? '',
-      overallFeedback: task.overallFeedback ?? '',
-      studentVisibleNotes: task.studentVisibleNotes ?? '',
+      taskResponseBand: rubric?.taskResponseBand ?? "",
+      coherenceBand: rubric?.coherenceBand ?? "",
+      lexicalBand: rubric?.lexicalBand ?? "",
+      grammarBand: rubric?.grammarBand ?? "",
+      overallBand: rubric?.overallBand ?? "",
+      overallFeedback: task.overallFeedback ?? "",
+      studentVisibleNotes: task.studentVisibleNotes ?? "",
       annotationCount: task.annotations.length,
       studentVisibleAnnotationCount: visibleAnnotations.length,
       gradingStatus: task.gradingStatus,
       submittedAt: task.submittedAt,
-      gradedBy: task.gradedBy ?? '',
-      gradedAt: task.gradedAt ?? '',
+      gradedBy: task.gradedBy ?? "",
+      gradedAt: task.gradedAt ?? "",
     };
   });
 }
 
-function getWritingTaskSlot(task: WritingTaskSubmission): 'task1' | 'task2' | null {
+function getWritingTaskSlot(task: WritingTaskSubmission): "task1" | "task2" | null {
   const normalizedId = task.taskId.trim().toLowerCase();
   const normalizedLabel = task.taskLabel.trim().toLowerCase();
 
-  if (normalizedId === 'task1' || normalizedId === 'task-1' || normalizedLabel === 'task 1') {
-    return 'task1';
+  if (normalizedId === "task1" || normalizedId === "task-1" || normalizedLabel === "task 1") {
+    return "task1";
   }
 
-  if (normalizedId === 'task2' || normalizedId === 'task-2' || normalizedLabel === 'task 2') {
-    return 'task2';
+  if (normalizedId === "task2" || normalizedId === "task-2" || normalizedLabel === "task 2") {
+    return "task2";
   }
 
   return null;
 }
 
-function assignWritingTaskColumns(row: Record<string, unknown>, slot: 'task1' | 'task2', task?: WritingTaskSubmission) {
+function assignWritingTaskColumns(
+  row: Record<string, unknown>,
+  slot: "task1" | "task2",
+  task?: WritingTaskSubmission
+) {
   if (!task) {
     for (const field of WRITING_WIDE_TASK_FIELDS) {
-      row[`${slot}:${field.key}`] = '';
+      row[`${slot}:${field.key}`] = "";
     }
     return;
   }
 
-  const visibleAnnotations = task.annotations.filter((annotation) => annotation.visibility === 'student_visible');
+  const visibleAnnotations = task.annotations.filter(
+    (annotation) => annotation.visibility === "student_visible"
+  );
   const rubric = task.rubricAssessment;
 
   row[`${slot}:wordCount`] = task.wordCount;
   row[`${slot}:response`] = htmlToPlainTextPreserveLineBreaks(task.studentText);
-  row[`${slot}:taskResponseBand`] = rubric?.taskResponseBand ?? '';
-  row[`${slot}:coherenceBand`] = rubric?.coherenceBand ?? '';
-  row[`${slot}:lexicalBand`] = rubric?.lexicalBand ?? '';
-  row[`${slot}:grammarBand`] = rubric?.grammarBand ?? '';
-  row[`${slot}:overallBand`] = rubric?.overallBand ?? '';
-  row[`${slot}:overallFeedback`] = task.overallFeedback ?? '';
-  row[`${slot}:studentVisibleNotes`] = task.studentVisibleNotes ?? '';
+  row[`${slot}:taskResponseBand`] = rubric?.taskResponseBand ?? "";
+  row[`${slot}:coherenceBand`] = rubric?.coherenceBand ?? "";
+  row[`${slot}:lexicalBand`] = rubric?.lexicalBand ?? "";
+  row[`${slot}:grammarBand`] = rubric?.grammarBand ?? "";
+  row[`${slot}:overallBand`] = rubric?.overallBand ?? "";
+  row[`${slot}:overallFeedback`] = task.overallFeedback ?? "";
+  row[`${slot}:studentVisibleNotes`] = task.studentVisibleNotes ?? "";
   row[`${slot}:annotationCount`] = task.annotations.length;
   row[`${slot}:studentVisibleAnnotationCount`] = visibleAnnotations.length;
   row[`${slot}:gradingStatus`] = task.gradingStatus;
-  row[`${slot}:gradedBy`] = task.gradedBy ?? '';
-  row[`${slot}:gradedAt`] = task.gradedAt ?? '';
+  row[`${slot}:gradedBy`] = task.gradedBy ?? "";
+  row[`${slot}:gradedAt`] = task.gradedAt ?? "";
 }
 
 export function buildWideWritingExport({
@@ -1120,12 +1186,12 @@ export function buildWideWritingExport({
   writingSubmissions,
 }: WideWritingExportInput): WideWritingExport {
   const writingBySubmissionId = new Map(
-    writingSubmissions.map((entry) => [entry.submissionId, entry.writing] as const),
+    writingSubmissions.map((entry) => [entry.submissionId, entry.writing] as const)
   );
 
   const rows = submissions.map((submission) => {
     const tasks = writingBySubmissionId.get(submission.id) ?? [];
-    const tasksBySlot = new Map<'task1' | 'task2', WritingTaskSubmission>();
+    const tasksBySlot = new Map<"task1" | "task2", WritingTaskSubmission>();
 
     for (const task of tasks) {
       const slot = getWritingTaskSlot(task);
@@ -1143,16 +1209,16 @@ export function buildWideWritingExport({
       submissionId: submission.id,
       studentName: submission.studentName,
       studentId: submission.studentId,
-      studentEmail: submission.studentEmail ?? '',
-      nickname: submission.nickname ?? '',
-      ieltsCourse: submission.ieltsCourse ?? '',
+      studentEmail: submission.studentEmail ?? "",
+      nickname: submission.nickname ?? "",
+      ieltsCourse: submission.ieltsCourse ?? "",
       cohortName: submission.cohortName,
-      section: 'writing',
+      section: "writing",
       submittedAt,
     };
 
-    assignWritingTaskColumns(row, 'task1', tasksBySlot.get('task1'));
-    assignWritingTaskColumns(row, 'task2', tasksBySlot.get('task2'));
+    assignWritingTaskColumns(row, "task1", tasksBySlot.get("task1"));
+    assignWritingTaskColumns(row, "task2", tasksBySlot.get("task2"));
 
     return row;
   });
@@ -1167,18 +1233,18 @@ export function slugifyCsvFilePart(value: string): string {
   return value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export function buildCsvFilename(
   examTitle: string,
   section: GradingExportSection,
   cohortName?: string | undefined,
-  variant?: string | undefined,
+  variant?: string | undefined
 ): string {
   const parts = [examTitle, cohortName, section, variant, new Date().toISOString().slice(0, 10)]
-    .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
+    .filter((part): part is string => typeof part === "string" && part.trim() !== "")
     .map(slugifyCsvFilePart);
-  return `${parts.join('-') || 'grading-export'}.csv`;
+  return `${parts.join("-") || "grading-export"}.csv`;
 }

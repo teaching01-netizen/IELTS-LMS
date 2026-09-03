@@ -1,21 +1,26 @@
-import React, { useCallback, useMemo, useRef } from 'react';
-import type { ActScienceStimulus, ExamState, QuestionAnswer, StimulusAnnotation } from '../../types';
-import { getBlockQuestionCount } from '../../utils/examUtils';
+import React, { useCallback, useMemo, useRef } from "react";
+import type {
+  ActScienceStimulus,
+  ExamState,
+  QuestionAnswer,
+  StimulusAnnotation,
+} from "../../types";
+import { getBlockQuestionCount } from "../../utils/examUtils";
 import {
   getStudentQuestionsForModule,
   type StudentQuestionDescriptor,
-} from '@student/application/studentExamContentFacade';
-import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
-import type { StudentHighlightColor } from './highlightPalette';
-import type { StudentLayoutMode } from './layout/studentLayoutMode';
-import { RichTextHighlighter } from './RichTextHighlighter';
-import { StudentQuestionText } from './StudentQuestionText';
-import { StudentZoomableMedia } from './StudentZoomableMedia';
-import { StudentMaterialWithQuestionPane } from './StudentMaterialWithQuestionPane';
-import { StudentModuleEmptyState } from './StudentModuleEmptyState';
-import { useSplitPaneResize } from './useSplitPaneResize';
-import { hasHtmlMarkup, normalizeReadingPlainTextForDisplay } from './normalizeReadingPassageText';
-import { sanitizeReadingPassageHtml } from './sanitizeReadingPassageHtml';
+} from "@student/application/studentExamContentFacade";
+import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
+import type { StudentHighlightColor } from "./highlightPalette";
+import type { StudentLayoutMode } from "./layout/studentLayoutMode";
+import { RichTextHighlighter } from "./RichTextHighlighter";
+import { StudentQuestionText } from "./StudentQuestionText";
+import { StudentZoomableMedia } from "./StudentZoomableMedia";
+import { StudentMaterialWithQuestionPane } from "./StudentMaterialWithQuestionPane";
+import { StudentModuleEmptyState } from "./StudentModuleEmptyState";
+import { useSplitPaneResize } from "./useSplitPaneResize";
+import { hasHtmlMarkup, normalizeReadingPlainTextForDisplay } from "./normalizeReadingPassageText";
+import { sanitizeReadingPassageHtml } from "./sanitizeReadingPassageHtml";
 
 export interface StudentScienceProps {
   state: ExamState;
@@ -23,7 +28,7 @@ export interface StudentScienceProps {
   onAnswerChange: (
     questionId: string,
     answer: QuestionAnswer,
-    meta?: StudentAnswerMutationMeta,
+    meta?: StudentAnswerMutationMeta
   ) => void;
   currentQuestionId: string | null;
   onNavigate: (id: string) => void;
@@ -52,13 +57,13 @@ interface ScienceStimulusPaneProps {
 
 function renderScienceImageAnnotations(
   annotations: StimulusAnnotation[],
-  zoom = 1,
+  zoom = 1
 ): React.ReactNode {
   return annotations.map((annotation) => {
     const positionStyle: React.CSSProperties = {
       left: `${annotation.x}%`,
       top: `${annotation.y}%`,
-      transform: 'translate(-50%, -50%)',
+      transform: "translate(-50%, -50%)",
     };
 
     if (annotation.width) {
@@ -69,7 +74,7 @@ function renderScienceImageAnnotations(
       positionStyle.height = `${annotation.height}%`;
     }
 
-    if (annotation.type === 'hotspot') {
+    if (annotation.type === "hotspot") {
       return (
         <span
           key={annotation.id}
@@ -86,7 +91,7 @@ function renderScienceImageAnnotations(
       );
     }
 
-    if (annotation.type === 'text') {
+    if (annotation.type === "text") {
       return (
         <span
           key={annotation.id}
@@ -101,7 +106,7 @@ function renderScienceImageAnnotations(
       );
     }
 
-    if (annotation.type === 'box') {
+    if (annotation.type === "box") {
       return (
         <span
           key={annotation.id}
@@ -135,21 +140,21 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
   return (
     <div
       className={`student-science-stimulus-pane h-full overflow-y-auto font-sans text-gray-900 ${
-        materialCompact ? 'p-2 md:p-3' : 'p-4 md:p-6 lg:p-8'
-      } ${isTabletMode ? 'w-[var(--science-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--science-pane-width)] lg:min-w-[300px]'}`}
+        materialCompact ? "p-2 md:p-3" : "p-4 md:p-6 lg:p-8"
+      } ${isTabletMode ? "w-[var(--science-pane-width)] min-w-[48px] border-r border-gray-200" : "lg:w-[var(--science-pane-width)] lg:min-w-[300px]"}`}
       data-student-highlightable="true"
       data-student-zoom-scroll
       style={{
         ...(contentZoomStyle ?? {}),
-        fontSize: 'var(--student-passage-font-size)',
-        lineHeight: 'var(--student-passage-line-height)',
-        userSelect: 'text',
-        WebkitUserSelect: 'text',
+        fontSize: "var(--student-passage-font-size)",
+        lineHeight: "var(--student-passage-line-height)",
+        userSelect: "text",
+        WebkitUserSelect: "text",
       }}
     >
       <h2
         className="student-passage-measure mb-4 font-bold leading-tight tracking-tight text-gray-900 break-words"
-        style={{ fontSize: 'var(--student-passage-title-font-size)' }}
+        style={{ fontSize: "var(--student-passage-title-font-size)" }}
       >
         {stimulus.title}
       </h2>
@@ -168,7 +173,7 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
             key={image.id}
             sources={[image.src]}
             alt={image.alt}
-            label={image.alt || 'Stimulus image'}
+            label={image.alt || "Stimulus image"}
             hint="Tap to zoom the stimulus image"
             className="mt-4 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
             renderOverlay={(zoom) => renderScienceImageAnnotations(image.annotations, zoom)}
@@ -192,16 +197,16 @@ export function StudentScience({
   choiceEliminationEnabled = false,
   highlightClassName,
   tabletMode = false,
-  layoutMode = 'wide',
+  layoutMode = "wide",
   contentZoom = 1,
   registerLiveAnswer,
 }: StudentScienceProps) {
   const isTabletMode = Boolean(tabletMode);
   const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
   const supportsCssZoom =
-    typeof CSS !== 'undefined' &&
-    typeof CSS.supports === 'function' &&
-    CSS.supports('zoom', '1.01');
+    typeof CSS !== "undefined" &&
+    typeof CSS.supports === "function" &&
+    CSS.supports("zoom", "1.01");
   const contentZoomStyle = useMemo<React.CSSProperties | undefined>(() => {
     if (!isTabletMode || clampedContentZoom === 1) {
       return undefined;
@@ -214,7 +219,7 @@ export function StudentScience({
     const inverseZoom = 1 / clampedContentZoom;
     return {
       transform: `scale(${clampedContentZoom})`,
-      transformOrigin: 'top left',
+      transformOrigin: "top left",
       width: `${inverseZoom * 100}%`,
       minHeight: `${inverseZoom * 100}%`,
     };
@@ -239,7 +244,7 @@ export function StudentScience({
       return { ...current, [questionId]: nextOptionIds };
     });
   }, []);
-  const choiceEliminationAvailable = state.type === 'ACT' && choiceEliminationEnabled;
+  const choiceEliminationAvailable = state.type === "ACT" && choiceEliminationEnabled;
   const {
     answerCompact,
     handleDrag,
@@ -250,13 +255,10 @@ export function StudentScience({
     workspaceRef,
   } = useSplitPaneResize({
     isTabletMode,
-    materialPaneWidthProperty: '--science-pane-width',
-    dividerMode: isTabletMode ? 'overlay' : 'consumes-space',
+    materialPaneWidthProperty: "--science-pane-width",
+    dividerMode: isTabletMode ? "overlay" : "consumes-space",
   });
-  const allQuestions = useMemo(
-    () => getStudentQuestionsForModule(state, 'science'),
-    [state],
-  );
+  const allQuestions = useMemo(() => getStudentQuestionsForModule(state, "science"), [state]);
   const currentQuestion =
     allQuestions.find((question) => question.id === currentQuestionId) ?? allQuestions[0];
   const activeStimulusId = currentQuestion?.groupId ?? state.activeScienceStimulusId;
@@ -278,11 +280,13 @@ export function StudentScience({
   }, [state.science.stimuli]);
   const getBlockStartQuestionNumber = useCallback(
     (blockId: string) => blockStartNumbers.get(blockId) ?? 1,
-    [blockStartNumbers],
+    [blockStartNumbers]
   );
   const renderBlockInstruction = useCallback(
     (instruction: string, blockId: string) => (
-      <div className={`rounded-lg border border-gray-200 bg-gray-50 ${answerCompact ? 'px-3 py-2' : 'px-4 py-3'}`}>
+      <div
+        className={`rounded-lg border border-gray-200 bg-gray-50 ${answerCompact ? "px-3 py-2" : "px-4 py-3"}`}
+      >
         <StudentQuestionText
           as="p"
           className="text-gray-800 break-words [overflow-wrap:anywhere]"
@@ -293,7 +297,7 @@ export function StudentScience({
         />
       </div>
     ),
-    [answerCompact, highlightColor, highlightEnabled],
+    [answerCompact, highlightColor, highlightEnabled]
   );
 
   if (!activeStimulus) {
@@ -339,16 +343,14 @@ export function StudentScience({
         registerLiveAnswer,
         questionContainerRef,
         contentZoomStyle,
-        panelTestId: 'science-question-scroll',
+        panelTestId: "science-question-scroll",
         getBlockStartQuestionNumber,
         renderBlockInstruction,
-        expandedQuestionGapClassName: 'space-y-8 md:space-y-10',
+        expandedQuestionGapClassName: "space-y-8 md:space-y-10",
         eliminatedOptionIdsByQuestion: choiceEliminationAvailable
           ? eliminatedOptionIdsByQuestion
           : undefined,
-        onToggleOptionElimination: choiceEliminationAvailable
-          ? toggleOptionElimination
-          : undefined,
+        onToggleOptionElimination: choiceEliminationAvailable ? toggleOptionElimination : undefined,
       }}
     />
   );

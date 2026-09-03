@@ -1,10 +1,10 @@
-import React from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
-import { Bell, Menu, Search, ShieldCheck } from 'lucide-react';
-import { ErrorSurface, LoadingSurface } from '@components/ui';
-import { useAdminRootController } from '@admin/hooks/useAdminRootController';
-import { useAuthSession } from '../../auth/api/authSession';
-import { AdminProvider } from './AdminContext';
+import React from "react";
+import { Outlet, useNavigate } from "react-router-dom";
+import { Bell, Menu, Search, ShieldCheck } from "lucide-react";
+import { ErrorSurface, LoadingSurface } from "@components/ui";
+import { useAdminRootController } from "@admin/hooks/useAdminRootController";
+import { useAuthSession } from "../../auth/api/authSession";
+import { AdminProvider } from "./AdminContext";
 
 /**
  * AdminRoot Route
@@ -33,7 +33,7 @@ export function AdminRoot() {
     } catch {
       // AuthSessionProvider clears local auth state even when the backend request fails.
     } finally {
-      navigate('/login', { replace: true });
+      navigate("/login", { replace: true });
     }
   };
 
@@ -70,7 +70,7 @@ export function AdminRoot() {
         ) : null}
         <aside
           className={`fixed inset-y-0 left-0 z-30 flex flex-col bg-gray-50 text-gray-900 border-r border-border transition-all duration-300 md:relative md:inset-auto md:z-20 md:translate-x-0 ${
-            sidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:w-16'
+            sidebarOpen ? "w-64 translate-x-0" : "w-64 -translate-x-full md:w-16"
           }`}
           role="navigation"
           aria-label="Admin navigation"
@@ -87,7 +87,7 @@ export function AdminRoot() {
             <button
               onClick={() => setSidebarOpen((open) => !open)}
               className="p-1 hover:bg-gray-200 rounded-sm text-gray-600 transition-colors"
-              aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+              aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
             >
               <Menu size={20} />
             </button>
@@ -105,24 +105,24 @@ export function AdminRoot() {
                     onClick={() => navigate(item.path)}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
                       isActive
-                        ? 'bg-gray-200 text-gray-900 font-medium'
-                        : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                        ? "bg-gray-200 text-gray-900 font-medium"
+                        : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
                     }`}
                     title={!sidebarOpen ? item.label : undefined}
-                    aria-current={isActive ? 'page' : undefined}
+                    aria-current={isActive ? "page" : undefined}
                   >
-                    <Icon size={18} className={isActive ? 'text-gray-900' : 'text-gray-500'} />
+                    <Icon size={18} className={isActive ? "text-gray-900" : "text-gray-500"} />
                     {sidebarOpen ? <span className="text-sm font-medium">{item.label}</span> : null}
                   </button>
                 );
               })}
 
               <div className="pt-6 pb-2 px-1">
-                <div className={`h-px bg-border mb-6 ${!sidebarOpen ? 'mx-auto w-8' : ''}`}></div>
+                <div className={`h-px bg-border mb-6 ${!sidebarOpen ? "mx-auto w-8" : ""}`}></div>
                 <button
-                  onClick={() => navigate('/proctor')}
+                  onClick={() => navigate("/proctor")}
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-md bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors border border-amber-200"
-                  title={!sidebarOpen ? 'Live Proctoring' : undefined}
+                  title={!sidebarOpen ? "Live Proctoring" : undefined}
                 >
                   <ShieldCheck size={18} />
                   {sidebarOpen ? (
@@ -142,7 +142,7 @@ export function AdminRoot() {
               }}
               className="w-full flex items-center justify-center gap-2 bg-gray-200/70 hover:bg-gray-200 text-gray-700 py-2 rounded-md text-sm font-medium transition-colors"
             >
-              {sidebarOpen ? 'Exit Admin' : 'Exit'}
+              {sidebarOpen ? "Exit Admin" : "Exit"}
             </button>
           </div>
         </aside>
@@ -157,7 +157,7 @@ export function AdminRoot() {
                 type="button"
                 onClick={() => setSidebarOpen((open) => !open)}
                 className="inline-flex items-center justify-center rounded-md p-2 text-gray-600 hover:bg-gray-100 md:hidden"
-                aria-label={sidebarOpen ? 'Close admin navigation' : 'Open admin navigation'}
+                aria-label={sidebarOpen ? "Close admin navigation" : "Open admin navigation"}
               >
                 <Menu size={20} />
               </button>
@@ -198,7 +198,11 @@ export function AdminRoot() {
             </div>
           </header>
 
-          <main id="main-content" className="min-w-0 flex-1 overflow-y-auto bg-gray-50 p-3 sm:p-6" role="main">
+          <main
+            id="main-content"
+            className="min-w-0 flex-1 overflow-y-auto bg-gray-50 p-3 sm:p-6"
+            role="main"
+          >
             <Outlet />
           </main>
         </div>

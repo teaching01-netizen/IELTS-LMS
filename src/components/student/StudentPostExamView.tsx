@@ -1,7 +1,7 @@
-import React from 'react';
-import { Button } from '../ui/Button';
-import type { ExamType } from '../../types';
-import type { StudentScoreSummary } from '../../types/studentAttempt';
+import React from "react";
+import { Button } from "../ui/Button";
+import type { ExamType } from "../../types";
+import type { StudentScoreSummary } from "../../types/studentAttempt";
 
 interface StudentPostExamViewProps {
   examType?: ExamType | undefined;
@@ -14,7 +14,7 @@ interface StudentPostExamViewProps {
 }
 
 export function StudentPostExamView({
-  examType = 'Academic',
+  examType = "Academic",
   isProctorTerminated,
   proctorNote,
   studentInfo,
@@ -22,7 +22,7 @@ export function StudentPostExamView({
   onExit,
   finalSubmitOverlay,
 }: StudentPostExamViewProps) {
-  const examLabel = examType === 'ACT' ? 'ACT' : 'IELTS';
+  const examLabel = examType === "ACT" ? "ACT" : "IELTS";
 
   return (
     <div className="flex flex-col items-center justify-center h-full w-full bg-gray-50 p-4 font-sans text-gray-900">
@@ -32,14 +32,12 @@ export function StudentPostExamView({
       <main id="main-content" role="main" className="flex flex-col items-center justify-center">
         <div className="bg-white p-6 md:p-8 rounded-lg shadow-md max-w-2xl w-full text-center">
           <h1 className="text-3xl font-bold mb-4">
-            {isProctorTerminated ? 'Session terminated' : `${examLabel} Examination Complete!`}
+            {isProctorTerminated ? "Session terminated" : `${examLabel} Examination Complete!`}
           </h1>
           {isProctorTerminated ? (
             <div className="text-gray-600 mb-8 space-y-3">
               <p>Your session was terminated by the proctor.</p>
-              {proctorNote ? (
-                <p className="text-gray-700">{proctorNote}</p>
-              ) : null}
+              {proctorNote ? <p className="text-gray-700">{proctorNote}</p> : null}
             </div>
           ) : (
             <p className="text-gray-600 mb-8">
@@ -63,7 +61,7 @@ export function StudentPostExamView({
               </div>
             </div>
           ) : null}
-          {examType === 'ACT' && score ? (
+          {examType === "ACT" && score ? (
             <div className="mb-8 rounded-sm border border-violet-200 bg-violet-50 p-5 text-left">
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-violet-700">
                 Science Score
@@ -72,9 +70,7 @@ export function StudentPostExamView({
                 <p className="text-3xl font-black text-gray-900">
                   {score.correctCount}/{score.totalQuestions}
                 </p>
-                <p className="text-2xl font-bold text-violet-700">
-                  {score.percentage.toFixed(2)}%
-                </p>
+                <p className="text-2xl font-bold text-violet-700">{score.percentage.toFixed(2)}%</p>
               </div>
             </div>
           ) : null}

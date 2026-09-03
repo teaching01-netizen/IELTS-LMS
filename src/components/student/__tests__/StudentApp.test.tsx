@@ -361,11 +361,7 @@ describe("StudentApp runtime-backed mode", () => {
     },
   };
 
-  const actState: ExamState = createInitialExamState(
-    "ACT Science Practice",
-    "ACT",
-    "ACT Science",
-  );
+  const actState: ExamState = createInitialExamState("ACT Science Practice", "ACT", "ACT Science");
   actState.activeModule = "science";
   actState.activeScienceStimulusId = "stimulus-1";
   actState.science.stimuli = [
@@ -414,7 +410,7 @@ describe("StudentApp runtime-backed mode", () => {
         scheduleId="sched-act-1"
         attemptSnapshot={createActAttemptSnapshot()}
         enableMonitoring={false}
-      />,
+      />
     );
 
     expect(await screen.findByRole("timer", { name: "Time remaining" })).toHaveTextContent("40:00");
@@ -455,9 +451,7 @@ describe("StudentApp runtime-backed mode", () => {
     expect(screen.getByRole("button", { name: "Highlight" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose highlight color" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Erase highlights" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Eliminate choices" })
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Eliminate choices" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /apply yellow highlight/i })
     ).not.toBeInTheDocument();
