@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
-use sqlx::{Executor, MySql, MySqlPool};
+use sqlx::{Executor, MySql, MySqlConnection, MySqlPool};
 
 #[derive(Debug, Clone)]
 pub struct IdempotencyRecord {
@@ -141,6 +141,78 @@ impl IdempotencyRepository {
         })
     }
 
+    /// Serialize insert-or-replay on a concrete connection. Unlike a plain
+    /// SELECT-before-INSERT, a concurrent insert of the same primary key is an
+    /// expected race: the duplicate-key statement error is caught, the winning
+    /// record is read back, and the fingerprint decides between Replay and
+    /// Conflict. The caller's transaction stays usable (MySQL rolls back only
+    /// the failed INSERT statement), and the caller still wins the authoritative
+    /// serialization by holding its aggregate row lock before invoking this.
+    pub async fn store_or_replay_with_connection(
+        &self,
+        connection: &mut MySqlConnection,
+        actor_id: &str,
+        route_key: &str,
+        idempotency_key: &str,
+        request_hash: &str,
+        response_status: i32,
+        response_body: Value,
+    ) -> Result<(IdempotencyLookupStatus, IdempotencyRecord), sqlx::Error> {
+        let insert_result = self
+            .store_with_executor(
+                &mut *connection,
+                actor_id,
+                route_key,
+                idempotency_key,
+                request_hash,
+                response_status,
+                &response_body,
+            )
+            .await;
+        match insert_result {
+            Ok(created) => Ok((IdempotencyLookupStatus::Created, created)),
+            Err(error) => {
+                let is_duplicate = error
+                    .as_database_error()
+                    .is_some_and(|database_error| database_error.is_unique_violation());
+                if !is_duplicate {
+                    return Err(error);
+                }
+                // A concurrent request inserted the same key between our read
+                // and insert. Fetch the winning record and fingerprint-compare.
+                let Some(existing) = Self::lookup_with_executor(
+                    &mut *connection,
+                    actor_id,
+                    route_key,
+                    idempotency_key,
+                )
+                .await?
+                else {
+                    // The winner was purged between our failed insert and this
+                    // read; attempt the insert once more, then surface the raw
+                    // error if a second writer wins the race again.
+                    let created = self
+                        .store_with_executor(
+                            &mut *connection,
+                            actor_id,
+                            route_key,
+                            idempotency_key,
+                            request_hash,
+                            response_status,
+                            &response_body,
+                        )
+                        .await?;
+                    return Ok((IdempotencyLookupStatus::Created, created));
+                };
+                if existing.request_hash == request_hash {
+                    Ok((IdempotencyLookupStatus::Replay, existing))
+                } else {
+                    Ok((IdempotencyLookupStatus::Conflict, existing))
+                }
+            }
+        }
+    }
+
     pub async fn store_or_replay(
         &self,
         actor_id: &str,
@@ -160,19 +232,21 @@ impl IdempotencyRepository {
             return Ok((IdempotencyLookupStatus::Conflict, existing));
         }
 
-        let created = self
-            .store_with_executor(
-                &self.pool,
-                actor_id,
-                route_key,
-                idempotency_key,
-                request_hash,
-                response_status,
-                &response_body,
-            )
-            .await?;
-
-        Ok((IdempotencyLookupStatus::Created, created))
+        // Fast path: SELECT saw nothing, but a concurrent request may insert the
+        // same primary key before our INSERT lands. Route through the
+        // connection variant so the duplicate-key race becomes a deterministic
+        // replay instead of a duplicate-key DATABASE_ERROR.
+        let mut connection = self.pool.acquire().await?;
+        self.store_or_replay_with_connection(
+            &mut connection,
+            actor_id,
+            route_key,
+            idempotency_key,
+            request_hash,
+            response_status,
+            response_body,
+        )
+        .await
     }
 
     pub async fn purge_expired(&self, limit: i64) -> Result<u64, sqlx::Error> {

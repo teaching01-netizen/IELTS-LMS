@@ -812,9 +812,48 @@ fn map_scheduling_error(error: crate::scheduling::SchedulingError) -> DeliveryEr
     }
 }
 
+/// Immutable runtime tuning for the delivery service. Production callers must
+/// construct this from validated configuration; every field controls real
+/// behavior (idempotency retention per command class and heartbeat throttling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeliveryRuntimeTuning {
+    pub mutation_idempotency_usable_hours: i64,
+    pub submit_idempotency_usable_hours: i64,
+    pub violation_idempotency_usable_hours: i64,
+    pub heartbeat_min_write_interval_secs: u64,
+}
+
+impl DeliveryRuntimeTuning {
+    pub fn from_config(
+        mutation_idempotency_usable_hours: i64,
+        submit_idempotency_usable_hours: i64,
+        violation_idempotency_usable_hours: i64,
+        heartbeat_min_write_interval_secs: u64,
+    ) -> Self {
+        Self {
+            mutation_idempotency_usable_hours: mutation_idempotency_usable_hours.max(1),
+            submit_idempotency_usable_hours: submit_idempotency_usable_hours.max(1),
+            violation_idempotency_usable_hours: violation_idempotency_usable_hours.max(1),
+            heartbeat_min_write_interval_secs,
+        }
+    }
+}
+
+impl Default for DeliveryRuntimeTuning {
+    fn default() -> Self {
+        Self {
+            mutation_idempotency_usable_hours: 72,
+            submit_idempotency_usable_hours: 72,
+            violation_idempotency_usable_hours: 72,
+            heartbeat_min_write_interval_secs: 0,
+        }
+    }
+}
+
 pub struct DeliveryService {
     pool: MySqlPool,
     auth_service: Option<AuthService>,
+    runtime_tuning: DeliveryRuntimeTuning,
 }
 
 impl DeliveryService {
@@ -822,6 +861,7 @@ impl DeliveryService {
         Self {
             pool,
             auth_service: None,
+            runtime_tuning: DeliveryRuntimeTuning::default(),
         }
     }
 
@@ -830,28 +870,45 @@ impl DeliveryService {
         Self {
             pool,
             auth_service: Some(auth_service),
+            runtime_tuning: DeliveryRuntimeTuning::default(),
         }
     }
 
-    pub fn with_runtime_tuning(
-        pool: MySqlPool,
-        _idempotency_usable_hours: i64,
-        _submit_idempotency_usable_hours: i64,
-        _violation_idempotency_usable_hours: i64,
-        _heartbeat_min_write_interval_secs: u64,
-    ) -> Self {
-        Self::new(pool)
+    /// Construct a delivery service whose idempotency retention and heartbeat
+    /// throttling follow the supplied tuning. All tuning values are honored; a
+    /// caller that does not want tuning applied should pass `Default::default()`.
+    pub fn with_runtime_tuning(pool: MySqlPool, tuning: DeliveryRuntimeTuning) -> Self {
+        Self {
+            pool,
+            auth_service: None,
+            runtime_tuning: tuning,
+        }
     }
 
     pub fn with_auth_runtime_tuning(
         pool: MySqlPool,
         config: AppConfig,
-        _idempotency_usable_hours: i64,
-        _submit_idempotency_usable_hours: i64,
-        _violation_idempotency_usable_hours: i64,
-        _heartbeat_min_write_interval_secs: u64,
+        mutation_idempotency_usable_hours: i64,
+        submit_idempotency_usable_hours: i64,
+        violation_idempotency_usable_hours: i64,
+        heartbeat_min_write_interval_secs: u64,
     ) -> Self {
-        Self::with_auth(pool, config)
+        let auth_service = AuthService::new(pool.clone(), config);
+        let runtime_tuning = DeliveryRuntimeTuning::from_config(
+            mutation_idempotency_usable_hours,
+            submit_idempotency_usable_hours,
+            violation_idempotency_usable_hours,
+            heartbeat_min_write_interval_secs,
+        );
+        Self {
+            pool,
+            auth_service: Some(auth_service),
+            runtime_tuning,
+        }
+    }
+
+    fn runtime_tuning(&self) -> DeliveryRuntimeTuning {
+        self.runtime_tuning
     }
 
     fn auth_service(&self) -> Result<&AuthService, DeliveryError> {
@@ -1046,8 +1103,17 @@ impl DeliveryService {
             .load_version(schedule.published_version_id.clone())
             .await?;
         let runtime = self.load_runtime(actor, schedule_id).await?;
+
+        // Pre-check is one atomic command: attempt state mutation + audit event
+        // + idempotency result commit together (or none commit). The attempt row
+        // is locked FOR UPDATE first (global order: attempt -> runtime), which
+        // makes the in-transaction idempotency re-check authoritative: any
+        // same-key request that committed before our lock is visible, so
+        // duplicate execution and duplicate audit events are impossible.
+        let mut tx = self.pool.begin().await?;
         let attempt = self
-            .get_or_create_attempt(
+            .ensure_attempt_created_on(
+                tx.as_mut(),
                 &schedule,
                 &version,
                 runtime.as_ref(),
@@ -1057,11 +1123,31 @@ impl DeliveryService {
                 &req.candidate_name,
                 &req.candidate_email,
                 &req.client_session_id,
+                true,
             )
             .await?;
+
+        // Re-check idempotency after acquiring the serialization lock. A replay
+        // (or a key reused with a different payload) resolves here, before any
+        // write in this transaction has been made.
+        if let Some(response) = self
+            .lookup_idempotent_response_on_connection(
+                tx.as_mut(),
+                &req.student_key,
+                &route_key,
+                idempotency_key.as_deref(),
+                request_hash.as_deref(),
+            )
+            .await?
+        {
+            tx.rollback().await?;
+            return Ok(response);
+        }
+
         if attempt.submitted_at.is_some()
             || attempt.proctor_status == ielts_backend_domain::attempt::ProctorStatus::Terminated
         {
+            tx.rollback().await?;
             return Err(DeliveryError::Conflict {
                 message: "Attempt is already terminal and cannot accept pre-check updates."
                     .to_owned(),
@@ -1097,8 +1183,9 @@ impl DeliveryService {
         );
 
         let updated = self
-            .update_attempt(
-                attempt.id,
+            .update_attempt_on_connection(
+                tx.as_mut(),
+                &attempt.id,
                 phase,
                 attempt.current_module.clone(),
                 attempt.current_question_id.clone(),
@@ -1140,7 +1227,7 @@ impl DeliveryService {
             "clientSessionId": req.client_session_id,
             "hasDeviceFingerprint": has_device_fingerprint
         }))
-        .execute(&self.pool)
+        .execute(tx.as_mut())
         .await?;
 
         if let Some(idempotency_key) = idempotency_key.as_deref() {
@@ -1152,8 +1239,13 @@ impl DeliveryService {
             let request_hash = request_hash
                 .as_deref()
                 .expect("request hash present when idempotency key exists");
+            // Store the idempotency record inside the same transaction: attempt
+            // mutation, audit event and idempotency record commit atomically.
+            // A concurrent same-key insert (defended defensively at the
+            // repository level) resolves to a deterministic replay.
             let (status, record) = repository
-                .store_or_replay(
+                .store_or_replay_with_connection(
+                    tx.as_mut(),
                     &req.student_key,
                     &route_key,
                     idempotency_key,
@@ -1162,16 +1254,22 @@ impl DeliveryService {
                     response_body,
                 )
                 .await?;
-            if status == IdempotencyLookupStatus::Conflict {
-                return Err(DeliveryError::conflict(
-                    "Idempotency-Key does not match the original request.".to_owned(),
-                ));
-            }
-            if status == IdempotencyLookupStatus::Replay {
-                return deserialize_idempotent_response(&record);
+            match status {
+                IdempotencyLookupStatus::Created => {}
+                IdempotencyLookupStatus::Replay => {
+                    tx.rollback().await?;
+                    return deserialize_idempotent_response(&record);
+                }
+                IdempotencyLookupStatus::Conflict => {
+                    tx.rollback().await?;
+                    return Err(DeliveryError::conflict(
+                        "Idempotency-Key does not match the original request.".to_owned(),
+                    ));
+                }
             }
         }
 
+        tx.commit().await?;
         Ok(updated)
     }
 
@@ -1410,7 +1508,7 @@ impl DeliveryService {
         schedule_id: Uuid,
         req: StudentMutationBatchRequest,
         server_received_at: DateTime<Utc>,
-        _response_mode: MutationBatchResponseMode,
+        response_mode: MutationBatchResponseMode,
         idempotency_key: Option<String>,
     ) -> Result<StudentMutationBatchResponse, DeliveryError> {
         if req.mutations.is_empty() {
@@ -1421,6 +1519,10 @@ impl DeliveryService {
 
         validate_batch_sequences(&req.mutations)?;
         validate_batch_mutation_ids(&req.mutations)?;
+        // Response materialization differs by mode: Ack returns only durable
+        // acknowledgement metadata, Full returns the complete attempt state.
+        // Durable state, transaction scope and idempotency semantics are shared.
+        let include_full_attempt = response_mode == MutationBatchResponseMode::Full;
 
         let repository = self.idempotency_repository();
         let route_key = mutation_batch_route_key(schedule_id);
@@ -1610,7 +1712,7 @@ impl DeliveryService {
 
         if new_mutations.is_empty() {
             let response = StudentMutationBatchResponse {
-                attempt: Some(attempt.clone()),
+                attempt: include_full_attempt.then(|| attempt.clone()),
                 applied_mutation_count: 0,
                 server_accepted_through_seq: existing_max_seq,
                 revision: attempt.revision,
@@ -1825,7 +1927,7 @@ impl DeliveryService {
         .await?;
 
         let response = StudentMutationBatchResponse {
-            attempt: Some(attempt.clone()),
+            attempt: include_full_attempt.then(|| attempt.clone()),
             applied_mutation_count,
             server_accepted_through_seq,
             revision: attempt.revision,
@@ -1922,6 +2024,40 @@ impl DeliveryService {
                     .await?;
             }
         }
+        let now: DateTime<Utc> = sqlx::query_scalar("SELECT UTC_TIMESTAMP(6)")
+            .fetch_one(&mut *tx)
+            .await?;
+
+        // Heartbeat write throttle (runtime tuning). A pure presence Heartbeat
+        // that arrives within `heartbeat_min_write_interval_secs` of the last
+        // durable presence write for this exact client session adds no new
+        // information: the earlier write already renewed liveness. Suppress the
+        // redundant event/attempt/presence writes while still acknowledging.
+        // Disconnect/Lost/Reconnect transitions are never throttled because they
+        // carry state that must be durable, and a missing presence row or a
+        // non-ok status always falls through to a real write.
+        let throttle_seconds = self.runtime_tuning().heartbeat_min_write_interval_secs;
+        if throttle_seconds > 0 && req.event_type == HeartbeatEventType::Heartbeat {
+            let recent_presence: Option<(DateTime<Utc>, String)> = sqlx::query_as(
+                "SELECT last_heartbeat_at, COALESCE(last_heartbeat_status, '') FROM student_attempt_presence WHERE attempt_id = ? AND client_session_id = ?",
+            )
+            .bind(&attempt.id)
+            .bind(&req.client_session_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let within_interval = recent_presence.as_ref().is_some_and(|(last_at, status)| {
+                status == "ok"
+                    && now.signed_duration_since(*last_at)
+                        < ChronoDuration::seconds(
+                            i64::try_from(throttle_seconds).unwrap_or(i64::MAX),
+                        )
+            });
+            if within_interval {
+                tx.commit().await?;
+                return Ok(attempt);
+            }
+        }
+
         // Older clients may omit mutation_id. Derive a stable legacy identity
         // instead of generating a fresh UUID, so a retried identical request
         // remains idempotent. New clients should always send mutation_id.
@@ -1979,9 +2115,6 @@ impl DeliveryService {
             return Ok(attempt);
         }
 
-        let now: DateTime<Utc> = sqlx::query_scalar("SELECT UTC_TIMESTAMP(6)")
-            .fetch_one(&mut *tx)
-            .await?;
         let heartbeat_status = match req.event_type {
             HeartbeatEventType::Disconnect | HeartbeatEventType::Lost => "lost",
             _ => "ok",
@@ -2133,13 +2266,18 @@ impl DeliveryService {
         }
 
         let mut tx = self.pool.begin().await?;
-        let (runtime_gate, runtime_section_gate) = self
-            .lock_runtime_write_gate_tx(tx.as_mut(), schedule_id)
-            .await?;
+        // Global lock order: attempt row -> runtime -> active runtime section.
+        // Every attempt writer (mutation batch, terminalization, heartbeat) and
+        // every deadline reconciliation acquires the attempt row before shared
+        // runtime rows; submitting in the reverse order would deadlock against
+        // a concurrent autosave that holds the attempt and waits for the gate.
         let attempt = self
             .load_attempt_by_id_for_update(tx.as_mut(), req.attempt_id.clone())
             .await?
             .ok_or(DeliveryError::NotFound)?;
+        let (runtime_gate, runtime_section_gate) = self
+            .lock_runtime_write_gate_tx(tx.as_mut(), schedule_id)
+            .await?;
         if attempt.schedule_id != schedule_id.to_string() || attempt.student_key != req.student_key
         {
             return Err(DeliveryError::Validation(
@@ -2500,6 +2638,7 @@ impl DeliveryService {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     async fn get_or_create_attempt(
         &self,
         schedule: &ExamSchedule,
@@ -2512,123 +2651,227 @@ impl DeliveryService {
         candidate_email: &str,
         client_session_id: &str,
     ) -> Result<StudentAttempt, DeliveryError> {
-        if let Some(attempt) = self
-            .load_attempt_by_student_key(schedule.id.clone(), student_key)
-            .await?
-        {
-            return Ok(attempt);
-        }
-
-        let registration = self
-            .load_registration_by_student_key(schedule.id.clone(), student_key)
-            .await?;
-        let phase = determine_phase(runtime, false, false, None);
-        let current_module = first_enabled_module(&version.config_snapshot);
-        let phase_for_insert = phase.clone();
-        let current_module_for_insert = current_module.clone();
-        let attempt_id = Uuid::new_v4();
-        let mut tx = self.pool.begin().await?;
-        let insert_result = sqlx::query(
-            r#"
-            INSERT INTO student_attempts (
-                id, schedule_id, registration_id, wcode, student_key, organization_id, exam_id, published_version_id,
-                exam_title, candidate_id, candidate_name, candidate_email, phase, current_module,
-                answers, writing_answers, flags, violations_snapshot, integrity, recovery,
-                created_at, updated_at, revision
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), 0)
-            "#,
+        let mut connection = self.pool.acquire().await?;
+        self.ensure_attempt_created_on(
+            &mut *connection,
+            schedule,
+            version,
+            runtime,
+            wcode,
+            student_key,
+            candidate_id,
+            candidate_name,
+            candidate_email,
+            client_session_id,
+            false,
         )
-        .bind(attempt_id.to_string())
-        .bind(&schedule.id)
-        .bind(registration.as_ref().map(|value| value.registration_id.clone()))
-        .bind(wcode.unwrap_or(""))
-        .bind(student_key)
-        .bind(&schedule.organization_id)
-        .bind(&schedule.exam_id)
-        .bind(&schedule.published_version_id)
-        .bind(&schedule.exam_title)
-        .bind(candidate_id)
-        .bind(candidate_name)
-        .bind(candidate_email)
-        .bind(phase_for_insert)
-        .bind(current_module_for_insert)
-        .bind(json!({}))
-        .bind(json!({}))
-        .bind(json!({}))
-        .bind(json!([]))
-        .bind(json!({
-            "preCheck": null,
-            "deviceFingerprintHash": null,
-            "clientSessionId": client_session_id,
-            "lastDisconnectAt": null,
-            "lastReconnectAt": null,
-            "lastHeartbeatAt": null,
-            "lastHeartbeatStatus": "idle"
-        }))
-        .bind(json!({
-            "clientSessionId": client_session_id,
-            "lastRecoveredAt": null,
-            "lastLocalMutationAt": null,
-            "lastPersistedAt": null,
-            "pendingMutationCount": 0,
-            "syncState": "idle",
-            "serverAcceptedThroughSeq": 0
-        }))
-        .execute(&mut *tx)
-        .await;
+        .await
+    }
 
-        if let Err(error) = insert_result {
-            let unique_violation = error
-                .as_database_error()
-                .is_some_and(|database_error| database_error.is_unique_violation());
-            tx.rollback().await?;
-            if unique_violation {
-                if let Some(attempt) = self
-                    .load_attempt_by_student_key(schedule.id.clone(), student_key)
-                    .await?
-                {
-                    return Ok(attempt);
+    /// Create-or-fetch the authoritative attempt row on an explicit connection.
+    ///
+    /// Creation is safe under concurrency because `student_attempts` carries a
+    /// unique key on (schedule_id, student_key): when two requests create the
+    /// same attempt at once, the loser observes the unique violation and the
+    /// loop re-reads the winner's committed row. When `lock_existing` is true
+    /// the existing row is locked FOR UPDATE, serializing the caller behind
+    /// every other attempt writer (global lock order: attempt -> runtime ->
+    /// active section), which makes an in-transaction idempotency re-check
+    /// authoritative.
+    #[allow(clippy::too_many_arguments)]
+    async fn ensure_attempt_created_on(
+        &self,
+        connection: &mut MySqlConnection,
+        schedule: &ExamSchedule,
+        version: &ExamVersion,
+        runtime: Option<&ExamSessionRuntime>,
+        wcode: Option<&str>,
+        student_key: &str,
+        candidate_id: &str,
+        candidate_name: &str,
+        candidate_email: &str,
+        client_session_id: &str,
+        lock_existing: bool,
+    ) -> Result<StudentAttempt, DeliveryError> {
+        for _ in 0..3 {
+            let existing_query = if lock_existing {
+                "SELECT * FROM student_attempts WHERE schedule_id = ? AND student_key = ? FOR UPDATE"
+            } else {
+                "SELECT * FROM student_attempts WHERE schedule_id = ? AND student_key = ?"
+            };
+            if let Some(attempt) = sqlx::query_as::<_, StudentAttempt>(existing_query)
+                .bind(&schedule.id)
+                .bind(student_key)
+                .fetch_optional(&mut *connection)
+                .await?
+            {
+                return Ok(attempt);
+            }
+
+            let registration = sqlx::query_as::<_, AttemptRegistrationRow>(
+                r#"
+                SELECT id AS registration_id, user_id
+                FROM schedule_registrations
+                WHERE schedule_id = ?
+                  AND student_key = ?
+                LIMIT 1
+                "#,
+            )
+            .bind(&schedule.id)
+            .bind(student_key)
+            .fetch_optional(&mut *connection)
+            .await?;
+
+            let phase = determine_phase(runtime, false, false, None);
+            let current_module = first_enabled_module(&version.config_snapshot);
+            let phase_for_insert = phase.clone();
+            let current_module_for_insert = current_module.clone();
+            let attempt_id = Uuid::new_v4();
+            let insert_result = sqlx::query(
+                r#"
+                INSERT INTO student_attempts (
+                    id, schedule_id, registration_id, wcode, student_key, organization_id, exam_id, published_version_id,
+                    exam_title, candidate_id, candidate_name, candidate_email, phase, current_module,
+                    answers, writing_answers, flags, violations_snapshot, integrity, recovery,
+                    created_at, updated_at, revision
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), 0)
+                "#,
+            )
+            .bind(attempt_id.to_string())
+            .bind(&schedule.id)
+            .bind(registration.as_ref().map(|value| value.registration_id.clone()))
+            .bind(wcode.unwrap_or(""))
+            .bind(student_key)
+            .bind(&schedule.organization_id)
+            .bind(&schedule.exam_id)
+            .bind(&schedule.published_version_id)
+            .bind(&schedule.exam_title)
+            .bind(candidate_id)
+            .bind(candidate_name)
+            .bind(candidate_email)
+            .bind(phase_for_insert)
+            .bind(current_module_for_insert)
+            .bind(json!({}))
+            .bind(json!({}))
+            .bind(json!({}))
+            .bind(json!([]))
+            .bind(json!({
+                "preCheck": null,
+                "deviceFingerprintHash": null,
+                "clientSessionId": client_session_id,
+                "lastDisconnectAt": null,
+                "lastReconnectAt": null,
+                "lastHeartbeatAt": null,
+                "lastHeartbeatStatus": "idle"
+            }))
+            .bind(json!({
+                "clientSessionId": client_session_id,
+                "lastRecoveredAt": null,
+                "lastLocalMutationAt": null,
+                "lastPersistedAt": null,
+                "pendingMutationCount": 0,
+                "syncState": "idle",
+                "serverAcceptedThroughSeq": 0
+            }))
+            .execute(&mut *connection)
+            .await;
+            match insert_result {
+                Ok(_) => {
+                    sqlx::query(
+                        r#"
+                        INSERT INTO session_audit_logs (
+                            id, schedule_id, actor, action_type, target_student_id, payload, created_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, NOW())
+                        "#,
+                    )
+                    .bind(Uuid::new_v4().to_string())
+                    .bind(&schedule.id)
+                    .bind(candidate_name)
+                    .bind("STUDENT_ATTEMPT_CREATED")
+                    .bind(attempt_id.to_string())
+                    .bind(json!({
+                        "candidateId": candidate_id,
+                        "candidateEmail": candidate_email,
+                        "wcode": wcode.unwrap_or(""),
+                        "currentModule": current_module,
+                        "phase": phase
+                    }))
+                    .execute(&mut *connection)
+                    .await?;
+                    let created = sqlx::query_as::<_, StudentAttempt>(
+                        "SELECT * FROM student_attempts WHERE id = ?",
+                    )
+                    .bind(attempt_id.to_string())
+                    .fetch_one(&mut *connection)
+                    .await
+                    .map_err(DeliveryError::from)?;
+                    return Ok(created);
+                }
+                Err(error) => {
+                    let unique_violation = error
+                        .as_database_error()
+                        .is_some_and(|database_error| database_error.is_unique_violation());
+                    if !unique_violation {
+                        return Err(DeliveryError::from(error));
+                    }
+                    // Another request created this attempt concurrently; the
+                    // loop re-reads the winner (locking when requested).
                 }
             }
-            return Err(DeliveryError::from(error));
         }
-
-        sqlx::query(
-            r#"
-            INSERT INTO session_audit_logs (
-                id, schedule_id, actor, action_type, target_student_id, payload, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, NOW())
-            "#,
-        )
-        .bind(Uuid::new_v4().to_string())
-        .bind(&schedule.id)
-        .bind(candidate_name)
-        .bind("STUDENT_ATTEMPT_CREATED")
-        .bind(attempt_id.to_string())
-        .bind(json!({
-            "candidateId": candidate_id,
-            "candidateEmail": candidate_email,
-            "wcode": wcode.unwrap_or(""),
-            "currentModule": current_module,
-            "phase": phase
-        }))
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-
-        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
-            .bind(attempt_id.to_string())
-            .fetch_one(&self.pool)
-            .await
-            .map_err(DeliveryError::from)
+        Err(DeliveryError::Internal(
+            "Failed to create student attempt after repeated concurrent creation races.".to_owned(),
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn update_attempt(
         &self,
         attempt_id: String,
+        phase: AttemptPhase,
+        current_module: ModuleType,
+        current_question_id: Option<String>,
+        answers: Value,
+        writing_answers: Value,
+        flags: Value,
+        violations_snapshot: Value,
+        integrity: Value,
+        recovery: Value,
+        final_submission: Option<Value>,
+        submitted_at: Option<DateTime<Utc>>,
+        expected_revision: i32,
+    ) -> Result<StudentAttempt, DeliveryError> {
+        let mut connection = self.pool.acquire().await?;
+        self.update_attempt_on_connection(
+            &mut *connection,
+            &attempt_id,
+            phase,
+            current_module,
+            current_question_id,
+            answers,
+            writing_answers,
+            flags,
+            violations_snapshot,
+            integrity,
+            recovery,
+            final_submission,
+            submitted_at,
+            expected_revision,
+        )
+        .await
+    }
+
+    /// Same guarded attempt-state update executed on an explicit connection so
+    /// it can join the caller's transaction (pre-check atomicity). The
+    /// optimistic revision guard and terminal-state guards are identical to the
+    /// pool-level `update_attempt`.
+    #[allow(clippy::too_many_arguments)]
+    async fn update_attempt_on_connection(
+        &self,
+        connection: &mut MySqlConnection,
+        attempt_id: &str,
         phase: AttemptPhase,
         current_module: ModuleType,
         current_question_id: Option<String>,
@@ -2676,9 +2919,9 @@ impl DeliveryService {
         .bind(recovery)
         .bind(final_submission)
         .bind(submitted_at)
-        .bind(attempt_id.to_string())
+        .bind(attempt_id)
         .bind(expected_revision)
-        .execute(&self.pool)
+        .execute(&mut *connection)
         .await?;
 
         if result.rows_affected() != 1 {
@@ -2688,69 +2931,13 @@ impl DeliveryService {
         }
 
         sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
-            .bind(attempt_id.to_string())
-            .fetch_one(&self.pool)
+            .bind(attempt_id)
+            .fetch_one(&mut *connection)
             .await
             .map_err(DeliveryError::from)
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn update_attempt_preserving_revision(
-        &self,
-        attempt_id: String,
-        phase: AttemptPhase,
-        current_module: ModuleType,
-        current_question_id: Option<String>,
-        answers: Value,
-        writing_answers: Value,
-        flags: Value,
-        violations_snapshot: Value,
-        integrity: Value,
-        recovery: Value,
-        final_submission: Option<Value>,
-        submitted_at: Option<DateTime<Utc>>,
-    ) -> Result<StudentAttempt, DeliveryError> {
-        sqlx::query(
-            r#"
-            UPDATE student_attempts
-            SET
-                phase = ?,
-                current_module = ?,
-                current_question_id = ?,
-                answers = ?,
-                writing_answers = ?,
-                flags = ?,
-                violations_snapshot = ?,
-                integrity = ?,
-                recovery = ?,
-                final_submission = ?,
-                submitted_at = ?,
-                updated_at = NOW()
-            WHERE id = ?
-            "#,
-        )
-        .bind(phase)
-        .bind(current_module)
-        .bind(current_question_id)
-        .bind(answers)
-        .bind(writing_answers)
-        .bind(flags)
-        .bind(violations_snapshot)
-        .bind(integrity)
-        .bind(recovery)
-        .bind(final_submission)
-        .bind(submitted_at)
-        .bind(attempt_id.to_string())
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
-            .bind(attempt_id.to_string())
-            .fetch_one(&self.pool)
-            .await
-            .map_err(DeliveryError::from)
-    }
-
     async fn load_schedule(
         &self,
         actor: &ActorContext,
@@ -2825,27 +3012,6 @@ impl DeliveryService {
         .map_err(DeliveryError::from)
     }
 
-    async fn load_registration_by_student_key(
-        &self,
-        schedule_id: String,
-        student_key: &str,
-    ) -> Result<Option<AttemptRegistrationRow>, DeliveryError> {
-        sqlx::query_as::<_, AttemptRegistrationRow>(
-            r#"
-            SELECT id AS registration_id, user_id
-            FROM schedule_registrations
-            WHERE schedule_id = ?
-              AND student_key = ?
-            LIMIT 1
-            "#,
-        )
-        .bind(&schedule_id)
-        .bind(student_key)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(DeliveryError::from)
-    }
-
     async fn load_attempt_by_id(
         &self,
         attempt_id: String,
@@ -2872,7 +3038,15 @@ impl DeliveryService {
     }
 
     fn idempotency_repository(&self) -> IdempotencyRepository {
-        IdempotencyRepository::new(self.pool.clone())
+        // Route-specific retention policy comes from runtime tuning, not from
+        // repository defaults reconstructed inside hot paths.
+        let tuning = self.runtime_tuning();
+        IdempotencyRepository::with_ttl_policy(
+            self.pool.clone(),
+            tuning.mutation_idempotency_usable_hours,
+            tuning.submit_idempotency_usable_hours,
+            tuning.violation_idempotency_usable_hours,
+        )
     }
 
     fn idempotency_request_hash<T: Serialize>(
@@ -3046,12 +3220,45 @@ pub(crate) async fn auto_submit_schedule_attempts_in_tx(
         .await?;
     }
 
+    // Attempt terminalization ownership by timing model (single authoritative
+    // answer for "what deadline owns this attempt right now"):
+    //   legacy_section_v1 (SAT)      -> personal module clock
+    //   cohort_stage_v2 / _v3 (SAT)  -> cohort stage/section clock (shared with
+    //                                   the schedule runtime rows below)
+    //   IELTS-style cohort runtimes   -> schedule runtime sections
+    // A cohort schedule expiry may only terminalize an attempt when no
+    // student-owned clock still grants usable time; otherwise the SAT module
+    // reconciliation (which seals through the same attempt terminalization
+    // fence in seal_attempt_in_tx) owns the terminal transition.
     for attempt in pending_attempts {
         let provider_key: Option<String> =
             sqlx::query_scalar("SELECT provider_key FROM exam_entities WHERE id = ?")
                 .bind(&attempt.exam_id)
                 .fetch_optional(&mut **tx)
                 .await?;
+        if provider_key.as_deref() == Some("sat") {
+            let timing_model: Option<String> = sqlx::query_scalar(
+                "SELECT timing_model FROM exam_session_runtimes WHERE schedule_id = ?",
+            )
+            .bind(schedule_id.to_string())
+            .fetch_optional(&mut **tx)
+            .await?;
+            if timing_model.as_deref() == Some("legacy_section_v1") {
+                // Personal module clock still running: the cohort expiry must
+                // not override remaining student-owned time. The SAT module
+                // reconciler finalizes this attempt at its authoritative
+                // deadline (or when the student completes the final module).
+                let still_valid_module: i64 = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM assessment_module_attempts ma WHERE ma.attempt_id = ? AND ma.state IN ('active', 'review') AND ma.paused_at IS NULL AND UTC_TIMESTAMP(6) < DATE_ADD(COALESCE(ma.started_at, ma.created_at), INTERVAL (ma.allocated_seconds + ma.extension_seconds + ma.accumulated_paused_seconds) SECOND))",
+                )
+                .bind(&attempt.id)
+                .fetch_one(&mut **tx)
+                .await?;
+                if still_valid_module == 1 {
+                    continue;
+                }
+            }
+        }
         let outcome = if provider_key.as_deref() == Some("sat")
             || attempt.proctor_status.as_str() == "terminated"
         {

@@ -1426,6 +1426,88 @@ impl ProctoringService {
     ) -> Result<Option<i64>, ProctoringError> {
         let mut tx = self.pool.begin().await?;
 
+        // Global lock order is attempt row -> runtime -> active runtime section.
+        // This reconcile can reach the terminal branch, which locks (and seals)
+        // student attempts. If that branch is reachable it must lock the pending
+        // attempt rows BEFORE the runtime rows below, otherwise a concurrent
+        // autosave/submit (attempt first, then the runtime gate) can deadlock
+        // against this transaction (runtime first, then attempts).
+        //
+        // Plan the transition with plain reads first; the authoritative decision
+        // below is re-made under the real locks, so a stale plan only decides
+        // whether the attempt pre-lock is taken.
+        let plan_runtime = sqlx::query_as::<_, RuntimeRow>(
+            "SELECT * FROM exam_session_runtimes WHERE schedule_id = ?",
+        )
+        .bind(schedule_id.to_string())
+        .fetch_optional(tx.as_mut())
+        .await?
+        .ok_or(ProctoringError::NotFound)?;
+        if plan_runtime.status == RuntimeStatus::Live {
+            let plan_sections = sqlx::query_as::<_, RuntimeSectionRow>(
+                "SELECT * FROM exam_session_runtime_sections WHERE runtime_id = ? ORDER BY section_order ASC",
+            )
+            .bind(&plan_runtime.id)
+            .fetch_all(tx.as_mut())
+            .await
+            .map_err(ProctoringError::from)?;
+            let mut plan_index =
+                plan_runtime
+                    .active_section_key
+                    .as_deref()
+                    .and_then(|active_key| {
+                        plan_sections
+                            .iter()
+                            .position(|section| section.section_key == active_key)
+                    });
+            // Walk the same expiry chain as the authoritative loop below and
+            // ask whether it runs out of locked successor sections (completion).
+            let mut may_complete = false;
+            while let Some(index) = plan_index {
+                let Some(section) = plan_sections.get(index) else {
+                    break;
+                };
+                if section.status != SectionRuntimeStatus::Live
+                    || section.paused_at.is_some()
+                    || section.actual_start_at.is_none()
+                {
+                    break;
+                }
+                let actual_start_at = section.actual_start_at.expect("checked above");
+                if !section_expired_at(
+                    actual_start_at,
+                    section.planned_duration_minutes,
+                    section.extension_minutes,
+                    section.accumulated_paused_seconds,
+                    as_of,
+                ) {
+                    break;
+                }
+                let next_index = plan_sections
+                    .iter()
+                    .enumerate()
+                    .skip(index + 1)
+                    .find(|(_, candidate)| candidate.status == SectionRuntimeStatus::Locked)
+                    .map(|(next_index, _)| next_index);
+                match next_index {
+                    Some(next_index) => plan_index = Some(next_index),
+                    None => {
+                        may_complete = true;
+                        break;
+                    }
+                }
+            }
+            if may_complete {
+                sqlx::query(
+                    "SELECT id FROM student_attempts WHERE schedule_id = ? AND submitted_at IS NULL ORDER BY id FOR UPDATE",
+                )
+                .bind(schedule_id.to_string())
+                .execute(tx.as_mut())
+                .await
+                .map_err(ProctoringError::from)?;
+            }
+        }
+
         let runtime = sqlx::query_as::<_, RuntimeRow>(
             "SELECT * FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
         )
@@ -2913,6 +2995,42 @@ mod runtime_hydration_tests {
         assert!(runtime.current_section_remaining_seconds > 600 - 50);
         assert!(!runtime.is_overrun);
         assert_eq!(runtime.revision, 7);
+    }
+
+    #[test]
+    fn paused_section_freezes_remaining_time_at_the_pause_instant() {
+        let started_at = Utc::now() - Duration::seconds(200);
+        let paused_at = started_at + Duration::seconds(120);
+        // Elapsed 120 s of a 300 s section when paused; even much later wall
+        // time must not drain the frozen remainder.
+        let later = paused_at + Duration::seconds(600);
+        let computed = compute_section_remaining_seconds(
+            started_at,
+            5,
+            0,
+            Some(paused_at),
+            0,
+            SectionRuntimeStatus::Paused,
+            later,
+        );
+        assert_eq!(computed.remaining_seconds, 180);
+        assert!(!computed.is_overrun);
+    }
+
+    #[test]
+    fn overrun_is_reported_once_the_deadline_passes_and_remaining_clamps_to_zero() {
+        let started_at = Utc::now() - Duration::seconds(200);
+        let computed = compute_section_remaining_seconds(
+            started_at,
+            3,
+            0,
+            None,
+            0,
+            SectionRuntimeStatus::Live,
+            started_at + Duration::seconds(181),
+        );
+        assert_eq!(computed.remaining_seconds, 0);
+        assert!(computed.is_overrun);
     }
 }
 

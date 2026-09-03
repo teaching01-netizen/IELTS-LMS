@@ -1310,6 +1310,12 @@ export function StudentAttemptProvider({
     [persistenceEnabled, scheduleId, syncAttemptState]
   );
 
+  // Durable, connectivity-gated final-submission retry. There is deliberately
+  // no time cap: once the user has authorized final submission with an unknown
+  // server outcome, the client keeps enough durable intent (attempt state plus
+  // the deterministic `student-submit-{attemptId}` idempotency key) to verify
+  // or retry whenever connectivity returns, for the lifetime of the attempt.
+  // Reload resumes the loop through the resume effect below.
   const scheduleBackgroundSubmitRetry = useCallback(
     (seedAttempt: StudentAttempt) => {
       if (!persistenceEnabled) {
@@ -1320,39 +1326,66 @@ export function StudentAttemptProvider({
         return;
       }
 
-      const retryWindowMs = 60 * 60 * 1000;
-      const startedAtMs = Date.now();
-
       const promise = (async () => {
         let retryDelayMs = 5_000;
 
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, retryDelayMs);
-        });
+        while (true) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, retryDelayMs);
+          });
 
-        while (Date.now() - startedAtMs <= retryWindowMs) {
           if (!navigator.onLine) {
-            await new Promise<void>((resolve) => {
-              window.setTimeout(resolve, retryDelayMs);
-            });
+            // Wait for connectivity before attempting. The durable queue and
+            // the deterministic idempotency key keep the submission intent
+            // safe across arbitrarily long offline periods.
             retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
             continue;
           }
 
           const candidateAttempt = attemptRef.current ?? seedAttempt;
-          try {
-            const submittedAttempt = await studentAttemptRepository.submitAttempt(candidateAttempt);
-            syncAttemptState(mergeAttempt(submittedAttempt, {
+          if (!candidateAttempt.recovery.finalSubmissionPending) {
+            // Another path (hydration, verification, manual retry) resolved it.
+            return;
+          }
+          if (candidateAttempt.submittedAt) {
+            syncAttemptState(mergeAttempt(candidateAttempt, {
               recovery: {
                 finalSubmissionPending: false,
               },
             }));
             void queryClient.invalidateQueries();
             return;
-          } catch {
-            await new Promise<void>((resolve) => {
-              window.setTimeout(resolve, retryDelayMs);
+          }
+
+          try {
+            const submittedAttempt = await studentAttemptRepository.submitAttempt(candidateAttempt);
+            const confirmedAttempt = mergeAttempt(submittedAttempt, {
+              recovery: {
+                finalSubmissionPending: false,
+              },
             });
+            runtimeActions.setPhase('post-exam');
+            syncAttemptState(confirmedAttempt);
+            void queryClient.invalidateQueries();
+            return;
+          } catch (error) {
+            const statusCode =
+              typeof error === 'object' && error !== null && 'statusCode' in error
+                ? (error as { statusCode?: unknown }).statusCode
+                : undefined;
+            const reason = backendConflictReason(error);
+            // Permanent outcomes stop the automatic loop: the attempt is
+            // terminal on the server under a different outcome (for example
+            // proctor termination) or the session can no longer authorize this
+            // submission. Keep the durable pending marker so the explicit
+            // retry action or fresh hydration resolves the state.
+            if (
+              statusCode === 401 ||
+              statusCode === 403 ||
+              (statusCode === 409 && reason === null)
+            ) {
+              return;
+            }
             retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
           }
         }
@@ -1365,7 +1398,7 @@ export function StudentAttemptProvider({
         }
       });
     },
-    [persistenceEnabled, syncAttemptState]
+    [persistenceEnabled, runtimeActions, syncAttemptState]
   );
 
   const submitAttempt = useCallback(async (): Promise<boolean> => {
@@ -1401,7 +1434,12 @@ export function StudentAttemptProvider({
       syncAttemptState(confirmedAttempt);
       void queryClient.invalidateQueries();
       return true;
-    } catch {
+    } catch (error) {
+      const permanentFailure =
+        typeof error === 'object' && error !== null && 'statusCode' in error
+          ? (error as { statusCode?: unknown }).statusCode === 401 ||
+            (error as { statusCode?: unknown }).statusCode === 403
+          : false;
       const pendingAttempt = mergeAttempt(latestAttempt, {
         recovery: {
           finalSubmissionPending: true,
@@ -1409,12 +1447,45 @@ export function StudentAttemptProvider({
         },
       });
       syncAttemptState(pendingAttempt);
-      scheduleBackgroundSubmitRetry(pendingAttempt);
+      // A permanent authorization failure cannot be retried automatically; the
+      // UI keeps the pending state and offers the explicit retry action.
+      if (!permanentFailure) {
+        scheduleBackgroundSubmitRetry(pendingAttempt);
+      }
       return false;
     }
-
-    return true;
   }, [persistenceEnabled, runtimeActions, scheduleBackgroundSubmitRetry, syncAttemptState]);
+
+  // Resume a pending final submission after reload or after the automatic loop
+  // stopped for a permanent reason: durable pending intent must never be
+  // abandoned just because the previous page lifetime ended.
+  useEffect(() => {
+    if (!persistenceEnabled) {
+      return;
+    }
+
+    const candidate = attemptRef.current;
+    if (!candidate?.recovery.finalSubmissionPending) {
+      return;
+    }
+    if (backgroundSubmitInFlightRef.current) {
+      return;
+    }
+    if (candidate.submittedAt) {
+      syncAttemptState(mergeAttempt(candidate, {
+        recovery: {
+          finalSubmissionPending: false,
+        },
+      }));
+      return;
+    }
+    scheduleBackgroundSubmitRetry(candidate);
+  }, [
+    attempt?.recovery.finalSubmissionPending,
+    persistenceEnabled,
+    scheduleBackgroundSubmitRetry,
+    syncAttemptState,
+  ]);
 
   const flushAnswerDurabilityNow = useCallback(() => {
     if (!persistenceEnabled) {

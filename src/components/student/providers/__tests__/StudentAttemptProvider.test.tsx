@@ -970,6 +970,72 @@ describe('StudentAttemptProvider', () => {
     expect(result.current.runtime.state.phase).toBe('exam');
   });
 
+  it('confirms a pending submission after an offline period longer than the retry window', async () => {
+    vi.useFakeTimers();
+    const submittedAt = '2026-01-01T01:00:00.000Z';
+    const confirmedAttempt: StudentAttempt = {
+      ...createAttemptSnapshot(),
+      phase: 'post-exam',
+      submittedAt,
+      recovery: {
+        ...createAttemptSnapshot().recovery,
+        syncState: 'saved',
+        finalSubmissionPending: false,
+      },
+    };
+    vi.mocked(studentAttemptRepository.submitAttempt)
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce(confirmedAttempt);
+
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: false,
+    });
+
+    const { result } = renderHook(
+      () => ({
+        attempt: useStudentAttempt(),
+        runtime: useStudentRuntime(),
+      }),
+      { wrapper: createWrapper() },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    let submitted = true;
+    await act(async () => {
+      submitted = await result.current.attempt.actions.submitAttempt();
+    });
+    expect(submitted).toBe(false);
+    expect(result.current.attempt.state.attempt?.recovery.finalSubmissionPending).toBe(true);
+    expect(result.current.attempt.state.attempt?.phase).toBe('exam');
+
+    // Offline well beyond the former fixed one-hour retry window: the durable
+    // pending intent must survive, not be abandoned by a timer cap.
+    await act(async () => {
+      vi.advanceTimersByTime(61 * 60 * 1_000);
+    });
+    expect(result.current.attempt.state.attempt?.recovery.finalSubmissionPending).toBe(true);
+
+    // Connectivity returns: the retry loop replays the same deterministic
+    // submission and the state becomes confirmed.
+    Object.defineProperty(window.navigator, 'onLine', {
+      configurable: true,
+      value: true,
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(70_000);
+    });
+
+    expect(studentAttemptRepository.submitAttempt).toHaveBeenCalledTimes(2);
+    expect(result.current.attempt.state.attempt?.submittedAt).toBe(submittedAt);
+    expect(result.current.attempt.state.attempt?.phase).toBe('post-exam');
+    expect(result.current.attempt.state.attempt?.recovery.finalSubmissionPending).toBe(false);
+    vi.useRealTimers();
+  });
+
   it('does not drop pending mutations when the attempt credential is missing', async () => {
     window.sessionStorage.clear();
 
