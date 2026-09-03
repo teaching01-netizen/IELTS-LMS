@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Search, Filter, MoreHorizontal, Copy, CheckCircle, Archive, X, Layers, Book, Pen, Headset, Mic, Settings2, LayoutTemplate, GitCommit, XCircle, Download, Trash2, type LucideIcon } from 'lucide-react';
+import { Plus, Search, Filter, MoreHorizontal, Copy, CheckCircle, Archive, X, Layers, Book, Pen, Headset, Mic, FlaskConical, Settings2, LayoutTemplate, GitCommit, XCircle, Download, Trash2, type LucideIcon } from 'lucide-react';
 import { StatusBadge } from '../ui/StatusBadge';
-import { Exam, ExamConfig } from '../../types';
+import { Exam, ExamConfig, ExamPreset, ExamType } from '../../types';
 import { lazyLoad } from '../../app/performance/lazyLoad';
 import { ExamEntity, ExamEvent, ExamVersionSummary, BulkOperationResult } from '../../types/domain';
 import { getExamStatsFromExam, ExamFilterOptions, ExamSortOptions, DEFAULT_FILTERS, DEFAULT_SORT, hasActiveFilters } from '../../utils/examStats';
@@ -200,8 +200,8 @@ export function AdminExams({
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   const [newExamTitle, setNewExamTitle] = useState('');
-  const [newExamType, setNewExamType] = useState<'Academic' | 'General Training'>('Academic');
-  const [newExamPreset, setNewExamPreset] = useState<ExamConfig['general']['preset']>('Academic');
+  const [newExamType, setNewExamType] = useState<ExamType>('Academic');
+  const [newExamPreset, setNewExamPreset] = useState<ExamPreset>('Academic');
   const [includeScheduling, setIncludeScheduling] = useState(false);
   const [scheduleData, setScheduleData] = useState({
     cohort: 'Elite 2025-A',
@@ -467,9 +467,10 @@ export function AdminExams({
     setSearchQuery('');
   };
 
-  const presets: { id: ExamConfig['general']['preset'], label: string, icon: LucideIcon, description: string }[] = [
+  const presets: { id: ExamPreset, label: string, icon: LucideIcon, description: string }[] = [
     { id: 'Academic', label: 'Academic Full', icon: Layers, description: 'Standard 4-module academic exam' },
     { id: 'General Training', label: 'GT Full', icon: Layers, description: 'Standard 4-module general training' },
+    { id: 'ACT Science', label: 'ACT Science', icon: FlaskConical, description: 'One-section ACT Science practice' },
     { id: 'Listening', label: 'Listening Drill', icon: Headset, description: 'Section-only listening practice' },
     { id: 'Reading', label: 'Reading Drill', icon: Book, description: 'Section-only reading practice' },
     { id: 'Writing', label: 'Writing Drill', icon: Pen, description: 'Section-only writing practice' },
@@ -812,8 +813,13 @@ export function AdminExams({
                         type="button"
                         onClick={() => {
                           setNewExamPreset(preset.id);
-                          if (preset.id === 'General Training') setNewExamType('General Training');
-                          else if (preset.id === 'Academic') setNewExamType('Academic');
+                          if (preset.id === 'ACT Science') {
+                            setNewExamType('ACT');
+                          } else if (preset.id === 'General Training') {
+                            setNewExamType('General Training');
+                          } else if (preset.id === 'Academic' || newExamType === 'ACT') {
+                            setNewExamType('Academic');
+                          }
                         }}
                         className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-left transition-all ${
                           isActive 
@@ -835,11 +841,11 @@ export function AdminExams({
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Standard Type</label>
-                <div className="grid grid-cols-2 gap-3">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Exam Type</label>
+                <div className="grid grid-cols-3 gap-3">
                   <button
                     type="button"
-                    disabled={newExamPreset === 'General Training'}
+                    disabled={newExamPreset === 'General Training' || newExamPreset === 'ACT Science'}
                     onClick={() => setNewExamType('Academic')}
                     className={`px-3 py-2 rounded-md text-sm font-medium border ${newExamType === 'Academic' ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'}`}
                   >
@@ -847,11 +853,22 @@ export function AdminExams({
                   </button>
                   <button
                     type="button"
-                    disabled={newExamPreset === 'Academic'}
+                    disabled={newExamPreset === 'Academic' || newExamPreset === 'ACT Science'}
                     onClick={() => setNewExamType('General Training')}
                     className={`px-3 py-2 rounded-md text-sm font-medium border ${newExamType === 'General Training' ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'}`}
                   >
                     General Training
+                  </button>
+                  <button
+                    type="button"
+                    disabled={newExamPreset !== 'ACT Science'}
+                    onClick={() => {
+                      setNewExamType('ACT');
+                      setNewExamPreset('ACT Science');
+                    }}
+                    className={`px-3 py-2 rounded-md text-sm font-medium border ${newExamType === 'ACT' ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                  >
+                    ACT Science
                   </button>
                 </div>
               </div>

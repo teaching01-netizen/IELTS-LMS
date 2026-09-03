@@ -7,6 +7,7 @@ import {
   Grid2X2,
   Highlighter,
   MoreHorizontal,
+  X,
 } from "lucide-react";
 import {
   getStudentHighlightPaletteEntry,
@@ -15,8 +16,10 @@ import {
 } from "../highlightPalette";
 import type { StudentHighlightToolMode } from "../providers/StudentUIProvider";
 import { StudentToolsSheet } from "./StudentToolsSheet";
+import type { ExamType } from "../../../types";
 
 interface CompactStudentHeaderProps {
+  readonly examType?: ExamType | undefined;
   readonly moduleLabel: string;
   readonly testTakerId?: string | undefined;
   readonly timeRemaining?: number | undefined;
@@ -27,6 +30,9 @@ interface CompactStudentHeaderProps {
   readonly onToggleHighlightMode?: (() => void) | undefined;
   readonly onSelectHighlightColor?: ((color: StudentHighlightColor) => void) | undefined;
   readonly onSelectEraseMode?: (() => void) | undefined;
+  readonly choiceEliminationAvailable?: boolean | undefined;
+  readonly choiceEliminationEnabled?: boolean | undefined;
+  readonly onToggleChoiceElimination?: (() => void) | undefined;
   readonly onOpenAccessibility?: (() => void) | undefined;
   readonly onOpenNavigator?: (() => void) | undefined;
 }
@@ -40,6 +46,7 @@ function formatTime(seconds: number): string {
 const sheetActionClassName = `student-touch-target flex items-center gap-3 rounded-sm border border-gray-200 px-3 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50 transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]`;
 
 export function CompactStudentHeader({
+  examType = "Academic",
   moduleLabel,
   testTakerId,
   timeRemaining,
@@ -50,6 +57,9 @@ export function CompactStudentHeader({
   onToggleHighlightMode,
   onSelectHighlightColor,
   onSelectEraseMode,
+  choiceEliminationAvailable = false,
+  choiceEliminationEnabled = false,
+  onToggleChoiceElimination,
   onOpenAccessibility,
   onOpenNavigator,
 }: CompactStudentHeaderProps) {
@@ -61,6 +71,8 @@ export function CompactStudentHeader({
   }, []);
   const activePaletteEntry = getStudentHighlightPaletteEntry(highlightColor);
   const hasHighlightTools = highlightEnabled && onToggleHighlightMode && onSelectEraseMode;
+  const hasChoiceEliminationTool = choiceEliminationAvailable && onToggleChoiceElimination;
+  const examLabel = examType === "ACT" ? "ACT" : "IELTS";
 
   return (
     <header
@@ -71,7 +83,7 @@ export function CompactStudentHeader({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="flex-shrink-0 border border-gray-900 px-1.5 py-0.5 text-lg font-bold tracking-tight text-gray-900">
-            IELTS
+            {examLabel}
           </span>
           <span className="truncate text-sm font-semibold text-gray-700">{moduleLabel}</span>
         </div>
@@ -204,6 +216,20 @@ export function CompactStudentHeader({
               <span>Erase highlights</span>
             </button>
           </>
+        ) : null}
+
+        {hasChoiceEliminationTool ? (
+          <button
+            type="button"
+            className={`${sheetActionClassName} ${choiceEliminationEnabled ? "border-blue-700 bg-blue-50" : ""}`}
+            aria-pressed={choiceEliminationEnabled}
+            aria-label="Eliminate choices"
+            onClick={onToggleChoiceElimination}
+            data-student-primary-touch-target
+          >
+            <X size={18} aria-hidden="true" />
+            <span>Eliminate choices</span>
+          </button>
         ) : null}
 
         {onOpenAccessibility ? (

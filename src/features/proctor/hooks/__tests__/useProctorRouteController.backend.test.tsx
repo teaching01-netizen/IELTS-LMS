@@ -840,6 +840,43 @@ describe('useProctorRouteController backend mode', () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
+  it('surfaces a failed runtime start instead of refreshing as if the exam started', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_PROCTORING', 'true');
+
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse([
+        {
+          schedule: buildSchedule(),
+          runtime: buildRuntime(),
+          studentCount: 1,
+          activeCount: 0,
+          alertCount: 0,
+          violationCount: 0,
+          degradedLiveMode: false,
+        },
+      ]),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const startRuntimeSpy = vi
+      .spyOn(examDeliveryService, 'startRuntime')
+      .mockResolvedValue({ success: false, error: 'The exam runtime could not be started.' });
+
+    const { result } = renderHook(() => useProctorRouteController(), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.handleStartScheduledSession('sched-1');
+    });
+
+    expect(startRuntimeSpy).toHaveBeenCalledWith('sched-1', 'Proctor');
+    expect(result.current.error).toBe('The exam runtime could not be started.');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores failed session detail fetches and still hydrates schedule summaries (worst case)', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_PROCTORING', 'true');
 

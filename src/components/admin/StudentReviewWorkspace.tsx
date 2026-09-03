@@ -34,6 +34,8 @@ export interface StudentReviewWorkspaceProps {
 type WritingPrintSlot = 'task1' | 'task2';
 type WritingBandKey = 'taskResponseBand' | 'coherenceBand' | 'lexicalBand' | 'grammarBand';
 type WritingNotesKey = 'taskResponseNotes' | 'coherenceNotes' | 'lexicalNotes' | 'grammarNotes';
+type ReviewSection = 'listening' | 'reading' | 'writing' | 'speaking' | 'science';
+type ObjectiveReviewSection = 'listening' | 'reading' | 'science';
 
 const getWritingPrintSlot = (taskId: string): WritingPrintSlot | null => {
   const normalized = taskId.trim().toLowerCase();
@@ -88,7 +90,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const [examState, setExamState] = useState<ExamState | null>(null);
   const [examLoading, setExamLoading] = useState(false);
   const [examError, setExamError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<'listening' | 'reading' | 'writing' | 'speaking'>('reading');
+  const [activeSection, setActiveSection] = useState<ReviewSection>('reading');
   const [activeTask, setActiveTask] = useState<string>('task1');
   const [loading, setLoading] = useState(true);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -154,7 +156,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           return;
         }
 
-        setExamState(hydrateExamState(version.contentSnapshot as ExamState));
+        const nextExamState = hydrateExamState(version.contentSnapshot as ExamState);
+        setExamState(nextExamState);
+        setActiveSection(nextExamState.type === 'ACT' ? 'science' : 'reading');
       } catch (error) {
         if (seq !== examLoadSeq.current) return;
         setExamState(null);
@@ -359,7 +363,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   };
 
   const handleObjectiveOverride = async (
-    section: 'reading' | 'listening',
+    section: ObjectiveReviewSection,
     questionId: string,
     isCorrect: boolean,
   ) => {
@@ -595,7 +599,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     setReviewDraft(updatedDraft);
   };
 
-  const getSectionSubmission = (section: 'listening' | 'reading' | 'writing' | 'speaking') => {
+  const getSectionSubmission = (section: ReviewSection) => {
     return sectionSubmissions.find(s => s.section === section);
   };
 
@@ -831,6 +835,22 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
     return results;
   }, [getWritingPrompt, getWritingResponseText, reviewDraft, writingTasks]);
+
+  const isActReview =
+    submission?.sectionStatuses.science !== undefined
+    || examState?.type === 'ACT'
+    || sectionSubmissions.some((section) => section.section === 'science');
+  const reviewSections: ReviewSection[] = isActReview
+    ? ['science']
+    : ['listening', 'reading', 'writing', 'speaking'];
+
+  useEffect(() => {
+    if (isActReview && activeSection !== 'science') {
+      setActiveSection('science');
+    } else if (!isActReview && activeSection === 'science') {
+      setActiveSection('reading');
+    }
+  }, [activeSection, isActReview]);
 
   if (loading || !submission) {
     return (
@@ -1203,7 +1223,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           <div className="p-4 border-b border-gray-200 overflow-y-auto flex-1">
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Sections</h2>
             <div className="space-y-1">
-              {(['listening', 'reading', 'writing', 'speaking'] as const).map((section) => {
+              {reviewSections.map((section) => {
                 const sectionSub = getSectionSubmission(section);
                 return (
                   <button
@@ -1219,7 +1239,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                         : 'text-gray-700 hover:bg-gray-50'
                     }`}
                   >
-                    <span className="capitalize">{section}</span>
+                    <span>{section === 'science' ? 'ACT Science' : section}</span>
                     {sectionSub && (
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                         sectionSub.gradingStatus === 'finalized' 
@@ -1321,7 +1341,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           <div className="max-w-4xl mx-auto space-y-6">
             {/* Section Header */}
             <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-2 capitalize">{activeSection}</h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-2">
+                {activeSection === 'science' ? 'ACT Science' : activeSection}
+              </h2>
               {activeSection !== 'writing' && sectionsLoading && (
                 <div role="status" aria-live="polite" className="mt-3 space-y-3">
                   <p className="sr-only text-sm text-gray-500">Loading section answers...</p>
@@ -1439,7 +1461,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             )}
 
             {/* Reading/Listening Content */}
-            {(activeSection === 'reading' || activeSection === 'listening') && currentSectionSubmission && (
+            {(activeSection === 'reading' || activeSection === 'listening' || activeSection === 'science') && currentSectionSubmission && (
               <QuestionTracebackPanel
                 section={activeSection}
                 examState={examState}

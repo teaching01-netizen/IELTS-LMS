@@ -1,11 +1,18 @@
-import { createDefaultConfig, normalizeExamConfig } from '../constants/examDefaults';
+import {
+  createDefaultConfig,
+  DEFAULT_ACT_EXAM_SUMMARY,
+  normalizeExamConfig,
+} from '../constants/examDefaults';
 import type {
   ClassificationBlock,
+  ActScienceStimulus,
   ClozeQuestion,
   DiagramLabelingBlock,
   Exam,
   ExamConfig,
+  ExamPreset,
   ExamState,
+  ExamType,
   FlowChartBlock,
   MapQuestion,
   MatchingBlock,
@@ -37,7 +44,7 @@ import { replaceWritingTaskContents } from '../utils/writingTaskUtils';
 import { flattenSubAnswerTree, hasSubAnswerTreeMode } from '../utils/subAnswerTree';
 import { getMultiSelectSelectionLimit } from '../utils/multiSelectMcq';
 
-const MODULE_ORDER: ModuleType[] = ['listening', 'reading', 'writing', 'speaking'];
+const MODULE_ORDER: ModuleType[] = ['listening', 'reading', 'writing', 'speaking', 'science'];
 
 const LEGACY_STATUS_MAP: Record<ExamStatus, Exam['status']> = {
   draft: 'Draft',
@@ -108,6 +115,12 @@ function normalizeSingleMcqBlock(block: SingleMCQBlock): SingleMCQBlock {
       id: questionId,
       stem: questionStem,
       options: questionOptions,
+      skillCategory:
+        questionValue?.skillCategory === 'interpretation_of_data'
+        || questionValue?.skillCategory === 'scientific_investigation'
+        || questionValue?.skillCategory === 'evaluating_scientific_arguments_and_models_with_evidence'
+          ? questionValue.skillCategory
+          : undefined,
     } satisfies SingleMCQQuestion;
   });
 
@@ -186,8 +199,11 @@ export interface StudentQuestionDescriptor {
 
 export function getEnabledModules(config: ExamConfig): ModuleType[] {
   return MODULE_ORDER
-    .filter((moduleKey) => config.sections[moduleKey].enabled)
-    .sort((left, right) => config.sections[left].order - config.sections[right].order);
+    .filter((moduleKey) => config.sections[moduleKey]?.enabled)
+    .sort(
+      (left, right) =>
+        (config.sections[left]?.order ?? 0) - (config.sections[right]?.order ?? 0),
+    );
 }
 
 export async function getExamStateFromEntity(
@@ -257,11 +273,15 @@ export async function adaptExamEntitiesToLegacyExams(
 
 export function createInitialExamState(
   title: string,
-  type: 'Academic' | 'General Training',
-  preset: ExamConfig['general']['preset'] = 'Academic',
+  type: ExamType,
+  preset: ExamPreset = 'Academic',
   baseConfig?: ExamConfig,
 ): ExamState {
   const base = structuredClone(baseConfig ?? createDefaultConfig(type, preset));
+  const shouldUseActDefaultSummary =
+    type === 'ACT' &&
+    (base.general.summary === `Standard IELTS ${base.general.type} Exam` ||
+      base.general.summary === 'ACT Science Practice Test');
   const config = normalizeExamConfig({
     ...base,
     general: {
@@ -269,10 +289,16 @@ export function createInitialExamState(
       preset,
       type,
       title,
+      ...(shouldUseActDefaultSummary
+        ? { summary: DEFAULT_ACT_EXAM_SUMMARY }
+        : {}),
     },
   });
+  const isActScience = config.general.type === 'ACT';
 
-  if (preset !== 'Academic' && preset !== 'General Training' && preset !== 'Custom') {
+  if (isActScience) {
+    config.sections.science.enabled = true;
+  } else if (preset !== 'Academic' && preset !== 'General Training' && preset !== 'Custom') {
     MODULE_ORDER.forEach((moduleKey) => {
       config.sections[moduleKey].enabled = false;
     });
@@ -339,11 +365,12 @@ export function createInitialExamState(
     title,
     type,
     activeModule,
-    activePassageId: 'p1',
-    activeListeningPartId: 'l1',
+    activePassageId: config.sections.reading.enabled ? 'p1' : '',
+    activeListeningPartId: config.sections.listening.enabled ? 'l1' : '',
+    activeScienceStimulusId: '',
     config,
     reading: {
-      passages: Array(config.sections.reading.passageCount)
+      passages: config.sections.reading.enabled ? Array(config.sections.reading.passageCount)
         .fill(null)
         .map((_, index) =>
           index === 0
@@ -356,10 +383,10 @@ export function createInitialExamState(
                 images: [],
                 wordCount: 0,
               },
-        ),
+        ) : [],
     },
     listening: {
-      parts: Array(config.sections.listening.partCount)
+      parts: config.sections.listening.enabled ? Array(config.sections.listening.partCount)
         .fill(null)
         .map((_, index) => ({
           id: `l${index + 1}`,
@@ -369,7 +396,7 @@ export function createInitialExamState(
               ? [{ id: 'pin1', time: '00:45', label: 'Q1-5 Location' }]
               : [],
           blocks: [],
-        })),
+        })) : [],
     },
     writing,
     speaking: {
@@ -392,6 +419,9 @@ export function createInitialExamState(
       evaluatorNotes: '',
       rubric: buildSpeakingRubric(config, structuredClone(OFFICIAL_SPEAKING_RUBRIC)),
       gradeHistory: [],
+    },
+    science: {
+      stimuli: isActScience ? [] : [],
     },
   };
 }
@@ -427,6 +457,13 @@ export function hydrateExamState(state: ExamState): ExamState {
       ...fallback.speaking,
       ...partialState.speaking,
     },
+    science: {
+      ...fallback.science,
+      ...partialState.science,
+      stimuli: Array.isArray(partialState.science?.stimuli)
+        ? partialState.science.stimuli
+        : fallback.science.stimuli,
+    },
   };
   const writing = replaceWritingTaskContents(
     {
@@ -460,6 +497,19 @@ export function hydrateExamState(state: ExamState): ExamState {
           ...part,
           blocks: normalizeQuestionBlocks(part.blocks),
         }))
+        : [],
+    },
+    science: {
+      ...mergedState.science,
+      stimuli: Array.isArray(mergedState.science?.stimuli)
+        ? mergedState.science.stimuli.map((stimulus: ActScienceStimulus) => ({
+            ...stimulus,
+            blocks: normalizeQuestionBlocks(stimulus.blocks) as ActScienceStimulus['blocks'],
+            images: stimulus.images ?? [],
+            wordCount:
+              stimulus.wordCount ??
+              (stimulus.content.trim() ? stimulus.content.trim().split(/\s+/).length : 0),
+          }))
         : [],
     },
     writing,
@@ -520,6 +570,26 @@ export function getStudentQuestionsForModule(
           block,
           part.id,
           part.title,
+          nextRootNumber,
+        );
+        questions.push(...descriptors);
+        nextRootNumber = nextNumber;
+      });
+    });
+
+    return questions;
+  }
+
+  if (moduleType === 'science') {
+    const questions: StudentQuestionDescriptor[] = [];
+    let nextRootNumber = 1;
+
+    state.science.stimuli.forEach((stimulus) => {
+      stimulus.blocks.forEach((block) => {
+        const { descriptors, nextNumber } = buildStudentQuestionDescriptors(
+          block,
+          stimulus.id,
+          stimulus.title,
           nextRootNumber,
         );
         questions.push(...descriptors);

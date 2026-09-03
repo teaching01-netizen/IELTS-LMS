@@ -6,9 +6,10 @@ import { StudentEntryRoute } from '../StudentEntryRoute';
 
 const navigateMock = vi.fn();
 const studentEntryMock = vi.fn();
+const authState = vi.hoisted(() => ({ status: 'authenticated' as 'authenticated' | 'unauthenticated' }));
 
 vi.mock('../../../auth/authSession', () => ({
-  useAuthSession: () => ({ studentEntry: studentEntryMock }),
+  useAuthSession: () => ({ studentEntry: studentEntryMock, status: authState.status }),
 }));
 
 vi.mock('react-router-dom', async () => {
@@ -42,7 +43,7 @@ function submitForm(wcode = 'W250334') {
   fireEvent.change(screen.getByLabelText(/nickname/i), {
     target: { value: 'student-one' },
   });
-  fireEvent.change(screen.getByLabelText(/IELTS Course/i), {
+  fireEvent.change(screen.getByLabelText(/^Course$/i), {
     target: { value: 'IELTS Academic' },
   });
   fireEvent.click(screen.getByRole('button', { name: /continue/i }));
@@ -64,6 +65,7 @@ describe('StudentEntryRoute', () => {
     window.sessionStorage.clear();
     navigateMock.mockReset();
     studentEntryMock.mockReset();
+    authState.status = 'authenticated';
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
@@ -99,6 +101,13 @@ describe('StudentEntryRoute', () => {
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith(`/student/${scheduleId}/W250334`);
     });
+  });
+
+  it('uses a course-neutral label on the shared student check-in form', () => {
+    renderRoute('550e8400-e29b-41d4-a716-446655440000');
+
+    expect(screen.getByRole('textbox', { name: /^Course$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /IELTS Course/i })).not.toBeInTheDocument();
   });
 
   it('auto-resumes an existing attempt for the last wcode instead of forcing check-in again', async () => {
@@ -216,6 +225,62 @@ describe('StudentEntryRoute', () => {
     });
 
     expect(studentEntryMock).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-resume a cached attempt before the student session is authenticated', async () => {
+    const scheduleId = '550e8400-e29b-41d4-a716-446655440127';
+    authState.status = 'unauthenticated';
+    window.localStorage.setItem(`ielts-student-last-wcode:${scheduleId}`, 'W250334');
+    window.localStorage.setItem(
+      'ielts_student_attempts_v1',
+      JSON.stringify([
+        {
+          id: 'attempt-3',
+          scheduleId,
+          studentKey: `student-${scheduleId}-W250334`,
+          examId: 'exam-1',
+          examTitle: 'Mock Exam',
+          candidateId: 'W250334',
+          candidateName: 'Student One',
+          candidateEmail: 'student@example.com',
+          phase: 'exam',
+          currentModule: 'reading',
+          currentQuestionId: null,
+          answers: {},
+          writingAnswers: {},
+          flags: {},
+          violations: [],
+          integrity: {
+            preCheck: null,
+            deviceFingerprintHash: null,
+            clientSessionId: null,
+            lastDisconnectAt: null,
+            lastReconnectAt: null,
+            lastHeartbeatAt: null,
+            lastHeartbeatStatus: 'idle',
+          },
+          recovery: {
+            lastRecoveredAt: null,
+            lastLocalMutationAt: null,
+            lastPersistedAt: null,
+            lastDroppedMutations: null,
+            pendingMutationCount: 0,
+            serverAcceptedThroughSeq: 0,
+            clientSessionId: null,
+            syncState: 'idle',
+          },
+          createdAt: '2026-04-24T00:00:00.000Z',
+          updatedAt: '2026-04-24T00:00:00.000Z',
+        },
+      ]),
+    );
+
+    renderRoute(scheduleId);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /continue/i })).toBeInTheDocument();
+    });
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 
   it('rejects emails that pass simple regex patterns but fail shared schema validation', async () => {

@@ -38,6 +38,10 @@ function collectEnabledDescriptors(state: ExamState) {
     descriptors.push(...getStudentQuestionsForModule(state, 'listening'));
   }
 
+  if (state.config.sections.science.enabled) {
+    descriptors.push(...getStudentQuestionsForModule(state, 'science'));
+  }
+
   return descriptors;
 }
 
@@ -53,6 +57,12 @@ function collectEnabledBlocks(state: ExamState): QuestionBlock[] {
   if (state.config.sections.listening.enabled) {
     state.listening.parts.forEach((part) => {
       part.blocks.forEach((block) => blocks.push(block));
+    });
+  }
+
+  if (state.config.sections.science.enabled) {
+    state.science.stimuli.forEach((stimulus) => {
+      stimulus.blocks.forEach((block) => blocks.push(block));
     });
   }
 
@@ -86,6 +96,18 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
     });
   }
 
+  const scienceStimulusIds = state.config.sections.science.enabled
+    ? state.science.stimuli.map((stimulus) => stimulus.id)
+    : [];
+  const scienceStimulusDuplicates = findDuplicateValues(scienceStimulusIds);
+  if (scienceStimulusDuplicates.size > 0) {
+    issues.push({
+      field: 'integrity.duplicate_science_stimulus_ids',
+      severity: 'error',
+      message: `Duplicate ACT Science stimulus IDs detected: ${formatExamples(Array.from(scienceStimulusDuplicates.keys()))}.`,
+    });
+  }
+
   const blockIds: string[] = [];
   if (state.config.sections.reading.enabled) {
     state.reading.passages.forEach((passage) => {
@@ -96,6 +118,12 @@ export function getExamIdCollisionIssues(state: ExamState): ExamIntegrityIssue[]
   if (state.config.sections.listening.enabled) {
     state.listening.parts.forEach((part) => {
       part.blocks.forEach((block) => blockIds.push(block.id));
+    });
+  }
+
+  if (state.config.sections.science.enabled) {
+    state.science.stimuli.forEach((stimulus) => {
+      stimulus.blocks.forEach((block) => blockIds.push(block.id));
     });
   }
 

@@ -6,6 +6,7 @@ import { QuestionBuilderPane } from './QuestionBuilderPane';
 import { ListeningWorkspace } from './workspaces/ListeningWorkspace';
 import { WritingWorkspace } from './workspaces/WritingWorkspace';
 import { SpeakingWorkspace } from './workspaces/SpeakingWorkspace';
+import { ActScienceWorkspace } from './ActScienceWorkspace';
 import { getBlockQuestionCount } from '../utils/examUtils';
 import { PassageListSidebar } from './passage/PassageListSidebar';
 import { PassageMetadataEditor } from './passage/PassageMetadataEditor';
@@ -121,6 +122,9 @@ export function Workspace({
   }
   if (state.activeModule === 'speaking') {
     return <SpeakingWorkspace state={state} setState={stableSetState} />;
+  }
+  if (state.activeModule === 'science') {
+    return <ActScienceWorkspace state={state} setState={stableSetState} />;
   }
 
   const handlePassageAdd = () => {

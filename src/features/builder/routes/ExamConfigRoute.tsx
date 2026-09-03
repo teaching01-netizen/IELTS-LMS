@@ -77,7 +77,11 @@ export function ExamConfigRoute() {
               </div>
             </div>
           </div>
-          <ExamConfigTabs activeTab={activeTab} onTabChange={setActiveTab} />
+          <ExamConfigTabs
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            examType={config.general.type}
+          />
         </div>
 
         <div className="p-8">

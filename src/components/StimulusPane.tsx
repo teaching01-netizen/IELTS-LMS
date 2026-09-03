@@ -11,7 +11,7 @@ import {
   ListOrdered,
   Underline,
 } from 'lucide-react';
-import { Passage, ExamState, StimulusImageAsset } from '../types';
+import { ActScienceStimulus, Passage, ExamState, StimulusImageAsset } from '../types';
 import { StimulusImageEditor } from './StimulusImageEditor';
 import { getPassageMetrics } from '../utils/builderEnhancements';
 import { normalizeImageUrl } from '../utils/imageUrl';
@@ -24,9 +24,10 @@ const metricTone = {
 };
 
 interface StimulusPaneProps {
-  passage: Passage;
+  passage: Passage | ActScienceStimulus;
   state: ExamState;
   setState: (next: ExamState | ((previous: ExamState) => ExamState)) => void | Promise<void>;
+  section?: 'reading' | 'science';
 }
 
 function areStimulusPanePropsEqual(previous: StimulusPaneProps, next: StimulusPaneProps) {
@@ -35,6 +36,7 @@ function areStimulusPanePropsEqual(previous: StimulusPaneProps, next: StimulusPa
     && previous.passage.content === next.passage.content
     && previous.passage.images === next.passage.images
     && previous.passage.wordCount === next.passage.wordCount
+    && previous.section === next.section
     && previous.state.config.standards.passageWordCount === next.state.config.standards.passageWordCount
     && previous.setState === next.setState
   );
@@ -44,6 +46,7 @@ export const StimulusPane = React.memo(function StimulusPane({
   passage,
   state,
   setState,
+  section = 'reading',
 }: StimulusPaneProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [isImageEditorOpen, setIsImageEditorOpen] = useState(false);
@@ -59,22 +62,38 @@ export const StimulusPane = React.memo(function StimulusPane({
     }
   }, [passage.content]);
 
-  const updatePassage = (updater: (current: Passage) => Passage) => {
+  const updatePassage = (
+    updater: (current: Passage | ActScienceStimulus) => Passage | ActScienceStimulus,
+  ) => {
     void setState((previous) => {
-      const currentPassage = previous.reading.passages.find((item) => item.id === passage.id);
+      const currentPassage = section === 'science'
+        ? previous.science.stimuli.find((item) => item.id === passage.id)
+        : previous.reading.passages.find((item) => item.id === passage.id);
       if (!currentPassage) {
         return previous;
       }
 
       const nextPassage = updater(currentPassage);
       const nextMetrics = getPassageMetrics(nextPassage.content, passageWordCount);
+      const updatedPassage = {
+        ...nextPassage,
+        wordCount: nextMetrics.words,
+      };
+
+      if (section === 'science') {
+        return {
+          ...previous,
+          science: {
+            ...previous.science,
+            stimuli: previous.science.stimuli.map((item) =>
+              item.id === currentPassage.id ? updatedPassage as ActScienceStimulus : item,
+            ),
+          },
+        };
+      }
+
       const newPassages = previous.reading.passages.map((item) =>
-        item.id === currentPassage.id
-          ? {
-              ...nextPassage,
-              wordCount: nextMetrics.words,
-            }
-          : item,
+        item.id === currentPassage.id ? updatedPassage as Passage : item,
       );
 
       return {
@@ -213,7 +232,9 @@ export const StimulusPane = React.memo(function StimulusPane({
             onPaste={handlePaste}
             onDrop={handleDrop}
             className="min-h-[420px] rounded-[28px] border border-gray-100 bg-white px-8 py-8 outline-none text-gray-900 leading-relaxed font-sans text-sm md:text-base shadow-sm [&_h1]:text-3xl [&_h1]:font-black [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mb-3 [&_h3]:text-xl [&_h3]:font-bold [&_h3]:mb-2 [&_img]:max-w-full [&_img]:rounded-2xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-4"
-            data-placeholder="Enter reading passage text here..."
+            data-placeholder={section === 'science'
+              ? 'Enter ACT Science stimulus text here...'
+              : 'Enter reading passage text here...'}
           />
 
           {(passage.images ?? []).length > 0 && (

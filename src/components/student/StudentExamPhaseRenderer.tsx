@@ -84,9 +84,11 @@ export function StudentExamPhaseRenderer({
 
     return (
       <StudentPostExamView
+        examType={examState.type}
         isProctorTerminated={verifiedTerminalState === 'terminated'}
         proctorNote={runtimeState.proctorNote}
         studentInfo={studentInfo}
+        score={attemptState.attempt?.finalSubmission?.score}
         onExit={onExit}
         finalSubmitOverlay={finalSubmitOverlay}
       />

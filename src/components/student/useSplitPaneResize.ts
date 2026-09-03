@@ -15,7 +15,11 @@ const DEFAULT_LEFT_WIDTH = 40;
 
 interface UseSplitPaneResizeOptions {
   isTabletMode: boolean;
-  materialPaneWidthProperty: '--reading-pane-width' | '--listening-pane-width' | '--writing-prompt-pane-width';
+  materialPaneWidthProperty:
+    | '--reading-pane-width'
+    | '--listening-pane-width'
+    | '--writing-prompt-pane-width'
+    | '--science-pane-width';
   answerPaneWidthProperty?: '--question-pane-width' | '--writing-editor-pane-width';
   defaultLeftWidth?: number;
   dividerMode?: 'overlay' | 'consumes-space';

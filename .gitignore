@@ -5,6 +5,7 @@ build/
 dist/
 coverage/
 .vite/
+.cert/
 *.tsbuildinfo
 .tsbuildinfo
 .eslintcache

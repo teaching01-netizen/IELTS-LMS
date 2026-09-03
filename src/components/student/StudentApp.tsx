@@ -282,6 +282,16 @@ export function StudentApp({
     (!runtimeState.runtimeBacked && runtimeState.phase === 'post-exam');
   const effectivePhase =
     runtimeState.phase === 'post-exam' && !shouldRenderPostExam ? 'exam' : runtimeState.phase;
+  const [choiceEliminationEnabled, setChoiceEliminationEnabled] = useState(false);
+  const choiceEliminationAvailable =
+    examState.type === 'ACT' && runtimeState.currentModule === 'science' && effectivePhase === 'exam';
+  const toggleChoiceElimination = useCallback(() => {
+    if (!choiceEliminationAvailable) {
+      return;
+    }
+
+    setChoiceEliminationEnabled((enabled) => !enabled);
+  }, [choiceEliminationAvailable]);
   const runtimeCompletionVerified = isRuntimeStructurallyCompleted(runtimeState.runtimeSnapshot);
   const runtimeSubmissionPending =
     runtimeState.runtimeBacked &&
@@ -381,6 +391,12 @@ export function StudentApp({
   }, [runtimeState.currentModule]);
 
   useEffect(() => {
+    if (!choiceEliminationAvailable) {
+      setChoiceEliminationEnabled(false);
+    }
+  }, [choiceEliminationAvailable]);
+
+  useEffect(() => {
     if (runtimeState.blocking.active && blockingCopy) {
       blockingOverlayRef.current?.focus();
     }
@@ -470,7 +486,9 @@ export function StudentApp({
     examState.config.progression.unansweredSubmissionPolicy ?? 'confirm';
   const submitRequiresConfirmation =
     effectivePhase === 'exam' &&
-    (runtimeState.currentModule === 'reading' || runtimeState.currentModule === 'listening') &&
+    (runtimeState.currentModule === 'reading' ||
+      runtimeState.currentModule === 'listening' ||
+      runtimeState.currentModule === 'science') &&
     totalQuestions > 0 &&
     answeredCount < totalQuestions &&
     unansweredSubmissionPolicy !== 'allow';
@@ -599,7 +617,8 @@ export function StudentApp({
   const showNavigatorForModule =
     runtimeState.currentModule === 'reading' ||
     runtimeState.currentModule === 'listening' ||
-    runtimeState.currentModule === 'writing';
+    runtimeState.currentModule === 'writing' ||
+    runtimeState.currentModule === 'science';
 
   const blockingOverlay =
     runtimeState.blocking.active && blockingCopy ? (
@@ -759,6 +778,7 @@ export function StudentApp({
       {layoutMode === 'compact' ? (
         <StudentExamHeaderClock
           compact={true}
+          examType={examState.type}
           moduleLabel={`${runtimeState.currentModule.charAt(0).toUpperCase()}${runtimeState.currentModule.slice(1)}`}
           testTakerId={attemptState.attempt?.candidateId ?? undefined}
           autoSaveStatus={autoSaveStatus}
@@ -768,12 +788,16 @@ export function StudentApp({
           onToggleHighlightMode={uiActions.toggleHighlightMode}
           onSelectHighlightColor={uiActions.setHighlightColor}
           onSelectEraseMode={uiActions.toggleEraseMode}
+          choiceEliminationAvailable={choiceEliminationAvailable}
+          choiceEliminationEnabled={choiceEliminationEnabled}
+          onToggleChoiceElimination={toggleChoiceElimination}
           onOpenAccessibility={openAccessibility}
           onOpenNavigator={showNavigatorForModule ? openNavigator : undefined}
         />
       ) : (
         <StudentExamHeaderClock
           compact={false}
+          examType={examState.type}
           moduleLabel={
             runtimeState.currentModule.charAt(0).toUpperCase() + runtimeState.currentModule.slice(1)
           }
@@ -785,6 +809,9 @@ export function StudentApp({
           onToggleHighlightMode={uiActions.toggleHighlightMode}
           onSelectHighlightColor={uiActions.setHighlightColor}
           onSelectEraseMode={uiActions.toggleEraseMode}
+          choiceEliminationAvailable={choiceEliminationAvailable}
+          choiceEliminationEnabled={choiceEliminationEnabled}
+          onToggleChoiceElimination={toggleChoiceElimination}
           tabletMode={tabletMode}
           onOpenAccessibility={openAccessibility}
           onOpenNavigator={showNavigatorForModule ? openNavigator : undefined}
@@ -802,6 +829,7 @@ export function StudentApp({
             contentZoom={uiState.accessibilitySettings.zoom}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
+            choiceEliminationEnabled={choiceEliminationEnabled}
             playbackRate={uiState.accessibilitySettings.playbackRate}
             showNavigator={uiState.showNavigator}
             security={examState.config.security}

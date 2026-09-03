@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StudentAppWrapper } from "../StudentAppWrapper";
 import { createDefaultConfig } from "../../../constants/examDefaults";
+import { createInitialExamState } from "../../../services/examAdapterService";
 import { studentAttemptRepository } from "../../../services/studentAttemptRepository";
 import type { ExamState } from "../../../types";
 import type { ExamSessionRuntime } from "../../../types/domain";
@@ -165,6 +166,17 @@ function createReadingAttemptSnapshot(): StudentAttempt {
     currentQuestionId: "rq-1",
     answers: {},
     writingAnswers: {},
+  };
+}
+
+function createActAttemptSnapshot(): StudentAttempt {
+  const attempt = createWritingAttemptSnapshot();
+  return {
+    ...attempt,
+    id: "attempt-act-1",
+    examTitle: "ACT Science Practice",
+    currentModule: "science",
+    currentQuestionId: "science-question-1",
   };
 }
 
@@ -349,6 +361,85 @@ describe("StudentApp runtime-backed mode", () => {
     },
   };
 
+  const actState: ExamState = createInitialExamState(
+    "ACT Science Practice",
+    "ACT",
+    "ACT Science",
+  );
+  actState.activeModule = "science";
+  actState.activeScienceStimulusId = "stimulus-1";
+  actState.science.stimuli = [
+    {
+      id: "stimulus-1",
+      title: "Water temperature results",
+      content: "The table shows the results of an experiment.",
+      images: [],
+      blocks: [
+        {
+          id: "science-block-1",
+          type: "SINGLE_MCQ",
+          instruction: "Use the experiment results to answer the question.",
+          stem: "Which conclusion is supported by the experiment?",
+          options: [
+            { id: "option-a", text: "Option A", isCorrect: true },
+            { id: "option-b", text: "Option B", isCorrect: false },
+            { id: "option-c", text: "Option C", isCorrect: false },
+            { id: "option-d", text: "Option D", isCorrect: false },
+          ],
+          questions: [
+            {
+              id: "science-question-1",
+              stem: "Which conclusion is supported by the experiment?",
+              skillCategory: "interpretation_of_data",
+              options: [
+                { id: "option-a", text: "Option A", isCorrect: true },
+                { id: "option-b", text: "Option B", isCorrect: false },
+                { id: "option-c", text: "Option C", isCorrect: false },
+                { id: "option-d", text: "Option D", isCorrect: false },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  it("renders ACT Science through the complete student app workspace", async () => {
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+    render(
+      <StudentAppWrapper
+        state={actState}
+        onExit={() => {}}
+        scheduleId="sched-act-1"
+        attemptSnapshot={createActAttemptSnapshot()}
+        enableMonitoring={false}
+      />,
+    );
+
+    expect(await screen.findByRole("timer", { name: "Time remaining" })).toHaveTextContent("40:00");
+    expect(screen.getByText("ACT")).toBeInTheDocument();
+    expect(screen.queryByText("IELTS")).not.toBeInTheDocument();
+    expect(screen.getByTestId("science-split-workspace")).toBeInTheDocument();
+    expect(screen.getByText("Water temperature results")).toBeInTheDocument();
+    const answerA = screen.getByRole("radio", { name: /Option A/i });
+    expect(answerA).toBeInTheDocument();
+    const eliminateChoices = screen.getByRole("button", { name: "Eliminate choices" });
+    expect(eliminateChoices).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "Eliminate option B" })).not.toBeInTheDocument();
+
+    fireEvent.click(eliminateChoices);
+
+    expect(eliminateChoices).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Eliminate option B" })).toBeInTheDocument();
+    expect(answerA).not.toBeChecked();
+    expect(screen.getByRole("button", { name: /Question 1/i })).toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Finish" }));
+    expect(await screen.findByText(/You have 1 unanswered question/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit Section" })).toBeEnabled();
+  });
+
   it("renders the persistent highlight tool in Reading exam mode without a floating toolbar", async () => {
     render(
       <StudentAppWrapper
@@ -364,6 +455,9 @@ describe("StudentApp runtime-backed mode", () => {
     expect(screen.getByRole("button", { name: "Highlight" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose highlight color" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Erase highlights" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Eliminate choices" })
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /apply yellow highlight/i })
     ).not.toBeInTheDocument();

@@ -9,6 +9,10 @@ interface ModulesTabProps {
 }
 
 export function ModulesTab({ config, onChange }: ModulesTabProps) {
+  const moduleKeys: ModuleType[] = config.general.type === 'ACT'
+    ? ['science']
+    : ['listening', 'reading', 'writing', 'speaking'];
+
   const updateSection = (module: ModuleType, value: Partial<ExamConfig['sections'][ModuleType]>) => {
     onChange({
       ...config,
@@ -78,7 +82,7 @@ export function ModulesTab({ config, onChange }: ModulesTabProps) {
           <Layers size={16} className="text-blue-500" /> Module Configuration
         </h3>
         <div className="space-y-3">
-          {(['listening', 'reading', 'writing', 'speaking'] as ModuleType[]).map((m) => {
+          {moduleKeys.map((m) => {
             const section = config.sections[m];
             return (
               <div key={m} className={`bg-white border p-4 rounded-xl shadow-sm transition-all ${section.enabled ? 'border-blue-100' : 'opacity-60 border-gray-200'}`}>
@@ -111,11 +115,28 @@ export function ModulesTab({ config, onChange }: ModulesTabProps) {
                     <div className="grid grid-cols-3 gap-4">
                       <div>
                         <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                          {m === 'reading' ? 'Passage Count' : m === 'listening' ? 'Part Count' : m === 'writing' ? 'Task Count' : 'Part Count'}
+                          {m === 'reading'
+                            ? 'Passage Count'
+                            : m === 'listening'
+                              ? 'Part Count'
+                              : m === 'writing'
+                                ? 'Task Count'
+                                : m === 'science'
+                                  ? 'Question Count'
+                                  : 'Part Count'}
                         </label>
                         <input 
+                          id={`${m}-count`}
                           type="number" 
-                          value={m === 'reading' ? ('passageCount' in section ? section.passageCount : 0) : m === 'listening' ? ('partCount' in section ? section.partCount : 0) : m === 'writing' ? ('tasks' in section ? section.tasks.length : 0) : ('parts' in section ? section.parts.length : 0)}
+                          value={m === 'reading'
+                            ? ('passageCount' in section ? section.passageCount : 0)
+                            : m === 'listening'
+                              ? ('partCount' in section ? section.partCount : 0)
+                              : m === 'writing'
+                                ? ('tasks' in section ? section.tasks.length : 0)
+                                : m === 'science'
+                                  ? ('questionCount' in section ? section.questionCount : 0)
+                                  : ('parts' in section ? section.parts.length : 0)}
                           readOnly={m === 'writing'}
                           onChange={(e) => {
                             const val = parseInt(e.target.value);
@@ -123,6 +144,8 @@ export function ModulesTab({ config, onChange }: ModulesTabProps) {
                             else if (m === 'listening') updateSection(m, { partCount: val });
                             else if (m === 'writing') {
                               return;
+                            } else if (m === 'science') {
+                              updateSection(m, { questionCount: val });
                             } else {
                               const currentParts = 'parts' in section ? section.parts : [];
                               const newParts = val > currentParts.length 

@@ -26,12 +26,14 @@ import {
   VersionDiff,
   BulkOperationResult
 } from '../types/domain';
-import { ExamState, ModuleType } from '../types';
+import { ExamState, ExamType, ModuleType } from '../types';
 import {
   validateReadingModule,
   validateListeningModule,
+  validateActScienceModule,
   getReadingTotalQuestions,
-  getListeningTotalQuestions
+  getListeningTotalQuestions,
+  getActScienceTotalQuestions,
 } from '../utils/examUtils';
 import { normalizeExamStateTableCompletionBlocks } from '../utils/tableCompletion';
 import { hydrateExamState } from './examAdapterService';
@@ -139,7 +141,7 @@ export class ExamLifecycleService {
    */
   async createExam(
     title: string,
-    type: 'Academic' | 'General Training',
+    type: ExamType,
     initialState: ExamState,
     owner: string = 'System'
   ): Promise<TransitionResult> {
@@ -872,7 +874,7 @@ export class ExamLifecycleService {
           warnings: Array<{ field: string; message: string }>;
         }>(`/v1/exams/${examId}/validation`);
 
-        let questionCounts = { reading: 0, listening: 0, total: 0 };
+        let questionCounts: PublishReadiness['questionCounts'] = { reading: 0, listening: 0, total: 0 };
         let integrityIssues: ReturnType<typeof getExamIdCollisionIssues> = [];
         try {
           const exam = await this.repository.getExamById(examId);
@@ -888,11 +890,15 @@ export class ExamLifecycleService {
               const listeningQuestions = config.sections.listening.enabled
                 ? getListeningTotalQuestions(content.listening.parts)
                 : 0;
+              const scienceQuestions = config.general.type === 'ACT' && config.sections.science?.enabled
+                ? getActScienceTotalQuestions(content.science.stimuli)
+                : 0;
               integrityIssues = getExamIdCollisionIssues(content);
               questionCounts = {
                 reading: readingQuestions,
                 listening: listeningQuestions,
-                total: readingQuestions + listeningQuestions,
+                total: readingQuestions + listeningQuestions + scienceQuestions,
+                ...(config.general.type === 'ACT' ? { science: scienceQuestions } : {}),
               };
             }
           }
@@ -991,6 +997,7 @@ export class ExamLifecycleService {
     if (config.sections.listening.enabled) enabledModules.push('listening');
     if (config.sections.writing.enabled) enabledModules.push('writing');
     if (config.sections.speaking.enabled) enabledModules.push('speaking');
+    if (config.sections.science.enabled) enabledModules.push('science');
 
     if (enabledModules.length === 0) {
       errors.push({ field: 'modules', message: 'At least one module must be enabled', severity: 'error' });
@@ -1055,7 +1062,21 @@ export class ExamLifecycleService {
       }
     }
 
-    // 6. Writing module validation
+    // 6. ACT Science module validation
+    if (config.sections.science.enabled) {
+      const scienceErrors = validateActScienceModule(content.science.stimuli);
+      scienceErrors.forEach((error) => {
+        const field = error.field || 'science';
+        if (error.type === 'warning') {
+          warnings.push({ field, message: error.message });
+        } else {
+          errors.push({ field, message: error.message, severity: 'error' });
+          missingFields.push(field);
+        }
+      });
+    }
+
+    // 7. Writing module validation
     if (config.sections.writing.enabled) {
       if (!config.sections.writing.tasks || config.sections.writing.tasks.length === 0) {
         errors.push({ field: 'writing.config', message: 'Writing task configuration is missing', severity: 'error' });
@@ -1072,7 +1093,7 @@ export class ExamLifecycleService {
       }
     }
 
-    // 7. Speaking module validation
+    // 8. Speaking module validation
     if (config.sections.speaking.enabled) {
       if (!content.speaking.part1Topics || content.speaking.part1Topics.length === 0) {
         errors.push({ field: 'speaking.part1', message: 'Speaking Part 1 topics are empty', severity: 'error' });
@@ -1094,7 +1115,7 @@ export class ExamLifecycleService {
       }
     }
 
-    // 8. Visibility and permissions check
+    // 9. Visibility and permissions check
     if (exam.visibility === 'private') {
       warnings.push({ field: 'visibility', message: 'Exam visibility is set to private - it will not be visible to other users' });
     }
@@ -1104,7 +1125,7 @@ export class ExamLifecycleService {
       missingFields.push('permissions');
     }
 
-    // 9. Schedule conflicts check
+    // 10. Schedule conflicts check
     const schedules = await this.repository.getSchedulesByExam(examId);
     const activeSchedules = schedules.filter(s => s.status === 'scheduled' || s.status === 'live');
     if (activeSchedules.length > 0 && exam.status === 'published') {
@@ -1117,6 +1138,9 @@ export class ExamLifecycleService {
     // Calculate question counts
     const readingQuestions = config.sections.reading.enabled ? getReadingTotalQuestions(content.reading.passages) : 0;
     const listeningQuestions = config.sections.listening.enabled ? getListeningTotalQuestions(content.listening.parts) : 0;
+    const scienceQuestions = config.general.type === 'ACT' && config.sections.science?.enabled
+      ? getActScienceTotalQuestions(content.science.stimuli)
+      : 0;
 
     const integrityIssues = getExamIdCollisionIssues(content);
     integrityIssues.forEach((issue) => {
@@ -1140,7 +1164,8 @@ export class ExamLifecycleService {
       questionCounts: {
         reading: readingQuestions,
         listening: listeningQuestions,
-        total: readingQuestions + listeningQuestions
+        total: readingQuestions + listeningQuestions + scienceQuestions,
+        ...(config.general.type === 'ACT' ? { science: scienceQuestions } : {}),
       }
     };
   }

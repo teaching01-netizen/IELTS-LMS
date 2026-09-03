@@ -121,6 +121,25 @@ export interface ObjectiveIntegrityOverview {
   issues: ObjectiveIntegrityIssueSummary[];
 }
 
+export interface ActScienceScoreReport {
+  submissionId: string;
+  scheduleId: string;
+  examId: string;
+  publishedVersionId: string;
+  examTitle: string;
+  cohortName: string;
+  studentId: string;
+  studentName: string;
+  submittedAt: string;
+  gradingStatus: string;
+  score: {
+    section: 'science';
+    correctCount: number;
+    totalQuestions: number;
+    percentage: number;
+  };
+}
+
 /**
  * Visibility for comments and notes
  */
@@ -241,6 +260,7 @@ export interface StudentSubmission {
     reading: SectionGradingStatus;
     writing: SectionGradingStatus;
     speaking: SectionGradingStatus;
+    science?: SectionGradingStatus | undefined;
   };
   
   // Metadata
@@ -254,7 +274,7 @@ export interface StudentSubmission {
 export interface SectionSubmission {
   id: string;
   submissionId: string;
-  section: 'listening' | 'reading' | 'writing' | 'speaking';
+  section: 'listening' | 'reading' | 'writing' | 'speaking' | 'science';
   
   // Immutable snapshot of student answers
   answers: SectionAnswers;

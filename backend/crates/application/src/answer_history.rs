@@ -1273,14 +1273,25 @@ fn build_writing_task_ids(config_snapshot: &Value, content_snapshot: &Value) -> 
 
 fn build_objective_module_order(config_snapshot: &Value) -> Vec<String> {
     let mut enabled = Vec::<(String, i64)>::new();
-    for section_key in ["listening", "reading"] {
+    let is_act = config_snapshot
+        .get("general")
+        .and_then(|general| general.get("type"))
+        .and_then(Value::as_str)
+        == Some("ACT");
+    let section_keys = if is_act {
+        vec!["science"]
+    } else {
+        vec!["listening", "reading"]
+    };
+
+    for section_key in section_keys {
         let section_config = config_snapshot
             .get("sections")
             .and_then(|sections| sections.get(section_key));
         let is_enabled = section_config
             .and_then(|section| section.get("enabled"))
             .and_then(Value::as_bool)
-            .unwrap_or(true);
+            .unwrap_or(section_key != "science");
         if !is_enabled {
             continue;
         }
@@ -1297,9 +1308,11 @@ fn build_objective_module_order(config_snapshot: &Value) -> Vec<String> {
         .map(|(section, _)| section)
         .collect::<Vec<_>>();
 
-    for fallback in ["listening", "reading"] {
-        if !ordered.iter().any(|section| section == fallback) {
-            ordered.push(fallback.to_string());
+    if !is_act {
+        for fallback in ["listening", "reading"] {
+            if !ordered.iter().any(|section| section == fallback) {
+                ordered.push(fallback.to_string());
+            }
         }
     }
     ordered
@@ -1340,6 +1353,21 @@ fn build_objective_targets_for_section(content_snapshot: &Value, section_key: &s
                 }
             }
         }
+        "science" => {
+            if let Some(stimuli) = content_snapshot
+                .get("science")
+                .and_then(|science| science.get("stimuli"))
+                .and_then(Value::as_array)
+            {
+                for stimulus in stimuli {
+                    if let Some(blocks) = stimulus.get("blocks").and_then(Value::as_array) {
+                        for block in blocks {
+                            index_act_science_block_targets(block, &mut targets, &mut seen);
+                        }
+                    }
+                }
+            }
+        }
         _ => {}
     }
 
@@ -1356,6 +1384,19 @@ fn build_objective_targets_for_section(content_snapshot: &Value, section_key: &s
     }
 
     targets
+}
+
+fn index_act_science_block_targets(
+    block: &Value,
+    targets: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+) {
+    match block.get("type").and_then(Value::as_str) {
+        Some("SINGLE_MCQ") | Some("MULTI_MCQ") => {
+            register_question_array_targets(block, targets, seen);
+        }
+        _ => index_objective_block_targets(block, targets, seen),
+    }
 }
 
 fn index_objective_block_targets(
@@ -1511,5 +1552,46 @@ fn register_target_id(targets: &mut Vec<String>, seen: &mut HashSet<String>, tar
     let target = target_id.to_owned();
     if seen.insert(target.clone()) {
         targets.push(target);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn act_science_answer_history_indexes_each_question_inside_stimulus() {
+        let config_snapshot = json!({
+            "general": {"type": "ACT"},
+            "sections": {
+                "science": {"enabled": true, "order": 1},
+                "reading": {"enabled": false},
+                "listening": {"enabled": false}
+            }
+        });
+        let content_snapshot = json!({
+            "science": {
+                "stimuli": [{
+                    "id": "stimulus-1",
+                    "blocks": [{
+                        "id": "science-block-1",
+                        "type": "SINGLE_MCQ",
+                        "questions": [
+                            {"id": "science-q-1"},
+                            {"id": "science-q-2"}
+                        ]
+                    }]
+                }]
+            }
+        });
+
+        assert_eq!(
+            build_objective_module_order(&config_snapshot),
+            vec!["science"]
+        );
+        assert_eq!(
+            build_objective_targets_for_section(&content_snapshot, "science"),
+            vec!["science-q-1", "science-q-2"]
+        );
     }
 }

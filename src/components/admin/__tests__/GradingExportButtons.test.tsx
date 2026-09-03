@@ -9,6 +9,7 @@ describe('GradingExportButtons', () => {
     const onExportReadingManual = vi.fn();
     const onExportListening = vi.fn();
     const onExportListeningManual = vi.fn();
+    const onExportScience = vi.fn();
     const onPrintWriting = vi.fn();
     const onOpenExportBuilder = vi.fn();
 
@@ -19,6 +20,7 @@ describe('GradingExportButtons', () => {
         onExportReadingManual={onExportReadingManual}
         onExportListening={onExportListening}
         onExportListeningManual={onExportListeningManual}
+        onExportScience={onExportScience}
         onPrintWriting={onPrintWriting}
         onOpenExportBuilder={onOpenExportBuilder}
       />,
@@ -49,11 +51,42 @@ describe('GradingExportButtons', () => {
     expect(onExportListeningManual).toHaveBeenCalledTimes(1);
 
     openMenu();
+    expect(screen.getByRole('menuitem', { name: /act science answers & scores/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('menuitem', { name: /act science answers & scores/i }));
+    expect(onExportScience).toHaveBeenCalledTimes(1);
+
+    openMenu();
     fireEvent.click(screen.getByRole('menuitem', { name: /print all writing/i }));
     expect(onPrintWriting).toHaveBeenCalledTimes(1);
 
     openMenu();
     fireEvent.click(screen.getByRole('menuitem', { name: /export builder · pdf zip/i }));
     expect(onOpenExportBuilder).toHaveBeenCalledTimes(1);
+  });
+
+  test('shows only ACT Science export for an ACT Science session', () => {
+    render(
+      <GradingExportButtons
+        exportingSection={null}
+        onExportReading={vi.fn()}
+        onExportReadingManual={vi.fn()}
+        onExportListening={vi.fn()}
+        onExportListeningManual={vi.fn()}
+        onExportScience={vi.fn()}
+        scienceOnly
+        onPrintWriting={vi.fn()}
+        onOpenExportBuilder={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+
+    expect(screen.getByRole('menuitem', { name: /act science answers & scores/i })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /reading answers & scores/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /reading manual check sheet/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /listening answers & scores/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /listening manual check sheet/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /print all writing/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /export builder/i })).not.toBeInTheDocument();
   });
 });

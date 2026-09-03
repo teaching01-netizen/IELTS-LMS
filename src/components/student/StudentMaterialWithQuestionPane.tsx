@@ -50,6 +50,8 @@ interface StudentMaterialWithQuestionPaneProps {
     hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
     hideStepper?: boolean | undefined;
     shouldFocusQuestion?: (() => boolean) | undefined;
+    eliminatedOptionIdsByQuestion?: Readonly<Record<string, readonly string[]>> | undefined;
+    onToggleOptionElimination?: ((questionId: string, optionId: string) => void) | undefined;
   };
 }
 
@@ -188,6 +190,8 @@ export function StudentMaterialWithQuestionPane({
       hideDiagramReferenceForBlock={questionPanel.hideDiagramReferenceForBlock}
       hideStepper={questionPanel.hideStepper ?? isCompact}
       shouldFocusQuestion={questionPanel.shouldFocusQuestion}
+      eliminatedOptionIdsByQuestion={questionPanel.eliminatedOptionIdsByQuestion}
+      onToggleOptionElimination={questionPanel.onToggleOptionElimination}
     />
   );
 

@@ -39,6 +39,10 @@ vi.mock('../StudentSpeaking', () => ({
   StudentSpeaking: () => <div data-testid="speaking-module">speaking</div>,
 }));
 
+vi.mock('../StudentScience', () => ({
+  StudentScience: () => <div data-testid="science-module">science</div>,
+}));
+
 vi.mock('../StudentFooter', () => ({
   StudentFooter: ({ onSubmit }: { onSubmit: () => void }) => (
     <button type="button" data-testid="workspace-footer-submit" onClick={onSubmit}>
@@ -107,7 +111,10 @@ function createExamState(): ExamState {
   } as ExamState;
 }
 
-function renderWorkspace(module: 'reading' | 'listening' | 'writing' | 'speaking') {
+function renderWorkspace(
+  module: 'reading' | 'listening' | 'writing' | 'speaking' | 'science',
+  examState: ExamState = createExamState(),
+) {
   const onNavigate = vi.fn();
   const onSubmit = vi.fn();
   const onCloseNavigator = vi.fn();
@@ -115,7 +122,7 @@ function renderWorkspace(module: 'reading' | 'listening' | 'writing' | 'speaking
   render(
     <StudentExamWorkspace
       currentModule={module}
-      examState={createExamState()}
+      examState={examState}
       currentQuestionId="q1"
       allQuestions={[{ id: 'q1' } as StudentQuestionDescriptor]}
       answers={{} as Record<string, QuestionAnswer>}
@@ -191,5 +198,16 @@ describe('StudentExamWorkspace', () => {
 
     expect(screen.getByTestId('workspace-navigator')).toBeInTheDocument();
     expect(screen.queryByTestId('workspace-writing-navigator')).not.toBeInTheDocument();
+  });
+
+  it('renders the ACT Science student workspace with shared question navigation', () => {
+    const actState = { ...createExamState(), type: 'ACT' } as ExamState;
+
+    renderWorkspace('science', actState);
+
+    expect(screen.getByTestId('science-module')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-footer-submit')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-navigator')).toBeInTheDocument();
+    expect(screen.queryByTestId('reading-module')).not.toBeInTheDocument();
   });
 });

@@ -1,7 +1,33 @@
 import type { ExamStatus, RuntimeStatus, SectionRuntimeStatus } from './types/domain';
 import type { StudentAnswerValue } from './types/answers';
 
-export type ModuleType = 'listening' | 'reading' | 'writing' | 'speaking';
+export type ExamType = 'Academic' | 'General Training' | 'ACT';
+export type ExamPreset =
+  | 'Academic'
+  | 'General Training'
+  | 'Listening'
+  | 'Reading'
+  | 'Writing'
+  | 'Speaking'
+  | 'Custom'
+  | 'ACT Science';
+export type ModuleType = 'listening' | 'reading' | 'writing' | 'speaking' | 'science';
+export type ActScienceSkillCategory =
+  | 'interpretation_of_data'
+  | 'scientific_investigation'
+  | 'evaluating_scientific_arguments_and_models_with_evidence';
+
+export const ACT_SCIENCE_SKILL_CATEGORIES: ReadonlyArray<{
+  value: ActScienceSkillCategory;
+  label: string;
+}> = [
+  { value: 'interpretation_of_data', label: 'Interpretation of Data' },
+  { value: 'scientific_investigation', label: 'Scientific Investigation' },
+  {
+    value: 'evaluating_scientific_arguments_and_models_with_evidence',
+    label: 'Evaluating Scientific Arguments and Models with Evidence',
+  },
+];
 export type DeepPartial<T> =
   T extends Array<infer U>
     ? Array<DeepPartial<U>>
@@ -230,6 +256,7 @@ export interface SingleMCQQuestion {
   id: string;
   stem: string;
   options: MCQOption[];
+  skillCategory?: ActScienceSkillCategory | undefined;
 }
 
 export interface ShortAnswerQuestion {
@@ -406,6 +433,15 @@ export interface Passage {
   metadata?: PassageMetadata | undefined;
 }
 
+export interface ActScienceStimulus {
+  id: string;
+  title: string;
+  content: string;
+  blocks: SingleMCQBlock[];
+  images?: StimulusImageAsset[] | undefined;
+  wordCount?: number | undefined;
+}
+
 // Question Bank Types
 export interface QuestionMetadata {
   id: string;
@@ -551,6 +587,10 @@ export interface ModuleConfig {
   allowedQuestionTypes: QuestionType[];
 }
 
+export interface ScienceConfig extends ModuleConfig {
+  questionCount: number;
+}
+
 export interface ListeningConfig extends ModuleConfig {
   partCount: number;
   bandScoreTable: BandScoreTable;
@@ -582,8 +622,8 @@ export interface SpeakingConfig extends ModuleConfig {
 
 export interface ExamConfig {
   general: {
-    preset: 'Academic' | 'General Training' | 'Listening' | 'Reading' | 'Writing' | 'Speaking' | 'Custom';
-    type: 'Academic' | 'General Training';
+    preset: ExamPreset;
+    type: ExamType;
     ieltsMode: boolean;
     title: string;
     summary: string;
@@ -594,6 +634,7 @@ export interface ExamConfig {
     reading: ReadingConfig;
     writing: WritingConfig;
     speaking: SpeakingConfig;
+    science: ScienceConfig;
   };
   standards: StandardsConfig;
   progression: {
@@ -679,7 +720,7 @@ export interface BlockValidation {
 export interface Exam {
   id: string;
   title: string;
-  type: 'Academic' | 'General Training';
+  type: ExamType;
   status: 'Draft' | 'Published' | 'Archived';
   workflowStatus?: ExamStatus | undefined;
   author: string;
@@ -691,10 +732,11 @@ export interface Exam {
 
 export interface ExamState {
   title: string;
-  type: 'Academic' | 'General Training';
+  type: ExamType;
   activeModule: ModuleType;
   activePassageId: string;
   activeListeningPartId: string;
+  activeScienceStimulusId: string;
   config: ExamConfig;
   reading: {
     passages: Passage[];
@@ -719,6 +761,9 @@ export interface ExamState {
     evaluatorNotes?: string | undefined;
     rubric?: RubricDefinition | undefined;
     gradeHistory?: GradeHistoryEntry[] | undefined;
+  };
+  science: {
+    stimuli: ActScienceStimulus[];
   };
 }
 

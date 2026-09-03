@@ -5,7 +5,7 @@
  * All UI and business logic should work with these types, not the legacy Exam type.
  */
 
-import type { ExamState, ExamConfig, ModuleType } from '../types';
+import type { ExamState, ExamConfig, ExamType, ModuleType } from '../types';
 import type {
   StudentAttempt as StudentAttemptRecord,
   StudentAttemptMutation as PendingAttemptMutation,
@@ -74,7 +74,7 @@ export interface ExamEntity {
   id: string;
   slug: string;
   title: string;
-  type: 'Academic' | 'General Training';
+  type: ExamType;
   status: ExamStatus;
   visibility: ExamVisibility;
   owner: string;
@@ -355,6 +355,7 @@ export interface PublishReadiness {
   questionCounts: {
     reading: number;
     listening: number;
+    science?: number;
     total: number;
   };
 }

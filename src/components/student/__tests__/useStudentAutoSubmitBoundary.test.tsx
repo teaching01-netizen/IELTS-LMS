@@ -40,6 +40,46 @@ function createRuntimeSnapshot(partial: Partial<ExamSessionRuntime> = {}): ExamS
 }
 
 describe('useStudentAutoSubmitBoundary', () => {
+  it('auto-submits a self-timed ACT Science section once when the timer reaches zero', async () => {
+    const flushAndSubmitCurrentModuleWithRetry = vi.fn().mockResolvedValue(undefined);
+    const runtimeState = {
+      blockingActive: false,
+      displayTimeRemaining: 1,
+      runtimeBacked: false,
+      runtimeStatus: null,
+      currentModule: 'science' as const,
+      runtimeSnapshot: null,
+    };
+
+    const { rerender } = renderHook(
+      (props: typeof runtimeState) =>
+        useStudentAutoSubmitBoundary({
+          effectivePhase: 'exam',
+          autoSubmitEnabled: true,
+          runtimeState: props,
+          flushAndSubmitCurrentModuleWithRetry,
+        }),
+      { initialProps: runtimeState },
+    );
+
+    rerender({ ...runtimeState, displayTimeRemaining: 0 });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(flushAndSubmitCurrentModuleWithRetry).toHaveBeenCalledTimes(1);
+    expect(flushAndSubmitCurrentModuleWithRetry).toHaveBeenCalledWith('self:science');
+
+    rerender({ ...runtimeState, displayTimeRemaining: 0 });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(flushAndSubmitCurrentModuleWithRetry).toHaveBeenCalledTimes(1);
+  });
+
   it('submits once when runtime confirms section boundary at zero remaining', async () => {
     const flushAndSubmitCurrentModuleWithRetry = vi.fn().mockResolvedValue(undefined);
 

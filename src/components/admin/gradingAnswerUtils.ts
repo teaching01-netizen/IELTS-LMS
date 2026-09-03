@@ -58,6 +58,29 @@ function lookupOptionText(
   return options?.find((opt) => opt.id === id)?.text ?? id;
 }
 
+function formatChoiceLetter(index: number): string {
+  let value = index + 1;
+  let label = '';
+  while (value > 0) {
+    value -= 1;
+    label = String.fromCharCode(65 + (value % 26)) + label;
+    value = Math.floor(value / 26);
+  }
+  return label;
+}
+
+function lookupOptionDisplay(
+  options: Array<{ id: string; text: string }> | undefined,
+  id: string,
+  includeChoiceLabels: boolean,
+): string {
+  const optionIndex = options?.findIndex((option) => option.id === id) ?? -1;
+  const text = lookupOptionText(options, id);
+  return includeChoiceLabels && optionIndex >= 0
+    ? `${formatChoiceLetter(optionIndex)}. ${text}`
+    : text;
+}
+
 function lookupHeadingText(
   headings: Array<{ id: string; text: string }> | undefined,
   id: string,
@@ -90,6 +113,11 @@ function getSingleMcqOptions(
 
   const blockOptions = (descriptor.block as { options?: Array<{ id: string; text: string; isCorrect?: boolean }> }).options;
   return Array.isArray(blockOptions) ? blockOptions : [];
+}
+
+export interface AnswerDisplayOptions {
+  includeChoiceLabels?: boolean;
+  correctAnswerOverride?: string;
 }
 
 export function getQuestionPrompt(descriptor: StudentQuestionDescriptor): string {
@@ -206,9 +234,34 @@ export function getCorrectAnswerValue(descriptor: StudentQuestionDescriptor): un
   }
 }
 
-export function getCorrectAnswerDisplay(descriptor: StudentQuestionDescriptor): string {
+export function getCorrectAnswerDisplay(
+  descriptor: StudentQuestionDescriptor,
+  options: AnswerDisplayOptions = {},
+): string {
+  const includeChoiceLabels = options.includeChoiceLabels === true;
+  const correctAnswerOverride = options.correctAnswerOverride?.trim();
+  const { block } = descriptor;
+
+  if (correctAnswerOverride) {
+    if (block.type === 'MULTI_MCQ') {
+      const optionList = Array.isArray(block.options) ? block.options : [];
+      return correctAnswerOverride
+        .split('|')
+        .map((id) => lookupOptionDisplay(optionList, id.trim(), includeChoiceLabels))
+        .join(', ');
+    }
+
+    if (block.type === 'SINGLE_MCQ') {
+      const optionList = getSingleMcqOptions(descriptor);
+      const firstAnswer = correctAnswerOverride.split('|')[0]?.trim() ?? '';
+      return lookupOptionDisplay(optionList, firstAnswer, includeChoiceLabels);
+    }
+
+    return correctAnswerOverride;
+  }
+
   const acceptedAnswers = getAcceptedAnswersForDescriptor(descriptor);
-  const { block, question } = descriptor;
+  const { question } = descriptor;
   if (acceptedAnswers && acceptedAnswers.length > 0) {
     return acceptedAnswers.join(' | ');
   }
@@ -229,12 +282,14 @@ export function getCorrectAnswerDisplay(descriptor: StudentQuestionDescriptor): 
   if (block.type === 'MULTI_MCQ') {
     const options = Array.isArray(block.options) ? block.options : [];
     const ids = Array.isArray(correct) ? (correct as string[]) : [];
-    return ids.map((id) => lookupOptionText(options, id)).join(', ');
+    return ids.map((id) => lookupOptionDisplay(options, id, includeChoiceLabels)).join(', ');
   }
 
   if (block.type === 'SINGLE_MCQ') {
     const options = getSingleMcqOptions(descriptor);
-    return typeof correct === 'string' ? lookupOptionText(options, correct) : '';
+    return typeof correct === 'string'
+      ? lookupOptionDisplay(options, correct, includeChoiceLabels)
+      : '';
   }
 
   if (block.type === 'MATCHING') {
@@ -281,19 +336,23 @@ function getAcceptedAnswersForDescriptor(descriptor: StudentQuestionDescriptor):
 export function getStudentAnswerDisplay(
   descriptor: StudentQuestionDescriptor,
   answerMap: Record<string, StudentAnswerValue | undefined>,
+  options: AnswerDisplayOptions = {},
 ): string {
   const value = getQuestionAnswer(descriptor, answerMap);
   const { block } = descriptor;
+  const includeChoiceLabels = options.includeChoiceLabels === true;
 
   if (block.type === 'MULTI_MCQ') {
     const options = Array.isArray(block.options) ? block.options : [];
     const ids = Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
-    return ids.map((id) => lookupOptionText(options, id)).join(', ');
+    return ids.map((id) => lookupOptionDisplay(options, id, includeChoiceLabels)).join(', ');
   }
 
   if (block.type === 'SINGLE_MCQ') {
     const options = getSingleMcqOptions(descriptor);
-    return typeof value === 'string' ? lookupOptionText(options, value) : '';
+    return typeof value === 'string'
+      ? lookupOptionDisplay(options, value, includeChoiceLabels)
+      : '';
   }
 
   if (block.type === 'MATCHING') {

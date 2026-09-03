@@ -166,6 +166,13 @@ describe('student interaction motion class contracts', () => {
   });
 
   describe('StudentHeader', () => {
+    it('shows ACT branding for an ACT exam instead of the IELTS label', () => {
+      renderHeader({ examType: 'ACT' });
+
+      expect(screen.getByText('ACT')).toBeInTheDocument();
+      expect(screen.queryByText('IELTS')).not.toBeInTheDocument();
+    });
+
     it('sweeps the zoom controls, highlight tools, and chrome buttons with the recipe', () => {
       renderHeader();
 

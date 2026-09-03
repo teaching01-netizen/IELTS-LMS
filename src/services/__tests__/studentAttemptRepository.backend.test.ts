@@ -242,6 +242,7 @@ describe('studentAttemptRepository backend mode', () => {
           answers: { q1: 'A' },
           writingAnswers: { task1: '<p>Draft</p>' },
           flags: { q1: true },
+          score: { section: 'science', correctCount: 8, totalQuestions: 10, percentage: 80 },
         },
         submittedAt: '2026-01-01T10:00:00.000Z',
       }),
@@ -250,6 +251,12 @@ describe('studentAttemptRepository backend mode', () => {
     expect(mapped.answers).toEqual({ q1: 'A' });
     expect(mapped.writingAnswers).toEqual({ task1: '<p>Draft</p>' });
     expect(mapped.flags).toEqual({ q1: true });
+    expect(mapped.finalSubmission?.score).toEqual({
+      section: 'science',
+      correctCount: 8,
+      totalQuestions: 10,
+      percentage: 80,
+    });
   });
 
   it('builds submit payload with finalAnswerPatch and sequence metadata', async () => {

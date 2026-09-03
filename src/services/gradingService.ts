@@ -47,6 +47,7 @@ import {
   ObjectiveOverrideUpsertRequest,
   ObjectiveQuestionOverrideRequest,
   ObjectiveIntegrityOverview,
+  ActScienceScoreReport,
 } from '../types/grading';
 
 /**
@@ -269,6 +270,19 @@ export class GradingService {
     }
   }
 
+  async getActScienceReports(): Promise<GradingServiceResult<ActScienceScoreReport[]>> {
+    try {
+      if (!isBackendGradingEnabled()) {
+        return { success: false, error: 'ACT Science reports require backend grading.' };
+      }
+
+      const reports = await backendGet<ActScienceScoreReport[]>('/v1/results/act-science');
+      return { success: true, data: reports };
+    } catch (error) {
+      return { success: false, error: `Failed to load ACT Science reports: ${error}` };
+    }
+  }
+
   async upsertObjectiveOverride(
     scheduleId: string,
     questionId: string,
@@ -330,7 +344,7 @@ export class GradingService {
 
   async overrideObjectiveQuestion(
     submissionId: string,
-    section: 'reading' | 'listening',
+    section: 'reading' | 'listening' | 'science',
     questionId: string,
     request: ObjectiveQuestionOverrideRequest,
   ): Promise<GradingServiceResult<SectionSubmission>> {

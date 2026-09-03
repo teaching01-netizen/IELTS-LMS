@@ -9,7 +9,8 @@ import { Exam, ExamState } from '../types';
 import { ExamEntity, ExamVersion } from '../types/domain';
 import {
   getReadingTotalQuestions,
-  getListeningTotalQuestions
+  getListeningTotalQuestions,
+  getActScienceTotalQuestions,
 } from './examUtils';
 
 /**
@@ -19,6 +20,7 @@ export interface ExamStats {
   totalQuestions: number;
   readingQuestions: number;
   listeningQuestions: number;
+  scienceQuestions?: number;
   readingPassages: number;
   listeningParts: number;
   hasWriting: boolean;
@@ -31,11 +33,13 @@ export interface ExamStats {
 export function getExamStatsFromExam(exam: Exam): ExamStats {
   const readingQuestions = getReadingTotalQuestions(exam.content.reading.passages);
   const listeningQuestions = getListeningTotalQuestions(exam.content.listening.parts);
+  const scienceQuestions = getActScienceTotalQuestions(exam.content.science?.stimuli ?? []);
   
   return {
-    totalQuestions: readingQuestions + listeningQuestions,
+    totalQuestions: readingQuestions + listeningQuestions + scienceQuestions,
     readingQuestions,
     listeningQuestions,
+    scienceQuestions,
     readingPassages: exam.content.reading.passages.length,
     listeningParts: exam.content.listening.parts.length,
     hasWriting: exam.content.config.sections.writing.enabled,
@@ -49,11 +53,13 @@ export function getExamStatsFromExam(exam: Exam): ExamStats {
 export function getExamStatsFromState(state: ExamState): ExamStats {
   const readingQuestions = getReadingTotalQuestions(state.reading.passages);
   const listeningQuestions = getListeningTotalQuestions(state.listening.parts);
+  const scienceQuestions = getActScienceTotalQuestions(state.science.stimuli);
   
   return {
-    totalQuestions: readingQuestions + listeningQuestions,
+    totalQuestions: readingQuestions + listeningQuestions + scienceQuestions,
     readingQuestions,
     listeningQuestions,
+    scienceQuestions,
     readingPassages: state.reading.passages.length,
     listeningParts: state.listening.parts.length,
     hasWriting: state.config.sections.writing.enabled,
@@ -95,6 +101,7 @@ export async function getExamStatsFromEntity(
     totalQuestions: 0,
     readingQuestions: 0,
     listeningQuestions: 0,
+    scienceQuestions: 0,
     readingPassages: 0,
     listeningParts: 0,
     hasWriting: false,
@@ -114,6 +121,9 @@ export function formatExamStats(stats: ExamStats): string {
   }
   if (stats.listeningQuestions > 0) {
     parts.push(`${stats.listeningQuestions} Listening`);
+  }
+  if ((stats.scienceQuestions ?? 0) > 0) {
+    parts.push(`${stats.scienceQuestions} Science`);
   }
   if (stats.hasWriting) {
     parts.push('Writing');

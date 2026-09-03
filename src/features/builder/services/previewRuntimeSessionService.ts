@@ -47,7 +47,7 @@ function parsePreviewRuntimeSection(
 ): ModuleType | null {
   const parts = schedule.cohortName.split(':');
   const raw = parts[parts.length - 1]?.trim().toLowerCase();
-  if (raw === 'listening' || raw === 'reading' || raw === 'writing' || raw === 'speaking') {
+  if (raw === 'listening' || raw === 'reading' || raw === 'writing' || raw === 'speaking' || raw === 'science') {
     return raw;
   }
   return null;

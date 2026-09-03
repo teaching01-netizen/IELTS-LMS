@@ -57,6 +57,7 @@ const GRADING_MIGRATIONS: &[&str] = &[
     "0028_grading_objective_grading_source.sql",
     "0029_release_events_timestamp_precision.sql",
     "0030_outbox_retry_policy.sql",
+    "0032_act_science_support.sql",
 ];
 
 #[tokio::test]
@@ -500,7 +501,10 @@ async fn grading_review_and_result_release_flow_round_trips() {
         .as_array()
         .expect("results array")
         .iter()
-        .find(|row| row["submissionId"] == submission_id.to_string())
+        .find(|row| {
+            row["submissionId"] == submission_id.to_string()
+                && row["releaseStatus"] == "released"
+        })
         .expect("released result row");
     let result_id = released_result["id"]
         .as_str()
@@ -578,7 +582,7 @@ async fn grading_review_and_result_release_flow_round_trips() {
         .unwrap();
     assert_eq!(analytics.status(), StatusCode::OK);
     let analytics_json = json_body(analytics).await;
-    assert_eq!(analytics_json["data"]["totalResults"], 1);
+    assert_eq!(analytics_json["data"]["totalResults"], 2);
     assert_eq!(analytics_json["data"]["releasedResults"], 1);
 
     let events = app
@@ -606,7 +610,7 @@ async fn grading_review_and_result_release_flow_round_trips() {
         .unwrap();
     assert_eq!(export.status(), StatusCode::OK);
     let export_json = json_body(export).await;
-    assert_eq!(export_json["data"]["count"], 1);
+    assert_eq!(export_json["data"]["count"], 2);
     assert_eq!(
         attempt_id.to_string(),
         session_detail_json["data"]["submissions"][0]["attemptId"]
@@ -766,6 +770,164 @@ async fn objective_block_matrix_answers_are_received_and_sectioned() {
         .find(|entry| entry["taskId"] == "task2")
         .expect("task2 writing payload");
     assert_eq!(task2["text"], submitted_writing_answers["task2"]["text"]);
+
+    database.shutdown().await;
+}
+
+#[tokio::test]
+async fn act_submit_returns_authoritative_score_and_admin_report_without_duplicates() {
+    let database = mysql::TestDatabase::new(GRADING_MIGRATIONS).await;
+    let schedule = seed_act_schedule(
+        database.pool(),
+        "act-science-score-report",
+        "ACT Science Score Report",
+        act_science_content_snapshot(),
+    )
+    .await;
+    let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
+    let service = DeliveryService::new(database.pool().clone());
+    start_runtime(database.pool(), schedule_id, "science").await;
+
+    let candidate_id = "act-candidate";
+    let context = service
+        .bootstrap(
+            schedule_id,
+            StudentBootstrapRequest {
+                student_key: student_key(schedule_id, candidate_id),
+                candidate_id: candidate_id.to_owned(),
+                candidate_name: "Best Student".to_owned(),
+                candidate_email: "act-candidate@example.com".to_owned(),
+                email: Some("act-candidate@example.com".to_owned()),
+                wcode: Some("ACT123456".to_owned()),
+                client_session_id: Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .expect("bootstrap ACT attempt");
+    let attempt = context.attempt.expect("ACT attempt");
+    let attempt_id = attempt.id.clone();
+    let answers = serde_json::Value::Object(
+        (1..=8)
+            .map(|index| (format!("science-q-{index}"), json!("a")))
+            .collect(),
+    );
+    let submit_request = StudentSubmitRequest {
+        attempt_id: attempt_id.clone(),
+        student_key: student_key(schedule_id, candidate_id),
+        last_seen_revision: Some(attempt.revision),
+        submission_id: Some("submission-act-candidate".to_owned()),
+        client_session_id: None,
+        client_final_seq: Some(0),
+        server_accepted_through_seq: Some(0),
+        final_answer_patch: None,
+        final_client_snapshot_hash: None,
+        answers: Some(answers.clone()),
+        writing_answers: Some(json!({})),
+        flags: Some(json!({})),
+    };
+
+    let first_response = service
+        .submit_attempt(
+            schedule_id,
+            submit_request.clone(),
+            Some("act-submit-idempotency".to_owned()),
+        )
+        .await
+        .expect("submit ACT attempt");
+    let first_score = first_response.score.clone().expect("ACT score");
+    assert_eq!(first_score.section, "science");
+    assert_eq!(first_score.correct_count, 8);
+    assert_eq!(first_score.total_questions, 10);
+    assert_eq!(first_score.percentage, 80.0);
+    assert!(first_response
+        .attempt
+        .final_submission
+        .as_ref()
+        .and_then(|submission| submission.get("score"))
+        .and_then(|score| score.get("questionResults"))
+        .is_none());
+
+    let duplicate_response = service
+        .submit_attempt(
+            schedule_id,
+            submit_request,
+            Some("act-submit-idempotency".to_owned()),
+        )
+        .await
+        .expect("replay ACT submit");
+    assert_eq!(duplicate_response.submission_id, first_response.submission_id);
+    assert_eq!(duplicate_response.score, Some(first_score));
+
+    let auth = create_authenticated_user(
+        database.pool(),
+        UserRole::Admin,
+        "act-admin@example.com",
+        "ACT Admin",
+    )
+    .await;
+    let mut config = AppConfig::default();
+    config.grading_sync_on_read_fallback = true;
+    let app = build_router(AppState::with_pool(config, database.pool().clone()));
+    let reports = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder().uri("/api/v1/results/act-science"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reports.status(), StatusCode::OK);
+    let reports_json = json_body(reports).await;
+    let report_rows = reports_json["data"].as_array().expect("report rows");
+    assert_eq!(report_rows.len(), 1);
+    assert_eq!(report_rows[0]["studentName"], "Best Student");
+    assert_eq!(report_rows[0]["score"]["correctCount"], 8);
+    assert_eq!(report_rows[0]["score"]["totalQuestions"], 10);
+    assert_eq!(report_rows[0]["score"]["percentage"], 80.0);
+    assert!(report_rows[0].get("questionResults").is_none());
+
+    let grading_sessions = app
+        .clone()
+        .oneshot(
+            auth.with_auth(
+                Request::builder()
+                    .uri("/api/v1/grading/sessions?page=1&pageSize=10&search=Best%20Student"),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(grading_sessions.status(), StatusCode::OK);
+    let grading_sessions_json = json_body(grading_sessions).await;
+    let sessions = grading_sessions_json["data"]["sessions"]
+        .as_array()
+        .expect("grading session rows");
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["scheduleId"], schedule.id);
+
+    let session_detail = app
+        .oneshot(
+            auth.with_auth(
+                Request::builder().uri(format!(
+                    "/api/v1/grading/sessions/{}?page=1&pageSize=10",
+                    schedule.id
+                )),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(session_detail.status(), StatusCode::OK);
+    let session_detail_json = json_body(session_detail).await;
+    let submissions = session_detail_json["data"]["submissions"]
+        .as_array()
+        .expect("session submissions");
+    assert_eq!(submissions.len(), 1);
+    assert_eq!(submissions[0]["studentName"], "Best Student");
+    assert_eq!(submissions[0]["sectionStatuses"]["science"], "auto_graded");
 
     database.shutdown().await;
 }
@@ -1266,8 +1428,29 @@ async fn bootstrap_and_submit(
     writing_answers: serde_json::Value,
     flags: serde_json::Value,
 ) -> Uuid {
+    bootstrap_and_submit_for_section(
+        pool,
+        schedule_id,
+        candidate_id,
+        answers,
+        writing_answers,
+        flags,
+        "listening",
+    )
+    .await
+}
+
+async fn bootstrap_and_submit_for_section(
+    pool: &sqlx::MySqlPool,
+    schedule_id: Uuid,
+    candidate_id: &str,
+    answers: serde_json::Value,
+    writing_answers: serde_json::Value,
+    flags: serde_json::Value,
+    section_key: &str,
+) -> Uuid {
     let service = DeliveryService::new(pool.clone());
-    start_runtime(pool, schedule_id, "listening").await;
+    start_runtime(pool, schedule_id, section_key).await;
     let context = service
         .bootstrap(
             schedule_id,
@@ -1327,6 +1510,45 @@ async fn seed_schedule_with_content(
     title: &str,
     content_snapshot: serde_json::Value,
 ) -> ielts_backend_domain::schedule::ExamSchedule {
+    seed_schedule_with_exam_config(
+        pool,
+        slug,
+        title,
+        ExamType::Academic,
+        content_snapshot,
+        sample_delivery_config(),
+        "Grading Cohort",
+    )
+    .await
+}
+
+async fn seed_act_schedule(
+    pool: &sqlx::MySqlPool,
+    slug: &str,
+    title: &str,
+    content_snapshot: serde_json::Value,
+) -> ielts_backend_domain::schedule::ExamSchedule {
+    seed_schedule_with_exam_config(
+        pool,
+        slug,
+        title,
+        ExamType::Act,
+        content_snapshot,
+        act_delivery_config(),
+        "ACT Cohort",
+    )
+    .await
+}
+
+async fn seed_schedule_with_exam_config(
+    pool: &sqlx::MySqlPool,
+    slug: &str,
+    title: &str,
+    exam_type: ExamType,
+    content_snapshot: serde_json::Value,
+    config_snapshot: serde_json::Value,
+    cohort_name: &str,
+) -> ielts_backend_domain::schedule::ExamSchedule {
     let actor = contract_actor();
     let builder_service = BuilderService::new(pool.clone());
     let exam = builder_service
@@ -1335,7 +1557,7 @@ async fn seed_schedule_with_content(
             CreateExamRequest {
                 slug: slug.to_owned(),
                 title: title.to_owned(),
-                exam_type: ExamType::Academic.as_str().to_owned(),
+                exam_type: exam_type.as_str().to_owned(),
                 visibility: Visibility::Organization.as_str().to_owned(),
                 organization_id: Some("org-1".to_owned()),
             },
@@ -1350,7 +1572,7 @@ async fn seed_schedule_with_content(
             exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot,
-                config_snapshot: sample_delivery_config(),
+                config_snapshot,
                 revision: exam.revision,
             },
         )
@@ -1380,7 +1602,7 @@ async fn seed_schedule_with_content(
             CreateScheduleRequest {
                 exam_id,
                 published_version_id: published_version.id,
-                cohort_name: "Grading Cohort".to_owned(),
+                cohort_name: cohort_name.to_owned(),
                 proctor_display_name: exam.title.clone(),
                 grading_display_name: exam.title.clone(),
                 institution: Some("IELTS Centre".to_owned()),
@@ -1903,6 +2125,7 @@ fn matrix_content_snapshot() -> serde_json::Value {
                     {
                         "id": "l-multi",
                         "type": "MULTI_MCQ",
+                        "stem": "Choose two options",
                         "requiredSelections": 2,
                         "options": [
                             { "id": "A", "text": "Option A", "isCorrect": true },
@@ -2010,6 +2233,58 @@ fn sample_delivery_config() -> serde_json::Value {
             "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 10},
             "speaking": {"enabled": true, "label": "Speaking", "order": 4, "duration": 15, "gapAfterMinutes": 0}
         }
+    })
+}
+
+fn act_science_content_snapshot() -> serde_json::Value {
+    let questions = (1..=10)
+        .map(|index| {
+            json!({
+                "id": format!("science-q-{index}"),
+                "skillCategory": "interpretation_of_data",
+                "stem": format!("Which answer is correct for question {index}?"),
+                "options": [
+                    {"id": "a", "text": "Answer A", "isCorrect": true},
+                    {"id": "b", "text": "Answer B", "isCorrect": false},
+                    {"id": "c", "text": "Answer C", "isCorrect": false},
+                    {"id": "d", "text": "Answer D", "isCorrect": false}
+                ]
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "science": {
+            "stimuli": [{
+                "id": "science-stimulus-1",
+                "title": "Plant Growth Experiment",
+                "content": "Researchers measured plant growth under different light conditions.",
+                "blocks": [{
+                    "id": "science-block-1",
+                    "type": "SINGLE_MCQ",
+                    "instruction": "Choose one answer.",
+                    "questions": questions
+                }]
+            }]
+        }
+    })
+}
+
+fn act_delivery_config() -> serde_json::Value {
+    json!({
+        "general": {"type": "ACT"},
+        "sections": {
+            "science": {
+                "enabled": true,
+                "label": "Science",
+                "order": 1,
+                "duration": 40,
+                "allowPause": false,
+                "questionCount": 10
+            }
+        },
+        "progression": {"allowPause": false},
+        "scoring": {"mode": "raw_percent", "percentageDecimals": 2}
     })
 }
 

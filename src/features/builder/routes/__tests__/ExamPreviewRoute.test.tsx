@@ -232,4 +232,50 @@ describe('ExamPreviewRoute', () => {
 
     consoleErrorSpy.mockRestore();
   });
+
+  it('renders ACT Science through the student runtime preview', async () => {
+    searchParams = new URLSearchParams('module=science');
+    resolvePreviewRuntimeSessionMock.mockResolvedValueOnce({
+      module: 'science',
+      scheduleId: 'sched-preview-science',
+      studentId: 'W654321',
+    });
+    const state = createInitialExamState('ACT Science preview', 'ACT');
+    mockController.mockReturnValue({
+      isLoading: false,
+      error: null,
+      exam: {
+        id: 'exam-1',
+        slug: 'exam-1',
+        title: 'ACT Science preview',
+        type: 'ACT',
+        status: 'draft',
+        visibility: 'private',
+        owner: 'builder-1',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        currentDraftVersionId: 'ver-1',
+        currentPublishedVersionId: null,
+        canEdit: true,
+        canPublish: true,
+        canDelete: true,
+        schemaVersion: 4,
+      },
+      state,
+    });
+
+    render(<ExamPreviewRoute />);
+
+    expect(await screen.findByTestId('student-app-wrapper')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /preview section/i })).toHaveValue('science');
+    expect(resolvePreviewRuntimeSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedModule: 'science',
+        authorUserId: 'builder-1',
+      }),
+    );
+
+    const props = wrapperSpy.mock.calls[0]?.[0] as { scheduleId: string };
+    expect(props.scheduleId).toBe('sched-preview-science');
+  });
 });

@@ -9,7 +9,7 @@ import {
 import { extractObjectiveAnswerMap } from './gradingAnswerUtils';
 
 interface QuestionTracebackPanelProps {
-  section: 'reading' | 'listening';
+  section: 'reading' | 'listening' | 'science';
   examState: ExamState | null;
   sectionSubmission: SectionSubmission | null;
   examLoading: boolean;
@@ -75,6 +75,7 @@ function buildFallbackTracebackGroups(
 function renderGroup(
   group: ObjectiveTracebackGroup,
   index: number,
+  section: QuestionTracebackPanelProps['section'],
   onOverride: QuestionTracebackPanelProps['onOverride'],
   pendingOverrideQuestionIds: ReadonlySet<string> | undefined,
 ) {
@@ -119,6 +120,11 @@ function renderGroup(
                 <h4 className="text-sm font-semibold text-gray-900">
                   {item.prompt || 'Question prompt unavailable'}
                 </h4>
+                {section === 'science' && item.questionType ? (
+                  <p className="text-xs font-medium text-blue-700">
+                    Question Type: {item.questionType}
+                  </p>
+                ) : null}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -270,6 +276,7 @@ export function QuestionTracebackPanel({
   pendingOverrideQuestionIds,
   overrideError,
 }: QuestionTracebackPanelProps) {
+  const sectionLabel = section === 'science' ? 'ACT Science' : section;
   const schemaGroups = useMemo(
     () => buildQuestionTracebackGroups(examState, sectionSubmission, section),
     [examState, section, sectionSubmission],
@@ -344,7 +351,7 @@ export function QuestionTracebackPanel({
           <div className="min-w-0">
             <h3 className="font-bold text-gray-900">Traceback View</h3>
             <p className="break-words text-xs text-gray-600 capitalize">
-              {section} section answer replay · text matches ignore letter case
+              {sectionLabel} section answer replay · text matches ignore letter case
             </p>
           </div>
         </div>
@@ -434,7 +441,7 @@ export function QuestionTracebackPanel({
           ) : null}
 
           {groups.map((group, index) =>
-            renderGroup(group, index, onOverride, pendingOverrideQuestionIds),
+            renderGroup(group, index, section, onOverride, pendingOverrideQuestionIds),
           )}
         </div>
       ) : null}

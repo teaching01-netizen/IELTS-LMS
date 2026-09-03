@@ -101,7 +101,7 @@ export function StudentEntryRoute() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { studentEntry } = useAuthSession();
+  const { studentEntry, status: authStatus } = useAuthSession();
 
   const initialWcode = useMemo(() => {
     if (!scheduleId) {
@@ -166,7 +166,7 @@ export function StudentEntryRoute() {
     }
 
     const normalizedWcode = normalizeAccessCode(initialWcode);
-    if (!normalizedWcode) {
+    if (!normalizedWcode || authStatus !== 'authenticated') {
       return;
     }
 
@@ -191,7 +191,7 @@ export function StudentEntryRoute() {
     return () => {
       cancelled = true;
     };
-  }, [initialWcode, navigate, scheduleId]);
+  }, [authStatus, initialWcode, navigate, scheduleId]);
 
   const handleInputChange = (field: keyof EntryFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -235,7 +235,7 @@ export function StudentEntryRoute() {
     }
 
     if (!normalizedIeltsCourse) {
-      newErrors.ieltsCourse = 'IELTS Course is required';
+      newErrors.ieltsCourse = 'Course is required';
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -441,14 +441,14 @@ export function StudentEntryRoute() {
 
           <div>
             <label htmlFor="ieltsCourse" className="block text-sm font-medium text-gray-700 mb-2">
-              IELTS Course
+              Course
               <input
                 id="ieltsCourse"
                 type="text"
                 value={formData.ieltsCourse}
                 onChange={(e) => handleInputChange('ieltsCourse', e.target.value)}
-                placeholder="IELTS Course"
-                aria-label="IELTS Course"
+                placeholder="Course"
+                aria-label="Course"
                 disabled={isLoading || Boolean(queuedAdmission)}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
                   errors.ieltsCourse ? 'border-red-300' : 'border-gray-300'

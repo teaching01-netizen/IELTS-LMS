@@ -116,7 +116,7 @@ impl TestDatabase {
 
     #[allow(dead_code)]
     pub fn database_url(&self) -> String {
-        format!("mysql://root:root@127.0.0.1:4000/{}", self.db_name)
+        format!("mysql://root@127.0.0.1:4000/{}", self.db_name)
     }
 
     pub async fn shutdown(self) {
@@ -392,12 +392,10 @@ fn connect_options(user: &str, database: &str) -> MySqlConnectOptions {
             .expect("invalid database URL");
 
         let parts: Vec<&str> = url.split('@').collect();
-        let auth_parts: Vec<&str> = parts[0].split(':').collect();
+        let (username, password) = parts[0].split_once(':').unwrap_or((parts[0], ""));
         let host_parts: Vec<&str> = parts[1].split('/').collect();
         let host_port: Vec<&str> = host_parts[0].split(':').collect();
 
-        let username = auth_parts[0];
-        let password = auth_parts[1];
         let host = host_port[0];
         let port = host_port[1].parse::<u16>().unwrap_or(4000);
         let db = if host_parts.len() > 1 {
@@ -419,7 +417,7 @@ fn connect_options(user: &str, database: &str) -> MySqlConnectOptions {
         .host("127.0.0.1")
         .port(4000)
         .username(user)
-        .password("root")
+        .password("")
         .database(database)
 }
 

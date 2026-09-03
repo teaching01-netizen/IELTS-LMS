@@ -2,6 +2,8 @@ import {
   BandScoreTable,
   DeepPartial,
   ExamConfig,
+  ExamPreset,
+  ExamType,
   ModuleType,
   PassageWordCountStandards,
   SpeakingPartConfig,
@@ -18,6 +20,8 @@ export const DEFAULT_DELIVERY_POLICY: ExamConfig['delivery'] = {
   transitionMode: 'auto_with_proctor_override',
   allowedExtensionMinutes: [5, 10]
 };
+
+export const DEFAULT_ACT_EXAM_SUMMARY = 'Standard ACT Exam';
 
 export const DEFAULT_LISTENING_BAND_TABLE: BandScoreTable = {
   39: 9.0, 37: 8.5, 35: 8.0, 32: 7.5, 30: 7.0, 26: 6.5, 23: 6.0, 18: 5.5, 16: 5.0, 13: 4.5, 10: 4.0, 6: 3.5, 4: 3.0, 2: 2.5
@@ -272,7 +276,27 @@ export const syncConfigWithStandards = (config: ExamConfig): ExamConfig => {
     };
   };
 
-  const withPolicy = applyIeltsMode(config);
+  const applyActScienceMode = (next: ExamConfig): ExamConfig => {
+    if (next.general.type !== 'ACT') return next;
+
+    return {
+      ...next,
+      sections: {
+        ...next.sections,
+        listening: { ...next.sections.listening, enabled: false },
+        reading: { ...next.sections.reading, enabled: false },
+        writing: { ...next.sections.writing, enabled: false },
+        speaking: { ...next.sections.speaking, enabled: false },
+        science: { ...next.sections.science, enabled: true },
+      },
+      progression: {
+        ...next.progression,
+        allowPause: false,
+      },
+    };
+  };
+
+  const withPolicy = applyActScienceMode(applyIeltsMode(config));
   const synced = {
     ...withPolicy,
     standards: cloneStandards(withPolicy.standards),
@@ -309,22 +333,25 @@ export const syncConfigWithStandards = (config: ExamConfig): ExamConfig => {
 };
 
 const buildDefaultConfig = (
-  type: 'Academic' | 'General Training' = 'Academic',
-  preset: ExamConfig['general']['preset'] = 'Academic'
+  type: ExamType = 'Academic',
+  preset: ExamPreset = 'Academic'
 ): ExamConfig => {
+  const isActScience = type === 'ACT' || preset === 'ACT Science';
+  const resolvedType: ExamType = isActScience ? 'ACT' : type;
+  const resolvedPreset: ExamPreset = isActScience ? 'ACT Science' : preset;
   const isListeningOnly = preset === 'Listening';
   const isReadingOnly = preset === 'Reading';
   const isWritingOnly = preset === 'Writing';
   const isSpeakingOnly = preset === 'Speaking';
-  const isFull = preset === 'Academic' || preset === 'General Training';
+  const isFull = !isActScience && (preset === 'Academic' || preset === 'General Training');
 
   return {
     general: {
-      preset,
-      type,
+      preset: resolvedPreset,
+      type: resolvedType,
       ieltsMode: false,
       title: '',
-      summary: `Standard IELTS ${type} Exam`,
+      summary: isActScience ? DEFAULT_ACT_EXAM_SUMMARY : `Standard IELTS ${resolvedType} Exam`,
       instructions: 'Please follow the instructions for each section carefully.'
     },
     sections: {
@@ -378,6 +405,15 @@ const buildDefaultConfig = (
         ],
         rubricWeights: { ...DEFAULT_SPEAKING_RUBRIC_WEIGHTS },
         allowedQuestionTypes: []
+      },
+      science: {
+        enabled: isActScience,
+        label: 'Science',
+        duration: 40,
+        order: 0,
+        gapAfterMinutes: 0,
+        questionCount: 40,
+        allowedQuestionTypes: ['SINGLE_MCQ'],
       }
     },
     standards: buildDefaultStandards(),
@@ -478,6 +514,14 @@ const normalizeModuleConfig = <T extends ExamConfig['sections'][ModuleType]>(bas
       );
   }
 
+  if ('questionCount' in base) {
+    (normalized as T & { questionCount: number }).questionCount = coerceInt(
+      (incoming as T & { questionCount?: number })?.questionCount,
+      (base as T & { questionCount: number }).questionCount,
+      1,
+    );
+  }
+
   if ('rubricWeights' in base) {
     (normalized as T & { rubricWeights: Record<string, number> }).rubricWeights = 
       (incoming as T & { rubricWeights?: Record<string, number> })?.rubricWeights ?? 
@@ -527,7 +571,8 @@ export const normalizeExamConfig = (config?: DeepPartial<ExamConfig>): ExamConfi
       listening: normalizeModuleConfig(base.sections.listening, config.sections?.listening),
       reading: normalizeModuleConfig(base.sections.reading, config.sections?.reading),
       writing: normalizeModuleConfig(base.sections.writing, config.sections?.writing),
-      speaking: normalizeModuleConfig(base.sections.speaking, config.sections?.speaking)
+      speaking: normalizeModuleConfig(base.sections.speaking, config.sections?.speaking),
+      science: normalizeModuleConfig(base.sections.science, config.sections?.science),
     },
     standards: deriveStandards(base.standards, config),
     progression: {
@@ -560,6 +605,6 @@ export const normalizeExamConfig = (config?: DeepPartial<ExamConfig>): ExamConfi
 };
 
 export const createDefaultConfig = (
-  type: 'Academic' | 'General Training' = 'Academic',
-  preset: ExamConfig['general']['preset'] = 'Academic'
+  type: ExamType = 'Academic',
+  preset: ExamPreset = 'Academic'
 ): ExamConfig => buildDefaultConfig(type, preset);

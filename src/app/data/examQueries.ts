@@ -6,7 +6,7 @@
 import { useQuery, useMutation, useQueryClient, UseMutationOptions } from '@tanstack/react-query';
 import { examAuthoringFacade } from '../../features/exam-authoring/application/examAuthoringFacade';
 import { liveQueryPolicy, queryKeys } from './queryClient';
-import { ExamState } from '../../types';
+import { ExamState, ExamType } from '../../types';
 import { ExamSchedule, ExamSessionRuntime, ExamStatus } from '../../types/domain';
 import { TransitionResult } from '../../types/domain';
 
@@ -96,7 +96,7 @@ export function useScheduleRuntime(scheduleId: string) {
 /**
  * Mutation to create a new exam
  */
-export function useCreateExam(options?: UseMutationOptions<TransitionResult, Error, { title: string; type: 'Academic' | 'General Training'; initialState: ExamState; owner?: string }>) {
+export function useCreateExam(options?: UseMutationOptions<TransitionResult, Error, { title: string; type: ExamType; initialState: ExamState; owner?: string }>) {
   const queryClient = useQueryClient();
   
   return useMutation({

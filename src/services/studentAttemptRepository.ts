@@ -22,6 +22,7 @@ import type {
   StudentAttemptMutation,
   StudentAttemptSeed,
   StudentHeartbeatEvent,
+  StudentScoreSummary,
 } from '../types/studentAttempt';
 import {
   mergeStudentAttemptRecovery,
@@ -131,6 +132,7 @@ interface BackendStudentAttempt {
         answers?: StudentAttempt['answers'] | null | undefined;
         writingAnswers?: StudentAttempt['writingAnswers'] | null | undefined;
         flags?: StudentAttempt['flags'] | null | undefined;
+        score?: StudentScoreSummary | null | undefined;
       }
     | null
     | undefined;
@@ -177,6 +179,7 @@ interface BackendSubmitResponse {
   attempt: BackendStudentAttempt;
   submissionId: string;
   submittedAt: string;
+  score?: StudentScoreSummary | null | undefined;
   refreshedAttemptCredential?: BackendAttemptCredential | null | undefined;
 }
 
@@ -1353,7 +1356,7 @@ function mutationWatermarkKey(attemptId: string, clientSessionId: string): strin
 
 export function mapBackendStudentAttempt(
   payload: BackendStudentAttempt,
-  receipt?: Pick<BackendSubmitResponse, 'submissionId' | 'submittedAt'>,
+  receipt?: Pick<BackendSubmitResponse, 'submissionId' | 'submittedAt' | 'score'>,
 ): StudentAttempt {
   rememberAttemptSchedule(payload.id, payload.scheduleId);
 
@@ -1372,11 +1375,13 @@ export function mapBackendStudentAttempt(
           ? { writingAnswers: payload.finalSubmission.writingAnswers }
           : {}),
         ...(payload.finalSubmission.flags ? { flags: payload.finalSubmission.flags } : {}),
+        ...(payload.finalSubmission.score ? { score: payload.finalSubmission.score } : {}),
       }
     : receipt
       ? {
           submissionId: receipt.submissionId,
           submittedAt: receipt.submittedAt,
+          ...(receipt.score ? { score: receipt.score } : {}),
         }
       : null;
 
@@ -2482,6 +2487,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     const submittedAttempt = mapBackendStudentAttempt(response.attempt, {
       submissionId: response.submissionId,
       submittedAt: response.submittedAt,
+      score: response.score,
     });
     clearAttemptCredentialFromAdapter(attemptForSubmit);
     await this.cache.saveAttempt(submittedAttempt);

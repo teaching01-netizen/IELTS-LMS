@@ -183,6 +183,86 @@ describe('QuestionTracebackPanel', () => {
     expect(screen.queryByText('[1] C')).not.toBeInTheDocument();
   });
 
+  test('shows the ACT Science question type for each question', () => {
+    const examState = createInitialExamState('ACT Science Practice', 'ACT', 'ACT Science');
+    examState.science.stimuli = [{
+      id: 'stimulus-1',
+      title: 'Water experiment',
+      content: 'Experiment content',
+      blocks: [{
+        id: 'science-block-1',
+        type: 'SINGLE_MCQ',
+        instruction: 'Choose the best answer.',
+        stem: 'What happened?',
+        options: [
+          { id: 'option-a', text: 'Water increased', isCorrect: true },
+          { id: 'option-b', text: 'Water decreased', isCorrect: false },
+        ],
+        questions: [
+          {
+            id: 'science-q1',
+            stem: 'What happened to the water?',
+            skillCategory: 'interpretation_of_data',
+            options: [
+              { id: 'option-a', text: 'Water increased', isCorrect: true },
+              { id: 'option-b', text: 'Water decreased', isCorrect: false },
+            ],
+          },
+          {
+            id: 'science-q2',
+            stem: 'How should this be tested?',
+            skillCategory: 'scientific_investigation',
+            options: [
+              { id: 'sin-a', text: 'Test A', isCorrect: true },
+              { id: 'sin-b', text: 'Test B', isCorrect: false },
+            ],
+          },
+          {
+            id: 'science-q3',
+            stem: 'Which argument is supported?',
+            skillCategory: 'evaluating_scientific_arguments_and_models_with_evidence',
+            options: [
+              { id: 'esa-a', text: 'Argument A', isCorrect: true },
+              { id: 'esa-b', text: 'Argument B', isCorrect: false },
+            ],
+          },
+        ],
+      }],
+      images: [],
+    }] as any;
+
+    render(
+      <QuestionTracebackPanel
+        section="science"
+        examState={examState}
+        sectionSubmission={{
+          id: 'sec-science-1',
+          submissionId: 'sub-science-1',
+          section: 'science',
+          answers: {
+            type: 'science',
+            answers: {
+              'science-q1': 'option-b',
+              'science-q2': 'sin-a',
+              'science-q3': 'esa-a',
+            },
+          },
+          autoGradingResults: undefined,
+          gradingStatus: 'auto_graded',
+          submittedAt: '2026-01-01T00:00:00.000Z',
+        } as any}
+        examLoading={false}
+        examError={null}
+      />,
+    );
+
+    expect(screen.getByText('Question Type: Interpretation of Data')).toBeInTheDocument();
+    expect(screen.getByText('Question Type: Scientific Investigation')).toBeInTheDocument();
+    expect(
+      screen.getByText('Question Type: Evaluating Scientific Arguments and Models with Evidence'),
+    ).toBeInTheDocument();
+  });
+
   test('shows numbering gap warning when canonical question numbers are non-contiguous', () => {
     mockedBuildQuestionTracebackGroups.mockReturnValueOnce([
       {

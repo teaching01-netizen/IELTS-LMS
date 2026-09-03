@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { StudentHeader } from '../StudentHeader';
@@ -141,5 +141,127 @@ describe('StudentHeader highlight tool', () => {
       />,
     );
     expect(screen.queryByRole('button', { name: 'Highlight' })).toBeNull();
+  });
+
+  it('shows the ACT Science choice elimination mode beside the test taker identity', () => {
+    const onToggleChoiceElimination = vi.fn();
+
+    render(
+      <StudentHeader
+        examType="ACT"
+        choiceEliminationAvailable
+        choiceEliminationEnabled={false}
+        onToggleChoiceElimination={onToggleChoiceElimination}
+        highlightEnabled
+        highlightToolMode="off"
+        highlightColor="yellow"
+        onToggleHighlightMode={() => {}}
+        onSelectHighlightColor={() => {}}
+        onSelectEraseMode={() => {}}
+        isExamActive
+      />,
+    );
+
+    const eliminateButton = screen.getByRole('button', { name: 'Eliminate choices' });
+    expect(eliminateButton).toHaveAttribute('aria-pressed', 'false');
+    expect(eliminateButton).toHaveClass('min-h-11');
+    expect(screen.getByText('Test taker ID').parentElement?.parentElement).toContainElement(eliminateButton);
+
+    fireEvent.click(eliminateButton);
+    expect(onToggleChoiceElimination).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose choice elimination in the IELTS header', () => {
+    render(
+      <StudentHeader
+        examType="Academic"
+        choiceEliminationAvailable
+        onToggleChoiceElimination={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Eliminate choices' })).toBeNull();
+  });
+
+  it('keeps Highlight and Erase together in the right-side tool group', () => {
+    render(
+      <StudentHeader
+        examType="ACT"
+        choiceEliminationAvailable
+        choiceEliminationEnabled
+        onToggleChoiceElimination={() => {}}
+        highlightEnabled
+        highlightToolMode="highlight"
+        highlightColor="yellow"
+        onToggleHighlightMode={() => {}}
+        onSelectHighlightColor={() => {}}
+        onSelectEraseMode={() => {}}
+        isExamActive
+      />,
+    );
+
+    const controls = within(screen.getByTestId('student-header-controls-slot'))
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label'));
+
+    expect(controls).toEqual([
+      'Highlighting',
+      'Choose highlight color',
+      'Erase highlights',
+    ]);
+  });
+
+  it('keeps the Highlighting label visible in a stable-width toolbar slot', () => {
+    const { rerender } = render(
+      <StudentHeader
+        examType="ACT"
+        highlightEnabled
+        highlightToolMode="off"
+        highlightColor="yellow"
+        onToggleHighlightMode={() => {}}
+        onSelectHighlightColor={() => {}}
+        onSelectEraseMode={() => {}}
+        isExamActive
+      />,
+    );
+
+    const inactiveButton = screen.getByRole('button', { name: 'Highlight' });
+    expect(inactiveButton).toHaveClass('min-w-[9.5rem]', 'whitespace-nowrap');
+
+    rerender(
+      <StudentHeader
+        examType="ACT"
+        highlightEnabled
+        highlightToolMode="highlight"
+        highlightColor="yellow"
+        onToggleHighlightMode={() => {}}
+        onSelectHighlightColor={() => {}}
+        onSelectEraseMode={() => {}}
+        isExamActive
+      />,
+    );
+
+    const activeButton = screen.getByRole('button', { name: 'Highlighting' });
+    expect(activeButton).toHaveClass('min-w-[9.5rem]', 'whitespace-nowrap');
+    expect(within(activeButton).getByText('Highlighting')).not.toHaveClass('hidden');
+  });
+
+  it('keeps the IELTS highlight layout outside the ACT-only balance adjustment', () => {
+    render(
+      <StudentHeader
+        examType="Academic"
+        highlightEnabled
+        highlightToolMode="highlight"
+        highlightColor="yellow"
+        onToggleHighlightMode={() => {}}
+        onSelectHighlightColor={() => {}}
+        onSelectEraseMode={() => {}}
+        isExamActive
+      />,
+    );
+
+    const highlightButton = screen.getByRole('button', { name: 'Highlighting' });
+    expect(highlightButton).not.toHaveClass('min-w-[10.5rem]', 'whitespace-nowrap');
+    expect(within(highlightButton).getByText('Highlighting')).toHaveClass('hidden', 'md:inline');
   });
 });

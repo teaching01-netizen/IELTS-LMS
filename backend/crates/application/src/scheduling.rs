@@ -1565,7 +1565,7 @@ fn build_section_plan(
             SchedulingError::Validation("Exam config is missing section settings.".to_owned())
         })?;
 
-    let ordered_keys = ["listening", "reading", "writing", "speaking"];
+    let ordered_keys = ["listening", "reading", "writing", "speaking", "science"];
     let mut entries = Vec::new();
 
     for (default_order, key) in ordered_keys.into_iter().enumerate() {
@@ -1724,6 +1724,32 @@ mod tests {
         assert_eq!(plan[3].section_key, "speaking");
         assert_eq!(plan[3].start_offset_minutes, 165);
         assert_eq!(plan[3].end_offset_minutes, 180);
+    }
+
+    #[test]
+    fn build_section_plan_supports_act_science_as_one_continuous_section() {
+        let config = json!({
+            "general": {"type": "ACT", "ieltsMode": false},
+            "sections": {
+                "science": {
+                    "enabled": true,
+                    "label": "Science",
+                    "duration": 40,
+                    "order": 1,
+                    "gapAfterMinutes": 0
+                }
+            },
+            "progression": {"allowPause": false}
+        });
+
+        let plan = build_section_plan(&config).expect("build ACT Science plan");
+
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].section_key, "science");
+        assert_eq!(plan[0].label, "Science");
+        assert_eq!(plan[0].duration_minutes, 40);
+        assert_eq!(plan[0].start_offset_minutes, 0);
+        assert_eq!(plan[0].end_offset_minutes, 40);
     }
 
     #[test]

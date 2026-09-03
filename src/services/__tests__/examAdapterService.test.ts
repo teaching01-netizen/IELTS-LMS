@@ -3,6 +3,27 @@ import { createDefaultConfig } from '../../constants/examDefaults';
 import { hydrateExamState } from '../examAdapterService';
 
 describe('hydrateExamState', () => {
+  it('creates an ACT Science state without IELTS content containers', async () => {
+    const { createInitialExamState } = await import('../examAdapterService');
+    const state = createInitialExamState('ACT Science Draft', 'ACT', 'ACT Science');
+
+    expect(state.type).toBe('ACT');
+    expect(state.activeModule).toBe('science');
+    expect(state.activeScienceStimulusId).toBe('');
+    expect(state.science.stimuli).toEqual([]);
+    expect(state.reading.passages).toEqual([]);
+    expect(state.listening.parts).toEqual([]);
+  });
+
+  it('replaces the IELTS fallback summary when creating ACT from shared defaults', async () => {
+    const { createInitialExamState } = await import('../examAdapterService');
+    const sharedDefaults = createDefaultConfig('Academic', 'Academic');
+
+    const state = createInitialExamState('ACT Science Draft', 'ACT', 'ACT Science', sharedDefaults);
+
+    expect(state.config.general.summary).toBe('Standard ACT Exam');
+  });
+
   it('fills missing exam sections when a corrupted draft only contains config', () => {
     const config = createDefaultConfig('Academic', 'Academic');
     config.general.title = 'Recovered Exam';

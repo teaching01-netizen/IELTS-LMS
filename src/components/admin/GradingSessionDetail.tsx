@@ -202,6 +202,10 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     setFilters({ ...filters, searchQuery: query });
   };
 
+  const hasScienceSubmissions = submissions.some(
+    (submission) => submission.sectionStatuses.science !== undefined,
+  );
+
   const getSectionBadge = (status: SectionGradingStatus) => {
     const styles = {
       pending: 'bg-gray-100 text-gray-600',
@@ -225,6 +229,17 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       </span>
     );
   };
+
+  const getNotApplicableBadge = () => (
+    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
+      NA
+    </span>
+  );
+
+  const getIeltsSectionBadge = (
+    submission: StudentSubmission,
+    status: SectionGradingStatus,
+  ) => submission.sectionStatuses.science !== undefined ? getNotApplicableBadge() : getSectionBadge(status);
 
   const getOverallStatusBadge = (status: OverallGradingStatus) => {
     const styles: Record<string, string> = {
@@ -723,6 +738,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             onExportReadingManual={() => void handleExportSection('reading_manual')}
             onExportListening={() => void handleExportSection('listening')}
             onExportListeningManual={() => void handleExportSection('listening_manual')}
+            onExportScience={hasScienceSubmissions ? () => void handleExportSection('science') : undefined}
+            scienceOnly={hasScienceSubmissions}
             onPrintWriting={() => void handleExportSection('writing')}
             onOpenExportBuilder={openPerStudentExportDialog}
           />
@@ -833,6 +850,9 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                   <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Reading</th>
                   <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Writing</th>
                   <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Speaking</th>
+                  {hasScienceSubmissions && (
+                    <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Science</th>
+                  )}
                   <th className="px-3 md:px-6 py-3 font-medium hidden sm:table-cell">Status</th>
                   <th className="px-3 md:px-6 py-3 font-medium text-right">Action</th>
                 </tr>
@@ -869,17 +889,24 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                       {getTimeAgo(submission.submittedAt)}
                     </td>
                     <td className="px-3 md:px-6 py-4 hidden md:table-cell">
-                      {getSectionBadge(submission.sectionStatuses.listening)}
+                      {getIeltsSectionBadge(submission, submission.sectionStatuses.listening)}
                     </td>
                     <td className="px-3 md:px-6 py-4 hidden md:table-cell">
-                      {getSectionBadge(submission.sectionStatuses.reading)}
+                      {getIeltsSectionBadge(submission, submission.sectionStatuses.reading)}
                     </td>
                     <td className="px-3 md:px-6 py-4 hidden md:table-cell">
-                      {getSectionBadge(submission.sectionStatuses.writing)}
+                      {getIeltsSectionBadge(submission, submission.sectionStatuses.writing)}
                     </td>
                     <td className="px-3 md:px-6 py-4 hidden md:table-cell">
-                      {getSectionBadge(submission.sectionStatuses.speaking)}
+                      {getIeltsSectionBadge(submission, submission.sectionStatuses.speaking)}
                     </td>
+                    {hasScienceSubmissions && (
+                      <td className="px-3 md:px-6 py-4 hidden md:table-cell">
+                        {submission.sectionStatuses.science
+                          ? getSectionBadge(submission.sectionStatuses.science)
+                          : null}
+                      </td>
+                    )}
                     <td className="px-3 md:px-6 py-4 hidden sm:table-cell">
                       {getOverallStatusBadge(submission.gradingStatus)}
                     </td>

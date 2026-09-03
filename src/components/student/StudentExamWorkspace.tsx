@@ -7,6 +7,7 @@ import { StudentFooter } from "./StudentFooter";
 import { StudentListening } from "./StudentListening";
 import { StudentReading } from "./StudentReading";
 import { StudentSpeaking } from "./StudentSpeaking";
+import { StudentScience } from "./StudentScience";
 import { StudentWriting } from "./StudentWriting";
 import type { StudentHighlightColor } from "./highlightPalette";
 import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
@@ -28,6 +29,7 @@ export interface StudentExamWorkspaceProps {
   displayTimeRemaining?: number | undefined;
   highlightEnabled: boolean;
   highlightColor: StudentHighlightColor;
+  choiceEliminationEnabled?: boolean | undefined;
   highlightClassName?: string;
   playbackRate: StudentPlaybackRate;
   showNavigator: boolean;
@@ -67,6 +69,7 @@ export function StudentExamWorkspace({
   displayTimeRemaining,
   highlightEnabled,
   highlightColor,
+  choiceEliminationEnabled = false,
   highlightClassName,
   playbackRate,
   showNavigator,
@@ -159,9 +162,30 @@ export function StudentExamWorkspace({
             onNavigate={onNavigate}
           />
         ) : null}
+
+        {currentModule === "science" ? (
+          <StudentScience
+            state={examState}
+            answers={answers}
+            onAnswerChange={onObjectiveAnswerChange}
+            currentQuestionId={currentQuestionId}
+            onNavigate={onNavigate}
+            flags={flags}
+            onToggleFlag={onFlagToggle}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+            choiceEliminationEnabled={choiceEliminationEnabled}
+            highlightClassName={highlightClassName}
+            tabletMode={tabletMode}
+            layoutMode={layoutMode}
+            contentZoom={contentZoom}
+            registerLiveAnswer={onRegisterLiveObjectiveAnswer}
+            allQuestions={allQuestions}
+          />
+        ) : null}
       </main>
 
-      {currentModule === "reading" || currentModule === "listening" ? (
+      {currentModule === "reading" || currentModule === "listening" || currentModule === "science" ? (
         <StudentFooter
           questions={allQuestions}
           currentQuestionId={currentQuestionId}

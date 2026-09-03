@@ -51,12 +51,20 @@ export interface StudentPreCheckResult {
   checks: StudentPreCheckCheckResult[];
 }
 
+export interface StudentScoreSummary {
+  section: 'science';
+  correctCount: number;
+  totalQuestions: number;
+  percentage: number;
+}
+
 export interface StudentFinalSubmissionReceipt {
   submissionId: string;
   submittedAt: string;
   answers?: StudentAttempt['answers'] | undefined;
   writingAnswers?: StudentAttempt['writingAnswers'] | undefined;
   flags?: StudentAttempt['flags'] | undefined;
+  score?: StudentScoreSummary | undefined;
 }
 
 export interface StudentAttempt {

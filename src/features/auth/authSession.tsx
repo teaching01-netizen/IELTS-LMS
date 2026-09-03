@@ -97,6 +97,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [status, setStatus] = useState<AuthStatus>('loading');
   const sessionRef = useRef<AuthSession | null>(null);
+  const sessionRequestGenerationRef = useRef(0);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -125,10 +126,17 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async () => {
+    const requestGeneration = sessionRequestGenerationRef.current;
     try {
       const nextSession = await authService.getSession();
+      if (requestGeneration !== sessionRequestGenerationRef.current) {
+        return sessionRef.current;
+      }
       return setSessionState(nextSession, setSession, setStatus);
     } catch (error) {
+      if (requestGeneration !== sessionRequestGenerationRef.current) {
+        return sessionRef.current;
+      }
       logError(error instanceof Error ? error : new Error('Failed to refresh session'), {
         scope: 'authSession.refresh',
       });
@@ -141,6 +149,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const login = useCallback(async (email: string, password: string) => {
+    sessionRequestGenerationRef.current += 1;
     const nextSession = await authService.login({ email, password });
     return setSessionState(nextSession, setSession, setStatus) as AuthSession;
   }, []);
@@ -153,6 +162,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     nickname: string;
     ieltsCourse: string;
   }) => {
+    sessionRequestGenerationRef.current += 1;
     const result = await authService.studentEntry(payload);
     if (!('user' in result)) {
       return result;
@@ -161,6 +171,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    sessionRequestGenerationRef.current += 1;
     try {
       await authService.logout();
     } finally {
@@ -169,6 +180,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logoutAll = useCallback(async () => {
+    sessionRequestGenerationRef.current += 1;
     try {
       await authService.logoutAll();
     } finally {
@@ -181,12 +193,14 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const completePasswordReset = useCallback(async (token: string, password: string) => {
+    sessionRequestGenerationRef.current += 1;
     const nextSession = await authService.completePasswordReset({ token, password });
     return setSessionState(nextSession, setSession, setStatus) as AuthSession;
   }, []);
 
   const activateAccount = useCallback(
     async (token: string, password: string, displayName?: string | undefined) => {
+      sessionRequestGenerationRef.current += 1;
       const nextSession = await authService.activateAccount({
         token,
         password,

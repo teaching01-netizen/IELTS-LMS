@@ -12,7 +12,7 @@ import {
 } from '../services/previewRuntimeSessionService';
 import type { ModuleType } from '../../../types';
 
-const MODULE_KEYS: ModuleType[] = ['listening', 'reading', 'writing', 'speaking'];
+const MODULE_KEYS: ModuleType[] = ['listening', 'reading', 'writing', 'speaking', 'science'];
 
 export function ExamPreviewRoute() {
   const { examId } = useParams<{ examId: string }>();

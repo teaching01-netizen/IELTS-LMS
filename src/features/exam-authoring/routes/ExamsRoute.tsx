@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ErrorSurface } from '@components/ui/ErrorSurface';
 import { LoadingSurface } from '@components/ui/LoadingSurface';
-import type { ExamConfig } from '../../../types';
+import type { ExamConfig, ExamType } from '../../../types';
 import type { ExamEvent, ExamVersionSummary, VersionDiff } from '../../../types/domain';
 import { ExamList } from '../ui/ExamList/ExamList';
 import { examAuthoringFacade } from '../application/examAuthoringFacade';
@@ -120,7 +120,7 @@ export function ExamsRoute() {
 
   const handleCreateExam = async (
     title: string,
-    type: 'Academic' | 'General Training',
+    type: ExamType,
     preset: ExamConfig['general']['preset'] = 'Academic',
   ) => {
     const initialState = examAuthoringFacade.createInitialExamState(title, type, preset, defaults);

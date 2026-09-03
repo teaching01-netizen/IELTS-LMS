@@ -445,7 +445,13 @@ export function useProctorRouteController(): ProctorRouteController {
 
   const handleStartScheduledSession = useCallback(
     async (scheduleId: string) => {
-      await proctorFacade.delivery.startRuntime(scheduleId, 'Proctor');
+      const result = await proctorFacade.delivery.startRuntime(scheduleId, 'Proctor');
+      if (!result.success) {
+        setError(result.error ?? 'Failed to start exam');
+        return;
+      }
+
+      setError(null);
       await loadMonitoringState();
     },
     [loadMonitoringState],

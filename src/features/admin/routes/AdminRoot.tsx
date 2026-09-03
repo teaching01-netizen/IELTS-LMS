@@ -3,6 +3,7 @@ import { Outlet, useNavigate } from 'react-router-dom';
 import { Bell, Menu, Search, ShieldCheck } from 'lucide-react';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { useAdminRootController } from '@admin/hooks/useAdminRootController';
+import { useAuthSession } from '../../auth/api/authSession';
 import { AdminProvider } from './AdminContext';
 
 /**
@@ -13,6 +14,7 @@ import { AdminProvider } from './AdminContext';
  */
 export function AdminRoot() {
   const navigate = useNavigate();
+  const { logout } = useAuthSession();
   const {
     contextValue,
     currentView,
@@ -24,6 +26,16 @@ export function AdminRoot() {
     sidebarOpen,
     setSidebarOpen,
   } = useAdminRootController();
+
+  const handleExitAdmin = async () => {
+    try {
+      await logout();
+    } catch {
+      // AuthSessionProvider clears local auth state even when the backend request fails.
+    } finally {
+      navigate('/login', { replace: true });
+    }
+  };
 
   if (!isInitialized) {
     return <LoadingSurface label="Loading Admin..." />;
@@ -125,7 +137,9 @@ export function AdminRoot() {
 
           <div className="p-4 border-t border-border">
             <button
-              onClick={() => navigate('/')}
+              onClick={() => {
+                void handleExitAdmin();
+              }}
               className="w-full flex items-center justify-center gap-2 bg-gray-200/70 hover:bg-gray-200 text-gray-700 py-2 rounded-md text-sm font-medium transition-colors"
             >
               {sidebarOpen ? 'Exit Admin' : 'Exit'}

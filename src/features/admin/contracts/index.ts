@@ -5,7 +5,7 @@
  * These define the stable interfaces at admin product boundaries.
  */
 
-import { ExamConfig } from '../../../types';
+import { ExamConfig, ExamType } from '../../../types';
 import {
   BulkOperationResult,
   ExamEvent,
@@ -35,7 +35,7 @@ export interface ExamOperationCallbacks {
   onEditExam: (id: string) => void;
   onCreateExam: (
     title: string,
-    type: 'Academic' | 'General Training',
+    type: ExamType,
     preset: ExamConfig['general']['preset']
   ) => void;
   onCloneExam?: (examId: string, newTitle: string) => Promise<void>;

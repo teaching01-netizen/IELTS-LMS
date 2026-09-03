@@ -1,5 +1,5 @@
 import {
-  Exam, ExamConfig, ModuleType, QuestionBlock, Passage, ListeningPart,
+  Exam, ExamConfig, ModuleType, QuestionBlock, Passage, ListeningPart, ActScienceStimulus,
   TFNGBlock, ClozeBlock, MatchingBlock, MapBlock, MultiMCQBlock,
   ValidationError, BlockValidation, ExamState,
   TFNGQuestion, ClozeQuestion, MatchingQuestion, MapQuestion, StimulusImageAsset,
@@ -176,6 +176,16 @@ export const getReadingTotalQuestions = (passages: Passage[]): number => {
 
 export const getListeningTotalQuestions = (parts: ListeningPart[]): number => {
   return parts.reduce((acc, p) => acc + getPartQuestionCount(p), 0);
+};
+
+export const getActScienceTotalQuestions = (stimuli: ActScienceStimulus[]): number => {
+  return stimuli.reduce(
+    (total, stimulus) => total + stimulus.blocks.reduce(
+      (blockTotal, block) => blockTotal + getBlockQuestionCount(block),
+      0,
+    ),
+    0,
+  );
 };
 
 export const flattenReadingQuestions = (passages: Passage[]): Array<{ passageId: string; block: QuestionBlock; question: TFNGQuestion | ClozeQuestion | MatchingQuestion | MapQuestion | ShortAnswerQuestion | SentenceCompletionQuestion | SingleMCQQuestion | NoteCompletionQuestion | null; index: number }> => {
@@ -755,6 +765,79 @@ export const validateReadingModule = (passages: Passage[]): ValidationError[] =>
   return errors;
 };
 
+export const validateActScienceModule = (stimuli: ActScienceStimulus[]): ValidationError[] => {
+  const errors: ValidationError[] = [];
+  const validSkillCategories = new Set([
+    'interpretation_of_data',
+    'scientific_investigation',
+    'evaluating_scientific_arguments_and_models_with_evidence',
+  ]);
+
+  if (stimuli.length === 0) {
+    errors.push({ field: 'science.stimuli', message: 'At least one ACT Science stimulus is required', type: 'error' });
+  }
+
+  stimuli.forEach((stimulus, stimulusIndex) => {
+    const prefix = `science.stimuli[${stimulusIndex}]`;
+    if (!stimulus.title.trim()) {
+      errors.push({ field: `${prefix}.title`, message: `Stimulus ${stimulusIndex + 1} title is required`, type: 'error' });
+    }
+    if (!stimulus.content.replace(/<[^>]*>/g, '').trim()) {
+      errors.push({ field: `${prefix}.content`, message: `Stimulus ${stimulusIndex + 1} content is required`, type: 'error' });
+    }
+
+    if (stimulus.blocks.length === 0) {
+      errors.push({ field: `${prefix}.blocks`, message: `Stimulus ${stimulusIndex + 1} must have at least one question set`, type: 'error' });
+    }
+
+    stimulus.blocks.forEach((block, blockIndex) => {
+      const blockPrefix = `${prefix}.blocks[${blockIndex}]`;
+      if (block.type !== 'SINGLE_MCQ') {
+        errors.push({ field: `${blockPrefix}.type`, message: 'ACT Science supports single-choice questions only', type: 'error' });
+        return;
+      }
+
+      const questions = block.questions ?? [];
+      if (questions.length === 0) {
+        errors.push({ field: `${blockPrefix}.questions`, message: 'At least one question is required', type: 'error' });
+      }
+
+      questions.forEach((question, questionIndex) => {
+        const questionPrefix = `${blockPrefix}.questions[${questionIndex}]`;
+        if (!question.stem.trim()) {
+          errors.push({ field: `${questionPrefix}.stem`, message: `Question ${questionIndex + 1} stem is required`, type: 'error' });
+        }
+        if (!validSkillCategories.has(question.skillCategory ?? '')) {
+          errors.push({ field: `${questionPrefix}.skillCategory`, message: `Question ${questionIndex + 1} must have an ACT Science skill category`, type: 'error' });
+        }
+        if (question.options.length !== 4) {
+          errors.push({ field: `${questionPrefix}.options`, message: `Question ${questionIndex + 1} must have exactly 4 options`, type: 'error' });
+        }
+        const correctCount = question.options.filter((option) => option.isCorrect).length;
+        if (correctCount !== 1) {
+          errors.push({ field: `${questionPrefix}.options`, message: `Question ${questionIndex + 1} must have exactly 1 correct option`, type: 'error' });
+        }
+        question.options.forEach((option, optionIndex) => {
+          if (!option.text.trim()) {
+            errors.push({ field: `${questionPrefix}.options[${optionIndex}].text`, message: `Option ${optionIndex + 1} in question ${questionIndex + 1} is empty`, type: 'error' });
+          }
+        });
+      });
+    });
+  });
+
+  const totalQuestions = getActScienceTotalQuestions(stimuli);
+  if (totalQuestions > 0 && totalQuestions !== 40) {
+    errors.push({
+      field: 'science.questions',
+      message: `ACT Science has ${totalQuestions} questions. The full-set target is 40; publishing is allowed for testing.`,
+      type: 'warning',
+    });
+  }
+
+  return errors;
+};
+
 export const validateListeningModule = (parts: ListeningPart[]): ValidationError[] => {
   const errors: ValidationError[] = [];
   
@@ -776,8 +859,12 @@ export const canPublishExam = (exam: Exam): { canPublish: boolean; errors: Valid
     errors.push({ field: 'title', message: 'Exam title is required', type: 'error' });
   }
   
-  errors.push(...validateReadingModule(exam.content.reading.passages));
-  errors.push(...validateListeningModule(exam.content.listening.parts));
+  if (exam.type === 'ACT') {
+    errors.push(...validateActScienceModule(exam.content.science?.stimuli ?? []));
+  } else {
+    errors.push(...validateReadingModule(exam.content.reading.passages));
+    errors.push(...validateListeningModule(exam.content.listening.parts));
+  }
   
   return {
     canPublish: errors.filter(e => e.type === 'error').length === 0,

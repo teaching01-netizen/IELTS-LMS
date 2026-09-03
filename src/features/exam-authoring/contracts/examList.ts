@@ -1,4 +1,4 @@
-import type { Exam, ExamConfig } from '../../../types';
+import type { Exam, ExamConfig, ExamType } from '../../../types';
 import type {
   BulkOperationResult,
   ExamEntity,
@@ -38,7 +38,7 @@ export interface ExamListProps {
   onGoToReview?: ((id: string) => void) | undefined;
   onCreateExam: (
     title: string,
-    type: 'Academic' | 'General Training',
+    type: ExamType,
     preset: ExamConfig['general']['preset'],
   ) => void;
   onCloneExam?: (examId: string, newTitle: string) => Promise<void>;

@@ -81,7 +81,7 @@ function createQuestionResult(questionId: string, isCorrect: boolean, awardedSco
 
 function createSectionSubmission(
   submissionId: string,
-  section: 'reading' | 'listening',
+  section: 'reading' | 'listening' | 'science',
   answers: Record<string, unknown>,
   questionResults: ReturnType<typeof createQuestionResult>[],
 ) {
@@ -171,6 +171,276 @@ function createWritingTaskSubmission(
 }
 
 describe('gradingReviewUtils', () => {
+  test('builds ACT Science CSV with labelled choices and per-question scores', () => {
+    const examState = createInitialExamState('ACT Science Practice', 'ACT', 'ACT Science');
+    examState.science.stimuli = [{
+      id: 'stimulus-1',
+      title: 'Water experiment',
+      content: 'Experiment results',
+      blocks: [{
+        id: 'science-block-1',
+        type: 'SINGLE_MCQ',
+        instruction: 'Choose the best answer.',
+        stem: 'Use the experiment results.',
+        questions: [
+          {
+            id: 'science-q1',
+            stem: 'What happened to the water?',
+            skillCategory: 'interpretation_of_data',
+            options: [
+              { id: 'option-a', text: 'water increased', isCorrect: true },
+              { id: 'option-b', text: 'water decreased', isCorrect: false },
+            ],
+          },
+          {
+            id: 'science-q2',
+            stem: 'Which result is supported?',
+            skillCategory: 'scientific_investigation',
+            options: [
+              { id: 'option-a', text: 'temperature increased', isCorrect: true },
+              { id: 'option-b', text: 'temperature decreased', isCorrect: false },
+            ],
+          },
+        ],
+      }],
+      images: [],
+    }] as any;
+
+    const submission = {
+      ...createStudentSubmission('sub-act-1', 'stu-act-1', 'ACT Student'),
+      sectionStatuses: {
+        ...createStudentSubmission('sub-act-1', 'stu-act-1', 'ACT Student').sectionStatuses,
+        science: 'auto_graded',
+      },
+    };
+    const scienceSubmission = createSectionSubmission(
+      'sub-act-1',
+      'science',
+      { 'science-q1': 'option-b', 'science-q2': 'option-a' },
+      [
+        {
+          ...createQuestionResult('science-q1', false, 0),
+          correctAnswer: 'option-a',
+          hasOverride: true,
+        },
+        {
+          ...createQuestionResult('science-q2', true, 1),
+          correctAnswer: 'option-a',
+        },
+      ],
+    );
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-act-1', examTitle: 'ACT Science Practice' },
+      submissions: [submission],
+      sectionSubmissions: [{ submissionId: submission.id, sectionSubmission: scienceSubmission }],
+      examState,
+      moduleType: 'science',
+    });
+
+    expect(exportData.columns.map((column) => column.label)).toEqual([
+      'Exam Title',
+      'Session ID',
+      'Schedule ID',
+      'Submission ID',
+      'Student Name',
+      'Student ID',
+      'Student Email',
+      'Nickname',
+      'IELTS Course',
+      'Cohort Name',
+      'Section',
+      'Submitted At',
+      'Total Score',
+      'Interpretation of Data (IOD) Correct',
+      'Scientific Investigation (SIN) Correct',
+      'Evaluating Scientific Arguments and Models with Evidence (ESA) Correct',
+      'Max Score',
+      'Percentage',
+      'IOD Percentage',
+      'SIN Percentage',
+      'ESA Percentage',
+      'Correct Count',
+      'Q1 Answer',
+      'Q2 Answer',
+      'Q1 Right Answer',
+      'Q2 Right Answer',
+      'Q1 Score',
+      'Q2 Score',
+    ]);
+    expect(exportData.rows[0]?.section).toBe('science');
+    expect(exportData.rows[0]?.totalScore).toBe(1);
+    expect(exportData.rows[0]?.maxScore).toBe(2);
+    expect(exportData.rows[0]?.percentage).toBe(50);
+    expect(exportData.rows[0]?.['answer:science-q1']).toBe('B. water decreased');
+    expect(exportData.rows[0]?.['rightAnswer:science-q1']).toBe('A. water increased');
+    expect(exportData.rows[0]?.['score:science-q1']).toBe(0);
+    expect(exportData.rows[0]?.['answer:science-q2']).toBe('A. temperature increased');
+    expect(exportData.rows[0]?.['score:science-q2']).toBe(1);
+  });
+
+  test('adds ACT Science correct counts by skill category after total score', () => {
+    const examState = createInitialExamState('ACT Science Practice', 'ACT', 'ACT Science');
+    examState.science.stimuli = [{
+      id: 'stimulus-categories',
+      title: 'Science skills',
+      content: 'Experiment content',
+      blocks: [{
+        id: 'science-block-categories',
+        type: 'SINGLE_MCQ',
+        instruction: 'Choose the best answer.',
+        stem: 'Use the evidence.',
+        options: [
+          { id: 'option-a', text: 'Answer A', isCorrect: true },
+          { id: 'option-b', text: 'Answer B', isCorrect: false },
+        ],
+        questions: [
+          {
+            id: 'science-iod',
+            stem: 'Interpret the data.',
+            skillCategory: 'interpretation_of_data',
+            options: [
+              { id: 'iod-a', text: 'Answer A', isCorrect: true },
+              { id: 'iod-b', text: 'Answer B', isCorrect: false },
+            ],
+          },
+          {
+            id: 'science-sin',
+            stem: 'Plan an investigation.',
+            skillCategory: 'scientific_investigation',
+            options: [
+              { id: 'sin-a', text: 'Answer A', isCorrect: true },
+              { id: 'sin-b', text: 'Answer B', isCorrect: false },
+            ],
+          },
+          {
+            id: 'science-esa',
+            stem: 'Evaluate the argument.',
+            skillCategory: 'evaluating_scientific_arguments_and_models_with_evidence',
+            options: [
+              { id: 'esa-a', text: 'Answer A', isCorrect: true },
+              { id: 'esa-b', text: 'Answer B', isCorrect: false },
+            ],
+          },
+        ],
+      }],
+      images: [],
+    }] as any;
+
+    const submission = {
+      ...createStudentSubmission('sub-act-categories', 'stu-act-categories', 'ACT Student'),
+      sectionStatuses: {
+        ...createStudentSubmission('sub-act-categories', 'stu-act-categories', 'ACT Student').sectionStatuses,
+        science: 'auto_graded',
+      },
+    };
+    const scienceSubmission = createSectionSubmission(
+      'sub-act-categories',
+      'science',
+      {
+        'science-iod': 'iod-a',
+        'science-sin': 'sin-b',
+        'science-esa': 'esa-a',
+      },
+      [
+        { ...createQuestionResult('science-iod', true, 1), correctAnswer: 'iod-a' },
+        { ...createQuestionResult('science-sin', false, 0), correctAnswer: 'sin-a' },
+        { ...createQuestionResult('science-esa', true, 1), correctAnswer: 'esa-a' },
+      ],
+    );
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-act-categories', examTitle: 'ACT Science Practice' },
+      submissions: [submission],
+      sectionSubmissions: [{ submissionId: submission.id, sectionSubmission: scienceSubmission }],
+      examState,
+      moduleType: 'science',
+    });
+
+    const columnLabels = exportData.columns.map((column) => column.label);
+    expect(columnLabels.slice(11, 22)).toEqual([
+      'Submitted At',
+      'Total Score',
+      'Interpretation of Data (IOD) Correct',
+      'Scientific Investigation (SIN) Correct',
+      'Evaluating Scientific Arguments and Models with Evidence (ESA) Correct',
+      'Max Score',
+      'Percentage',
+      'IOD Percentage',
+      'SIN Percentage',
+      'ESA Percentage',
+      'Correct Count',
+    ]);
+
+    const row = exportData.rows[0];
+    expect(row?.totalScore).toBe(2);
+    expect(row?.['scienceCategory:interpretation_of_data']).toBe(1);
+    expect(row?.['scienceCategory:scientific_investigation']).toBe(0);
+    expect(row?.['scienceCategory:evaluating_scientific_arguments_and_models_with_evidence']).toBe(1);
+    expect(row?.['scienceCategoryPercentage:interpretation_of_data']).toBe(100);
+    expect(row?.['scienceCategoryPercentage:scientific_investigation']).toBe(0);
+    expect(row?.['scienceCategoryPercentage:evaluating_scientific_arguments_and_models_with_evidence']).toBe(100);
+    expect(
+      Number(row?.['scienceCategory:interpretation_of_data'])
+        + Number(row?.['scienceCategory:scientific_investigation'])
+        + Number(row?.['scienceCategory:evaluating_scientific_arguments_and_models_with_evidence']),
+    ).toBe(row?.totalScore);
+  });
+
+  test('calculates ACT Science category percentages from each category total', () => {
+    const examState = createInitialExamState('ACT Science Practice', 'ACT', 'ACT Science');
+    examState.science.stimuli = [{
+      id: 'stimulus-percentage',
+      title: 'Category percentage',
+      content: 'Science content',
+      blocks: [{
+        id: 'science-block-percentage',
+        type: 'SINGLE_MCQ',
+        instruction: 'Choose the best answer.',
+        stem: 'Use the evidence.',
+        questions: ['one', 'two', 'three'].map((suffix) => ({
+          id: `science-iod-${suffix}`,
+          stem: `IOD question ${suffix}`,
+          skillCategory: 'interpretation_of_data',
+          options: [
+            { id: `iod-${suffix}-a`, text: 'Correct answer', isCorrect: true },
+            { id: `iod-${suffix}-b`, text: 'Wrong answer', isCorrect: false },
+          ],
+        })),
+      }],
+      images: [],
+    }] as any;
+
+    const submission = createStudentSubmission('sub-act-percentage', 'stu-act-percentage', 'ACT Student');
+    const scienceSubmission = createSectionSubmission(
+      submission.id,
+      'science',
+      {
+        'science-iod-one': 'iod-one-a',
+        'science-iod-two': 'iod-two-b',
+        'science-iod-three': 'iod-three-b',
+      },
+      [
+        { ...createQuestionResult('science-iod-one', true, 1), correctAnswer: 'iod-one-a' },
+        { ...createQuestionResult('science-iod-two', false, 0), correctAnswer: 'iod-two-a' },
+        { ...createQuestionResult('science-iod-three', false, 0), correctAnswer: 'iod-three-a' },
+      ],
+    );
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-act-percentage', examTitle: 'ACT Science Practice' },
+      submissions: [submission],
+      sectionSubmissions: [{ submissionId: submission.id, sectionSubmission: scienceSubmission }],
+      examState,
+      moduleType: 'science',
+    });
+
+    expect(exportData.rows[0]?.['scienceCategory:interpretation_of_data']).toBe(1);
+    expect(exportData.rows[0]?.['scienceCategoryPercentage:interpretation_of_data']).toBe(33.33);
+    expect(exportData.rows[0]?.['scienceCategoryPercentage:scientific_investigation']).toBe(0);
+    expect(exportData.rows[0]?.['scienceCategoryPercentage:evaluating_scientific_arguments_and_models_with_evidence']).toBe(0);
+  });
+
   test('keeps real MULTI_MCQ student and correct answers in the grading PDF source rows', () => {
     const examState = createInitialExamState('Exam', 'Academic');
     examState.reading.passages[0]!.blocks = [{

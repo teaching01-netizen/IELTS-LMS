@@ -12,10 +12,13 @@ interface TimingTabProps {
 export function TimingTab({ config, onChange }: TimingTabProps) {
   const sectionPlan = useMemo(() => examDeliveryService.buildSectionPlan(config), [config]);
   const isIeltsMode = Boolean(config.general.ieltsMode);
+  const sectionKeys: ModuleType[] = config.general.type === 'ACT'
+    ? ['science']
+    : ['listening', 'reading', 'writing', 'speaking'];
 
   const timingValidation = useMemo(() => {
     const errors: Array<{ field: string; message: string }> = [];
-    const enabledSections = (['listening', 'reading', 'writing', 'speaking'] as ModuleType[])
+    const enabledSections = sectionKeys
       .map((module) => config.sections[module])
       .filter(section => section.enabled);
 
@@ -24,7 +27,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
     }
 
     const orderCounts = new Map<number, number>();
-    (['listening', 'reading', 'writing', 'speaking'] as ModuleType[]).forEach((module) => {
+    sectionKeys.forEach((module) => {
       const section = config.sections[module];
       if (!section.enabled) return;
 
@@ -46,7 +49,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
     });
 
     return errors;
-  }, [config]);
+  }, [config, sectionKeys]);
 
   const updateSection = (module: ModuleType, value: Partial<ExamConfig['sections'][ModuleType]>) => {
     onChange({
@@ -172,26 +175,42 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
   return (
     <div className="space-y-6">
       <section className="space-y-3">
-        <div className="flex items-start justify-between gap-4 rounded-xl border border-amber-100 bg-amber-50/60 p-4">
+        <div className={`flex items-start justify-between gap-4 rounded-xl border p-4 ${config.general.type === 'ACT' ? 'border-blue-100 bg-blue-50/60' : 'border-amber-100 bg-amber-50/60'}`}>
           <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-amber-800">Authentic IELTS Mode</p>
-            <p className="mt-1 text-sm font-semibold text-amber-950">
-              Lock timing and runtime controls to match official IELTS expectations.
-            </p>
-            <p className="mt-1 text-[11px] text-amber-800">
-              When enabled: fixed L/R/W durations, no gaps, auto-submit on time up, no cohort pause, and no
-              section extensions or proctor section overrides.
-            </p>
+            {config.general.type === 'ACT' ? (
+              <>
+                <p className="text-xs font-bold uppercase tracking-widest text-blue-800">ACT Science Timing</p>
+                <p className="mt-1 text-sm font-semibold text-blue-950">
+                  One continuous Science section. The default is 40 minutes and no pause.
+                </p>
+                <p className="mt-1 text-[11px] text-blue-800">
+                  Admin can change the duration and permitted special-time settings using the existing scheduling controls.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-bold uppercase tracking-widest text-amber-800">Authentic IELTS Mode</p>
+                <p className="mt-1 text-sm font-semibold text-amber-950">
+                  Lock timing and runtime controls to match official IELTS expectations.
+                </p>
+                <p className="mt-1 text-[11px] text-amber-800">
+                  When enabled: fixed L/R/W durations, no gaps, auto-submit on time up, no cohort pause, and no
+                  section extensions or proctor section overrides.
+                </p>
+              </>
+            )}
           </div>
-          <label className="flex items-center gap-2">
-            <span className="text-xs font-bold text-amber-900">{isIeltsMode ? 'ON' : 'OFF'}</span>
-            <input
-              type="checkbox"
-              checked={isIeltsMode}
-              onChange={(e) => updateIeltsMode(e.target.checked)}
-              className="h-4 w-4 rounded border-amber-300 text-amber-700 focus:ring-amber-500"
-            />
-          </label>
+          {config.general.type !== 'ACT' && (
+            <label className="flex items-center gap-2">
+              <span className="text-xs font-bold text-amber-900">{isIeltsMode ? 'ON' : 'OFF'}</span>
+              <input
+                type="checkbox"
+                checked={isIeltsMode}
+                onChange={(e) => updateIeltsMode(e.target.checked)}
+                className="h-4 w-4 rounded border-amber-300 text-amber-700 focus:ring-amber-500"
+              />
+            </label>
+          )}
         </div>
       </section>
 
@@ -221,7 +240,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
         </div>
 
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden divide-y divide-gray-50 shadow-sm">
-          {(['listening', 'reading', 'writing', 'speaking'] as ModuleType[]).map((m) => {
+          {sectionKeys.map((m) => {
             const section = config.sections[m];
             if (!section.enabled) return null;
             const planItem = sectionPlan.sections.find(item => item.sectionKey === m);
@@ -253,8 +272,9 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
 
                 <div className="grid grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Duration (min)</label>
+                    <label htmlFor={`${m}-duration`} className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Duration (min)</label>
                     <input 
+                      id={`${m}-duration`}
                       type="number" 
                       min={1}
                       value={section.duration}
@@ -264,8 +284,9 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
                     />
                   </div>
                   <div>
-                    <label className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Gap After (min)</label>
+                    <label htmlFor={`${m}-gap`} className="block text-[9px] font-bold text-gray-400 uppercase mb-1">Gap After (min)</label>
                     <input 
+                      id={`${m}-gap`}
                       type="number" 
                       min={0}
                       value={section.gapAfterMinutes ?? 0}
@@ -511,7 +532,7 @@ export function TimingTab({ config, onChange }: TimingTabProps) {
               type="checkbox" 
               checked={config.progression.allowPause}
               onChange={(e) => updateConfig('progression', { allowPause: e.target.checked })}
-              disabled={isIeltsMode}
+              disabled={isIeltsMode || config.general.type === 'ACT'}
               className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
           </div>

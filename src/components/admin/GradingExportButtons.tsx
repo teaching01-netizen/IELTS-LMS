@@ -14,6 +14,8 @@ interface GradingExportButtonsProps {
   onExportReadingManual: () => void;
   onExportListening: () => void;
   onExportListeningManual: () => void;
+  onExportScience?: (() => void) | undefined;
+  scienceOnly?: boolean | undefined;
   onPrintWriting: () => void;
   onOpenExportBuilder?: () => void;
 }
@@ -36,6 +38,8 @@ export function GradingExportButtons({
   onExportReadingManual,
   onExportListening,
   onExportListeningManual,
+  onExportScience,
+  scienceOnly = false,
   onPrintWriting,
   onOpenExportBuilder,
 }: GradingExportButtonsProps) {
@@ -67,11 +71,23 @@ export function GradingExportButtons({
 
   const busy = exportingSection !== null;
 
-  const groups: ExportMenuGroup[] = [
-    {
-      key: 'csv',
-      label: 'Download CSV',
-      items: [
+  const scienceItem = onExportScience ? {
+    key: 'science' as const,
+    label: 'ACT Science answers & scores',
+    description: 'Auto-graded results for every student',
+    icon: <FileSpreadsheet size={16} />,
+    onClick: onExportScience,
+  } : null;
+
+  const groups: ExportMenuGroup[] = scienceOnly
+    ? scienceItem
+      ? [{ key: 'csv', label: 'Download CSV', items: [scienceItem] }]
+      : []
+    : [
+      {
+        key: 'csv',
+        label: 'Download CSV',
+        items: [
         {
           key: 'reading',
           label: 'Reading answers & scores',
@@ -100,22 +116,23 @@ export function GradingExportButtons({
           icon: <FileSpreadsheet size={16} />,
           onClick: onExportListeningManual,
         },
-      ],
-    },
-    {
-      key: 'print',
-      label: 'Print',
-      items: [
-        {
-          key: 'writing',
-          label: 'Print all writing',
-          description: 'Task pages with prompts, responses and assessment forms',
-          icon: <Printer size={16} />,
-          onClick: onPrintWriting,
-        },
-      ],
-    },
-  ];
+        ...(scienceItem ? [scienceItem] : []),
+        ],
+      },
+      {
+        key: 'print',
+        label: 'Print',
+        items: [
+          {
+            key: 'writing',
+            label: 'Print all writing',
+            description: 'Task pages with prompts, responses and assessment forms',
+            icon: <Printer size={16} />,
+            onClick: onPrintWriting,
+          },
+        ],
+      },
+    ];
 
   return (
     <div ref={containerRef} className="relative">
@@ -169,7 +186,7 @@ export function GradingExportButtons({
             </React.Fragment>
           ))}
 
-          {onOpenExportBuilder ? (
+          {!scienceOnly && onOpenExportBuilder ? (
             <>
               <div className="my-1.5 border-t border-gray-100" role="separator" />
               <button

@@ -33,6 +33,7 @@ import {
 } from '../../../utils/cloneExamContent';
 import { getBuilderStateRecoveryIssue, reconcileBuilderState } from '../utils/builderStateRecovery';
 import { createAcademicSampleExamState } from '../../../utils/academicSampleExam';
+import { getActScienceTotalQuestions } from '../../../utils/examUtils';
 
 const nowLabel = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -121,6 +122,25 @@ function ScoringAside({
           }}
           onSubmitGrade={onSubmitGrade}
         />
+      </div>
+    );
+  }
+
+  if (state.activeModule === 'science') {
+    const questionCount = getActScienceTotalQuestions(state.science.stimuli);
+    return (
+      <div className="w-[430px] flex-shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50/90 p-5 backdrop-blur-sm">
+        <p className="text-xs font-bold uppercase tracking-widest text-violet-700">ACT Science Scoring</p>
+        <h3 className="mt-2 text-lg font-bold text-gray-900">Raw score preview</h3>
+        <p className="mt-2 text-sm text-gray-600">
+          Current draft contains {questionCount} question{questionCount === 1 ? '' : 's'}.
+        </p>
+        <div className="mt-5 rounded-xl border border-violet-100 bg-violet-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-violet-800">Scoring rule</p>
+          <p className="mt-2 text-sm text-violet-950">
+            The first release will report correct answers and percentage. Scale score 1–36 and percentile are deferred.
+          </p>
+        </div>
       </div>
     );
   }
@@ -227,10 +247,10 @@ export function BuilderRoot() {
     }
 
     const contentMatch = jumpField.match(
-      /^content\.(listening|reading)\.(parts|passages)\[(\d+)\]\.blocks\[(\d+)\]/,
+      /^content\.(listening|reading|science)\.(parts|passages|stimuli)\[(\d+)\]\.blocks\[(\d+)\]/,
     );
     if (contentMatch) {
-      const module = contentMatch[1] as 'listening' | 'reading';
+      const module = contentMatch[1] as 'listening' | 'reading' | 'science';
       const container = contentMatch[2];
       const sectionIndex = Number.parseInt(contentMatch[3] ?? '', 10);
       const blockIndex = Number.parseInt(contentMatch[4] ?? '', 10);
@@ -239,11 +259,11 @@ export function BuilderRoot() {
       }
     }
 
-    const shortMatch = jumpField.match(/^(listening|reading)\.parts\[(\d+)\]\.blocks\[(\d+)\]/);
+    const shortMatch = jumpField.match(/^(listening|reading|science)\.(parts|passages|stimuli)\[(\d+)\]\.blocks\[(\d+)\]/);
     if (shortMatch) {
-      const module = shortMatch[1] as 'listening' | 'reading';
-      const sectionIndex = Number.parseInt(shortMatch[2] ?? '', 10);
-      const blockIndex = Number.parseInt(shortMatch[3] ?? '', 10);
+      const module = shortMatch[1] as 'listening' | 'reading' | 'science';
+      const sectionIndex = Number.parseInt(shortMatch[3] ?? '', 10);
+      const blockIndex = Number.parseInt(shortMatch[4] ?? '', 10);
       if (Number.isFinite(sectionIndex) && Number.isFinite(blockIndex)) {
         return { jumpField, module, container: 'parts', sectionIndex, blockIndex };
       }
@@ -273,11 +293,17 @@ export function BuilderRoot() {
       if (targetPart?.id) {
         nextState.activeListeningPartId = targetPart.id;
       }
-    } else {
+    } else if (jumpTarget.module === 'reading') {
       nextState.activeModule = 'reading';
       const targetPassage = nextState.reading.passages[jumpTarget.sectionIndex];
       if (targetPassage?.id) {
         nextState.activePassageId = targetPassage.id;
+      }
+    } else {
+      nextState.activeModule = 'science';
+      const targetStimulus = nextState.science.stimuli[jumpTarget.sectionIndex];
+      if (targetStimulus?.id) {
+        nextState.activeScienceStimulusId = targetStimulus.id;
       }
     }
 

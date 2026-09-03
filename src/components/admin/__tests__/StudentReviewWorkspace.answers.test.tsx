@@ -2,6 +2,10 @@ import React from 'react';
 import { describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+const { overrideObjectiveQuestion } = vi.hoisted(() => ({
+  overrideObjectiveQuestion: vi.fn(),
+}));
+
 vi.mock('../../../services/gradingRepository', () => {
   return {
     gradingRepository: {
@@ -32,12 +36,159 @@ vi.mock('../../../services/gradingService', () => {
       releaseResult: vi.fn(),
       scheduleRelease: vi.fn(),
       reopenReview: vi.fn(),
+      overrideObjectiveQuestion,
       getObjectiveGradingSource: vi.fn().mockResolvedValue({ success: false }),
     },
   };
 });
 
 describe('StudentReviewWorkspace objective answers', () => {
+  test('shows only ACT Science with traceback details and supports answer overrides', async () => {
+    const { createInitialExamState } = await import('../../../services/examAdapterService');
+    const { gradingRepository } = await import('../../../services/gradingRepository');
+    const { examRepository } = await import('../../../services/examRepository');
+    const { StudentReviewWorkspace } = await import('../StudentReviewWorkspace');
+
+    const questionId = 'science-question-1';
+    const examState = createInitialExamState('ACT Science Practice', 'ACT', 'ACT Science');
+    examState.science.stimuli = [
+      {
+        id: 'stimulus-1',
+        title: 'Water temperature results',
+        content: 'The table shows the results of an experiment.',
+        blocks: [
+          {
+            id: 'science-block-1',
+            type: 'SINGLE_MCQ',
+            instruction: 'Use the experiment results to answer the question.',
+            stem: 'Which conclusion is supported by the experiment?',
+            options: [
+              { id: 'option-a', text: 'Option A', isCorrect: true },
+              { id: 'option-b', text: 'Option B', isCorrect: false },
+            ],
+            questions: [
+              {
+                id: questionId,
+                stem: 'Which conclusion is supported by the experiment?',
+                skillCategory: 'interpretation_of_data',
+                options: [
+                  { id: 'option-a', text: 'Option A', isCorrect: true },
+                  { id: 'option-b', text: 'Option B', isCorrect: false },
+                ],
+              },
+            ],
+          },
+        ],
+        images: [],
+      },
+    ] as any;
+
+    const now = new Date().toISOString();
+    (gradingRepository.getSubmissionById as any).mockResolvedValue({
+      id: 'sub-act-1',
+      submissionId: 'sub-act-1',
+      scheduleId: 'sched-act-1',
+      examId: 'exam-act-1',
+      publishedVersionId: 'ver-act-1',
+      studentId: 'stu-act-1',
+      studentName: 'ACT Student',
+      studentEmail: 'act@example.com',
+      cohortName: 'ACT Cohort',
+      submittedAt: now,
+      timeSpentSeconds: 120,
+      gradingStatus: 'submitted',
+      isFlagged: false,
+      isOverdue: false,
+      sectionStatuses: {
+        listening: 'auto_graded',
+        reading: 'auto_graded',
+        writing: 'needs_review',
+        speaking: 'pending',
+        science: 'auto_graded',
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+    (gradingRepository.getSectionSubmissionsBySubmissionId as any).mockResolvedValue([
+      {
+        id: 'science-section-1',
+        submissionId: 'sub-act-1',
+        section: 'science',
+        answers: { type: 'science', answers: { [questionId]: 'option-a' } },
+        autoGradingResults: {
+          totalScore: 1,
+          maxScore: 1,
+          percentage: 100,
+          questionResults: [
+            {
+              questionId,
+              studentAnswer: 'option-a',
+              correctAnswer: 'option-a',
+              isCorrect: true,
+              awardedScore: 1,
+              maxScore: 1,
+              scoringRule: 'single_choice',
+              hasOverride: false,
+            },
+          ],
+          generatedAt: now,
+        },
+        gradingStatus: 'auto_graded',
+        submittedAt: now,
+      },
+    ]);
+    (gradingRepository.getWritingSubmissionsBySubmissionId as any).mockResolvedValue([]);
+    (gradingRepository.getReviewDraftBySubmission as any).mockResolvedValue({
+      id: 'draft-act-1',
+      submissionId: 'sub-act-1',
+      studentId: 'stu-act-1',
+      teacherId: 'teacher-1',
+      releaseStatus: 'draft',
+      sectionDrafts: {},
+      annotations: [],
+      drawings: [],
+      teacherSummary: { strengths: [], improvementPriorities: [], recommendedPractice: [] },
+      checklist: {},
+      hasUnsavedChanges: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    (examRepository.getVersionById as any).mockResolvedValue({
+      id: 'ver-act-1',
+      contentSnapshot: examState,
+    });
+    overrideObjectiveQuestion.mockResolvedValue({ success: true });
+
+    render(
+      <StudentReviewWorkspace
+        submissionId="sub-act-1"
+        onBack={() => {}}
+        currentTeacherId="teacher-1"
+        currentTeacherName="Teacher"
+      />,
+    );
+
+    expect(await screen.findByRole('button', { name: /ACT Science auto_graded/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /listening/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /reading/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /writing/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /speaking/i })).not.toBeInTheDocument();
+    expect(await screen.findByText('Which conclusion is supported by the experiment?')).toBeInTheDocument();
+    expect(screen.getAllByText('Option A')).toHaveLength(2);
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mark incorrect' }));
+    });
+    await waitFor(() => {
+      expect(overrideObjectiveQuestion).toHaveBeenCalledWith(
+        'sub-act-1',
+        'science',
+        questionId,
+        { isCorrect: false, reason: 'Manual grader correctness decision' },
+      );
+    });
+  });
+
   test('renders reading answers from backend bundle map', async () => {
     const { createInitialExamState } = await import('../../../services/examAdapterService');
     const { gradingRepository } = await import('../../../services/gradingRepository');
@@ -160,6 +311,10 @@ describe('StudentReviewWorkspace objective answers', () => {
 
     expect(await screen.findByText('Traceback View')).toBeInTheDocument();
     expect(await screen.findByText(answerValue)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^listening$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^reading/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^writing$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^speaking$/i })).toBeInTheDocument();
     const initialSectionLoadCount = vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mock.calls.length;
 
     act(() => {

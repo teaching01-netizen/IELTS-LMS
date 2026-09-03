@@ -12,4 +12,16 @@ describe('isStudentHighlightToolContextActive', () => {
     expect(isStudentHighlightToolContextActive({ ...base, module: 'reading', submitConfirmOpen: true })).toBe(false);
     expect(isStudentHighlightToolContextActive({ ...base, module: 'reading', finalSubmitIdle: false })).toBe(false);
   });
+
+  it('allows an unblocked idle ACT Science exam context', () => {
+    expect(
+      isStudentHighlightToolContextActive({
+        phase: 'exam',
+        module: 'science',
+        blockingReason: null,
+        submitConfirmOpen: false,
+        finalSubmitIdle: true,
+      }),
+    ).toBe(true);
+  });
 });

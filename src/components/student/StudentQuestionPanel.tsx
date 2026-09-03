@@ -33,6 +33,8 @@ interface StudentQuestionPanelProps {
   hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
   hideStepper?: boolean | undefined;
   shouldFocusQuestion?: (() => boolean) | undefined;
+  eliminatedOptionIdsByQuestion?: Readonly<Record<string, readonly string[]>> | undefined;
+  onToggleOptionElimination?: ((questionId: string, optionId: string) => void) | undefined;
 }
 
 export function StudentQuestionPanel({
@@ -58,6 +60,8 @@ export function StudentQuestionPanel({
   hideDiagramReferenceForBlock,
   hideStepper = false,
   shouldFocusQuestion,
+  eliminatedOptionIdsByQuestion,
+  onToggleOptionElimination,
 }: StudentQuestionPanelProps) {
   const currentIndex = allQuestions.findIndex((question) => question.id === currentQuestionId);
   const hasPrev = currentIndex > 0;
@@ -140,6 +144,8 @@ export function StudentQuestionPanel({
               renderBlockInstruction={renderBlockInstruction}
               expandedQuestionGapClassName={expandedQuestionGapClassName}
               hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
+              eliminatedOptionIdsByQuestion={eliminatedOptionIdsByQuestion}
+              onToggleOptionElimination={onToggleOptionElimination}
             />
           );
         })}

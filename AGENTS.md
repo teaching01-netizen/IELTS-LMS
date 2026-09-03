@@ -38,3 +38,17 @@ You are a high-precision coding agent. You MUST NOT make raw text-based assumpti
 * **No Unverified Edits:** Never modify a single file without first checking its global import/export linkages using AST graph parsing.
 * **Fail-Fast Policy:** If an AST tool returns ambiguous syntax trees or unparseable blocks, STOP execution immediately and report the structural error.
 * **Comment & String Safety:** Never alter AST nodes classified as Comment or StringLiteral during structural refactoring unless explicitly instructed to do so.
+
+## Agent skills
+
+### Issue tracker
+
+Issues for this GitHub repository are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the repository's canonical triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository; read `CONTEXT.md` and relevant architecture decisions before exploring. See `docs/agents/domain.md`.

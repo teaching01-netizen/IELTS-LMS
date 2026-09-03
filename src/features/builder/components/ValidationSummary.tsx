@@ -18,21 +18,39 @@ export function ValidationSummary({
   onNavigateToConfig,
   onNavigateToBuilder,
 }: ValidationSummaryProps) {
+  const scienceQuestions = publishReadiness.questionCounts.science;
+  const isActScience = scienceQuestions !== undefined;
   const defaultValidationScope: ValidationScope = {
-    checked: [
-      'All questions have correct answers',
-      'Scoring tables match IELTS band conversions',
-      'Time allocations are within acceptable ranges',
-      'Question types match module requirements',
-      'Required fields are populated',
-      'Module configurations are valid',
-    ],
-    notChecked: [
-      'Content quality and appropriateness',
-      'Passage difficulty level',
-      'Distractor quality',
-      'Alignment with learning objectives',
-    ],
+    checked: isActScience
+      ? [
+          'ACT Science question structure is valid',
+          'Four answer choices and one correct answer per question',
+          'ACT Science skill categories are valid',
+          'Time allocation is within acceptable ranges',
+          'Required fields are populated',
+          'Module configuration is valid',
+        ]
+      : [
+          'All questions have correct answers',
+          'Scoring tables match IELTS band conversions',
+          'Time allocations are within acceptable ranges',
+          'Question types match module requirements',
+          'Required fields are populated',
+          'Module configurations are valid',
+        ],
+    notChecked: isActScience
+      ? [
+          'Scientific content quality and appropriateness',
+          'Evidence interpretation quality',
+          'Distractor quality',
+          'Alignment with learning objectives',
+        ]
+      : [
+          'Content quality and appropriateness',
+          'Passage difficulty level',
+          'Distractor quality',
+          'Alignment with learning objectives',
+        ],
   };
 
   const scope = validationScope || defaultValidationScope;
@@ -140,7 +158,7 @@ export function ValidationSummary({
 
       <div className="pt-4 border-t border-slate-100">
         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Content Summary</p>
-        <div className="grid grid-cols-3 gap-3">
+        <div className={`grid gap-3 ${scienceQuestions !== undefined ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <div className="text-center p-3 bg-slate-50 rounded-xl border border-slate-100">
             <p className="text-lg font-bold text-slate-900">{publishReadiness.questionCounts.reading}</p>
             <p className="text-[10px] font-medium text-slate-500 uppercase">Reading</p>
@@ -149,6 +167,12 @@ export function ValidationSummary({
             <p className="text-lg font-bold text-slate-900">{publishReadiness.questionCounts.listening}</p>
             <p className="text-[10px] font-medium text-slate-500 uppercase">Listening</p>
           </div>
+          {scienceQuestions !== undefined && (
+            <div className="text-center p-3 bg-slate-50 rounded-xl border border-slate-100">
+              <p className="text-lg font-bold text-slate-900">{scienceQuestions}</p>
+              <p className="text-[10px] font-medium text-slate-500 uppercase">Science</p>
+            </div>
+          )}
           <div className="text-center p-3 bg-slate-50 rounded-xl border border-slate-100">
             <p className="text-lg font-bold text-slate-900">{publishReadiness.questionCounts.total}</p>
             <p className="text-[10px] font-medium text-slate-500 uppercase">Total</p>

@@ -8,6 +8,21 @@ import {
 } from '../examDefaults';
 
 describe('examDefaults standards', () => {
+  it('creates an ACT Science default with one continuous section', () => {
+    const config = createDefaultConfig('ACT', 'ACT Science');
+
+    expect(config.general.type).toBe('ACT');
+    expect(config.general.preset).toBe('ACT Science');
+    expect(config.sections.science.enabled).toBe(true);
+    expect(config.sections.science.duration).toBe(40);
+    expect(config.sections.science.questionCount).toBe(40);
+    expect(config.progression.allowPause).toBe(false);
+    expect(config.sections.reading.enabled).toBe(false);
+    expect(config.sections.listening.enabled).toBe(false);
+    expect(config.sections.writing.enabled).toBe(false);
+    expect(config.sections.speaking.enabled).toBe(false);
+  });
+
   it('creates default standards for academic exams', () => {
     const config = createDefaultConfig('Academic', 'Academic');
 

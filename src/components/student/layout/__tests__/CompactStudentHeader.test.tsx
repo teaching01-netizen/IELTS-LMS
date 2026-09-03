@@ -4,6 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { CompactStudentHeader } from '../CompactStudentHeader';
 
 describe('CompactStudentHeader', () => {
+  it('shows ACT branding for an ACT exam instead of the IELTS label', () => {
+    render(<CompactStudentHeader moduleLabel="Science" examType="ACT" />);
+
+    expect(screen.getByText('ACT')).toBeInTheDocument();
+    expect(screen.queryByText('IELTS')).not.toBeInTheDocument();
+  });
+
   it('keeps the timer visible while putting secondary tools behind More', () => {
     render(
       <CompactStudentHeader
@@ -39,5 +46,26 @@ describe('CompactStudentHeader', () => {
 
     expect(onOpenNavigator).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('student-tools-sheet')).not.toBeInTheDocument();
+  });
+
+  it('exposes ACT Science choice elimination in the compact exam tools', () => {
+    const onToggleChoiceElimination = vi.fn();
+
+    render(
+      <CompactStudentHeader
+        moduleLabel="Science"
+        examType="ACT"
+        choiceEliminationAvailable
+        choiceEliminationEnabled={false}
+        onToggleChoiceElimination={onToggleChoiceElimination}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open exam tools' }));
+    const eliminateButton = screen.getByRole('button', { name: 'Eliminate choices' });
+    expect(eliminateButton).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(eliminateButton);
+    expect(onToggleChoiceElimination).toHaveBeenCalledTimes(1);
   });
 });

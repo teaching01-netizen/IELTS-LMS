@@ -189,4 +189,23 @@ describe('ValidationSummary', () => {
       errorsHeading.compareDocumentPosition(checkedHeading) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
   });
+
+  it('uses ACT Science checks instead of IELTS band-score checks for ACT readiness', () => {
+    render(
+      <ValidationSummary
+        publishReadiness={{
+          ...mockPublishReadiness,
+          questionCounts: {
+            reading: 0,
+            listening: 0,
+            science: 10,
+            total: 10,
+          },
+        }}
+      />
+    );
+
+    expect(screen.queryByText(/scoring tables match IELTS band conversions/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/ACT Science question structure is valid/i)).toBeInTheDocument();
+  });
 });
