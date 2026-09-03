@@ -23,6 +23,15 @@ const REQUIRED_COLUMNS: &[(&str, &str)] = &[
     ("websocket_connection_leases", "lease_token"),
     ("users", "organization_id"),
     ("student_heartbeat_events", "mutation_id"),
+    ("student_attempts", "protocol_version"),
+    ("student_attempts", "delivery_status"),
+    ("student_attempts", "lease_epoch"),
+    ("student_attempts", "control_epoch"),
+    ("student_attempts", "response_revision"),
+    ("student_attempts", "deadline_at"),
+    ("student_attempts", "closing_grace_until"),
+    ("student_attempts", "final_response_digest"),
+    ("assessment_question_responses", "client_write_id"),
 ];
 
 const REQUIRED_INDEXES: &[(&str, &str)] = &[
@@ -44,6 +53,12 @@ const REQUIRED_INDEXES: &[(&str, &str)] = &[
     ),
     ("assessment_module_attempts", "module_attempt_identity"),
     ("student_heartbeat_events", "heartbeat_mutation"),
+    ("attempt_mutations_v2", "uq_attempt_mutations_v2_write_id"),
+    ("attempt_mutations_v2", "uq_attempt_mutations_v2_version"),
+    (
+        "attempt_submissions_v2",
+        "uq_attempt_submissions_v2_submission",
+    ),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

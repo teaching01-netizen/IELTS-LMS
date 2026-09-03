@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, CheckCircle2, Download, FileSpreadsheet, UploadCloud, X } from "lucide-react";
 import type {
   AssessmentAuthoringShell,
@@ -13,7 +12,7 @@ import type {
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
 import { uploadAssessmentImportAsset } from "../api/assessmentMediaApi";
 import { ExamQuestionRenderer } from "../../exam-rendering/api/ExamQuestionRenderer";
-import { authoringMotion } from "../ui/authoringMotion";
+import { AuthoringDialog } from "../ui/authoringPrimitives";
 
 const MODULE_LABELS: Record<string, string> = {
   "rw-m1": "Reading & Writing · Module 1",
@@ -44,9 +43,6 @@ export function SatWorkbookImportSheet({
   onCommitted,
 }: SatWorkbookImportSheetProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const surfaceRef = useRef<HTMLDivElement>(null);
-  const closeRef = useRef<HTMLButtonElement>(null);
-  const previousActiveRef = useRef<HTMLElement | null>(null);
   const [activity, setActivity] = useState<Activity>("idle");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<SatWorkbookPreview | null>(null);
@@ -56,41 +52,6 @@ export function SatWorkbookImportSheet({
   const [selectedModuleKey, setSelectedModuleKey] = useState<string | null>(null);
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState(0);
   const busy = activity !== "idle";
-
-  useEffect(() => {
-    if (!open) return;
-    previousActiveRef.current = document.activeElement as HTMLElement | null;
-    const frame = requestAnimationFrame(() => closeRef.current?.focus());
-    const listener = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const controls = Array.from(
-        surfaceRef.current?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
-        ) ?? []
-      ).filter((control) => !control.classList.contains("sr-only"));
-      const first = controls[0];
-      const last = controls.at(-1);
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", listener);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("keydown", listener);
-      previousActiveRef.current?.focus();
-    };
-  }, [busy, onClose, open]);
 
   useEffect(() => {
     if (open) return;
@@ -192,29 +153,14 @@ export function SatWorkbookImportSheet({
   };
 
   return (
-    <AnimatePresence>
-      {open ? (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={authoringMotion.surface}
-          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/28 p-3 authoring-glass sm:p-5"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Import SAT from Excel"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !busy) onClose();
-          }}
-        >
-          <motion.div
-            ref={surfaceRef}
-            initial={{ opacity: 0, y: 10, scale: 0.99 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.99 }}
-            transition={authoringMotion.surface}
-            className="au-elevation-sheet flex max-h-[94vh] w-full max-w-[1320px] flex-col overflow-hidden rounded-[20px] border border-au-separator bg-white"
-          >
+    <AuthoringDialog
+      open={open}
+      title="Import SAT from Excel"
+      onClose={onClose}
+      closeDisabled={busy}
+      showHeader={false}
+      contentClassName="authoring-dialog-content--workbook au-elevation-sheet flex max-h-[94vh] max-w-[1320px] flex-col overflow-hidden rounded-[20px] p-0"
+    >
             <header className="flex shrink-0 items-start justify-between border-b border-au-separator px-5 py-4 sm:px-6">
               <div>
                 <h2 className="text-[16px] font-semibold tracking-[-0.02em] text-slate-950">
@@ -226,14 +172,13 @@ export function SatWorkbookImportSheet({
                 </p>
               </div>
               <button
-                ref={closeRef}
                 type="button"
                 disabled={busy}
                 onClick={onClose}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-au-fill disabled:opacity-35"
                 aria-label="Close SAT workbook import"
               >
-                <X size={16} />
+                <X size={16} aria-hidden="true" />
               </button>
             </header>
 
@@ -263,20 +208,20 @@ export function SatWorkbookImportSheet({
                   onClick={() => void downloadTemplate()}
                   className="authoring-interactive mt-2 flex min-h-10 w-full items-center justify-center gap-2 rounded-[11px] text-[11px] font-semibold text-au-accent hover:bg-au-accent-tint"
                 >
-                  <Download size={14} />
+                  <Download size={14} aria-hidden="true" />
                   Download SAT Excel template
                 </button>
 
                 {error ? (
-                  <div className="mt-3 flex gap-2 rounded-xl bg-au-danger-tint px-3 py-2.5 text-[11px] leading-5 text-au-danger-text">
-                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                  <div role="alert" className="mt-3 flex gap-2 rounded-xl bg-au-danger-tint px-3 py-2.5 text-[11px] leading-5 text-au-danger-text">
+                    <AlertCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
                     <span>{error}</span>
                   </div>
                 ) : null}
 
                 {activity === "staging" ? (
                   <div className="mt-3 flex items-center gap-2 rounded-[12px] bg-au-accent-tint px-3 py-2.5 text-[11px] font-medium text-au-accent">
-                    <UploadCloud size={14} />
+                    <UploadCloud size={14} aria-hidden="true" />
                     Securing {preview?.assets.length ?? 0} workbook visual{
                       preview?.assets.length === 1 ? "" : "s"
                     }…
@@ -309,7 +254,7 @@ export function SatWorkbookImportSheet({
                             className={`flex min-h-10 w-full items-center justify-between rounded-[10px] px-2.5 text-left text-[11px] transition ${
                               selected
                                 ? "bg-au-accent-tint-strong text-au-accent"
-                                : "text-slate-600 hover:bg-black/[0.04]"
+                                : "text-slate-600 hover:bg-au-fill"
                             }`}
                           >
                             <span className="truncate font-semibold">
@@ -346,7 +291,7 @@ export function SatWorkbookImportSheet({
                       </div>
                     ) : stagedAssets.length === preview.assets.length && activity !== "staging" ? (
                       <div className="mt-4 flex items-center gap-2 rounded-xl bg-au-success-tint px-3 py-2.5 text-[11px] font-medium text-au-success-text">
-                        <CheckCircle2 size={15} />
+                        <CheckCircle2 size={15} aria-hidden="true" />
                         Complete SAT ready to import
                       </div>
                     ) : null}
@@ -357,7 +302,7 @@ export function SatWorkbookImportSheet({
               <div className="flex min-h-[420px] min-w-0 flex-col bg-au-fill">
                 {selectedModule && selectedQuestion ? (
                   <>
-                    <div className="flex shrink-0 items-center justify-between border-b border-au-separator bg-white px-4 py-3 authoring-glass sm:px-5">
+                    <div className="flex shrink-0 items-center justify-between border-b border-au-separator px-4 py-3 authoring-glass sm:px-5">
                       <div className="min-w-0">
                         <p className="truncate text-[11px] font-semibold text-slate-800">
                           {MODULE_LABELS[selectedModule.moduleKey] ?? selectedModule.moduleKey}
@@ -386,7 +331,7 @@ export function SatWorkbookImportSheet({
                 ) : (
                   <div className="flex flex-1 items-center justify-center p-8 text-center">
                     <div className="max-w-sm">
-                      <FileSpreadsheet size={30} className="mx-auto text-slate-300" />
+                      <FileSpreadsheet size={30} className="mx-auto text-slate-300" aria-hidden="true" />
                       <p className="mt-3 text-[13px] font-semibold text-slate-700">
                         Your SAT appears here before import
                       </p>
@@ -429,10 +374,7 @@ export function SatWorkbookImportSheet({
                 </button>
               </div>
             </footer>
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
+    </AuthoringDialog>
   );
 }
 
@@ -533,7 +475,7 @@ function DropTarget({
       aria-label="Choose or drop SAT Excel workbook"
       onClick={onChoose}
       className={`w-full rounded-[16px] border border-dashed p-5 text-center transition disabled:cursor-wait ${
-        dragging ? "border-au-accent/55 bg-au-accent-tint" : "border-black/[0.14] bg-au-fill"
+        dragging ? "border-au-accent/55 bg-au-accent-tint" : "border-au-separator bg-au-fill"
       }`}
       onDragEnter={(event) => {
         event.preventDefault();
@@ -548,14 +490,14 @@ function DropTarget({
         if (nextFile) onDrop(nextFile);
       }}
     >
-      <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-white text-au-accent shadow-sm" aria-hidden="true">
-        <UploadCloud size={18} />
+      <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-au-surface text-au-accent shadow-sm" aria-hidden="true">
+        <UploadCloud size={18} aria-hidden="true" />
       </span>
       <p className="mt-3 truncate text-[12px] font-semibold text-slate-800">
         {checking ? "Preparing workbook…" : (file?.name ?? "Drop your SAT Excel workbook")}
       </p>
       <p className="mt-1 text-[10px] leading-4 text-slate-400">.xlsx · up to 12 MB</p>
-      <span className="mt-3 inline-flex min-h-9 items-center rounded-full bg-white px-3.5 text-[10px] font-semibold text-slate-700 shadow-sm ring-1 ring-au-accent/10">
+      <span className="mt-3 inline-flex min-h-9 items-center rounded-full bg-au-surface px-3.5 text-[10px] font-semibold text-slate-700 shadow-sm ring-1 ring-au-accent/10">
         Choose File
       </span>
     </button>
@@ -567,7 +509,7 @@ function Metric({ label, value, bad = false }: { label: string; value: number; b
     <div className="rounded-[11px] bg-au-fill px-2.5 py-2">
       <p className="text-[9px] font-medium text-slate-400">{label}</p>
       <p
-        className={`mt-0.5 text-[15px] font-semibold tabular-nums ${bad ? "text-amber-700" : "text-slate-800"}`}
+        className={`mt-0.5 text-[15px] font-semibold tabular-nums ${bad ? "text-au-warning-text" : "text-slate-800"}`}
       >
         {value}
       </p>

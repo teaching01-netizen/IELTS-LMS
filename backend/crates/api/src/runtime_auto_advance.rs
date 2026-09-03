@@ -23,16 +23,27 @@ pub fn spawn_runtime_auto_advance(state: AppState) -> Option<tokio::task::JoinHa
         interval.tick().await;
 
         let service = ProctoringService::new(pool.clone());
-        let sat_service = AssessmentDeliveryService::new(pool);
+        let sat_service = AssessmentDeliveryService::new(pool.clone());
         loop {
             interval.tick().await;
 
+            // Both section and SAT-module reconciliation must use one
+            // authoritative database timestamp per tick. Host-clock drift
+            // must not move either state machine across a response boundary.
+            let server_now: chrono::DateTime<chrono::Utc> =
+                match sqlx::query_scalar("SELECT UTC_TIMESTAMP(6)")
+                    .fetch_one(&pool)
+                    .await
+                {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::warn!(error = %error, "runtime clock query failed");
+                        continue;
+                    }
+                };
+
             match service
-                .reconcile_expired_sections_at_with_origin(
-                    chrono::Utc::now(),
-                    250,
-                    &state.instance_id,
-                )
+                .reconcile_expired_sections_at_with_origin(server_now, 250, &state.instance_id)
                 .await
             {
                 Ok(outcomes) => {
@@ -51,7 +62,7 @@ pub fn spawn_runtime_auto_advance(state: AppState) -> Option<tokio::task::JoinHa
             }
 
             match sat_service
-                .reconcile_expired_modules_at(chrono::Utc::now(), 250)
+                .reconcile_expired_modules_at(server_now, 250)
                 .await
             {
                 Ok(outcomes) => {

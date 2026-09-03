@@ -48,3 +48,7 @@ path = "../../tests/integration/submission_unanswered_policy.rs"
 [[test]]
 name = "sat_adaptive_runtime"
 path = "../../tests/integration/sat_adaptive_runtime.rs"
+
+[[test]]
+name = "response_durability_v2_proof_tests"
+path = "../../tests/integration/response_durability_v2_proof_tests.rs"

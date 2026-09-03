@@ -14,4 +14,5 @@ pub mod results;
 pub mod schedules;
 pub mod settings;
 pub mod student;
+pub mod student_v2;
 pub mod ws;

@@ -55,7 +55,7 @@ export function AuthoringSegmented<T extends string>({
                 aria-hidden="true"
                 layoutId={layoutId}
                 transition={reduceMotion ? { duration: 0.01 } : authoringMotion.snap}
-                className="absolute inset-0 rounded-[8px] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.1),0_0_0_0.5px_rgba(0,0,0,0.04)]"
+                className="au-elevation-card absolute inset-0 rounded-[8px] bg-au-surface"
               />
             ) : null}
             <span className="relative z-10 flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap">

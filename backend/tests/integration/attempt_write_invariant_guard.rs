@@ -48,6 +48,7 @@ fn protected_attempt_columns_are_only_written_by_delivery_writer() {
     let allowed_files = [
         root.join("crates/application/src/delivery.rs"),
         root.join("crates/application/src/delivery/mod.rs"),
+        root.join("crates/application/src/delivery/response_durability_v2.rs"),
     ];
 
     let mut files = Vec::new();

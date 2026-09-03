@@ -130,6 +130,15 @@ interface BackendStudentAttempt {
   submittedAt?: string | null | undefined;
   integrity?: Partial<StudentAttempt["integrity"]> | null | undefined;
   recovery?: Partial<StudentAttempt["recovery"]> | null | undefined;
+  protocolVersion?: number | null | undefined;
+  deliveryStatus?: StudentAttempt["deliveryStatus"];
+  leaseEpoch?: number | null | undefined;
+  controlEpoch?: number | null | undefined;
+  responseRevision?: number | null | undefined;
+  deadlineAt?: string | null | undefined;
+  closingGraceUntil?: string | null | undefined;
+  finalResponseDigest?: string | null | undefined;
+  activeClientSessionId?: string | null | undefined;
   proctorStatus?: StudentAttempt["proctorStatus"] | null | undefined;
   proctorNote?: string | null | undefined;
   proctorUpdatedAt?: string | null | undefined;
@@ -1275,14 +1284,15 @@ function readOrPrimeMutationSequenceWatermark(attemptId: string, clientSessionId
 function ensureClientSessionId(
   scheduleId: string,
   studentKey: string,
-  preferredClientSessionId: string | null = null
+  preferredClientSessionId: string | null = null,
+  forceNew = false,
 ): string {
   const session = getBrowserStorage("sessionStorage");
   const local = getBrowserStorage("localStorage");
 
   const storageKey = getClientSessionStorageKey(scheduleId, studentKey);
   const stored = session?.getItem(storageKey) ?? local?.getItem(storageKey) ?? null;
-  if (stored) {
+  if (stored && !forceNew) {
     try {
       session?.setItem(storageKey, stored);
     } catch {
@@ -1317,6 +1327,18 @@ export function ensureClientSessionIdForAttempt(attempt: StudentAttempt): string
   const preferredClientSessionId =
     attempt.recovery.clientSessionId ?? attempt.integrity.clientSessionId ?? null;
   return ensureClientSessionId(attempt.scheduleId, attempt.studentKey, preferredClientSessionId);
+}
+
+/** Persist a newly generated browser session identity after an explicit lease takeover. */
+export function rotateClientSessionIdForAttempt(attempt: StudentAttempt): string {
+  return ensureClientSessionId(attempt.scheduleId, attempt.studentKey, null, true);
+}
+
+export function restoreClientSessionIdForAttempt(
+  attempt: StudentAttempt,
+  clientSessionId: string,
+): string {
+  return ensureClientSessionId(attempt.scheduleId, attempt.studentKey, clientSessionId, true);
 }
 
 export async function refreshAttemptCredentialForAttempt(
@@ -1411,6 +1433,21 @@ export function mapBackendStudentAttempt(
     },
     createdAt: payload.createdAt,
     updatedAt: payload.updatedAt,
+    ...(payload.protocolVersion != null ? { protocolVersion: payload.protocolVersion } : {}),
+    ...(payload.deliveryStatus != null ? { deliveryStatus: payload.deliveryStatus } : {}),
+    ...(payload.leaseEpoch != null ? { leaseEpoch: payload.leaseEpoch } : {}),
+    ...(payload.controlEpoch != null ? { controlEpoch: payload.controlEpoch } : {}),
+    ...(payload.responseRevision != null ? { responseRevision: payload.responseRevision } : {}),
+    ...(payload.deadlineAt !== undefined ? { deadlineAt: payload.deadlineAt } : {}),
+    ...(payload.closingGraceUntil !== undefined
+      ? { closingGraceUntil: payload.closingGraceUntil }
+      : {}),
+    ...(payload.finalResponseDigest !== undefined
+      ? { finalResponseDigest: payload.finalResponseDigest }
+      : {}),
+    ...(payload.activeClientSessionId !== undefined
+      ? { activeClientSessionId: payload.activeClientSessionId }
+      : {}),
   });
 }
 

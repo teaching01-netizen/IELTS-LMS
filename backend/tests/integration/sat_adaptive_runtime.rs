@@ -664,7 +664,7 @@ async fn sat_adaptive_runtime_is_transactional_proctored_and_idempotent() {
         SET rs.actual_start_at = DATE_SUB(
             UTC_TIMESTAMP(6),
             INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60
-                + rs.accumulated_paused_seconds + 5) SECOND
+                + rs.accumulated_paused_seconds + 35) SECOND
         )
         WHERE r.schedule_id = ? AND rs.section_key = 'reading-writing'
         "#,

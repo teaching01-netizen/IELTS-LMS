@@ -3,6 +3,8 @@ export { buildStudentHeartbeatEvent } from '@services/studentIntegrityService';
 export {
   hasAttemptCredential,
   ensureClientSessionIdForAttempt,
+  rotateClientSessionIdForAttempt,
+  restoreClientSessionIdForAttempt,
   mapBackendStudentAttempt,
   refreshAttemptCredentialForAttempt,
   studentAttemptRepository,

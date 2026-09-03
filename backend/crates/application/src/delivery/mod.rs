@@ -1,5 +1,6 @@
 pub mod mutation_batch;
 pub mod ports;
+pub mod response_durability_v2;
 pub mod session_context;
 pub mod submit_attempt;
 
@@ -259,7 +260,7 @@ pub(crate) async fn claim_provider_attempt_writer_in_tx(
     client_session_id: &str,
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query(
-        "UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL AND submitted_at IS NULL AND COALESCE(proctor_status, 'active') <> 'terminated'",
+        "UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL AND submitted_at IS NULL AND COALESCE(proctor_status, 'active') <> 'terminated' AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
     )
     .bind(client_session_id)
     .bind(attempt_id)
@@ -275,7 +276,7 @@ pub(crate) async fn mark_provider_attempt_exam_phase_in_tx(
     attempt_id: &str,
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query(
-        "UPDATE student_attempts SET phase = 'exam', updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ?",
+        "UPDATE student_attempts SET phase = 'exam', control_epoch = control_epoch + 1, updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND submitted_at IS NULL AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
     )
     .bind(attempt_id)
     .execute(conn)
@@ -289,8 +290,98 @@ pub(crate) async fn increment_provider_attempt_answer_revision_in_tx(
     schedule_id: &str,
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query(
-        "UPDATE student_attempts SET answer_revision = answer_revision + 1, updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND schedule_id = ?",
+        "UPDATE student_attempts SET answer_revision = answer_revision + 1, updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND schedule_id = ? AND submitted_at IS NULL AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
     )
+    .bind(attempt_id)
+    .bind(schedule_id)
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Re-project the V2 attempt deadline from the locked authoritative runtime
+/// section. `delivery_status` is part of this same transition so a response
+/// writer cannot observe a new clock with the old lifecycle state.
+pub(crate) async fn sync_v2_runtime_timing_in_tx(
+    conn: &mut MySqlConnection,
+    schedule_id: &str,
+    runtime_id: &str,
+    section_key: &str,
+    lifecycle_status: Option<&str>,
+) -> Result<u64, sqlx::Error> {
+    let lifecycle_assignment = match lifecycle_status {
+        Some("paused") => {
+            "delivery_status = CASE WHEN COALESCE(sa.delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN sa.delivery_status ELSE 'paused' END, phase = CASE WHEN sa.phase IN ('pre-check', 'post-exam') THEN sa.phase ELSE 'exam' END,"
+        }
+        Some("running") => {
+            "delivery_status = CASE WHEN COALESCE(sa.proctor_status, 'active') = 'paused' OR COALESCE(sa.delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN sa.delivery_status ELSE 'running' END, phase = CASE WHEN sa.phase IN ('pre-check', 'post-exam') THEN sa.phase ELSE 'exam' END,"
+        }
+        Some(other) => {
+            tracing::warn!(lifecycle_status = other, "ignoring unsupported V2 lifecycle status");
+            ""
+        }
+        None => "",
+    };
+    let statement = format!(
+        "UPDATE student_attempts sa
+         JOIN exam_session_runtime_sections rs
+           ON rs.runtime_id = ? AND rs.section_key = ?
+         SET {lifecycle_assignment}
+             deadline_at = CASE
+                 WHEN rs.actual_start_at IS NULL THEN sa.deadline_at
+                 ELSE DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND)
+             END,
+             closing_grace_until = CASE
+                 WHEN rs.actual_start_at IS NULL THEN sa.closing_grace_until
+                 ELSE DATE_ADD(DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND), INTERVAL 30 SECOND)
+             END,
+             control_epoch = sa.control_epoch + 1,
+             revision = sa.revision + 1,
+             updated_at = UTC_TIMESTAMP(6)
+         WHERE sa.schedule_id = ?
+           AND sa.protocol_version = 2
+           AND sa.submitted_at IS NULL
+           AND COALESCE(sa.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
+    );
+    let result = sqlx::query(&statement)
+        .bind(runtime_id)
+        .bind(section_key)
+        .bind(schedule_id)
+        .execute(conn)
+        .await?;
+    Ok(result.rows_affected())
+}
+
+/// Apply a per-attempt extension to the V2 response clock. The legacy SAT
+/// module clock is updated by the provider writer separately; this keeps the
+/// authenticated V2 deadline projection in sync with that same extension.
+pub(crate) async fn extend_v2_attempt_deadline_in_tx(
+    conn: &mut MySqlConnection,
+    attempt_id: &str,
+    schedule_id: &str,
+    minutes: i32,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE student_attempts
+         SET deadline_at = CASE
+                 WHEN deadline_at IS NULL THEN NULL
+                 ELSE DATE_ADD(deadline_at, INTERVAL ? MINUTE)
+             END,
+             closing_grace_until = CASE
+                 WHEN deadline_at IS NULL THEN closing_grace_until
+                 WHEN closing_grace_until IS NULL THEN DATE_ADD(deadline_at, INTERVAL 30 SECOND)
+                 ELSE DATE_ADD(closing_grace_until, INTERVAL ? MINUTE)
+             END,
+             control_epoch = control_epoch + 1,
+             revision = revision + 1,
+             updated_at = UTC_TIMESTAMP(6)
+         WHERE id = ? AND schedule_id = ?
+           AND protocol_version = 2
+           AND submitted_at IS NULL
+           AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
+    )
+    .bind(minutes)
+    .bind(minutes)
     .bind(attempt_id)
     .bind(schedule_id)
     .execute(conn)
@@ -341,7 +432,7 @@ pub(crate) async fn lock_schedule_terminalization_scope_in_tx(
     schedule_id: &str,
 ) -> Result<(), DeliveryError> {
     let runtime: Option<(String, Option<String>)> = sqlx::query_as(
-        "SELECT id, current_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+        "SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
     )
     .bind(schedule_id)
     .fetch_optional(&mut *conn)
@@ -615,6 +706,10 @@ pub(crate) async fn seal_attempt_in_tx(
         }
     }
 
+    let terminalization_request_id = Uuid::parse_str(&command.request_id)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|_| Uuid::new_v4().to_string());
+
     sqlx::query(
         r#"
         INSERT INTO attempt_terminalizations (
@@ -637,13 +732,13 @@ pub(crate) async fn seal_attempt_in_tx(
     .bind(recorded_at)
     .bind(attempt.answer_revision)
     .bind(&snapshot)
-    .bind(&command.request_id)
+    .bind(terminalization_request_id)
     .execute(&mut **tx)
     .await?;
 
     let claim = if command.outcome == "terminated" {
         sqlx::query(
-            "UPDATE student_attempts SET phase = 'post-exam', final_submission = ?, submitted_at = COALESCE(submitted_at, ?), proctor_status = 'terminated', proctor_note = COALESCE(?, proctor_note), proctor_updated_at = UTC_TIMESTAMP(6), proctor_updated_by = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND schedule_id = ? AND submitted_at IS NULL AND phase <> 'post-exam'",
+            "UPDATE student_attempts SET phase = 'post-exam', delivery_status = 'terminated', final_submission = ?, submitted_at = COALESCE(submitted_at, ?), proctor_status = 'terminated', proctor_note = COALESCE(?, proctor_note), proctor_updated_at = UTC_TIMESTAMP(6), proctor_updated_by = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ? AND ((submitted_at IS NULL AND phase <> 'post-exam') OR (delivery_status = 'submitted' AND phase = 'post-exam' AND final_submission IS NULL))",
         )
         .bind(&projection)
         .bind(effective_at)
@@ -655,7 +750,7 @@ pub(crate) async fn seal_attempt_in_tx(
         .await?
     } else {
         sqlx::query(
-            "UPDATE student_attempts SET phase = 'post-exam', final_submission = ?, submitted_at = COALESCE(submitted_at, ?), updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND schedule_id = ? AND submitted_at IS NULL AND phase <> 'post-exam' AND COALESCE(proctor_status, 'active') <> 'terminated'",
+            "UPDATE student_attempts SET phase = 'post-exam', delivery_status = 'submitted', final_submission = ?, submitted_at = COALESCE(submitted_at, ?), updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ? AND ((submitted_at IS NULL AND phase <> 'post-exam') OR (delivery_status = 'submitted' AND phase = 'post-exam' AND final_submission IS NULL)) AND COALESCE(proctor_status, 'active') <> 'terminated'",
         )
         .bind(&projection)
         .bind(effective_at)
@@ -801,6 +896,23 @@ fn ensure_student_key_scope(actor: &ActorContext, student_key: &str) -> Result<(
     Ok(())
 }
 
+fn delivery_status_is_terminal(status: Option<&str>) -> bool {
+    matches!(
+        status.unwrap_or("running"),
+        "submitted" | "terminated" | "locked" | "cancelled"
+    )
+}
+
+fn attempt_owner_matches_actor(actor: &ActorContext, owner_id: Option<&str>) -> bool {
+    !matches!(actor.role, ActorRole::Student)
+        || owner_id.is_none()
+        || owner_id == Some(actor.actor_id.as_str())
+}
+
+fn attempt_owner_for_actor(actor: &ActorContext) -> Option<&str> {
+    matches!(actor.role, ActorRole::Student).then_some(actor.actor_id.as_str())
+}
+
 fn map_scheduling_error(error: crate::scheduling::SchedulingError) -> DeliveryError {
     match error {
         crate::scheduling::SchedulingError::Database(error) => DeliveryError::Database(error),
@@ -854,6 +966,7 @@ pub struct DeliveryService {
     pool: MySqlPool,
     auth_service: Option<AuthService>,
     runtime_tuning: DeliveryRuntimeTuning,
+    response_durability_v2_enabled: bool,
 }
 
 impl DeliveryService {
@@ -862,15 +975,18 @@ impl DeliveryService {
             pool,
             auth_service: None,
             runtime_tuning: DeliveryRuntimeTuning::default(),
+            response_durability_v2_enabled: false,
         }
     }
 
     pub fn with_auth(pool: MySqlPool, config: AppConfig) -> Self {
+        let response_durability_v2_enabled = config.response_durability_v2_enabled();
         let auth_service = AuthService::new(pool.clone(), config);
         Self {
             pool,
             auth_service: Some(auth_service),
             runtime_tuning: DeliveryRuntimeTuning::default(),
+            response_durability_v2_enabled,
         }
     }
 
@@ -882,6 +998,7 @@ impl DeliveryService {
             pool,
             auth_service: None,
             runtime_tuning: tuning,
+            response_durability_v2_enabled: false,
         }
     }
 
@@ -893,6 +1010,7 @@ impl DeliveryService {
         violation_idempotency_usable_hours: i64,
         heartbeat_min_write_interval_secs: u64,
     ) -> Self {
+        let response_durability_v2_enabled = config.response_durability_v2_enabled();
         let auth_service = AuthService::new(pool.clone(), config);
         let runtime_tuning = DeliveryRuntimeTuning::from_config(
             mutation_idempotency_usable_hours,
@@ -904,6 +1022,7 @@ impl DeliveryService {
             pool,
             auth_service: Some(auth_service),
             runtime_tuning,
+            response_durability_v2_enabled,
         }
     }
 
@@ -925,21 +1044,25 @@ impl DeliveryService {
         // The caller must hold the attempt row first. This helper then locks
         // runtime -> active runtime section, preserving attempt -> runtime order.
         let runtime = sqlx::query_as::<_, RuntimeGateRow>(
-            "SELECT id, status, current_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+            "SELECT id, status, active_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
         )
         .bind(schedule_id.to_string())
         .fetch_optional(&mut *conn)
         .await?;
 
+        // `active_section_key` is the control-plane owner of the write window.
+        // `current_section_key` is retained for presentation/backwards
+        // compatibility and must not authorize a response when the two rows
+        // disagree or the active key is absent.
         let section = match runtime
             .as_ref()
-            .and_then(|runtime| runtime.current_section_key.as_deref())
+            .and_then(|runtime| runtime.active_section_key.as_deref())
         {
             Some(section_key) => {
                 let runtime_id = runtime
                     .as_ref()
                     .map(|runtime| runtime.id.as_str())
-                    .expect("runtime exists when current section key exists");
+                    .expect("runtime exists when active section key exists");
                 sqlx::query_as::<_, RuntimeSectionWriteGateRow>(
                     r#"
                     SELECT
@@ -1112,7 +1235,7 @@ impl DeliveryService {
         // duplicate execution and duplicate audit events are impossible.
         let mut tx = self.pool.begin().await?;
         let attempt = self
-            .ensure_attempt_created_on(
+            .get_or_create_attempt_on(
                 tx.as_mut(),
                 &schedule,
                 &version,
@@ -1126,6 +1249,10 @@ impl DeliveryService {
                 true,
             )
             .await?;
+        if !attempt_owner_matches_actor(actor, attempt.user_id.as_deref()) {
+            tx.rollback().await?;
+            return Err(DeliveryError::NotFound);
+        }
 
         // Re-check idempotency after acquiring the serialization lock. A replay
         // (or a key reused with a different payload) resolves here, before any
@@ -1145,6 +1272,8 @@ impl DeliveryService {
         }
 
         if attempt.submitted_at.is_some()
+            || delivery_status_is_terminal(Some(attempt.delivery_status.as_str()))
+            || attempt.phase == AttemptPhase::PostExam
             || attempt.proctor_status == ielts_backend_domain::attempt::ProctorStatus::Terminated
         {
             tx.rollback().await?;
@@ -1207,6 +1336,7 @@ impl DeliveryService {
                 attempt.final_submission.clone(),
                 attempt.submitted_at,
                 attempt.revision,
+                attempt_owner_for_actor(actor),
             )
             .await?;
 
@@ -1299,6 +1429,9 @@ impl DeliveryService {
                 &req.client_session_id,
             )
             .await?;
+        if !attempt_owner_matches_actor(actor, attempt.user_id.as_deref()) {
+            return Err(DeliveryError::NotFound);
+        }
 
         let has_precheck = attempt
             .integrity
@@ -1307,10 +1440,14 @@ impl DeliveryService {
             .and_then(|value| value.get("completedAt"))
             .and_then(Value::as_str)
             .is_some();
+        let attempt_terminal = attempt.submitted_at.is_some()
+            || delivery_status_is_terminal(Some(attempt.delivery_status.as_str()))
+            || attempt.phase == AttemptPhase::PostExam
+            || attempt.proctor_status == ielts_backend_domain::attempt::ProctorStatus::Terminated;
         let phase = determine_phase(
             runtime.as_ref(),
             has_precheck,
-            attempt.submitted_at.is_some(),
+            attempt_terminal,
             Some(attempt.phase),
         );
         let client_session_id_value = Value::String(req.client_session_id.to_string());
@@ -1337,8 +1474,7 @@ impl DeliveryService {
             attempt.recovery.clone().into()
         };
 
-        let attempt = if attempt.submitted_at.is_none()
-            && attempt.proctor_status != ielts_backend_domain::attempt::ProctorStatus::Terminated
+        let attempt = if !attempt_terminal
             && (attempt.phase != phase
                 || needs_client_session_id_in_integrity
                 || needs_client_session_id_in_recovery)
@@ -1358,6 +1494,7 @@ impl DeliveryService {
                     attempt.final_submission.clone(),
                     attempt.submitted_at,
                     attempt.revision,
+                    attempt_owner_for_actor(actor),
                 )
                 .await
             {
@@ -1422,12 +1559,23 @@ impl DeliveryService {
             .or(fallback_client_session_id)
             .ok_or_else(|| DeliveryError::Validation(missing_client_session_message.to_owned()))?;
 
-        let active_client_session_id: Option<String> = sqlx::query_scalar(
-            "SELECT active_client_session_id FROM student_attempts WHERE id = ?",
+        let (active_client_session_id, attempt_user_id, protocol_version): (
+            Option<String>,
+            Option<String>,
+            Option<i32>,
+        ) = sqlx::query_as(
+            "SELECT active_client_session_id, user_id, protocol_version FROM student_attempts WHERE id = ?",
         )
         .bind(&attempt.id)
         .fetch_one(&self.pool)
         .await?;
+
+        if attempt_user_id
+            .as_deref()
+            .is_some_and(|owner_id| owner_id != principal.user.id)
+        {
+            return Err(DeliveryError::NotFound);
+        }
 
         if !claim_write_ownership {
             if let Some(active_session_id) = active_client_session_id.as_ref() {
@@ -1459,23 +1607,76 @@ impl DeliveryService {
                 DeliveryError::Internal(format!("Unable to issue attempt token: {err}"))
             })?;
 
-        if claim_write_ownership || active_client_session_id.is_none() {
-            sqlx::query(
-                r#"
-                    UPDATE student_attempts
-                    SET active_client_session_id = ?,
-                        integrity = JSON_SET(integrity, '$.clientSessionId', ?),
-                        recovery = JSON_SET(recovery, '$.clientSessionId', ?),
-                        updated_at = NOW()
-                    WHERE id = ?
-                    "#,
-            )
-            .bind(&client_session_id)
-            .bind(&client_session_id)
-            .bind(&client_session_id)
-            .bind(&attempt.id)
-            .execute(&self.pool)
-            .await?;
+        // A v2 bootstrap may issue a credential for a new tab without silently
+        // stealing the active lease. That tab must call the explicit takeover
+        // endpoint before it can write. Legacy attempts retain their v1 claim
+        // behavior during rollout.
+        let should_claim_active_session = if protocol_version == Some(2) {
+            active_client_session_id.is_none()
+                || active_client_session_id.as_deref() == Some(client_session_id.as_str())
+        } else {
+            claim_write_ownership || active_client_session_id.is_none()
+        };
+
+        if should_claim_active_session {
+            let claim = if protocol_version == Some(2) {
+                sqlx::query(
+                    r#"
+                        UPDATE student_attempts
+                        SET active_client_session_id = ?,
+                            user_id = COALESCE(user_id, ?),
+                            integrity = JSON_SET(integrity, '$.clientSessionId', ?),
+                            recovery = JSON_SET(recovery, '$.clientSessionId', ?),
+                            updated_at = NOW()
+                        WHERE id = ?
+                          AND (active_client_session_id IS NULL OR active_client_session_id = ?)
+                        "#,
+                )
+                .bind(&client_session_id)
+                .bind(&principal.user.id)
+                .bind(&client_session_id)
+                .bind(&client_session_id)
+                .bind(&attempt.id)
+                .bind(&client_session_id)
+                .execute(&self.pool)
+                .await?
+            } else {
+                sqlx::query(
+                    r#"
+                        UPDATE student_attempts
+                        SET active_client_session_id = ?,
+                            user_id = COALESCE(user_id, ?),
+                            integrity = JSON_SET(integrity, '$.clientSessionId', ?),
+                            recovery = JSON_SET(recovery, '$.clientSessionId', ?),
+                            updated_at = NOW()
+                        WHERE id = ?
+                        "#,
+                )
+                .bind(&client_session_id)
+                .bind(&principal.user.id)
+                .bind(&client_session_id)
+                .bind(&client_session_id)
+                .bind(&attempt.id)
+                .execute(&self.pool)
+                .await?
+            };
+            if protocol_version == Some(2) && claim.rows_affected() != 1 {
+                return Err(DeliveryError::Conflict {
+                    message:
+                        "Attempt write credential has been superseded by a newer student session."
+                            .to_owned(),
+                    reason: Some(DeliveryConflictReason::ActiveSessionSuperseded),
+                    latest_revision: Some(attempt.revision),
+                    server_accepted_through_seq: None,
+                    active_session_id: active_client_session_id,
+                });
+            }
+        } else if attempt_user_id.is_none() {
+            sqlx::query("UPDATE student_attempts SET user_id = ? WHERE id = ? AND user_id IS NULL")
+                .bind(&principal.user.id)
+                .bind(&attempt.id)
+                .execute(&self.pool)
+                .await?;
         }
 
         session.attempt = Some(
@@ -1586,6 +1787,22 @@ impl DeliveryService {
             }
             _ => {}
         }
+
+        // Protocol-v2 response commands have their own transactional endpoint
+        // and runtime/ownership gate. Never let them fall through the legacy
+        // objective mutation path (which would bypass V2 response durability).
+        if attempt.protocol_version == 2
+            && req
+                .mutations
+                .iter()
+                .any(|mutation| mutation.command.is_response_command())
+        {
+            return Err(DeliveryError::conflict_reason(
+                DeliveryConflictReason::InvalidMutation,
+                "Protocol v2 response commands must use the response durability endpoint.",
+            ));
+        }
+
         if let Some(response) = self
             .lookup_idempotent_response_on_connection(
                 tx.as_mut(),
@@ -1608,7 +1825,7 @@ impl DeliveryService {
         );
         let active_section_key = runtime_gate
             .as_ref()
-            .and_then(|gate| gate.current_section_key.as_deref());
+            .and_then(|gate| gate.active_section_key.as_deref());
 
         let version = self
             .load_version(attempt.published_version_id.clone())
@@ -1740,7 +1957,10 @@ impl DeliveryService {
             return Ok(response);
         }
 
-        if attempt.submitted_at.is_some() {
+        if attempt.submitted_at.is_some()
+            || delivery_status_is_terminal(Some(attempt.delivery_status.as_str()))
+            || (attempt.protocol_version == 2 && attempt.phase == AttemptPhase::PostExam)
+        {
             return Err(DeliveryError::Conflict {
                 message: "Attempt is already sealed and no longer accepts new mutations."
                     .to_owned(),
@@ -1854,6 +2074,7 @@ impl DeliveryService {
               AND revision = ?
               AND submitted_at IS NULL
               AND COALESCE(proctor_status, 'active') <> 'terminated'
+              AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
             "#,
         )
         .bind(phase)
@@ -1986,11 +2207,27 @@ impl DeliveryService {
             ));
         }
         if attempt.submitted_at.is_some()
-            || attempt.proctor_status == ielts_backend_domain::attempt::ProctorStatus::Terminated
+            || delivery_status_is_terminal(Some(attempt.delivery_status.as_str()))
+            || matches!(attempt.delivery_status.as_str(), "paused")
+            || attempt.phase == AttemptPhase::PostExam
+            || matches!(
+                attempt.proctor_status,
+                ielts_backend_domain::attempt::ProctorStatus::Paused
+                    | ielts_backend_domain::attempt::ProctorStatus::Terminated
+            )
         {
             return Err(DeliveryError::Conflict {
-                message: "Attempt is already terminal and no longer accepts heartbeats.".to_owned(),
-                reason: Some(DeliveryConflictReason::AttemptSubmitted),
+                message: "Attempt is closed or paused and no longer accepts heartbeats.".to_owned(),
+                reason: Some(
+                    if attempt.delivery_status == "paused"
+                        || attempt.proctor_status
+                            == ielts_backend_domain::attempt::ProctorStatus::Paused
+                    {
+                        DeliveryConflictReason::AttemptProctorBlocked
+                    } else {
+                        DeliveryConflictReason::AttemptSubmitted
+                    },
+                ),
                 latest_revision: Some(attempt.revision),
                 server_accepted_through_seq: None,
                 active_session_id: None,
@@ -2148,7 +2385,7 @@ impl DeliveryService {
             );
         }
         let changed = sqlx::query(
-            "UPDATE student_attempts SET integrity = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + ? WHERE id = ? AND submitted_at IS NULL AND proctor_status <> 'terminated'",
+            "UPDATE student_attempts SET integrity = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + ? WHERE id = ? AND submitted_at IS NULL AND COALESCE(proctor_status, 'active') <> 'terminated' AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
         )
         .bind(Value::Object(integrity))
         .bind(i32::from(req.event_type != HeartbeatEventType::Heartbeat))
@@ -2266,24 +2503,27 @@ impl DeliveryService {
         }
 
         let mut tx = self.pool.begin().await?;
-        // Global lock order: attempt row -> runtime -> active runtime section.
-        // Every attempt writer (mutation batch, terminalization, heartbeat) and
-        // every deadline reconciliation acquires the attempt row before shared
-        // runtime rows; submitting in the reverse order would deadlock against
-        // a concurrent autosave that holds the attempt and waits for the gate.
+        // Lock the attempt before the runtime/section gate, matching every
+        // other student/proctor writer and preventing lock-order deadlocks.
         let attempt = self
             .load_attempt_by_id_for_update(tx.as_mut(), req.attempt_id.clone())
             .await?
             .ok_or(DeliveryError::NotFound)?;
-        let (runtime_gate, runtime_section_gate) = self
-            .lock_runtime_write_gate_tx(tx.as_mut(), schedule_id)
-            .await?;
         if attempt.schedule_id != schedule_id.to_string() || attempt.student_key != req.student_key
         {
             return Err(DeliveryError::Validation(
                 "Attempt does not belong to the provided schedule or student key.".to_owned(),
             ));
         }
+        if attempt.protocol_version == 2 {
+            return Err(DeliveryError::conflict(
+                "Protocol v2 attempts must be submitted through the response durability endpoint."
+                    .to_owned(),
+            ));
+        }
+        let (runtime_gate, runtime_section_gate) = self
+            .lock_runtime_write_gate_tx(tx.as_mut(), schedule_id)
+            .await?;
 
         let active_client_session_id: Option<String> = sqlx::query_scalar(
             "SELECT active_client_session_id FROM student_attempts WHERE id = ?",
@@ -2652,7 +2892,7 @@ impl DeliveryService {
         client_session_id: &str,
     ) -> Result<StudentAttempt, DeliveryError> {
         let mut connection = self.pool.acquire().await?;
-        self.ensure_attempt_created_on(
+        self.get_or_create_attempt_on(
             &mut *connection,
             schedule,
             version,
@@ -2679,7 +2919,7 @@ impl DeliveryService {
     /// active section), which makes an in-transaction idempotency re-check
     /// authoritative.
     #[allow(clippy::too_many_arguments)]
-    async fn ensure_attempt_created_on(
+    async fn get_or_create_attempt_on(
         &self,
         connection: &mut MySqlConnection,
         schedule: &ExamSchedule,
@@ -2721,21 +2961,58 @@ impl DeliveryService {
             .bind(student_key)
             .fetch_optional(&mut *connection)
             .await?;
-
             let phase = determine_phase(runtime, false, false, None);
             let current_module = first_enabled_module(&version.config_snapshot);
             let phase_for_insert = phase.clone();
             let current_module_for_insert = current_module.clone();
+            // The runtime section remains authoritative even while the runtime
+            // is paused; `current_section_deadline_at` is intentionally omitted
+            // from the presentation snapshot in that state, so derive the
+            // persisted response clock directly from the section projection.
+            let response_deadline = runtime
+                .and_then(|value| {
+                    value.active_section_key.as_deref().and_then(|section_key| {
+                        value
+                            .sections
+                            .iter()
+                            .find(|section| section.section_key == section_key)
+                            .and_then(|section| {
+                                section.actual_start_at.map(|started_at| {
+                                    let duration_seconds = i64::from(
+                                        section
+                                            .planned_duration_minutes
+                                            .saturating_add(section.extension_minutes),
+                                    )
+                                    .saturating_mul(60)
+                                    .saturating_add(i64::from(
+                                        section.accumulated_paused_seconds.max(0),
+                                    ));
+                                    started_at + ChronoDuration::seconds(duration_seconds.max(0))
+                                })
+                            })
+                    })
+                })
+                .or_else(|| runtime.and_then(|value| value.current_section_deadline_at))
+                .unwrap_or(schedule.end_time);
+            let response_closing_grace = response_deadline + ChronoDuration::seconds(30);
+            let protocol_version = if self.response_durability_v2_enabled {
+                2
+            } else {
+                1
+            };
             let attempt_id = Uuid::new_v4();
             let insert_result = sqlx::query(
                 r#"
                 INSERT INTO student_attempts (
-                    id, schedule_id, registration_id, wcode, student_key, organization_id, exam_id, published_version_id,
+                    id, schedule_id, registration_id, wcode, student_key, organization_id, user_id, exam_id, published_version_id,
                     exam_title, candidate_id, candidate_name, candidate_email, phase, current_module,
                     answers, writing_answers, flags, violations_snapshot, integrity, recovery,
-                    created_at, updated_at, revision
+                    created_at, updated_at, revision,
+                    protocol_version, delivery_status, lease_epoch, control_epoch, response_revision,
+                    deadline_at, closing_grace_until
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), 0,
+                        ?, 'running', 1, 1, 0, ?, ?)
                 "#,
             )
             .bind(attempt_id.to_string())
@@ -2744,6 +3021,7 @@ impl DeliveryService {
             .bind(wcode.unwrap_or(""))
             .bind(student_key)
             .bind(&schedule.organization_id)
+            .bind(registration.as_ref().and_then(|value| value.user_id.clone()))
             .bind(&schedule.exam_id)
             .bind(&schedule.published_version_id)
             .bind(&schedule.exam_title)
@@ -2774,6 +3052,9 @@ impl DeliveryService {
                 "syncState": "idle",
                 "serverAcceptedThroughSeq": 0
             }))
+            .bind(protocol_version)
+            .bind(response_deadline)
+            .bind(response_closing_grace)
             .execute(&mut *connection)
             .await;
             match insert_result {
@@ -2842,31 +3123,67 @@ impl DeliveryService {
         final_submission: Option<Value>,
         submitted_at: Option<DateTime<Utc>>,
         expected_revision: i32,
+        owner_user_id: Option<&str>,
     ) -> Result<StudentAttempt, DeliveryError> {
-        let mut connection = self.pool.acquire().await?;
-        self.update_attempt_on_connection(
-            &mut *connection,
-            &attempt_id,
-            phase,
-            current_module,
-            current_question_id,
-            answers,
-            writing_answers,
-            flags,
-            violations_snapshot,
-            integrity,
-            recovery,
-            final_submission,
-            submitted_at,
-            expected_revision,
+        let result = sqlx::query(
+            r#"
+            UPDATE student_attempts
+            SET
+                phase = ?,
+                current_module = ?,
+                current_question_id = ?,
+                answers = ?,
+                writing_answers = ?,
+                flags = ?,
+                violations_snapshot = ?,
+                integrity = ?,
+                recovery = ?,
+                final_submission = ?,
+                submitted_at = ?,
+                user_id = COALESCE(user_id, ?),
+                updated_at = NOW(),
+                revision = revision + 1
+            WHERE id = ?
+              AND revision = ?
+              AND submitted_at IS NULL
+              AND COALESCE(proctor_status, 'active') <> 'terminated'
+              AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+            "#,
         )
-        .await
+        .bind(phase)
+        .bind(current_module)
+        .bind(current_question_id)
+        .bind(answers)
+        .bind(writing_answers)
+        .bind(flags)
+        .bind(violations_snapshot)
+        .bind(integrity)
+        .bind(recovery)
+        .bind(final_submission)
+        .bind(submitted_at)
+        .bind(owner_user_id)
+        .bind(attempt_id.to_string())
+        .bind(expected_revision)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() != 1 {
+            return Err(DeliveryError::conflict(
+                "Attempt changed or is already terminal.".to_owned(),
+            ));
+        }
+
+        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+            .bind(attempt_id.to_string())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(DeliveryError::from)
     }
 
     /// Same guarded attempt-state update executed on an explicit connection so
     /// it can join the caller's transaction (pre-check atomicity). The
-    /// optimistic revision guard and terminal-state guards are identical to the
-    /// pool-level `update_attempt`.
+    /// optimistic revision guard, terminal-state guards, delivery-status guard
+    /// and ownership coalesce are identical to the pool-level `update_attempt`.
     #[allow(clippy::too_many_arguments)]
     async fn update_attempt_on_connection(
         &self,
@@ -2884,6 +3201,7 @@ impl DeliveryService {
         final_submission: Option<Value>,
         submitted_at: Option<DateTime<Utc>>,
         expected_revision: i32,
+        owner_user_id: Option<&str>,
     ) -> Result<StudentAttempt, DeliveryError> {
         let result = sqlx::query(
             r#"
@@ -2900,12 +3218,14 @@ impl DeliveryService {
                 recovery = ?,
                 final_submission = ?,
                 submitted_at = ?,
+                user_id = COALESCE(user_id, ?),
                 updated_at = NOW(),
                 revision = revision + 1
             WHERE id = ?
               AND revision = ?
               AND submitted_at IS NULL
               AND COALESCE(proctor_status, 'active') <> 'terminated'
+              AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
             "#,
         )
         .bind(phase)
@@ -2919,6 +3239,7 @@ impl DeliveryService {
         .bind(recovery)
         .bind(final_submission)
         .bind(submitted_at)
+        .bind(owner_user_id)
         .bind(attempt_id)
         .bind(expected_revision)
         .execute(&mut *connection)
@@ -2938,6 +3259,62 @@ impl DeliveryService {
     }
 
     #[allow(clippy::too_many_arguments)]
+    async fn update_attempt_preserving_revision(
+        &self,
+        attempt_id: String,
+        phase: AttemptPhase,
+        current_module: ModuleType,
+        current_question_id: Option<String>,
+        answers: Value,
+        writing_answers: Value,
+        flags: Value,
+        violations_snapshot: Value,
+        integrity: Value,
+        recovery: Value,
+        final_submission: Option<Value>,
+        submitted_at: Option<DateTime<Utc>>,
+    ) -> Result<StudentAttempt, DeliveryError> {
+        sqlx::query(
+            r#"
+            UPDATE student_attempts
+            SET
+                phase = ?,
+                current_module = ?,
+                current_question_id = ?,
+                answers = ?,
+                writing_answers = ?,
+                flags = ?,
+                violations_snapshot = ?,
+                integrity = ?,
+                recovery = ?,
+                final_submission = ?,
+                submitted_at = ?,
+                updated_at = NOW()
+            WHERE id = ?
+            "#,
+        )
+        .bind(phase)
+        .bind(current_module)
+        .bind(current_question_id)
+        .bind(answers)
+        .bind(writing_answers)
+        .bind(flags)
+        .bind(violations_snapshot)
+        .bind(integrity)
+        .bind(recovery)
+        .bind(final_submission)
+        .bind(submitted_at)
+        .bind(attempt_id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query_as::<_, StudentAttempt>("SELECT * FROM student_attempts WHERE id = ?")
+            .bind(attempt_id.to_string())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(DeliveryError::from)
+    }
+
     async fn load_schedule(
         &self,
         actor: &ActorContext,
@@ -3007,6 +3384,27 @@ impl DeliveryService {
         )
         .bind(&schedule_id)
         .bind(wcode)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(DeliveryError::from)
+    }
+
+    async fn load_registration_by_student_key(
+        &self,
+        schedule_id: String,
+        student_key: &str,
+    ) -> Result<Option<AttemptRegistrationRow>, DeliveryError> {
+        sqlx::query_as::<_, AttemptRegistrationRow>(
+            r#"
+            SELECT id AS registration_id, user_id
+            FROM schedule_registrations
+            WHERE schedule_id = ?
+              AND student_key = ?
+            LIMIT 1
+            "#,
+        )
+        .bind(&schedule_id)
+        .bind(student_key)
         .fetch_optional(&self.pool)
         .await
         .map_err(DeliveryError::from)
@@ -3570,7 +3968,7 @@ fn validate_contiguous_sequences(
 struct RuntimeGateRow {
     id: String,
     status: String,
-    current_section_key: Option<String>,
+    active_section_key: Option<String>,
     waiting_for_next_section: bool,
 }
 
@@ -4299,6 +4697,21 @@ fn validate_answer_value(
     }
 }
 
+fn ensure_target_section(
+    active_section_key: Option<&str>,
+    target_section_key: Option<&str>,
+) -> Result<(), DeliveryError> {
+    if let (Some(active), Some(target)) = (active_section_key, target_section_key) {
+        if active != target {
+            return Err(DeliveryError::conflict_reason(
+                DeliveryConflictReason::SectionMismatch,
+                "Mutation belongs to an inactive section.",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn apply_mutation(
     mutation: &MutationEnvelope,
     answer_schema: &AnswerSchema,
@@ -4330,6 +4743,10 @@ fn apply_mutation(
             if !answer_schema.constraints.contains_key(&question_id) {
                 return Ok(false);
             }
+            ensure_target_section(
+                active_section_key,
+                answer_schema.sections.get(&question_id).map(String::as_str),
+            )?;
 
             let value = payload.value.clone();
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
@@ -4354,6 +4771,10 @@ fn apply_mutation(
             if !answer_schema.constraints.contains_key(&question_id) {
                 return Ok(false);
             }
+            ensure_target_section(
+                active_section_key,
+                answer_schema.sections.get(&question_id).map(String::as_str),
+            )?;
 
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
                 DeliveryError::Validation("Mutation references an unknown `questionId`.".to_owned())
@@ -4377,6 +4798,10 @@ fn apply_mutation(
             if !answer_schema.constraints.contains_key(&question_id) {
                 return Ok(false);
             }
+            ensure_target_section(
+                active_section_key,
+                answer_schema.sections.get(&question_id).map(String::as_str),
+            )?;
 
             let slot_index = usize::try_from(payload.slot_index).unwrap_or(usize::MAX);
             let value = payload.value.clone();
@@ -4400,6 +4825,10 @@ fn apply_mutation(
             if !answer_schema.constraints.contains_key(&question_id) {
                 return Ok(false);
             }
+            ensure_target_section(
+                active_section_key,
+                answer_schema.sections.get(&question_id).map(String::as_str),
+            )?;
 
             let slot_index = usize::try_from(payload.slot_index).unwrap_or(usize::MAX);
             let constraint = answer_schema.constraints.get(&question_id).ok_or_else(|| {
@@ -4423,14 +4852,10 @@ fn apply_mutation(
                 return Ok(false);
             }
 
-            if let Some(active_section_key) = active_section_key {
-                if active_section_key != "writing" {
-                    return Err(DeliveryError::conflict_reason(
-                        DeliveryConflictReason::SectionMismatch,
-                        "Mutation belongs to an inactive section.",
-                    ));
-                }
-            }
+            ensure_target_section(
+                active_section_key,
+                writing_task_ids.contains(&task_id).then_some("writing"),
+            )?;
             let value = payload.value.clone();
             if !matches!(value, Value::String(_) | Value::Null) {
                 return Err(DeliveryError::Validation(
@@ -4456,14 +4881,10 @@ fn apply_mutation(
                 return Ok(false);
             }
 
-            if let Some(active_section_key) = active_section_key {
-                if active_section_key != "writing" {
-                    return Err(DeliveryError::conflict_reason(
-                        DeliveryConflictReason::SectionMismatch,
-                        "Mutation belongs to an inactive section.",
-                    ));
-                }
-            }
+            ensure_target_section(
+                active_section_key,
+                writing_task_ids.contains(&task_id).then_some("writing"),
+            )?;
             let next_writing_answers = ensure_object(std::mem::take(writing_answers));
             *current_question_id = Some(task_id.clone());
             *writing_answers = Value::Object(set_value(next_writing_answers, task_id, Value::Null));
@@ -4482,6 +4903,10 @@ fn apply_mutation(
             if !answer_schema.sections.contains_key(&question_id) {
                 return Ok(false);
             }
+            ensure_target_section(
+                active_section_key,
+                answer_schema.sections.get(&question_id).map(String::as_str),
+            )?;
 
             let flag_value = payload.value.as_bool().ok_or_else(|| {
                 DeliveryError::Validation("Flag values must be boolean.".to_owned())
@@ -4492,9 +4917,19 @@ fn apply_mutation(
         }
         MutationCommand::Position(payload) => {
             // Client position is telemetry only. Never treat it as authoritative state.
+            // It is still scoped to the live section so a stale tab cannot make a
+            // position from another section look current in recovery metadata.
             let next_phase = payload.phase;
             let next_module = payload.current_module;
             let parsed_question_id = payload.current_question_id.clone();
+            if let Some(active_section_key) = active_section_key {
+                if payload.current_module.as_str() != active_section_key {
+                    return Err(DeliveryError::conflict_reason(
+                        DeliveryConflictReason::SectionMismatch,
+                        "Position belongs to an inactive section.",
+                    ));
+                }
+            }
             if let Some(ref value) = parsed_question_id {
                 let known_objective = answer_schema.sections.contains_key(value);
                 let known_writing = writing_task_ids.contains(value);
@@ -4507,6 +4942,12 @@ fn apply_mutation(
                     );
                     return Ok(false);
                 }
+                let target_section = answer_schema
+                    .sections
+                    .get(value)
+                    .map(String::as_str)
+                    .or_else(|| known_writing.then_some("writing"));
+                ensure_target_section(active_section_key, target_section)?;
             }
             *recovery = merge_recovery(
                 std::mem::take(recovery),
@@ -4824,7 +5265,7 @@ mod tests {
         let paused = RuntimeGateRow {
             id: "runtime-1".to_owned(),
             status: "paused".to_owned(),
-            current_section_key: Some("reading".to_owned()),
+            active_section_key: Some("reading".to_owned()),
             waiting_for_next_section: false,
         };
         let paused_gate = objective_mutation_gate(
@@ -4893,7 +5334,7 @@ mod tests {
         let live = RuntimeGateRow {
             id: "runtime-1".to_owned(),
             status: "live".to_owned(),
-            current_section_key: Some("reading".to_owned()),
+            active_section_key: Some("reading".to_owned()),
             waiting_for_next_section: false,
         };
         let section = RuntimeSectionWriteGateRow {
@@ -5076,6 +5517,101 @@ mod tests {
 
         assert_eq!(flags["q1"], true);
         assert_eq!(current_question_id.as_deref(), Some("task-1"));
+    }
+
+    #[test]
+    fn apply_mutation_rejects_known_targets_from_an_inactive_section() {
+        let answer_schema = AnswerSchema {
+            constraints: HashMap::from_iter([
+                ("reading-question".to_owned(), AnswerConstraint::Text),
+                ("listening-question".to_owned(), AnswerConstraint::Text),
+            ]),
+            sections: HashMap::from_iter([
+                ("reading-question".to_owned(), "reading".to_owned()),
+                ("listening-question".to_owned(), "listening".to_owned()),
+            ]),
+        };
+        let writing_task_ids: HashSet<String> = HashSet::new();
+        let mut answers = json!({});
+        let mut writing_answers = json!({});
+        let mut flags = json!({});
+        let mut violations_snapshot = json!([]);
+        let mut phase = AttemptPhase::Exam;
+        let mut current_module = ModuleType::Reading;
+        let mut current_question_id = None;
+        let mut recovery = json!({});
+
+        let error = apply_mutation(
+            &MutationEnvelope {
+                id: "m-cross-section-answer".to_owned(),
+                seq: 1,
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+                command: command(
+                    MutationType::Answer,
+                    json!({"questionId": "listening-question", "value": "A"}),
+                ),
+                base_revision: None,
+            },
+            &answer_schema,
+            &writing_task_ids,
+            ObjectiveMutationGate::allow(),
+            Some("reading"),
+            &mut answers,
+            &mut writing_answers,
+            &mut flags,
+            &mut violations_snapshot,
+            &mut phase,
+            &mut current_module,
+            &mut current_question_id,
+            &mut recovery,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DeliveryError::Conflict {
+                reason: Some(DeliveryConflictReason::SectionMismatch),
+                ..
+            }
+        ));
+        assert_eq!(answers, json!({}));
+
+        let error = apply_mutation(
+            &MutationEnvelope {
+                id: "m-cross-section-position".to_owned(),
+                seq: 2,
+                timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 0, 1).unwrap(),
+                command: command(
+                    MutationType::Position,
+                    json!({
+                        "phase": "exam",
+                        "currentModule": "reading",
+                        "currentQuestionId": "listening-question"
+                    }),
+                ),
+                base_revision: None,
+            },
+            &answer_schema,
+            &writing_task_ids,
+            ObjectiveMutationGate::allow(),
+            Some("reading"),
+            &mut answers,
+            &mut writing_answers,
+            &mut flags,
+            &mut violations_snapshot,
+            &mut phase,
+            &mut current_module,
+            &mut current_question_id,
+            &mut recovery,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DeliveryError::Conflict {
+                reason: Some(DeliveryConflictReason::SectionMismatch),
+                ..
+            }
+        ));
+        assert_eq!(recovery, json!({}));
     }
 
     #[test]

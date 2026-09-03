@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { Check, Copy, Download, ExternalLink, Presentation, Share2, X } from "lucide-react";
 import type { AssessmentAccessLink } from "../../contracts/accessLinks";
 import { copyText, studentJoinUrl } from "./accessLinkUi";
-
+import { AuthoringDialog } from "../authoringPrimitives";
 export function useAccessLinkQrCode(linkId: string | null, size = 640) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,37 +53,58 @@ export function AccessLinkShareSheet({ open, link, onClose, onPresent }: { open:
     }
   };
   return (
-    <AnimatePresence>
-      {open ? <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] flex items-center justify-center bg-black/20 p-4 authoring-glass" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-        <motion.section role="dialog" aria-modal="true" aria-labelledby="share-student-link-title" initial={{ opacity: 0, scale: 0.98, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 8 }} transition={{ duration: 0.18 }} className="w-full max-w-[440px] overflow-hidden rounded-[22px] border border-au-separator bg-white shadow-[0_24px_80px_rgba(0,0,0,0.2)]">
-          <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4"><div className="min-w-0 flex-1"><p className="text-[10px] font-medium text-slate-400">Share with students</p><h2 id="share-student-link-title" className="truncate text-[16px] font-semibold text-slate-950">{link.name}</h2></div><button type="button" aria-label="Close share sheet" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100"><X size={15}/></button></header>
+    <AuthoringDialog
+      open={open}
+      title={`Share ${link.name}`}
+      description="Copy or present this Student Link to learners."
+      onClose={onClose}
+      showHeader={false}
+      contentClassName="w-[calc(100vw-2rem)] max-w-[440px] overflow-hidden rounded-[22px] p-0"
+    >
+          <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4"><div className="min-w-0 flex-1"><p className="text-[10px] font-medium text-slate-400">Share with students</p><h2 className="truncate text-[16px] font-semibold text-slate-950">{link.name}</h2></div><button type="button" aria-label="Close share sheet" onClick={onClose} className="authoring-icon-button"><X size={15} aria-hidden="true"/></button></header>
           <div className="p-5">
             <div className="mx-auto flex h-52 w-52 items-center justify-center rounded-[18px] bg-au-fill p-3">{dataUrl ? <img src={dataUrl} alt={`QR code for ${link.name}`} className="h-full w-full" /> : <span className="text-[11px] text-slate-400">{qrError ?? "Generating QR code…"}</span>}</div>
             <div className="mt-4 rounded-xl bg-au-fill px-3 py-2.5"><p className="truncate font-mono text-[11px] text-slate-600">{url}</p></div>
-            <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => void share()} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-accent px-3 text-[12px] font-semibold text-white hover:bg-au-accent-hover"><Share2 size={15}/>Share</button><button type="button" onClick={() => void copy()} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-fill px-3 text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong">{copied ? <Check size={15} className="text-emerald-600"/> : <Copy size={15}/>} {copied ? "Copied" : "Copy Link"}</button></div>
-            <div className="mt-2 grid grid-cols-2 gap-2"><button type="button" onClick={onPresent} className="flex min-h-10 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-600 hover:bg-au-fill"><Presentation size={14}/>Present</button>{dataUrl ? <a href={dataUrl} download={`${link.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "student-link"}-qr.png`} className="flex min-h-10 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-600 hover:bg-au-fill"><Download size={14}/>Download QR</a> : <span />}</div>
-            <a href={url} target="_blank" rel="noreferrer" className="mt-2 flex min-h-10 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-500 hover:bg-au-fill"><ExternalLink size={13}/>Open student link</a>
+            <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => void share()} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-accent px-3 text-[12px] font-semibold text-white hover:bg-au-accent-hover"><Share2 size={15} aria-hidden="true"/>Share</button><button type="button" onClick={() => void copy()} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-fill px-3 text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong">{copied ? <Check size={15} className="text-au-success" aria-hidden="true"/> : <Copy size={15} aria-hidden="true"/>} {copied ? "Copied" : "Copy Link"}</button></div>
+            <div className="mt-2 grid grid-cols-2 gap-2"><button type="button" onClick={onPresent} className="flex min-h-10 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-600 hover:bg-au-fill"><Presentation size={14} aria-hidden="true"/>Present</button>{dataUrl ? <a href={dataUrl} download={`${link.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "student-link"}-qr.png`} className="flex min-h-10 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-600 hover:bg-au-fill"><Download size={14} aria-hidden="true"/>Download QR</a> : <span />}</div>
+            <a href={url} target="_blank" rel="noreferrer" className="mt-2 flex min-h-10 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-500 hover:bg-au-fill"><ExternalLink size={13} aria-hidden="true"/>Open student link</a>
             {shareError ? <p role="alert" className="mt-3 rounded-xl bg-au-danger-tint px-3 py-2 text-[11px] text-au-danger-text">{shareError}</p> : null}
           </div>
-        </motion.section>
-      </motion.div> : null}
-    </AnimatePresence>
+    </AuthoringDialog>
   );
 }
 
 export function AccessLinkPresentView({ open, link, onClose }: { open: boolean; link: AssessmentAccessLink | null; onClose: () => void }) {
   const { dataUrl } = useAccessLinkQrCode(open ? link?.id ?? null : null, 900);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, open]);
   if (!link || !open) return null;
   const url = studentJoinUrl(link.id);
-  return <div className="fixed inset-0 z-[130] flex flex-col bg-white text-slate-950" role="dialog" aria-modal="true" aria-label={`Present ${link.name} to students`}>
-    <header className="flex items-center justify-between px-6 py-5"><div><p className="text-[12px] font-medium text-slate-400">{link.examTitle} · Version {link.versionNumber}</p><h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">{link.name}</h2></div><button type="button" onClick={onClose} aria-label="Close presentation" className="flex h-11 w-11 items-center justify-center rounded-full bg-au-fill text-slate-500 hover:bg-slate-200"><X size={18}/></button></header>
-    <main className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10 text-center"><p className="text-lg font-semibold text-slate-700">Scan to join</p><div className="mt-5 flex h-[min(52vh,500px)] w-[min(52vh,500px)] items-center justify-center rounded-[32px] bg-au-fill p-7">{dataUrl ? <img src={dataUrl} alt={`QR code for ${link.name}`} className="h-full w-full" /> : <span className="text-sm text-slate-400">Preparing QR code…</span>}</div><p className="mt-5 font-mono text-[clamp(14px,2vw,22px)] font-medium text-slate-700">{url}</p><div className="mt-7 flex items-center gap-8 text-left"><Metric value={link.metrics.registered} label="Joined"/><Metric value={link.metrics.started} label="Started"/><Metric value={link.metrics.submitted} label="Submitted"/></div></main>
-  </div>;
+  return (
+    <AuthoringDialog
+      open={open}
+      title={`Present ${link.name} to students`}
+      description="Show the QR code and joining URL for this Student Link."
+      onClose={onClose}
+      showHeader={false}
+      contentClassName="authoring-dialog-content--fullscreen"
+    >
+      <header className="flex items-center justify-between px-6 py-5">
+        <div>
+          <p className="text-[12px] font-medium text-slate-400">{link.examTitle} · Version {link.versionNumber}</p>
+          <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">{link.name}</h2>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close presentation" className="authoring-icon-button h-11 w-11 bg-au-fill text-slate-500 hover:bg-au-fill-strong">
+          <X size={18} aria-hidden="true"/>
+        </button>
+      </header>
+      <main className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-10 text-center">
+        <p className="text-lg font-semibold text-slate-700">Scan to join</p>
+        <div className="mt-5 flex h-[min(52vh,500px)] w-[min(52vh,500px)] items-center justify-center rounded-[32px] bg-au-fill p-7">
+          {dataUrl ? <img src={dataUrl} alt={`QR code for ${link.name}`} className="h-full w-full" /> : <span className="text-sm text-slate-400">Preparing QR code…</span>}
+        </div>
+        <p className="mt-5 font-mono text-[clamp(14px,2vw,22px)] font-medium text-slate-700">{url}</p>
+        <div className="mt-7 flex items-center gap-8 text-left"><Metric value={link.metrics.registered} label="Joined"/><Metric value={link.metrics.started} label="Started"/><Metric value={link.metrics.submitted} label="Submitted"/></div>
+      </main>
+    </AuthoringDialog>
+  );
 }
 function Metric({ value, label }: { value: number; label: string }) { return <div><p className="text-3xl font-semibold tabular-nums tracking-[-0.04em]">{value}</p><p className="mt-1 text-[11px] font-medium text-slate-400">{label}</p></div>; }

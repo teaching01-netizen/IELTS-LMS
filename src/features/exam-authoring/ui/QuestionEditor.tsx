@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { Check, ChevronRight, Copy, MoreHorizontal, Save, Trash2 } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Check, ChevronRight, Copy, MoreHorizontal } from "lucide-react";
 import type { QuestionRevision, StructuredContent } from "../contracts/assessment";
 import { FastQuestionComposer } from "../editor/FastQuestionComposer";
 import { SAT_CHOICE_COMPOSER_CAPABILITIES } from "../editor/RichQuestionComposer";
@@ -13,18 +13,20 @@ import { ConfirmPopover } from "./ConfirmPopover";
 import { SatStudentResponseEditor } from "./SatStudentResponseEditor";
 import { AuthoringSegmented } from "./AuthoringSegmented";
 import { authoringMotion } from "./authoringMotion";
+import { AuthoringConfirmDialog, AuthoringDisclosure } from "./authoringPrimitives";
+import { SatMenu } from "../../../products/sat/ui/Menu";
 
 export interface QuestionEditorProps {
   question: QuestionRevision;
   questionNumber?: number;
-  saveStatus: "saved" | "unsaved" | "saving" | "error";
+  saveStatus: "saved" | "unsaved" | "saving" | "error" | "offline";
   onChange: (question: QuestionRevision) => void;
   onSaveNow: () => void;
   onSaveAndNext: () => void;
   keepMetadataForNext: boolean;
   onKeepMetadataForNextChange: (value: boolean) => void;
   onDuplicate: () => void;
-  onDelete: () => void;
+  onDelete: () => boolean | Promise<boolean>;
 }
 
 function emptyContent(): StructuredContent {
@@ -43,8 +45,9 @@ export function QuestionEditor({
   onDuplicate,
   onDelete,
 }: QuestionEditorProps) {
+  const reduceMotion = useReducedMotion();
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const answer = question.answer;
   const isSpr = answer.kind === "student_produced_response";
   const promptReady = plainTextFromContent(question.prompt).length > 0;
@@ -68,8 +71,11 @@ export function QuestionEditor({
     });
   };
 
-  const changeKind = (kind: QuestionRevision["questionType"]) => {
-    if (kind === question.questionType) return;
+  const [pendingQuestionType, setPendingQuestionType] = useState<
+    QuestionRevision["questionType"] | null
+  >(null);
+
+  const applyKindChange = (kind: QuestionRevision["questionType"]) => {
     if (kind === "student_produced_response") {
       onChange({
         ...question,
@@ -95,8 +101,25 @@ export function QuestionEditor({
     });
   };
 
+  const changeKind = (kind: QuestionRevision["questionType"]) => {
+    if (kind === question.questionType) return;
+    const answerHasContent =
+      question.answer.kind === "single_choice"
+        ? Boolean(question.answer.correctOptionId) ||
+          question.answer.options.some(
+            (option) => hasStructuredContent(option.content) || plainTextFromContent(option.content).trim()
+          )
+        : question.answer.acceptedResponses.some((response) => response.trim().length > 0);
+    if (answerHasContent) {
+      setPendingQuestionType(kind);
+      return;
+    }
+    applyKindChange(kind);
+  };
+
   return (
-    <article
+    <>
+      <article
       className="authoring-editor-sheet mx-auto my-5 w-[calc(100%-2rem)] max-w-[940px] px-6 pb-24 pt-7 sm:my-7 sm:px-10 sm:pt-9"
       data-committing={saveStatus === "saving" || undefined}
     >
@@ -112,7 +135,7 @@ export function QuestionEditor({
               <SaveState status={saveStatus} />
             </div>
           </div>
-          <div className="relative flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
               onClick={onDuplicate}
@@ -122,56 +145,40 @@ export function QuestionEditor({
               <Copy size={13} aria-hidden="true" />
               Duplicate
             </button>
-            <button
-              type="button"
-              onClick={() => setMoreOpen((value) => !value)}
-              className="authoring-interactive flex h-9 w-9 items-center justify-center rounded-[10px] text-slate-500 hover:bg-au-fill"
-              aria-label="More question actions"
-              aria-expanded={moreOpen}
-              aria-haspopup="menu"
-            >
-              <MoreHorizontal size={15} aria-hidden="true" />
-            </button>
-            {moreOpen ? (
-              <div
-                role="menu"
-                className="au-elevation-menu absolute right-0 top-11 z-40 min-w-44 rounded-[12px] border border-au-separator bg-white p-1.5"
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMoreOpen(false);
-                    onSaveNow();
-                  }}
-                  role="menuitem"
-                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[13px] font-semibold text-slate-700 hover:bg-au-fill"
-                >
-                  <Save size={12} aria-hidden="true" />
-                  Save now
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMoreOpen(false);
-                    setDeleteOpen(true);
-                  }}
-                  role="menuitem"
-                  className="flex min-h-10 w-full items-center gap-2 rounded-[9px] px-2.5 text-left text-[13px] font-semibold text-au-danger-text hover:bg-au-danger-tint"
-                >
-                  <Trash2 size={12} aria-hidden="true" />
-                  Delete question
-                </button>
-              </div>
-            ) : null}
+            <SatMenu
+              label="More question actions"
+              compact
+              align="end"
+              triggerContent={<MoreHorizontal size={15} aria-hidden="true" />}
+              items={[
+                {
+                  id: "save-question",
+                  label: "Save now",
+                  onSelect: onSaveNow,
+                },
+                {
+                  id: "delete-question",
+                  label: "Delete question",
+                  onSelect: () => setDeleteOpen(true),
+                  destructive: true,
+                },
+              ]}
+            />
             <ConfirmPopover
               open={deleteOpen}
               title="Delete this question?"
               description="The question will be removed from this SAT module. Cancel is focused by default."
               confirmLabel="Delete question"
+              busy={deleteBusy}
               onCancel={() => setDeleteOpen(false)}
-              onConfirm={() => {
-                setDeleteOpen(false);
-                onDelete();
+              onConfirm={async () => {
+                if (deleteBusy) return;
+                setDeleteBusy(true);
+                try {
+                  if (await onDelete()) setDeleteOpen(false);
+                } finally {
+                  setDeleteBusy(false);
+                }
               }}
             />
           </div>
@@ -261,13 +268,13 @@ export function QuestionEditor({
                       <motion.div
                         key={option.id}
                         layout
-                        transition={authoringMotion.state}
+                        transition={reduceMotion ? { duration: 0.01 } : authoringMotion.state}
                         className={`authoring-answer-row group flex items-start gap-2 rounded-[12px] border p-2 transition ${correct ? "border-au-success/25 bg-au-success/[0.05]" : "border-transparent hover:bg-au-fill"}`}
                       >
                         <motion.button
                           type="button"
-                          whileTap={authoringMotion.press}
-                          transition={authoringMotion.fast}
+                          whileTap={reduceMotion ? {} : authoringMotion.press}
+                          transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
                           onClick={() =>
                             onChange({
                               ...question,
@@ -299,7 +306,7 @@ export function QuestionEditor({
                               initial={{ opacity: 0, x: 3 }}
                               animate={{ opacity: 1, x: 0 }}
                               exit={{ opacity: 0 }}
-                              transition={authoringMotion.fast}
+                              transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
                               className="mt-3 pr-1 text-[10px] font-semibold uppercase tracking-[0.04em] text-au-success-text"
                             >
                               Key
@@ -314,13 +321,8 @@ export function QuestionEditor({
           )}
         </section>
 
-        <details className="group border-t border-au-separator pt-5">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[13px] font-semibold text-slate-700 marker:hidden transition-colors hover:text-slate-950">
-            <ChevronRight size={12} aria-hidden="true" className="text-slate-400 transition-transform duration-200 group-open:rotate-90" />
-            Rationale
-            <span className="font-normal text-slate-400">Internal · recommended</span>
-          </summary>
-          <div className="mt-3" data-authoring-field="rationale">
+        <AuthoringDisclosure label="Rationale" hint="Internal · recommended">
+          <div data-authoring-field="rationale">
             <FastQuestionComposer
               label="Question rationale"
               value={question.rationale}
@@ -330,11 +332,11 @@ export function QuestionEditor({
               minHeightClassName="min-h-[92px]"
             />
           </div>
-        </details>
+        </AuthoringDisclosure>
         </div>
       </div>
 
-      <div className="authoring-editor-footer sticky bottom-3 z-20 mt-10 flex items-center justify-between gap-3 rounded-[14px] border border-au-separator px-3.5 py-2.5 shadow-[0_0_0_0.5px_rgba(0,0,0,0.03),0_8px_28px_rgba(0,0,0,0.08)]">
+      <div className="authoring-editor-footer au-elevation-card sticky bottom-3 z-20 mt-10 flex items-center justify-between gap-3 rounded-[14px] border border-au-separator px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-3">
           <SaveState status={saveStatus} verbose />
           <label
@@ -355,8 +357,8 @@ export function QuestionEditor({
         </div>
         <motion.button
           type="button"
-          whileTap={authoringMotion.press}
-          transition={authoringMotion.fast}
+          whileTap={reduceMotion ? {} : authoringMotion.press}
+          transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
           onClick={onSaveAndNext}
           disabled={saveStatus === "saving"}
           className="authoring-interactive flex min-h-10 items-center gap-2 rounded-[11px] bg-au-accent px-4 text-[13px] font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2 disabled:opacity-45"
@@ -365,7 +367,21 @@ export function QuestionEditor({
           Save & Next <ChevronRight size={13} aria-hidden="true" />
         </motion.button>
       </div>
-    </article>
+      </article>
+      <AuthoringConfirmDialog
+        open={pendingQuestionType !== null}
+        title="Change response type?"
+        description="Changing the response type replaces the current answer key and response choices. This cannot be undone from the editor."
+        confirmLabel="Change response type"
+        destructive
+        onCancel={() => setPendingQuestionType(null)}
+        onConfirm={() => {
+          const nextType = pendingQuestionType;
+          setPendingQuestionType(null);
+          if (nextType) applyKindChange(nextType);
+        }}
+      />
+    </>
   );
 }
 
@@ -424,6 +440,7 @@ function SatSupportingMaterialStarters({
   return (
     <div
       className="mb-2 flex flex-wrap items-center gap-1.5"
+      role="group"
       aria-label="Supporting material starters"
     >
       <span className="mr-1 text-[11px] font-medium text-slate-400">Quick start</span>
@@ -444,7 +461,7 @@ function SatSupportingMaterialStarters({
 function ReadinessLabel({ ready }: { ready: boolean }) {
   return (
     <span className={`flex items-center gap-1 ${ready ? "text-au-success-text" : "text-slate-400"}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${ready ? "bg-au-success" : "bg-black/[0.2]"}`} aria-hidden="true" />
+      <span className={`h-1.5 w-1.5 rounded-full ${ready ? "bg-au-success" : "bg-au-fill-press"}`} aria-hidden="true" />
       {ready ? "Core complete" : "Incomplete"}
     </span>
   );
@@ -462,12 +479,14 @@ function SaveState({
       ? "Saving…"
       : status === "unsaved"
         ? "Changes pending"
-        : status === "error"
-          ? "Save failed"
-          : "Saved";
+        : status === "offline"
+          ? "Offline · saved on this device"
+          : status === "error"
+            ? "Save failed"
+            : "Saved";
   return (
     <span
-      className={`text-[10px] font-medium ${status === "error" ? "text-au-danger-text" : status === "saved" ? "text-au-success-text" : "text-slate-400"}`}
+      className={`text-[10px] font-medium ${status === "error" ? "text-au-danger-text" : status === "offline" ? "text-au-warning-text" : status === "saved" ? "text-au-success-text" : "text-slate-400"}`}
     >
       {verbose && status === "unsaved" ? "Autosave pending · ⌘S saves now" : label}
     </span>

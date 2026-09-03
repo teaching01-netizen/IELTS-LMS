@@ -43,9 +43,10 @@ pub struct QuestionBankItem {
     pub revision: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
 #[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[cfg_attr(feature = "sqlx", sqlx(type_name = "text", rename_all = "snake_case"))]
 pub enum Difficulty {
     Easy,
     Medium,

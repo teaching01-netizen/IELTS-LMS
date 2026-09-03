@@ -50,6 +50,10 @@
   --color-au-accent: #0071e3;
   --color-au-accent-hover: #0077ed;
   --color-au-accent-active: #0067c9;
+  --color-au-section-rw: #0071e3;
+  --color-au-section-rw-strong: #0067c9;
+  --color-au-section-math: #5856d6;
+  --color-au-section-math-strong: #4c4bc7;
   --color-au-accent-tint: rgba(0, 113, 227, 0.08);
   --color-au-accent-tint-strong: rgba(0, 113, 227, 0.14);
   --color-au-canvas: #f5f5f7;
@@ -914,31 +918,29 @@
 }
 
 .authoring-glass {
-  background: rgba(255, 255, 255, 0.78);
-  border-color: rgba(0, 0, 0, 0.06);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.7),
-    0 8px 28px rgba(0, 0, 0, 0.04);
+  background: var(--au-material-hud, rgba(255, 255, 255, 0.78));
+  border-color: var(--authoring-hairline, rgba(0, 0, 0, 0.06));
+  box-shadow: var(--au-elevation-card, 0 1px 2px rgba(0, 0, 0, 0.04));
   -webkit-backdrop-filter: saturate(180%) blur(24px);
   backdrop-filter: saturate(180%) blur(24px);
 }
 
 .authoring-sidebar {
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--au-material-sidebar, var(--color-au-surface));
   -webkit-backdrop-filter: saturate(160%) blur(20px);
   backdrop-filter: saturate(160%) blur(20px);
 }
 
 .authoring-subtoolbar {
-  background: rgba(245, 245, 247, 0.82);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  background: var(--au-material-sidebar-header, var(--color-au-fill));
+  border-bottom: 1px solid var(--color-au-separator);
   -webkit-backdrop-filter: saturate(170%) blur(18px);
   backdrop-filter: saturate(170%) blur(18px);
 }
 
 .authoring-segmented {
-  background: rgba(118, 118, 128, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.025);
+  background: var(--color-au-fill);
+  box-shadow: inset 0 0 0 1px var(--color-au-separator);
 }
 
 .sat-editable-inline-math {
@@ -976,19 +978,19 @@
 
 .sat-rendered-math:hover,
 [data-equation-selected="true"] > .sat-rendered-math {
-  background: rgba(0, 122, 255, 0.055);
-  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.11);
+  background: var(--color-au-accent-tint);
+  box-shadow: 0 0 0 2px var(--color-au-accent-tint-strong);
 }
 
 .sat-rendered-math:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.22);
+  outline: 3px solid var(--color-au-accent-tint-strong);
+  outline-offset: 2px;
 }
 
 .sat-mathfield-host {
-  border: 1px solid rgba(0, 122, 255, 0.24);
-  background: rgba(0, 122, 255, 0.025);
-  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.055);
+  border: 1px solid var(--color-au-accent-tint-strong);
+  background: var(--color-au-accent-tint);
+  box-shadow: 0 0 0 2px var(--color-au-accent-tint);
 }
 
 .sat-mathfield-host--inline {
@@ -1015,10 +1017,10 @@ math-field.sat-block-mathfield {
   border: 0;
   outline: 0;
   background: transparent;
-  color: rgb(15 23 42);
-  --caret-color: #007aff;
-  --selection-background-color: rgba(10, 132, 255, 0.16);
-  --contains-highlight-background-color: rgba(10, 132, 255, 0.1);
+  color: var(--sat-label, var(--color-gray-900));
+  --caret-color: var(--color-au-accent);
+  --selection-background-color: var(--color-au-accent-tint-strong);
+  --contains-highlight-background-color: var(--color-au-accent-tint);
 }
 
 math-field.sat-inline-mathfield {
@@ -1047,10 +1049,10 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .authoring-glass,
   .authoring-sidebar {
-    background: rgb(255 255 255);
+    background: var(--color-au-surface);
   }
   .authoring-subtoolbar {
-    background: rgb(245 245 247);
+    background: var(--color-au-fill);
   }
 }
 
@@ -1099,25 +1101,27 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 }
 
 @keyframes authoring-shimmer {
-  from {
-    transform: translateX(-110%);
-  }
+  from,
   to {
-    transform: translateX(110%);
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.45;
   }
 }
 
 .authoring-skeleton {
   position: relative;
   overflow: hidden;
-  background: rgb(241 245 249);
+  background: var(--color-au-fill-strong);
 }
 
 .authoring-skeleton::after {
   position: absolute;
   inset: 0;
   content: "";
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.78), transparent);
+  background: var(--color-au-surface);
+  opacity: 0;
   animation: authoring-shimmer 1.35s ease-in-out infinite;
 }
 
@@ -1442,6 +1446,10 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-accent-hover: #0077ed;
   --sat-warning: #8a4b00;
   --sat-danger: #b42318;
+  --authoring-sheet: var(--sat-surface);
+  --authoring-hairline: var(--sat-separator);
+  --au-elevation-menu: var(--sat-menu-elevation);
+  --au-elevation-sheet: var(--sat-dialog-elevation);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
   color: var(--sat-label);
   background: var(--sat-canvas);
@@ -1453,8 +1461,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
  * the SAT workspace. Color is never the only carrier of state. */
 .sat-product .text-slate-400 { color: var(--sat-tertiary-label) !important; }
 .sat-product .text-slate-500 { color: var(--sat-secondary-label) !important; }
-.sat-product .text-slate-600 { color: #3a3a3c !important; }
-.sat-product .text-slate-700 { color: #2c2c2e !important; }
+.sat-product .text-slate-600 { color: var(--sat-secondary-label) !important; }
+.sat-product .text-slate-700 { color: var(--sat-label) !important; }
 .sat-product .text-slate-800,
 .sat-product .text-slate-900,
 .sat-product .text-slate-950 { color: var(--sat-label) !important; }
@@ -1558,6 +1566,12 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
  * one material, and one motion curve across every surface.
  * ============================================================ */
 .sat-product {
+  --au-elevation-card:
+    0 0 0 0.5px rgba(0, 0, 0, 0.035),
+    0 1px 2px rgba(15, 23, 42, 0.04);
+  --au-elevation-drag:
+    0 0.5px 1px rgba(15, 23, 42, 0.05),
+    0 10px 24px rgba(15, 23, 42, 0.16);
   --sat-menu-elevation:
     0 0 0 0.5px rgba(0, 0, 0, 0.055),
     0 2px 8px rgba(0, 0, 0, 0.055),
@@ -1568,16 +1582,27 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     0 24px 68px rgba(0, 0, 0, 0.085);
 }
 
-/* Menus: hairline contact plus ambient depth. Destructive and current
- * items carry weight and glyph, never color alone. */
-.sat-product .sat-menu {
+.au-elevation-card {
+  box-shadow: var(--au-elevation-card);
+}
+
+.au-elevation-drag {
+  box-shadow: var(--au-elevation-drag);
+}
+
+/* Menus: hairline contact plus ambient depth. Radix portals mount at the
+ * document root, so this scope must live on the menu itself rather than only
+ * under `.sat-product`. The local aliases keep the portal visually identical
+ * to its in-workspace static fallback. Destructive and current items carry
+ * weight and glyph, never color alone. */
+.sat-menu {
   overflow: hidden;
   border-radius: 13px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: #ffffff;
+  border: 1px solid var(--color-au-separator);
+  background: var(--color-au-surface);
   padding: 5px;
 }
-.sat-product .sat-menu-item {
+.sat-menu-item {
   display: flex;
   width: 100%;
   align-items: center;
@@ -1591,27 +1616,34 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   color: var(--sat-secondary-label);
   outline: none;
 }
-.sat-product .sat-menu-item[data-current] {
+.sat-menu-item[data-current] {
   font-weight: 600;
   color: var(--sat-label);
 }
-.sat-product .sat-menu-item[data-destructive] {
+.sat-menu-item[data-destructive] {
   font-weight: 600;
   color: var(--sat-danger);
 }
-.sat-product .sat-menu-item:hover,
-.sat-product .sat-menu-item[data-highlighted] {
+.sat-menu-item:hover,
+.sat-menu-item[data-highlighted] {
   background: var(--sat-fill);
   color: var(--sat-label);
 }
-.sat-product .sat-menu-item[data-destructive]:hover,
-.sat-product .sat-menu-item[data-destructive][data-highlighted] {
-  background: rgba(180, 35, 24, 0.08);
+.sat-menu-item[data-destructive]:hover,
+.sat-menu-item[data-destructive][data-highlighted] {
+  background: var(--color-au-danger-tint);
   color: var(--sat-danger);
 }
-.sat-product .sat-menu-item:disabled {
+.sat-menu-item:disabled {
   opacity: 0.4;
   pointer-events: none;
+}
+
+/* The shared radio wrapper supplies a default circle indicator. The authoring
+ * module menu renders its own check mark so the selected state has one clear
+ * visual carrier in both the Radix and constrained fallback paths. */
+.sat-module-menu [data-slot="dropdown-menu-radio-item"] > span:first-child {
+  display: none;
 }
 
 /* Dialogs: one scrim, one centered card. Radix renders overlay and
@@ -1713,7 +1745,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     backdrop-filter: none !important;
     background: rgba(22, 22, 23, 0.55) !important;
   }
-  .sat-product .sat-menu,
+  .sat-menu,
   .sat-product .sat-dialog {
     background: #ffffff !important;
   }
@@ -1726,12 +1758,385 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 }
 
+/* Shared SAT authoring primitives. Interaction primitives are composed from
+ * Radix in TSX; these classes keep their visual language in one place. */
+.authoring-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(15, 23, 42, 0.24);
+  -webkit-backdrop-filter: saturate(140%) blur(12px);
+  backdrop-filter: saturate(140%) blur(12px);
+}
+
+.authoring-dialog-overlay[data-state="open"] {
+  animation: authoring-dialog-fade-in var(--authoring-motion-panel) var(--authoring-ease) both;
+}
+
+.authoring-dialog-overlay[data-state="closed"] {
+  animation: authoring-dialog-fade-out var(--authoring-motion-panel) var(--authoring-ease-standard) both;
+}
+
+.authoring-dialog-content,
+.authoring-confirm-dialog {
+  position: fixed;
+  z-index: 201;
+  top: 50%;
+  left: 50%;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--color-au-separator);
+  border-radius: var(--radius-au-xl);
+  background: var(--color-au-surface);
+  color: var(--color-gray-900);
+  box-shadow: var(--au-elevation-sheet, var(--shadow-xl));
+  outline: none;
+}
+
+.authoring-dialog-content[data-state="open"],
+.authoring-confirm-dialog[data-state="open"] {
+  animation: authoring-dialog-content-in var(--authoring-motion-panel) var(--authoring-ease) both;
+}
+
+.authoring-dialog-content[data-state="closed"],
+.authoring-confirm-dialog[data-state="closed"] {
+  animation: authoring-dialog-content-out var(--authoring-motion-panel) var(--authoring-ease-standard) both;
+}
+
+@keyframes authoring-dialog-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes authoring-dialog-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes authoring-dialog-content-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.985); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes authoring-dialog-content-out {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to { opacity: 0; transform: translate(-50%, -50%) scale(0.985); }
+}
+
+@keyframes authoring-dialog-content-in-compact {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes authoring-dialog-content-out-compact {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(12px); }
+}
+
+.authoring-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-3);
+  padding: var(--spacing-5) var(--spacing-5) var(--spacing-3);
+}
+
+.authoring-dialog-content > :not(.authoring-dialog-header):not(.sr-only) {
+  min-width: 0;
+}
+
+.authoring-dialog-content.authoring-dialog-content--fullscreen {
+  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  transform: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: var(--authoring-canvas, #f5f5f7);
+}
+
+.authoring-dialog-content.authoring-dialog-content--fullscreen[data-state="open"] {
+  animation-name: authoring-dialog-fullscreen-in;
+}
+
+.authoring-dialog-content.authoring-dialog-content--fullscreen[data-state="closed"] {
+  animation-name: authoring-dialog-fullscreen-out;
+}
+
+@media (max-width: 640px) {
+  .authoring-dialog-content:not(.authoring-dialog-content--fullscreen),
+  .authoring-confirm-dialog {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - 1rem);
+    transform: none;
+    border-radius: var(--radius-au-xl) var(--radius-au-xl) 0 0;
+    padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
+  }
+
+  .authoring-dialog-content:not(.authoring-dialog-content--fullscreen)[data-state="open"],
+  .authoring-confirm-dialog[data-state="open"] {
+    animation-name: authoring-dialog-content-in-compact;
+  }
+
+  .authoring-dialog-content:not(.authoring-dialog-content--fullscreen)[data-state="closed"],
+  .authoring-confirm-dialog[data-state="closed"] {
+    animation-name: authoring-dialog-content-out-compact;
+  }
+
+  /* Large import surfaces keep their header and footer reachable on phones;
+   * the content card, rather than the page, owns the overflow. */
+  .authoring-dialog-content--import,
+  .authoring-dialog-content--workbook {
+    overflow-y: auto;
+  }
+}
+
+@keyframes authoring-dialog-fullscreen-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes authoring-dialog-fullscreen-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.authoring-dialog-title {
+  color: var(--color-gray-900);
+  font-size: var(--text-au-17);
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  line-height: var(--text-au-17--line-height);
+}
+
+.authoring-dialog-description {
+  color: var(--color-gray-500);
+  font-size: var(--text-au-12);
+  line-height: 1.55;
+}
+
+.authoring-confirm-dialog {
+  width: min(calc(100vw - 2rem), 32rem);
+  padding: var(--spacing-5);
+}
+
+.authoring-icon-button {
+  display: inline-flex;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  color: var(--color-gray-500);
+  transition:
+    background-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    color var(--authoring-motion-fast) var(--authoring-ease-standard);
+}
+
+.authoring-icon-button:hover:not(:disabled) {
+  background: var(--color-au-fill);
+  color: var(--color-gray-900);
+}
+
+.authoring-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.authoring-button {
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  border-radius: var(--radius-au-md);
+  padding-inline: var(--spacing-4);
+  font-size: var(--text-au-12);
+  font-weight: 600;
+  transition:
+    background-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    border-color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    transform var(--authoring-motion-fast) var(--authoring-ease-standard);
+}
+
+.authoring-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.authoring-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.authoring-button--primary {
+  background: var(--color-au-accent);
+  color: white;
+}
+
+.authoring-button--primary:hover:not(:disabled) {
+  background: var(--color-au-accent-hover);
+}
+
+.authoring-button--danger {
+  background: var(--color-au-danger);
+  color: white;
+}
+
+.authoring-button--danger:hover:not(:disabled) {
+  background: var(--color-au-danger-text);
+}
+
+.authoring-button--secondary {
+  background: var(--color-au-fill);
+  color: var(--color-gray-700);
+}
+
+.authoring-button--secondary:hover:not(:disabled),
+.authoring-button--quiet:hover:not(:disabled) {
+  background: var(--color-au-fill-strong);
+  color: var(--color-gray-900);
+}
+
+.authoring-button--quiet {
+  background: transparent;
+  color: var(--color-gray-600);
+}
+
+.authoring-disclosure {
+  border-top: 1px solid var(--color-au-separator);
+  padding-top: var(--spacing-5);
+}
+
+.authoring-disclosure > summary {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: var(--spacing-2);
+  cursor: pointer;
+  list-style: none;
+  color: var(--color-gray-700);
+  font-size: var(--text-au-13);
+  font-weight: 600;
+}
+
+.authoring-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.authoring-disclosure > summary::before {
+  width: 1rem;
+  content: "›";
+  color: var(--color-gray-400);
+  font-size: 1.1rem;
+  line-height: 1;
+  transition: transform var(--authoring-motion-fast) var(--authoring-ease-standard);
+}
+
+.authoring-disclosure[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.authoring-disclosure > summary:focus-visible {
+  border-radius: var(--radius-au-sm);
+  outline: 2px solid var(--color-au-accent);
+  outline-offset: 2px;
+}
+
+.authoring-disclosure__hint {
+  color: var(--color-gray-400);
+  font-size: var(--text-au-11);
+  font-weight: 400;
+}
+
+.authoring-disclosure__content {
+  margin-top: var(--spacing-3);
+}
+
+.authoring-pane-resizer {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  width: 0.75rem;
+  min-width: 0.75rem;
+  flex: 0 0 0.75rem;
+  align-items: stretch;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.authoring-pane-resizer__grip {
+  width: 1px;
+  background: transparent;
+  transition:
+    width var(--authoring-motion-fast) var(--authoring-ease-standard),
+    background-color var(--authoring-motion-fast) var(--authoring-ease-standard);
+}
+
+.authoring-pane-resizer:hover .authoring-pane-resizer__grip,
+.authoring-pane-resizer:focus-visible .authoring-pane-resizer__grip,
+.authoring-pane-resizer[data-dragging="true"] .authoring-pane-resizer__grip {
+  width: 2px;
+  background: var(--au-tint, var(--color-au-accent));
+}
+
+.authoring-pane-resizer--disabled {
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Radix portals mount outside the workspace root. Keep the authoring motion
+ * and transparency preferences applied to those detached surfaces as well. */
+@media (prefers-reduced-motion: reduce) {
+  .authoring-dialog-content,
+  .authoring-confirm-dialog,
+  .authoring-dialog-overlay,
+  [data-slot="sheet-content"],
+  [data-slot="sheet-overlay"] {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .authoring-dialog-overlay,
+  [data-slot="sheet-overlay"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    background: rgba(15, 23, 42, 0.5) !important;
+  }
+}
+
+@media (pointer: coarse) {
+  .authoring-pane-resizer {
+    width: 1.125rem;
+    min-width: 1.125rem;
+    flex-basis: 1.125rem;
+  }
+}
+
 /* SAT authoring workspace — one material hierarchy, not a card farm.
  * Layer order: glass chrome → frosted rail → quiet canvas → sheet of paper. */
 .sat-authoring {
   --authoring-sidebar-width: clamp(280px, 30vw, 430px);
+  --authoring-inspector-width: clamp(280px, 24vw, 380px);
   --authoring-canvas: var(--sat-canvas, #f5f5f7);
-  --authoring-sheet: rgba(255, 255, 255, 0.97);
+  --authoring-sheet: var(--color-au-surface);
   --authoring-hairline: rgba(60, 60, 67, 0.14);
 
   /* Section semantics — tint is meaning, not decoration. Every accent-derived
@@ -1739,8 +2144,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
    * derives from --au-tint, so the workspace re-themes per section (Reading & Writing
    * vs. Math) the way macOS accent colors do. Primary action buttons keep the
    * static au-accent blue so actions never drift with section scope. */
-  --au-tint: #0071e3;
-  --au-tint-strong: #0067c9;
+  --au-tint: var(--color-au-section-rw);
+  --au-tint-strong: var(--color-au-section-rw-strong);
   --au-tint-soft: color-mix(in oklab, var(--au-tint) 8%, transparent);
   --au-tint-soft-strong: color-mix(in oklab, var(--au-tint) 16%, transparent);
 
@@ -1765,8 +2170,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 }
 
 .sat-authoring[data-au-section="math"] {
-  --au-tint: #5856d6;
-  --au-tint-strong: #4c4bc7;
+  --au-tint: var(--color-au-section-math);
+  --au-tint-strong: var(--color-au-section-math-strong);
 }
 
 .au-elevation-menu {
@@ -2110,34 +2515,46 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 }
 
 .sat-authoring .authoring-topbar {
-  background: rgba(250, 250, 252, 0.8);
+  background: var(--au-material-hud);
   -webkit-backdrop-filter: saturate(180%) blur(24px);
   backdrop-filter: saturate(180%) blur(24px);
-  border-bottom-color: rgba(60, 60, 67, 0.1);
+  border-bottom-color: var(--authoring-hairline);
   transition: border-bottom-color 220ms var(--authoring-ease, ease);
 }
 
 /* The chrome separates from content only once it scrolls — quiet at rest,
  * structural in motion, the way Apple toolbars behave. */
 .sat-authoring .authoring-topbar[data-scrolled="true"] {
-  border-bottom-color: rgba(60, 60, 67, 0.17);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65);
+  border-bottom-color: var(--sat-separator);
+  box-shadow: inset 0 -1px 0 var(--sat-separator);
 }
 
 .sat-authoring .authoring-workspace {
   background: var(--authoring-canvas);
 }
 
+.sat-authoring .authoring-surface {
+  border: 1px solid var(--authoring-hairline);
+  border-radius: var(--radius-au-xl);
+  background: var(--authoring-sheet);
+  box-shadow: var(--au-elevation-card);
+}
+
+.sat-authoring .authoring-surface--error {
+  border-color: color-mix(in oklab, var(--color-au-danger) 24%, transparent);
+  background: var(--color-au-danger-tint);
+}
+
 .sat-authoring :is(.authoring-sidebar, .authoring-issues-pane) {
   flex: 0 0 var(--authoring-sidebar-width);
   width: var(--authoring-sidebar-width);
   min-width: 0;
-  background: rgba(249, 249, 250, 0.92);
+  background: var(--au-material-sidebar);
   border-color: var(--authoring-hairline);
 }
 
 .sat-authoring .authoring-sidebar-header {
-  background: rgba(250, 250, 252, 0.72);
+  background: var(--au-material-sidebar-header);
   -webkit-backdrop-filter: saturate(160%) blur(18px);
   backdrop-filter: saturate(160%) blur(18px);
 }
@@ -2149,19 +2566,17 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 /* Selection is carried by a tint plus a hairline ring — color is reinforced
  * by the aria-current outline so it never depends on hue alone. */
 .sat-authoring .authoring-question-row:has([aria-current="true"]) {
-  box-shadow: inset 0 0 0 1px rgba(0, 113, 227, 0.22);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--au-tint) 24%, transparent);
 }
 
 .sat-authoring .authoring-editor-canvas {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 140px),
-    var(--authoring-canvas);
+  background: var(--authoring-canvas);
 }
 
 .sat-authoring .authoring-editor-sheet {
   background: var(--authoring-sheet);
-  border: 1px solid rgba(60, 60, 67, 0.1);
-  border-radius: 20px;
+  border: 1px solid var(--authoring-hairline);
+  border-radius: var(--radius-au-xl);
   box-shadow: var(--au-elevation-sheet);
 }
 
@@ -2175,16 +2590,16 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 }
 
 .sat-authoring .authoring-metadata-bar {
-  background: rgba(118, 118, 128, 0.065);
-  box-shadow: inset 0 0 0 1px rgba(60, 60, 67, 0.05);
+  background: var(--color-au-fill);
+  box-shadow: inset 0 0 0 1px var(--color-au-separator);
 }
 
 .sat-authoring .authoring-answer-row {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+  box-shadow: none;
 }
 
 .sat-authoring .authoring-editor-footer {
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--au-material-editor-footer);
   -webkit-backdrop-filter: saturate(160%) blur(20px);
   backdrop-filter: saturate(160%) blur(20px);
 }
@@ -2193,24 +2608,17 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   .sat-authoring .authoring-editor-sheet {
     width: calc(100% - 1rem);
     margin-block: 0.5rem;
-    border-radius: 14px;
+    border-radius: var(--radius-au-lg);
     box-shadow: none;
   }
 }
 
 @media (max-width: 900px) {
-  .sat-authoring .authoring-workspace {
-    flex-direction: column;
-    overflow-x: hidden;
-  }
-
-  .sat-authoring :is(.authoring-sidebar, .authoring-issues-pane) {
-    width: 100%;
-    min-width: 0;
-    height: clamp(220px, 34vh, 300px);
-    flex: 0 0 clamp(220px, 34vh, 300px);
-    border-right: 0;
-    border-bottom: 1px solid var(--authoring-hairline);
+  /* Compact mode moves navigation and inspection into Radix sheets. Keep the
+   * editor as the only in-flow region so controls never require page-level
+   * horizontal scrolling. */
+  .sat-authoring .authoring-workspace > :is(.authoring-sidebar, .authoring-issues-pane, .authoring-inspector, .authoring-pane-resizer) {
+    display: none;
   }
 
   .sat-authoring .authoring-editor-canvas {
@@ -2221,70 +2629,58 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 
   .sat-authoring .authoring-question-preview {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
     width: 100%;
-    height: min(70dvh, 640px);
-    min-height: min(360px, 70dvh);
-    border-top: 1px solid var(--authoring-hairline);
-    border-left: 0;
+    height: 100%;
+    min-height: 0;
+    border: 0;
+    background: var(--authoring-canvas);
   }
 
+  .sat-authoring .authoring-question-preview__inner {
+    height: 100%;
+  }
 }
+
+.authoring-mobile-sheet {
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.authoring-mobile-sheet :is(.authoring-sidebar, .authoring-issues-pane, .authoring-inspector) {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  background: var(--authoring-sheet);
+}
+
+.authoring-mobile-sheet :is(.authoring-sidebar-header, .authoring-issues-pane > div:first-child) {
+  background: var(--au-material-sidebar-header, rgba(250, 250, 252, 0.86));
+}
+
+.authoring-mobile-sheet [data-slot="sheet-header"] {
+  flex: 0 0 auto;
+}
+
 
 @media (prefers-reduced-transparency: reduce) {
   .sat-authoring .authoring-topbar,
   .sat-authoring .authoring-sidebar-header,
   .sat-authoring .authoring-editor-footer {
-    background: #fff !important;
+    background: var(--color-au-surface) !important;
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }
-}
-
-.sat-authoring .authoring-topbar {
-    background:var(--au-material-hud);
-}
-.sat-authoring .authoring-sidebar {
-    background:var(--au-material-sidebar);
-    border-color:var(--authoring-hairline);
-}
-.sat-authoring .authoring-sidebar-header {
-    background:var(--au-material-sidebar-header);
-}
-.sat-authoring .authoring-editor-footer {
-    background:var(--au-material-editor-footer);
-}
-.sat-authoring .authoring-question-row:has([aria-current="true"]) {
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--au-tint) 24%, transparent);
-}
-.sat-authoring .authoring-editor-sheet {
-    background:var(--authoring-sheet);
-    border:1px solid rgba(60,60,67,0.1);
-    border-radius:20px;
-    box-shadow:var(--au-elevation-sheet);
-    transition: border-color 180ms var(--authoring-ease);
 }
 
 .sat-authoring .authoring-inspector {
     background: var(--au-material-sidebar-header);
 }
 
-@media (max-width: 1100px) {
-  .sat-authoring .authoring-inspector {
-    width: 280px;
-  }
-}
 
-@media (max-width: 900px) {
-  .sat-authoring .authoring-inspector {
-    position: fixed;
-    inset-block: 0;
-    inset-inline-end: 0;
-    z-index: 60;
-    width: min(88vw, 360px);
-    border-left: 1px solid var(--authoring-hairline);
-    box-shadow: var(--au-elevation-sheet);
-  }
-}
 /* Dirty-bit flush: a 2px tint bar drains across the active row while the save
  * write is in flight: a disk-activity LED, never a spinner. The row keeps
  * `position: relative` (set in QuestionListPane) so the bar rides its bottom edge. */
@@ -2380,6 +2776,10 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     --color-au-accent: #0a72d8;
     --color-au-accent-hover: #1680eb;
     --color-au-accent-active: #075fb8;
+    --color-au-section-rw: #69adff;
+    --color-au-section-rw-strong: #8ac2ff;
+    --color-au-section-math: #9a98ff;
+    --color-au-section-math-strong: #b8b6ff;
     --color-au-accent-tint: rgba(105, 173, 255, 0.18);
     --color-au-accent-tint-strong: rgba(105, 173, 255, 0.28);
     --color-au-canvas: #111113;
@@ -2402,8 +2802,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 
   .sat-authoring {
-    --au-tint: #69adff;
-    --au-tint-strong: #8ac2ff;
+    --au-tint: var(--color-au-section-rw);
+    --au-tint-strong: var(--color-au-section-rw-strong);
     --au-tint-soft: color-mix(in oklab, var(--au-tint) 18%, transparent);
     --au-tint-soft-strong: color-mix(in oklab, var(--au-tint) 28%, transparent);
     --au-elevation-menu:
@@ -2414,6 +2814,11 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
       0 0 0 0.5px rgba(255, 255, 255, 0.07),
       0 2px 6px rgba(0, 0, 0, 0.24),
       0 24px 68px rgba(0, 0, 0, 0.48);
+  }
+
+  .sat-authoring[data-au-section="math"] {
+    --au-tint: var(--color-au-section-math);
+    --au-tint-strong: var(--color-au-section-math-strong);
   }
 
   .sat-ui [class*="bg-white"],
@@ -2483,7 +2888,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 
   .sat-authoring .authoring-skeleton::after {
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+    background: var(--color-au-surface);
   }
 }
 
@@ -2502,7 +2907,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 }
 
-@media (prefers-color-scheme: dark) and (forced-colors: active) {
+@media (forced-colors: active) {
   .sat-ui,
   .sat-product {
     --sat-background: Canvas;
@@ -2510,6 +2915,9 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     --sat-surface-subtle: Canvas;
     --sat-surface-hover: Canvas;
     --sat-canvas: Canvas;
+    --sat-label: CanvasText;
+    --sat-secondary-label: CanvasText;
+    --sat-tertiary-label: CanvasText;
     --sat-text: CanvasText;
     --sat-text-secondary: CanvasText;
     --sat-divider: CanvasText;
@@ -2520,6 +2928,13 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   .sat-product {
     --authoring-canvas: Canvas;
     --authoring-sheet: Canvas;
+    --color-au-accent: Highlight;
+    --color-au-accent-hover: Highlight;
+    --color-au-accent-active: Highlight;
+    --color-au-section-rw: Highlight;
+    --color-au-section-rw-strong: Highlight;
+    --color-au-section-math: Highlight;
+    --color-au-section-math-strong: Highlight;
     --color-au-canvas: Canvas;
     --color-au-surface: Canvas;
     --color-au-surface-raised: Canvas;
@@ -2528,5 +2943,11 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     --color-au-fill: Canvas;
     --color-au-fill-strong: Canvas;
     --color-au-fill-press: Canvas;
+    --color-au-success: Highlight;
+    --color-au-success-text: CanvasText;
+    --color-au-danger: Highlight;
+    --color-au-danger-text: CanvasText;
+    --color-au-warning: Highlight;
+    --color-au-warning-text: CanvasText;
   }
 }

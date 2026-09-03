@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Check, CircleAlert, Cloud, LoaderCircle } from "lucide-react";
 import type { QuestionSaveStatus } from "../hooks/useQuestionAutosave";
 import { authoringMotion } from "./authoringMotion";
@@ -13,6 +13,7 @@ export function SaveStatusIndicator({
   lastSavedAt: Date | null;
   onRetry?: () => void;
 }) {
+  const reduceMotion = useReducedMotion();
   const [showSaving, setShowSaving] = useState(false);
 
   useEffect(() => {
@@ -20,9 +21,13 @@ export function SaveStatusIndicator({
       setShowSaving(false);
       return;
     }
+    if (reduceMotion) {
+      setShowSaving(true);
+      return;
+    }
     const timer = window.setTimeout(() => setShowSaving(true), 220);
     return () => window.clearTimeout(timer);
-  }, [status]);
+  }, [reduceMotion, status]);
 
   const visibleStatus = status === "saving" && !showSaving ? "unsaved" : status;
   const meta =
@@ -30,13 +35,18 @@ export function SaveStatusIndicator({
       ? { key: "saving", label: "Saving", icon: LoaderCircle, className: "text-slate-500" }
       : visibleStatus === "unsaved"
         ? { key: "editing", label: "Editing", icon: Cloud, className: "text-slate-500" }
-        : visibleStatus === "error"
-          ? { key: "error", label: "Not saved", icon: CircleAlert, className: "text-au-danger-text" }
-          : { key: "saved", label: "Saved", icon: Check, className: "text-au-success-text" };
+        : visibleStatus === "offline"
+          ? { key: "offline", label: "Offline", icon: Cloud, className: "text-au-warning-text" }
+          : visibleStatus === "error"
+            ? { key: "error", label: "Not saved", icon: CircleAlert, className: "text-au-danger-text" }
+            : { key: "saved", label: "Saved", icon: Check, className: "text-au-success-text" };
   const Icon = meta.icon;
-  const title = lastSavedAt
-    ? `Last saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-    : meta.label;
+  const title =
+    visibleStatus === "offline"
+      ? "Offline. Changes are stored on this device and will retry when you reconnect."
+      : lastSavedAt
+        ? `Last saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+        : meta.label;
 
   return (
     <button
@@ -50,15 +60,16 @@ export function SaveStatusIndicator({
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={meta.key}
-          initial={{ opacity: 0, y: 3 }}
+          initial={reduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 3 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -3 }}
-          transition={authoringMotion.state}
+          exit={reduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: -3 }}
+          transition={reduceMotion ? { duration: 0.01 } : authoringMotion.state}
           className="flex items-center gap-1.5"
         >
           <Icon
             size={14}
-            className={visibleStatus === "saving" ? "animate-spin" : undefined}
+            aria-hidden="true"
+            className={visibleStatus === "saving" && !reduceMotion ? "animate-spin" : undefined}
             strokeWidth={2.3}
           />
           <span>{meta.label}</span>

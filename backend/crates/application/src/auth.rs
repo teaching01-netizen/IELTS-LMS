@@ -588,6 +588,14 @@ impl AuthService {
         .fetch_one(&self.pool)
         .await?;
 
+        let lease_epoch: Option<i64> =
+            sqlx::query_scalar("SELECT lease_epoch FROM student_attempts WHERE id = ?")
+                .bind(&attempt_id)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
+
         let claims = AttemptTokenClaims {
             token_id: session.token_id.clone(),
             user_id: principal.user.id.clone(),
@@ -595,6 +603,8 @@ impl AuthService {
             attempt_id: attempt_id.clone(),
             client_session_id: client_session_id.clone(),
             exp: expires_at,
+            lease_epoch: Some(lease_epoch.unwrap_or(1)),
+            organization_id: principal.user.organization_id.clone(),
         };
         Ok(IssueAttemptToken {
             attempt_token: sign_attempt_token(&self.config, &claims),

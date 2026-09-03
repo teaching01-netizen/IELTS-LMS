@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { JSONContent } from "@tiptap/core";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -23,7 +23,6 @@ import {
   Table2,
   Underline as UnderlineIcon,
   Undo2,
-  X,
 } from "lucide-react";
 import type { StructuredContent } from "../contracts/assessment";
 import {
@@ -34,6 +33,7 @@ import {
 import { SatImage } from "./SatImageExtension";
 import { EditableBlockMath, EditableInlineMath } from "./EditableMathExtension";
 import { uploadAssessmentAsset } from "../api/assessmentMediaApi";
+import { AuthoringDialog } from "../ui/authoringPrimitives";
 import { authoringMotion } from "../ui/authoringMotion";
 
 const baseExtensions = [
@@ -209,6 +209,7 @@ function ComposerToolbar({
   onOpenDialog: (dialog: Dialog) => void;
   onTableMutation: () => void;
 }) {
+  const reduceMotion = useReducedMotion();
   const state = useEditorState({
     editor,
     selector: ({ editor: current }) => ({
@@ -387,10 +388,10 @@ function ComposerToolbar({
       <AnimatePresence initial={false}>
         {capabilities.table && state?.table ? (
           <motion.div
-            initial={{ opacity: 0 }}
+            initial={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={authoringMotion.state}
+            exit={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
+            transition={reduceMotion ? { duration: 0.01 } : authoringMotion.state}
             className="sat-rich-editor__table-toolbar"
           >
             <div className="sat-rich-editor__table-toolbar-row">
@@ -464,15 +465,16 @@ function ToolbarButton({
   onClick: () => void;
   children: React.ReactNode;
 }) {
+  const reduceMotion = useReducedMotion();
   return (
     <motion.button
       type="button"
       title={title}
       aria-label={title}
-      aria-pressed={active || undefined}
+      aria-pressed={active}
       disabled={disabled}
-      whileTap={authoringMotion.press}
-      transition={authoringMotion.fast}
+      whileTap={reduceMotion ? {} : authoringMotion.press}
+      transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
       onClick={onClick}
       className={`sat-rich-editor__toolbar-button${active ? " is-active" : ""}`}
     >
@@ -507,6 +509,7 @@ function MathDialog({
   target: MathDialogTarget;
   onClose: () => void;
 }) {
+  const reduceMotion = useReducedMotion();
   const [latex, setLatex] = useState(target.latex);
   const [display, setDisplay] = useState(target.display);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -624,7 +627,7 @@ function MathDialog({
                 onClick={() => insertSnippet(item.latex, item.select)}
               />
             ))}
-            <span className="mx-0.5 h-8 w-px bg-black/10" aria-hidden="true" />
+            <span className="mx-0.5 h-8 w-px bg-au-separator" aria-hidden="true" />
             {equationSymbols.map((item) => (
               <EquationChip
                 key={item.label}
@@ -666,10 +669,10 @@ function MathDialog({
             aria-invalid={Boolean(equation.error)}
             aria-describedby={equation.error ? "sat-equation-error" : "sat-equation-help"}
             placeholder="Example: \\frac{x+1}{2}=8"
-            className={`w-full resize-y rounded-[13px] border bg-au-fill px-3.5 py-3 font-mono text-[14px] leading-6 text-slate-950 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-4 ${
+            className={`w-full resize-y rounded-[13px] border bg-au-fill px-3.5 py-3 font-mono text-[14px] leading-6 text-slate-950 outline-none transition placeholder:text-slate-400 focus:bg-au-surface focus:ring-4 ${
               equation.error
-                ? "border-red-300 focus:border-red-400 focus:ring-red-100"
-                : "border-transparent focus:border-[#0a84ff]/35 focus:ring-[#0a84ff]/10"
+                ? "border-au-danger/40 focus:border-au-danger focus:ring-au-danger-tint"
+                : "border-transparent focus:border-au-accent/35 focus:ring-au-accent/10"
             }`}
           />
           <div className="mt-1.5 min-h-5" aria-live="polite">
@@ -689,8 +692,8 @@ function MathDialog({
         <div>
           <span className="mb-2 block text-[12px] font-semibold text-slate-700">Preview</span>
           <motion.div
-            layout
-            transition={authoringMotion.state}
+            layout={!reduceMotion}
+            transition={reduceMotion ? { duration: 0.01 } : authoringMotion.state}
             className={`flex min-h-28 overflow-x-auto rounded-[15px] border border-au-separator bg-au-fill p-5 ${
               display ? "items-center justify-center text-center" : "items-center justify-start"
             }`}
@@ -698,15 +701,15 @@ function MathDialog({
             {equation.html ? (
               <motion.div
                 key={`${display}-${latex}`}
-                initial={{ opacity: 0.45, y: 2 }}
+                initial={reduceMotion ? { opacity: 1, y: 0 } : { opacity: 0.45, y: 2 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={authoringMotion.state}
+                transition={reduceMotion ? { duration: 0.01 } : authoringMotion.state}
                 className="max-w-full text-slate-950"
                 dangerouslySetInnerHTML={{ __html: equation.html }}
               />
             ) : (
               <div className="mx-auto flex flex-col items-center gap-2 text-center text-slate-400">
-                <Sigma size={20} strokeWidth={1.7} />
+                <Sigma size={20} strokeWidth={1.7} aria-hidden="true" />
                 <span className="text-[11px]">
                   {latex.trim()
                     ? "Complete the expression to preview"
@@ -731,11 +734,11 @@ function MathDialog({
             </button>
             <motion.button
               type="button"
-              whileTap={authoringMotion.press}
-              transition={authoringMotion.fast}
+              whileTap={reduceMotion ? {} : authoringMotion.press}
+              transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
               disabled={!canCommit}
               onClick={commitEquation}
-              className="authoring-interactive h-10 rounded-full bg-au-accent px-4 text-[12px] font-semibold text-white shadow-[0_1px_2px_rgba(0,0,0,0.12)] hover:bg-au-accent-hover disabled:cursor-default disabled:opacity-35"
+              className="authoring-interactive h-10 rounded-full bg-au-accent px-4 text-[12px] font-semibold text-white shadow-sm hover:bg-au-accent-hover disabled:cursor-default disabled:opacity-35"
             >
               {isEditing ? "Update equation" : "Insert equation"}
             </motion.button>
@@ -765,7 +768,7 @@ function EquationPlacementButton({
       onClick={onClick}
       className={`min-h-8 rounded-full px-3.5 text-[12px] font-semibold transition disabled:cursor-default disabled:opacity-30 ${
         active
-          ? "bg-white text-slate-950 shadow-[0_1px_3px_rgba(0,0,0,0.12)]"
+          ? "bg-au-surface text-slate-950 shadow-sm"
           : "text-slate-500 hover:text-slate-900"
       }`}
     >
@@ -806,6 +809,7 @@ function ImageDialog({
   ownerId?: string;
   onClose: () => void;
 }) {
+  const reduceMotion = useReducedMotion();
   const [assetId, setAssetId] = useState("");
   const [alt, setAlt] = useState("");
   const [caption, setCaption] = useState("");
@@ -846,7 +850,7 @@ function ImageDialog({
       {ownerId ? (
         <label
           htmlFor="sat-visual-upload"
-          className="authoring-interactive mb-4 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-300 bg-au-fill px-4 py-4 text-xs font-semibold text-slate-600 hover:border-slate-400 hover:bg-slate-100"
+          className="authoring-interactive mb-4 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-au-separator-strong bg-au-fill px-4 py-4 text-xs font-semibold text-slate-600 hover:border-au-accent/35 hover:bg-au-fill-strong"
         >
           <input
             id="sat-visual-upload"
@@ -872,10 +876,10 @@ function ImageDialog({
       <AnimatePresence initial={false}>
         {previewUrl ? (
           <motion.div
-            initial={{ opacity: 0, y: 5 }}
+            initial={reduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={authoringMotion.surface}
+            exit={reduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: -4 }}
+            transition={reduceMotion ? { duration: 0.01 } : authoringMotion.surface}
             className="relative mb-4 overflow-hidden rounded-xl border border-au-separator bg-au-fill"
           >
             <img
@@ -886,26 +890,26 @@ function ImageDialog({
             <AnimatePresence>
               {uploading ? (
                 <motion.div
-                  initial={{ opacity: 0 }}
+                  initial={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="absolute inset-x-0 top-0 h-1 overflow-hidden bg-slate-200/80"
+                  exit={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
+                  className="absolute inset-x-0 top-0 h-1 overflow-hidden bg-au-fill-strong"
                 >
                   <motion.span
                     initial={{ x: "-100%" }}
-                    animate={{ x: "260%" }}
-                    transition={{ duration: 1.05, ease: "easeInOut", repeat: Infinity }}
-                    className="block h-full w-1/3 bg-slate-900"
+                    animate={reduceMotion ? { x: "0%" } : { x: "260%" }}
+                    transition={reduceMotion ? { duration: 0.01 } : { duration: 1.05, ease: "easeInOut", repeat: Infinity }}
+                    className="block h-full w-1/3 bg-au-accent"
                   />
                 </motion.div>
               ) : null}
             </AnimatePresence>
             {!uploading && assetId && !uploadError ? (
               <motion.span
-                initial={{ opacity: 0, scale: 0.82 }}
+                initial={reduceMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.82 }}
                 animate={{ opacity: 1, scale: 1 }}
-                transition={authoringMotion.spring}
-                className="absolute right-2 top-2 rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-au-success-text shadow-sm"
+                transition={reduceMotion ? { duration: 0.01 } : authoringMotion.spring}
+                className="absolute right-2 top-2 rounded-full bg-au-surface px-2 py-1 text-[10px] font-semibold text-au-success-text shadow-sm"
               >
                 Secured ✓
               </motion.span>
@@ -915,7 +919,7 @@ function ImageDialog({
       </AnimatePresence>
 
       {uploadError ? (
-        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-au-danger-tint px-3 py-2 text-xs font-medium text-au-danger-text">
+        <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-au-danger-tint px-3 py-2 text-xs font-medium text-au-danger-text">
           <span>{uploadError}</span>
           {selectedFile ? (
             <button
@@ -942,7 +946,7 @@ function ImageDialog({
               aria-label="Asset ID or image URL"
               value={assetId}
               onChange={(event) => setAssetId(event.target.value)}
-              className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+              className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
               placeholder="Existing asset ID or https://…"
             />
           </div>
@@ -957,21 +961,22 @@ function ImageDialog({
               data-dialog-initial-focus
               value={assetId}
               onChange={(event) => setAssetId(event.target.value)}
-              className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+              className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
               placeholder="https://…"
             />
           </div>
         </>
       )}
       <span id="sat-visual-alt-label" className="mt-3 block text-xs font-semibold text-slate-700">
-        Alternative text <span className="text-red-500">*</span>
+        Alternative text <span className="text-au-danger-text">*</span>
       </span>
       <input
         id="sat-visual-alt"
         aria-labelledby="sat-visual-alt-label"
+        aria-required="true"
         value={alt}
         onChange={(event) => setAlt(event.target.value)}
-        className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+        className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
         placeholder="Describe the information a student needs from this visual"
       />
       <p className="mt-1.5 text-[10px] leading-5 text-slate-400">
@@ -989,14 +994,14 @@ function ImageDialog({
         aria-labelledby="sat-visual-caption-label"
         value={caption}
         onChange={(event) => setCaption(event.target.value)}
-        className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+        className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
         placeholder="Optional"
       />
       <div className="mt-4 flex justify-end">
         <motion.button
           type="button"
-          whileTap={authoringMotion.press}
-          transition={authoringMotion.fast}
+          whileTap={reduceMotion ? {} : authoringMotion.press}
+          transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
           disabled={uploading || !assetId.trim() || !alt.trim()}
           onClick={() => {
             editor
@@ -1014,7 +1019,7 @@ function ImageDialog({
               .run();
             onClose();
           }}
-          className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+          className="rounded-lg bg-au-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
         >
           Insert visual
         </motion.button>
@@ -1036,86 +1041,15 @@ function DialogFrame({
   dismissOnBackdrop?: boolean;
   widthClassName?: string;
 }) {
-  const surfaceRef = useRef<HTMLDivElement>(null);
-  const previousActive = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    previousActive.current = document.activeElement as HTMLElement | null;
-    const surface = surfaceRef.current;
-    const focusables = () =>
-      Array.from(
-        surface?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])'
-        ) ?? []
-      );
-    const frame = window.requestAnimationFrame(() => {
-      const preferred = surface?.querySelector<HTMLElement>("[data-dialog-initial-focus]");
-      (preferred ?? focusables()[0])?.focus();
-    });
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusables();
-      const first = items[0];
-      const last = items.at(-1);
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      document.removeEventListener("keydown", onKeyDown);
-      previousActive.current?.focus();
-    };
-  }, [onClose]);
-
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={authoringMotion.surface}
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/20 p-4 authoring-glass"
-      onMouseDown={(event) => {
-        if (dismissOnBackdrop && event.target === event.currentTarget) onClose();
-      }}
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
+    <AuthoringDialog
+      open
+      title={title}
+      onClose={onClose}
+      dismissOnBackdrop={dismissOnBackdrop}
+      contentClassName={widthClassName}
     >
-      <motion.div
-        ref={surfaceRef}
-        initial={{ opacity: 0, y: 10, scale: 0.985 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 6, scale: 0.99 }}
-        transition={authoringMotion.surface}
-        className={`w-full ${widthClassName} rounded-2xl border border-black/10 bg-white p-5 shadow-[0_20px_70px_rgba(15,23,42,0.2)]`}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-950">{title}</h3>
-          <motion.button
-            type="button"
-            whileTap={authoringMotion.press}
-            transition={authoringMotion.fast}
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-            aria-label="Close dialog"
-          >
-            <X size={16} />
-          </motion.button>
-        </div>
-        {children}
-      </motion.div>
-    </motion.div>
+      <div className="px-5 pb-5">{children}</div>
+    </AuthoringDialog>
   );
 }

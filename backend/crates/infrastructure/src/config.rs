@@ -556,6 +556,16 @@ impl AppConfig {
         format!("{}:{}", self.api_host, self.api_port)
     }
 
+    /// Selects whether newly created attempts may opt into response durability
+    /// protocol v2. Existing attempts keep the protocol version persisted on
+    /// their row; rollout is therefore explicit and reversible for new work.
+    pub fn response_durability_v2_enabled(&self) -> bool {
+        env::var("RESPONSE_DURABILITY_V2_ENABLED")
+            .ok()
+            .and_then(|value| parse_bool(&value))
+            .unwrap_or(false)
+    }
+
     /// Validate secrets that must never silently use development defaults in production.
     pub fn validate_for_runtime(&self) -> Result<(), String> {
         let environment = env::var("ENVIRONMENT")

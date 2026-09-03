@@ -62,6 +62,7 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
     "0038_sat_section_timing_model.sql",
     "0039_schedule_provider_identity.sql",
     "0043_attempt_terminalizations.sql",
+    "0049_response_durability_v2.sql",
 ];
 
 fn command(mutation_type: MutationType, payload: serde_json::Value) -> MutationCommand {
@@ -1627,7 +1628,7 @@ async fn mutation_batch_persists_writing_answers_separately_and_tracks_current_q
 }
 
 #[tokio::test]
-async fn mutation_batch_accepts_objective_mutations_outside_the_current_section() {
+async fn mutation_batch_rejects_objective_mutations_outside_the_current_section() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -1648,7 +1649,7 @@ async fn mutation_batch_accepts_objective_mutations_outside_the_current_section(
         .unwrap()
         .to_owned();
 
-    // Policy: cross-section objective mutations are accepted.
+    // Known objective targets must belong to the authoritative active section.
     let response = app
         .oneshot(
             with_attempt_token(Request::builder(), &attempt_token)
@@ -1676,15 +1677,16 @@ async fn mutation_batch_accepts_objective_mutations_outside_the_current_section(
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::CONFLICT);
     let json = json_body(response).await;
-    assert_eq!(json["data"]["attempt"]["answers"]["q1"], "A");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(json["error"]["details"]["reason"], "SECTION_MISMATCH");
 
     database.shutdown().await;
 }
 
 #[tokio::test]
-async fn mutation_batch_accepts_recent_previous_section_answer_during_section_transition() {
+async fn mutation_batch_rejects_recent_previous_section_answer_during_section_transition() {
     let database = mysql::TestDatabase::new(DELIVERY_MIGRATIONS).await;
     let schedule = seed_schedule(database.pool()).await;
     let schedule_id = Uuid::parse_str(&schedule.id).unwrap();
@@ -1754,11 +1756,9 @@ async fn mutation_batch_accepts_recent_previous_section_answer_during_section_tr
 
     let status = response.status();
     let json = json_body(response).await;
-    assert_eq!(status, StatusCode::OK, "{json}");
-    assert_eq!(json["data"]["appliedMutationCount"], 2);
-    assert_eq!(json["data"]["serverAcceptedThroughSeq"], 2);
-    assert_eq!(json["data"]["attempt"]["answers"]["q1"], "T");
-    assert_eq!(json["data"]["attempt"]["answers"]["r1"], "T");
+    assert_eq!(status, StatusCode::CONFLICT, "{json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+    assert_eq!(json["error"]["details"]["reason"], "SECTION_MISMATCH");
 
     database.shutdown().await;
 }

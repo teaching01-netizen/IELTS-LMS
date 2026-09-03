@@ -98,18 +98,29 @@ export function StudentSessionRoute() {
       );
     }
 
+    const v2DurabilityEnabled =
+      String(import.meta.env['VITE_USE_V2_DURABILITY_ENGINE'] ?? 'false') === 'true' &&
+      attemptSnapshot.protocolVersion === 2;
     return (
       <SatStudentSessionRoute
         scheduleId={scheduleId}
         attemptId={attemptSnapshot.id}
         candidateId={attemptSnapshot.candidateId}
+        attemptSnapshot={attemptSnapshot}
         runtimeSnapshot={runtimeSnapshot}
         liveSocketConnected={liveSocketConnected}
         attemptUpdateToken={satAttemptUpdateToken}
+        leaseEpoch={attemptSnapshot.leaseEpoch}
+        controlEpoch={attemptSnapshot.controlEpoch}
+        useV2DurabilityEngine={v2DurabilityEnabled}
         onExit={navigateToStudentCheckIn}
       />
     );
   }
+
+  const v2DurabilityEnabled =
+    String(import.meta.env['VITE_USE_V2_DURABILITY_ENGINE'] ?? 'false') === 'true' &&
+    attemptSnapshot?.protocolVersion === 2;
 
   return (
     <StudentAppWrapper
@@ -120,6 +131,7 @@ export function StudentSessionRoute() {
       onRuntimeRefresh={refreshRuntime}
       runtimeSnapshot={runtimeSnapshot}
       answerInvariantRollout={answerInvariantRollout}
+      useV2DurabilityEngine={v2DurabilityEnabled}
       showSubmitControls={false}
       allowExitDuringExam={false}
     />

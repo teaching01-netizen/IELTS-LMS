@@ -1,4 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect } from "react";
+
+function setScrollPosition(x: number, y: number): void {
+  try {
+    window.scrollTo(x, y);
+  } catch {
+    // jsdom exposes scrollTo but intentionally throws because it has no
+    // layout engine. The document locking state is still testable there.
+  }
+}
 
 /**
  * Scopes document-level locking to the actual exam phase.
@@ -10,29 +19,29 @@ import { useEffect } from 'react';
  */
 export function useStudentExamPageLock(active: boolean): void {
   useEffect(() => {
-    if (!active || typeof document === 'undefined') {
+    if (!active || typeof document === "undefined") {
       return;
     }
 
     const root = document.documentElement;
     const body = document.body;
-    const rootHadActiveClass = root.classList.contains('student-exam-active');
-    const bodyHadActiveClass = body.classList.contains('student-exam-active');
+    const rootHadActiveClass = root.classList.contains("student-exam-active");
+    const bodyHadActiveClass = body.classList.contains("student-exam-active");
     const previousScrollX = window.scrollX;
     const previousScrollY = window.scrollY;
 
-    root.classList.add('student-exam-active');
-    body.classList.add('student-exam-active');
-    window.scrollTo(0, 0);
+    root.classList.add("student-exam-active");
+    body.classList.add("student-exam-active");
+    setScrollPosition(0, 0);
 
     return () => {
       if (!rootHadActiveClass) {
-        root.classList.remove('student-exam-active');
+        root.classList.remove("student-exam-active");
       }
       if (!bodyHadActiveClass) {
-        body.classList.remove('student-exam-active');
+        body.classList.remove("student-exam-active");
       }
-      window.scrollTo(previousScrollX, previousScrollY);
+      setScrollPosition(previousScrollX, previousScrollY);
     };
   }, [active]);
 }

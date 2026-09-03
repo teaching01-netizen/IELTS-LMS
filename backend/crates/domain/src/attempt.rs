@@ -269,6 +269,25 @@ pub enum MutationCommand {
 }
 
 impl MutationCommand {
+    /// Returns true for response/objective commands that belong to the V2
+    /// response-durability protocol rather than the legacy mutation endpoint.
+    pub fn is_response_command(&self) -> bool {
+        matches!(
+            self,
+            Self::Answer(_)
+                | Self::WritingAnswer(_)
+                | Self::Flag(_)
+                | Self::SetSlot(_)
+                | Self::ClearSlot(_)
+                | Self::SetScalar(_)
+                | Self::ClearScalar(_)
+                | Self::SetChoice(_)
+                | Self::ClearChoice(_)
+                | Self::SetEssayText(_)
+                | Self::ClearEssayText(_)
+        )
+    }
+
     pub fn mutation_type(&self) -> MutationType {
         match self {
             Self::Answer(_) => MutationType::Answer,
@@ -543,6 +562,24 @@ pub struct StudentAttempt {
     pub updated_at: DateTime<Utc>,
     pub revision: i32,
     pub answer_revision: i32,
+    #[serde(default)]
+    pub protocol_version: i32,
+    #[serde(default)]
+    pub delivery_status: String,
+    #[serde(default)]
+    pub lease_epoch: i64,
+    #[serde(default)]
+    pub control_epoch: i64,
+    #[serde(default)]
+    pub response_revision: i64,
+    #[serde(default)]
+    pub deadline_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub closing_grace_until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub final_response_digest: Option<String>,
+    #[serde(default)]
+    pub active_client_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

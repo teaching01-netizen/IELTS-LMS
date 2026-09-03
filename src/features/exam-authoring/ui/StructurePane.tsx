@@ -95,17 +95,19 @@ export function StructurePane({
     });
   };
 
-  const runBulkAction = async (action: BulkQuestionAction) => {
-    if (!selectedIds.size) return;
+  const runBulkAction = async (action: BulkQuestionAction): Promise<boolean> => {
+    if (!selectedIds.size) return false;
     setBulkError(null);
     try {
       await onBulkAction([...selectedIds], action);
       setSelectedIds(new Set());
       setSelectionMode(false);
+      return true;
     } catch (error) {
       setBulkError(
         error instanceof Error ? error.message : "The bulk action could not be completed."
       );
+      return false;
     }
   };
 
@@ -131,8 +133,8 @@ export function StructurePane({
               }}
               className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold transition ${
                 selectionMode
-                  ? "bg-slate-950 text-white"
-                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                  ? "bg-au-accent text-white"
+                  : "text-slate-500 hover:bg-au-fill hover:text-slate-900"
               }`}
             >
               {selectionMode ? "Done" : "Select"}
@@ -162,7 +164,7 @@ export function StructurePane({
                       layout
                       key={module.id}
                       transition={authoringMotion.panel}
-                      className={`overflow-hidden rounded-xl transition-colors ${active ? "bg-black/[0.045]" : "bg-transparent hover:bg-black/[0.025]"}`}
+                      className={`overflow-hidden rounded-xl transition-colors ${active ? "bg-au-tint-soft-strong" : "bg-transparent hover:bg-au-fill"}`}
                     >
                       <motion.button
                         type="button"
@@ -181,7 +183,7 @@ export function StructurePane({
                             {module.questions.length}/{module.targetQuestionCount}
                           </span>
                         </div>
-                        <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-100">
+                        <div className="mt-2 h-1 overflow-hidden rounded-full bg-au-fill-strong">
                           <div
                             className="h-full rounded-full bg-au-accent transition-[width]"
                             style={{ width: `${progress}%` }}
@@ -224,15 +226,15 @@ export function StructurePane({
                                 module.questions.length >= module.targetQuestionCount
                               }
                               onClick={() => onCreateQuestion(module.id)}
-                              className="mt-3 flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-au-separator bg-white px-2 py-2 text-[11px] font-semibold text-slate-500 transition hover:border-au-separator hover:bg-au-fill-strong hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-45"
+                              className="mt-3 flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-au-separator bg-au-surface px-2 py-2 text-[11px] font-semibold text-slate-500 transition hover:border-au-separator-strong hover:bg-au-fill-strong hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-45"
                             >
                               {module.questions.length >= module.targetQuestionCount ? (
                                 <>
-                                  <Check size={13} /> Module complete
+                                  <Check size={13} aria-hidden="true" /> Module complete
                                 </>
                               ) : (
                                 <>
-                                  <Plus size={13} /> {isCreating ? "Adding…" : "Add question"}
+                                  <Plus size={13} aria-hidden="true" /> {isCreating ? "Adding…" : "Add question"}
                                 </>
                               )}
                             </motion.button>
@@ -432,16 +434,16 @@ function SortableQuestionButton({
                   y: -3,
                   scale: 1.045,
                   opacity: 0.96,
-                  boxShadow: "0 10px 24px rgba(15,23,42,0.16)",
+                  boxShadow: "var(--au-elevation-drag)",
                 }
               : emphasized
                 ? {
                     y: 0,
                     scale: [1, 1.055, 1],
                     opacity: 1,
-                    boxShadow: "0 0 0 rgba(0,0,0,0)",
+                    boxShadow: "none",
                   }
-                : { y: 0, scale: 1, opacity: 1, boxShadow: "0 0 0 rgba(0,0,0,0)" }
+                : { y: 0, scale: 1, opacity: 1, boxShadow: "none" }
           }
           transition={
             emphasized ? { duration: 0.52, ease: AUTHORING_EMPHASIS_EASE } : authoringMotion.spring
@@ -454,14 +456,17 @@ function SortableQuestionButton({
             transition={authoringMotion.fast}
             onClick={onClick}
             title={`Question ${index + 1} · ${statusTitle}`}
-            className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border text-[11px] font-semibold tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
+            aria-label={`Question ${index + 1}. ${statusTitle}${question.isPretest ? ". Pretest" : ""}`}
+            aria-pressed={selectionMode ? checked : undefined}
+            aria-current={!selectionMode && selected ? "page" : undefined}
+            className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border text-[11px] font-semibold tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent ${
               checked
-                ? "border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-100"
+                ? "border-au-accent bg-au-accent-tint text-au-accent ring-2 ring-au-accent-tint"
                 : selected && !selectionMode
-                  ? "border-[#0071e3] text-white"
+                  ? "border-au-accent text-white"
                   : pending
-                    ? "border-slate-400 bg-slate-50 text-slate-800 ring-2 ring-slate-100"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
+                    ? "border-au-separator-strong bg-au-fill text-slate-800 ring-2 ring-au-accent-tint"
+                    : "border-au-separator bg-au-surface text-slate-600 hover:border-au-separator-strong hover:bg-au-fill hover:text-slate-950"
             }`}
           >
             {selected && !selectionMode ? (
@@ -486,7 +491,7 @@ function SortableQuestionButton({
             </span>
             {question.isPretest ? (
               <span
-                className="absolute right-1 top-1 z-10 h-1.5 w-1.5 rounded-full bg-amber-400"
+                className="absolute right-1 top-1 z-10 h-1.5 w-1.5 rounded-full bg-au-warning"
                 title="Pretest"
               />
             ) : null}
@@ -499,7 +504,8 @@ function SortableQuestionButton({
           {!selectionMode ? (
             <GripVertical
               size={10}
-              className={`pointer-events-none absolute left-0.5 top-1/2 z-10 -translate-y-1/2 ${selected ? "text-white/40" : "text-slate-300"}`}
+              aria-hidden="true"
+              className={`pointer-events-none absolute left-0.5 top-1/2 z-10 -translate-y-1/2 ${selected ? "text-white/60" : "text-slate-300"}`}
             />
           ) : null}
         </motion.div>
@@ -530,6 +536,7 @@ function QuestionReadinessIcon({
         exit={{ opacity: 0, scale: 0.55 }}
         transition={authoringMotion.state}
         className={className}
+        aria-hidden="true"
       >
         {saving ? (
           <LoaderCircle
@@ -538,12 +545,12 @@ function QuestionReadinessIcon({
             strokeWidth={2.6}
           />
         ) : status === "ready" ? (
-          <CheckCircle2 size={9} className={inverted ? "" : "text-emerald-500"} strokeWidth={2.6} />
+          <CheckCircle2 size={9} className={inverted ? "" : "text-au-success"} strokeWidth={2.6} />
         ) : status === "error" ? (
-          <AlertCircle size={9} className={inverted ? "" : "text-red-500"} strokeWidth={2.6} />
+          <AlertCircle size={9} className={inverted ? "" : "text-au-danger"} strokeWidth={2.6} />
         ) : (
           <span
-            className={`block h-1.5 w-1.5 rounded-full ${inverted ? "bg-white/60" : "bg-slate-300"}`}
+            className={`block h-1.5 w-1.5 rounded-full ${inverted ? "bg-au-surface/60" : "bg-au-fill-strong"}`}
           />
         )}
       </motion.span>
@@ -570,7 +577,7 @@ function BulkActionBar({
   disabled: boolean;
   error: string | null;
   onClear: () => void;
-  onAction: (action: BulkQuestionAction) => Promise<void>;
+  onAction: (action: BulkQuestionAction) => Promise<boolean>;
 }) {
   const selectedPretests = questions.filter(
     (question) => selectedQuestionIds.has(question.examQuestionId) && question.isPretest
@@ -578,6 +585,7 @@ function BulkActionBar({
   const allSelectedArePretest = count > 0 && selectedPretests === count;
   const [moveTargetId, setMoveTargetId] = useState(moveTargets[0]?.id ?? "");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     setMoveTargetId(moveTargets[0]?.id ?? "");
@@ -589,7 +597,7 @@ function BulkActionBar({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 12 }}
       transition={authoringMotion.panel}
-      className="authoring-glass border-t border-au-separator p-3 shadow-[0_-8px_24px_rgba(15,23,42,0.04)]"
+      className="authoring-glass au-elevation-card border-t border-au-separator p-3"
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <AnimatePresence mode="wait" initial={false}>
@@ -610,10 +618,11 @@ function BulkActionBar({
           transition={authoringMotion.fast}
           onClick={onClear}
           disabled={!count || disabled}
-          className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+          className="rounded-md p-1 text-slate-400 hover:bg-au-fill hover:text-slate-700 disabled:opacity-30"
           title="Clear selection"
+          aria-label="Clear selection"
         >
-          <X size={13} />
+          <X size={13} aria-hidden="true" />
         </motion.button>
       </div>
 
@@ -623,7 +632,7 @@ function BulkActionBar({
             value={moveTargetId}
             disabled={disabled}
             onChange={(event) => setMoveTargetId(event.target.value)}
-            className="min-w-0 flex-1 rounded-md border border-au-separator bg-white px-2 py-1.5 text-[10px] font-medium text-slate-600 outline-none focus:border-slate-400"
+            className="min-w-0 flex-1 rounded-md border border-au-separator bg-au-surface px-2 py-1.5 text-[10px] font-medium text-slate-600 outline-none focus:border-au-accent"
             aria-label="Move selected questions to module"
           >
             {moveTargets.map((target) => (
@@ -640,7 +649,7 @@ function BulkActionBar({
             onClick={() => void onAction({ type: "move", destinationModuleId: moveTargetId })}
             className="flex items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-au-fill-strong hover:text-slate-900 disabled:opacity-30"
           >
-            <MoveRight size={12} /> Move
+            <MoveRight size={12} aria-hidden="true" /> Move
           </motion.button>
         </div>
       ) : null}
@@ -671,10 +680,16 @@ function BulkActionBar({
             title={`Delete ${count} question${count === 1 ? "" : "s"}?`}
             description="The selected questions will be removed from this module. Cancel is focused by default."
             confirmLabel="Delete selected"
+            busy={deleteBusy}
             onCancel={() => setDeleteOpen(false)}
-            onConfirm={() => {
-              setDeleteOpen(false);
-              void onAction({ type: "delete" });
+            onConfirm={async () => {
+              if (deleteBusy) return;
+              setDeleteBusy(true);
+              try {
+                if (await onAction({ type: "delete" })) setDeleteOpen(false);
+              } finally {
+                setDeleteBusy(false);
+              }
             }}
           />
         </div>
@@ -722,11 +737,11 @@ function BulkButton({
       onClick={onClick}
       className={`authoring-interactive flex min-h-12 w-full flex-col items-center justify-center gap-1 rounded-lg text-[9px] font-semibold disabled:cursor-not-allowed disabled:opacity-30 ${
         danger
-          ? "text-red-500 hover:bg-red-50"
-          : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+          ? "text-au-danger hover:bg-au-danger-tint"
+          : "text-slate-500 hover:bg-au-fill hover:text-slate-900"
       }`}
     >
-      {icon}
+      <span aria-hidden="true">{icon}</span>
       <span>{label}</span>
     </motion.button>
   );

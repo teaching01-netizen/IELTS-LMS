@@ -131,6 +131,8 @@ function newWorkingState(
   state: Exclude<SatRunnerState, { phase: 'loading' | 'complete' | 'submitting' }>,
   action: Extract<SatRunnerAction, { type: 'moduleStarted' | 'routeToModule' }>,
 ): SatRunnerState {
+  const existingResponses = 'responses' in state ? state.responses : {};
+  const existingRevisions = 'responseRevisions' in state ? state.responseRevisions : {};
   return {
     phase: 'module',
     scheduleId: state.scheduleId,
@@ -140,8 +142,8 @@ function newWorkingState(
     moduleKey: action.moduleKey,
     questionIds: action.questionIds,
     questionIndex: 0,
-    responses: {},
-    responseRevisions: {},
+    responses: { ...existingResponses },
+    responseRevisions: { ...existingRevisions },
     toolCapabilities: action.toolCapabilities ?? emptySatToolCapabilities(),
     activeTool: null,
     startedAt: action.startedAt,

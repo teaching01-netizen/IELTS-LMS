@@ -9,7 +9,7 @@ export function QuestionPaper({ question }: { question: QuestionRevision }) {
       data-testid="question-paper"
       data-question-paper
       data-au-section={question.metadata.sectionKey === "math" ? "math" : "rw"}
-      className="sat-proof-paper mx-auto w-full max-w-[720px] rounded-[2px] border border-au-separator bg-white px-7 py-8 text-[17px] leading-7 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_32px_rgba(0,0,0,0.06)] sm:px-12 sm:py-11"
+      className="sat-proof-paper au-elevation-card mx-auto w-full max-w-[720px] rounded-[2px] border border-au-separator bg-au-surface px-7 py-8 text-[17px] leading-7 sm:px-12 sm:py-11"
     >
       <SatQuestionBody question={question} sectionKey={toSatSectionKey(question.metadata.sectionKey)} stimulusPlacement="inline">
         {answer.kind === "single_choice" ? (

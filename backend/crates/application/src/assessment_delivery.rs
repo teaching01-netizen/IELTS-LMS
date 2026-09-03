@@ -41,7 +41,9 @@ enum SatRuntimeTimingGate {
 
 impl SatRuntimeTimingGate {
     fn uses_personal_module_deadline(self) -> bool {
-        !matches!(self, Self::CohortStageV2)
+        // Both cohort timing models are controlled by the shared runtime
+        // section clock. Individual module clocks remain legacy-only.
+        matches!(self, Self::LegacyAttempt)
     }
 }
 
@@ -237,6 +239,9 @@ struct AttemptControlRow {
     proctor_status: String,
     proctor_note: Option<String>,
     device_fingerprint_hash: Option<String>,
+    delivery_status: String,
+    submitted_at: Option<DateTime<Utc>>,
+    phase: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -581,8 +586,54 @@ impl AssessmentDeliveryService {
             .as_ref()
             .map(|row| row.id.clone())
             .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let existing_client_write_id: Option<String> = match existing.as_ref() {
+            Some(row) => sqlx::query_scalar::<_, Option<String>>(
+                "SELECT client_write_id FROM assessment_question_responses WHERE id = ? FOR UPDATE",
+            )
+            .bind(&row.id)
+            .fetch_one(&mut *tx)
+            .await?,
+            None => None,
+        };
         if let Some(existing_row) = existing.as_ref() {
-            if response_row_matches_request(existing_row, &request)? {
+            if request.client_write_id.is_some()
+                && existing_client_write_id.is_some()
+                && request.client_write_id != existing_client_write_id
+            {
+                return Err(AssessmentDeliveryError::StructuredConflict {
+                    reason: AssessmentDeliveryConflictReason::ResponseRevisionMismatch,
+                    message: "Response write identity does not match the stored revision."
+                        .to_owned(),
+                });
+            }
+            let payload_matches = response_row_matches_request(existing_row, &request)?;
+            if request.client_write_id.is_some()
+                && request.client_write_id == existing_client_write_id
+                && !payload_matches
+            {
+                return Err(AssessmentDeliveryError::StructuredConflict {
+                    reason: AssessmentDeliveryConflictReason::ResponseRevisionMismatch,
+                    message: "Response write identity was reused with a different payload."
+                        .to_owned(),
+                });
+            }
+            // A historical row may have no client identity. Once a caller
+            // supplies one, do not let an equal-revision payload silently
+            // replace that unidentifiable state: the caller cannot prove it
+            // authored the existing revision. Legacy callers without an
+            // identity retain the original optimistic-revision behavior.
+            if request.client_write_id.is_some()
+                && existing_client_write_id.is_none()
+                && !payload_matches
+                && request.revision == existing_row.revision
+            {
+                return Err(AssessmentDeliveryError::StructuredConflict {
+                    reason: AssessmentDeliveryConflictReason::ResponseRevisionMismatch,
+                    message: "Response write identity does not match the stored revision."
+                        .to_owned(),
+                });
+            }
+            if payload_matches {
                 let snapshot = response_snapshot(existing.expect("existing response row"))?;
                 if timeout_recovery {
                     self.repair_timeout_finalized_module_tx(&mut tx, attempt_id, &active)
@@ -606,24 +657,32 @@ impl AssessmentDeliveryService {
                     message: "Question response must start at revision zero.".to_owned(),
                 });
             }
-            _ => {}
+            Some(_) => {}
+            None => {}
         }
         let eliminated = json!(request.eliminated_options);
         if existing.is_some() {
-            sqlx::query(
-                "UPDATE assessment_question_responses SET response = ?, marked_for_review = ?, eliminated_options = ?, annotations = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND revision = ?",
+            let updated = sqlx::query(
+                "UPDATE assessment_question_responses SET response = ?, marked_for_review = ?, eliminated_options = ?, annotations = ?, client_write_id = COALESCE(?, client_write_id), revision = revision + 1, updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND revision = ?",
             )
             .bind(request.response)
             .bind(request.marked_for_review)
             .bind(eliminated)
             .bind(request.annotations)
+            .bind(request.client_write_id.as_deref())
             .bind(&response_id)
             .bind(request.revision)
             .execute(&mut *tx)
             .await?;
+            if updated.rows_affected() != 1 {
+                return Err(AssessmentDeliveryError::StructuredConflict {
+                    reason: AssessmentDeliveryConflictReason::ResponseRevisionMismatch,
+                    message: "Response changed while this write was being applied.".to_owned(),
+                });
+            }
         } else {
             sqlx::query(
-                "INSERT INTO assessment_question_responses (id, module_attempt_id, exam_question_id, response, marked_for_review, eliminated_options, annotations, revision) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+                "INSERT INTO assessment_question_responses (id, module_attempt_id, exam_question_id, response, marked_for_review, eliminated_options, annotations, client_write_id, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
             )
             .bind(&response_id)
             .bind(&active.id)
@@ -632,6 +691,7 @@ impl AssessmentDeliveryService {
             .bind(request.marked_for_review)
             .bind(eliminated)
             .bind(request.annotations)
+            .bind(request.client_write_id.as_deref())
             .execute(&mut *tx)
             .await?;
         }
@@ -1245,7 +1305,7 @@ impl AssessmentDeliveryService {
         attempt_id: &str,
     ) -> Result<AttemptControlRow, AssessmentDeliveryError> {
         sqlx::query_as::<_, AttemptControlRow>(
-            "SELECT candidate_name, COALESCE(proctor_status, 'active') AS proctor_status, proctor_note, JSON_UNQUOTE(JSON_EXTRACT(integrity, '$.deviceFingerprintHash')) AS device_fingerprint_hash FROM student_attempts WHERE id = ?",
+            "SELECT candidate_name, COALESCE(proctor_status, 'active') AS proctor_status, proctor_note, JSON_UNQUOTE(JSON_EXTRACT(integrity, '$.deviceFingerprintHash')) AS device_fingerprint_hash, COALESCE(delivery_status, 'running') AS delivery_status, submitted_at, phase FROM student_attempts WHERE id = ?",
         )
         .bind(attempt_id)
         .fetch_optional(&self.pool)
@@ -1370,7 +1430,7 @@ impl AssessmentDeliveryService {
             SELECT
                 r.status AS runtime_status,
                 r.timing_model,
-                r.current_section_key AS current_stage_key,
+                r.active_section_key AS current_stage_key,
                 r.revision AS runtime_revision,
                 rs.status AS stage_status,
                 rs.actual_start_at AS stage_actual_start_at,
@@ -1382,7 +1442,7 @@ impl AssessmentDeliveryService {
             FROM exam_session_runtimes r
             LEFT JOIN exam_session_runtime_sections rs
               ON rs.runtime_id = r.id
-             AND rs.section_key = r.current_section_key
+             AND rs.section_key = r.active_section_key
             WHERE r.schedule_id = ?
             "#,
         )
@@ -1885,7 +1945,7 @@ impl AssessmentDeliveryService {
         admitted_at: Option<DateTime<Utc>>,
     ) -> Result<SatRuntimeTimingGate, AssessmentDeliveryError> {
         let runtime: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT timing_model, current_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+            "SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
         )
         .bind(schedule_id)
         .fetch_optional(&mut **tx)
@@ -2016,7 +2076,7 @@ impl AssessmentDeliveryService {
         // Attempt first, runtime second. This is shared with proctor commands
         // and terminalization, preventing an attempt/runtime deadlock cycle.
         let control = sqlx::query_as::<_, AttemptControlRow>(
-            "SELECT candidate_name, COALESCE(proctor_status, 'active') AS proctor_status, proctor_note, JSON_UNQUOTE(JSON_EXTRACT(integrity, '$.deviceFingerprintHash')) AS device_fingerprint_hash FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+            "SELECT candidate_name, COALESCE(proctor_status, 'active') AS proctor_status, proctor_note, JSON_UNQUOTE(JSON_EXTRACT(integrity, '$.deviceFingerprintHash')) AS device_fingerprint_hash, COALESCE(delivery_status, 'running') AS delivery_status, submitted_at, phase FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
         )
         .bind(attempt_id)
         .bind(schedule_id)
@@ -2037,6 +2097,17 @@ impl AssessmentDeliveryService {
                 });
             }
             _ => {}
+        }
+        if control.submitted_at.is_some()
+            || matches!(
+                control.delivery_status.as_str(),
+                "submitted" | "terminated" | "locked" | "cancelled"
+            )
+            || control.phase.as_deref() == Some("post-exam")
+        {
+            return Err(AssessmentDeliveryError::Conflict(
+                "The SAT attempt is already terminal and cannot accept this command.".to_owned(),
+            ));
         }
         let runtime_status: Option<String> = sqlx::query_scalar(
             "SELECT status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
@@ -2241,10 +2312,22 @@ impl AssessmentDeliveryService {
     ) -> Result<bool, AssessmentDeliveryError> {
         let mut tx = self.pool.begin().await?;
 
-        // Lock order invariant: cohort runtime first, then the student's module attempts.
-        // This matches proctor/runtime transitions and avoids runtime<->attempt deadlock cycles.
+        // Lock order invariant: the attempt row first, then shared runtime rows.
+        // Schedule-wide proctor commands use the same order.
+        let attempt_exists: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+        )
+        .bind(attempt_id)
+        .bind(schedule_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if attempt_exists.is_none() {
+            tx.commit().await?;
+            return Ok(false);
+        }
+
         let runtime: Option<(String, String, String, Option<String>)> = sqlx::query_as(
-            "SELECT id, status, timing_model, current_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+            "SELECT id, status, timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
         )
         .bind(schedule_id)
         .fetch_optional(&mut *tx)
@@ -2494,7 +2577,7 @@ impl AssessmentDeliveryService {
             JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id
             LEFT JOIN exam_session_runtime_sections current_rs
               ON current_rs.runtime_id = r.id
-             AND current_rs.section_key = r.current_section_key
+             AND current_rs.section_key = r.active_section_key
             LEFT JOIN exam_session_runtime_sections expected_rs
               ON expected_rs.runtime_id = r.id
              AND expected_rs.section_key = CONCAT(s.section_key, CASE WHEN m.adaptive_role = 'base' THEN ':m1' ELSE ':m2' END)
@@ -2516,7 +2599,7 @@ impl AssessmentDeliveryService {
                               AND expected_rs.section_order IS NOT NULL
                               AND expected_rs.section_order < current_rs.section_order)
                           OR (r.status = 'live'
-                              AND r.current_section_key = expected_rs.section_key
+                              AND r.active_section_key = expected_rs.section_key
                               AND expected_rs.status = 'live'
                               AND expected_rs.actual_start_at IS NOT NULL
                               AND expected_rs.paused_at IS NULL
@@ -2529,7 +2612,7 @@ impl AssessmentDeliveryService {
                               AND section_rs.section_order IS NOT NULL
                               AND section_rs.section_order < current_rs.section_order)
                           OR (r.status = 'live'
-                              AND r.current_section_key = section_rs.section_key
+                              AND r.active_section_key = section_rs.section_key
                               AND section_rs.status = 'live'
                               AND section_rs.actual_start_at IS NOT NULL
                               AND section_rs.paused_at IS NULL

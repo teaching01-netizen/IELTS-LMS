@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, Link2, LockKeyhole, Users, X } from "lucide-react";
 import type {
   AccessLinkAudienceType,
@@ -11,6 +10,8 @@ import type {
   UpdateAssessmentAccessLinkRequest,
 } from "../../contracts/accessLinks";
 import { localDateTimeToIso, parseAccessLinkMembers, serializeAccessLinkMembers, toLocalDateTimeInput } from "./accessLinkUi";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "../../../../components/ui/sheet";
+import { AuthoringConfirmDialog, restoreAuthoringFocus } from "../authoringPrimitives";
 
 interface AccessLinkEditorSheetProps {
   open: boolean;
@@ -41,20 +42,79 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const [closesAt, setClosesAt] = useState(defaults.closesAt);
   const [membersSource, setMembersSource] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+  const initialSnapshotRef = useRef("");
+  const hydratingRef = useRef(false);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!props.open) {
+      setShowDiscardDialog(false);
+      setIsDirty(false);
+      return;
+    }
+    const link = props.link;
+    const nextName = link?.name ?? "";
+    const nextAudienceType = link?.audienceType ?? "anyone";
+    const nextAudienceLabel = link?.audienceLabel ?? "";
+    const nextAccessMode = link?.accessMode ?? "student_code";
+    const nextAvailabilityType = link?.availabilityType ?? "scheduled";
+    const nextOpensAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.opensAt) : defaults.opensAt;
+    const nextClosesAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.closesAt) : defaults.closesAt;
+    const nextMembersSource = serializeAccessLinkMembers(props.members);
+    setName(nextName);
+    setAudienceType(nextAudienceType);
+    setAudienceLabel(nextAudienceLabel);
+    setAccessMode(nextAccessMode);
+    setAvailabilityType(nextAvailabilityType);
+    setOpensAt(nextOpensAt);
+    setClosesAt(nextClosesAt);
+    setMembersSource(nextMembersSource);
+    setError(null);
+    initialSnapshotRef.current = editorSnapshot(
+      nextName,
+      nextAudienceType,
+      nextAudienceLabel,
+      nextAccessMode,
+      nextAvailabilityType,
+      nextOpensAt,
+      nextClosesAt,
+      nextMembersSource,
+    );
+    hydratingRef.current = true;
+    setIsDirty(false);
+  }, [defaults.closesAt, defaults.opensAt, props.link, props.members, props.open]);
 
   useEffect(() => {
     if (!props.open) return;
-    const link = props.link;
-    setName(link?.name ?? "");
-    setAudienceType(link?.audienceType ?? "anyone");
-    setAudienceLabel(link?.audienceLabel ?? "");
-    setAccessMode(link?.accessMode ?? "student_code");
-    setAvailabilityType(link?.availabilityType ?? "scheduled");
-    setOpensAt(link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.opensAt) : defaults.opensAt);
-    setClosesAt(link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.closesAt) : defaults.closesAt);
-    setMembersSource(serializeAccessLinkMembers(props.members));
-    setError(null);
-  }, [defaults.closesAt, defaults.opensAt, props.link, props.members, props.open]);
+    if (hydratingRef.current) {
+      hydratingRef.current = false;
+      return;
+    }
+    setIsDirty(
+      editorSnapshot(
+        name,
+        audienceType,
+        audienceLabel,
+        accessMode,
+        availabilityType,
+        opensAt,
+        closesAt,
+        membersSource,
+      ) !== initialSnapshotRef.current,
+    );
+  }, [
+    accessMode,
+    audienceLabel,
+    audienceType,
+    availabilityType,
+    closesAt,
+    membersSource,
+    name,
+    opensAt,
+    props.open,
+  ]);
 
   const submit = async () => {
     setError(null);
@@ -101,29 +161,58 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
           selectedStudents,
         });
       }
+      setIsDirty(false);
       props.onClose();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Student Link could not be saved.");
     }
   };
 
+  const requestClose = () => {
+    if (props.isSaving) return;
+    if (isDirty) {
+      setShowDiscardDialog(true);
+      return;
+    }
+    props.onClose();
+  };
+
   return (
-    <AnimatePresence>
-      {props.open ? (
-        <motion.div className="fixed inset-0 z-[100] flex justify-end bg-black/20 authoring-glass" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(event) => { if (event.target === event.currentTarget && !props.isSaving) props.onClose(); }}>
-          <motion.section role="dialog" aria-modal="true" aria-labelledby="access-link-editor-title" initial={{ x: 30, opacity: 0.8 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 30, opacity: 0 }} transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }} className="flex h-full w-full max-w-[520px] flex-col border-l border-au-separator bg-au-fill shadow-[-20px_0_70px_rgba(0,0,0,0.12)]">
-            <header className="flex items-center gap-3 border-b border-au-separator bg-white/88 px-5 py-4 authoring-glass">
-              <div className="min-w-0 flex-1"><p className="text-[11px] font-medium text-slate-400">Digital SAT · Current release</p><h2 id="access-link-editor-title" className="mt-0.5 text-lg font-semibold tracking-[-0.02em] text-slate-950">{props.link ? "Edit Student Link" : "Create Student Link"}</h2></div>
-              <button type="button" onClick={props.onClose} disabled={props.isSaving} aria-label="Close Student Link editor" className="flex h-9 w-9 items-center justify-center rounded-full text-slate-500 hover:bg-au-fill disabled:opacity-40"><X size={16}/></button>
+    <Sheet
+      open={props.open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) requestClose();
+      }}
+    >
+      <SheetContent
+        side="right"
+        showCloseButton={false}
+        onOpenAutoFocus={() => {
+          if (document.activeElement instanceof HTMLElement) {
+            restoreFocusRef.current = document.activeElement;
+          }
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const opener = restoreFocusRef.current;
+          restoreFocusRef.current = null;
+          restoreAuthoringFocus(opener);
+        }}
+        className="sat-product sat-authoring authoring-mobile-sheet au-elevation-sheet flex h-full w-full max-w-[520px] flex-col gap-0 border-l border-au-separator bg-au-fill p-0 sm:max-w-[520px]"
+      >
+            <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4 authoring-glass">
+              <div className="min-w-0 flex-1"><p className="text-[11px] font-medium text-slate-400">Digital SAT · Current release</p><SheetTitle className="mt-0.5 text-lg font-semibold tracking-[-0.02em] text-slate-950">{props.link ? "Edit Student Link" : "Create Student Link"}</SheetTitle>
+                <SheetDescription className="sr-only">Configure who can use this Student Link, how they identify themselves, and when it is available.</SheetDescription></div>
+              <button type="button" onClick={requestClose} disabled={props.isSaving} aria-label="Close Student Link editor" className="authoring-icon-button"><X size={16} aria-hidden="true"/></button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
               <div className="space-y-5">
                 <Field label="Name" description="Use the name staff will recognize when sharing or monitoring this link."><input value={name} onChange={(event) => setName(event.target.value)} maxLength={160} aria-label="Student Link name" className={inputClass} placeholder="Saturday Class — September" /></Field>
                 <Field label="Who is this for?">
                   <div className="grid grid-cols-3 gap-2">
-                    <Choice active={audienceType === "anyone"} onClick={() => setAudienceType("anyone")} icon={<Link2 size={15}/>} title="Anyone" subtitle="With the link" />
-                    <Choice active={audienceType === "cohort"} onClick={() => setAudienceType("cohort")} icon={<Users size={15}/>} title="Cohort" subtitle="Named group" />
-                    <Choice active={audienceType === "selected_students"} onClick={() => { setAudienceType("selected_students"); setAccessMode("student_code"); }} icon={<LockKeyhole size={15}/>} title="Selected" subtitle="Allowlist" />
+                    <Choice active={audienceType === "anyone"} onClick={() => setAudienceType("anyone")} icon={<Link2 size={15} aria-hidden="true"/>} title="Anyone" subtitle="With the link" />
+                    <Choice active={audienceType === "cohort"} onClick={() => setAudienceType("cohort")} icon={<Users size={15} aria-hidden="true"/>} title="Cohort" subtitle="Named group" />
+                    <Choice active={audienceType === "selected_students"} onClick={() => { setAudienceType("selected_students"); setAccessMode("student_code"); }} icon={<LockKeyhole size={15} aria-hidden="true"/>} title="Selected" subtitle="Allowlist" />
                   </div>
                   {audienceType !== "anyone" ? <input aria-label="Audience name" value={audienceLabel} onChange={(event) => setAudienceLabel(event.target.value)} className={`${inputClass} mt-2`} placeholder={audienceType === "cohort" ? "SAT September · Saturday" : "Scholarship Students"} /> : null}
                 </Field>
@@ -133,28 +222,61 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => setAccessMode("open")}>Name + email only</Segment>
                   </div>
                 </Field>
-                {audienceType === "selected_students" ? <Field label="Selected students" description="One student per line: code, name, email. Name and email are optional; code is required."><textarea aria-label="Selected students" value={membersSource} onChange={(event) => setMembersSource(event.target.value)} spellCheck={false} className="min-h-36 w-full resize-y rounded-xl border border-au-separator bg-white px-3 py-2.5 font-mono text-[11px] leading-5 outline-none focus:border-[#0071e3]/35 focus:ring-4 focus:ring-au-accent/10" placeholder={'W123456, Jane Doe, jane@example.com\nW123457, John Doe, john@example.com'} /></Field> : null}
+                {audienceType === "selected_students" ? <Field label="Selected students" description="One student per line: code, name, email. Name and email are optional; code is required."><textarea aria-label="Selected students" value={membersSource} onChange={(event) => setMembersSource(event.target.value)} spellCheck={false} className="min-h-36 w-full resize-y rounded-xl border border-au-separator bg-au-surface px-3 py-2.5 font-mono text-[11px] leading-5 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10" placeholder={'W123456, Jane Doe, jane@example.com\nW123457, John Doe, john@example.com'} /></Field> : null}
                 <Field label="When can students enter?">
                   <div className="grid grid-cols-2 gap-2">
-                    <Choice active={availabilityType === "scheduled"} onClick={() => setAvailabilityType("scheduled")} icon={<Clock3 size={15}/>} title="Scheduled" subtitle="Set a window" />
-                    <Choice active={availabilityType === "anytime"} onClick={() => setAvailabilityType("anytime")} icon={<Link2 size={15}/>} title="Anytime" subtitle="While active" />
+                    <Choice active={availabilityType === "scheduled"} onClick={() => setAvailabilityType("scheduled")} icon={<Clock3 size={15} aria-hidden="true"/>} title="Scheduled" subtitle="Set a window" />
+                    <Choice active={availabilityType === "anytime"} onClick={() => setAvailabilityType("anytime")} icon={<Link2 size={15} aria-hidden="true"/>} title="Anytime" subtitle="While active" />
                   </div>
-                  {availabilityType === "scheduled" ? <div className="mt-2 grid grid-cols-2 gap-2"><label htmlFor="access-link-opens-at" className="text-[10px] font-medium text-slate-500">Opens<input id="access-link-opens-at" aria-label="Opens" type="datetime-local" value={opensAt} onChange={(event) => setOpensAt(event.target.value)} className={`${inputClass} mt-1`} /></label><label htmlFor="access-link-closes-at" className="text-[10px] font-medium text-slate-500">Closes<input id="access-link-closes-at" aria-label="Closes" type="datetime-local" value={closesAt} onChange={(event) => setClosesAt(event.target.value)} className={`${inputClass} mt-1`} /></label></div> : <div className="mt-2 rounded-xl bg-white px-3 py-3 text-[11px] leading-5 text-slate-500">Students can enter whenever this link is Active. Pause or revoke it at any time without changing the published exam.</div>}
+                  {availabilityType === "scheduled" ? <div className="mt-2 grid grid-cols-2 gap-2"><label htmlFor="access-link-opens-at" className="text-[10px] font-medium text-slate-500">Opens<input id="access-link-opens-at" aria-label="Opens" type="datetime-local" value={opensAt} onChange={(event) => setOpensAt(event.target.value)} className={`${inputClass} mt-1`} /></label><label htmlFor="access-link-closes-at" className="text-[10px] font-medium text-slate-500">Closes<input id="access-link-closes-at" aria-label="Closes" type="datetime-local" value={closesAt} onChange={(event) => setClosesAt(event.target.value)} className={`${inputClass} mt-1`} /></label></div> : <div className="mt-2 rounded-xl bg-au-surface px-3 py-3 text-[11px] leading-5 text-slate-500">Students can enter whenever this link is Active. Pause or revoke it at any time without changing the published exam.</div>}
                 </Field>
               </div>
             </div>
-            <footer className="border-t border-au-separator bg-white/92 px-5 py-4 authoring-glass">
+            <footer className="border-t border-au-separator px-5 py-4 authoring-glass">
               {error ? <p role="alert" className="mb-3 rounded-xl bg-au-danger-tint px-3 py-2 text-[11px] font-medium text-au-danger-text">{error}</p> : null}
-              <div className="flex justify-end gap-2"><button type="button" onClick={props.onClose} disabled={props.isSaving} className="min-h-11 rounded-xl px-4 text-sm font-semibold text-slate-600 hover:bg-au-fill">Cancel</button><button type="button" onClick={() => void submit()} disabled={props.isSaving} className="min-h-11 rounded-xl bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover disabled:opacity-45">{props.isSaving ? "Saving…" : props.link ? "Save Changes" : "Create Link"}</button></div>
+              <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="min-h-11 rounded-xl px-4 text-sm font-semibold text-slate-600 hover:bg-au-fill">Cancel</button><button type="button" onClick={() => void submit()} disabled={props.isSaving} className="min-h-11 rounded-xl bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover disabled:opacity-45">{props.isSaving ? "Saving…" : props.link ? "Save Changes" : "Create Link"}</button></div>
             </footer>
-          </motion.section>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
+      </SheetContent>
+      <AuthoringConfirmDialog
+        open={showDiscardDialog}
+        title="Discard Student Link changes?"
+        description="Your unsaved Student Link settings will be lost."
+        confirmLabel="Discard changes"
+        destructive
+        onCancel={() => setShowDiscardDialog(false)}
+        onConfirm={() => {
+          setShowDiscardDialog(false);
+          setIsDirty(false);
+          props.onClose();
+        }}
+      />
+    </Sheet>
   );
 }
 
-const inputClass = "h-11 w-full rounded-xl border border-black/[0.08] bg-white px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#0071e3]/35 focus:ring-4 focus:ring-[#0071e3]/10";
+function editorSnapshot(
+  name: string,
+  audienceType: AccessLinkAudienceType,
+  audienceLabel: string,
+  accessMode: AccessLinkMode,
+  availabilityType: AccessLinkAvailabilityType,
+  opensAt: string,
+  closesAt: string,
+  membersSource: string,
+): string {
+  return JSON.stringify([
+    name,
+    audienceType,
+    audienceLabel,
+    accessMode,
+    availabilityType,
+    opensAt,
+    closesAt,
+    membersSource,
+  ]);
+}
+
+const inputClass = "h-11 w-full rounded-xl border border-au-separator bg-au-surface px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10";
 function Field({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) { return <section><div className="mb-2"><h3 className="text-[12px] font-semibold text-slate-800">{label}</h3>{description ? <p className="mt-0.5 text-[10px] leading-4 text-slate-400">{description}</p> : null}</div>{children}</section>; }
-function Choice({ active, onClick, icon, title, subtitle }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string }) { return <button type="button" aria-pressed={active} onClick={onClick} className={`min-h-[68px] rounded-xl border p-2.5 text-left transition ${active ? "border-[#0071e3]/35 bg-[#0071e3]/[0.055] text-[#0066cc]" : "border-black/[0.07] bg-white text-slate-600 hover:bg-black/[0.02]"}`}><span className="flex items-center gap-1.5 text-[11px] font-semibold">{icon}{title}</span><span className="mt-1 block text-[9px] font-medium text-slate-400">{subtitle}</span></button>; }
-function Segment({ active, disabled, onClick, children }: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" disabled={disabled} aria-pressed={active} onClick={onClick} className={`min-h-9 flex-1 rounded-lg px-2 text-[10px] font-semibold transition ${active ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"} disabled:opacity-35`}>{children}</button>; }
+function Choice({ active, onClick, icon, title, subtitle }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string }) { return <button type="button" aria-pressed={active} onClick={onClick} className={`min-h-[68px] rounded-xl border p-2.5 text-left transition ${active ? "border-au-accent/35 bg-au-accent-tint text-au-accent" : "border-au-separator bg-au-surface text-slate-600 hover:bg-au-fill"}`}><span className="flex items-center gap-1.5 text-[11px] font-semibold"><span aria-hidden="true">{icon}</span>{title}</span><span className="mt-1 block text-[9px] font-medium text-slate-400">{subtitle}</span></button>; }
+function Segment({ active, disabled, onClick, children }: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" disabled={disabled} aria-pressed={active} onClick={onClick} className={`min-h-9 flex-1 rounded-lg px-2 text-[10px] font-semibold transition ${active ? "bg-au-surface text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"} disabled:opacity-35`}>{children}</button>; }

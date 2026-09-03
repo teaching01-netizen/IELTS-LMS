@@ -85,7 +85,7 @@ describe("ModuleScopePicker", () => {
     render(<ModuleScopePicker sections={sections} selectedModuleId="rw-m1" onSelectModule={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Reading & Writing/i }));
     const menu = screen.getByRole("menu", { name: "Choose SAT module" });
-    expect(menu).toHaveClass("bg-white", "overflow-y-auto", "overscroll-contain", "isolate");
+    expect(menu).toHaveClass("bg-au-surface", "overflow-y-auto", "overscroll-contain", "isolate");
     expect(menu.className).toContain("max-h-[min(520px,calc(100vh-112px))]");
     for (const item of screen.getAllByRole("menuitemradio")) {
       expect(item.className).toContain("min-h-[58px]");

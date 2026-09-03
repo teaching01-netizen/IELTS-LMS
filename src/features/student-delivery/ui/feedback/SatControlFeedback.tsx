@@ -19,6 +19,41 @@ export function SatControlBanner({
   );
 }
 
+export function SatLeaseConflictNotice({
+  error,
+  isTakingOver,
+  onTakeOver,
+}: {
+  error: string | null;
+  isTakingOver: boolean;
+  onTakeOver: () => void;
+}) {
+  return (
+    <div
+      className="sat-ui fixed inset-x-4 top-[calc(100px+var(--student-safe-top))] z-[90] mx-auto flex max-w-2xl items-center justify-between gap-4 border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-4 py-3 text-left shadow-lg"
+      role="alert"
+      aria-live="assertive"
+    >
+      <div>
+        <p className="text-[14px] font-semibold text-[var(--sat-text)]">
+          This attempt is open in another session.
+        </p>
+        <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">
+          {error ?? "Pause here or take over explicitly to continue saving responses."}
+        </p>
+      </div>
+      <button
+        type="button"
+        className="shrink-0 rounded-[6px] border border-[var(--sat-text)] px-3 py-2 text-[13px] font-semibold text-[var(--sat-text)] hover:bg-[var(--sat-text)] hover:text-[var(--sat-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-wait disabled:opacity-60"
+        onClick={onTakeOver}
+        disabled={isTakingOver}
+      >
+        {isTakingOver ? "Taking over…" : "Take over"}
+      </button>
+    </div>
+  );
+}
+
 export function SatSubmissionOverlay({
   title = "Finalizing module…",
   note = "Your latest responses are being verified.",

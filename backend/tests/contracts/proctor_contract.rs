@@ -1125,7 +1125,8 @@ async fn runtime_auto_advance_completes_expired_section_and_emits_event() {
     sqlx::query(
         r#"
         UPDATE exam_session_runtime_sections
-        SET planned_duration_minutes = 0
+        SET planned_duration_minutes = 0,
+            actual_start_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 31 SECOND)
         WHERE runtime_id = ? AND section_key = ?
         "#,
     )
@@ -1136,6 +1137,9 @@ async fn runtime_auto_advance_completes_expired_section_and_emits_event() {
     .expect("shorten active section");
 
     let mut saw_auto_advance = false;
+    // The section is backdated beyond its 30-second grace boundary so this
+    // contract test remains fast while the unit test above covers the exact
+    // boundary semantics.
     for _ in 0..10 {
         let update_message = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
             .await

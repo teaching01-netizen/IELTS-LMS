@@ -12,7 +12,7 @@ use crate::{
     routes::{
         answer_history, assessment_access_links, assessment_authoring, assessment_delivery,
         assessment_release, auth, exams, grading, health, library, media, proctor, results,
-        schedules, settings, student, ws,
+        schedules, settings, student, student_v2, ws,
     },
     state::AppState,
 };
@@ -287,6 +287,40 @@ pub fn build_router(state: AppState) -> Router {
                     .route(
                         "/:schedule_id/submit",
                         post(student::submit_student_session),
+                    ),
+            ),
+        )
+        .nest(
+            "/v2/student",
+            Router::new().nest(
+                "/attempts",
+                Router::new()
+                    .route(
+                        "/:attempt_id/responses:batch",
+                        post(student_v2::save_responses_batch),
+                    )
+                    .route("/:attempt_id/submit", post(student_v2::submit_attempt_v2))
+                    .route("/:attempt_id/takeover", post(student_v2::takeover_lease))
+                    .route(
+                        "/:attempt_id/responses",
+                        get(student_v2::get_responses_snapshot),
+                    ),
+            ),
+        )
+        .nest(
+            "/api/v2/student",
+            Router::new().nest(
+                "/attempts",
+                Router::new()
+                    .route(
+                        "/:attempt_id/responses:batch",
+                        post(student_v2::save_responses_batch),
+                    )
+                    .route("/:attempt_id/submit", post(student_v2::submit_attempt_v2))
+                    .route("/:attempt_id/takeover", post(student_v2::takeover_lease))
+                    .route(
+                        "/:attempt_id/responses",
+                        get(student_v2::get_responses_snapshot),
                     ),
             ),
         )

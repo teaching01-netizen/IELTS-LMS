@@ -15,6 +15,8 @@ export interface QuestionInspectorPaneProps {
   onChange: (question: QuestionRevision) => void;
   onClose?: () => void;
   onIssueSelect?: (issue: AssessmentValidationIssue) => void;
+  /** Renders inside the compact viewport inspector sheet. */
+  embedded?: boolean;
 }
 
 const sections: Array<{ value: InspectorSection; label: string }> = [
@@ -31,6 +33,7 @@ export function QuestionInspectorPane({
   onChange,
   onClose,
   onIssueSelect,
+  embedded = false,
 }: QuestionInspectorPaneProps) {
   const blockingIssues = issues.filter((issue) => issue.blocking);
   const warningIssues = issues.filter((issue) => !issue.blocking);
@@ -41,7 +44,7 @@ export function QuestionInspectorPane({
     <aside
       id="sat-question-inspector"
       aria-label="Question inspector"
-      className="authoring-inspector flex min-h-0 w-[310px] shrink-0 flex-col border-l border-au-separator bg-white/80"
+      className={`authoring-inspector flex min-h-0 w-[var(--authoring-inspector-width)] shrink-0 flex-col border-l border-au-separator ${embedded ? "authoring-inspector--embedded !w-full !flex-1 !basis-auto !border-l-0" : ""}`}
     >
       <header className="flex shrink-0 items-center justify-between border-b border-au-separator px-4 py-3">
         <div className="min-w-0">
@@ -122,7 +125,7 @@ export function QuestionInspectorPane({
                           answer: { ...answer, correctOptionId: option.id },
                         })
                       }
-                      className={`flex min-h-11 w-full items-center gap-2 rounded-[11px] border px-3 text-left text-[12px] font-medium transition ${selected ? "border-au-success/30 bg-au-success-tint text-slate-950" : "border-au-separator bg-white hover:bg-au-fill"}`}
+                      className={`flex min-h-11 w-full items-center gap-2 rounded-[11px] border px-3 text-left text-[12px] font-medium transition ${selected ? "border-au-success/30 bg-au-success-tint text-slate-950" : "border-au-separator bg-au-surface hover:bg-au-fill"}`}
                     >
                       <span
                         className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-[11px] font-bold ${selected ? "bg-au-success-text text-white" : "bg-au-fill text-slate-600"}`}
