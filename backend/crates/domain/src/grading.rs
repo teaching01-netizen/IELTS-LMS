@@ -642,6 +642,31 @@ pub struct StudentResult {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectiveScoreSummary {
+    pub section: String,
+    pub correct_count: i64,
+    pub total_questions: i64,
+    pub percentage: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ActScienceScoreReport {
+    pub submission_id: String,
+    pub schedule_id: String,
+    pub exam_id: String,
+    pub published_version_id: String,
+    pub exam_title: String,
+    pub cohort_name: String,
+    pub student_id: String,
+    pub student_name: String,
+    pub submitted_at: DateTime<Utc>,
+    pub grading_status: String,
+    pub score: ObjectiveScoreSummary,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "sqlx", derive(FromRow))]
 #[serde(rename_all = "camelCase")]

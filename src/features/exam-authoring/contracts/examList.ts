@@ -1,11 +1,11 @@
-import type { Exam, ExamConfig } from '../../../types';
+import type { Exam, ExamConfig, ExamType } from "../../../types";
 import type {
   BulkOperationResult,
   ExamEntity,
   ExamEvent,
   ExamVersionSummary,
   VersionDiff,
-} from '../../../types/domain';
+} from "../../../types/domain";
 
 export interface ExamVersionHistoryProps {
   exam: ExamEntity;
@@ -13,7 +13,9 @@ export interface ExamVersionHistoryProps {
   events: ExamEvent[];
   onRestoreVersion?: ((versionId: string) => void) | undefined;
   onRepublishVersion?: ((versionId: string) => void) | undefined;
-  onCompareVersions?: ((versionIdA: string, versionIdB: string) => Promise<VersionDiff | null>) | undefined;
+  onCompareVersions?:
+    | ((versionIdA: string, versionIdB: string) => Promise<VersionDiff | null>)
+    | undefined;
   onCloneExam?: ((examId: string, newTitle: string) => Promise<void>) | undefined;
 }
 
@@ -28,7 +30,7 @@ export interface DeleteExamInput {
 }
 
 export interface ExamListProps {
-  onNavigate: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
+  onNavigate: (mode: "builder" | "student" | "admin" | "proctor") => void;
   exams: Exam[];
   examEntities?: ExamEntity[];
   versions?: ExamVersionSummary[];
@@ -36,11 +38,7 @@ export interface ExamListProps {
   onEditExam: (id: string) => void;
   onGoToConfig?: ((id: string) => void) | undefined;
   onGoToReview?: ((id: string) => void) | undefined;
-  onCreateExam: (
-    title: string,
-    type: 'Academic' | 'General Training',
-    preset: ExamConfig['general']['preset'],
-  ) => void;
+  onCreateExam: (title: string, type: ExamType, preset: ExamConfig["general"]["preset"]) => void;
   onCloneExam?: (examId: string, newTitle: string) => Promise<void>;
   onCreateFromTemplate?: (templateId: string, newTitle: string) => Promise<void>;
   onDeleteExam?: (examId: string) => Promise<void>;

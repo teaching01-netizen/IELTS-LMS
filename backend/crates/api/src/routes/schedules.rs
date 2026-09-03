@@ -21,6 +21,23 @@ use crate::{
     state::AppState,
 };
 
+const PREVIEW_RUNTIME_COHORT_PREFIX: &str = "__preview_runtime__:";
+const PREVIEW_RUNTIME_INSTITUTION: &str = "preview-runtime";
+
+fn is_preview_runtime_schedule_for(
+    cohort_name: &str,
+    institution: Option<&str>,
+    actor_id: &str,
+) -> bool {
+    let owner_marker = cohort_name
+        .strip_prefix(PREVIEW_RUNTIME_COHORT_PREFIX)
+        .and_then(|value| value.split(':').nth(1));
+
+    cohort_name.starts_with(PREVIEW_RUNTIME_COHORT_PREFIX)
+        && institution == Some(PREVIEW_RUNTIME_INSTITUTION)
+        && owner_marker == Some(actor_id)
+}
+
 pub async fn list_schedules(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,
@@ -127,9 +144,22 @@ pub async fn apply_runtime_command(
     Path(id): Path<Uuid>,
     Json(req): Json<RuntimeCommandRequest>,
 ) -> Result<ApiResponse<ExamSessionRuntime>, ApiError> {
-    principal.require_one_of(&[UserRole::Admin, UserRole::Proctor])?;
     let ctx = principal.actor_context();
     let service = SchedulingService::new(state.db_pool());
+
+    if principal.user.role == UserRole::Builder {
+        let schedule = service.get_schedule(&ctx, id).await?;
+        if !is_preview_runtime_schedule_for(
+            &schedule.cohort_name,
+            schedule.institution.as_deref(),
+            &principal.user.id,
+        ) {
+            principal.require_one_of(&[UserRole::Admin, UserRole::Proctor])?;
+        }
+    } else {
+        principal.require_one_of(&[UserRole::Admin, UserRole::Proctor])?;
+    }
+
     let should_admit_queued_on_start = state.config.storm_admission_enabled
         && matches!(
             req.action,
@@ -239,5 +269,38 @@ impl From<SchedulingError> for ApiError {
                 &err.to_string(),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_preview_runtime_schedule_for;
+
+    #[test]
+    fn builder_preview_runtime_requires_reserved_identity_and_owner() {
+        assert!(is_preview_runtime_schedule_for(
+            "__preview_runtime__:exam-1:user-1:science",
+            Some("preview-runtime"),
+            "user-1",
+        ));
+    }
+
+    #[test]
+    fn normal_schedule_cannot_be_started_as_builder_preview() {
+        assert!(!is_preview_runtime_schedule_for(
+            "ACT Science - Cohort A",
+            Some("preview-runtime"),
+            "user-1",
+        ));
+        assert!(!is_preview_runtime_schedule_for(
+            "__preview_runtime__:exam-1:user-1:science",
+            Some("Institute A"),
+            "user-1",
+        ));
+        assert!(!is_preview_runtime_schedule_for(
+            "__preview_runtime__:exam-1:user-1:science",
+            Some("preview-runtime"),
+            "user-2",
+        ));
     }
 }

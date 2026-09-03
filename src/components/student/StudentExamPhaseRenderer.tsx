@@ -1,12 +1,12 @@
-import type { CSSProperties, ReactNode } from 'react';
-import type { ExamState } from '../../types';
-import type { StudentExamPhase } from '@student/domain/exam-session/studentExamPhase';
-import { Lobby } from './Lobby';
-import { PreCheck } from './PreCheck';
-import { StudentPostExamView } from './StudentPostExamView';
-import { useStudentAttempt } from './providers/StudentAttemptProvider';
-import { useStudentRuntime, useStudentRuntimeSession } from './providers/StudentRuntimeProvider';
-import { isVerifiedTerminalStudentState } from './providers/verifiedTerminalState';
+import type { CSSProperties, ReactNode } from "react";
+import type { ExamState } from "../../types";
+import type { StudentExamPhase } from "@student/domain/exam-session/studentExamPhase";
+import { Lobby } from "./Lobby";
+import { PreCheck } from "./PreCheck";
+import { StudentPostExamView } from "./StudentPostExamView";
+import { useStudentAttempt } from "./providers/StudentAttemptProvider";
+import { useStudentRuntime, useStudentRuntimeSession } from "./providers/StudentRuntimeProvider";
+import { isVerifiedTerminalStudentState } from "./providers/verifiedTerminalState";
 
 interface StudentExamPhaseRendererProps {
   readonly phase: StudentExamPhase;
@@ -32,9 +32,12 @@ export function StudentExamPhaseRenderer({
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
   const { state: runtimeState, actions: runtimeActions } = useStudentRuntimeSession();
 
-  if (!shouldRenderPostExam && phase === 'pre-check') {
+  if (!shouldRenderPostExam && phase === "pre-check") {
     return (
-      <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900" style={shellStyle}>
+      <div
+        className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900"
+        style={shellStyle}
+      >
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
@@ -46,7 +49,7 @@ export function StudentExamPhaseRenderer({
             candidateId={attemptState.attempt?.candidateId}
             onComplete={async (result) => {
               await attemptActions.recordPreCheckResult(result);
-              runtimeActions.setPhase('lobby');
+              runtimeActions.setPhase("lobby");
             }}
           />
         </main>
@@ -55,9 +58,12 @@ export function StudentExamPhaseRenderer({
     );
   }
 
-  if (!shouldRenderPostExam && phase === 'lobby') {
+  if (!shouldRenderPostExam && phase === "lobby") {
     return (
-      <div className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900" style={shellStyle}>
+      <div
+        className="flex flex-col h-screen w-full bg-gray-50 font-sans text-gray-900"
+        style={shellStyle}
+      >
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
@@ -76,17 +82,19 @@ export function StudentExamPhaseRenderer({
 
   if (shouldRenderPostExam) {
     const studentInfo = [
-      { label: 'Student Name', value: attemptState.attempt?.candidateName },
-      { label: 'Student ID', value: attemptState.attempt?.candidateId },
-      { label: 'Email', value: attemptState.attempt?.candidateEmail },
-      { label: 'Exam', value: attemptState.attempt?.examTitle ?? examState.title },
+      { label: "Student Name", value: attemptState.attempt?.candidateName },
+      { label: "Student ID", value: attemptState.attempt?.candidateId },
+      { label: "Email", value: attemptState.attempt?.candidateEmail },
+      { label: "Exam", value: attemptState.attempt?.examTitle ?? examState.title },
     ].filter((item): item is { label: string; value: string } => Boolean(item.value));
 
     return (
       <StudentPostExamView
-        isProctorTerminated={verifiedTerminalState === 'terminated'}
+        examType={examState.type}
+        isProctorTerminated={verifiedTerminalState === "terminated"}
         proctorNote={runtimeState.proctorNote}
         studentInfo={studentInfo}
+        score={attemptState.attempt?.finalSubmission?.score}
         onExit={onExit}
         finalSubmitOverlay={finalSubmitOverlay}
       />

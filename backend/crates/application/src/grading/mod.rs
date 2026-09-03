@@ -7,7 +7,7 @@ pub mod session_queries;
 use chrono::{DateTime, Utc};
 use ielts_backend_domain::{
     grading::{
-        ActorActionRequest, GradingScheduleObjectiveOverride, GradingSession, GradingSessionDetail,
+        ActScienceScoreReport, ActorActionRequest, GradingScheduleObjectiveOverride, GradingSession, GradingSessionDetail,
         GradingSessionPage, GradingSessionPagination, GradingSessionStatus, ObjectiveGradingAudit,
         ObjectiveIntegrityIssueCode, ObjectiveIntegrityIssueSummary, ObjectiveIntegrityOverview,
         ObjectiveIntegrityStatus, ObjectiveOverrideDeleteRequest, ObjectiveOverrideUpsertRequest,
@@ -15,8 +15,8 @@ use ielts_backend_domain::{
         OverallGradingStatus, ReleaseEvent, ReleaseNowRequest, ReleaseStatus, ResultsAnalytics,
         ReviewAction, ReviewDraft, ReviewDraftSummary, SaveReviewDraftRequest,
         ScheduleReleaseRequest, SectionGradingStatus, SectionSubmission, StartReviewRequest,
-        StudentResult, StudentSubmission, SubmissionReviewBundle, SubmissionReviewSummary,
-        WritingTaskSubmission,
+        ObjectiveScoreSummary, StudentResult, StudentSubmission, SubmissionReviewBundle,
+        SubmissionReviewSummary, WritingTaskSubmission,
     },
     schedule::{ExamSchedule, ScheduleStatus},
 };
@@ -122,7 +122,6 @@ struct SessionListQueryParts {
     select_sql: String,
     count_sql: String,
     schedule_binds: Vec<String>,
-    bind_search: bool,
 }
 
 fn list_sessions_query_parts(
@@ -134,17 +133,28 @@ fn list_sessions_query_parts(
     let exclusion = preview_runtime_exclusion_sql();
     let search_clause = match search {
         Some(query) if !query.trim().is_empty() => {
-            " AND (exam_title LIKE ? OR cohort_name LIKE ?)".to_owned()
+            r#" AND (
+                exam_title LIKE ?
+                OR cohort_name LIKE ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM student_submissions submissions
+                    INNER JOIN exam_versions versions
+                        ON versions.id = submissions.published_version_id
+                    WHERE submissions.schedule_id = grading_sessions.schedule_id
+                        AND submissions.student_name LIKE ?
+                        AND JSON_UNQUOTE(JSON_EXTRACT(versions.config_snapshot, '$.general.type')) = 'ACT'
+                )
+            )"#
+                .to_owned()
         }
         _ => String::new(),
     };
-    let bind_search = !search_clause.is_empty();
 
     let build = |where_clause: String, schedule_binds: Vec<String>| SessionListQueryParts {
         select_sql: format!("SELECT * FROM grading_sessions {where_clause}"),
         count_sql: format!("SELECT COUNT(*) FROM grading_sessions {where_clause}"),
         schedule_binds,
-        bind_search,
     };
 
     if matches!(
@@ -309,7 +319,7 @@ impl GradingService {
                 query = query.bind(bind);
             }
             if let Some(pattern) = &pattern {
-                query = query.bind(pattern).bind(pattern);
+                query = query.bind(pattern).bind(pattern).bind(pattern);
             }
             query.fetch_one(&self.pool).await?
         };
@@ -324,7 +334,7 @@ impl GradingService {
                 query = query.bind(bind);
             }
             if let Some(pattern) = &pattern {
-                query = query.bind(pattern).bind(pattern);
+                query = query.bind(pattern).bind(pattern).bind(pattern);
             }
             query
                 .bind(page_size_i64)
@@ -492,9 +502,10 @@ impl GradingService {
         actor_name: &str,
         req: ObjectiveQuestionOverrideRequest,
     ) -> Result<SectionSubmission, GradingError> {
-        if !matches!(section, "reading" | "listening") {
+        if !matches!(section, "reading" | "listening" | "science") {
             return Err(GradingError::Validation(
-                "Only reading and listening objective answers can be overridden.".to_owned(),
+                "Only reading, listening, and ACT Science objective answers can be overridden."
+                    .to_owned(),
             ));
         }
 
@@ -534,6 +545,7 @@ impl GradingService {
             .unwrap_or_else(|| "Manual grader correctness override".to_owned());
         apply_manual_objective_question_override(
             &mut auto_grading_results,
+            section,
             question_id,
             req.is_correct,
             &ctx.actor_id.to_string(),
@@ -1267,6 +1279,92 @@ impl GradingService {
         Ok(results)
     }
 
+    pub async fn list_act_science_reports(
+        &self,
+        ctx: &ActorContext,
+    ) -> Result<Vec<ActScienceScoreReport>, GradingError> {
+        self.maybe_sync_on_read().await?;
+
+        let base_query = r#"
+            SELECT
+                s.id AS submission_id,
+                s.schedule_id,
+                s.exam_id,
+                s.published_version_id,
+                schedules.grading_display_name AS exam_title,
+                schedules.cohort_name,
+                s.student_id,
+                s.student_name,
+                s.submitted_at,
+                s.grading_status,
+                sections.auto_grading_results
+            FROM student_submissions s
+            INNER JOIN section_submissions sections
+                ON sections.submission_id = s.id
+                AND sections.section = 'science'
+            INNER JOIN exam_schedules schedules
+                ON schedules.id = s.schedule_id
+            INNER JOIN exam_versions versions
+                ON versions.id = s.published_version_id
+            WHERE JSON_UNQUOTE(JSON_EXTRACT(versions.config_snapshot, '$.general.type')) = 'ACT'
+                AND schedules.cohort_name NOT LIKE '__preview_runtime__:%'
+        "#;
+        let order_by = " ORDER BY s.submitted_at DESC, s.id DESC";
+        let is_admin = matches!(ctx.role, ActorRole::Admin | ActorRole::AdminObserver);
+
+        let rows = if is_admin {
+            sqlx::query_as::<_, ActScienceScoreReportRow>(&format!("{base_query}{order_by}"))
+                .fetch_all(&self.pool)
+                .await?
+        } else if let Some(schedule_id) = ctx.schedule_scope_id.clone() {
+            sqlx::query_as::<_, ActScienceScoreReportRow>(&format!(
+                "{base_query} AND s.schedule_id = ?{order_by}"
+            ))
+            .bind(schedule_id.to_string())
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            Vec::new()
+        };
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                let auto_grading_results = row.auto_grading_results?;
+                let score = ObjectiveScoreSummary {
+                    section: "science".to_owned(),
+                    correct_count: auto_grading_results
+                        .get("totalScore")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0)
+                        .max(0),
+                    total_questions: auto_grading_results
+                        .get("maxScore")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0)
+                        .max(0),
+                    percentage: auto_grading_results
+                        .get("percentage")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.0),
+                };
+                Some(ActScienceScoreReport {
+                    submission_id: row.submission_id,
+                    schedule_id: row.schedule_id,
+                    exam_id: row.exam_id,
+                    published_version_id: row.published_version_id,
+                    exam_title: row.exam_title,
+                    cohort_name: row.cohort_name,
+                    student_id: row.student_id,
+                    student_name: row.student_name,
+                    submitted_at: row.submitted_at,
+                    grading_status: row.grading_status,
+                    score,
+                })
+            })
+            .collect())
+    }
+
     pub async fn get_result(&self, result_id: Uuid) -> Result<StudentResult, GradingError> {
         sqlx::query_as::<_, StudentResult>("SELECT * FROM student_results WHERE id = ?")
             .bind(result_id.to_string())
@@ -1407,14 +1505,22 @@ impl GradingService {
             .load_schedule_objective_grading_source_version_id(&submission.schedule_id)
             .await?
             .unwrap_or(submission.published_version_id);
+        let config_snapshot = sqlx::query_scalar::<_, Value>(
+            "SELECT config_snapshot FROM exam_versions WHERE id = ?",
+        )
+        .bind(&source_version_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(GradingError::NotFound)?;
+        let objective_sections = objective_section_keys(&config_snapshot);
         let stored_sections = sqlx::query_as::<_, SectionSubmission>(
-            "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading')",
+            "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading', 'science')",
         )
         .bind(submission_id)
         .fetch_all(&self.pool)
         .await?;
-        let mut results = Vec::with_capacity(2);
-        for section in ["listening", "reading"] {
+        let mut results = Vec::with_capacity(objective_sections.len());
+        for &section in objective_sections {
             let Some(stored_section) = stored_sections
                 .iter()
                 .find(|stored| stored.section == section)
@@ -1470,14 +1576,22 @@ impl GradingService {
         let source_version_id = source_row
             .and_then(|(_, version_id)| version_id)
             .unwrap_or(submission.published_version_id);
+        let config_snapshot = sqlx::query_scalar::<_, Value>(
+            "SELECT config_snapshot FROM exam_versions WHERE id = ?",
+        )
+        .bind(&source_version_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+        .ok_or(GradingError::NotFound)?;
+        let objective_sections = objective_section_keys(&config_snapshot);
         let stored_sections = sqlx::query_as::<_, SectionSubmission>(
-            "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading') ORDER BY section ASC FOR UPDATE",
+            "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading', 'science') ORDER BY section ASC FOR UPDATE",
         )
         .bind(submission_id)
         .fetch_all(&mut **transaction)
         .await?;
-        let mut results = Vec::with_capacity(2);
-        for section in ["listening", "reading"] {
+        let mut results = Vec::with_capacity(objective_sections.len());
+        for &section in objective_sections {
             let Some(stored_section) = stored_sections
                 .iter()
                 .find(|stored| stored.section == section)
@@ -1698,41 +1812,24 @@ impl GradingService {
                 .get("answers")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            let answer_sections = build_objective_answer_sections(&attempt.content_snapshot);
-            let listening_answers =
-                filter_answers_for_section(&answers, &answer_sections, "listening");
-            let reading_answers = filter_answers_for_section(&answers, &answer_sections, "reading");
-            let mut listening_auto_results = compute_objective_auto_grading_results(
-                "listening",
-                &listening_answers,
-                &attempt.content_snapshot,
-                submission.submitted_at,
-                overrides,
-            );
-            let mut reading_auto_results = compute_objective_auto_grading_results(
-                "reading",
-                &reading_answers,
-                &attempt.content_snapshot,
-                submission.submitted_at,
-                overrides,
-            );
             let source_version_id = attempt.published_version_id.to_string();
-            objective_integrity::set_grading_source_version(
-                &mut listening_auto_results,
-                &source_version_id,
-            );
-            objective_integrity::set_grading_source_version(
-                &mut reading_auto_results,
-                &source_version_id,
-            );
-            objective_integrity::attach_answer_mapping_issues(
-                &mut listening_auto_results,
+            let mut section_specs = build_section_sync_specs(
+                SectionSyncMode::ObjectiveOnly,
                 &answers,
-                &answer_sections,
+                &json!({}),
+                &attempt.content_snapshot,
+                &attempt.config_snapshot,
+                submission.submitted_at,
+                overrides,
             );
+            for section_spec in &mut section_specs {
+                if let Some(results) = section_spec.auto_grading_results.as_mut() {
+                    objective_integrity::set_grading_source_version(results, &source_version_id);
+                }
+            }
 
             let existing_sections = sqlx::query_as::<_, SectionSubmission>(
-                "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading')",
+                "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading', 'science')",
             )
             .bind(&submission.id)
             .fetch_all(&self.pool)
@@ -1748,24 +1845,29 @@ impl GradingService {
                 })
                 .collect::<HashMap<String, Option<Value>>>();
 
-            let listening_needs_update = existing_map
-                .get("listening")
-                .and_then(|value| value.as_ref())
-                .is_none_or(|value| *value != listening_auto_results);
-            let reading_needs_update = existing_map
-                .get("reading")
-                .and_then(|value| value.as_ref())
-                .is_none_or(|value| *value != reading_auto_results);
+            let sections_needing_update = section_specs
+                .iter()
+                .filter(|section_spec| {
+                    section_spec
+                        .auto_grading_results
+                        .as_ref()
+                        .is_some_and(|results| {
+                            existing_map
+                                .get(section_spec.section)
+                                .and_then(|value| value.as_ref())
+                                .is_none_or(|existing| existing != results)
+                        })
+                })
+                .count() as u64;
 
-            report.sections_checked = report.sections_checked.saturating_add(2);
-            if listening_needs_update {
-                report.sections_needing_update = report.sections_needing_update.saturating_add(1);
-            }
-            if reading_needs_update {
-                report.sections_needing_update = report.sections_needing_update.saturating_add(1);
-            }
+            report.sections_checked = report
+                .sections_checked
+                .saturating_add(section_specs.len() as u64);
+            report.sections_needing_update = report
+                .sections_needing_update
+                .saturating_add(sections_needing_update);
 
-            if request.apply && (listening_needs_update || reading_needs_update) {
+            if request.apply && sections_needing_update > 0 {
                 self.ensure_objective_section_submissions(
                     &submission,
                     &attempt.final_submission,
@@ -1775,9 +1877,9 @@ impl GradingService {
                 )
                 .await?;
                 report.submissions_updated = report.submissions_updated.saturating_add(1);
-                report.sections_updated = report.sections_updated.saturating_add(
-                    u64::from(listening_needs_update) + u64::from(reading_needs_update),
-                );
+                report.sections_updated = report
+                    .sections_updated
+                    .saturating_add(sections_needing_update);
             }
         }
 
@@ -2010,7 +2112,7 @@ impl GradingService {
             FROM student_submissions s
             LEFT JOIN section_submissions ss
                 ON ss.submission_id = s.id
-                AND ss.section IN ('listening', 'reading')
+                AND ss.section IN ('listening', 'reading', 'science')
             WHERE s.schedule_id = ?
             ORDER BY s.student_name ASC, s.id ASC, ss.section ASC
             "#,
@@ -2841,12 +2943,15 @@ impl GradingService {
         for attempt in attempts {
             let attempt_id = attempt.id.to_string();
             let submitted_at = attempt.submitted_at.unwrap_or_else(Utc::now);
-            let section_statuses = json!({
+            let mut section_statuses = json!({
                 "listening": "auto_graded",
                 "reading": "auto_graded",
                 "writing": "needs_review",
                 "speaking": "pending"
             });
+            if is_act_config_snapshot(&attempt.config_snapshot) {
+                section_statuses["science"] = json!("auto_graded");
+            }
 
             let existing_submission_id = sqlx::query_scalar::<_, String>(
                 "SELECT id FROM student_submissions WHERE attempt_id = ?",
@@ -3029,7 +3134,7 @@ impl GradingService {
             .load_schedule_objective_override_lookup(&submission.schedule_id)
             .await?;
         let existing_objective_sections = sqlx::query_as::<_, SectionSubmission>(
-            "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading')",
+            "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading', 'science')",
         )
         .bind(&submission.id)
         .fetch_all(&self.pool)
@@ -3063,7 +3168,11 @@ impl GradingService {
                 continue;
             };
             if let Some(next_results) = section_spec.auto_grading_results.as_mut() {
-                preserve_manual_objective_overrides(next_results, existing_results);
+                preserve_manual_objective_overrides(
+                    next_results,
+                    existing_results,
+                    section_spec.section,
+                );
             }
         }
         let objective_results_changed = section_specs.iter().any(|section_spec| {
@@ -3293,8 +3402,6 @@ impl GradingService {
         report.attempts_scanned = attempts.len() as u64;
         let mut override_cache: HashMap<String, HashMap<String, ObjectiveOverridePayload>> =
             HashMap::new();
-        let answer_sections = build_objective_answer_sections(content_snapshot);
-
         for attempt in attempts {
             let attempt_id = attempt.id.to_string();
             let submission_sql = student_submission_query("WHERE s.attempt_id = ?");
@@ -3325,39 +3432,26 @@ impl GradingService {
                 .get("answers")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            let listening_answers =
-                filter_answers_for_section(&answers, &answer_sections, "listening");
-            let reading_answers = filter_answers_for_section(&answers, &answer_sections, "reading");
-            let mut listening_auto_results = compute_objective_auto_grading_results(
-                "listening",
-                &listening_answers,
-                content_snapshot,
-                submission.submitted_at,
-                overrides,
-            );
-            let mut reading_auto_results = compute_objective_auto_grading_results(
-                "reading",
-                &reading_answers,
-                content_snapshot,
-                submission.submitted_at,
-                overrides,
-            );
-            objective_integrity::set_grading_source_version(
-                &mut listening_auto_results,
-                grading_source_version_id,
-            );
-            objective_integrity::set_grading_source_version(
-                &mut reading_auto_results,
-                grading_source_version_id,
-            );
-            objective_integrity::attach_answer_mapping_issues(
-                &mut listening_auto_results,
+            let mut section_specs = build_section_sync_specs(
+                SectionSyncMode::ObjectiveOnly,
                 &answers,
-                &answer_sections,
+                &json!({}),
+                content_snapshot,
+                config_snapshot,
+                submission.submitted_at,
+                overrides,
             );
+            for section_spec in &mut section_specs {
+                if let Some(results) = section_spec.auto_grading_results.as_mut() {
+                    objective_integrity::set_grading_source_version(
+                        results,
+                        grading_source_version_id,
+                    );
+                }
+            }
 
             let existing_sections = sqlx::query_as::<_, SectionSubmission>(
-                "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading')",
+                "SELECT * FROM section_submissions WHERE submission_id = ? AND section IN ('listening', 'reading', 'science')",
             )
             .bind(&submission.id)
             .fetch_all(&self.pool)
@@ -3373,24 +3467,29 @@ impl GradingService {
                 })
                 .collect::<HashMap<String, Option<Value>>>();
 
-            let listening_needs_update = existing_map
-                .get("listening")
-                .and_then(|value| value.as_ref())
-                .is_none_or(|value| *value != listening_auto_results);
-            let reading_needs_update = existing_map
-                .get("reading")
-                .and_then(|value| value.as_ref())
-                .is_none_or(|value| *value != reading_auto_results);
+            let sections_needing_update = section_specs
+                .iter()
+                .filter(|section_spec| {
+                    section_spec
+                        .auto_grading_results
+                        .as_ref()
+                        .is_some_and(|results| {
+                            existing_map
+                                .get(section_spec.section)
+                                .and_then(|value| value.as_ref())
+                                .is_none_or(|existing| existing != results)
+                        })
+                })
+                .count() as u64;
 
-            report.sections_checked = report.sections_checked.saturating_add(2);
-            if listening_needs_update {
-                report.sections_needing_update = report.sections_needing_update.saturating_add(1);
-            }
-            if reading_needs_update {
-                report.sections_needing_update = report.sections_needing_update.saturating_add(1);
-            }
+            report.sections_checked = report
+                .sections_checked
+                .saturating_add(section_specs.len() as u64);
+            report.sections_needing_update = report
+                .sections_needing_update
+                .saturating_add(sections_needing_update);
 
-            if listening_needs_update || reading_needs_update {
+            if sections_needing_update > 0 {
                 self.ensure_objective_section_submissions(
                     &submission,
                     &attempt.final_submission,
@@ -3400,9 +3499,9 @@ impl GradingService {
                 )
                 .await?;
                 report.submissions_updated = report.submissions_updated.saturating_add(1);
-                report.sections_updated = report.sections_updated.saturating_add(
-                    u64::from(listening_needs_update) + u64::from(reading_needs_update),
-                );
+                report.sections_updated = report
+                    .sections_updated
+                    .saturating_add(sections_needing_update);
             }
         }
 
@@ -3438,6 +3537,21 @@ struct ObjectiveIntegritySectionRow {
     student_id: String,
     student_name: String,
     section: Option<String>,
+    auto_grading_results: Option<Value>,
+}
+
+#[derive(Debug, FromRow)]
+struct ActScienceScoreReportRow {
+    submission_id: String,
+    schedule_id: String,
+    exam_id: String,
+    published_version_id: String,
+    exam_title: String,
+    cohort_name: String,
+    student_id: String,
+    student_name: String,
+    submitted_at: DateTime<Utc>,
+    grading_status: String,
     auto_grading_results: Option<Value>,
 }
 
@@ -3549,6 +3663,67 @@ struct SectionSyncSpec {
     grading_status: SectionGradingStatus,
 }
 
+fn is_act_config_snapshot(config_snapshot: &Value) -> bool {
+    config_snapshot
+        .get("general")
+        .and_then(|general| general.get("type"))
+        .and_then(Value::as_str)
+        == Some("ACT")
+}
+
+pub(crate) fn compute_act_science_score(
+    config_snapshot: &Value,
+    content_snapshot: &Value,
+    answers: &Value,
+    submitted_at: DateTime<Utc>,
+) -> Option<ObjectiveScoreSummary> {
+    if !is_act_config_snapshot(config_snapshot) {
+        return None;
+    }
+
+    let answer_sections = build_objective_answer_sections(content_snapshot);
+    let science_answers = filter_answers_for_section(answers, &answer_sections, "science");
+    let results = compute_objective_auto_grading_results(
+        "science",
+        &science_answers,
+        content_snapshot,
+        submitted_at,
+        None,
+    );
+    let correct_count = results
+        .get("totalScore")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0);
+    let total_questions = results
+        .get("maxScore")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0);
+    let percentage = results
+        .get("percentage")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+
+    Some(ObjectiveScoreSummary {
+        section: "science".to_owned(),
+        correct_count,
+        total_questions,
+        percentage,
+    })
+}
+
+const IELTS_OBJECTIVE_SECTIONS: [&str; 2] = ["listening", "reading"];
+const ACT_OBJECTIVE_SECTIONS: [&str; 1] = ["science"];
+
+fn objective_section_keys(config_snapshot: &Value) -> &'static [&'static str] {
+    if is_act_config_snapshot(config_snapshot) {
+        &ACT_OBJECTIVE_SECTIONS
+    } else {
+        &IELTS_OBJECTIVE_SECTIONS
+    }
+}
+
 fn build_section_sync_specs(
     mode: SectionSyncMode,
     answers: &Value,
@@ -3559,6 +3734,36 @@ fn build_section_sync_specs(
     overrides: Option<&HashMap<String, ObjectiveOverridePayload>>,
 ) -> Vec<SectionSyncSpec> {
     let answer_sections = build_objective_answer_sections(content_snapshot);
+
+    if is_act_config_snapshot(config_snapshot) {
+        let science_answers = filter_answers_for_section(answers, &answer_sections, "science");
+        let mut science_auto_results = compute_objective_auto_grading_results(
+            "science",
+            &science_answers,
+            content_snapshot,
+            submitted_at,
+            overrides,
+        );
+        objective_integrity::attach_answer_mapping_issues(
+            &mut science_auto_results,
+            answers,
+            &answer_sections,
+        );
+        let grading_status =
+            if objective_integrity::objective_results_are_verified(&science_auto_results) {
+                SectionGradingStatus::AutoGraded
+            } else {
+                SectionGradingStatus::NeedsReview
+            };
+
+        return vec![SectionSyncSpec {
+            section: "science",
+            payload: json!({ "type": "science", "answers": science_answers }),
+            auto_grading_results: Some(science_auto_results),
+            grading_status,
+        }];
+    }
+
     let listening_answers = filter_answers_for_section(answers, &answer_sections, "listening");
     let reading_answers = filter_answers_for_section(answers, &answer_sections, "reading");
     let mut listening_auto_results = compute_objective_auto_grading_results(
@@ -3927,6 +4132,20 @@ fn build_objective_answer_sections(content_snapshot: &Value) -> HashMap<String, 
         }
     }
 
+    if let Some(stimuli) = content_snapshot
+        .get("science")
+        .and_then(|science| science.get("stimuli"))
+        .and_then(Value::as_array)
+    {
+        for stimulus in stimuli {
+            if let Some(blocks) = stimulus.get("blocks").and_then(Value::as_array) {
+                for block in blocks {
+                    index_objective_block_sections(block, "science", &mut sections);
+                }
+            }
+        }
+    }
+
     sections
 }
 
@@ -4252,7 +4471,7 @@ fn normalize_exact_text_for_match(value: &str) -> String {
     normalize_exact_text(value)
 }
 
-fn recalculate_objective_totals(results: &mut Value) {
+fn recalculate_objective_totals(results: &mut Value, section_key: &str) {
     let Some(question_results) = results.get("questionResults").and_then(Value::as_array) else {
         return;
     };
@@ -4272,6 +4491,11 @@ fn recalculate_objective_totals(results: &mut Value) {
     } else {
         0.0
     };
+    let percentage = if section_key == "science" {
+        (percentage * 100.0).round() / 100.0
+    } else {
+        percentage
+    };
 
     if let Some(payload) = results.as_object_mut() {
         payload.insert("totalScore".to_owned(), Value::from(total_score));
@@ -4280,7 +4504,11 @@ fn recalculate_objective_totals(results: &mut Value) {
     }
 }
 
-fn preserve_manual_objective_overrides(next_results: &mut Value, existing_results: &Value) {
+fn preserve_manual_objective_overrides(
+    next_results: &mut Value,
+    existing_results: &Value,
+    section_key: &str,
+) {
     let Some(existing_question_results) = existing_results
         .get("questionResults")
         .and_then(Value::as_array)
@@ -4328,11 +4556,12 @@ fn preserve_manual_objective_overrides(next_results: &mut Value, existing_result
         }
     }
 
-    recalculate_objective_totals(next_results);
+    recalculate_objective_totals(next_results, section_key);
 }
 
 fn apply_manual_objective_question_override(
     results: &mut Value,
+    section_key: &str,
     question_id: &str,
     is_correct: bool,
     actor_id: &str,
@@ -4375,7 +4604,7 @@ fn apply_manual_objective_question_override(
         }),
     );
 
-    recalculate_objective_totals(results);
+    recalculate_objective_totals(results, section_key);
     Ok(())
 }
 
@@ -4404,7 +4633,7 @@ fn compute_objective_auto_grading_results(
             .cloned()
             .unwrap_or(Value::Null);
         let issue_code = spec.integrity_issue.or_else(|| {
-            if !answer_present {
+            if !answer_present && section_key != "science" {
                 Some(ObjectiveIntegrityIssueCode::SubmissionMergeIncomplete)
             } else if objective_integrity::student_answer_is_malformed(&student_answer) {
                 Some(ObjectiveIntegrityIssueCode::AnswerPayloadTypeInvalid)
@@ -4518,6 +4747,11 @@ fn compute_objective_auto_grading_results(
         (total_score as f64 / max_score as f64) * 100.0
     } else {
         0.0
+    };
+    let percentage = if section_key == "science" {
+        (percentage * 100.0).round() / 100.0
+    } else {
+        percentage
     };
 
     json!({
@@ -4765,6 +4999,21 @@ fn build_objective_scoring_specs(
             {
                 for part in parts {
                     if let Some(blocks) = part.get("blocks").and_then(Value::as_array) {
+                        for block in blocks {
+                            index_objective_block_scoring_specs(block, &mut specs, &mut seen);
+                        }
+                    }
+                }
+            }
+        }
+        "science" => {
+            if let Some(stimuli) = content_snapshot
+                .get("science")
+                .and_then(|science| science.get("stimuli"))
+                .and_then(Value::as_array)
+            {
+                for stimulus in stimuli {
+                    if let Some(blocks) = stimulus.get("blocks").and_then(Value::as_array) {
                         for block in blocks {
                             index_objective_block_scoring_specs(block, &mut specs, &mut seen);
                         }
@@ -6054,6 +6303,261 @@ mod tests {
     }
 
     #[test]
+    fn act_science_single_mcq_is_scored_as_raw_points_and_percentage() {
+        let content_snapshot = json!({
+            "science": {
+                "stimuli": [{
+                    "id": "stimulus-1",
+                    "title": "Plant Growth",
+                    "content": "Researchers measured plant growth.",
+                    "blocks": [{
+                        "id": "science-block-1",
+                        "type": "SINGLE_MCQ",
+                        "questions": [
+                            {
+                                "id": "science-q-1",
+                                "skillCategory": "interpretation_of_data",
+                                "stem": "Which condition produced the greatest growth?",
+                                "options": [
+                                    {"id": "a", "text": "A", "isCorrect": true},
+                                    {"id": "b", "text": "B", "isCorrect": false},
+                                    {"id": "c", "text": "C", "isCorrect": false},
+                                    {"id": "d", "text": "D", "isCorrect": false}
+                                ]
+                            },
+                            {
+                                "id": "science-q-2",
+                                "skillCategory": "scientific_investigation",
+                                "stem": "What variable was measured?",
+                                "options": [
+                                    {"id": "a", "text": "A", "isCorrect": false},
+                                    {"id": "b", "text": "B", "isCorrect": false},
+                                    {"id": "c", "text": "C", "isCorrect": true},
+                                    {"id": "d", "text": "D", "isCorrect": false}
+                                ]
+                            }
+                        ]
+                    }]
+                }]
+            }
+        });
+        let answers = json!({"science-q-1": "a"});
+        let submitted_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+
+        let results = compute_objective_auto_grading_results(
+            "science",
+            &answers,
+            &content_snapshot,
+            submitted_at,
+            None,
+        );
+
+        assert_eq!(results["totalScore"], 1);
+        assert_eq!(results["maxScore"], 2);
+        assert_eq!(results["percentage"], 50.0);
+        assert_eq!(results["questionResults"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            results["questionResults"][1]["verificationStatus"],
+            "verified_unanswered"
+        );
+    }
+
+    #[test]
+    fn act_science_forty_questions_with_thirty_two_correct_scores_eighty_percent() {
+        let categories = [
+            "interpretation_of_data",
+            "scientific_investigation",
+            "evaluating_scientific_arguments_and_models_with_evidence",
+        ];
+        let questions: Vec<Value> = (1..=40)
+            .map(|number| {
+                let question_id = format!("science-q-{number}");
+                json!({
+                    "id": question_id,
+                    "skillCategory": categories[(number - 1) % categories.len()],
+                    "stem": format!("Science question {number}"),
+                    "options": [
+                        {"id": "a", "text": "Option A", "isCorrect": true},
+                        {"id": "b", "text": "Option B", "isCorrect": false},
+                        {"id": "c", "text": "Option C", "isCorrect": false},
+                        {"id": "d", "text": "Option D", "isCorrect": false}
+                    ]
+                })
+            })
+            .collect();
+        let content_snapshot = json!({
+            "science": {
+                "stimuli": [{
+                    "id": "stimulus-1",
+                    "title": "Science stimulus",
+                    "content": "A science passage.",
+                    "blocks": [{
+                        "id": "science-block-1",
+                        "type": "SINGLE_MCQ",
+                        "questions": questions
+                    }]
+                }]
+            }
+        });
+        let answers: Map<String, Value> = (1..=32)
+            .map(|number| (format!("science-q-{number}"), json!("a")))
+            .collect();
+
+        let score = compute_act_science_score(
+            &json!({"general": {"type": "ACT"}}),
+            &content_snapshot,
+            &Value::Object(answers),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        )
+        .expect("ACT Science score");
+
+        assert_eq!(score.correct_count, 32);
+        assert_eq!(score.total_questions, 40);
+        assert_eq!(score.percentage, 80.0);
+    }
+
+    #[test]
+    fn act_science_percentage_stays_rounded_after_manual_override() {
+        let mut results = json!({
+            "totalScore": 1,
+            "maxScore": 3,
+            "percentage": 33.33,
+            "questionResults": [
+                {"questionId": "science-q-1", "isCorrect": true, "awardedScore": 1, "maxScore": 1},
+                {"questionId": "science-q-2", "isCorrect": false, "awardedScore": 0, "maxScore": 1},
+                {"questionId": "science-q-3", "isCorrect": false, "awardedScore": 0, "maxScore": 1}
+            ]
+        });
+
+        apply_manual_objective_question_override(
+            &mut results,
+            "science",
+            "science-q-2",
+            true,
+            "teacher-1",
+            "Taylor Grader",
+            "Accepted equivalent answer",
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(results["totalScore"], 2);
+        assert_eq!(results["maxScore"], 3);
+        assert_eq!(results["percentage"], 66.67);
+    }
+
+    #[test]
+    fn act_science_score_summary_reports_raw_score_and_rounded_percentage_without_answer_key() {
+        let content_snapshot = json!({
+            "science": {
+                "stimuli": [{
+                    "id": "stimulus-1",
+                    "blocks": [{
+                        "id": "science-block-1",
+                        "type": "SINGLE_MCQ",
+                        "questions": [
+                            {
+                                "id": "science-q-1",
+                                "options": [
+                                    {"id": "a", "text": "A", "isCorrect": true},
+                                    {"id": "b", "text": "B", "isCorrect": false},
+                                    {"id": "c", "text": "C", "isCorrect": false},
+                                    {"id": "d", "text": "D", "isCorrect": false}
+                                ]
+                            },
+                            {
+                                "id": "science-q-2",
+                                "options": [
+                                    {"id": "a", "text": "A", "isCorrect": false},
+                                    {"id": "b", "text": "B", "isCorrect": true},
+                                    {"id": "c", "text": "C", "isCorrect": false},
+                                    {"id": "d", "text": "D", "isCorrect": false}
+                                ]
+                            },
+                            {
+                                "id": "science-q-3",
+                                "options": [
+                                    {"id": "a", "text": "A", "isCorrect": false},
+                                    {"id": "b", "text": "B", "isCorrect": false},
+                                    {"id": "c", "text": "C", "isCorrect": true},
+                                    {"id": "d", "text": "D", "isCorrect": false}
+                                ]
+                            }
+                        ]
+                    }]
+                }]
+            }
+        });
+
+        let score = compute_act_science_score(
+            &json!({"general": {"type": "ACT"}}),
+            &content_snapshot,
+            &json!({"science-q-1": "a", "science-q-2": "b"}),
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        )
+        .expect("ACT Science score");
+
+        assert_eq!(score.section, "science");
+        assert_eq!(score.correct_count, 2);
+        assert_eq!(score.total_questions, 3);
+        assert_eq!(score.percentage, 66.67);
+
+        let public_payload = serde_json::to_value(score).expect("serialize score summary");
+        assert!(public_payload.get("questionResults").is_none());
+        assert!(public_payload.get("correctAnswer").is_none());
+    }
+
+    #[test]
+    fn act_science_submission_sync_creates_only_the_science_section() {
+        let content_snapshot = json!({
+            "science": {
+                "stimuli": [{
+                    "id": "stimulus-1",
+                    "title": "Plant Growth",
+                    "content": "Researchers measured plant growth.",
+                    "blocks": [{
+                        "id": "science-block-1",
+                        "type": "SINGLE_MCQ",
+                        "questions": [{
+                            "id": "science-q-1",
+                            "skillCategory": "scientific_investigation",
+                            "stem": "What variable was measured?",
+                            "options": [
+                                {"id": "a", "text": "A", "isCorrect": true},
+                                {"id": "b", "text": "B", "isCorrect": false},
+                                {"id": "c", "text": "C", "isCorrect": false},
+                                {"id": "d", "text": "D", "isCorrect": false}
+                            ]
+                        }]
+                    }]
+                }]
+            }
+        });
+        let config_snapshot = json!({
+            "general": {"type": "ACT"},
+            "sections": {"science": {"enabled": true, "duration": 40}}
+        });
+
+        let specs = build_section_sync_specs(
+            SectionSyncMode::Full,
+            &json!({"science-q-1": "a"}),
+            &json!({}),
+            &content_snapshot,
+            &config_snapshot,
+            Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            None,
+        );
+
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].section, "science");
+        assert_eq!(specs[0].grading_status, SectionGradingStatus::AutoGraded);
+        assert_eq!(
+            specs[0].auto_grading_results.as_ref().unwrap()["totalScore"],
+            1
+        );
+    }
+
+    #[test]
     fn missing_answer_key_derives_needs_review_section_status() {
         let specs = build_section_sync_specs(
             SectionSyncMode::Full,
@@ -6843,6 +7347,7 @@ mod tests {
 
         apply_manual_objective_question_override(
             &mut results,
+            "reading",
             "q-1",
             true,
             "teacher-1",
@@ -6903,7 +7408,11 @@ mod tests {
             }]
         });
 
-        preserve_manual_objective_overrides(&mut recalculated_results, &existing_results);
+        preserve_manual_objective_overrides(
+            &mut recalculated_results,
+            &existing_results,
+            "reading",
+        );
 
         assert_eq!(recalculated_results["totalScore"], 1);
         assert_eq!(recalculated_results["maxScore"], 2);

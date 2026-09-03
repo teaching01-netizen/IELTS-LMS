@@ -52,6 +52,13 @@ const DELIVERY_MIGRATIONS: &[&str] = &[
     "0022_attempt_submission_ledger.sql",
     "0023_sort_memory_hotpath_indexes.sql",
     "0024_projection_sort_hardening.sql",
+    "0025_join_storm_admission_queue.sql",
+    "0026_relax_access_code_constraints.sql",
+    "0027_grading_objective_overrides.sql",
+    "0028_grading_objective_grading_source.sql",
+    "0029_release_events_timestamp_precision.sql",
+    "0030_outbox_retry_policy.sql",
+    "0031_grading_export_profiles.sql",
 ];
 
 fn command(mutation_type: MutationType, payload: serde_json::Value) -> MutationCommand {
@@ -2693,7 +2700,7 @@ fn delivery_block_matrix_content_snapshot() -> serde_json::Value {
                 "id": "listening-matrix-p1",
                 "title": "Listening Part Matrix",
                 "blocks": [
-                    { "id": "l-multi", "type": "MULTI_MCQ", "requiredSelections": 2, "options": [{ "id": "A", "text": "Option A", "isCorrect": true }, { "id": "B", "text": "Option B", "isCorrect": false }, { "id": "C", "text": "Option C", "isCorrect": true }] },
+                    { "id": "l-multi", "type": "MULTI_MCQ", "stem": "Choose two options", "requiredSelections": 2, "options": [{ "id": "A", "text": "Option A", "isCorrect": true }, { "id": "B", "text": "Option B", "isCorrect": false }, { "id": "C", "text": "Option C", "isCorrect": true }] },
                     { "id": "l-single-question-set", "type": "SINGLE_MCQ", "questions": [{ "id": "l-single-q1", "stem": "Pick one", "options": [{ "id": "A", "text": "Option A", "isCorrect": false }, { "id": "B", "text": "Option B", "isCorrect": true }] }] },
                     { "id": "l-single-legacy", "type": "SINGLE_MCQ", "stem": "Pick one (legacy)", "options": [{ "id": "X", "text": "Option X", "isCorrect": false }, { "id": "Y", "text": "Option Y", "isCorrect": true }] },
                     { "id": "l-diagram", "type": "DIAGRAM_LABELING", "imageUrl": "https://example.com/diagram.png", "labels": [{ "id": "l1", "correctAnswer": "nose" }, { "id": "l2", "correctAnswer": "ear" }] },

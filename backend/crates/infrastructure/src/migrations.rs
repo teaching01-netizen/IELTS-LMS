@@ -580,7 +580,7 @@ SELECT @q, @x;\n";
     }
 
     #[test]
-    fn student_attempt_presence_uses_fresh_schema_uuid_type_fallbacks() {
+    fn student_attempt_presence_uses_current_schema_id_types() {
         let delivery_sql = std::fs::read_to_string("../../migrations/0006_delivery.sql")
             .expect("read delivery migration");
         let presence_sql =
@@ -591,46 +591,39 @@ SELECT @q, @x;\n";
             column_type(&delivery_sql, "student_attempts", "id").expect("student_attempts.id type");
 
         assert_eq!(parent_type, "VARCHAR(36)");
-        assert!(presence_sql
-            .contains("COALESCE(@student_attempt_presence_attempt_id_type, 'VARCHAR(36)')"));
-        assert!(presence_sql
-            .contains("COALESCE(@student_attempt_presence_schedule_id_type, 'VARCHAR(36)')"));
+        assert!(presence_sql.contains("attempt_id VARCHAR(36) NOT NULL PRIMARY KEY"));
+        assert!(presence_sql.contains("schedule_id VARCHAR(36) NOT NULL"));
     }
 
     #[test]
-    fn student_attempt_presence_attempt_id_is_derived_from_existing_parent_column() {
+    fn student_attempt_presence_has_runtime_columns_and_foreign_key() {
         let presence_sql =
             std::fs::read_to_string("../../migrations/0014_student_attempt_presence.sql")
                 .expect("read student attempt presence migration");
 
-        assert!(
-            presence_sql.contains("information_schema.columns"),
-            "presence migration must inspect the existing student_attempts.id definition"
-        );
-        assert!(presence_sql.contains("COLUMN_TYPE"));
-        assert!(presence_sql.contains("CHARACTER_SET_NAME"));
-        assert!(presence_sql.contains("COLLATION_NAME"));
-        assert!(presence_sql.contains("TABLE_NAME = 'student_attempts'"));
-        assert!(presence_sql.contains("COLUMN_NAME = 'id'"));
+        assert!(presence_sql.contains("client_session_id VARCHAR(36) NOT NULL"));
+        assert!(presence_sql.contains("last_heartbeat_at TIMESTAMP"));
+        assert!(presence_sql.contains("last_heartbeat_status VARCHAR(20)"));
+        assert!(presence_sql.contains("last_disconnect_at TIMESTAMP NULL"));
+        assert!(presence_sql.contains("last_reconnect_at TIMESTAMP NULL"));
+        assert!(presence_sql.contains("updated_at TIMESTAMP"));
+        assert!(presence_sql.contains("attempt_id VARCHAR(36) NOT NULL PRIMARY KEY"));
         assert!(presence_sql.contains("CONSTRAINT student_attempt_presence_attempt_fk"));
-        assert!(
-            !presence_sql.contains("attempt_id VARCHAR(36) PRIMARY KEY"),
-            "hard-coding VARCHAR(36) is incompatible with legacy CHAR(36) parent columns"
-        );
     }
 
     #[test]
-    fn student_attempt_presence_avoids_select_into_user_variables() {
+    fn student_attempt_presence_avoids_dynamic_sql() {
         let presence_sql =
             std::fs::read_to_string("../../migrations/0014_student_attempt_presence.sql")
                 .expect("read student attempt presence migration");
 
         assert!(
-            !presence_sql.contains("INTO @"),
-            "TiDB rejects SELECT ... INTO @user_variable in startup migrations"
+            !presence_sql.contains("SET @"),
+            "TiDB migration must not assign schema values to user variables"
         );
-        assert!(presence_sql.contains("SET @student_attempt_presence_attempt_id_type = ("));
-        assert!(presence_sql.contains("SET @student_attempt_presence_schedule_id_type = ("));
+        assert!(!presence_sql.contains("PREPARE"));
+        assert!(!presence_sql.contains("INTO @"));
+        assert!(!presence_sql.contains("CREATE TABLE IF NOT EXISTS student_attempt_presence\nSELECT"));
     }
 
     #[test]

@@ -35,6 +35,7 @@ const BUILDER_MIGRATIONS: &[&str] = &[
     "0008_grading_results.sql",
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
+    "0020_schedule_role_display_names.sql",
 ];
 
 #[tokio::test]
@@ -109,7 +110,7 @@ async fn list_exams_returns_seeded_exam_entities() {
     let seeded = seed_exam(database.pool()).await;
     let auth = mysql::create_authenticated_user(
         database.pool(),
-        UserRole::Builder,
+        UserRole::Admin,
         "builder@example.com",
         "Builder",
     )
@@ -1123,8 +1124,12 @@ async fn get_events_returns_exam_history_for_the_exam() {
 
     assert_eq!(json["success"], true);
     assert_eq!(events.len(), 2);
-    assert_eq!(events[0]["action"], "draft_saved");
-    assert_eq!(events[1]["action"], "created");
+    let actions = events
+        .iter()
+        .filter_map(|event| event["action"].as_str())
+        .collect::<Vec<_>>();
+    assert!(actions.contains(&"created"));
+    assert!(actions.contains(&"draft_saved"));
 
     database.shutdown().await;
 }

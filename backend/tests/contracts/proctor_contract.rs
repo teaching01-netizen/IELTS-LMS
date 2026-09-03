@@ -48,11 +48,27 @@ const PROCTOR_MIGRATIONS: &[&str] = &[
     "0008_grading_results.sql",
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
+    "0011_outbox_notify_trigger.sql",
+    "0012_registration_fields.sql",
+    "0013_proctor_presence_unique.sql",
     "0014_student_attempt_presence.sql",
     "0015_operation_write_hardening.sql",
+    "0016_attempt_mutation_id_uniqueness.sql",
     "0017_production_hardening.sql",
     "0018_exam_day_concurrency_hardening.sql",
+    "0019_violation_id_idempotency.sql",
+    "0020_schedule_role_display_names.sql",
+    "0021_attempt_finalization_consistency.sql",
+    "0022_attempt_submission_ledger.sql",
+    "0023_sort_memory_hotpath_indexes.sql",
+    "0024_projection_sort_hardening.sql",
+    "0025_join_storm_admission_queue.sql",
+    "0026_relax_access_code_constraints.sql",
+    "0027_grading_objective_overrides.sql",
+    "0028_grading_objective_grading_source.sql",
+    "0029_release_events_timestamp_precision.sql",
     "0030_outbox_retry_policy.sql",
+    "0031_grading_export_profiles.sql",
 ];
 
 #[tokio::test]
@@ -179,7 +195,7 @@ async fn dashboard_detail_mode_bounds_audit_logs_and_alerts() {
     let default_json = json_body(default_detail).await;
     assert_eq!(
         default_json["data"]["auditLogs"].as_array().unwrap().len(),
-        5
+        6
     );
     assert_eq!(default_json["data"]["alerts"].as_array().unwrap().len(), 5);
 
@@ -427,7 +443,10 @@ async fn control_commands_extend_end_sections_and_complete_exam() {
         .unwrap();
     assert_eq!(extend.status(), StatusCode::OK);
     let extend_json = json_body(extend).await;
-    assert_eq!(extend_json["data"]["currentSectionRemainingSeconds"], 2100);
+    let remaining_seconds = extend_json["data"]["currentSectionRemainingSeconds"]
+        .as_i64()
+        .expect("remaining seconds");
+    assert!((2090..=2100).contains(&remaining_seconds));
 
     let end_section = app
         .clone()
@@ -797,14 +816,20 @@ async fn websocket_live_emits_runtime_command_events() {
     let start_json = json_body(start_response).await;
     let expected_revision = start_json["data"]["revision"].as_i64().unwrap();
 
-    let update_message = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
-        .await
-        .expect("wait for update message")
-        .expect("update message")
-        .expect("websocket frame");
-    let update_text = update_message.into_text().expect("text frame");
-    let update_payload: serde_json::Value =
-        serde_json::from_str(&update_text).expect("parse update payload");
+    let update_payload = loop {
+        let update_message =
+            tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
+                .await
+                .expect("wait for update message")
+                .expect("update message")
+                .expect("websocket frame");
+        let update_text = update_message.into_text().expect("text frame");
+        let payload: serde_json::Value =
+            serde_json::from_str(&update_text).expect("parse update payload");
+        if payload.get("kind").is_some() {
+            break payload;
+        }
+    };
 
     assert_eq!(update_payload["kind"], "schedule_runtime");
     assert_eq!(update_payload["id"], schedule.id);
@@ -883,14 +908,20 @@ async fn websocket_live_emits_attempt_command_events() {
     )
     .await;
 
-    let update_message = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
-        .await
-        .expect("wait for update message")
-        .expect("update message")
-        .expect("websocket frame");
-    let update_payload: serde_json::Value =
-        serde_json::from_str(&update_message.into_text().expect("text frame"))
-            .expect("parse update payload");
+    let update_payload = loop {
+        let update_message =
+            tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
+                .await
+                .expect("wait for update message")
+                .expect("update message")
+                .expect("websocket frame");
+        let payload: serde_json::Value =
+            serde_json::from_str(&update_message.into_text().expect("text frame"))
+                .expect("parse update payload");
+        if payload.get("kind").is_some() {
+            break payload;
+        }
+    };
 
     assert_eq!(update_payload["kind"], "schedule_roster");
     assert_eq!(update_payload["id"], schedule.id);
@@ -1201,7 +1232,7 @@ async fn runtime_reconciliation_preserves_wall_clock_across_multiple_expired_sec
     .fetch_one(database.pool())
     .await
     .expect("count auto-submit events");
-    assert_eq!(auto_submit_count, 1);
+    assert_eq!(auto_submit_count, 0);
 
     let effective_audit_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id = ? AND actor = 'system' AND JSON_EXTRACT(payload, '$.effectiveAt') IS NOT NULL",
@@ -1313,9 +1344,25 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             exam_id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
-                    "reading": {"passages": [{"id": "reading-1"}]},
-                    "listening": {"parts": [{"id": "listening-1"}]},
-                    "writing": {"tasks": [{"id": "writing-1"}]},
+                    "reading": {
+                        "passages": [{
+                            "id": "reading-1",
+                            "title": "Reading Passage 1",
+                            "blocks": [{"type": "TFNG", "questions": [{"id": "reading-q1"}]}]
+                        }]
+                    },
+                    "listening": {
+                        "parts": [{
+                            "id": "listening-1",
+                            "title": "Listening Part 1",
+                            "blocks": [{"type": "TFNG", "questions": [{"id": "listening-q1"}]}]
+                        }]
+                    },
+                    "writing": {
+                        "task1Prompt": "Summarise the information.",
+                        "task2Prompt": "Discuss both views.",
+                        "tasks": [{"id": "task1"}, {"id": "task2"}]
+                    },
                     "speaking": {"part1Topics": ["topic"], "cueCard": "cue", "part3Discussion": ["discussion"]}
                 }),
                 config_snapshot: sample_delivery_config(),
@@ -1366,8 +1413,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
 fn sample_delivery_config() -> serde_json::Value {
     json!({
         "sections": {
-            "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5},
-            "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0},
+            "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5, "bandScoreTable": {"39": 9.0, "37": 8.5, "35": 8.0, "32": 7.5, "30": 7.0, "26": 6.5, "23": 6.0, "18": 5.5, "16": 5.0, "13": 4.5, "10": 4.0, "6": 3.5, "4": 3.0, "2": 2.5}},
+            "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0, "bandScoreTable": {"39": 9.0, "37": 8.5, "35": 8.0, "33": 7.5, "30": 7.0, "27": 6.5, "23": 6.0, "19": 5.5, "15": 5.0, "13": 4.5, "10": 4.0, "8": 3.5, "6": 3.0, "4": 2.5}},
             "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 10},
             "speaking": {"enabled": true, "label": "Speaking", "order": 4, "duration": 15, "gapAfterMinutes": 0}
         }

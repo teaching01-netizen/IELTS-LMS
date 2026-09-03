@@ -1,18 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ErrorSurface, LoadingSurface } from '@components/ui';
-import { StudentAppWrapper } from '@components/student/StudentAppWrapper';
-import { useBuilderRouteController } from '@builder/hooks/useBuilderRouteController';
-import { getEnabledModules } from '../../exam-authoring/api/examAuthoringGateway';
-import { useAuthSession } from '../../auth/api/authSession';
-import { useStudentSessionRouteData } from '@student/api/studentSessionRouteData';
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { ErrorSurface, LoadingSurface } from "@components/ui";
+import { StudentAppWrapper } from "@components/student/StudentAppWrapper";
+import { useBuilderRouteController } from "@builder/hooks/useBuilderRouteController";
+import { getEnabledModules } from "../../exam-authoring/api/examAuthoringGateway";
+import { useAuthSession } from "../../auth/api/authSession";
+import { useStudentSessionRouteData } from "@student/api/studentSessionRouteData";
 import {
   resolvePreviewRuntimeSession,
   type PreviewRuntimeSession,
-} from '../services/previewRuntimeSessionService';
-import type { ModuleType } from '../../../types';
+} from "../services/previewRuntimeSessionService";
+import type { ModuleType } from "../../../types";
 
-const MODULE_KEYS: ModuleType[] = ['listening', 'reading', 'writing', 'speaking'];
+const MODULE_KEYS: ModuleType[] = ["listening", "reading", "writing", "speaking", "science"];
 
 export function ExamPreviewRoute() {
   const { examId } = useParams<{ examId: string }>();
@@ -25,7 +25,7 @@ export function ExamPreviewRoute() {
   const [sessionLoading, setSessionLoading] = useState(false);
 
   const requestedModule = useMemo<ModuleType | null>(() => {
-    const raw = searchParams.get('module');
+    const raw = searchParams.get("module");
     if (!raw) {
       return null;
     }
@@ -40,16 +40,16 @@ export function ExamPreviewRoute() {
   const previewModule =
     requestedModule && enabledModules.includes(requestedModule)
       ? requestedModule
-      : enabledModules[0] ?? 'reading';
+      : (enabledModules[0] ?? "reading");
 
   useEffect(() => {
     if (
-      !examId
-      || controller.isLoading
-      || controller.error
-      || !resolvedExam
-      || !resolvedState
-      || !resolvedAuthorUserId
+      !examId ||
+      controller.isLoading ||
+      controller.error ||
+      !resolvedExam ||
+      !resolvedState ||
+      !resolvedAuthorUserId
     ) {
       return;
     }
@@ -75,7 +75,7 @@ export function ExamPreviewRoute() {
 
         if (resolved.module !== previewModule) {
           const nextParams = new URLSearchParams(searchParams);
-          nextParams.set('module', resolved.module);
+          nextParams.set("module", resolved.module);
           setSearchParams(nextParams, { replace: true });
         }
 
@@ -84,7 +84,9 @@ export function ExamPreviewRoute() {
         if (cancelled) {
           return;
         }
-        setSessionError(error instanceof Error ? error.message : 'Failed to start preview runtime.');
+        setSessionError(
+          error instanceof Error ? error.message : "Failed to start preview runtime."
+        );
       } finally {
         if (!cancelled) {
           setSessionLoading(false);
@@ -109,12 +111,7 @@ export function ExamPreviewRoute() {
   ]);
 
   if (!examId) {
-    return (
-      <ErrorSurface
-        title="Preview unavailable"
-        description="Exam ID not found."
-      />
-    );
+    return <ErrorSurface title="Preview unavailable" description="Exam ID not found." />;
   }
 
   if (controller.isLoading) {
@@ -144,21 +141,11 @@ export function ExamPreviewRoute() {
   }
 
   if (!resolvedExam) {
-    return (
-      <ErrorSurface
-        title="Preview unavailable"
-        description="Exam metadata not found."
-      />
-    );
+    return <ErrorSurface title="Preview unavailable" description="Exam metadata not found." />;
   }
 
   if (!resolvedAuthorUserId) {
-    return (
-      <ErrorSurface
-        title="Preview unavailable"
-        description="Author session not available."
-      />
-    );
+    return <ErrorSurface title="Preview unavailable" description="Author session not available." />;
   }
 
   const handleModuleChange = (nextModule: ModuleType) => {
@@ -167,7 +154,7 @@ export function ExamPreviewRoute() {
     }
 
     const nextParams = new URLSearchParams(searchParams);
-    nextParams.set('module', nextModule);
+    nextParams.set("module", nextModule);
     setSearchParams(nextParams, { replace: true });
   };
 
@@ -176,12 +163,7 @@ export function ExamPreviewRoute() {
   }
 
   if (sessionError) {
-    return (
-      <ErrorSurface
-        title="Preview session failed"
-        description={sessionError}
-      />
-    );
+    return <ErrorSurface title="Preview session failed" description={sessionError} />;
   }
 
   if (!previewSession) {
@@ -230,20 +212,12 @@ function RuntimePreviewSurface({
   }
 
   if (error) {
-    return (
-      <ErrorSurface
-        title="Runtime preview failed"
-        description={error}
-      />
-    );
+    return <ErrorSurface title="Runtime preview failed" description={error} />;
   }
 
   if (!state) {
     return (
-      <ErrorSurface
-        title="Runtime preview unavailable"
-        description="Preview state not found."
-      />
+      <ErrorSurface title="Runtime preview unavailable" description="Preview state not found." />
     );
   }
 

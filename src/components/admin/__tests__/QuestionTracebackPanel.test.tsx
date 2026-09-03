@@ -1,38 +1,43 @@
-import React from 'react';
-import { afterEach, describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { createInitialExamState } from '../../../services/examAdapterService';
-import { QuestionTracebackPanel } from '../QuestionTracebackPanel';
-import * as gradingReviewUtils from '../gradingReviewUtils';
+import React from "react";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { createInitialExamState } from "../../../services/examAdapterService";
+import { QuestionTracebackPanel } from "../QuestionTracebackPanel";
+import * as gradingReviewUtils from "../gradingReviewUtils";
 
-vi.mock('../gradingReviewUtils', async () => {
-  const actual = await vi.importActual<typeof import('../gradingReviewUtils')>('../gradingReviewUtils');
+vi.mock("../gradingReviewUtils", async () => {
+  const actual =
+    await vi.importActual<typeof import("../gradingReviewUtils")>("../gradingReviewUtils");
   return {
     ...actual,
     buildQuestionTracebackGroups: vi.fn(actual.buildQuestionTracebackGroups),
   };
 });
 
-const mockedBuildQuestionTracebackGroups = vi.mocked(gradingReviewUtils.buildQuestionTracebackGroups);
+const mockedBuildQuestionTracebackGroups = vi.mocked(
+  gradingReviewUtils.buildQuestionTracebackGroups
+);
 
 afterEach(() => {
   mockedBuildQuestionTracebackGroups.mockClear();
 });
 
-describe('QuestionTracebackPanel', () => {
-  test('lets a grader choose a persisted correctness override for an answer row', () => {
-    const examState = createInitialExamState('Exam', 'Academic');
+describe("QuestionTracebackPanel", () => {
+  test("lets a grader choose a persisted correctness override for an answer row", () => {
+    const examState = createInitialExamState("Exam", "Academic");
     examState.reading.passages = [
       {
-        id: 'passage-1',
-        title: 'Passage 1',
-        content: 'Content',
+        id: "passage-1",
+        title: "Passage 1",
+        content: "Content",
         blocks: [
           {
-            id: 'block-1',
-            type: 'SHORT_ANSWER',
-            instruction: 'Answer the question.',
-            questions: [{ id: 'q-1', prompt: 'What is it?', correctAnswer: 'Answer', answerRule: 'ONE_WORD' }],
+            id: "block-1",
+            type: "SHORT_ANSWER",
+            instruction: "Answer the question.",
+            questions: [
+              { id: "q-1", prompt: "What is it?", correctAnswer: "Answer", answerRule: "ONE_WORD" },
+            ],
           },
         ],
         images: [],
@@ -45,44 +50,46 @@ describe('QuestionTracebackPanel', () => {
       <QuestionTracebackPanel
         section="reading"
         examState={examState}
-        sectionSubmission={{
-          id: 'sec-1',
-          submissionId: 'sub-1',
-          section: 'reading',
-          answers: { type: 'reading', answers: { 'q-1': 'Answer' } },
-          autoGradingResults: undefined,
-          gradingStatus: 'auto_graded',
-          submittedAt: '2026-01-01T00:00:00.000Z',
-        } as any}
+        sectionSubmission={
+          {
+            id: "sec-1",
+            submissionId: "sub-1",
+            section: "reading",
+            answers: { type: "reading", answers: { "q-1": "Answer" } },
+            autoGradingResults: undefined,
+            gradingStatus: "auto_graded",
+            submittedAt: "2026-01-01T00:00:00.000Z",
+          } as any
+        }
         examLoading={false}
         examError={null}
         onOverride={onOverride}
-      />,
+      />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Mark incorrect' }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark incorrect" }));
 
-    expect(onOverride).toHaveBeenCalledWith('q-1', false);
+    expect(onOverride).toHaveBeenCalledWith("q-1", false);
   });
 
-  test('renders grouped objective answers from the exam snapshot', () => {
-    const examState = createInitialExamState('Exam', 'Academic');
+  test("renders grouped objective answers from the exam snapshot", () => {
+    const examState = createInitialExamState("Exam", "Academic");
     examState.reading.passages = [
       {
-        id: 'passage-1',
-        title: 'Passage 1',
-        content: 'Content',
+        id: "passage-1",
+        title: "Passage 1",
+        content: "Content",
         blocks: [
           {
-            id: 'block-1',
-            type: 'SHORT_ANSWER',
-            instruction: 'Answer the question.',
+            id: "block-1",
+            type: "SHORT_ANSWER",
+            instruction: "Answer the question.",
             questions: [
               {
-                id: 'q-1',
-                prompt: 'What is it?',
-                correctAnswer: 'Answer',
-                answerRule: 'ONE_WORD',
+                id: "q-1",
+                prompt: "What is it?",
+                correctAnswer: "Answer",
+                answerRule: "ONE_WORD",
               },
             ],
           },
@@ -96,54 +103,56 @@ describe('QuestionTracebackPanel', () => {
       <QuestionTracebackPanel
         section="reading"
         examState={examState}
-        sectionSubmission={{
-          id: 'sec-1',
-          submissionId: 'sub-1',
-          section: 'reading',
-          answers: {
-            type: 'reading',
+        sectionSubmission={
+          {
+            id: "sec-1",
+            submissionId: "sub-1",
+            section: "reading",
             answers: {
-              'q-1': 'Answer',
+              type: "reading",
+              answers: {
+                "q-1": "Answer",
+              },
             },
-          },
-          autoGradingResults: undefined,
-          gradingStatus: 'auto_graded',
-          reviewedBy: undefined,
-          reviewedAt: undefined,
-          finalizedBy: undefined,
-          finalizedAt: undefined,
-          submittedAt: '2026-01-01T00:00:00.000Z',
-        } as any}
+            autoGradingResults: undefined,
+            gradingStatus: "auto_graded",
+            reviewedBy: undefined,
+            reviewedAt: undefined,
+            finalizedBy: undefined,
+            finalizedAt: undefined,
+            submittedAt: "2026-01-01T00:00:00.000Z",
+          } as any
+        }
         examLoading={false}
         examError={null}
-      />,
+      />
     );
 
     expect(screen.getByText(/Traceback View/i)).toBeInTheDocument();
-    expect(screen.getByText('Passage 1')).toBeInTheDocument();
-    expect(screen.getByText('What is it?')).toBeInTheDocument();
-    expect(screen.getAllByText('Answer')).toHaveLength(2);
-    expect(screen.getByText('Correct answer')).toBeInTheDocument();
+    expect(screen.getByText("Passage 1")).toBeInTheDocument();
+    expect(screen.getByText("What is it?")).toBeInTheDocument();
+    expect(screen.getAllByText("Answer")).toHaveLength(2);
+    expect(screen.getByText("Correct answer")).toBeInTheDocument();
   });
 
-  test('renders mapped MCQ option text in traceback student answers', () => {
-    const examState = createInitialExamState('Exam', 'Academic');
+  test("renders mapped MCQ option text in traceback student answers", () => {
+    const examState = createInitialExamState("Exam", "Academic");
     examState.reading.passages = [
       {
-        id: 'passage-1',
-        title: 'Passage 1',
-        content: 'Content',
+        id: "passage-1",
+        title: "Passage 1",
+        content: "Content",
         blocks: [
           {
-            id: 'block-1',
-            type: 'MULTI_MCQ',
-            instruction: 'Choose two',
-            stem: 'Choose two',
+            id: "block-1",
+            type: "MULTI_MCQ",
+            instruction: "Choose two",
+            stem: "Choose two",
             requiredSelections: 2,
             options: [
-              { id: 'A', text: 'Alpha', isCorrect: true },
-              { id: 'B', text: 'Beta', isCorrect: false },
-              { id: 'C', text: 'Charlie', isCorrect: true },
+              { id: "A", text: "Alpha", isCorrect: true },
+              { id: "B", text: "Beta", isCorrect: false },
+              { id: "C", text: "Charlie", isCorrect: true },
             ],
           },
         ],
@@ -156,66 +165,154 @@ describe('QuestionTracebackPanel', () => {
       <QuestionTracebackPanel
         section="reading"
         examState={examState}
-        sectionSubmission={{
-          id: 'sec-1',
-          submissionId: 'sub-1',
-          section: 'reading',
-          answers: {
-            type: 'reading',
+        sectionSubmission={
+          {
+            id: "sec-1",
+            submissionId: "sub-1",
+            section: "reading",
             answers: {
-              'block-1': ['C', 'A'],
+              type: "reading",
+              answers: {
+                "block-1": ["C", "A"],
+              },
             },
-          },
-          autoGradingResults: undefined,
-          gradingStatus: 'auto_graded',
-          reviewedBy: undefined,
-          reviewedAt: undefined,
-          finalizedBy: undefined,
-          finalizedAt: undefined,
-          submittedAt: '2026-01-01T00:00:00.000Z',
-        } as any}
+            autoGradingResults: undefined,
+            gradingStatus: "auto_graded",
+            reviewedBy: undefined,
+            reviewedAt: undefined,
+            finalizedBy: undefined,
+            finalizedAt: undefined,
+            submittedAt: "2026-01-01T00:00:00.000Z",
+          } as any
+        }
         examLoading={false}
         examError={null}
-      />,
+      />
     );
 
-    expect(screen.getAllByText('Charlie, Alpha').length).toBeGreaterThan(0);
-    expect(screen.queryByText('[1] C')).not.toBeInTheDocument();
+    expect(screen.getAllByText("Charlie, Alpha").length).toBeGreaterThan(0);
+    expect(screen.queryByText("[1] C")).not.toBeInTheDocument();
   });
 
-  test('shows numbering gap warning when canonical question numbers are non-contiguous', () => {
+  test("shows the ACT Science question type for each question", () => {
+    const examState = createInitialExamState("ACT Science Practice", "ACT", "ACT Science");
+    examState.science.stimuli = [
+      {
+        id: "stimulus-1",
+        title: "Water experiment",
+        content: "Experiment content",
+        blocks: [
+          {
+            id: "science-block-1",
+            type: "SINGLE_MCQ",
+            instruction: "Choose the best answer.",
+            stem: "What happened?",
+            options: [
+              { id: "option-a", text: "Water increased", isCorrect: true },
+              { id: "option-b", text: "Water decreased", isCorrect: false },
+            ],
+            questions: [
+              {
+                id: "science-q1",
+                stem: "What happened to the water?",
+                skillCategory: "interpretation_of_data",
+                options: [
+                  { id: "option-a", text: "Water increased", isCorrect: true },
+                  { id: "option-b", text: "Water decreased", isCorrect: false },
+                ],
+              },
+              {
+                id: "science-q2",
+                stem: "How should this be tested?",
+                skillCategory: "scientific_investigation",
+                options: [
+                  { id: "sin-a", text: "Test A", isCorrect: true },
+                  { id: "sin-b", text: "Test B", isCorrect: false },
+                ],
+              },
+              {
+                id: "science-q3",
+                stem: "Which argument is supported?",
+                skillCategory: "evaluating_scientific_arguments_and_models_with_evidence",
+                options: [
+                  { id: "esa-a", text: "Argument A", isCorrect: true },
+                  { id: "esa-b", text: "Argument B", isCorrect: false },
+                ],
+              },
+            ],
+          },
+        ],
+        images: [],
+      },
+    ] as any;
+
+    render(
+      <QuestionTracebackPanel
+        section="science"
+        examState={examState}
+        sectionSubmission={
+          {
+            id: "sec-science-1",
+            submissionId: "sub-science-1",
+            section: "science",
+            answers: {
+              type: "science",
+              answers: {
+                "science-q1": "option-b",
+                "science-q2": "sin-a",
+                "science-q3": "esa-a",
+              },
+            },
+            autoGradingResults: undefined,
+            gradingStatus: "auto_graded",
+            submittedAt: "2026-01-01T00:00:00.000Z",
+          } as any
+        }
+        examLoading={false}
+        examError={null}
+      />
+    );
+
+    expect(screen.getByText("Question Type: Interpretation of Data")).toBeInTheDocument();
+    expect(screen.getByText("Question Type: Scientific Investigation")).toBeInTheDocument();
+    expect(
+      screen.getByText("Question Type: Evaluating Scientific Arguments and Models with Evidence")
+    ).toBeInTheDocument();
+  });
+
+  test("shows numbering gap warning when canonical question numbers are non-contiguous", () => {
     mockedBuildQuestionTracebackGroups.mockReturnValueOnce([
       {
-        groupId: 'g1',
-        groupLabel: 'Passage 1',
+        groupId: "g1",
+        groupLabel: "Passage 1",
         items: [
           {
-            numberLabel: '21',
-            rootNumberLabel: '21',
-            questionId: 'q-21',
-            rootId: 'q-21',
-            prompt: 'Question 21',
-            studentAnswer: 'A',
-            correctAnswer: 'B',
+            numberLabel: "21",
+            rootNumberLabel: "21",
+            questionId: "q-21",
+            rootId: "q-21",
+            prompt: "Question 21",
+            studentAnswer: "A",
+            correctAnswer: "B",
             correctness: false,
             rootCorrectness: false,
             awardedScore: 0,
             maxScore: 1,
-            answerKey: 'q-21',
+            answerKey: "q-21",
           },
           {
-            numberLabel: '33',
-            rootNumberLabel: '33',
-            questionId: 'q-33',
-            rootId: 'q-33',
-            prompt: 'Question 33',
-            studentAnswer: 'C',
-            correctAnswer: 'D',
+            numberLabel: "33",
+            rootNumberLabel: "33",
+            questionId: "q-33",
+            rootId: "q-33",
+            prompt: "Question 33",
+            studentAnswer: "C",
+            correctAnswer: "D",
             correctness: false,
             rootCorrectness: false,
             awardedScore: 0,
             maxScore: 1,
-            answerKey: 'q-33',
+            answerKey: "q-33",
           },
         ],
       },
@@ -225,43 +322,45 @@ describe('QuestionTracebackPanel', () => {
       <QuestionTracebackPanel
         section="reading"
         examState={null}
-        sectionSubmission={{
-          id: 'sec-1',
-          submissionId: 'sub-1',
-          section: 'reading',
-          answers: { type: 'reading', answers: { 'q-21': 'A', 'q-33': 'C' } },
-          autoGradingResults: undefined,
-          gradingStatus: 'auto_graded',
-          reviewedBy: undefined,
-          reviewedAt: undefined,
-          finalizedBy: undefined,
-          finalizedAt: undefined,
-          submittedAt: '2026-01-01T00:00:00.000Z',
-        } as any}
+        sectionSubmission={
+          {
+            id: "sec-1",
+            submissionId: "sub-1",
+            section: "reading",
+            answers: { type: "reading", answers: { "q-21": "A", "q-33": "C" } },
+            autoGradingResults: undefined,
+            gradingStatus: "auto_graded",
+            reviewedBy: undefined,
+            reviewedAt: undefined,
+            finalizedBy: undefined,
+            finalizedAt: undefined,
+            submittedAt: "2026-01-01T00:00:00.000Z",
+          } as any
+        }
         examLoading={false}
         examError={null}
-      />,
+      />
     );
 
     expect(screen.getByText(/Question numbering has gaps/i)).toBeInTheDocument();
     expect(screen.getByText(/22-32/)).toBeInTheDocument();
   });
 
-  test('does not show numbering gap warning when numbering is contiguous', () => {
-    const examState = createInitialExamState('Exam', 'Academic');
+  test("does not show numbering gap warning when numbering is contiguous", () => {
+    const examState = createInitialExamState("Exam", "Academic");
     examState.reading.passages = [
       {
-        id: 'passage-1',
-        title: 'Passage 1',
-        content: 'Content',
+        id: "passage-1",
+        title: "Passage 1",
+        content: "Content",
         blocks: [
           {
-            id: 'block-1',
-            type: 'SHORT_ANSWER',
-            instruction: 'Answer the questions.',
+            id: "block-1",
+            type: "SHORT_ANSWER",
+            instruction: "Answer the questions.",
             questions: [
-              { id: 'q-1', prompt: 'Q1?', correctAnswer: 'A', answerRule: 'ONE_WORD' },
-              { id: 'q-2', prompt: 'Q2?', correctAnswer: 'B', answerRule: 'ONE_WORD' },
+              { id: "q-1", prompt: "Q1?", correctAnswer: "A", answerRule: "ONE_WORD" },
+              { id: "q-2", prompt: "Q2?", correctAnswer: "B", answerRule: "ONE_WORD" },
             ],
           },
         ],
@@ -274,46 +373,48 @@ describe('QuestionTracebackPanel', () => {
       <QuestionTracebackPanel
         section="reading"
         examState={examState}
-        sectionSubmission={{
-          id: 'sec-1',
-          submissionId: 'sub-1',
-          section: 'reading',
-          answers: { type: 'reading', answers: { 'q-1': 'A', 'q-2': 'B' } },
-          autoGradingResults: undefined,
-          gradingStatus: 'auto_graded',
-          reviewedBy: undefined,
-          reviewedAt: undefined,
-          finalizedBy: undefined,
-          finalizedAt: undefined,
-          submittedAt: '2026-01-01T00:00:00.000Z',
-        } as any}
+        sectionSubmission={
+          {
+            id: "sec-1",
+            submissionId: "sub-1",
+            section: "reading",
+            answers: { type: "reading", answers: { "q-1": "A", "q-2": "B" } },
+            autoGradingResults: undefined,
+            gradingStatus: "auto_graded",
+            reviewedBy: undefined,
+            reviewedAt: undefined,
+            finalizedBy: undefined,
+            finalizedAt: undefined,
+            submittedAt: "2026-01-01T00:00:00.000Z",
+          } as any
+        }
         examLoading={false}
         examError={null}
-      />,
+      />
     );
 
     expect(screen.queryByText(/Question numbering has gaps/i)).not.toBeInTheDocument();
   });
 
-  test('shows unmapped answer-key warning when stored answer keys do not match traceback descriptors', () => {
+  test("shows unmapped answer-key warning when stored answer keys do not match traceback descriptors", () => {
     mockedBuildQuestionTracebackGroups.mockReturnValueOnce([
       {
-        groupId: 'g1',
-        groupLabel: 'Passage 1',
+        groupId: "g1",
+        groupLabel: "Passage 1",
         items: [
           {
-            numberLabel: '1',
-            rootNumberLabel: '1',
-            questionId: 'q-1',
-            rootId: 'q-1',
-            prompt: 'Question 1',
-            studentAnswer: 'A',
-            correctAnswer: 'A',
+            numberLabel: "1",
+            rootNumberLabel: "1",
+            questionId: "q-1",
+            rootId: "q-1",
+            prompt: "Question 1",
+            studentAnswer: "A",
+            correctAnswer: "A",
             correctness: true,
             rootCorrectness: true,
             awardedScore: 1,
             maxScore: 1,
-            answerKey: 'q-1',
+            answerKey: "q-1",
           },
         ],
       },
@@ -323,63 +424,65 @@ describe('QuestionTracebackPanel', () => {
       <QuestionTracebackPanel
         section="reading"
         examState={null}
-        sectionSubmission={{
-          id: 'sec-1',
-          submissionId: 'sub-1',
-          section: 'reading',
-          answers: { type: 'reading', answers: { 'q-1': 'A', 'orphan-key': 'X' } },
-          autoGradingResults: undefined,
-          gradingStatus: 'auto_graded',
-          reviewedBy: undefined,
-          reviewedAt: undefined,
-          finalizedBy: undefined,
-          finalizedAt: undefined,
-          submittedAt: '2026-01-01T00:00:00.000Z',
-        } as any}
+        sectionSubmission={
+          {
+            id: "sec-1",
+            submissionId: "sub-1",
+            section: "reading",
+            answers: { type: "reading", answers: { "q-1": "A", "orphan-key": "X" } },
+            autoGradingResults: undefined,
+            gradingStatus: "auto_graded",
+            reviewedBy: undefined,
+            reviewedAt: undefined,
+            finalizedBy: undefined,
+            finalizedAt: undefined,
+            submittedAt: "2026-01-01T00:00:00.000Z",
+          } as any
+        }
         examLoading={false}
         examError={null}
-      />,
+      />
     );
 
     expect(screen.getByText(/stored answer key\(s\) do not map/i)).toBeInTheDocument();
     expect(screen.getByText(/orphan-key/)).toBeInTheDocument();
   });
 
-  test('shows grouped scoring rule label when provided by traceback items', () => {
+  test("shows grouped scoring rule label when provided by traceback items", () => {
     mockedBuildQuestionTracebackGroups.mockReturnValueOnce([
       {
-        groupId: 'g1',
-        groupLabel: 'Passage 1',
+        groupId: "g1",
+        groupLabel: "Passage 1",
         items: [
           {
-            numberLabel: '22',
-            rootNumberLabel: '22',
-            questionId: 'q-22:a',
-            rootId: 'q-22:group:pair',
-            prompt: 'Blank A',
-            studentAnswer: 'sun',
-            correctAnswer: 'sun',
+            numberLabel: "22",
+            rootNumberLabel: "22",
+            questionId: "q-22:a",
+            rootId: "q-22:group:pair",
+            prompt: "Blank A",
+            studentAnswer: "sun",
+            correctAnswer: "sun",
             correctness: true,
             rootCorrectness: true,
             awardedScore: 1,
             maxScore: 1,
-            answerKey: 'q-22',
-            rootRuleLabel: 'Scoring: 2 answers required for 1 point',
+            answerKey: "q-22",
+            rootRuleLabel: "Scoring: 2 answers required for 1 point",
           },
           {
-            numberLabel: '22',
-            rootNumberLabel: '22',
-            questionId: 'q-22:b',
-            rootId: 'q-22:group:pair',
-            prompt: 'Blank B',
-            studentAnswer: 'moon',
-            correctAnswer: 'moon',
+            numberLabel: "22",
+            rootNumberLabel: "22",
+            questionId: "q-22:b",
+            rootId: "q-22:group:pair",
+            prompt: "Blank B",
+            studentAnswer: "moon",
+            correctAnswer: "moon",
             correctness: true,
             rootCorrectness: true,
             awardedScore: 1,
             maxScore: 1,
-            answerKey: 'q-22',
-            rootRuleLabel: 'Scoring: 2 answers required for 1 point',
+            answerKey: "q-22",
+            rootRuleLabel: "Scoring: 2 answers required for 1 point",
           },
         ],
       },
@@ -389,22 +492,24 @@ describe('QuestionTracebackPanel', () => {
       <QuestionTracebackPanel
         section="reading"
         examState={null}
-        sectionSubmission={{
-          id: 'sec-1',
-          submissionId: 'sub-1',
-          section: 'reading',
-          answers: { type: 'reading', answers: { 'q-22': ['sun', 'moon'] } },
-          autoGradingResults: undefined,
-          gradingStatus: 'auto_graded',
-          reviewedBy: undefined,
-          reviewedAt: undefined,
-          finalizedBy: undefined,
-          finalizedAt: undefined,
-          submittedAt: '2026-01-01T00:00:00.000Z',
-        } as any}
+        sectionSubmission={
+          {
+            id: "sec-1",
+            submissionId: "sub-1",
+            section: "reading",
+            answers: { type: "reading", answers: { "q-22": ["sun", "moon"] } },
+            autoGradingResults: undefined,
+            gradingStatus: "auto_graded",
+            reviewedBy: undefined,
+            reviewedAt: undefined,
+            finalizedBy: undefined,
+            finalizedAt: undefined,
+            submittedAt: "2026-01-01T00:00:00.000Z",
+          } as any
+        }
         examLoading={false}
         examError={null}
-      />,
+      />
     );
 
     expect(screen.getByText(/2 answers required for 1 point/i)).toBeInTheDocument();

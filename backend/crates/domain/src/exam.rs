@@ -89,6 +89,8 @@ pub enum ExamType {
     Academic,
     #[serde(rename = "General Training")]
     GeneralTraining,
+    #[serde(rename = "ACT")]
+    Act,
 }
 
 #[cfg(feature = "sqlx")]
@@ -138,6 +140,7 @@ mod sqlx_exam_enums {
     impl_text_enum!(ExamType, {
         Academic => "Academic",
         GeneralTraining => "General Training",
+        Act => "ACT",
     });
 
     impl_text_enum!(ExamStatus, {
@@ -163,6 +166,7 @@ impl ExamType {
         match self {
             ExamType::Academic => "Academic",
             ExamType::GeneralTraining => "General Training",
+            ExamType::Act => "ACT",
         }
     }
 
@@ -170,6 +174,7 @@ impl ExamType {
         match s {
             "Academic" => Ok(ExamType::Academic),
             "General Training" => Ok(ExamType::GeneralTraining),
+            "ACT" => Ok(ExamType::Act),
             _ => Err(format!("Invalid ExamType: {}", s)),
         }
     }
@@ -556,5 +561,19 @@ pub enum VersionProjection {
 impl Default for VersionProjection {
     fn default() -> Self {
         Self::Full
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExamType;
+
+    #[test]
+    fn act_exam_type_round_trips_through_storage_and_json_value() {
+        let exam_type = ExamType::from_str("ACT").expect("ACT should be a valid exam type");
+
+        assert_eq!(exam_type, ExamType::Act);
+        assert_eq!(exam_type.as_str(), "ACT");
+        assert_eq!(serde_json::to_string(&exam_type).unwrap(), "\"ACT\"");
     }
 }

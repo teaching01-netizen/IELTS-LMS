@@ -2,26 +2,27 @@ COMPOSE ?= docker compose
 CARGO ?= cargo
 NODE ?= node
 SHELL := /bin/bash
+ENV_RUN := set -a; if [[ -f .env ]]; then source .env; fi; set +a;
 
 .PHONY: db-up db-bootstrap db-down migrate api worker fmt clippy test load-test load-test-restart backup-rehearsal migrate-tidb ops-check idle-ram-capture idle-ram-summary idle-ram-compare
 
 db-up:
-	$(COMPOSE) -f docker-compose.yml up -d tidb minio
+	$(COMPOSE) -f docker-compose.yml up -d --wait tidb minio
 
 db-bootstrap:
-	@echo "No bootstrap required for TiDB local dev."
+	docker run --rm mysql:8 mysql -h host.docker.internal -P 4000 -uroot -e "CREATE DATABASE IF NOT EXISTS ielts;"
 
 db-down:
 	$(COMPOSE) -f docker-compose.yml down --remove-orphans
 
 migrate:
-	@echo "Run migrations via the app/worker against TiDB."
+	@$(ENV_RUN) $(CARGO) run -p ielts-backend-api --bin migrate
 
 api:
-	$(CARGO) run -p ielts-backend-api
+	@$(ENV_RUN) $(CARGO) run -p ielts-backend-api --bin ielts-backend-api
 
 worker:
-	$(CARGO) run -p ielts-backend-worker
+	@$(ENV_RUN) $(CARGO) run -p ielts-backend-worker
 
 fmt:
 	$(CARGO) fmt --all
@@ -30,7 +31,7 @@ clippy:
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 
 test:
-	$(CARGO) test --workspace
+	@$(ENV_RUN) TEST_DATABASE_URL="$${TEST_DATABASE_URL:-$${DATABASE_URL}}" $(CARGO) test --workspace
 
 load-test:
 	$(NODE) ./scripts/load-test.js

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bold,
   Heading1,
@@ -10,33 +10,36 @@ import {
   List,
   ListOrdered,
   Underline,
-} from 'lucide-react';
-import { Passage, ExamState, StimulusImageAsset } from '../types';
-import { StimulusImageEditor } from './StimulusImageEditor';
-import { getPassageMetrics } from '../utils/builderEnhancements';
-import { normalizeImageUrl } from '../utils/imageUrl';
-import { sanitizeHtml } from '../utils/sanitizeHtml';
+} from "lucide-react";
+import { ActScienceStimulus, Passage, ExamState, StimulusImageAsset } from "../types";
+import { StimulusImageEditor } from "./StimulusImageEditor";
+import { getPassageMetrics } from "../utils/builderEnhancements";
+import { normalizeImageUrl } from "../utils/imageUrl";
+import { sanitizeHtml } from "../utils/sanitizeHtml";
 
 const metricTone = {
-  green: 'text-emerald-700 bg-emerald-50 border-emerald-100',
-  yellow: 'text-amber-700 bg-amber-50 border-amber-100',
-  red: 'text-red-700 bg-red-50 border-red-100',
+  green: "text-emerald-700 bg-emerald-50 border-emerald-100",
+  yellow: "text-amber-700 bg-amber-50 border-amber-100",
+  red: "text-red-700 bg-red-50 border-red-100",
 };
 
 interface StimulusPaneProps {
-  passage: Passage;
+  passage: Passage | ActScienceStimulus;
   state: ExamState;
   setState: (next: ExamState | ((previous: ExamState) => ExamState)) => void | Promise<void>;
+  section?: "reading" | "science";
 }
 
 function areStimulusPanePropsEqual(previous: StimulusPaneProps, next: StimulusPaneProps) {
   return (
-    previous.passage.id === next.passage.id
-    && previous.passage.content === next.passage.content
-    && previous.passage.images === next.passage.images
-    && previous.passage.wordCount === next.passage.wordCount
-    && previous.state.config.standards.passageWordCount === next.state.config.standards.passageWordCount
-    && previous.setState === next.setState
+    previous.passage.id === next.passage.id &&
+    previous.passage.content === next.passage.content &&
+    previous.passage.images === next.passage.images &&
+    previous.passage.wordCount === next.passage.wordCount &&
+    previous.section === next.section &&
+    previous.state.config.standards.passageWordCount ===
+      next.state.config.standards.passageWordCount &&
+    previous.setState === next.setState
   );
 }
 
@@ -44,13 +47,14 @@ export const StimulusPane = React.memo(function StimulusPane({
   passage,
   state,
   setState,
+  section = "reading",
 }: StimulusPaneProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [isImageEditorOpen, setIsImageEditorOpen] = useState(false);
   const passageWordCount = state.config.standards.passageWordCount;
   const metrics = useMemo(
     () => getPassageMetrics(passage.content, passageWordCount),
-    [passage.content, passageWordCount],
+    [passage.content, passageWordCount]
   );
 
   useEffect(() => {
@@ -59,22 +63,39 @@ export const StimulusPane = React.memo(function StimulusPane({
     }
   }, [passage.content]);
 
-  const updatePassage = (updater: (current: Passage) => Passage) => {
+  const updatePassage = (
+    updater: (current: Passage | ActScienceStimulus) => Passage | ActScienceStimulus
+  ) => {
     void setState((previous) => {
-      const currentPassage = previous.reading.passages.find((item) => item.id === passage.id);
+      const currentPassage =
+        section === "science"
+          ? previous.science.stimuli.find((item) => item.id === passage.id)
+          : previous.reading.passages.find((item) => item.id === passage.id);
       if (!currentPassage) {
         return previous;
       }
 
       const nextPassage = updater(currentPassage);
       const nextMetrics = getPassageMetrics(nextPassage.content, passageWordCount);
+      const updatedPassage = {
+        ...nextPassage,
+        wordCount: nextMetrics.words,
+      };
+
+      if (section === "science") {
+        return {
+          ...previous,
+          science: {
+            ...previous.science,
+            stimuli: previous.science.stimuli.map((item) =>
+              item.id === currentPassage.id ? (updatedPassage as ActScienceStimulus) : item
+            ),
+          },
+        };
+      }
+
       const newPassages = previous.reading.passages.map((item) =>
-        item.id === currentPassage.id
-          ? {
-              ...nextPassage,
-              wordCount: nextMetrics.words,
-            }
-          : item,
+        item.id === currentPassage.id ? (updatedPassage as Passage) : item
       );
 
       return {
@@ -87,7 +108,7 @@ export const StimulusPane = React.memo(function StimulusPane({
   const syncEditor = () => {
     updatePassage((current) => ({
       ...current,
-      content: editorRef.current?.innerHTML ?? '',
+      content: editorRef.current?.innerHTML ?? "",
     }));
   };
 
@@ -100,16 +121,16 @@ export const StimulusPane = React.memo(function StimulusPane({
     event.preventDefault();
     editorRef.current?.focus();
 
-    const html = clipboard.getData('text/html');
+    const html = clipboard.getData("text/html");
     if (html) {
-      document.execCommand('insertHTML', false, sanitizeHtml(html));
+      document.execCommand("insertHTML", false, sanitizeHtml(html));
       syncEditor();
       return;
     }
 
-    const text = clipboard.getData('text/plain');
+    const text = clipboard.getData("text/plain");
     if (text) {
-      document.execCommand('insertText', false, text);
+      document.execCommand("insertText", false, text);
       syncEditor();
     }
   };
@@ -120,11 +141,11 @@ export const StimulusPane = React.memo(function StimulusPane({
       return;
     }
 
-    const html = transfer.getData('text/html');
+    const html = transfer.getData("text/html");
     if (html) {
       event.preventDefault();
       editorRef.current?.focus();
-      document.execCommand('insertHTML', false, sanitizeHtml(html));
+      document.execCommand("insertHTML", false, sanitizeHtml(html));
       syncEditor();
     }
   };
@@ -138,7 +159,7 @@ export const StimulusPane = React.memo(function StimulusPane({
   const addParagraphLabels = () => {
     const source = editorRef.current?.innerHTML ?? passage.content;
     const parser = new DOMParser();
-    const doc = parser.parseFromString(`<div>${source}</div>`, 'text/html');
+    const doc = parser.parseFromString(`<div>${source}</div>`, "text/html");
     const root = doc.body.firstElementChild;
 
     if (!root) {
@@ -166,9 +187,9 @@ export const StimulusPane = React.memo(function StimulusPane({
   };
 
   const handleInsertLink = () => {
-    const url = window.prompt('Paste link URL');
+    const url = window.prompt("Paste link URL");
     if (url) {
-      applyCommand('createLink', url);
+      applyCommand("createLink", url);
     }
   };
 
@@ -184,18 +205,68 @@ export const StimulusPane = React.memo(function StimulusPane({
     <>
       <div className="flex-1 flex flex-col bg-white overflow-hidden h-full min-h-0">
         <div className="border-b border-gray-100 bg-white px-4 py-3 flex items-center gap-1 flex-wrap">
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('bold')}><Bold size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('italic')}><Italic size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('underline')}><Underline size={16} /></button>
+          <button
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => applyCommand("bold")}
+          >
+            <Bold size={16} />
+          </button>
+          <button
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => applyCommand("italic")}
+          >
+            <Italic size={16} />
+          </button>
+          <button
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => applyCommand("underline")}
+          >
+            <Underline size={16} />
+          </button>
           <div className="w-px h-6 bg-gray-200 mx-1" />
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('formatBlock', 'h1')}><Heading1 size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('formatBlock', 'h2')}><Heading2 size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('formatBlock', 'h3')}><Heading3 size={16} /></button>
+          <button
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => applyCommand("formatBlock", "h1")}
+          >
+            <Heading1 size={16} />
+          </button>
+          <button
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => applyCommand("formatBlock", "h2")}
+          >
+            <Heading2 size={16} />
+          </button>
+          <button
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => applyCommand("formatBlock", "h3")}
+          >
+            <Heading3 size={16} />
+          </button>
           <div className="w-px h-6 bg-gray-200 mx-1" />
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('insertUnorderedList')}><List size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('insertOrderedList')}><ListOrdered size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={handleInsertLink}><LinkIcon size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => setIsImageEditorOpen(true)}><ImageIcon size={16} /></button>
+          <button
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => applyCommand("insertUnorderedList")}
+          >
+            <List size={16} />
+          </button>
+          <button
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => applyCommand("insertOrderedList")}
+          >
+            <ListOrdered size={16} />
+          </button>
+          <button
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={handleInsertLink}
+          >
+            <LinkIcon size={16} />
+          </button>
+          <button
+            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            onClick={() => setIsImageEditorOpen(true)}
+          >
+            <ImageIcon size={16} />
+          </button>
           <button
             onClick={addParagraphLabels}
             className="ml-auto text-xs font-semibold text-blue-800 hover:bg-blue-50 px-3 py-2 rounded-lg border border-transparent hover:border-blue-200 transition-all"
@@ -213,15 +284,26 @@ export const StimulusPane = React.memo(function StimulusPane({
             onPaste={handlePaste}
             onDrop={handleDrop}
             className="min-h-[420px] rounded-[28px] border border-gray-100 bg-white px-8 py-8 outline-none text-gray-900 leading-relaxed font-sans text-sm md:text-base shadow-sm [&_h1]:text-3xl [&_h1]:font-black [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mb-3 [&_h3]:text-xl [&_h3]:font-bold [&_h3]:mb-2 [&_img]:max-w-full [&_img]:rounded-2xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-4"
-            data-placeholder="Enter reading passage text here..."
+            data-placeholder={
+              section === "science"
+                ? "Enter ACT Science stimulus text here..."
+                : "Enter reading passage text here..."
+            }
           />
 
           {(passage.images ?? []).length > 0 && (
             <div className="mt-6 grid gap-4 lg:grid-cols-2">
               {(passage.images ?? []).map((image) => (
-                <div key={image.id} className="rounded-[28px] border border-gray-200 bg-white p-4 shadow-sm">
+                <div
+                  key={image.id}
+                  className="rounded-[28px] border border-gray-200 bg-white p-4 shadow-sm"
+                >
                   <div className="relative aspect-[4/3] overflow-hidden rounded-2xl border border-gray-100 bg-gray-50">
-                    <img src={normalizeImageUrl(image.src)} alt={image.alt} className="h-full w-full object-contain" />
+                    <img
+                      src={normalizeImageUrl(image.src)}
+                      alt={image.alt}
+                      className="h-full w-full object-contain"
+                    />
                     {image.annotations.map((annotation) => (
                       <span
                         key={annotation.id}
@@ -231,23 +313,23 @@ export const StimulusPane = React.memo(function StimulusPane({
                           top: `${annotation.y}%`,
                           width: annotation.width ? `${annotation.width}%` : undefined,
                           height: annotation.height ? `${annotation.height}%` : undefined,
-                          transform: 'translate(-50%, -50%)',
+                          transform: "translate(-50%, -50%)",
                         }}
                       >
-                        {annotation.type === 'hotspot' && (
+                        {annotation.type === "hotspot" && (
                           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white shadow-md">
                             •
                           </span>
                         )}
-                        {annotation.type === 'text' && (
+                        {annotation.type === "text" && (
                           <span className="rounded-lg bg-white/90 px-2 py-1 text-[11px] font-semibold text-gray-800 border border-gray-200">
                             {annotation.text}
                           </span>
                         )}
-                        {annotation.type === 'box' && (
+                        {annotation.type === "box" && (
                           <span className="block h-full w-full rounded-lg border-2 border-blue-600 bg-blue-100/10" />
                         )}
-                        {annotation.type === 'arrow' && (
+                        {annotation.type === "arrow" && (
                           <span className="rounded-full bg-blue-600 px-2 py-1 text-[10px] font-bold text-white">
                             Arrow
                           </span>
@@ -275,11 +357,11 @@ export const StimulusPane = React.memo(function StimulusPane({
             title={metrics.tooltip}
             className={`rounded-full border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.2em] ${metricTone[metrics.tone]}`}
           >
-            {metrics.status === 'optimal'
+            {metrics.status === "optimal"
               ? `${passageWordCount.optimalMin}-${passageWordCount.optimalMax} optimal`
-              : metrics.status === 'warning'
+              : metrics.status === "warning"
                 ? `${passageWordCount.warningMin}-${passageWordCount.warningMax} warning`
-                : 'Outside range'}
+                : "Outside range"}
           </div>
         </div>
       </div>

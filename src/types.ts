@@ -1,7 +1,33 @@
-import type { ExamStatus, RuntimeStatus, SectionRuntimeStatus } from './types/domain';
-import type { StudentAnswerValue } from './types/answers';
+import type { ExamStatus, RuntimeStatus, SectionRuntimeStatus } from "./types/domain";
+import type { StudentAnswerValue } from "./types/answers";
 
-export type ModuleType = 'listening' | 'reading' | 'writing' | 'speaking';
+export type ExamType = "Academic" | "General Training" | "ACT";
+export type ExamPreset =
+  | "Academic"
+  | "General Training"
+  | "Listening"
+  | "Reading"
+  | "Writing"
+  | "Speaking"
+  | "Custom"
+  | "ACT Science";
+export type ModuleType = "listening" | "reading" | "writing" | "speaking" | "science";
+export type ActScienceSkillCategory =
+  | "interpretation_of_data"
+  | "scientific_investigation"
+  | "evaluating_scientific_arguments_and_models_with_evidence";
+
+export const ACT_SCIENCE_SKILL_CATEGORIES: ReadonlyArray<{
+  value: ActScienceSkillCategory;
+  label: string;
+}> = [
+  { value: "interpretation_of_data", label: "Interpretation of Data" },
+  { value: "scientific_investigation", label: "Scientific Investigation" },
+  {
+    value: "evaluating_scientific_arguments_and_models_with_evidence",
+    label: "Evaluating Scientific Arguments and Models with Evidence",
+  },
+];
 export type DeepPartial<T> =
   T extends Array<infer U>
     ? Array<DeepPartial<U>>
@@ -10,24 +36,24 @@ export type DeepPartial<T> =
       : T;
 
 export type QuestionType =
-  | 'TFNG'
-  | 'CLOZE'
-  | 'MATCHING'
-  | 'MAP'
-  | 'MULTI_MCQ'
-  | 'SINGLE_MCQ'
-  | 'SHORT_ANSWER'
-  | 'SENTENCE_COMPLETION'
-  | 'DIAGRAM_LABELING'
-  | 'FLOW_CHART'
-  | 'TABLE_COMPLETION'
-  | 'NOTE_COMPLETION'
-  | 'CLASSIFICATION'
-  | 'MATCHING_FEATURES';
+  | "TFNG"
+  | "CLOZE"
+  | "MATCHING"
+  | "MAP"
+  | "MULTI_MCQ"
+  | "SINGLE_MCQ"
+  | "SHORT_ANSWER"
+  | "SENTENCE_COMPLETION"
+  | "DIAGRAM_LABELING"
+  | "FLOW_CHART"
+  | "TABLE_COMPLETION"
+  | "NOTE_COMPLETION"
+  | "CLASSIFICATION"
+  | "MATCHING_FEATURES";
 
-export type TFNGMode = 'TFNG' | 'YNNG';
-export type AnswerRule = 'ONE_WORD' | 'TWO_WORDS' | 'THREE_WORDS';
-export type SlotGroupRule = 'all_required' | 'at_least_n';
+export type TFNGMode = "TFNG" | "YNNG";
+export type AnswerRule = "ONE_WORD" | "TWO_WORDS" | "THREE_WORDS";
+export type SlotGroupRule = "all_required" | "at_least_n";
 
 export interface SubAnswerTreeNode {
   id: string;
@@ -40,7 +66,7 @@ export interface SubAnswerTreeNode {
 export interface TFNGQuestion {
   id: string;
   statement: string;
-  correctAnswer: 'T' | 'F' | 'NG' | 'Y' | 'N' | 'NG';
+  correctAnswer: "T" | "F" | "NG" | "Y" | "N" | "NG";
 }
 
 export interface ClozeQuestion {
@@ -73,11 +99,11 @@ export interface MCQOption {
 export type { StudentAnswerValue };
 export type QuestionAnswer = StudentAnswerValue;
 
-export type StimulusAnnotationTool = 'pointer' | 'hotspot' | 'arrow' | 'text' | 'box' | 'zoom';
+export type StimulusAnnotationTool = "pointer" | "hotspot" | "arrow" | "text" | "box" | "zoom";
 
 export interface StimulusAnnotation {
   id: string;
-  type: Exclude<StimulusAnnotationTool, 'pointer' | 'zoom'>;
+  type: Exclude<StimulusAnnotationTool, "pointer" | "zoom">;
   x: number;
   y: number;
   width?: number | undefined;
@@ -107,7 +133,7 @@ export interface WritingChartData {
   imageSrc?: string | undefined;
   labels: string[];
   title: string;
-  type: 'bar' | 'line' | 'pie' | 'table';
+  type: "bar" | "line" | "pie" | "table";
   values: number[];
 }
 
@@ -116,7 +142,7 @@ export interface WritingTaskContent {
   prompt: string;
   chart?: WritingChartData | undefined;
   modelAnswer?: string | undefined;
-  letterType?: 'formal' | 'informal' | 'semi-formal' | undefined;
+  letterType?: "formal" | "informal" | "semi-formal" | undefined;
   recipient?: string | undefined;
   letterPurpose?: string | undefined;
 }
@@ -124,10 +150,10 @@ export interface WritingTaskContent {
 export interface PromptTemplateRecord {
   id: string;
   title: string;
-  topic: 'Education' | 'Technology' | 'Environment' | 'Health' | 'Society';
-  category: 'Task 1 Academic' | 'Task 1 General Training' | 'Task 2 Essay';
+  topic: "Education" | "Technology" | "Environment" | "Health" | "Society";
+  category: "Task 1 Academic" | "Task 1 General Training" | "Task 2 Essay";
   prompt: string;
-  source: 'official' | 'custom';
+  source: "official" | "custom";
 }
 
 export interface RubricCriterion {
@@ -141,7 +167,7 @@ export interface RubricCriterion {
 export interface RubricDefinition {
   id: string;
   title: string;
-  module: 'writing' | 'speaking';
+  module: "writing" | "speaking";
   criteria: RubricCriterion[];
   custom?: boolean | undefined;
 }
@@ -181,16 +207,16 @@ export interface InsertedBlockImage {
   caption?: string | undefined;
 }
 
-export type ReferenceImagePlacement = 'question' | 'instruction';
+export type ReferenceImagePlacement = "question" | "instruction";
 
 export interface TFNGBlock extends BaseQuestionBlock {
-  type: 'TFNG';
+  type: "TFNG";
   mode: TFNGMode;
   questions: TFNGQuestion[];
 }
 
 export interface ClozeBlock extends BaseQuestionBlock {
-  type: 'CLOZE';
+  type: "CLOZE";
   answerRule: AnswerRule;
   questions: ClozeQuestion[];
   subAnswerModeEnabled?: boolean;
@@ -198,13 +224,13 @@ export interface ClozeBlock extends BaseQuestionBlock {
 }
 
 export interface MatchingBlock extends BaseQuestionBlock {
-  type: 'MATCHING';
+  type: "MATCHING";
   headings: { id: string; text: string }[];
   questions: MatchingQuestion[];
 }
 
 export interface MapBlock extends BaseQuestionBlock {
-  type: 'MAP';
+  type: "MAP";
   assetUrl: string;
   referenceImagePlacement?: ReferenceImagePlacement;
   questions: MapQuestion[];
@@ -213,14 +239,14 @@ export interface MapBlock extends BaseQuestionBlock {
 }
 
 export interface MultiMCQBlock extends BaseQuestionBlock {
-  type: 'MULTI_MCQ';
+  type: "MULTI_MCQ";
   stem: string;
   requiredSelections: number;
   options: MCQOption[];
 }
 
 export interface SingleMCQBlock extends BaseQuestionBlock {
-  type: 'SINGLE_MCQ';
+  type: "SINGLE_MCQ";
   stem: string;
   options: MCQOption[];
   questions?: SingleMCQQuestion[];
@@ -230,6 +256,7 @@ export interface SingleMCQQuestion {
   id: string;
   stem: string;
   options: MCQOption[];
+  skillCategory?: ActScienceSkillCategory | undefined;
 }
 
 export interface ShortAnswerQuestion {
@@ -241,7 +268,7 @@ export interface ShortAnswerQuestion {
 }
 
 export interface ShortAnswerBlock extends BaseQuestionBlock {
-  type: 'SHORT_ANSWER';
+  type: "SHORT_ANSWER";
   questions: ShortAnswerQuestion[];
   subAnswerModeEnabled?: boolean;
   answerTree?: SubAnswerTreeNode[];
@@ -268,7 +295,7 @@ export interface SentenceCompletionQuestion {
 }
 
 export interface SentenceCompletionBlock extends BaseQuestionBlock {
-  type: 'SENTENCE_COMPLETION';
+  type: "SENTENCE_COMPLETION";
   questions: SentenceCompletionQuestion[];
   subAnswerModeEnabled?: boolean;
   answerTree?: SubAnswerTreeNode[];
@@ -283,7 +310,7 @@ export interface DiagramLabel {
 }
 
 export interface DiagramLabelingBlock extends BaseQuestionBlock {
-  type: 'DIAGRAM_LABELING';
+  type: "DIAGRAM_LABELING";
   imageUrl: string;
   imageSrc?: string | undefined;
   assetUrl?: string | undefined;
@@ -300,7 +327,7 @@ export interface FlowChartStep {
 }
 
 export interface FlowChartBlock extends BaseQuestionBlock {
-  type: 'FLOW_CHART';
+  type: "FLOW_CHART";
   steps: FlowChartStep[];
   subAnswerModeEnabled?: boolean;
   answerTree?: SubAnswerTreeNode[];
@@ -320,7 +347,7 @@ export interface TableCell {
 }
 
 export interface TableCompletionBlock extends BaseQuestionBlock {
-  type: 'TABLE_COMPLETION';
+  type: "TABLE_COMPLETION";
   headers: string[];
   headerIds?: string[];
   rows: string[][];
@@ -346,7 +373,7 @@ export interface NoteCompletionQuestion {
 }
 
 export interface NoteCompletionBlock extends BaseQuestionBlock {
-  type: 'NOTE_COMPLETION';
+  type: "NOTE_COMPLETION";
   questions: NoteCompletionQuestion[];
   subAnswerModeEnabled?: boolean;
   answerTree?: SubAnswerTreeNode[];
@@ -359,7 +386,7 @@ export interface ClassificationItem {
 }
 
 export interface ClassificationBlock extends BaseQuestionBlock {
-  type: 'CLASSIFICATION';
+  type: "CLASSIFICATION";
   categories: string[];
   items: ClassificationItem[];
   subAnswerModeEnabled?: boolean;
@@ -373,7 +400,7 @@ export interface MatchingFeature {
 }
 
 export interface MatchingFeaturesBlock extends BaseQuestionBlock {
-  type: 'MATCHING_FEATURES';
+  type: "MATCHING_FEATURES";
   features: MatchingFeature[];
   options: string[];
   subAnswerModeEnabled?: boolean;
@@ -406,10 +433,19 @@ export interface Passage {
   metadata?: PassageMetadata | undefined;
 }
 
+export interface ActScienceStimulus {
+  id: string;
+  title: string;
+  content: string;
+  blocks: SingleMCQBlock[];
+  images?: StimulusImageAsset[] | undefined;
+  wordCount?: number | undefined;
+}
+
 // Question Bank Types
 export interface QuestionMetadata {
   id: string;
-  difficulty: 'easy' | 'medium' | 'hard';
+  difficulty: "easy" | "medium" | "hard";
   topic: string;
   tags: string[];
   usageCount: number;
@@ -426,7 +462,7 @@ export interface QuestionBankItem {
 
 export interface QuestionBankQuery {
   type?: QuestionType | undefined;
-  difficulty?: 'easy' | 'medium' | 'hard' | undefined;
+  difficulty?: "easy" | "medium" | "hard" | undefined;
   topic?: string | undefined;
   tags?: string[] | undefined;
   searchTerm?: string | undefined;
@@ -435,7 +471,7 @@ export interface QuestionBankQuery {
 // Passage Management Types
 export interface PassageMetadata {
   id: string;
-  difficulty: 'easy' | 'medium' | 'hard';
+  difficulty: "easy" | "medium" | "hard";
   source: string;
   topic: string;
   tags: string[];
@@ -454,7 +490,7 @@ export interface PassageLibraryItem {
 }
 
 export interface PassageLibraryQuery {
-  difficulty?: 'easy' | 'medium' | 'hard' | undefined;
+  difficulty?: "easy" | "medium" | "hard" | undefined;
   topic?: string | undefined;
   tags?: string[] | undefined;
   searchTerm?: string | undefined;
@@ -468,7 +504,7 @@ export interface ListeningPart {
   audioUrl?: string | undefined;
   transcript?: string | undefined;
   transcriptUrl?: string | undefined;
-  pins: { id: string, time: string, label: string }[];
+  pins: { id: string; time: string; label: string }[];
   blocks: QuestionBlock[];
 }
 
@@ -520,7 +556,7 @@ export interface StandardsConfig {
   };
 }
 
-export type WritingTaskType = 'task1-academic' | 'task1-general' | 'task2-essay';
+export type WritingTaskType = "task1-academic" | "task1-general" | "task2-essay";
 
 export interface WritingTaskConfig {
   id: string;
@@ -549,6 +585,10 @@ export interface ModuleConfig {
   order: number;
   gapAfterMinutes: number;
   allowedQuestionTypes: QuestionType[];
+}
+
+export interface ScienceConfig extends ModuleConfig {
+  questionCount: number;
 }
 
 export interface ListeningConfig extends ModuleConfig {
@@ -582,8 +622,8 @@ export interface SpeakingConfig extends ModuleConfig {
 
 export interface ExamConfig {
   general: {
-    preset: 'Academic' | 'General Training' | 'Listening' | 'Reading' | 'Writing' | 'Speaking' | 'Custom';
-    type: 'Academic' | 'General Training';
+    preset: ExamPreset;
+    type: ExamType;
     ieltsMode: boolean;
     title: string;
     summary: string;
@@ -594,6 +634,7 @@ export interface ExamConfig {
     reading: ReadingConfig;
     writing: WritingConfig;
     speaking: SpeakingConfig;
+    science: ScienceConfig;
   };
   standards: StandardsConfig;
   progression: {
@@ -602,18 +643,18 @@ export interface ExamConfig {
     allowPause: boolean;
     showWarnings: boolean;
     warningThreshold: number;
-    unansweredSubmissionPolicy?: 'allow' | 'confirm' | 'block' | undefined;
+    unansweredSubmissionPolicy?: "allow" | "confirm" | "block" | undefined;
   };
   delivery: {
-    launchMode: 'proctor_start';
-    transitionMode: 'auto_with_proctor_override';
+    launchMode: "proctor_start";
+    transitionMode: "auto_with_proctor_override";
     allowedExtensionMinutes: number[];
   };
   scoring: {
-    overallRounding: 'nearest-0.5' | 'floor' | 'ceil';
+    overallRounding: "nearest-0.5" | "floor" | "ceil";
   };
   security: {
-    tabSwitchRule: 'none' | 'warn' | 'terminate';
+    tabSwitchRule: "none" | "warn" | "terminate";
     detectSecondaryScreen: boolean;
     blockClipboard: boolean;
     antiScreenshotGuardEnabled: boolean;
@@ -639,12 +680,14 @@ export interface ExamConfig {
       audio: boolean;
       screen: boolean;
     };
-    severityThresholds?: {
-      lowLimit: number;
-      mediumLimit: number;
-      highLimit: number;
-      criticalAction: 'terminate';
-    } | undefined;
+    severityThresholds?:
+      | {
+          lowLimit: number;
+          mediumLimit: number;
+          highLimit: number;
+          criticalAction: "terminate";
+        }
+      | undefined;
   };
 }
 
@@ -654,7 +697,7 @@ export interface ExamDefaultsProfile {
   config: ExamConfig;
 }
 
-export type SaveStatus = 'unsaved' | 'saving' | 'saved' | 'error';
+export type SaveStatus = "unsaved" | "saving" | "saved" | "error";
 
 export interface ValidationError {
   blockId?: string | undefined;
@@ -662,7 +705,7 @@ export interface ValidationError {
   partId?: string | undefined;
   field: string;
   message: string;
-  type: 'error' | 'warning';
+  type: "error" | "warning";
 }
 
 export interface ValidationScope {
@@ -679,8 +722,8 @@ export interface BlockValidation {
 export interface Exam {
   id: string;
   title: string;
-  type: 'Academic' | 'General Training';
-  status: 'Draft' | 'Published' | 'Archived';
+  type: ExamType;
+  status: "Draft" | "Published" | "Archived";
   workflowStatus?: ExamStatus | undefined;
   author: string;
   lastModified: string;
@@ -691,10 +734,11 @@ export interface Exam {
 
 export interface ExamState {
   title: string;
-  type: 'Academic' | 'General Training';
+  type: ExamType;
   activeModule: ModuleType;
   activePassageId: string;
   activeListeningPartId: string;
+  activeScienceStimulusId: string;
   config: ExamConfig;
   reading: {
     passages: Passage[];
@@ -720,11 +764,14 @@ export interface ExamState {
     rubric?: RubricDefinition | undefined;
     gradeHistory?: GradeHistoryEntry[] | undefined;
   };
+  science: {
+    stimuli: ActScienceStimulus[];
+  };
 }
 
-export type StudentStatus = 'active' | 'warned' | 'paused' | 'terminated' | 'idle' | 'connecting';
+export type StudentStatus = "active" | "warned" | "paused" | "terminated" | "idle" | "connecting";
 
-export type ViolationSeverity = 'low' | 'medium' | 'high' | 'critical';
+export type ViolationSeverity = "low" | "medium" | "high" | "critical";
 
 export interface Violation {
   id: string;
@@ -770,7 +817,7 @@ export interface ExamGroup {
   joinReadyCount: number;
   joinTotalCount: number;
   violationCount: number;
-  status: 'live' | 'scheduled' | 'completed' | 'cancelled' | 'not_started';
+  status: "live" | "scheduled" | "completed" | "cancelled" | "not_started";
   plannedDurationMinutes: number;
 }
 
@@ -786,38 +833,38 @@ export interface ProctorAlert {
 }
 
 export type AuditActionType =
-  | 'SESSION_START'
-  | 'SESSION_PAUSE'
-  | 'SESSION_RESUME'
-  | 'SESSION_END'
-  | 'SECTION_START'
-  | 'SECTION_END'
-  | 'VIOLATION_DETECTED'
-  | 'STUDENT_WARN'
-  | 'STUDENT_PAUSE'
-  | 'STUDENT_RESUME'
-  | 'STUDENT_TERMINATE'
-  | 'COHORT_PAUSE'
-  | 'COHORT_RESUME'
-  | 'EXTENSION_GRANTED'
-  | 'ALERT_ACKNOWLEDGED'
-  | 'NOTE_CREATED'
-  | 'HANDOVER_INITIATED'
-  | 'PRECHECK_COMPLETED'
-  | 'PRECHECK_WARNING_ACKNOWLEDGED'
-  | 'NETWORK_DISCONNECTED'
-  | 'NETWORK_RECONNECTED'
-  | 'HEARTBEAT_MISSED'
-  | 'HEARTBEAT_LOST'
-  | 'DEVICE_CONTINUITY_FAILED'
-  | 'CLIPBOARD_BLOCKED'
-  | 'CONTEXT_MENU_BLOCKED'
-  | 'AUTOFILL_SUSPECTED'
-  | 'PASTE_BLOCKED'
-  | 'REPLACEMENT_SUSPECTED'
-  | 'SCREEN_CHECK_UNSUPPORTED'
-  | 'SCREEN_CHECK_PERMISSION_DENIED'
-  | 'AUTO_ACTION';
+  | "SESSION_START"
+  | "SESSION_PAUSE"
+  | "SESSION_RESUME"
+  | "SESSION_END"
+  | "SECTION_START"
+  | "SECTION_END"
+  | "VIOLATION_DETECTED"
+  | "STUDENT_WARN"
+  | "STUDENT_PAUSE"
+  | "STUDENT_RESUME"
+  | "STUDENT_TERMINATE"
+  | "COHORT_PAUSE"
+  | "COHORT_RESUME"
+  | "EXTENSION_GRANTED"
+  | "ALERT_ACKNOWLEDGED"
+  | "NOTE_CREATED"
+  | "HANDOVER_INITIATED"
+  | "PRECHECK_COMPLETED"
+  | "PRECHECK_WARNING_ACKNOWLEDGED"
+  | "NETWORK_DISCONNECTED"
+  | "NETWORK_RECONNECTED"
+  | "HEARTBEAT_MISSED"
+  | "HEARTBEAT_LOST"
+  | "DEVICE_CONTINUITY_FAILED"
+  | "CLIPBOARD_BLOCKED"
+  | "CONTEXT_MENU_BLOCKED"
+  | "AUTOFILL_SUSPECTED"
+  | "PASTE_BLOCKED"
+  | "REPLACEMENT_SUSPECTED"
+  | "SCREEN_CHECK_UNSUPPORTED"
+  | "SCREEN_CHECK_PERMISSION_DENIED"
+  | "AUTO_ACTION";
 
 export interface SessionAuditLog {
   id: string;
@@ -829,7 +876,7 @@ export interface SessionAuditLog {
   payload?: Record<string, unknown> | undefined;
 }
 
-export type NoteCategory = 'general' | 'incident' | 'handover';
+export type NoteCategory = "general" | "incident" | "handover";
 
 export interface SessionNote {
   id: string;
@@ -841,8 +888,11 @@ export interface SessionNote {
   isResolved?: boolean | undefined;
 }
 
-export type ViolationTriggerType = 'violation_count' | 'specific_violation_type' | 'severity_threshold';
-export type ViolationAutoAction = 'warn' | 'pause' | 'notify_proctor' | 'terminate';
+export type ViolationTriggerType =
+  | "violation_count"
+  | "specific_violation_type"
+  | "severity_threshold";
+export type ViolationAutoAction = "warn" | "pause" | "notify_proctor" | "terminate";
 
 export interface ViolationRule {
   id: string;

@@ -69,6 +69,15 @@ pub fn validate_exam_content(
     result
 }
 
+fn is_act_config(config: &serde_json::Value) -> bool {
+    config
+        .get("general")
+        .and_then(|general| general.as_object())
+        .and_then(|general| general.get("type"))
+        .and_then(|exam_type| exam_type.as_str())
+        == Some("ACT")
+}
+
 fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
@@ -104,6 +113,11 @@ fn validate_config(config: &serde_json::Value, result: &mut ValidationResult) {
     }
     let sections = sections.unwrap();
 
+    if is_act_config(config) {
+        validate_act_config(sections, result);
+        return;
+    }
+
     // Check if at least one module is enabled
     let mut enabled_modules = Vec::new();
     for module in ["reading", "listening", "writing", "speaking"] {
@@ -134,6 +148,59 @@ fn validate_config(config: &serde_json::Value, result: &mut ValidationResult) {
         if let Some(listening_config) = sections.get("listening").and_then(|l| l.as_object()) {
             validate_band_score_table(listening_config, "listening", result);
         }
+    }
+}
+
+fn validate_act_config(
+    sections: &serde_json::Map<String, serde_json::Value>,
+    result: &mut ValidationResult,
+) {
+    let Some(science) = sections
+        .get("science")
+        .and_then(|section| section.as_object())
+    else {
+        result.add_error(
+            "config.sections.science",
+            "ACT Science section configuration is missing",
+        );
+        return;
+    };
+
+    if !science
+        .get("enabled")
+        .and_then(|enabled| enabled.as_bool())
+        .unwrap_or(false)
+    {
+        result.add_error(
+            "config.sections.science.enabled",
+            "ACT Science section must be enabled",
+        );
+    }
+
+    match science
+        .get("duration")
+        .and_then(|duration| duration.as_i64())
+    {
+        Some(duration) if duration > 0 => {}
+        Some(_) => result.add_error(
+            "config.sections.science.duration",
+            "ACT Science duration must be greater than zero",
+        ),
+        None => result.add_error(
+            "config.sections.science.duration",
+            "ACT Science duration is required",
+        ),
+    }
+
+    if science
+        .get("allowPause")
+        .and_then(|allow_pause| allow_pause.as_bool())
+        .unwrap_or(false)
+    {
+        result.add_error(
+            "config.sections.science.allowPause",
+            "ACT Science does not allow pausing during the section",
+        );
     }
 }
 
@@ -197,6 +264,14 @@ fn validate_content(
         .get("sections")
         .and_then(|s| s.as_object())
         .unwrap_or(&empty_map);
+
+    if is_act_config(config) {
+        if is_module_enabled(sections, "science") {
+            validate_act_science_content(content_obj, result);
+        }
+        validate_id_integrity(content_obj, result);
+        return;
+    }
 
     // Validate reading content if enabled
     if is_module_enabled(sections, "reading") {
@@ -283,6 +358,249 @@ fn validate_id_integrity(
             format!("Duplicate IDs found: {}", duplicates_sorted.join(", ")),
         );
     }
+}
+
+const ACT_SKILL_CATEGORIES: [&str; 3] = [
+    "interpretation_of_data",
+    "scientific_investigation",
+    "evaluating_scientific_arguments_and_models_with_evidence",
+];
+
+fn validate_act_science_content(
+    content: &serde_json::Map<String, serde_json::Value>,
+    result: &mut ValidationResult,
+) {
+    let stimuli = content
+        .get("science")
+        .and_then(|science| science.as_object())
+        .and_then(|science| science.get("stimuli"))
+        .and_then(|stimuli| stimuli.as_array());
+
+    let Some(stimuli) = stimuli else {
+        result.add_error("content.science.stimuli", "ACT Science stimuli are missing");
+        return;
+    };
+
+    if stimuli.is_empty() {
+        result.add_error(
+            "content.science.stimuli",
+            "At least one ACT Science stimulus is required",
+        );
+        return;
+    }
+
+    let mut total_questions = 0;
+
+    for (stimulus_idx, stimulus) in stimuli.iter().enumerate() {
+        let stimulus_prefix = format!("content.science.stimuli[{}]", stimulus_idx);
+        let Some(stimulus_obj) = stimulus.as_object() else {
+            result.add_error(stimulus_prefix, "Invalid ACT Science stimulus structure");
+            continue;
+        };
+
+        if stimulus_obj
+            .get("title")
+            .and_then(|title| title.as_str())
+            .map(|title| title.trim().is_empty())
+            .unwrap_or(true)
+        {
+            result.add_error(
+                format!("{}.title", stimulus_prefix),
+                "Stimulus title is required",
+            );
+        }
+
+        if stimulus_obj
+            .get("content")
+            .and_then(|content| content.as_str())
+            .map(|content| content.trim().is_empty())
+            .unwrap_or(true)
+        {
+            result.add_error(
+                format!("{}.content", stimulus_prefix),
+                "Stimulus content is required",
+            );
+        }
+
+        let Some(blocks) = stimulus_obj
+            .get("blocks")
+            .and_then(|blocks| blocks.as_array())
+        else {
+            result.add_error(
+                format!("{}.blocks", stimulus_prefix),
+                "Stimulus question blocks are missing",
+            );
+            continue;
+        };
+
+        if blocks.is_empty() {
+            result.add_error(
+                format!("{}.blocks", stimulus_prefix),
+                "At least one question block is required for a stimulus",
+            );
+            continue;
+        }
+
+        for (block_idx, block) in blocks.iter().enumerate() {
+            let block_prefix = format!("{}.blocks[{}]", stimulus_prefix, block_idx);
+            let Some(block_obj) = block.as_object() else {
+                result.add_error(block_prefix, "Invalid ACT Science question block");
+                continue;
+            };
+
+            if block_obj.get("type").and_then(|value| value.as_str()) != Some("SINGLE_MCQ") {
+                result.add_error(
+                    format!("{}.type", block_prefix),
+                    "ACT Science currently supports SINGLE_MCQ blocks only",
+                );
+                continue;
+            }
+
+            total_questions += validate_act_single_mcq_block(block_obj, &block_prefix, result);
+        }
+    }
+
+    if total_questions == 0 {
+        result.add_error(
+            "content.science.questions",
+            "ACT Science must contain at least one question",
+        );
+    } else if total_questions != 40 {
+        result.add_warning(
+            "content.science.questions",
+            format!(
+                "ACT Science has {} questions; a full set has 40. Publishing is allowed for testing.",
+                total_questions
+            ),
+        );
+    }
+}
+
+fn validate_act_single_mcq_block(
+    block: &serde_json::Map<String, serde_json::Value>,
+    field_prefix: &str,
+    result: &mut ValidationResult,
+) -> i32 {
+    let Some(questions) = block
+        .get("questions")
+        .and_then(|questions| questions.as_array())
+    else {
+        result.add_error(
+            format!("{}.questions", field_prefix),
+            "Questions are required for ACT Science SINGLE_MCQ",
+        );
+        return 0;
+    };
+
+    if questions.is_empty() {
+        result.add_error(
+            format!("{}.questions", field_prefix),
+            "At least one question is required for ACT Science SINGLE_MCQ",
+        );
+        return 0;
+    }
+
+    for (question_idx, question) in questions.iter().enumerate() {
+        let question_prefix = format!("{}.questions[{}]", field_prefix, question_idx);
+        let Some(question_obj) = question.as_object() else {
+            result.add_error(question_prefix, "Invalid ACT Science question");
+            continue;
+        };
+
+        if question_obj
+            .get("id")
+            .and_then(|id| id.as_str())
+            .map(|id| id.trim().is_empty())
+            .unwrap_or(true)
+        {
+            result.add_error(format!("{}.id", question_prefix), "Question ID is required");
+        }
+
+        let skill_category = question_obj
+            .get("skillCategory")
+            .and_then(|skill_category| skill_category.as_str());
+        if !skill_category.is_some_and(|skill| ACT_SKILL_CATEGORIES.contains(&skill)) {
+            result.add_error(
+                format!("{}.skillCategory", question_prefix),
+                "ACT Science skill category is invalid",
+            );
+        }
+
+        if question_obj
+            .get("stem")
+            .and_then(|stem| stem.as_str())
+            .map(|stem| stem.trim().is_empty())
+            .unwrap_or(true)
+        {
+            result.add_error(
+                format!("{}.stem", question_prefix),
+                "Question stem is required",
+            );
+        }
+
+        let Some(options) = question_obj
+            .get("options")
+            .and_then(|options| options.as_array())
+        else {
+            result.add_error(
+                format!("{}.options", question_prefix),
+                "Exactly 4 options are required for ACT Science",
+            );
+            continue;
+        };
+
+        if options.len() != 4 {
+            result.add_error(
+                format!("{}.options", question_prefix),
+                "Exactly 4 options are required for ACT Science",
+            );
+        }
+
+        let correct_count = options
+            .iter()
+            .filter(|option| {
+                option
+                    .as_object()
+                    .and_then(|option| option.get("isCorrect"))
+                    .and_then(|is_correct| is_correct.as_bool())
+                    .unwrap_or(false)
+            })
+            .count();
+        if correct_count != 1 {
+            result.add_error(
+                format!("{}.options", question_prefix),
+                "Exactly one option must be marked as correct for ACT Science",
+            );
+        }
+
+        for (option_idx, option) in options.iter().enumerate() {
+            let option_prefix = format!("{}.options[{}]", question_prefix, option_idx);
+            let Some(option_obj) = option.as_object() else {
+                result.add_error(option_prefix, "Invalid ACT Science option");
+                continue;
+            };
+
+            if option_obj
+                .get("id")
+                .and_then(|id| id.as_str())
+                .map(|id| id.trim().is_empty())
+                .unwrap_or(true)
+            {
+                result.add_error(format!("{}.id", option_prefix), "Option ID is required");
+            }
+
+            if option_obj
+                .get("text")
+                .and_then(|text| text.as_str())
+                .map(|text| text.trim().is_empty())
+                .unwrap_or(true)
+            {
+                result.add_error(format!("{}.text", option_prefix), "Option text is required");
+            }
+        }
+    }
+
+    questions.len() as i32
 }
 
 fn validate_reading_content(
@@ -2063,6 +2381,117 @@ mod tests {
         assert!(result.errors.iter().any(|error| {
             error.field == "content.listening.parts[1].blocks[1].options[2]"
                 && error.message == "Option text is required"
+        }));
+    }
+
+    #[test]
+    fn act_science_allows_incomplete_draft_with_publish_warning() {
+        let content = json!({
+            "science": {
+                "stimuli": [{
+                    "id": "stimulus-1",
+                    "title": "Plant Growth Experiment",
+                    "content": "Researchers measured plant growth under different light conditions.",
+                    "blocks": [{
+                        "id": "science-block-1",
+                        "type": "SINGLE_MCQ",
+                        "instruction": "Choose one answer.",
+                        "questions": [
+                            {
+                                "id": "science-q-1",
+                                "skillCategory": "interpretation_of_data",
+                                "stem": "Which condition produced the greatest growth?",
+                                "options": [
+                                    {"id": "a", "text": "Condition A", "isCorrect": true},
+                                    {"id": "b", "text": "Condition B", "isCorrect": false},
+                                    {"id": "c", "text": "Condition C", "isCorrect": false},
+                                    {"id": "d", "text": "Condition D", "isCorrect": false}
+                                ]
+                            },
+                            {
+                                "id": "science-q-2",
+                                "skillCategory": "scientific_investigation",
+                                "stem": "What variable was measured?",
+                                "options": [
+                                    {"id": "a", "text": "Plant growth", "isCorrect": true},
+                                    {"id": "b", "text": "Soil color", "isCorrect": false},
+                                    {"id": "c", "text": "Seed shape", "isCorrect": false},
+                                    {"id": "d", "text": "Pot size", "isCorrect": false}
+                                ]
+                            }
+                        ]
+                    }]
+                }]
+            }
+        });
+
+        let config = json!({
+            "general": {"type": "ACT"},
+            "sections": {
+                "science": {
+                    "enabled": true,
+                    "label": "Science",
+                    "duration": 40,
+                    "questionCount": 40
+                }
+            },
+            "progression": {"allowPause": false},
+            "scoring": {"mode": "raw_percent", "percentageDecimals": 2}
+        });
+
+        let result = validate_exam_content(&content, &config);
+
+        assert!(
+            result.errors.is_empty(),
+            "unexpected errors: {:?}",
+            result.errors
+        );
+        assert!(result.warnings.iter().any(|warning| {
+            warning.field == "content.science.questions"
+                && warning.message.contains("2")
+                && warning.message.contains("40")
+        }));
+    }
+
+    #[test]
+    fn act_science_requires_exactly_four_options_and_one_correct_answer() {
+        let content = json!({
+            "science": {
+                "stimuli": [{
+                    "id": "stimulus-1",
+                    "title": "Plant Growth Experiment",
+                    "content": "Researchers measured plant growth.",
+                    "blocks": [{
+                        "id": "science-block-1",
+                        "type": "SINGLE_MCQ",
+                        "questions": [{
+                            "id": "science-q-1",
+                            "skillCategory": "interpretation_of_data",
+                            "stem": "Which condition produced the greatest growth?",
+                            "options": [
+                                {"id": "a", "text": "Condition A", "isCorrect": true},
+                                {"id": "b", "text": "Condition B", "isCorrect": true},
+                                {"id": "c", "text": "Condition C", "isCorrect": false}
+                            ]
+                        }]
+                    }]
+                }]
+            }
+        });
+        let config = json!({
+            "general": {"type": "ACT"},
+            "sections": {"science": {"enabled": true, "duration": 40}}
+        });
+
+        let result = validate_exam_content(&content, &config);
+
+        assert!(result.errors.iter().any(|error| {
+            error.field == "content.science.stimuli[0].blocks[0].questions[0].options"
+                && error.message == "Exactly 4 options are required for ACT Science"
+        }));
+        assert!(result.errors.iter().any(|error| {
+            error.field == "content.science.stimuli[0].blocks[0].questions[0].options"
+                && error.message == "Exactly one option must be marked as correct for ACT Science"
         }));
     }
 }

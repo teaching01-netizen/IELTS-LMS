@@ -1,15 +1,30 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LISTENING_BAND_TABLE,
   DEFAULT_READING_ACADEMIC_BAND_TABLE,
   DEFAULT_READING_GT_BAND_TABLE,
   createDefaultConfig,
   normalizeExamConfig,
-} from '../examDefaults';
+} from "../examDefaults";
 
-describe('examDefaults standards', () => {
-  it('creates default standards for academic exams', () => {
-    const config = createDefaultConfig('Academic', 'Academic');
+describe("examDefaults standards", () => {
+  it("creates an ACT Science default with one continuous section", () => {
+    const config = createDefaultConfig("ACT", "ACT Science");
+
+    expect(config.general.type).toBe("ACT");
+    expect(config.general.preset).toBe("ACT Science");
+    expect(config.sections.science.enabled).toBe(true);
+    expect(config.sections.science.duration).toBe(40);
+    expect(config.sections.science.questionCount).toBe(40);
+    expect(config.progression.allowPause).toBe(false);
+    expect(config.sections.reading.enabled).toBe(false);
+    expect(config.sections.listening.enabled).toBe(false);
+    expect(config.sections.writing.enabled).toBe(false);
+    expect(config.sections.speaking.enabled).toBe(false);
+  });
+
+  it("creates default standards for academic exams", () => {
+    const config = createDefaultConfig("Academic", "Academic");
 
     expect(config.security.blockClipboard).toBe(true);
     expect(config.security.antiScreenshotGuardEnabled).toBe(true);
@@ -29,14 +44,18 @@ describe('examDefaults standards', () => {
     });
     expect(config.standards.rubricDeviationThreshold).toBe(10);
     expect(config.standards.bandScoreTables.listening).toEqual(DEFAULT_LISTENING_BAND_TABLE);
-    expect(config.standards.bandScoreTables.readingAcademic).toEqual(DEFAULT_READING_ACADEMIC_BAND_TABLE);
-    expect(config.standards.bandScoreTables.readingGeneralTraining).toEqual(DEFAULT_READING_GT_BAND_TABLE);
+    expect(config.standards.bandScoreTables.readingAcademic).toEqual(
+      DEFAULT_READING_ACADEMIC_BAND_TABLE
+    );
+    expect(config.standards.bandScoreTables.readingGeneralTraining).toEqual(
+      DEFAULT_READING_GT_BAND_TABLE
+    );
   });
 
-  it('backfills standards from legacy section values', () => {
+  it("backfills standards from legacy section values", () => {
     const config = normalizeExamConfig({
       general: {
-        type: 'General Training',
+        type: "General Training",
       },
       sections: {
         listening: {
@@ -47,8 +66,8 @@ describe('examDefaults standards', () => {
         },
         writing: {
           tasks: [
-            { id: 'task1', label: 'Task 1', minWords: 180, recommendedTime: 25 },
-            { id: 'task2', label: 'Task 2', minWords: 270, recommendedTime: 45 },
+            { id: "task1", label: "Task 1", minWords: 180, recommendedTime: 25 },
+            { id: "task2", label: "Task 2", minWords: 270, recommendedTime: 45 },
           ],
           rubricWeights: {
             taskResponse: 30,
@@ -93,7 +112,7 @@ describe('examDefaults standards', () => {
     expect(config.sections.reading.bandScoreTable).toEqual({ 34: 9, 30: 8 });
   });
 
-  it('enforces IELTS authentic mode policy', () => {
+  it("enforces IELTS authentic mode policy", () => {
     const config = normalizeExamConfig({
       general: {
         ieltsMode: true,
@@ -140,7 +159,7 @@ describe('examDefaults standards', () => {
     expect(config.standards.writingTasks.task2).toEqual({ minWords: 250, recommendedTime: 40 });
   });
 
-  it('normalizes anti-screenshot guard to enabled when missing from legacy config', () => {
+  it("normalizes anti-screenshot guard to enabled when missing from legacy config", () => {
     const config = normalizeExamConfig({
       security: {
         antiScreenshotGuardEnabled: undefined,
@@ -150,7 +169,7 @@ describe('examDefaults standards', () => {
     expect(config.security.antiScreenshotGuardEnabled).toBe(true);
   });
 
-  it('strips deleted fullscreen anti-cheat keys from legacy configs', () => {
+  it("strips deleted fullscreen anti-cheat keys from legacy configs", () => {
     const config = normalizeExamConfig({
       security: {
         requireFullscreen: true,
@@ -159,16 +178,24 @@ describe('examDefaults standards', () => {
       },
     });
 
-    expect('requireFullscreen' in config.security).toBe(false);
-    expect('fullscreenAutoReentry' in config.security).toBe(false);
-    expect('fullscreenMaxViolations' in config.security).toBe(false);
+    expect("requireFullscreen" in config.security).toBe(false);
+    expect("fullscreenAutoReentry" in config.security).toBe(false);
+    expect("fullscreenMaxViolations" in config.security).toBe(false);
   });
 
-  it('keeps single-task writing configs single-task after normalization', () => {
+  it("keeps single-task writing configs single-task after normalization", () => {
     const config = normalizeExamConfig({
       sections: {
         writing: {
-          tasks: [{ id: 'task1', label: 'Task 1', taskType: 'task1-academic', minWords: 150, recommendedTime: 20 }],
+          tasks: [
+            {
+              id: "task1",
+              label: "Task 1",
+              taskType: "task1-academic",
+              minWords: 150,
+              recommendedTime: 20,
+            },
+          ],
         },
       },
       standards: {
@@ -181,7 +208,7 @@ describe('examDefaults standards', () => {
 
     expect(config.sections.writing.tasks).toHaveLength(1);
     expect(config.sections.writing.tasks[0]).toMatchObject({
-      id: 'task1',
+      id: "task1",
       minWords: 180,
       recommendedTime: 25,
     });

@@ -37,8 +37,9 @@ impl VersionSerializer {
                 let has_listening = map.contains_key("listening");
                 let has_writing = map.contains_key("writing");
                 let has_speaking = map.contains_key("speaking");
+                let has_science = map.contains_key("science");
 
-                if !has_reading && !has_listening && !has_writing && !has_speaking {
+                if !has_reading && !has_listening && !has_writing && !has_speaking && !has_science {
                     return Ok(false);
                 }
 
@@ -55,7 +56,8 @@ impl VersionSerializer {
                 let sections: Vec<&str> = map
                     .keys()
                     .filter(|k| {
-                        ["reading", "listening", "writing", "speaking"].contains(&k.as_str())
+                        ["reading", "listening", "writing", "speaking", "science"]
+                            .contains(&k.as_str())
                     })
                     .map(|k| k.as_str())
                     .collect();
@@ -110,6 +112,12 @@ mod tests {
     }
 
     #[test]
+    fn validate_content_structure_accepts_act_science() {
+        let content = json!({"science": {"stimuli": []}});
+        assert!(VersionSerializer::validate_content_structure(&content).unwrap());
+    }
+
+    #[test]
     fn validate_content_structure_empty() {
         let content = json!({});
         assert!(!VersionSerializer::validate_content_structure(&content).unwrap());
@@ -121,5 +129,13 @@ mod tests {
         let summary = VersionSerializer::content_summary(&content);
         assert!(summary.is_some());
         assert!(summary.unwrap().contains("reading"));
+    }
+
+    #[test]
+    fn content_summary_includes_act_science() {
+        let content = json!({"science": {"stimuli": []}});
+        let summary = VersionSerializer::content_summary(&content);
+        assert!(summary.is_some());
+        assert!(summary.unwrap().contains("science"));
     }
 }

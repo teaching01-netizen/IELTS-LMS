@@ -5,13 +5,13 @@
  * All UI and business logic should work with these types, not the legacy Exam type.
  */
 
-import type { ExamState, ExamConfig, ModuleType } from '../types';
+import type { ExamState, ExamConfig, ExamType, ModuleType } from "../types";
 import type {
   StudentAttempt as StudentAttemptRecord,
   StudentAttemptMutation as PendingAttemptMutation,
   StudentHeartbeatEvent,
   StudentPreCheckResult as PreCheckResult,
-} from './studentAttempt';
+} from "./studentAttempt";
 
 /**
  * Schema version for migration support.
@@ -22,39 +22,39 @@ export const SCHEMA_VERSION = 4;
 /**
  * Exam lifecycle states with proper workflow
  */
-export type ExamStatus = 
-  | 'draft' 
-  | 'in_review' 
-  | 'approved' 
-  | 'rejected'
-  | 'scheduled' 
-  | 'published' 
-  | 'archived'
-  | 'unpublished';
+export type ExamStatus =
+  | "draft"
+  | "in_review"
+  | "approved"
+  | "rejected"
+  | "scheduled"
+  | "published"
+  | "archived"
+  | "unpublished";
 
 /**
  * Visibility settings for exams
  */
-export type ExamVisibility = 'private' | 'organization' | 'public';
+export type ExamVisibility = "private" | "organization" | "public";
 
 /**
  * Actions that can be performed on exams (for audit log)
  */
 export type ExamAction =
-  | 'created'
-  | 'draft_saved'
-  | 'submitted_for_review'
-  | 'approved'
-  | 'rejected'
-  | 'published'
-  | 'unpublished'
-  | 'scheduled'
-  | 'archived'
-  | 'restored'
-  | 'cloned'
-  | 'version_created'
-  | 'version_restored'
-  | 'permissions_updated';
+  | "created"
+  | "draft_saved"
+  | "submitted_for_review"
+  | "approved"
+  | "rejected"
+  | "published"
+  | "unpublished"
+  | "scheduled"
+  | "archived"
+  | "restored"
+  | "cloned"
+  | "version_created"
+  | "version_restored"
+  | "permissions_updated";
 
 /**
  * Transition guards for status changes
@@ -63,7 +63,7 @@ export type StatusTransition = {
   from: ExamStatus;
   to: ExamStatus;
   allowed: boolean;
-  requireActor?: 'admin' | 'owner' | 'reviewer' | undefined;
+  requireActor?: "admin" | "owner" | "reviewer" | undefined;
 };
 
 /**
@@ -74,31 +74,31 @@ export interface ExamEntity {
   id: string;
   slug: string;
   title: string;
-  type: 'Academic' | 'General Training';
+  type: ExamType;
   status: ExamStatus;
   visibility: ExamVisibility;
   owner: string;
-  
+
   // Timestamps
   createdAt: string;
   updatedAt: string;
   publishedAt?: string | undefined;
   archivedAt?: string | undefined;
-  
+
   // Version pointers
   currentDraftVersionId: string | null;
   currentPublishedVersionId: string | null;
-  
+
   // Permissions summary (simplified for now, can be expanded)
   canEdit: boolean;
   canPublish: boolean;
   canDelete: boolean;
-  
+
   // Denormalized counts for performance (kept in sync via service)
   totalQuestions?: number | undefined;
   totalReadingQuestions?: number | undefined;
   totalListeningQuestions?: number | undefined;
-  
+
   // Schema version for migration
   schemaVersion: number;
 }
@@ -119,17 +119,17 @@ export interface ExamVersion {
   examId: string;
   versionNumber: number;
   parentVersionId: string | null;
-  
+
   // Immutable snapshots
   contentSnapshot: ExamState;
   configSnapshot: ExamConfig;
   validationSnapshot?: ExamVersionValidationSnapshot | undefined;
-  
+
   // Metadata
   createdBy: string;
   createdAt: string;
   publishNotes?: string | undefined;
-  
+
   // Version state
   isDraft: boolean;
   isPublished: boolean;
@@ -186,7 +186,7 @@ export interface ExamVersionBuilderContent {
 /**
  * Content projection type for version requests.
  */
-export type VersionProjection = 'full' | 'metadata' | 'builder' | 'grading';
+export type VersionProjection = "full" | "metadata" | "builder" | "grading";
 
 /**
  * Audit event for exam lifecycle tracking
@@ -214,33 +214,35 @@ export interface ExamSchedule {
   proctorDisplayName: string;
   gradingDisplayName: string;
   publishedVersionId: string; // Always points to immutable version
-  
+
   // Schedule details
   cohortName: string;
   institution?: string | undefined;
   startTime: string;
   endTime: string;
   plannedDurationMinutes: number;
-  deliveryMode: 'proctor_start';
-  
+  deliveryMode: "proctor_start";
+
   // Recurrence settings
-  recurrence?: {
-    type: 'none' | 'daily' | 'weekly' | 'monthly';
-    interval: number;
-    endDate?: string | undefined;
-  } | undefined;
-  
+  recurrence?:
+    | {
+        type: "none" | "daily" | "weekly" | "monthly";
+        interval: number;
+        endDate?: string | undefined;
+      }
+    | undefined;
+
   // Buffer settings
   bufferBeforeMinutes?: number | undefined;
   bufferAfterMinutes?: number | undefined;
-  
+
   // Auto controls
   autoStart: boolean;
   autoStop: boolean;
-  
+
   // Status
-  status: 'scheduled' | 'live' | 'completed' | 'cancelled';
-  
+  status: "scheduled" | "live" | "completed" | "cancelled";
+
   // Metadata
   createdAt: string;
   createdBy: string;
@@ -250,12 +252,12 @@ export interface ExamSchedule {
 /**
  * Runtime status for the whole cohort session
  */
-export type RuntimeStatus = 'not_started' | 'live' | 'paused' | 'completed' | 'cancelled';
+export type RuntimeStatus = "not_started" | "live" | "paused" | "completed" | "cancelled";
 
 /**
  * Runtime status for a single section
  */
-export type SectionRuntimeStatus = 'locked' | 'live' | 'paused' | 'completed';
+export type SectionRuntimeStatus = "locked" | "live" | "paused" | "completed";
 
 /**
  * Section runtime tracking
@@ -273,7 +275,7 @@ export interface SectionRuntimeState {
   pausedAt: string | null;
   accumulatedPausedSeconds: number;
   extensionMinutes: number;
-  completionReason?: 'auto_timeout' | 'proctor_end' | 'proctor_complete' | 'cancelled' | undefined;
+  completionReason?: "auto_timeout" | "proctor_end" | "proctor_complete" | "cancelled" | undefined;
   projectedStartAt?: string | null | undefined;
   projectedEndAt?: string | null | undefined;
 }
@@ -288,13 +290,13 @@ export interface CohortControlEvent {
   examId: string;
   actor: string;
   action:
-    | 'start_runtime'
-    | 'pause_runtime'
-    | 'resume_runtime'
-    | 'extend_section'
-    | 'end_section_now'
-    | 'complete_runtime'
-    | 'auto_timeout';
+    | "start_runtime"
+    | "pause_runtime"
+    | "resume_runtime"
+    | "extend_section"
+    | "end_section_now"
+    | "complete_runtime"
+    | "auto_timeout";
   sectionKey?: ModuleType | undefined;
   minutes?: number | undefined;
   reason?: string | undefined;
@@ -318,7 +320,7 @@ export interface ExamSessionRuntime {
   examId: string;
   examTitle: string;
   cohortName: string;
-  deliveryMode: 'proctor_start';
+  deliveryMode: "proctor_start";
   status: RuntimeStatus;
   actualStartAt: string | null;
   actualEndAt: string | null;
@@ -345,7 +347,7 @@ export interface PublishReadiness {
   errors: Array<{
     field: string;
     message: string;
-    severity: 'error' | 'warning';
+    severity: "error" | "warning";
   }>;
   warnings: Array<{
     field: string;
@@ -355,6 +357,7 @@ export interface PublishReadiness {
   questionCounts: {
     reading: number;
     listening: number;
+    science?: number;
     total: number;
   };
 }
@@ -377,7 +380,7 @@ export interface VersionDiff {
   versionA: ExamVersion;
   versionB: ExamVersion;
   hasChanges: boolean;
-  
+
   // Metadata diffs
   metadataDiff: {
     versionNumberChanged: boolean;
@@ -386,7 +389,7 @@ export interface VersionDiff {
     createdAtChanged: boolean;
     publishNotesChanged: boolean;
   };
-  
+
   // Config diffs
   configDiff: {
     generalChanged: boolean;
@@ -400,7 +403,7 @@ export interface VersionDiff {
     scoringChanged: boolean;
     securityChanged: boolean;
   };
-  
+
   // Content counts diff
   countsDiff: {
     readingPassages: { a: number; b: number; changed: boolean };
@@ -448,16 +451,11 @@ export interface BulkOperationResult {
   }>;
 }
 
-export type StudentAttemptStatus =
-  | 'pre-check'
-  | 'lobby'
-  | 'exam'
-  | 'post-exam'
-  | 'submitted';
+export type StudentAttemptStatus = "pre-check" | "lobby" | "exam" | "post-exam" | "submitted";
 
-export type HeartbeatStatus = 'idle' | 'ok' | 'lost';
+export type HeartbeatStatus = "idle" | "ok" | "lost";
 
-export type DeviceContinuityStatus = 'unknown' | 'verified' | 'mismatch';
+export type DeviceContinuityStatus = "unknown" | "verified" | "mismatch";
 
 export type {
   PendingAttemptMutation,

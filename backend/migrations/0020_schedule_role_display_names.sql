@@ -1,7 +1,9 @@
 -- Add schedule-level role-specific display names for proctor and grading surfaces.
 
 ALTER TABLE exam_schedules
-    ADD COLUMN proctor_display_name VARCHAR(255) NULL AFTER exam_title,
+    ADD COLUMN proctor_display_name VARCHAR(255) NULL AFTER exam_title;
+
+ALTER TABLE exam_schedules
     ADD COLUMN grading_display_name VARCHAR(255) NULL AFTER proctor_display_name;
 
 UPDATE exam_schedules

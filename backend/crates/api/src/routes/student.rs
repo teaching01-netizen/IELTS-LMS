@@ -1749,6 +1749,24 @@ mod tests {
     }
 
     #[test]
+    fn submit_request_rejects_client_supplied_score() {
+        let payload = json!({
+            "attemptId": "attempt-1",
+            "lastSeenRevision": 11,
+            "submissionId": "submit-1",
+            "clientFinalSeq": 13,
+            "score": {
+                "correctCount": 40,
+                "totalQuestions": 40,
+                "percentage": 100.0
+            }
+        });
+
+        let parsed = serde_json::from_value::<ApiSubmitRequest>(payload);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
     fn submit_request_accepts_final_patch_metadata() {
         let payload = json!({
             "attemptId": "attempt-1",

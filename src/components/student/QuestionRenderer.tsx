@@ -27,7 +27,7 @@ import {
 import { ProtectedInput } from "./ProtectedInput";
 import { StudentQuestionText } from "./StudentQuestionText";
 import { StudentQuestionNumber } from "./StudentQuestionNumber";
-import { Check, Flag } from "lucide-react";
+import { Check, Flag, X } from "lucide-react";
 import { stripBoldMarkdown } from "../../utils/boldMarkdown";
 import { getImageUrlCandidates } from "../../utils/imageUrl";
 import { StudentZoomableMedia } from "./StudentZoomableMedia";
@@ -73,6 +73,8 @@ interface QuestionRendererProps {
   studentId?: string | undefined;
   hideDiagramReference?: boolean | undefined;
   registerLiveAnswer?: ((payload: { value: QuestionAnswer }) => void) | undefined;
+  eliminatedOptionIds?: readonly string[] | undefined;
+  onToggleOptionElimination?: ((optionId: string) => void) | undefined;
 }
 
 export function QuestionRenderer({
@@ -96,6 +98,8 @@ export function QuestionRenderer({
   studentId,
   hideDiagramReference = false,
   registerLiveAnswer,
+  eliminatedOptionIds = [],
+  onToggleOptionElimination,
 }: QuestionRendererProps) {
   const stringArrayAnswer = Array.isArray(answer) ? answer : [];
   const isCompactPane = tabletMode && compactPane;
@@ -503,7 +507,8 @@ export function QuestionRenderer({
       Array.isArray(questionLevel?.options) && questionLevel.options.length > 0
         ? questionLevel.options
         : (mcqBlock.options ?? []);
-    const inputGroupName = questionLevel ? `q-${questionLevel.id}` : `q-${mcqBlock.id}`;
+    const questionId = questionLevel?.id ?? mcqBlock.id;
+    const inputGroupName = `q-${questionId}`;
 
     return (
       <fieldset className="flex flex-col gap-4">
@@ -521,47 +526,79 @@ export function QuestionRenderer({
         <div className={`${fieldIndentClass} space-y-3`}>
           {options.map((option, index) => {
             const letter = String.fromCharCode(65 + index);
+            const isEliminated = eliminatedOptionIds.includes(option.id);
+            const eliminatedOptionClassName = isEliminated ? "text-gray-500" : "";
+            const showEliminationButton = Boolean(onToggleOptionElimination) && index < 4;
+            const eliminationAction = isEliminated ? "Restore" : "Eliminate";
             return (
-              <label
+              <div
                 key={option.id}
-                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
+                className={`flex items-start gap-3 rounded-md border p-3 transition-colors ${
                   answer === option.id
                     ? "border-blue-500 bg-blue-50"
                     : "border-gray-200 hover:border-blue-300"
                 }`}
               >
-                <input
-                  type="radio"
-                  name={inputGroupName}
-                  checked={answer === option.id}
-                  onChange={() => commitAnswerChange(option.id)}
-                  className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <div className="flex gap-2">
-                  <StudentQuestionText
-                    as="span"
-                    className="font-bold text-gray-700"
-                    text={`${letter}.`}
-                    highlightEnabled={highlightEnabled}
-                    highlightColor={highlightColor}
-                    highlightSurfaceId={getHighlightSurfaceId(
-                      `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
-                      "option-letter"
-                    )}
+                <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+                  <input
+                    type="radio"
+                    name={inputGroupName}
+                    checked={answer === option.id}
+                    onChange={() => commitAnswerChange(option.id)}
+                    className="mt-1 h-4 w-4 flex-shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
-                  <StudentQuestionText
-                    as="span"
-                    className="text-gray-800"
-                    text={option.text}
-                    highlightEnabled={highlightEnabled}
-                    highlightColor={highlightColor}
-                    highlightSurfaceId={getHighlightSurfaceId(
-                      `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
-                      "option-text"
-                    )}
-                  />
-                </div>
-              </label>
+                  <div className={`relative flex gap-2 ${eliminatedOptionClassName}`}>
+                    <StudentQuestionText
+                      as="span"
+                      className="font-bold text-gray-700"
+                      text={`${letter}.`}
+                      highlightEnabled={highlightEnabled}
+                      highlightColor={highlightColor}
+                      highlightSurfaceId={getHighlightSurfaceId(
+                        `${questionId}:${option.id}`,
+                        "option-letter"
+                      )}
+                    />
+                    <StudentQuestionText
+                      as="span"
+                      className={`text-gray-800 ${eliminatedOptionClassName}`}
+                      text={option.text}
+                      highlightEnabled={highlightEnabled}
+                      highlightColor={highlightColor}
+                      highlightSurfaceId={getHighlightSurfaceId(
+                        `${questionId}:${option.id}`,
+                        "option-text"
+                      )}
+                    />
+                    {isEliminated ? (
+                      <>
+                        <span
+                          aria-hidden="true"
+                          data-testid="choice-elimination-mark"
+                          className="pointer-events-none absolute inset-x-0 top-1/2 h-0.5 -rotate-6 bg-gray-400/80"
+                        />
+                        <span
+                          aria-hidden="true"
+                          data-testid="choice-elimination-mark"
+                          className="pointer-events-none absolute inset-x-0 top-1/2 h-0.5 rotate-6 bg-gray-400/80"
+                        />
+                      </>
+                    ) : null}
+                  </div>
+                </label>
+                {showEliminationButton ? (
+                  <button
+                    type="button"
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-sm border border-gray-700 bg-gray-800 p-0 text-white transition-colors hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600/40"
+                    aria-label={`${eliminationAction} option ${letter}`}
+                    aria-pressed={isEliminated}
+                    title={`${eliminationAction} option ${letter}`}
+                    onClick={() => onToggleOptionElimination?.(option.id)}
+                  >
+                    <X size={16} strokeWidth={2.5} aria-hidden="true" />
+                  </button>
+                ) : null}
+              </div>
             );
           })}
         </div>

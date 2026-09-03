@@ -1,22 +1,54 @@
-import React, { useState, useMemo, useEffect, memo } from 'react';
-import { createPortal } from 'react-dom';
-import { Plus, Search, Filter, MoreHorizontal, Copy, CheckCircle, Archive, X, Layers, Book, Pen, Headset, Mic, Settings2, LayoutTemplate, GitCommit, XCircle, Download, Trash2, type LucideIcon } from 'lucide-react';
-import { StatusBadge } from '../ui/StatusBadge';
-import { Exam, ExamConfig } from '../../types';
-import { lazyLoad } from '../../app/performance/lazyLoad';
-import { ExamEntity, ExamEvent, ExamVersionSummary, BulkOperationResult } from '../../types/domain';
-import { getExamStatsFromExam, ExamFilterOptions, ExamSortOptions, DEFAULT_FILTERS, DEFAULT_SORT, hasActiveFilters } from '../../utils/examStats';
-import type { ExamListProps, ExamVersionHistoryProps } from '../../features/exam-authoring/contracts/examList';
-import { ExamFiltersPanel } from './ExamFiltersPanel';
-import { ExamBulkActionBar } from './ExamBulkActionBar';
-import { Virtuoso } from 'react-virtuoso';
-import { VIRTUAL_LIST_HEIGHTS } from '../../constants/uiConstants';
-import { buildExamTextExport, downloadExamTextExport } from '../../utils/examTextExport';
+import React, { useState, useMemo, useEffect, memo } from "react";
+import { createPortal } from "react-dom";
+import {
+  Plus,
+  Search,
+  Filter,
+  MoreHorizontal,
+  Copy,
+  CheckCircle,
+  Archive,
+  X,
+  Layers,
+  Book,
+  Pen,
+  Headset,
+  Mic,
+  FlaskConical,
+  Settings2,
+  LayoutTemplate,
+  GitCommit,
+  XCircle,
+  Download,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
+import { StatusBadge } from "../ui/StatusBadge";
+import { Exam, ExamConfig, ExamPreset, ExamType } from "../../types";
+import { lazyLoad } from "../../app/performance/lazyLoad";
+import { ExamEntity, ExamEvent, ExamVersionSummary, BulkOperationResult } from "../../types/domain";
+import {
+  getExamStatsFromExam,
+  ExamFilterOptions,
+  ExamSortOptions,
+  DEFAULT_FILTERS,
+  DEFAULT_SORT,
+  hasActiveFilters,
+} from "../../utils/examStats";
+import type {
+  ExamListProps,
+  ExamVersionHistoryProps,
+} from "../../features/exam-authoring/contracts/examList";
+import { ExamFiltersPanel } from "./ExamFiltersPanel";
+import { ExamBulkActionBar } from "./ExamBulkActionBar";
+import { Virtuoso } from "react-virtuoso";
+import { VIRTUAL_LIST_HEIGHTS } from "../../constants/uiConstants";
+import { buildExamTextExport, downloadExamTextExport } from "../../utils/examTextExport";
 
 const ExamVersionHistory = lazyLoad<ExamVersionHistoryProps>(
-  () => import('./ExamVersionHistory').then((module) => ({ default: module.ExamVersionHistory })),
-  'Loading version history...',
-  'ExamVersionHistory'
+  () => import("./ExamVersionHistory").then((module) => ({ default: module.ExamVersionHistory })),
+  "Loading version history...",
+  "ExamVersionHistory"
 );
 
 interface ExamGridCardProps {
@@ -42,10 +74,12 @@ const ExamGridCard = memo(function ExamGridCard({
   onDropdownClick,
   getStatusBadge,
   onGoToConfig,
-  onGoToReview
+  onGoToReview,
 }: ExamGridCardProps) {
   return (
-    <div className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col hover:shadow-md transition-shadow ${isSelected ? 'border-blue-500 ring-2 ring-blue-500' : 'border-gray-200'}`}>
+    <div
+      className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col hover:shadow-md transition-shadow ${isSelected ? "border-blue-500 ring-2 ring-blue-500" : "border-gray-200"}`}
+    >
       <div className="p-5 flex-1">
         <div className="flex items-start gap-3 mb-3">
           <input
@@ -56,7 +90,9 @@ const ExamGridCard = memo(function ExamGridCard({
           />
           <div className="flex-1 min-w-0">
             <div className="flex justify-between items-start">
-              <h3 className="font-semibold text-lg text-gray-900 line-clamp-1" title={exam.title}>{exam.title}</h3>
+              <h3 className="font-semibold text-lg text-gray-900 line-clamp-1" title={exam.title}>
+                {exam.title}
+              </h3>
               {getStatusBadge(exam.status)}
             </div>
           </div>
@@ -128,10 +164,10 @@ const ExamListItem = memo(function ExamListItem({
   onDropdownClick,
   getStatusBadge,
   onGoToConfig,
-  onGoToReview
+  onGoToReview,
 }: ExamListItemProps) {
   return (
-    <div className={`hover:bg-gray-50 flex items-center ${isSelected ? 'bg-blue-50' : ''}`}>
+    <div className={`hover:bg-gray-50 flex items-center ${isSelected ? "bg-blue-50" : ""}`}>
       <div className="px-6 py-4 w-8">
         <input
           type="checkbox"
@@ -145,7 +181,9 @@ const ExamListItem = memo(function ExamListItem({
       <div className="px-6 py-4 w-36">{getStatusBadge(exam.status)}</div>
       <div className="px-6 py-4 w-20 text-gray-500">{stats.totalQuestions}</div>
       <div className="px-6 py-4 w-32 text-gray-500">{exam.author}</div>
-      <div className="px-6 py-4 w-32 text-gray-500">{new Date(exam.lastModified).toLocaleDateString()}</div>
+      <div className="px-6 py-4 w-32 text-gray-500">
+        {new Date(exam.lastModified).toLocaleDateString()}
+      </div>
       <div className="px-6 py-4 w-32 text-right overflow-visible flex items-center justify-end gap-2">
         <button
           onClick={() => onEdit(exam.id)}
@@ -186,35 +224,37 @@ export function AdminExams({
   onBulkArchive,
   onBulkDuplicate,
   onBulkExport,
-  onBulkDelete
+  onBulkDelete,
 }: ExamListProps) {
   // View state
-  const [view, setView] = useState<'grid' | 'list'>('list');
-  
+  const [view, setView] = useState<"grid" | "list">("list");
+
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCloneModal, setShowCloneModal] = useState(false);
   const [selectedExamForClone, setSelectedExamForClone] = useState<Exam | null>(null);
-  const [cloneTitle, setCloneTitle] = useState('');
-  const [cloneMode, setCloneMode] = useState<'clone' | 'template'>('clone');
+  const [cloneTitle, setCloneTitle] = useState("");
+  const [cloneMode, setCloneMode] = useState<"clone" | "template">("clone");
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
-  const [newExamTitle, setNewExamTitle] = useState('');
-  const [newExamType, setNewExamType] = useState<'Academic' | 'General Training'>('Academic');
-  const [newExamPreset, setNewExamPreset] = useState<ExamConfig['general']['preset']>('Academic');
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(
+    null
+  );
+  const [newExamTitle, setNewExamTitle] = useState("");
+  const [newExamType, setNewExamType] = useState<ExamType>("Academic");
+  const [newExamPreset, setNewExamPreset] = useState<ExamPreset>("Academic");
   const [includeScheduling, setIncludeScheduling] = useState(false);
   const [scheduleData, setScheduleData] = useState({
-    cohort: 'Elite 2025-A',
-    start: '2025-01-20T09:00',
-    end: '2025-01-20T12:00'
+    cohort: "Elite 2025-A",
+    start: "2025-01-20T09:00",
+    end: "2025-01-20T12:00",
   });
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [selectedExamForHistory, setSelectedExamForHistory] = useState<ExamEntity | null>(null);
   const [examVersions, setExamVersions] = useState<ExamVersionSummary[]>([]);
   const [examEvents, setExamEvents] = useState<ExamEvent[]>([]);
-  
+
   // Phase 4: Filter, sort, and selection state
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ExamFilterOptions>(DEFAULT_FILTERS);
   const [sort, setSort] = useState<ExamSortOptions>(DEFAULT_SORT);
   const [selectedExamIds, setSelectedExamIds] = useState<Set<string>>(new Set());
@@ -222,7 +262,7 @@ export function AdminExams({
   const [bulkOperationResult, setBulkOperationResult] = useState<BulkOperationResult | null>(null);
   const [showBulkResult, setShowBulkResult] = useState(false);
   const [showBulkDuplicateModal, setShowBulkDuplicateModal] = useState(false);
-  const [bulkDuplicateTitlePattern, setBulkDuplicateTitlePattern] = useState('{title} (Copy)');
+  const [bulkDuplicateTitlePattern, setBulkDuplicateTitlePattern] = useState("{title} (Copy)");
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -234,8 +274,8 @@ export function AdminExams({
     };
 
     if (activeDropdown) {
-      document.addEventListener('click', handleClickOutside);
-      return () => document.removeEventListener('click', handleClickOutside);
+      document.addEventListener("click", handleClickOutside);
+      return () => document.removeEventListener("click", handleClickOutside);
     }
     return undefined;
   }, [activeDropdown]);
@@ -243,35 +283,36 @@ export function AdminExams({
   // Phase 4: Filter and sort logic
   const filteredAndSortedExams = useMemo(() => {
     let filtered = [...exams];
-    
+
     // Apply search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(exam =>
-        exam.title.toLowerCase().includes(query) ||
-        exam.type.toLowerCase().includes(query) ||
-        exam.author.toLowerCase().includes(query)
+      filtered = filtered.filter(
+        (exam) =>
+          exam.title.toLowerCase().includes(query) ||
+          exam.type.toLowerCase().includes(query) ||
+          exam.author.toLowerCase().includes(query)
       );
     }
-    
+
     // Apply status filter
     if (filters.status.length > 0) {
-      filtered = filtered.filter(exam => filters.status.includes(exam.status));
+      filtered = filtered.filter((exam) => filters.status.includes(exam.status));
     }
-    
+
     // Apply type filter
     if (filters.type.length > 0) {
-      filtered = filtered.filter(exam => filters.type.includes(exam.type));
+      filtered = filtered.filter((exam) => filters.type.includes(exam.type));
     }
-    
+
     // Apply creator filter
     if (filters.creator.length > 0) {
-      filtered = filtered.filter(exam => filters.creator.includes(exam.author));
+      filtered = filtered.filter((exam) => filters.creator.includes(exam.author));
     }
-    
+
     // Apply date range filter
     if (filters.dateRange?.start || filters.dateRange?.end) {
-      filtered = filtered.filter(exam => {
+      filtered = filtered.filter((exam) => {
         const examDate = new Date(exam.lastModified);
         if (filters.dateRange?.start && examDate < new Date(filters.dateRange.start)) {
           return false;
@@ -282,64 +323,70 @@ export function AdminExams({
         return true;
       });
     }
-    
+
     // Apply question count filter
     if (filters.questionCount?.min !== undefined || filters.questionCount?.max !== undefined) {
-      filtered = filtered.filter(exam => {
+      filtered = filtered.filter((exam) => {
         const stats = getExamStatsFromExam(exam);
-        if (filters.questionCount?.min !== undefined && stats.totalQuestions < filters.questionCount.min) {
+        if (
+          filters.questionCount?.min !== undefined &&
+          stats.totalQuestions < filters.questionCount.min
+        ) {
           return false;
         }
-        if (filters.questionCount?.max !== undefined && stats.totalQuestions > filters.questionCount.max) {
+        if (
+          filters.questionCount?.max !== undefined &&
+          stats.totalQuestions > filters.questionCount.max
+        ) {
           return false;
         }
         return true;
       });
     }
-    
+
     // Apply sorting
     filtered.sort((a, b) => {
       let comparison = 0;
-      
+
       switch (sort.field) {
-        case 'title':
+        case "title":
           comparison = a.title.localeCompare(b.title);
           break;
-        case 'modified':
+        case "modified":
           comparison = new Date(a.lastModified).getTime() - new Date(b.lastModified).getTime();
           break;
-        case 'published': {
-          const aPublished = a.status === 'Published' ? new Date(a.lastModified).getTime() : 0;
-          const bPublished = b.status === 'Published' ? new Date(b.lastModified).getTime() : 0;
+        case "published": {
+          const aPublished = a.status === "Published" ? new Date(a.lastModified).getTime() : 0;
+          const bPublished = b.status === "Published" ? new Date(b.lastModified).getTime() : 0;
           comparison = aPublished - bPublished;
           break;
         }
-        case 'created':
+        case "created":
           comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
           break;
-        case 'questionCount': {
+        case "questionCount": {
           const aStats = getExamStatsFromExam(a);
           const bStats = getExamStatsFromExam(b);
           comparison = aStats.totalQuestions - bStats.totalQuestions;
           break;
         }
       }
-      
-      return sort.direction === 'desc' ? -comparison : comparison;
+
+      return sort.direction === "desc" ? -comparison : comparison;
     });
-    
+
     return filtered;
   }, [exams, searchQuery, filters, sort]);
-  
+
   // Phase 4: Selection handlers
   const toggleSelectAll = () => {
     if (selectedExamIds.size === filteredAndSortedExams.length) {
       setSelectedExamIds(new Set());
     } else {
-      setSelectedExamIds(new Set(filteredAndSortedExams.map(e => e.id)));
+      setSelectedExamIds(new Set(filteredAndSortedExams.map((e) => e.id)));
     }
   };
-  
+
   const toggleSelectExam = (examId: string) => {
     const newSelection = new Set(selectedExamIds);
     if (newSelection.has(examId)) {
@@ -349,39 +396,39 @@ export function AdminExams({
     }
     setSelectedExamIds(newSelection);
   };
-  
+
   const clearSelection = () => {
     setSelectedExamIds(new Set());
   };
-  
+
   // Phase 4: Bulk action handlers
   const handleBulkPublish = async () => {
     if (!onBulkPublish || selectedExamIds.size === 0) return;
-    
+
     const result = await onBulkPublish(Array.from(selectedExamIds));
     setBulkOperationResult(result);
     setShowBulkResult(true);
     clearSelection();
   };
-  
+
   const handleBulkUnpublish = async () => {
     if (!onBulkUnpublish || selectedExamIds.size === 0) return;
-    
+
     const result = await onBulkUnpublish(Array.from(selectedExamIds));
     setBulkOperationResult(result);
     setShowBulkResult(true);
     clearSelection();
   };
-  
+
   const handleBulkArchive = async () => {
     if (!onBulkArchive || selectedExamIds.size === 0) return;
-    
+
     const result = await onBulkArchive(Array.from(selectedExamIds));
     setBulkOperationResult(result);
     setShowBulkResult(true);
     clearSelection();
   };
-  
+
   const handleBulkDuplicate = async () => {
     if (!onBulkDuplicate || selectedExamIds.size === 0) return;
 
@@ -397,14 +444,16 @@ export function AdminExams({
 
     if (selectedExamIds.size === 1) {
       const selectedExam = exams.find((exam) => selectedExamIds.has(exam.id));
-      setBulkDuplicateTitlePattern(selectedExam ? `${selectedExam.title} (Copy)` : '{title} (Copy)');
+      setBulkDuplicateTitlePattern(
+        selectedExam ? `${selectedExam.title} (Copy)` : "{title} (Copy)"
+      );
     } else {
-      setBulkDuplicateTitlePattern('{title} (Copy)');
+      setBulkDuplicateTitlePattern("{title} (Copy)");
     }
 
     setShowBulkDuplicateModal(true);
   };
-  
+
   const handleBulkExport = async () => {
     if (!onBulkExport || selectedExamIds.size === 0) return;
 
@@ -414,7 +463,7 @@ export function AdminExams({
     setShowBulkResult(true);
 
     const successfulExamIds = new Set(
-      result.results.filter((item) => item.success).map((item) => item.examId),
+      result.results.filter((item) => item.success).map((item) => item.examId)
     );
     if (successfulExamIds.size > 0) {
       const examById = new Map(exams.map((exam) => [exam.id, exam]));
@@ -436,7 +485,7 @@ export function AdminExams({
     if (!onBulkDelete || selectedExamIds.size === 0) return;
 
     const count = selectedExamIds.size;
-    if (!confirm(`Delete ${count} exam${count !== 1 ? 's' : ''}? This cannot be undone.`)) {
+    if (!confirm(`Delete ${count} exam${count !== 1 ? "s" : ""}? This cannot be undone.`)) {
       return;
     }
 
@@ -445,54 +494,102 @@ export function AdminExams({
     setShowBulkResult(true);
     clearSelection();
   };
-  
+
   // Phase 4: Filter handlers
   const addFilter = (type: keyof ExamFilterOptions, value: string) => {
-    setFilters(prev => {
+    setFilters((prev) => {
       const current = prev[type] as string[];
       if (current.includes(value)) return prev;
       return { ...prev, [type]: [...current, value] };
     });
   };
-  
+
   const removeFilter = (type: keyof ExamFilterOptions, value: string) => {
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
-      [type]: (prev[type] as string[]).filter(v => v !== value)
+      [type]: (prev[type] as string[]).filter((v) => v !== value),
     }));
   };
-  
+
   const clearAllFilters = () => {
     setFilters(DEFAULT_FILTERS);
-    setSearchQuery('');
+    setSearchQuery("");
   };
 
-  const presets: { id: ExamConfig['general']['preset'], label: string, icon: LucideIcon, description: string }[] = [
-    { id: 'Academic', label: 'Academic Full', icon: Layers, description: 'Standard 4-module academic exam' },
-    { id: 'General Training', label: 'GT Full', icon: Layers, description: 'Standard 4-module general training' },
-    { id: 'Listening', label: 'Listening Drill', icon: Headset, description: 'Section-only listening practice' },
-    { id: 'Reading', label: 'Reading Drill', icon: Book, description: 'Section-only reading practice' },
-    { id: 'Writing', label: 'Writing Drill', icon: Pen, description: 'Section-only writing practice' },
-    { id: 'Speaking', label: 'Speaking Drill', icon: Mic, description: 'Section-only speaking practice' },
-    { id: 'Custom', label: 'Custom Build', icon: Settings2, description: 'Blank slate with custom modules' },
+  const presets: { id: ExamPreset; label: string; icon: LucideIcon; description: string }[] = [
+    {
+      id: "Academic",
+      label: "Academic Full",
+      icon: Layers,
+      description: "Standard 4-module academic exam",
+    },
+    {
+      id: "General Training",
+      label: "GT Full",
+      icon: Layers,
+      description: "Standard 4-module general training",
+    },
+    {
+      id: "ACT Science",
+      label: "ACT Science",
+      icon: FlaskConical,
+      description: "One-section ACT Science practice",
+    },
+    {
+      id: "Listening",
+      label: "Listening Drill",
+      icon: Headset,
+      description: "Section-only listening practice",
+    },
+    {
+      id: "Reading",
+      label: "Reading Drill",
+      icon: Book,
+      description: "Section-only reading practice",
+    },
+    {
+      id: "Writing",
+      label: "Writing Drill",
+      icon: Pen,
+      description: "Section-only writing practice",
+    },
+    {
+      id: "Speaking",
+      label: "Speaking Drill",
+      icon: Mic,
+      description: "Section-only speaking practice",
+    },
+    {
+      id: "Custom",
+      label: "Custom Build",
+      icon: Settings2,
+      description: "Blank slate with custom modules",
+    },
   ];
 
   const getStatusBadge = (status: string) => {
-    const variant = status === 'Published' ? 'published' : 
-                    status === 'Draft' ? 'draft' : 
-                    status === 'Archived' ? 'warning' : 'neutral';
-    return status === 'Published' 
-      ? <StatusBadge variant={variant} size="sm" context="Live">{status}</StatusBadge>
-      : <StatusBadge variant={variant} size="sm">{status}</StatusBadge>;
+    const variant =
+      status === "Published"
+        ? "published"
+        : status === "Draft"
+          ? "draft"
+          : status === "Archived"
+            ? "warning"
+            : "neutral";
+    return status === "Published" ? (
+      <StatusBadge variant={variant} size="sm" context="Live">
+        {status}
+      </StatusBadge>
+    ) : (
+      <StatusBadge variant={variant} size="sm">
+        {status}
+      </StatusBadge>
+    );
   };
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onCreateExam(
-      newExamTitle || 'Untitled Exam', 
-      newExamType,
-      newExamPreset
-    );
+    onCreateExam(newExamTitle || "Untitled Exam", newExamType, newExamPreset);
     setShowCreateModal(false);
   };
 
@@ -504,7 +601,10 @@ export function AdminExams({
     } else {
       const button = e.currentTarget as HTMLElement;
       const rect = button.getBoundingClientRect();
-      setDropdownPosition({ top: rect.bottom + window.scrollY, left: rect.right - 192 + window.scrollX });
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY,
+        left: rect.right - 192 + window.scrollX,
+      });
       setActiveDropdown(examId);
     }
   };
@@ -512,14 +612,14 @@ export function AdminExams({
   const handleCloneClick = (exam: Exam) => {
     setSelectedExamForClone(exam);
     setCloneTitle(`${exam.title} (Copy)`);
-    setCloneMode('clone');
+    setCloneMode("clone");
     setShowCloneModal(true);
   };
 
   const handleCreateFromTemplateClick = (exam: Exam) => {
     setSelectedExamForClone(exam);
     setCloneTitle(`${exam.title} (from template)`);
-    setCloneMode('template');
+    setCloneMode("template");
     setShowCloneModal(true);
   };
 
@@ -527,23 +627,23 @@ export function AdminExams({
     e.preventDefault();
     if (!selectedExamForClone || !cloneTitle.trim()) return;
 
-    if (cloneMode === 'clone' && onCloneExam) {
+    if (cloneMode === "clone" && onCloneExam) {
       onCloneExam(selectedExamForClone.id, cloneTitle);
-    } else if (cloneMode === 'template' && onCreateFromTemplate) {
+    } else if (cloneMode === "template" && onCreateFromTemplate) {
       onCreateFromTemplate(selectedExamForClone.id, cloneTitle);
     }
 
     setShowCloneModal(false);
     setSelectedExamForClone(null);
-    setCloneTitle('');
+    setCloneTitle("");
   };
 
   const handleViewVersionHistory = async (exam: Exam) => {
-    const examEntity = examEntities?.find(e => e.id === exam.id);
+    const examEntity = examEntities?.find((e) => e.id === exam.id);
     if (!examEntity) return;
 
     setSelectedExamForHistory(examEntity);
-    
+
     // Load versions and events
     if (onGetVersions) {
       const loadedVersions = await onGetVersions(exam.id);
@@ -553,7 +653,7 @@ export function AdminExams({
       const loadedEvents = await onGetEvents(exam.id);
       setExamEvents(loadedEvents);
     }
-    
+
     setShowVersionHistory(true);
   };
 
@@ -572,24 +672,24 @@ export function AdminExams({
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Exam Library</h1>
-        
+
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
-            <input 
-              type="text" 
-              placeholder="Search exams..." 
+            <input
+              type="text"
+              placeholder="Search exams..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             />
           </div>
-          <button 
+          <button
             onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-2 px-3 py-2 border rounded-md text-sm font-medium transition-colors ${
-              showFilters || hasActiveFilters(filters) 
-                ? 'bg-blue-50 border-blue-600 text-blue-700' 
-                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+              showFilters || hasActiveFilters(filters)
+                ? "bg-blue-50 border-blue-600 text-blue-700"
+                : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
             }`}
           >
             <Filter size={16} />
@@ -600,7 +700,7 @@ export function AdminExams({
               </span>
             )}
           </button>
-          <button 
+          <button
             onClick={() => setShowCreateModal(true)}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors"
           >
@@ -608,15 +708,15 @@ export function AdminExams({
             Create Exam
           </button>
           <div className="flex border border-gray-300 rounded-md overflow-hidden bg-white">
-            <button 
-              onClick={() => setView('grid')}
-              className={`px-3 py-2 text-sm font-medium ${view === 'grid' ? 'bg-gray-100 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            <button
+              onClick={() => setView("grid")}
+              className={`px-3 py-2 text-sm font-medium ${view === "grid" ? "bg-gray-100 text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
             >
               Grid
             </button>
-            <button 
-              onClick={() => setView('list')}
-              className={`px-3 py-2 text-sm font-medium border-l border-gray-300 ${view === 'list' ? 'bg-gray-100 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            <button
+              onClick={() => setView("list")}
+              className={`px-3 py-2 text-sm font-medium border-l border-gray-300 ${view === "list" ? "bg-gray-100 text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
             >
               List
             </button>
@@ -627,30 +727,30 @@ export function AdminExams({
       {/* Phase 4: Filter Chips */}
       {hasActiveFilters(filters) && (
         <div className="flex flex-wrap items-center gap-2">
-          {filters.status.map(status => (
+          {filters.status.map((status) => (
             <button
               key={status}
-              onClick={() => removeFilter('status', status)}
+              onClick={() => removeFilter("status", status)}
               className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium hover:bg-blue-200 transition-colors"
             >
               {status}
               <X size={14} />
             </button>
           ))}
-          {filters.type.map(type => (
+          {filters.type.map((type) => (
             <button
               key={type}
-              onClick={() => removeFilter('type', type)}
+              onClick={() => removeFilter("type", type)}
               className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium hover:bg-green-200 transition-colors"
             >
               {type}
               <X size={14} />
             </button>
           ))}
-          {filters.creator.map(creator => (
+          {filters.creator.map((creator) => (
             <button
               key={creator}
-              onClick={() => removeFilter('creator', creator)}
+              onClick={() => removeFilter("creator", creator)}
               className="inline-flex items-center gap-1 px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium hover:bg-purple-200 transition-colors"
             >
               {creator}
@@ -692,12 +792,12 @@ export function AdminExams({
         />
       )}
 
-      {view === 'grid' ? (
+      {view === "grid" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredAndSortedExams.map((exam) => {
             const stats = getExamStatsFromExam(exam);
             const isSelected = selectedExamIds.has(exam.id);
-            
+
             return (
               <ExamGridCard
                 key={exam.id}
@@ -708,7 +808,7 @@ export function AdminExams({
                 onEdit={onEditExam}
                 onPreview={(examId) => {
                   onEditExam(examId);
-                  onNavigate('student');
+                  onNavigate("student");
                 }}
                 onDropdownClick={handleDropdownClick}
                 getStatusBadge={getStatusBadge}
@@ -723,9 +823,12 @@ export function AdminExams({
             <thead>
               <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-200">
                 <th className="px-6 py-3 font-medium w-8">
-                  <input 
-                    type="checkbox" 
-                    checked={selectedExamIds.size === filteredAndSortedExams.length && filteredAndSortedExams.length > 0}
+                  <input
+                    type="checkbox"
+                    checked={
+                      selectedExamIds.size === filteredAndSortedExams.length &&
+                      filteredAndSortedExams.length > 0
+                    }
                     onChange={toggleSelectAll}
                     className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
@@ -781,16 +884,19 @@ export function AdminExams({
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <h2 className="text-xl font-bold text-gray-900">Create New Exam</h2>
-              <button onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600 p-1">
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1"
+              >
                 <X size={20} />
               </button>
             </div>
-            
+
             <form onSubmit={handleCreateSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Exam Title</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={newExamTitle}
                   onChange={(e) => setNewExamTitle(e.target.value)}
                   placeholder="e.g. Academic Practice Test 5"
@@ -801,7 +907,9 @@ export function AdminExams({
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Select Preset</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Select Preset
+                </label>
                 <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto p-1 border border-gray-100 rounded-lg">
                   {presets.map((preset) => {
                     const Icon = preset.icon;
@@ -812,21 +920,34 @@ export function AdminExams({
                         type="button"
                         onClick={() => {
                           setNewExamPreset(preset.id);
-                          if (preset.id === 'General Training') setNewExamType('General Training');
-                          else if (preset.id === 'Academic') setNewExamType('Academic');
+                          if (preset.id === "ACT Science") {
+                            setNewExamType("ACT");
+                          } else if (preset.id === "General Training") {
+                            setNewExamType("General Training");
+                          } else if (preset.id === "Academic" || newExamType === "ACT") {
+                            setNewExamType("Academic");
+                          }
                         }}
                         className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-left transition-all ${
-                          isActive 
-                            ? 'bg-blue-50 border-blue-600 ring-1 ring-blue-600' 
-                            : 'bg-white border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                          isActive
+                            ? "bg-blue-50 border-blue-600 ring-1 ring-blue-600"
+                            : "bg-white border-gray-200 hover:border-blue-300 hover:bg-gray-50"
                         }`}
                       >
-                        <div className={`p-1.5 rounded-md ${isActive ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                        <div
+                          className={`p-1.5 rounded-md ${isActive ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-500"}`}
+                        >
                           <Icon size={16} />
                         </div>
                         <div className="text-center">
-                          <p className={`text-xs font-bold ${isActive ? 'text-blue-900' : 'text-gray-900'}`}>{preset.label}</p>
-                          <p className="text-[10px] text-gray-500 line-clamp-1">{preset.description}</p>
+                          <p
+                            className={`text-xs font-bold ${isActive ? "text-blue-900" : "text-gray-900"}`}
+                          >
+                            {preset.label}
+                          </p>
+                          <p className="text-[10px] text-gray-500 line-clamp-1">
+                            {preset.description}
+                          </p>
                         </div>
                       </button>
                     );
@@ -835,46 +956,63 @@ export function AdminExams({
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Standard Type</label>
-                <div className="grid grid-cols-2 gap-3">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Exam Type</label>
+                <div className="grid grid-cols-3 gap-3">
                   <button
                     type="button"
-                    disabled={newExamPreset === 'General Training'}
-                    onClick={() => setNewExamType('Academic')}
-                    className={`px-3 py-2 rounded-md text-sm font-medium border ${newExamType === 'Academic' ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                    disabled={
+                      newExamPreset === "General Training" || newExamPreset === "ACT Science"
+                    }
+                    onClick={() => setNewExamType("Academic")}
+                    className={`px-3 py-2 rounded-md text-sm font-medium border ${newExamType === "Academic" ? "bg-blue-50 border-blue-600 text-blue-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"}`}
                   >
                     Academic
                   </button>
                   <button
                     type="button"
-                    disabled={newExamPreset === 'Academic'}
-                    onClick={() => setNewExamType('General Training')}
-                    className={`px-3 py-2 rounded-md text-sm font-medium border ${newExamType === 'General Training' ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                    disabled={newExamPreset === "Academic" || newExamPreset === "ACT Science"}
+                    onClick={() => setNewExamType("General Training")}
+                    className={`px-3 py-2 rounded-md text-sm font-medium border ${newExamType === "General Training" ? "bg-blue-50 border-blue-600 text-blue-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"}`}
                   >
                     General Training
+                  </button>
+                  <button
+                    type="button"
+                    disabled={newExamPreset !== "ACT Science"}
+                    onClick={() => {
+                      setNewExamType("ACT");
+                      setNewExamPreset("ACT Science");
+                    }}
+                    className={`px-3 py-2 rounded-md text-sm font-medium border ${newExamType === "ACT" ? "bg-blue-50 border-blue-600 text-blue-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"}`}
+                  >
+                    ACT Science
                   </button>
                 </div>
               </div>
 
               <div className="pt-2">
                 <label className="flex items-center gap-2 cursor-pointer group">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     checked={includeScheduling}
                     onChange={(e) => setIncludeScheduling(e.target.checked)}
                     className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
-                  <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900">Add to schedule immediately</span>
+                  <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900">
+                    Add to schedule immediately
+                  </span>
                 </label>
               </div>
 
               {includeScheduling && (
                 <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3 animate-in slide-in-from-top-2 duration-200">
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Class / Cohort</label>
-                    <select 
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
+                      Class / Cohort
+                    </label>
+                    <select
                       value={scheduleData.cohort}
-                      onChange={(e) => setScheduleData({...scheduleData, cohort: e.target.value})}
+                      onChange={(e) => setScheduleData({ ...scheduleData, cohort: e.target.value })}
                       className="w-full px-3 py-1.5 border border-gray-300 rounded bg-white text-sm outline-none"
                     >
                       <option>Elite 2025-A</option>
@@ -884,20 +1022,26 @@ export function AdminExams({
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Start Time</label>
-                      <input 
-                        type="datetime-local" 
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
+                        Start Time
+                      </label>
+                      <input
+                        type="datetime-local"
                         value={scheduleData.start}
-                        onChange={(e) => setScheduleData({...scheduleData, start: e.target.value})}
+                        onChange={(e) =>
+                          setScheduleData({ ...scheduleData, start: e.target.value })
+                        }
                         className="w-full px-2 py-1 border border-gray-300 rounded text-xs outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">End Time</label>
-                      <input 
-                        type="datetime-local" 
+                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
+                        End Time
+                      </label>
+                      <input
+                        type="datetime-local"
                         value={scheduleData.end}
-                        onChange={(e) => setScheduleData({...scheduleData, end: e.target.value})}
+                        onChange={(e) => setScheduleData({ ...scheduleData, end: e.target.value })}
                         className="w-full px-2 py-1 border border-gray-300 rounded text-xs outline-none"
                       />
                     </div>
@@ -906,14 +1050,14 @@ export function AdminExams({
               )}
 
               <div className="pt-4 flex gap-3">
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => setShowCreateModal(false)}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium shadow-sm transition-colors"
                 >
@@ -931,26 +1075,31 @@ export function AdminExams({
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <h2 className="text-xl font-bold text-gray-900">
-                {cloneMode === 'clone' ? 'Clone Exam' : 'Create from Template'}
+                {cloneMode === "clone" ? "Clone Exam" : "Create from Template"}
               </h2>
-              <button onClick={() => setShowCloneModal(false)} className="text-gray-400 hover:text-gray-600 p-1">
+              <button
+                onClick={() => setShowCloneModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1"
+              >
                 <X size={20} />
               </button>
             </div>
-            
+
             <form onSubmit={handleCloneSubmit} className="p-6 space-y-4">
               <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
                 <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Source Exam</p>
                 <p className="font-medium text-gray-900">{selectedExamForClone.title}</p>
-                <p className="text-xs text-gray-500">{selectedExamForClone.type} • {selectedExamForClone.status}</p>
+                <p className="text-xs text-gray-500">
+                  {selectedExamForClone.type} • {selectedExamForClone.status}
+                </p>
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  {cloneMode === 'clone' ? 'New Exam Title' : 'Template Name'}
+                  {cloneMode === "clone" ? "New Exam Title" : "Template Name"}
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={cloneTitle}
                   onChange={(e) => setCloneTitle(e.target.value)}
                   placeholder="Enter title..."
@@ -961,18 +1110,18 @@ export function AdminExams({
               </div>
 
               <div className="pt-4 flex gap-3">
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => setShowCloneModal(false)}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium shadow-sm transition-colors"
                 >
-                  {cloneMode === 'clone' ? 'Clone' : 'Create'}
+                  {cloneMode === "clone" ? "Clone" : "Create"}
                 </button>
               </div>
             </form>
@@ -985,28 +1134,38 @@ export function AdminExams({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h2 className="text-xl font-bold text-gray-900">
-                Bulk Operation Result
-              </h2>
-              <button onClick={() => setShowBulkResult(false)} className="text-gray-400 hover:text-gray-600 p-1">
+              <h2 className="text-xl font-bold text-gray-900">Bulk Operation Result</h2>
+              <button
+                onClick={() => setShowBulkResult(false)}
+                className="text-gray-400 hover:text-gray-600 p-1"
+              >
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className="p-6">
               <div className="flex items-center gap-4 mb-4">
-                <div className={`flex items-center justify-center w-12 h-12 rounded-full ${bulkOperationResult.success ? 'bg-green-100' : 'bg-red-100'}`}>
+                <div
+                  className={`flex items-center justify-center w-12 h-12 rounded-full ${bulkOperationResult.success ? "bg-green-100" : "bg-red-100"}`}
+                >
                   {bulkOperationResult.success ? (
-                    <CheckCircle size={24} className={bulkOperationResult.succeeded === bulkOperationResult.total ? 'text-green-600' : 'text-yellow-600'} />
+                    <CheckCircle
+                      size={24}
+                      className={
+                        bulkOperationResult.succeeded === bulkOperationResult.total
+                          ? "text-green-600"
+                          : "text-yellow-600"
+                      }
+                    />
                   ) : (
                     <XCircle size={24} className="text-red-600" />
                   )}
                 </div>
                 <div>
                   <p className="font-semibold text-gray-900">
-                    {bulkOperationResult.succeeded === bulkOperationResult.total 
-                      ? 'All operations completed successfully' 
-                      : 'Some operations failed'}
+                    {bulkOperationResult.succeeded === bulkOperationResult.total
+                      ? "All operations completed successfully"
+                      : "Some operations failed"}
                   </p>
                   <p className="text-sm text-gray-500">
                     {bulkOperationResult.succeeded} of {bulkOperationResult.total} succeeded
@@ -1026,7 +1185,7 @@ export function AdminExams({
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {bulkOperationResult.results.map((result, idx: number) => (
-                        <tr key={idx} className={result.success ? 'bg-white' : 'bg-red-50'}>
+                        <tr key={idx} className={result.success ? "bg-white" : "bg-red-50"}>
                           <td className="px-4 py-2 text-gray-900">{result.examTitle}</td>
                           <td className="px-4 py-2">
                             {result.success ? (
@@ -1065,24 +1224,27 @@ export function AdminExams({
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <h2 className="text-xl font-bold text-gray-900">Duplicate Exams</h2>
-              <button onClick={() => setShowBulkDuplicateModal(false)} className="text-gray-400 hover:text-gray-600 p-1">
+              <button
+                onClick={() => setShowBulkDuplicateModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1"
+              >
                 <X size={20} />
               </button>
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-gray-600">
-                {selectedExamIds.size} exam{selectedExamIds.size !== 1 ? 's' : ''} selected.
-                {selectedExamIds.size > 1 ? ' Use {title} to include each source exam title.' : ''}
+                {selectedExamIds.size} exam{selectedExamIds.size !== 1 ? "s" : ""} selected.
+                {selectedExamIds.size > 1 ? " Use {title} to include each source exam title." : ""}
               </p>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  {selectedExamIds.size > 1 ? 'New Exam Title Pattern' : 'New Exam Title'}
+                  {selectedExamIds.size > 1 ? "New Exam Title Pattern" : "New Exam Title"}
                 </label>
                 <input
                   type="text"
                   value={bulkDuplicateTitlePattern}
                   onChange={(e) => setBulkDuplicateTitlePattern(e.target.value)}
-                  placeholder={selectedExamIds.size > 1 ? '{title} (Copy)' : 'Enter title...'}
+                  placeholder={selectedExamIds.size > 1 ? "{title} (Copy)" : "Enter title..."}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   autoFocus
                   required
@@ -1122,13 +1284,13 @@ export function AdminExams({
                   <span className="text-gray-500 text-sm ml-2">{selectedExamForHistory.title}</span>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => {
                   setShowVersionHistory(false);
                   setSelectedExamForHistory(null);
                   setExamVersions([]);
                   setExamEvents([]);
-                }} 
+                }}
                 className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
               >
                 <X size={20} />
@@ -1149,80 +1311,82 @@ export function AdminExams({
       )}
 
       {/* Portal-rendered dropdown */}
-      {activeDropdown && dropdownPosition && createPortal(
-        <div 
-          className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999]"
-          style={{ top: dropdownPosition.top, left: dropdownPosition.left }}
-        >
-          <div className="p-1">
-            {onCloneExam && (
-              <button
-                onClick={() => {
-                  const exam = exams.find(e => e.id === activeDropdown);
-                  if (exam) {
-                    handleCloneClick(exam);
-                    setActiveDropdown(null);
-                    setDropdownPosition(null);
-                  }
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
-              >
-                <Copy size={14} />
-                Clone Exam
-              </button>
-            )}
-            {examEntities && onGetVersions && (
-              <button
-                onClick={() => {
-                  const exam = exams.find(e => e.id === activeDropdown);
-                  if (exam) {
-                    handleViewVersionHistory(exam);
-                    setActiveDropdown(null);
-                    setDropdownPosition(null);
-                  }
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
-              >
-                <GitCommit size={14} />
-                Version History
-              </button>
-            )}
-            {onCreateFromTemplate && (
-              <button
-                onClick={() => {
-                  const exam = exams.find(e => e.id === activeDropdown);
-                  if (exam) {
-                    handleCreateFromTemplateClick(exam);
-                    setActiveDropdown(null);
-                    setDropdownPosition(null);
-                  }
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
-              >
-                <LayoutTemplate size={14} />
-                Create from Template
-              </button>
-            )}
-            {onDeleteExam && (
-              <button
-                onClick={() => {
-                  const exam = exams.find(e => e.id === activeDropdown);
-                  if (exam && confirm(`Are you sure you want to delete "${exam.title}"?`)) {
-                    onDeleteExam(exam.id);
-                    setActiveDropdown(null);
-                    setDropdownPosition(null);
-                  }
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded"
-              >
-                <Trash2 size={14} />
-                Delete Exam
-              </button>
-            )}
-          </div>
-        </div>,
-        document.body
-      )}
+      {activeDropdown &&
+        dropdownPosition &&
+        createPortal(
+          <div
+            className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999]"
+            style={{ top: dropdownPosition.top, left: dropdownPosition.left }}
+          >
+            <div className="p-1">
+              {onCloneExam && (
+                <button
+                  onClick={() => {
+                    const exam = exams.find((e) => e.id === activeDropdown);
+                    if (exam) {
+                      handleCloneClick(exam);
+                      setActiveDropdown(null);
+                      setDropdownPosition(null);
+                    }
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
+                >
+                  <Copy size={14} />
+                  Clone Exam
+                </button>
+              )}
+              {examEntities && onGetVersions && (
+                <button
+                  onClick={() => {
+                    const exam = exams.find((e) => e.id === activeDropdown);
+                    if (exam) {
+                      handleViewVersionHistory(exam);
+                      setActiveDropdown(null);
+                      setDropdownPosition(null);
+                    }
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
+                >
+                  <GitCommit size={14} />
+                  Version History
+                </button>
+              )}
+              {onCreateFromTemplate && (
+                <button
+                  onClick={() => {
+                    const exam = exams.find((e) => e.id === activeDropdown);
+                    if (exam) {
+                      handleCreateFromTemplateClick(exam);
+                      setActiveDropdown(null);
+                      setDropdownPosition(null);
+                    }
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded"
+                >
+                  <LayoutTemplate size={14} />
+                  Create from Template
+                </button>
+              )}
+              {onDeleteExam && (
+                <button
+                  onClick={() => {
+                    const exam = exams.find((e) => e.id === activeDropdown);
+                    if (exam && confirm(`Are you sure you want to delete "${exam.title}"?`)) {
+                      onDeleteExam(exam.id);
+                      setActiveDropdown(null);
+                      setDropdownPosition(null);
+                    }
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded"
+                >
+                  <Trash2 size={14} />
+                  Delete Exam
+                </button>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

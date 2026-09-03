@@ -1,29 +1,29 @@
 /**
  * Admin Feature Contracts
- * 
+ *
  * Explicit type contracts for the admin surface.
  * These define the stable interfaces at admin product boundaries.
  */
 
-import { ExamConfig } from '../../../types';
+import { ExamConfig, ExamType } from "../../../types";
 import {
   BulkOperationResult,
   ExamEvent,
   ExamSchedule,
   ExamVersionSummary,
   VersionDiff,
-} from '../../../types/domain';
+} from "../../../types/domain";
 
 /**
  * Admin navigation modes
  */
-export type AdminView = 'exams' | 'scheduling' | 'grading' | 'results' | 'settings';
+export type AdminView = "exams" | "scheduling" | "grading" | "results" | "settings";
 
 /**
  * Props passed to AdminRoot from parent (AppShell or router)
  */
 export interface AdminRootProps {
-  onNavigate: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
+  onNavigate: (mode: "builder" | "student" | "admin" | "proctor") => void;
   defaults: ExamConfig;
   setDefaults: (config: ExamConfig) => void;
 }
@@ -33,11 +33,7 @@ export interface AdminRootProps {
  */
 export interface ExamOperationCallbacks {
   onEditExam: (id: string) => void;
-  onCreateExam: (
-    title: string,
-    type: 'Academic' | 'General Training',
-    preset: ExamConfig['general']['preset']
-  ) => void;
+  onCreateExam: (title: string, type: ExamType, preset: ExamConfig["general"]["preset"]) => void;
   onCloneExam?: (examId: string, newTitle: string) => Promise<void>;
   onCreateFromTemplate?: (templateId: string, newTitle: string) => Promise<void>;
 }

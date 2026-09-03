@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use crate::grading::ObjectiveScoreSummary;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -38,6 +39,7 @@ pub enum ModuleType {
     Reading,
     Writing,
     Speaking,
+    Science,
 }
 
 impl ModuleType {
@@ -47,6 +49,7 @@ impl ModuleType {
             Self::Reading => "reading",
             Self::Writing => "writing",
             Self::Speaking => "speaking",
+            Self::Science => "science",
         }
     }
 
@@ -56,6 +59,7 @@ impl ModuleType {
             "reading" => Some(Self::Reading),
             "writing" => Some(Self::Writing),
             "speaking" => Some(Self::Speaking),
+            "science" => Some(Self::Science),
             _ => None,
         }
     }
@@ -743,6 +747,7 @@ pub struct StudentSubmitResponse {
     pub attempt: StudentAttempt,
     pub submission_id: String,
     pub submitted_at: DateTime<Utc>,
+    pub score: Option<ObjectiveScoreSummary>,
     pub refreshed_attempt_credential: Option<crate::auth::IssueAttemptToken>,
 }
 
@@ -826,6 +831,7 @@ mod sqlx_text_enums {
         Reading => "reading",
         Writing => "writing",
         Speaking => "speaking",
+        Science => "science",
     });
 
     impl_text_enum!(HeartbeatEventType, {

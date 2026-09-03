@@ -51,3 +51,7 @@ path = "../../tests/integration/grading_enum_decode.rs"
 [[test]]
 name = "exam_enum_decode"
 path = "../../tests/integration/exam_enum_decode.rs"
+
+[[test]]
+name = "startup_migrations_smoke"
+path = "../../tests/integration/startup_migrations_smoke.rs"

@@ -1,12 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Download,
-  ChevronDown,
-  FileSpreadsheet,
-  Printer,
-  FolderArchive,
-} from 'lucide-react';
-import type { GradingExportSection } from './gradingReviewUtils';
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Download, ChevronDown, FileSpreadsheet, Printer, FolderArchive } from "lucide-react";
+import type { GradingExportSection } from "./gradingReviewUtils";
 
 interface GradingExportButtonsProps {
   exportingSection: GradingExportSection | null;
@@ -14,6 +8,8 @@ interface GradingExportButtonsProps {
   onExportReadingManual: () => void;
   onExportListening: () => void;
   onExportListeningManual: () => void;
+  onExportScience?: (() => void) | undefined;
+  scienceOnly?: boolean | undefined;
   onPrintWriting: () => void;
   onOpenExportBuilder?: () => void;
 }
@@ -22,7 +18,7 @@ interface ExportMenuGroup {
   key: string;
   label: string;
   items: Array<{
-    key: GradingExportSection | 'export_builder';
+    key: GradingExportSection | "export_builder";
     label: string;
     description: string;
     icon: React.ReactNode;
@@ -36,6 +32,8 @@ export function GradingExportButtons({
   onExportReadingManual,
   onExportListening,
   onExportListeningManual,
+  onExportScience,
+  scienceOnly = false,
   onPrintWriting,
   onOpenExportBuilder,
 }: GradingExportButtonsProps) {
@@ -54,68 +52,83 @@ export function GradingExportButtons({
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') close();
+      if (event.key === "Escape") close();
     };
 
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [open, close]);
 
   const busy = exportingSection !== null;
 
-  const groups: ExportMenuGroup[] = [
-    {
-      key: 'csv',
-      label: 'Download CSV',
-      items: [
+  const scienceItem = onExportScience
+    ? {
+        key: "science" as const,
+        label: "ACT Science answers & scores",
+        description: "Auto-graded results for every student",
+        icon: <FileSpreadsheet size={16} />,
+        onClick: onExportScience,
+      }
+    : null;
+
+  const groups: ExportMenuGroup[] = scienceOnly
+    ? scienceItem
+      ? [{ key: "csv", label: "Download CSV", items: [scienceItem] }]
+      : []
+    : [
         {
-          key: 'reading',
-          label: 'Reading answers & scores',
-          description: 'Auto-graded results for every student',
-          icon: <FileSpreadsheet size={16} />,
-          onClick: onExportReading,
+          key: "csv",
+          label: "Download CSV",
+          items: [
+            {
+              key: "reading",
+              label: "Reading answers & scores",
+              description: "Auto-graded results for every student",
+              icon: <FileSpreadsheet size={16} />,
+              onClick: onExportReading,
+            },
+            {
+              key: "reading_manual",
+              label: "Reading manual check sheet",
+              description: "Blank score columns for graders",
+              icon: <FileSpreadsheet size={16} />,
+              onClick: onExportReadingManual,
+            },
+            {
+              key: "listening",
+              label: "Listening answers & scores",
+              description: "Auto-graded results for every student",
+              icon: <FileSpreadsheet size={16} />,
+              onClick: onExportListening,
+            },
+            {
+              key: "listening_manual",
+              label: "Listening manual check sheet",
+              description: "Blank score columns for graders",
+              icon: <FileSpreadsheet size={16} />,
+              onClick: onExportListeningManual,
+            },
+            ...(scienceItem ? [scienceItem] : []),
+          ],
         },
         {
-          key: 'reading_manual',
-          label: 'Reading manual check sheet',
-          description: 'Blank score columns for graders',
-          icon: <FileSpreadsheet size={16} />,
-          onClick: onExportReadingManual,
+          key: "print",
+          label: "Print",
+          items: [
+            {
+              key: "writing",
+              label: "Print all writing",
+              description: "Task pages with prompts, responses and assessment forms",
+              icon: <Printer size={16} />,
+              onClick: onPrintWriting,
+            },
+          ],
         },
-        {
-          key: 'listening',
-          label: 'Listening answers & scores',
-          description: 'Auto-graded results for every student',
-          icon: <FileSpreadsheet size={16} />,
-          onClick: onExportListening,
-        },
-        {
-          key: 'listening_manual',
-          label: 'Listening manual check sheet',
-          description: 'Blank score columns for graders',
-          icon: <FileSpreadsheet size={16} />,
-          onClick: onExportListeningManual,
-        },
-      ],
-    },
-    {
-      key: 'print',
-      label: 'Print',
-      items: [
-        {
-          key: 'writing',
-          label: 'Print all writing',
-          description: 'Task pages with prompts, responses and assessment forms',
-          icon: <Printer size={16} />,
-          onClick: onPrintWriting,
-        },
-      ],
-    },
-  ];
+      ];
 
   return (
     <div ref={containerRef} className="relative">
@@ -128,7 +141,10 @@ export function GradingExportButtons({
       >
         <Download size={16} />
         Export
-        <ChevronDown size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown
+          size={14}
+          className={`text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
+        />
       </button>
 
       {open ? (
@@ -139,7 +155,9 @@ export function GradingExportButtons({
         >
           {groups.map((group, groupIndex) => (
             <React.Fragment key={group.key}>
-              {groupIndex > 0 && <div className="my-1.5 border-t border-gray-100" role="separator" />}
+              {groupIndex > 0 && (
+                <div className="my-1.5 border-t border-gray-100" role="separator" />
+              )}
               <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-gray-400">
                 {group.label}
               </p>
@@ -160,16 +178,18 @@ export function GradingExportButtons({
                   </span>
                   <span className="min-w-0">
                     <span className="block text-sm font-medium text-gray-800">
-                      {exportingSection === item.key ? 'Exporting…' : item.label}
+                      {exportingSection === item.key ? "Exporting…" : item.label}
                     </span>
-                    <span className="block text-xs text-gray-500 leading-snug">{item.description}</span>
+                    <span className="block text-xs text-gray-500 leading-snug">
+                      {item.description}
+                    </span>
                   </span>
                 </button>
               ))}
             </React.Fragment>
           ))}
 
-          {onOpenExportBuilder ? (
+          {!scienceOnly && onOpenExportBuilder ? (
             <>
               <div className="my-1.5 border-t border-gray-100" role="separator" />
               <button
@@ -186,9 +206,12 @@ export function GradingExportButtons({
                   <FolderArchive size={16} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-blue-700">Export Builder · PDF ZIP</span>
+                  <span className="block text-sm font-medium text-blue-700">
+                    Export Builder · PDF ZIP
+                  </span>
                   <span className="block text-xs text-blue-600/80 leading-snug">
-                    Choose students, sections and PDF layout, then download a ZIP of per-student PDFs
+                    Choose students, sections and PDF layout, then download a ZIP of per-student
+                    PDFs
                   </span>
                 </span>
               </button>

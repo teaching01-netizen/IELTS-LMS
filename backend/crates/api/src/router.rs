@@ -294,6 +294,7 @@ pub fn build_router(state: AppState) -> Router {
             Router::new()
                 .route("/", get(results::list_results))
                 .route("/analytics", get(results::analytics))
+                .route("/act-science", get(results::list_act_science_reports))
                 .route("/export", post(results::export_results))
                 .route("/:result_id/events", get(results::result_events))
                 .route("/:result_id", get(results::get_result)),

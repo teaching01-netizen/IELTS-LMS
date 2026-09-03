@@ -12,13 +12,16 @@ use uuid::Uuid;
 
 use ielts_backend_api::{router::build_router, state::AppState};
 use ielts_backend_application::{
-    builder::BuilderService, delivery::DeliveryService, scheduling::SchedulingService,
+    builder::BuilderService,
+    delivery::DeliveryService,
+    grading::{GradingProjectionRequest, GradingService},
+    scheduling::SchedulingService,
 };
 use ielts_backend_domain::{
     attempt::{StudentBootstrapRequest, StudentSubmitRequest},
     auth::UserRole,
     exam::{CreateExamRequest, ExamType, PublishExamRequest, SaveDraftRequest, Visibility},
-    schedule::CreateScheduleRequest,
+    schedule::{CreateScheduleRequest, RuntimeCommandAction, RuntimeCommandRequest},
 };
 use ielts_backend_infrastructure::{
     actor_context::{ActorContext, ActorRole},
@@ -38,6 +41,11 @@ const ANSWER_HISTORY_MIGRATIONS: &[&str] = &[
     "0008_grading_results.sql",
     "0009_media_cache_outbox.sql",
     "0010_auth_security.sql",
+    "0017_production_hardening.sql",
+    "0020_schedule_role_display_names.sql",
+    "0027_grading_objective_overrides.sql",
+    "0028_grading_objective_grading_source.sql",
+    "0030_outbox_retry_policy.sql",
 ];
 
 #[tokio::test]
@@ -134,13 +142,19 @@ async fn admin_can_fetch_answer_history_overview_and_detail() {
         .iter()
         .map(|item| item["targetId"].as_str().unwrap_or_default())
         .collect::<Vec<_>>();
-    assert_eq!(summary_targets, vec!["q1", "q2", "task1", "legacy-q"]);
+    assert_eq!(
+        summary_targets,
+        vec!["l1", "q1", "q2", "task1", "task2", "legacy-q"]
+    );
     assert_eq!(summaries[0]["label"], "Question 1");
-    assert_eq!(summaries[0]["module"], "reading");
-    assert_eq!(summaries[1]["label"], "Question 2");
-    assert_eq!(summaries[2]["label"], "Task 1");
-    assert_eq!(summaries[3]["label"], "Question 3 (Unmapped)");
-    assert_eq!(summaries[3]["module"], "objective");
+    assert_eq!(summaries[0]["module"], "listening");
+    assert_eq!(summaries[1]["label"], "Question 1");
+    assert_eq!(summaries[1]["module"], "reading");
+    assert_eq!(summaries[2]["label"], "Question 2");
+    assert_eq!(summaries[3]["label"], "Task 1");
+    assert_eq!(summaries[4]["label"], "Task 2");
+    assert_eq!(summaries[5]["label"], "Question 1 (Unmapped)");
+    assert_eq!(summaries[5]["module"], "objective");
 
     assert!(overview_json["data"]["questionSummaries"]
         .as_array()
@@ -247,8 +261,8 @@ async fn overview_and_detail_read_nested_mutation_payload_shapes() {
         2,
         json!({
             "command": {
-                "current_question_id": "q1",
-                "current_module": "reading"
+                "currentQuestionId": "q1",
+                "currentModule": "reading"
             }
         }),
         Utc.with_ymd_and_hms(2026, 1, 10, 9, 20, 2).unwrap(),
@@ -972,7 +986,9 @@ async fn bootstrap_and_submit(
         .await
         .expect("bootstrap attempt");
 
-    let attempt_id = context.attempt.expect("attempt").id;
+    let attempt = context.attempt.expect("attempt");
+    let attempt_revision = attempt.revision;
+    let attempt_id = attempt.id;
 
     service
         .submit_attempt(
@@ -983,7 +999,7 @@ async fn bootstrap_and_submit(
                 answers: Some(answers),
                 writing_answers: Some(writing_answers),
                 flags: Some(json!({})),
-                last_seen_revision: Some(0),
+                last_seen_revision: Some(attempt_revision),
                 submission_id: Some(format!("submission-{candidate_id}")),
                 client_session_id: None,
                 client_final_seq: Some(0),
@@ -995,6 +1011,11 @@ async fn bootstrap_and_submit(
         )
         .await
         .expect("submit attempt");
+
+    GradingService::new(pool.clone())
+        .run_projection_cycle(GradingProjectionRequest::default())
+        .await
+        .expect("project submitted attempt");
 
     Uuid::parse_str(&attempt_id).unwrap()
 }
@@ -1022,8 +1043,25 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             exam.id.clone(),
             SaveDraftRequest {
                 content_snapshot: json!({
-                    "reading": {"questions": [{"id": "q1"}, {"id": "q2"}]},
-                    "writing": {"tasks": [{"id": "task1"}]}
+                    "reading": {
+                        "passages": [{
+                            "id": "reading-1",
+                            "title": "Reading Passage 1",
+                            "blocks": [{"type": "TFNG", "questions": [{"id": "q1"}, {"id": "q2"}]}]
+                        }]
+                    },
+                    "listening": {
+                        "parts": [{
+                            "id": "listening-1",
+                            "title": "Listening Part 1",
+                            "blocks": [{"type": "TFNG", "questions": [{"id": "l1"}]}]
+                        }]
+                    },
+                    "writing": {
+                        "task1Prompt": "Summarise the information.",
+                        "task2Prompt": "Discuss both views.",
+                        "tasks": [{"id": "task1"}, {"id": "task2"}]
+                    }
                 }),
                 config_snapshot: sample_delivery_config(),
                 revision: exam.revision,
@@ -1045,7 +1083,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
         .await
         .unwrap();
 
-    SchedulingService::new(pool.clone())
+    let scheduling = SchedulingService::new(pool.clone());
+    let schedule = scheduling
         .create_schedule(
             &actor,
             CreateScheduleRequest {
@@ -1063,14 +1102,42 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
             },
         )
         .await
-        .unwrap()
+        .unwrap();
+
+    scheduling
+        .apply_runtime_command(
+            &actor,
+            Uuid::parse_str(&schedule.id).unwrap(),
+            RuntimeCommandRequest {
+                action: RuntimeCommandAction::StartRuntime,
+                reason: Some("answer-history contract runtime start".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+
+    schedule
 }
 
 fn sample_delivery_config() -> serde_json::Value {
     json!({
         "sections": {
-            "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5},
-            "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0},
+            "listening": {
+                "enabled": true,
+                "label": "Listening",
+                "order": 1,
+                "duration": 30,
+                "gapAfterMinutes": 5,
+                "bandScoreTable": {"39": 9.0, "37": 8.5, "35": 8.0, "32": 7.5, "30": 7.0, "26": 6.5, "23": 6.0, "18": 5.5, "16": 5.0, "13": 4.5, "10": 4.0, "6": 3.5, "4": 3.0, "2": 2.5}
+            },
+            "reading": {
+                "enabled": true,
+                "label": "Reading",
+                "order": 2,
+                "duration": 60,
+                "gapAfterMinutes": 0,
+                "bandScoreTable": {"39": 9.0, "37": 8.5, "35": 8.0, "33": 7.5, "30": 7.0, "27": 6.5, "23": 6.0, "19": 5.5, "15": 5.0, "13": 4.5, "10": 4.0, "8": 3.5, "6": 3.0, "4": 2.5}
+            },
             "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 10}
         }
     })

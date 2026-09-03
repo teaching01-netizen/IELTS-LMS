@@ -661,9 +661,8 @@ impl DeliveryService {
             HashSet::new()
         };
 
-        let version = self
-            .load_version(attempt.published_version_id.clone())
-            .await?;
+        let version =
+            Self::load_version_with_executor(tx.as_mut(), &attempt.published_version_id).await?;
         let answer_schema = build_answer_schema(&version.content_snapshot)?;
         let writing_task_ids = build_writing_task_ids(&version.config_snapshot);
 
@@ -1297,9 +1296,8 @@ impl DeliveryService {
             ));
         }
 
-        let version = self
-            .load_version(attempt.published_version_id.clone())
-            .await?;
+        let version =
+            Self::load_version_with_executor(tx.as_mut(), &attempt.published_version_id).await?;
         let answer_schema = build_answer_schema(&version.content_snapshot)?;
 
         let mut final_answers = req
@@ -1363,6 +1361,12 @@ impl DeliveryService {
         }
 
         let now = Utc::now();
+        let score = crate::grading::compute_act_science_score(
+            &version.config_snapshot,
+            &version.content_snapshot,
+            &final_answers,
+            now,
+        );
         let submission_id = req
             .submission_id
             .as_deref()
@@ -1376,7 +1380,7 @@ impl DeliveryService {
             (Some(client_final_seq), None) => client_final_seq > 0,
             _ => false,
         };
-        let final_submission = json!({
+        let mut final_submission = json!({
             "submissionId": submission_id,
             "submittedAt": now,
             "answers": final_answers,
@@ -1389,6 +1393,11 @@ impl DeliveryService {
                 "finalPatchApplied": req.final_answer_patch.is_some()
             }
         });
+        if let Some(score) = score.as_ref() {
+            final_submission["score"] = serde_json::to_value(score).map_err(|err| {
+                DeliveryError::Internal(format!("Failed to serialize score summary: {err}"))
+            })?;
+        }
         let recovery = merge_recovery(
             attempt.recovery.clone().into(),
             json!({
@@ -1455,6 +1464,7 @@ impl DeliveryService {
             attempt,
             submission_id,
             submitted_at,
+            score,
             refreshed_attempt_credential: None,
         };
 
@@ -1705,11 +1715,21 @@ impl DeliveryService {
     }
 
     async fn load_version(&self, version_id: String) -> Result<ExamVersion, DeliveryError> {
-        sqlx::query_as::<_, ExamVersion>(
+        Self::load_version_with_executor(&self.pool, &version_id).await
+    }
+
+    async fn load_version_with_executor<'e, E>(
+        executor: E,
+        version_id: &str,
+    ) -> Result<ExamVersion, DeliveryError>
+    where
+        E: sqlx::Executor<'e, Database = MySql>,
+    {
+        sqlx::query_as::<MySql, ExamVersion>(
             "SELECT id, CAST(exam_id AS CHAR) as exam_id, version_number, CAST(parent_version_id AS CHAR) as parent_version_id, content_snapshot, config_snapshot, validation_snapshot, CAST(created_by AS CHAR) as created_by, created_at, publish_notes, is_draft, is_published, revision FROM exam_versions WHERE id = ?"
         )
-            .bind(&version_id)
-            .fetch_optional(&self.pool)
+            .bind(version_id)
+            .fetch_optional(executor)
             .await?
             .ok_or(DeliveryError::NotFound)
     }
@@ -2111,6 +2131,11 @@ fn build_submit_response(
     attempt: StudentAttempt,
     submitted_at: DateTime<Utc>,
 ) -> StudentSubmitResponse {
+    let score = attempt
+        .final_submission
+        .as_ref()
+        .and_then(|value| value.get("score"))
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
     StudentSubmitResponse {
         submission_id: attempt
             .final_submission
@@ -2121,6 +2146,7 @@ fn build_submit_response(
             .unwrap_or_else(|| format!("submission-{}", attempt.id)),
         attempt,
         submitted_at,
+        score,
         refreshed_attempt_credential: None,
     }
 }
@@ -2161,6 +2187,7 @@ fn first_enabled_module(config_snapshot: &Value) -> ModuleType {
         ("reading", ModuleType::Reading),
         ("writing", ModuleType::Writing),
         ("speaking", ModuleType::Speaking),
+        ("science", ModuleType::Science),
     ] {
         if config_snapshot
             .get("sections")
@@ -2470,6 +2497,20 @@ fn build_answer_schema(content_snapshot: &Value) -> Result<AnswerSchema, Deliver
             if let Some(blocks) = part.get("blocks").and_then(Value::as_array) {
                 for block in blocks {
                     index_block(block, "listening", &mut constraints, &mut sections)?;
+                }
+            }
+        }
+    }
+
+    if let Some(stimuli) = content_snapshot
+        .get("science")
+        .and_then(|science| science.get("stimuli"))
+        .and_then(Value::as_array)
+    {
+        for stimulus in stimuli {
+            if let Some(blocks) = stimulus.get("blocks").and_then(Value::as_array) {
+                for block in blocks {
+                    index_block(block, "science", &mut constraints, &mut sections)?;
                 }
             }
         }
@@ -4424,6 +4465,42 @@ mod tests {
             schema.sections.get("single-q2").map(String::as_str),
             Some("reading"),
         );
+    }
+
+    #[test]
+    fn build_answer_schema_indexes_act_science_questions_by_question_id() {
+        let schema = build_answer_schema(&json!({
+            "science": {
+                "stimuli": [{
+                    "blocks": [{
+                        "id": "science-block-1",
+                        "type": "SINGLE_MCQ",
+                        "questions": [{
+                            "id": "science-q-1",
+                            "options": [
+                                {"id": "a", "text": "A"},
+                                {"id": "b", "text": "B"},
+                                {"id": "c", "text": "C"},
+                                {"id": "d", "text": "D"}
+                            ]
+                        }]
+                    }]
+                }]
+            }
+        }))
+        .expect("build ACT Science answer schema");
+
+        match schema.constraints.get("science-q-1") {
+            Some(AnswerConstraint::Enum(allowed)) => {
+                assert_eq!(allowed.len(), 4);
+                assert!(allowed.contains("a"));
+                assert_eq!(
+                    schema.sections.get("science-q-1").map(String::as_str),
+                    Some("science")
+                );
+            }
+            other => panic!("expected a four-choice science constraint, got {other:?}"),
+        }
     }
 
     #[test]

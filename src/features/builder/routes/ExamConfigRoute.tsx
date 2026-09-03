@@ -1,19 +1,19 @@
-import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { BasicInfoTab } from '../components/BasicInfoTab';
-import { ExamConfigTabs } from '../components/ExamConfigTabs';
-import { ModulesTab } from '../components/ModulesTab';
-import { SecurityTab } from '../components/SecurityTab';
-import { StandardsTab } from '../components/StandardsTab';
-import { TimingTab } from '../components/TimingTab';
-import type { ConfigTab } from '../components/ExamConfigTabs';
-import { useConfigRouteController } from '../hooks/useConfigRouteController';
-import { ErrorSurface, LoadingSurface } from '@components/ui';
+import React, { useState } from "react";
+import { useParams } from "react-router-dom";
+import { BasicInfoTab } from "../components/BasicInfoTab";
+import { ExamConfigTabs } from "../components/ExamConfigTabs";
+import { ModulesTab } from "../components/ModulesTab";
+import { SecurityTab } from "../components/SecurityTab";
+import { StandardsTab } from "../components/StandardsTab";
+import { TimingTab } from "../components/TimingTab";
+import type { ConfigTab } from "../components/ExamConfigTabs";
+import { useConfigRouteController } from "../hooks/useConfigRouteController";
+import { ErrorSurface, LoadingSurface } from "@components/ui";
 
 export function ExamConfigRoute() {
   const { examId } = useParams<{ examId: string }>();
   const controller = useConfigRouteController(examId);
-  const [activeTab, setActiveTab] = useState<ConfigTab>('basic');
+  const [activeTab, setActiveTab] = useState<ConfigTab>("basic");
 
   if (controller.isLoading) {
     return <LoadingSurface label="Loading exam configuration…" />;
@@ -41,19 +41,19 @@ export function ExamConfigRoute() {
   }
 
   const config = controller.config;
-  const statusLabel = controller.exam?.status ? controller.exam.status.replace(/_/g, ' ') : 'draft';
+  const statusLabel = controller.exam?.status ? controller.exam.status.replace(/_/g, " ") : "draft";
 
   const renderTab = () => {
     switch (activeTab) {
-      case 'basic':
+      case "basic":
         return <BasicInfoTab config={config} onChange={controller.handleUpdateConfig} />;
-      case 'modules':
+      case "modules":
         return <ModulesTab config={config} onChange={controller.handleUpdateConfig} />;
-      case 'standards':
+      case "standards":
         return <StandardsTab config={config} onChange={controller.handleUpdateConfig} />;
-      case 'timing':
+      case "timing":
         return <TimingTab config={config} onChange={controller.handleUpdateConfig} />;
-      case 'security':
+      case "security":
         return <SecurityTab config={config} onChange={controller.handleUpdateConfig} />;
       default:
         return null;
@@ -67,8 +67,12 @@ export function ExamConfigRoute() {
           <div className="px-8 py-5">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Exam Configuration</h1>
-                <p className="text-sm text-slate-500 mt-1">{controller.exam?.title || 'Untitled Exam'}</p>
+                <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
+                  Exam Configuration
+                </h1>
+                <p className="text-sm text-slate-500 mt-1">
+                  {controller.exam?.title || "Untitled Exam"}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
@@ -77,7 +81,11 @@ export function ExamConfigRoute() {
               </div>
             </div>
           </div>
-          <ExamConfigTabs activeTab={activeTab} onTabChange={setActiveTab} />
+          <ExamConfigTabs
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            examType={config.general.type}
+          />
         </div>
 
         <div className="p-8">
@@ -101,7 +109,7 @@ export function ExamConfigRoute() {
                 className="px-5 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Saves your current work. You can continue editing."
               >
-                {controller.isSaving ? 'Saving…' : 'Save Draft'}
+                {controller.isSaving ? "Saving…" : "Save Draft"}
               </button>
               <button
                 onClick={() => {

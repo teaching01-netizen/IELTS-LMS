@@ -1,18 +1,21 @@
-import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, UNSAFE_NavigationContext } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { StudentEntryRoute } from '../StudentEntryRoute';
+import React from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, UNSAFE_NavigationContext } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { StudentEntryRoute } from "../StudentEntryRoute";
 
 const navigateMock = vi.fn();
 const studentEntryMock = vi.fn();
-
-vi.mock('../../../auth/authSession', () => ({
-  useAuthSession: () => ({ studentEntry: studentEntryMock }),
+const authState = vi.hoisted(() => ({
+  status: "authenticated" as "authenticated" | "unauthenticated",
 }));
 
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+vi.mock("../../../auth/authSession", () => ({
+  useAuthSession: () => ({ studentEntry: studentEntryMock, status: authState.status }),
+}));
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
   return {
     ...actual,
     useNavigate: () => navigateMock,
@@ -25,27 +28,27 @@ function renderRoute(scheduleId: string) {
       <Routes>
         <Route path="/student/:scheduleId" element={<StudentEntryRoute />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
-function submitForm(wcode = 'W250334') {
+function submitForm(wcode = "W250334") {
   fireEvent.change(screen.getByLabelText(/access code|wcode/i), {
     target: { value: wcode },
   });
   fireEvent.change(screen.getByLabelText(/email/i), {
-    target: { value: 'student@example.com' },
+    target: { value: "student@example.com" },
   });
   fireEvent.change(screen.getByLabelText(/full name/i), {
-    target: { value: 'Student One' },
+    target: { value: "Student One" },
   });
   fireEvent.change(screen.getByLabelText(/nickname/i), {
-    target: { value: 'student-one' },
+    target: { value: "student-one" },
   });
-  fireEvent.change(screen.getByLabelText(/IELTS Course/i), {
-    target: { value: 'IELTS Academic' },
+  fireEvent.change(screen.getByLabelText(/^Course$/i), {
+    target: { value: "IELTS Academic" },
   });
-  fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+  fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 }
 
 function RouteProbe({ onReady }: { onReady: (push: (to: string) => void) => void }) {
@@ -58,28 +61,29 @@ function RouteProbe({ onReady }: { onReady: (push: (to: string) => void) => void
   return null;
 }
 
-describe('StudentEntryRoute', () => {
+describe("StudentEntryRoute", () => {
   afterEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     navigateMock.mockReset();
     studentEntryMock.mockReset();
+    authState.status = "authenticated";
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
-  it('creates a behind-the-scenes student session and continues to the schedule-backed delivery route', async () => {
-    const scheduleId = '550e8400-e29b-41d4-a716-446655440000';
+  it("creates a behind-the-scenes student session and continues to the schedule-backed delivery route", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440000";
     studentEntryMock.mockResolvedValue({
       user: {
-        id: 'student-1',
-        email: 'student@example.com',
-        displayName: 'Student One',
-        role: 'student',
-        state: 'active',
+        id: "student-1",
+        email: "student@example.com",
+        displayName: "Student One",
+        role: "student",
+        state: "active",
       },
-      csrfToken: 'csrf-1',
-      expiresAt: '2026-01-01T12:00:00.000Z',
+      csrfToken: "csrf-1",
+      expiresAt: "2026-01-01T12:00:00.000Z",
     });
 
     renderRoute(scheduleId);
@@ -88,11 +92,11 @@ describe('StudentEntryRoute', () => {
     await waitFor(() => {
       expect(studentEntryMock).toHaveBeenCalledWith({
         scheduleId,
-        wcode: 'W250334',
-        email: 'student@example.com',
-        studentName: 'Student One',
-        nickname: 'student-one',
-        ieltsCourse: 'IELTS Academic',
+        wcode: "W250334",
+        email: "student@example.com",
+        studentName: "Student One",
+        nickname: "student-one",
+        ieltsCourse: "IELTS Academic",
       });
     });
 
@@ -101,23 +105,30 @@ describe('StudentEntryRoute', () => {
     });
   });
 
-  it('auto-resumes an existing attempt for the last wcode instead of forcing check-in again', async () => {
-    const scheduleId = '550e8400-e29b-41d4-a716-446655440001';
-    window.localStorage.setItem(`ielts-student-last-wcode:${scheduleId}`, 'W250334');
+  it("uses a course-neutral label on the shared student check-in form", () => {
+    renderRoute("550e8400-e29b-41d4-a716-446655440000");
+
+    expect(screen.getByRole("textbox", { name: /^Course$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /IELTS Course/i })).not.toBeInTheDocument();
+  });
+
+  it("auto-resumes an existing attempt for the last wcode instead of forcing check-in again", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440001";
+    window.localStorage.setItem(`ielts-student-last-wcode:${scheduleId}`, "W250334");
     window.localStorage.setItem(
-      'ielts_student_attempts_v1',
+      "ielts_student_attempts_v1",
       JSON.stringify([
         {
-          id: 'attempt-1',
+          id: "attempt-1",
           scheduleId,
           studentKey: `student-${scheduleId}-W250334`,
-          examId: 'exam-1',
-          examTitle: 'Mock Exam',
-          candidateId: 'W250334',
-          candidateName: 'Student One',
-          candidateEmail: 'student@example.com',
-          phase: 'exam',
-          currentModule: 'reading',
+          examId: "exam-1",
+          examTitle: "Mock Exam",
+          candidateId: "W250334",
+          candidateName: "Student One",
+          candidateEmail: "student@example.com",
+          phase: "exam",
+          currentModule: "reading",
           currentQuestionId: null,
           answers: {},
           writingAnswers: {},
@@ -130,7 +141,7 @@ describe('StudentEntryRoute', () => {
             lastDisconnectAt: null,
             lastReconnectAt: null,
             lastHeartbeatAt: null,
-            lastHeartbeatStatus: 'idle',
+            lastHeartbeatStatus: "idle",
           },
           recovery: {
             lastRecoveredAt: null,
@@ -140,12 +151,12 @@ describe('StudentEntryRoute', () => {
             pendingMutationCount: 0,
             serverAcceptedThroughSeq: 0,
             clientSessionId: null,
-            syncState: 'idle',
+            syncState: "idle",
           },
-          createdAt: '2026-04-24T00:00:00.000Z',
-          updatedAt: '2026-04-24T00:00:00.000Z',
+          createdAt: "2026-04-24T00:00:00.000Z",
+          updatedAt: "2026-04-24T00:00:00.000Z",
         },
-      ]),
+      ])
     );
 
     renderRoute(scheduleId);
@@ -159,24 +170,24 @@ describe('StudentEntryRoute', () => {
     expect(studentEntryMock).not.toHaveBeenCalled();
   });
 
-  it('auto-resumes an existing attempt for non-legacy access codes', async () => {
-    const scheduleId = '550e8400-e29b-41d4-a716-446655440126';
-    const accessCode = 'guest-alpha_01';
+  it("auto-resumes an existing attempt for non-legacy access codes", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440126";
+    const accessCode = "guest-alpha_01";
     window.localStorage.setItem(`ielts-student-last-wcode:${scheduleId}`, accessCode);
     window.localStorage.setItem(
-      'ielts_student_attempts_v1',
+      "ielts_student_attempts_v1",
       JSON.stringify([
         {
-          id: 'attempt-2',
+          id: "attempt-2",
           scheduleId,
           studentKey: `student-${scheduleId}-${accessCode}`,
-          examId: 'exam-1',
-          examTitle: 'Mock Exam',
+          examId: "exam-1",
+          examTitle: "Mock Exam",
           candidateId: accessCode,
-          candidateName: 'Student One',
-          candidateEmail: 'student@example.com',
-          phase: 'exam',
-          currentModule: 'reading',
+          candidateName: "Student One",
+          candidateEmail: "student@example.com",
+          phase: "exam",
+          currentModule: "reading",
           currentQuestionId: null,
           answers: {},
           writingAnswers: {},
@@ -189,7 +200,7 @@ describe('StudentEntryRoute', () => {
             lastDisconnectAt: null,
             lastReconnectAt: null,
             lastHeartbeatAt: null,
-            lastHeartbeatStatus: 'idle',
+            lastHeartbeatStatus: "idle",
           },
           recovery: {
             lastRecoveredAt: null,
@@ -199,12 +210,12 @@ describe('StudentEntryRoute', () => {
             pendingMutationCount: 0,
             serverAcceptedThroughSeq: 0,
             clientSessionId: null,
-            syncState: 'idle',
+            syncState: "idle",
           },
-          createdAt: '2026-04-24T00:00:00.000Z',
-          updatedAt: '2026-04-24T00:00:00.000Z',
+          createdAt: "2026-04-24T00:00:00.000Z",
+          updatedAt: "2026-04-24T00:00:00.000Z",
         },
-      ]),
+      ])
     );
 
     renderRoute(scheduleId);
@@ -218,48 +229,104 @@ describe('StudentEntryRoute', () => {
     expect(studentEntryMock).not.toHaveBeenCalled();
   });
 
-  it('rejects emails that pass simple regex patterns but fail shared schema validation', async () => {
-    const scheduleId = '550e8400-e29b-41d4-a716-446655440099';
+  it("does not auto-resume a cached attempt before the student session is authenticated", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440127";
+    authState.status = "unauthenticated";
+    window.localStorage.setItem(`ielts-student-last-wcode:${scheduleId}`, "W250334");
+    window.localStorage.setItem(
+      "ielts_student_attempts_v1",
+      JSON.stringify([
+        {
+          id: "attempt-3",
+          scheduleId,
+          studentKey: `student-${scheduleId}-W250334`,
+          examId: "exam-1",
+          examTitle: "Mock Exam",
+          candidateId: "W250334",
+          candidateName: "Student One",
+          candidateEmail: "student@example.com",
+          phase: "exam",
+          currentModule: "reading",
+          currentQuestionId: null,
+          answers: {},
+          writingAnswers: {},
+          flags: {},
+          violations: [],
+          integrity: {
+            preCheck: null,
+            deviceFingerprintHash: null,
+            clientSessionId: null,
+            lastDisconnectAt: null,
+            lastReconnectAt: null,
+            lastHeartbeatAt: null,
+            lastHeartbeatStatus: "idle",
+          },
+          recovery: {
+            lastRecoveredAt: null,
+            lastLocalMutationAt: null,
+            lastPersistedAt: null,
+            lastDroppedMutations: null,
+            pendingMutationCount: 0,
+            serverAcceptedThroughSeq: 0,
+            clientSessionId: null,
+            syncState: "idle",
+          },
+          createdAt: "2026-04-24T00:00:00.000Z",
+          updatedAt: "2026-04-24T00:00:00.000Z",
+        },
+      ])
+    );
+
+    renderRoute(scheduleId);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /continue/i })).toBeInTheDocument();
+    });
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects emails that pass simple regex patterns but fail shared schema validation", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440099";
     renderRoute(scheduleId);
 
     fireEvent.change(screen.getByLabelText(/access code|wcode/i), {
-      target: { value: 'W250334' },
+      target: { value: "W250334" },
     });
     fireEvent.change(screen.getByLabelText(/email/i), {
-      target: { value: 'student@example..com' },
+      target: { value: "student@example..com" },
     });
     fireEvent.change(screen.getByLabelText(/full name/i), {
-      target: { value: 'Student One' },
+      target: { value: "Student One" },
     });
-    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
     await waitFor(() => {
       expect(studentEntryMock).not.toHaveBeenCalled();
     });
   });
 
-  it('shows queue position and keeps polling until admission is granted', async () => {
-    const scheduleId = '550e8400-e29b-41d4-a716-446655440123';
+  it("shows queue position and keeps polling until admission is granted", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440123";
     studentEntryMock
       .mockResolvedValueOnce({
-        state: 'queued',
-        ticketId: 'ticket-1',
+        state: "queued",
+        ticketId: "ticket-1",
         scheduleId,
-        wcode: 'W250334',
+        wcode: "W250334",
         position: 3,
         pollAfterMs: 10,
-        queuedAt: '2026-05-08T00:00:00.000Z',
+        queuedAt: "2026-05-08T00:00:00.000Z",
       })
       .mockResolvedValueOnce({
         user: {
-          id: 'student-1',
-          email: 'student@example.com',
-          displayName: 'Student One',
-          role: 'student',
-          state: 'active',
+          id: "student-1",
+          email: "student@example.com",
+          displayName: "Student One",
+          role: "student",
+          state: "active",
         },
-        csrfToken: 'csrf-1',
-        expiresAt: '2026-01-01T12:00:00.000Z',
+        csrfToken: "csrf-1",
+        expiresAt: "2026-01-01T12:00:00.000Z",
       });
 
     renderRoute(scheduleId);
@@ -276,31 +343,31 @@ describe('StudentEntryRoute', () => {
     });
   });
 
-  it('accepts non-Wcode formatted access codes', async () => {
-    const scheduleId = '550e8400-e29b-41d4-a716-446655440124';
+  it("accepts non-Wcode formatted access codes", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440124";
     studentEntryMock.mockResolvedValue({
       user: {
-        id: 'student-2',
-        email: 'student@example.com',
-        displayName: 'Student Two',
-        role: 'student',
-        state: 'active',
+        id: "student-2",
+        email: "student@example.com",
+        displayName: "Student Two",
+        role: "student",
+        state: "active",
       },
-      csrfToken: 'csrf-2',
-      expiresAt: '2026-01-01T12:00:00.000Z',
+      csrfToken: "csrf-2",
+      expiresAt: "2026-01-01T12:00:00.000Z",
     });
 
     renderRoute(scheduleId);
-    submitForm('guest-alpha_01');
+    submitForm("guest-alpha_01");
 
     await waitFor(() => {
       expect(studentEntryMock).toHaveBeenCalledWith({
         scheduleId,
-        wcode: 'guest-alpha_01',
-        email: 'student@example.com',
-        studentName: 'Student One',
-        nickname: 'student-one',
-        ieltsCourse: 'IELTS Academic',
+        wcode: "guest-alpha_01",
+        email: "student@example.com",
+        studentName: "Student One",
+        nickname: "student-one",
+        ieltsCourse: "IELTS Academic",
       });
     });
 
@@ -309,31 +376,31 @@ describe('StudentEntryRoute', () => {
     });
   });
 
-  it('canonicalizes legacy W-codes to uppercase without blocking input', async () => {
-    const scheduleId = '550e8400-e29b-41d4-a716-446655440127';
+  it("canonicalizes legacy W-codes to uppercase without blocking input", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440127";
     studentEntryMock.mockResolvedValue({
       user: {
-        id: 'student-4',
-        email: 'student@example.com',
-        displayName: 'Student Four',
-        role: 'student',
-        state: 'active',
+        id: "student-4",
+        email: "student@example.com",
+        displayName: "Student Four",
+        role: "student",
+        state: "active",
       },
-      csrfToken: 'csrf-4',
-      expiresAt: '2026-01-01T12:00:00.000Z',
+      csrfToken: "csrf-4",
+      expiresAt: "2026-01-01T12:00:00.000Z",
     });
 
     renderRoute(scheduleId);
-    submitForm('w250334');
+    submitForm("w250334");
 
     await waitFor(() => {
       expect(studentEntryMock).toHaveBeenCalledWith({
         scheduleId,
-        wcode: 'W250334',
-        email: 'student@example.com',
-        studentName: 'Student One',
-        nickname: 'student-one',
-        ieltsCourse: 'IELTS Academic',
+        wcode: "W250334",
+        email: "student@example.com",
+        studentName: "Student One",
+        nickname: "student-one",
+        ieltsCourse: "IELTS Academic",
       });
     });
 
@@ -342,19 +409,19 @@ describe('StudentEntryRoute', () => {
     });
   });
 
-  it('encodes access code when navigating to student route', async () => {
-    const scheduleId = '550e8400-e29b-41d4-a716-446655440125';
-    const rawAccessCode = 'guest/a?x#y';
+  it("encodes access code when navigating to student route", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440125";
+    const rawAccessCode = "guest/a?x#y";
     studentEntryMock.mockResolvedValue({
       user: {
-        id: 'student-3',
-        email: 'student@example.com',
-        displayName: 'Student Three',
-        role: 'student',
-        state: 'active',
+        id: "student-3",
+        email: "student@example.com",
+        displayName: "Student Three",
+        role: "student",
+        state: "active",
       },
-      csrfToken: 'csrf-3',
-      expiresAt: '2026-01-01T12:00:00.000Z',
+      csrfToken: "csrf-3",
+      expiresAt: "2026-01-01T12:00:00.000Z",
     });
 
     renderRoute(scheduleId);
@@ -364,31 +431,31 @@ describe('StudentEntryRoute', () => {
       expect(studentEntryMock).toHaveBeenCalledWith({
         scheduleId,
         wcode: rawAccessCode,
-        email: 'student@example.com',
-        studentName: 'Student One',
-        nickname: 'student-one',
-        ieltsCourse: 'IELTS Academic',
+        email: "student@example.com",
+        studentName: "Student One",
+        nickname: "student-one",
+        ieltsCourse: "IELTS Academic",
       });
     });
 
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith(
-        `/student/${scheduleId}/${encodeURIComponent(rawAccessCode)}`,
+        `/student/${scheduleId}/${encodeURIComponent(rawAccessCode)}`
       );
     });
   });
 
-  it('resets form state when the schedule or query access code changes in place', async () => {
-    const firstScheduleId = '550e8400-e29b-41d4-a716-446655440128';
-    const secondScheduleId = '550e8400-e29b-41d4-a716-446655440129';
+  it("resets form state when the schedule or query access code changes in place", async () => {
+    const firstScheduleId = "550e8400-e29b-41d4-a716-446655440128";
+    const secondScheduleId = "550e8400-e29b-41d4-a716-446655440129";
     window.localStorage.setItem(
       `ielts-student-profile:${firstScheduleId}:W111111`,
       JSON.stringify({
-        studentName: 'First Student',
-        email: 'first@example.com',
-        nickname: 'first',
-        ieltsCourse: 'IELTS Academic',
-      }),
+        studentName: "First Student",
+        email: "first@example.com",
+        nickname: "first",
+        ieltsCourse: "IELTS Academic",
+      })
     );
 
     let pushRoute: ((to: string) => void) | null = null;
@@ -409,14 +476,14 @@ describe('StudentEntryRoute', () => {
             }
           />
         </Routes>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     await waitFor(() => {
-      expect(screen.getByLabelText(/email/i)).toHaveValue('first@example.com');
+      expect(screen.getByLabelText(/email/i)).toHaveValue("first@example.com");
     });
     fireEvent.change(screen.getByLabelText(/email/i), {
-      target: { value: 'edited@example.com' },
+      target: { value: "edited@example.com" },
     });
 
     await act(async () => {
@@ -424,9 +491,9 @@ describe('StudentEntryRoute', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText(/access code|wcode/i)).toHaveValue('W222222');
-      expect(screen.getByLabelText(/email/i)).toHaveValue('');
-      expect(screen.getByLabelText(/full name/i)).toHaveValue('');
+      expect(screen.getByLabelText(/access code|wcode/i)).toHaveValue("W222222");
+      expect(screen.getByLabelText(/email/i)).toHaveValue("");
+      expect(screen.getByLabelText(/full name/i)).toHaveValue("");
     });
   });
 });

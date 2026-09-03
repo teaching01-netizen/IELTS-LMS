@@ -55,6 +55,21 @@ pub async fn analytics(
     ))
 }
 
+pub async fn list_act_science_reports(
+    State(state): State<AppState>,
+    Extension(request_id): Extension<RequestId>,
+    principal: AuthenticatedUser,
+) -> Result<ApiResponse<Vec<ielts_backend_domain::grading::ActScienceScoreReport>>, ApiError> {
+    principal.require_one_of(&[UserRole::Admin, UserRole::Grader, UserRole::Proctor])?;
+    let ctx = crate::http::auth::actor_context_from_principal(&principal);
+    let service = ResultsService::with_sync_on_read_fallback(
+        state.db_pool(),
+        state.config.grading_sync_on_read_fallback,
+    );
+    let reports = service.list_act_science_reports(&ctx).await?;
+    Ok(ApiResponse::success_with_request_id(reports, request_id.0))
+}
+
 pub async fn export_results(
     State(state): State<AppState>,
     Extension(request_id): Extension<RequestId>,

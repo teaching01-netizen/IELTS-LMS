@@ -1,13 +1,13 @@
-import type { ExamSchedule, ExamSessionRuntime } from '../types/domain';
-import type { ExamConfig, ModuleType, ValidationError } from '../types';
-import { normalizeExamConfig } from '../constants/examDefaults';
+import type { ExamSchedule, ExamSessionRuntime } from "../types/domain";
+import type { ExamConfig, ModuleType, ValidationError } from "../types";
+import { normalizeExamConfig } from "../constants/examDefaults";
 import {
   backendGet,
   backendPost,
   getAttemptSchedule,
   mapBackendRuntime,
   mapBackendSchedule,
-} from './backendBridge';
+} from "./backendBridge";
 
 export interface SectionPlanItem {
   sectionKey: ModuleType;
@@ -49,7 +49,7 @@ export interface RuntimeMutationResult {
   error?: string;
 }
 
-const MODULE_ORDER: ModuleType[] = ['listening', 'reading', 'writing', 'speaking'];
+const MODULE_ORDER: ModuleType[] = ["listening", "reading", "writing", "speaking", "science"];
 
 function toMs(value: string | null | undefined): number | null {
   if (!value) return null;
@@ -58,8 +58,7 @@ function toMs(value: string | null | undefined): number | null {
 }
 
 function sortSections(config: ExamConfig) {
-  return MODULE_ORDER
-    .filter((sectionKey) => config.sections[sectionKey].enabled)
+  return MODULE_ORDER.filter((sectionKey) => config.sections[sectionKey].enabled)
     .map((sectionKey) => ({
       sectionKey,
       config: config.sections[sectionKey],
@@ -78,9 +77,9 @@ async function resolveAttemptScheduleId(attemptId: string): Promise<string | nul
     return rememberedSchedule;
   }
 
-  const { studentAttemptRepository } = await import('./studentAttemptRepository');
+  const { studentAttemptRepository } = await import("./studentAttemptRepository");
   const attempt = (await studentAttemptRepository.getAllAttempts()).find(
-    (candidate) => candidate.id === attemptId,
+    (candidate) => candidate.id === attemptId
   );
 
   return attempt?.scheduleId ?? null;
@@ -123,10 +122,10 @@ export class ExamDeliveryService {
 
   deriveProctorStartScheduleWindow(
     config: ExamConfig,
-    now: Date | string = new Date(),
+    now: Date | string = new Date()
   ): DerivedScheduleWindow {
     const plan = this.buildSectionPlan(config);
-    const start = typeof now === 'string' ? new Date(now) : new Date(now.getTime());
+    const start = typeof now === "string" ? new Date(now) : new Date(now.getTime());
     const end = new Date(start.getTime() + plan.plannedDurationMinutes * 60_000);
 
     return {
@@ -153,10 +152,10 @@ export class ExamDeliveryService {
   }
 
   isScheduleWindowOpen(
-    schedule: Pick<ExamSchedule, 'startTime' | 'endTime'>,
-    now: Date | string = new Date(),
+    schedule: Pick<ExamSchedule, "startTime" | "endTime">,
+    now: Date | string = new Date()
   ): boolean {
-    const nowMs = typeof now === 'string' ? toMs(now) : now.getTime();
+    const nowMs = typeof now === "string" ? toMs(now) : now.getTime();
     const startMs = toMs(schedule.startTime);
     const endMs = toMs(schedule.endTime);
 
@@ -168,15 +167,15 @@ export class ExamDeliveryService {
   }
 
   isScheduleReadyToStart(
-    schedule: Pick<ExamSchedule, 'status' | 'startTime' | 'endTime'>,
-    runtime?: Pick<ExamSessionRuntime, 'status'> | null,
-    now: Date | string = new Date(),
+    schedule: Pick<ExamSchedule, "status" | "startTime" | "endTime">,
+    runtime?: Pick<ExamSessionRuntime, "status"> | null,
+    now: Date | string = new Date()
   ): boolean {
-    if (schedule.status !== 'scheduled') {
+    if (schedule.status !== "scheduled") {
       return false;
     }
 
-    if (runtime && runtime.status !== 'not_started') {
+    if (runtime && runtime.status !== "not_started") {
       return false;
     }
 
@@ -186,21 +185,21 @@ export class ExamDeliveryService {
   formatExamGroupScheduledStartTime(iso: string): string {
     const parsed = new Date(iso);
     if (!Number.isFinite(parsed.getTime())) {
-      return 'Invalid time';
+      return "Invalid time";
     }
 
     return parsed.toLocaleString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-      day: '2-digit',
-      month: 'short',
+      hour: "2-digit",
+      minute: "2-digit",
+      day: "2-digit",
+      month: "short",
     });
   }
 
   validateScheduleWindow(
     config: ExamConfig,
     startTime: string,
-    endTime: string,
+    endTime: string
   ): ScheduleWindowValidationResult {
     const normalized = normalizeExamConfig(config);
     const plan = this.buildSectionPlan(normalized);
@@ -209,9 +208,9 @@ export class ExamDeliveryService {
     const enabledSections = sortSections(normalized);
     if (enabledSections.length === 0) {
       errors.push({
-        field: 'sections',
-        message: 'At least one enabled section is required',
-        type: 'error',
+        field: "sections",
+        message: "At least one enabled section is required",
+        type: "error",
       });
     }
 
@@ -220,16 +219,16 @@ export class ExamDeliveryService {
       if (section.duration <= 0) {
         errors.push({
           field: `sections.${sectionKey}.duration`,
-          message: 'Section duration must be greater than 0',
-          type: 'error',
+          message: "Section duration must be greater than 0",
+          type: "error",
         });
       }
 
       if (section.gapAfterMinutes < 0) {
         errors.push({
           field: `sections.${sectionKey}.gapAfterMinutes`,
-          message: 'Gap after section cannot be negative',
-          type: 'error',
+          message: "Gap after section cannot be negative",
+          type: "error",
         });
       }
 
@@ -239,9 +238,9 @@ export class ExamDeliveryService {
     orders.forEach((count, order) => {
       if (count > 1) {
         errors.push({
-          field: 'sections.order',
+          field: "sections.order",
           message: `Duplicate section order ${order} detected`,
-          type: 'error',
+          type: "error",
         });
       }
     });
@@ -250,23 +249,23 @@ export class ExamDeliveryService {
     const endMs = toMs(endTime);
     if (startMs === null || endMs === null || endMs <= startMs) {
       errors.push({
-        field: 'window',
-        message: 'Scheduled end time must be after start time',
-        type: 'error',
+        field: "window",
+        message: "Scheduled end time must be after start time",
+        type: "error",
       });
     }
 
     const windowMinutes = startMs !== null && endMs !== null ? (endMs - startMs) / 60_000 : 0;
     if (windowMinutes < plan.plannedDurationMinutes) {
       errors.push({
-        field: 'window',
+        field: "window",
         message: `Scheduled window must be at least ${plan.plannedDurationMinutes} minutes`,
-        type: 'error',
+        type: "error",
       });
     }
 
     return {
-      isValid: errors.filter((error) => error.type === 'error').length === 0,
+      isValid: errors.filter((error) => error.type === "error").length === 0,
       plannedDurationMinutes: plan.plannedDurationMinutes,
       windowMinutes,
       errors,
@@ -276,16 +275,16 @@ export class ExamDeliveryService {
   async startRuntime(
     scheduleId: string,
     _actor: string,
-    _now: Date | string = new Date(),
+    _now: Date | string = new Date()
   ): Promise<RuntimeMutationResult> {
     try {
       const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
       const runtimePayload = await backendPost<any>(
         `/v1/schedules/${scheduleId}/runtime/commands`,
         {
-          action: 'start_runtime',
+          action: "start_runtime",
         },
-        { retries: 0 },
+        { retries: 0 }
       );
 
       return {
@@ -295,14 +294,14 @@ export class ExamDeliveryService {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to start runtime',
+        error: error instanceof Error ? error.message : "Failed to start runtime",
       };
     }
   }
 
   async getRuntimeSnapshot(
     scheduleId: string,
-    _now: Date | string = new Date(),
+    _now: Date | string = new Date()
   ): Promise<ExamSessionRuntime | null> {
     try {
       const [schedulePayload, runtimePayload] = await Promise.all([
@@ -319,89 +318,105 @@ export class ExamDeliveryService {
   async warnStudent(
     attemptId: string,
     message: string,
-    actor: string,
+    actor: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const scheduleId = await resolveAttemptScheduleId(attemptId);
       if (!scheduleId) {
-        return { success: false, error: 'Attempt not found' };
+        return { success: false, error: "Attempt not found" };
       }
 
-      await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/warn`, {
-        actorId: actor,
-        message,
-      }, { retries: 0 });
+      await backendPost(
+        `/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/warn`,
+        {
+          actorId: actor,
+          message,
+        },
+        { retries: 0 }
+      );
       return { success: true };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to warn student',
+        error: error instanceof Error ? error.message : "Failed to warn student",
       };
     }
   }
 
   async pauseStudentAttempt(
     attemptId: string,
-    actor: string,
+    actor: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const scheduleId = await resolveAttemptScheduleId(attemptId);
       if (!scheduleId) {
-        return { success: false, error: 'Attempt not found' };
+        return { success: false, error: "Attempt not found" };
       }
 
-      await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/pause`, {
-        actorId: actor,
-      }, { retries: 0 });
+      await backendPost(
+        `/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/pause`,
+        {
+          actorId: actor,
+        },
+        { retries: 0 }
+      );
       return { success: true };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to pause student',
+        error: error instanceof Error ? error.message : "Failed to pause student",
       };
     }
   }
 
   async resumeStudentAttempt(
     attemptId: string,
-    actor: string,
+    actor: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const scheduleId = await resolveAttemptScheduleId(attemptId);
       if (!scheduleId) {
-        return { success: false, error: 'Attempt not found' };
+        return { success: false, error: "Attempt not found" };
       }
 
-      await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/resume`, {
-        actorId: actor,
-      }, { retries: 0 });
+      await backendPost(
+        `/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/resume`,
+        {
+          actorId: actor,
+        },
+        { retries: 0 }
+      );
       return { success: true };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to resume student',
+        error: error instanceof Error ? error.message : "Failed to resume student",
       };
     }
   }
 
   async terminateStudentAttempt(
     attemptId: string,
-    actor: string,
+    actor: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const scheduleId = await resolveAttemptScheduleId(attemptId);
       if (!scheduleId) {
-        return { success: false, error: 'Attempt not found' };
+        return { success: false, error: "Attempt not found" };
       }
 
-      await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/terminate`, {
-        actorId: actor,
-      }, { retries: 0 });
+      await backendPost(
+        `/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/terminate`,
+        {
+          actorId: actor,
+        },
+        { retries: 0 }
+      );
       return { success: true };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to terminate student',
+        error: error instanceof Error ? error.message : "Failed to terminate student",
       };
     }
   }
@@ -409,18 +424,18 @@ export class ExamDeliveryService {
   async pauseRuntime(
     scheduleId: string,
     _actor: string,
-    reason = 'proctor_pause',
-    _now: Date | string = new Date(),
+    reason = "proctor_pause",
+    _now: Date | string = new Date()
   ): Promise<RuntimeMutationResult> {
     try {
       const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
       const runtimePayload = await backendPost<any>(
         `/v1/schedules/${scheduleId}/runtime/commands`,
         {
-          action: 'pause_runtime',
+          action: "pause_runtime",
           reason,
         },
-        { retries: 0 },
+        { retries: 0 }
       );
 
       return {
@@ -430,7 +445,7 @@ export class ExamDeliveryService {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to pause runtime',
+        error: error instanceof Error ? error.message : "Failed to pause runtime",
       };
     }
   }
@@ -438,16 +453,16 @@ export class ExamDeliveryService {
   async resumeRuntime(
     scheduleId: string,
     _actor: string,
-    _now: Date | string = new Date(),
+    _now: Date | string = new Date()
   ): Promise<RuntimeMutationResult> {
     try {
       const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
       const runtimePayload = await backendPost<any>(
         `/v1/schedules/${scheduleId}/runtime/commands`,
         {
-          action: 'resume_runtime',
+          action: "resume_runtime",
         },
-        { retries: 0 },
+        { retries: 0 }
       );
 
       return {
@@ -457,7 +472,7 @@ export class ExamDeliveryService {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to resume runtime',
+        error: error instanceof Error ? error.message : "Failed to resume runtime",
       };
     }
   }
@@ -467,7 +482,7 @@ export class ExamDeliveryService {
     actor: string,
     minutes: number,
     expectedActiveSectionKey?: string | null,
-    _now: Date | string = new Date(),
+    _now: Date | string = new Date()
   ): Promise<RuntimeMutationResult> {
     try {
       const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
@@ -478,7 +493,7 @@ export class ExamDeliveryService {
           minutes,
           expectedActiveSectionKey: expectedActiveSectionKey ?? undefined,
         },
-        { retries: 0 },
+        { retries: 0 }
       );
 
       return {
@@ -488,7 +503,7 @@ export class ExamDeliveryService {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to extend section',
+        error: error instanceof Error ? error.message : "Failed to extend section",
       };
     }
   }
@@ -497,7 +512,7 @@ export class ExamDeliveryService {
     scheduleId: string,
     actor: string,
     expectedActiveSectionKey?: string | null,
-    _now: Date | string = new Date(),
+    _now: Date | string = new Date()
   ): Promise<RuntimeMutationResult> {
     try {
       const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
@@ -507,7 +522,7 @@ export class ExamDeliveryService {
           actorId: actor,
           expectedActiveSectionKey: expectedActiveSectionKey ?? undefined,
         },
-        { retries: 0 },
+        { retries: 0 }
       );
 
       return {
@@ -517,7 +532,7 @@ export class ExamDeliveryService {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to end section',
+        error: error instanceof Error ? error.message : "Failed to end section",
       };
     }
   }
@@ -525,7 +540,7 @@ export class ExamDeliveryService {
   async completeRuntime(
     scheduleId: string,
     actor: string,
-    _now: Date | string = new Date(),
+    _now: Date | string = new Date()
   ): Promise<RuntimeMutationResult> {
     try {
       const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
@@ -534,7 +549,7 @@ export class ExamDeliveryService {
         {
           actorId: actor,
         },
-        { retries: 0 },
+        { retries: 0 }
       );
 
       return {
@@ -544,7 +559,7 @@ export class ExamDeliveryService {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to complete runtime',
+        error: error instanceof Error ? error.message : "Failed to complete runtime",
       };
     }
   }

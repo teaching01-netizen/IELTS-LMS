@@ -2,7 +2,9 @@ use serde_json::Value;
 use sqlx::MySqlPool;
 use uuid::Uuid;
 
-use ielts_backend_domain::grading::{ReleaseEvent, ResultsAnalytics, StudentResult};
+use ielts_backend_domain::grading::{
+    ActScienceScoreReport, ReleaseEvent, ResultsAnalytics, StudentResult,
+};
 use ielts_backend_infrastructure::actor_context::ActorContext;
 
 use crate::grading::{GradingError, GradingService};
@@ -15,6 +17,12 @@ impl ResultsService {
     pub fn new(pool: MySqlPool) -> Self {
         Self {
             grading: GradingService::new(pool),
+        }
+    }
+
+    pub fn with_sync_on_read_fallback(pool: MySqlPool, enabled: bool) -> Self {
+        Self {
+            grading: GradingService::with_sync_on_read_fallback(pool, enabled),
         }
     }
 
@@ -35,6 +43,13 @@ impl ResultsService {
 
     pub async fn export_results(&self, ctx: &ActorContext) -> Result<Value, GradingError> {
         self.grading.export_results(ctx).await
+    }
+
+    pub async fn list_act_science_reports(
+        &self,
+        ctx: &ActorContext,
+    ) -> Result<Vec<ActScienceScoreReport>, GradingError> {
+        self.grading.list_act_science_reports(ctx).await
     }
 
     pub async fn get_events(&self, result_id: Uuid) -> Result<Vec<ReleaseEvent>, GradingError> {

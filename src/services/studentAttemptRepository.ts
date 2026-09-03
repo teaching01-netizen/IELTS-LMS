@@ -1,11 +1,5 @@
-import {
-  backendGet,
-  backendPost,
-  rememberAttemptSchedule,
-} from './backendBridge';
-import {
-  studentSessionTransport,
-} from './studentSessionTransport';
+import { backendGet, backendPost, rememberAttemptSchedule } from "./backendBridge";
+import { studentSessionTransport } from "./studentSessionTransport";
 import {
   buildAttemptAuthorizationHeader as buildAttemptAuthorizationHeaderFromAdapter,
   clearAttemptCredential as clearAttemptCredentialFromAdapter,
@@ -13,8 +7,8 @@ import {
   refreshAttemptCredentialForAttempt as refreshAttemptCredentialForAttemptFromAdapter,
   storeAttemptCredential as storeAttemptCredentialFromAdapter,
   tryBuildAttemptAuthorizationHeader as tryBuildAttemptAuthorizationHeaderFromAdapter,
-} from './attemptCredentialAdapter';
-import { ApiClientError, type ApiRequestConfig } from '../app/api/apiClient';
+} from "./attemptCredentialAdapter";
+import { ApiClientError, type ApiRequestConfig } from "../app/api/apiClient";
 import type {
   StudentAttempt,
   StudentAnswerValue,
@@ -22,37 +16,38 @@ import type {
   StudentAttemptMutation,
   StudentAttemptSeed,
   StudentHeartbeatEvent,
-} from '../types/studentAttempt';
+  StudentScoreSummary,
+} from "../types/studentAttempt";
 import {
   mergeStudentAttemptRecovery,
   normalizeStudentAttempt,
-} from './studentAttemptNormalization';
-import type { ModuleType } from '../types';
-import type { ExamSchedule } from '../types/domain';
-import { createTtlLruCache } from '../utils/ttlLruCache';
+} from "./studentAttemptNormalization";
+import type { ModuleType } from "../types";
+import type { ExamSchedule } from "../types/domain";
+import { createTtlLruCache } from "../utils/ttlLruCache";
 import {
   emitStudentObservabilityMetric,
   withStudentObservabilityDimensions,
-} from '../utils/studentObservability';
+} from "../utils/studentObservability";
 
-const STORAGE_KEY_ATTEMPTS = 'ielts_student_attempts_v1';
-const STORAGE_KEY_PENDING_MUTATIONS = 'ielts_student_attempt_pending_mutations_v1';
-const STORAGE_KEY_HEARTBEAT_EVENTS = 'ielts_student_attempt_heartbeat_events_v1';
-const STORAGE_KEY_ATTEMPT_RECEIPTS = 'ielts_student_attempt_receipts_v1';
-const STUDENT_ATTEMPT_IDB_NAME = 'ielts_student_attempt_cache_v1';
+const STORAGE_KEY_ATTEMPTS = "ielts_student_attempts_v1";
+const STORAGE_KEY_PENDING_MUTATIONS = "ielts_student_attempt_pending_mutations_v1";
+const STORAGE_KEY_HEARTBEAT_EVENTS = "ielts_student_attempt_heartbeat_events_v1";
+const STORAGE_KEY_ATTEMPT_RECEIPTS = "ielts_student_attempt_receipts_v1";
+const STUDENT_ATTEMPT_IDB_NAME = "ielts_student_attempt_cache_v1";
 const STUDENT_ATTEMPT_IDB_VERSION = 1;
-const STUDENT_ATTEMPT_IDB_PENDING_STORE = 'pending_mutations';
-const STORAGE_KEY_CLIENT_SESSION_PREFIX = 'ielts-student-client-session:v1:';
-const STORAGE_KEY_MUTATION_WATERMARK_PREFIX = 'ielts-student-mutation-watermark:v1:';
+const STUDENT_ATTEMPT_IDB_PENDING_STORE = "pending_mutations";
+const STORAGE_KEY_CLIENT_SESSION_PREFIX = "ielts-student-client-session:v1:";
+const STORAGE_KEY_MUTATION_WATERMARK_PREFIX = "ielts-student-mutation-watermark:v1:";
 const MAX_HEARTBEAT_EVENTS_PER_ATTEMPT = 200;
 const MAX_HEARTBEAT_FLUSH_EVENTS = 50;
 const MUTATION_BATCH_CHUNK_SIZE = 100;
 const MAX_PENDING_MUTATIONS_PER_ATTEMPT = 5_000;
 const MAX_PENDING_MUTATION_BYTES_PER_ATTEMPT = 2 * 1024 * 1024;
 const STUDENT_LIFECYCLE_LOG_SAMPLE_RATE = 0.2;
-const STUDENT_LIFECYCLE_SAMPLE_HEADER = 'x-student-lifecycle-sampled';
-const STUDENT_FLUSH_CYCLE_ID_HEADER = 'x-student-flush-cycle-id';
-const STUDENT_SUBMIT_CYCLE_ID_HEADER = 'x-student-submit-cycle-id';
+const STUDENT_LIFECYCLE_SAMPLE_HEADER = "x-student-lifecycle-sampled";
+const STUDENT_FLUSH_CYCLE_ID_HEADER = "x-student-flush-cycle-id";
+const STUDENT_SUBMIT_CYCLE_ID_HEADER = "x-student-submit-cycle-id";
 
 export interface StudentLocalCachePolicy {
   submittedReceiptTtlMs: number;
@@ -117,27 +112,28 @@ interface BackendStudentAttempt {
   candidateId: string;
   candidateName: string;
   candidateEmail: string;
-  phase: StudentAttempt['phase'];
-  currentModule: StudentAttempt['currentModule'];
+  phase: StudentAttempt["phase"];
+  currentModule: StudentAttempt["currentModule"];
   currentQuestionId?: string | null | undefined;
-  answers?: StudentAttempt['answers'] | null | undefined;
-  writingAnswers?: StudentAttempt['writingAnswers'] | null | undefined;
-  flags?: StudentAttempt['flags'] | null | undefined;
-  violationsSnapshot?: StudentAttempt['violations'] | null | undefined;
+  answers?: StudentAttempt["answers"] | null | undefined;
+  writingAnswers?: StudentAttempt["writingAnswers"] | null | undefined;
+  flags?: StudentAttempt["flags"] | null | undefined;
+  violationsSnapshot?: StudentAttempt["violations"] | null | undefined;
   finalSubmission?:
     | {
         submissionId?: string | null | undefined;
         submittedAt?: string | null | undefined;
-        answers?: StudentAttempt['answers'] | null | undefined;
-        writingAnswers?: StudentAttempt['writingAnswers'] | null | undefined;
-        flags?: StudentAttempt['flags'] | null | undefined;
+        answers?: StudentAttempt["answers"] | null | undefined;
+        writingAnswers?: StudentAttempt["writingAnswers"] | null | undefined;
+        flags?: StudentAttempt["flags"] | null | undefined;
+        score?: StudentScoreSummary | null | undefined;
       }
     | null
     | undefined;
   submittedAt?: string | null | undefined;
-  integrity?: Partial<StudentAttempt['integrity']> | null | undefined;
-  recovery?: Partial<StudentAttempt['recovery']> | null | undefined;
-  proctorStatus?: StudentAttempt['proctorStatus'] | null | undefined;
+  integrity?: Partial<StudentAttempt["integrity"]> | null | undefined;
+  recovery?: Partial<StudentAttempt["recovery"]> | null | undefined;
+  proctorStatus?: StudentAttempt["proctorStatus"] | null | undefined;
   proctorNote?: string | null | undefined;
   proctorUpdatedAt?: string | null | undefined;
   proctorUpdatedBy?: string | null | undefined;
@@ -177,6 +173,7 @@ interface BackendSubmitResponse {
   attempt: BackendStudentAttempt;
   submissionId: string;
   submittedAt: string;
+  score?: StudentScoreSummary | null | undefined;
   refreshedAttemptCredential?: BackendAttemptCredential | null | undefined;
 }
 
@@ -211,11 +208,11 @@ function generateId(prefix: string): string {
 }
 
 function generateUuid(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
 
-  return `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`;
+  return `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
 }
 
 function shouldEmitStudentLifecycleSuccessLog(sampleRate: number): boolean {
@@ -245,24 +242,27 @@ type CanonicalJsonValue =
   | { [key: string]: CanonicalJsonValue };
 
 function stableStringifyCanonicalJson(value: CanonicalJsonValue): string {
-  if (value === null || typeof value !== 'object') {
+  if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
   }
 
   if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringifyCanonicalJson(item)).join(',')}]`;
+    return `[${value.map((item) => stableStringifyCanonicalJson(item)).join(",")}]`;
   }
 
   const keys = Object.keys(value).sort();
   return `{${keys
-    .map((key) => `${JSON.stringify(key)}:${stableStringifyCanonicalJson(value[key] as CanonicalJsonValue)}`)
-    .join(',')}}`;
+    .map(
+      (key) =>
+        `${JSON.stringify(key)}:${stableStringifyCanonicalJson(value[key] as CanonicalJsonValue)}`
+    )
+    .join(",")}}`;
 }
 
 function canonicalJsonForHash(value: unknown): string {
   const serialized = JSON.stringify(value);
   if (serialized === undefined) {
-    return 'null';
+    return "null";
   }
   const normalized = JSON.parse(serialized) as CanonicalJsonValue;
   return stableStringifyCanonicalJson(normalized);
@@ -275,16 +275,22 @@ async function sha256Hex(value: unknown): Promise<string | null> {
   }
 
   const serialized = canonicalJsonForHash(value);
-  const digest = await subtle.digest('SHA-256', new TextEncoder().encode(serialized));
+  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(serialized));
   return Array.from(new Uint8Array(digest))
-    .map((chunk) => chunk.toString(16).padStart(2, '0'))
-    .join('');
+    .map((chunk) => chunk.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-function getBrowserStorage(type: 'localStorage' | 'sessionStorage'): Storage | null {
+function getBrowserStorage(type: "localStorage" | "sessionStorage"): Storage | null {
   try {
-    const owner: (Pick<Window, 'localStorage' | 'sessionStorage'> & Partial<typeof globalThis>) | null =
-      typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : null;
+    const owner:
+      | (Pick<Window, "localStorage" | "sessionStorage"> & Partial<typeof globalThis>)
+      | null =
+      typeof window !== "undefined"
+        ? window
+        : typeof globalThis !== "undefined"
+          ? globalThis
+          : null;
     const storage = owner?.[type];
     return storage ?? null;
   } catch {
@@ -294,8 +300,12 @@ function getBrowserStorage(type: 'localStorage' | 'sessionStorage'): Storage | n
 
 function getIndexedDbFactory(): IDBFactory | null {
   try {
-    const owner: (Pick<Window, 'indexedDB'> & Partial<typeof globalThis>) | null =
-      typeof window !== 'undefined' ? window : typeof globalThis !== 'undefined' ? globalThis : null;
+    const owner: (Pick<Window, "indexedDB"> & Partial<typeof globalThis>) | null =
+      typeof window !== "undefined"
+        ? window
+        : typeof globalThis !== "undefined"
+          ? globalThis
+          : null;
     const indexedDb = owner?.indexedDB;
     return indexedDb ?? null;
   } catch {
@@ -306,30 +316,34 @@ function getIndexedDbFactory(): IDBFactory | null {
 function idbRequestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed.'));
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed."));
   });
 }
 
 function waitForIdbTransaction(transaction: IDBTransaction): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB transaction failed.'));
-    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted.'));
+    transaction.onerror = () =>
+      reject(transaction.error ?? new Error("IndexedDB transaction failed."));
+    transaction.onabort = () =>
+      reject(transaction.error ?? new Error("IndexedDB transaction aborted."));
   });
 }
 
-function isPendingAttemptMutationRecord(candidate: unknown): candidate is PendingAttemptMutationRecord {
-  if (!candidate || typeof candidate !== 'object') {
+function isPendingAttemptMutationRecord(
+  candidate: unknown
+): candidate is PendingAttemptMutationRecord {
+  if (!candidate || typeof candidate !== "object") {
     return false;
   }
 
   const record = candidate as Partial<PendingAttemptMutationRecord>;
-  return typeof record.attemptId === 'string' && Array.isArray(record.mutations);
+  return typeof record.attemptId === "string" && Array.isArray(record.mutations);
 }
 
 function arePendingMutationRecordSetsEqual(
   left: PendingAttemptMutationRecord[],
-  right: PendingAttemptMutationRecord[],
+  right: PendingAttemptMutationRecord[]
 ): boolean {
   try {
     return JSON.stringify(left) === JSON.stringify(right);
@@ -354,7 +368,7 @@ async function openPendingMutationDatabase(): Promise<IDBDatabase | null> {
     request.onupgradeneeded = () => {
       const database = request.result;
       if (!database.objectStoreNames.contains(STUDENT_ATTEMPT_IDB_PENDING_STORE)) {
-        database.createObjectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE, { keyPath: 'attemptId' });
+        database.createObjectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE, { keyPath: "attemptId" });
       }
     };
 
@@ -372,14 +386,16 @@ async function openPendingMutationDatabase(): Promise<IDBDatabase | null> {
   return pendingMutationDbPromise;
 }
 
-async function getPendingMutationRecordsFromIndexedDb(): Promise<PendingAttemptMutationRecord[] | null> {
+async function getPendingMutationRecordsFromIndexedDb(): Promise<
+  PendingAttemptMutationRecord[] | null
+> {
   const database = await openPendingMutationDatabase();
   if (!database) {
     return null;
   }
 
   try {
-    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, 'readonly');
+    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, "readonly");
     const store = transaction.objectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE);
     const records = await idbRequestToPromise(store.getAll() as IDBRequest<unknown[]>);
     await waitForIdbTransaction(transaction);
@@ -390,7 +406,7 @@ async function getPendingMutationRecordsFromIndexedDb(): Promise<PendingAttemptM
 }
 
 async function writePendingMutationRecordsToIndexedDb(
-  records: PendingAttemptMutationRecord[],
+  records: PendingAttemptMutationRecord[]
 ): Promise<boolean> {
   const database = await openPendingMutationDatabase();
   if (!database) {
@@ -398,7 +414,7 @@ async function writePendingMutationRecordsToIndexedDb(
   }
 
   try {
-    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, 'readwrite');
+    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, "readwrite");
     const store = transaction.objectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE);
     store.clear();
     for (const record of records) {
@@ -412,7 +428,7 @@ async function writePendingMutationRecordsToIndexedDb(
 }
 
 async function putPendingMutationRecordInIndexedDb(
-  record: PendingAttemptMutationRecord,
+  record: PendingAttemptMutationRecord
 ): Promise<boolean> {
   const database = await openPendingMutationDatabase();
   if (!database) {
@@ -420,7 +436,7 @@ async function putPendingMutationRecordInIndexedDb(
   }
 
   try {
-    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, 'readwrite');
+    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, "readwrite");
     transaction.objectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE).put(record);
     await waitForIdbTransaction(transaction);
     return true;
@@ -436,7 +452,7 @@ async function deletePendingMutationRecordInIndexedDb(attemptId: string): Promis
   }
 
   try {
-    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, 'readwrite');
+    const transaction = database.transaction(STUDENT_ATTEMPT_IDB_PENDING_STORE, "readwrite");
     transaction.objectStore(STUDENT_ATTEMPT_IDB_PENDING_STORE).delete(attemptId);
     await waitForIdbTransaction(transaction);
     return true;
@@ -446,7 +462,7 @@ async function deletePendingMutationRecordInIndexedDb(attemptId: string): Promis
 }
 
 function getJsonArrayFromStorage<T>(key: string): T[] {
-  const local = getBrowserStorage('localStorage');
+  const local = getBrowserStorage("localStorage");
   const raw = local?.getItem(key);
   if (!raw) {
     return [];
@@ -461,7 +477,7 @@ function getJsonArrayFromStorage<T>(key: string): T[] {
 }
 
 function setJsonArrayInStorage<T>(key: string, data: T[]): void {
-  const local = getBrowserStorage('localStorage');
+  const local = getBrowserStorage("localStorage");
   if (!local) {
     return;
   }
@@ -479,12 +495,12 @@ function submissionIdForAttempt(attempt: StudentAttempt): string | null {
 
 export function compactSubmittedAttempt(
   attempt: StudentAttempt,
-  compactedAt: Date = new Date(),
+  compactedAt: Date = new Date()
 ): StudentAttemptReceipt {
   const submittedAt = submittedAtForAttempt(attempt);
   const submissionId = submissionIdForAttempt(attempt);
   if (!submittedAt || !submissionId) {
-    throw new Error('Cannot compact an attempt without submission receipt metadata.');
+    throw new Error("Cannot compact an attempt without submission receipt metadata.");
   }
 
   return {
@@ -500,38 +516,38 @@ export function compactSubmittedAttempt(
 function isSubmittedSyncedAttempt(
   attempt: StudentAttempt,
   pendingMutations: StudentAttemptMutation[],
-  heartbeatEvents: StudentHeartbeatEvent[],
+  heartbeatEvents: StudentHeartbeatEvent[]
 ): boolean {
   return (
-    attempt.phase === 'post-exam' &&
+    attempt.phase === "post-exam" &&
     Boolean(submittedAtForAttempt(attempt)) &&
     Boolean(submissionIdForAttempt(attempt)) &&
     pendingMutations.length === 0 &&
     heartbeatEvents.length === 0 &&
     attempt.recovery.pendingMutationCount === 0 &&
-    attempt.recovery.syncState === 'saved'
+    attempt.recovery.syncState === "saved"
   );
 }
 
 function hasUnsyncedLocalState(
   attempt: StudentAttempt,
   pendingMutations: StudentAttemptMutation[],
-  heartbeatEvents: StudentHeartbeatEvent[],
+  heartbeatEvents: StudentHeartbeatEvent[]
 ): boolean {
   return (
     pendingMutations.length > 0 ||
     heartbeatEvents.length > 0 ||
     attempt.recovery.pendingMutationCount > 0 ||
-    attempt.recovery.syncState === 'saving' ||
-    attempt.recovery.syncState === 'offline' ||
-    attempt.recovery.syncState === 'syncing_reconnect' ||
-    attempt.recovery.syncState === 'error'
+    attempt.recovery.syncState === "saving" ||
+    attempt.recovery.syncState === "offline" ||
+    attempt.recovery.syncState === "syncing_reconnect" ||
+    attempt.recovery.syncState === "error"
   );
 }
 
 function staleCutoffForAttempt(
   attempt: StudentAttempt,
-  schedule: Pick<ExamSchedule, 'endTime'> | null | undefined,
+  schedule: Pick<ExamSchedule, "endTime"> | null | undefined
 ): number {
   const scheduleEnd = schedule?.endTime ? Date.parse(schedule.endTime) : NaN;
   const updatedAt = Date.parse(attempt.updatedAt);
@@ -543,10 +559,14 @@ function staleCutoffForAttempt(
 
 export async function pruneStudentAttemptCache(
   now: Date = new Date(),
-  scheduleLookup: (scheduleId: string) => Pick<ExamSchedule, 'endTime'> | null | undefined = () => null,
+  scheduleLookup: (scheduleId: string) => Pick<ExamSchedule, "endTime"> | null | undefined = () =>
+    null
 ): Promise<StudentAttemptCachePruneResult> {
-  const attempts = getJsonArrayFromStorage<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeStudentAttempt);
-  const pending = getJsonArrayFromStorage<PendingAttemptMutationRecord>(STORAGE_KEY_PENDING_MUTATIONS);
+  const attempts =
+    getJsonArrayFromStorage<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeStudentAttempt);
+  const pending = getJsonArrayFromStorage<PendingAttemptMutationRecord>(
+    STORAGE_KEY_PENDING_MUTATIONS
+  );
   const heartbeats = getJsonArrayFromStorage<StudentHeartbeatEvent>(STORAGE_KEY_HEARTBEAT_EVENTS);
   const receipts = getJsonArrayFromStorage<StudentAttemptReceipt>(STORAGE_KEY_ATTEMPT_RECEIPTS);
   const pendingByAttempt = new Map(pending.map((entry) => [entry.attemptId, entry.mutations]));
@@ -571,7 +591,7 @@ export async function pruneStudentAttemptCache(
     if (isSubmittedSyncedAttempt(attempt, attemptPending, attemptHeartbeats)) {
       const receipt = compactSubmittedAttempt(attempt, now);
       const existingIndex = nextReceipts.findIndex(
-        (candidate) => candidate.attemptId === receipt.attemptId,
+        (candidate) => candidate.attemptId === receipt.attemptId
       );
       if (existingIndex >= 0) {
         nextReceipts[existingIndex] = receipt;
@@ -614,19 +634,22 @@ export async function pruneStudentAttemptCache(
 }
 
 export function getStudentAttemptLocalCacheStats(): StudentAttemptLocalCacheStats {
-  const local = getBrowserStorage('localStorage');
-  const readRaw = (key: string) => local?.getItem(key) ?? '[]';
+  const local = getBrowserStorage("localStorage");
+  const readRaw = (key: string) => local?.getItem(key) ?? "[]";
   const attemptsRaw = readRaw(STORAGE_KEY_ATTEMPTS);
   const receiptsRaw = readRaw(STORAGE_KEY_ATTEMPT_RECEIPTS);
   const pendingRaw = readRaw(STORAGE_KEY_PENDING_MUTATIONS);
   const heartbeatsRaw = readRaw(STORAGE_KEY_HEARTBEAT_EVENTS);
   const attempts = getJsonArrayFromStorage<StudentAttempt>(STORAGE_KEY_ATTEMPTS);
   const receipts = getJsonArrayFromStorage<StudentAttemptReceipt>(STORAGE_KEY_ATTEMPT_RECEIPTS);
-  const pending = getJsonArrayFromStorage<PendingAttemptMutationRecord>(STORAGE_KEY_PENDING_MUTATIONS);
+  const pending = getJsonArrayFromStorage<PendingAttemptMutationRecord>(
+    STORAGE_KEY_PENDING_MUTATIONS
+  );
   const heartbeats = getJsonArrayFromStorage<StudentHeartbeatEvent>(STORAGE_KEY_HEARTBEAT_EVENTS);
 
   return {
-    approximateBytes: attemptsRaw.length + receiptsRaw.length + pendingRaw.length + heartbeatsRaw.length,
+    approximateBytes:
+      attemptsRaw.length + receiptsRaw.length + pendingRaw.length + heartbeatsRaw.length,
     attemptCount: attempts.length,
     receiptCount: receipts.length,
     pendingMutationCount: pending.reduce((total, entry) => total + entry.mutations.length, 0),
@@ -655,43 +678,47 @@ export async function resetStudentAttemptPendingMutationIndexedDbForTests(): Pro
 
 export function tryBuildAttemptAuthorizationHeader(
   scheduleId: string,
-  attemptId: string,
+  attemptId: string
 ): Record<string, string> | null {
   return tryBuildAttemptAuthorizationHeaderFromAdapter(scheduleId, attemptId);
 }
 
 function isUnauthorizedError(error: unknown): boolean {
   return (
-    typeof error === 'object' &&
+    typeof error === "object" &&
     error !== null &&
-    'statusCode' in error &&
+    "statusCode" in error &&
     (error as { statusCode?: unknown }).statusCode === 401
   );
 }
 
 function isMissingAttemptCredentialError(error: unknown): boolean {
-  return error instanceof Error && error.message.toLowerCase().includes('missing attempt credential');
+  return (
+    error instanceof Error && error.message.toLowerCase().includes("missing attempt credential")
+  );
 }
 
 function isObjectiveMutation(mutation: StudentAttemptMutation): boolean {
-  return mutation.type === 'answer' || mutation.type === 'flag' || mutation.type === 'writing_answer';
+  return (
+    mutation.type === "answer" || mutation.type === "flag" || mutation.type === "writing_answer"
+  );
 }
 
 function mutationModuleKey(mutation: StudentAttemptMutation): ModuleType | null {
-  const value = 'module' in mutation.payload ? mutation.payload.module : undefined;
-  return typeof value === 'string' && value.trim() ? (value as ModuleType) : null;
+  const value = "module" in mutation.payload ? mutation.payload.module : undefined;
+  return typeof value === "string" && value.trim() ? (value as ModuleType) : null;
 }
 
 function mutationSupersessionKey(mutation: StudentAttemptMutation): string | null {
-  if (mutation.type === 'answer' || mutation.type === 'flag') {
+  if (mutation.type === "answer" || mutation.type === "flag") {
     const questionId = mutation.payload.questionId;
-    if (typeof questionId !== 'string') {
+    if (typeof questionId !== "string") {
       return null;
     }
 
-    if (mutation.type === 'answer') {
+    if (mutation.type === "answer") {
       const slotIndex = mutation.payload.slotIndex;
-      if (typeof slotIndex === 'number' && Number.isInteger(slotIndex) && slotIndex >= 0) {
+      if (typeof slotIndex === "number" && Number.isInteger(slotIndex) && slotIndex >= 0) {
         return `answer:${questionId}:slot:${slotIndex}`;
       }
     }
@@ -699,13 +726,13 @@ function mutationSupersessionKey(mutation: StudentAttemptMutation): string | nul
     return `${mutation.type}:${questionId}`;
   }
 
-  if (mutation.type === 'writing_answer') {
+  if (mutation.type === "writing_answer") {
     const taskId = mutation.payload.taskId;
-    return typeof taskId === 'string' ? `${mutation.type}:${taskId}` : null;
+    return typeof taskId === "string" ? `${mutation.type}:${taskId}` : null;
   }
 
-  if (mutation.type === 'position') {
-    return `position:${mutation.payload.currentModule ?? 'current'}`;
+  if (mutation.type === "position") {
+    return `position:${mutation.payload.currentModule ?? "current"}`;
   }
 
   return null;
@@ -734,7 +761,9 @@ function compactSupersededMutations(mutations: StudentAttemptMutation[]): Studen
   });
 }
 
-function enforcePendingMutationPolicy(mutations: StudentAttemptMutation[]): StudentAttemptMutation[] {
+function enforcePendingMutationPolicy(
+  mutations: StudentAttemptMutation[]
+): StudentAttemptMutation[] {
   if (
     mutations.length <= studentLocalCachePolicy.maxPendingMutationsPerAttempt &&
     approximateMutationBytes(mutations) <= studentLocalCachePolicy.maxPendingMutationBytesPerAttempt
@@ -751,20 +780,24 @@ function enforcePendingMutationPolicy(mutations: StudentAttemptMutation[]): Stud
   }
 
   const protectedMutations = next.filter((mutation) => mutationSupersessionKey(mutation) === null);
-  const compactableMutations = next.filter((mutation) => mutationSupersessionKey(mutation) !== null);
+  const compactableMutations = next.filter(
+    (mutation) => mutationSupersessionKey(mutation) !== null
+  );
   const remainingSlots = Math.max(
     0,
-    studentLocalCachePolicy.maxPendingMutationsPerAttempt - protectedMutations.length,
+    studentLocalCachePolicy.maxPendingMutationsPerAttempt - protectedMutations.length
   );
   next = [...protectedMutations, ...compactableMutations.slice(-remainingSlots)].sort(
-    (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
+    (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
   );
 
   while (
     next.length > protectedMutations.length &&
     approximateMutationBytes(next) > studentLocalCachePolicy.maxPendingMutationBytesPerAttempt
   ) {
-    const firstCompactableIndex = next.findIndex((mutation) => mutationSupersessionKey(mutation) !== null);
+    const firstCompactableIndex = next.findIndex(
+      (mutation) => mutationSupersessionKey(mutation) !== null
+    );
     if (firstCompactableIndex < 0) {
       break;
     }
@@ -776,26 +809,23 @@ function enforcePendingMutationPolicy(mutations: StudentAttemptMutation[]): Stud
 
 function isModuleType(value: unknown): value is ModuleType {
   return (
-    value === 'listening' ||
-    value === 'reading' ||
-    value === 'writing' ||
-    value === 'speaking'
+    value === "listening" || value === "reading" || value === "writing" || value === "speaking"
   );
 }
 
-function isAttemptPhase(value: unknown): value is StudentAttempt['phase'] {
+function isAttemptPhase(value: unknown): value is StudentAttempt["phase"] {
   return (
-    value === 'pre-check' ||
-    value === 'lobby' ||
-    value === 'exam' ||
-    value === 'post-exam' ||
-    value === 'submitted'
+    value === "pre-check" ||
+    value === "lobby" ||
+    value === "exam" ||
+    value === "post-exam" ||
+    value === "submitted"
   );
 }
 
 export function replayPendingMutationsOntoAttempt(
   attempt: StudentAttempt,
-  mutations: StudentAttemptMutation[],
+  mutations: StudentAttemptMutation[]
 ): StudentAttempt {
   if (mutations.length === 0) {
     return attempt;
@@ -805,9 +835,9 @@ export function replayPendingMutationsOntoAttempt(
 
   for (const mutation of mutations) {
     switch (mutation.type) {
-      case 'answer': {
+      case "answer": {
         const questionId = mutation.payload.questionId;
-        if (typeof questionId !== 'string') {
+        if (typeof questionId !== "string") {
           break;
         }
 
@@ -820,10 +850,10 @@ export function replayPendingMutationsOntoAttempt(
         };
         break;
       }
-      case 'writing_answer': {
+      case "writing_answer": {
         const taskId = mutation.payload.taskId;
         const value = mutation.payload.value;
-        if (typeof taskId !== 'string' || typeof value !== 'string') {
+        if (typeof taskId !== "string" || typeof value !== "string") {
           break;
         }
 
@@ -836,10 +866,10 @@ export function replayPendingMutationsOntoAttempt(
         };
         break;
       }
-      case 'flag': {
+      case "flag": {
         const questionId = mutation.payload.questionId;
         const value = mutation.payload.value;
-        if (typeof questionId !== 'string' || typeof value !== 'boolean') {
+        if (typeof questionId !== "string" || typeof value !== "boolean") {
           break;
         }
 
@@ -852,7 +882,7 @@ export function replayPendingMutationsOntoAttempt(
         };
         break;
       }
-      case 'position': {
+      case "position": {
         const currentModule = mutation.payload.currentModule;
         const currentQuestionId = mutation.payload.currentQuestionId;
         const phase = mutation.payload.phase;
@@ -860,7 +890,7 @@ export function replayPendingMutationsOntoAttempt(
         nextAttempt = {
           ...nextAttempt,
           ...(isModuleType(currentModule) ? { currentModule } : {}),
-          ...(typeof currentQuestionId === 'string' || currentQuestionId === null
+          ...(typeof currentQuestionId === "string" || currentQuestionId === null
             ? { currentQuestionId }
             : {}),
           ...(isAttemptPhase(phase) ? { phase } : {}),
@@ -895,7 +925,7 @@ function parseIsoTimestamp(value: string | null | undefined): number {
 
 function shouldPreferLocalAcceptedState(
   localAttempt: StudentAttempt | null,
-  incomingAttempt: StudentAttempt,
+  incomingAttempt: StudentAttempt
 ): localAttempt is StudentAttempt {
   if (!localAttempt || localAttempt.id !== incomingAttempt.id || incomingAttempt.submittedAt) {
     return false;
@@ -913,7 +943,7 @@ function shouldPreferLocalAcceptedState(
 
 function preserveNewerAcceptedLocalState(
   incomingAttempt: StudentAttempt,
-  localAttempt: StudentAttempt | null,
+  localAttempt: StudentAttempt | null
 ): StudentAttempt {
   if (!shouldPreferLocalAcceptedState(localAttempt, incomingAttempt)) {
     return incomingAttempt;
@@ -937,29 +967,34 @@ function preserveNewerAcceptedLocalState(
         localAttempt.recovery.lastDroppedMutations ?? incomingAttempt.recovery.lastDroppedMutations,
       pendingMutationCount: Math.max(
         localAttempt.recovery.pendingMutationCount,
-        incomingAttempt.recovery.pendingMutationCount,
+        incomingAttempt.recovery.pendingMutationCount
       ),
       serverAcceptedThroughSeq: attemptAcceptedSeq(localAttempt),
       clientSessionId:
         localAttempt.recovery.clientSessionId ?? incomingAttempt.recovery.clientSessionId,
       syncState: localAttempt.recovery.syncState,
       finalSubmissionPending:
-        localAttempt.recovery.finalSubmissionPending || incomingAttempt.recovery.finalSubmissionPending,
+        localAttempt.recovery.finalSubmissionPending ||
+        incomingAttempt.recovery.finalSubmissionPending,
     },
   };
 }
 
 export function backendConflictReason(error: unknown): string | null {
   if (error instanceof ApiClientError) {
-    const reason = error.backendDetails?.['reason'];
-    return typeof reason === 'string' && reason.trim() ? reason : null;
+    const reason = error.backendDetails?.["reason"];
+    return typeof reason === "string" && reason.trim() ? reason : null;
   }
 
-  if (typeof error === 'object' && error !== null && 'backendDetails' in error) {
+  if (typeof error === "object" && error !== null && "backendDetails" in error) {
     const details = (error as { backendDetails?: unknown }).backendDetails;
-    if (details && typeof details === 'object' && 'reason' in (details as Record<string, unknown>)) {
-      const reason = (details as Record<string, unknown>)['reason'];
-      return typeof reason === 'string' && reason.trim() ? reason : null;
+    if (
+      details &&
+      typeof details === "object" &&
+      "reason" in (details as Record<string, unknown>)
+    ) {
+      const reason = (details as Record<string, unknown>)["reason"];
+      return typeof reason === "string" && reason.trim() ? reason : null;
     }
   }
 
@@ -968,17 +1003,21 @@ export function backendConflictReason(error: unknown): string | null {
 
 function backendConflictLatestRevision(error: unknown): number | null {
   if (error instanceof ApiClientError) {
-    const latestRevision = error.backendDetails?.['latestRevision'];
-    if (typeof latestRevision === 'number' && Number.isFinite(latestRevision)) {
+    const latestRevision = error.backendDetails?.["latestRevision"];
+    if (typeof latestRevision === "number" && Number.isFinite(latestRevision)) {
       return latestRevision;
     }
   }
 
-  if (typeof error === 'object' && error !== null && 'backendDetails' in error) {
+  if (typeof error === "object" && error !== null && "backendDetails" in error) {
     const details = (error as { backendDetails?: unknown }).backendDetails;
-    if (details && typeof details === 'object' && 'latestRevision' in (details as Record<string, unknown>)) {
-      const latestRevision = (details as Record<string, unknown>)['latestRevision'];
-      if (typeof latestRevision === 'number' && Number.isFinite(latestRevision)) {
+    if (
+      details &&
+      typeof details === "object" &&
+      "latestRevision" in (details as Record<string, unknown>)
+    ) {
+      const latestRevision = (details as Record<string, unknown>)["latestRevision"];
+      if (typeof latestRevision === "number" && Number.isFinite(latestRevision)) {
         return latestRevision;
       }
     }
@@ -991,7 +1030,7 @@ type OperationCommandPayload =
   | {
       mutationId: string;
       baseRevision: number;
-      type: 'SetSlot';
+      type: "SetSlot";
       questionId: string;
       slotIndex: number;
       value: string;
@@ -999,82 +1038,82 @@ type OperationCommandPayload =
   | {
       mutationId: string;
       baseRevision: number;
-      type: 'ClearSlot';
+      type: "ClearSlot";
       questionId: string;
       slotIndex: number;
     }
   | {
       mutationId: string;
       baseRevision: number;
-      type: 'SetScalar';
+      type: "SetScalar";
       questionId: string;
       value: string;
     }
   | {
       mutationId: string;
       baseRevision: number;
-      type: 'ClearScalar';
+      type: "ClearScalar";
       questionId: string;
     }
   | {
       mutationId: string;
       baseRevision: number;
-      type: 'SetChoice';
+      type: "SetChoice";
       questionId: string;
       value: string | string[];
     }
   | {
       mutationId: string;
       baseRevision: number;
-      type: 'ClearChoice';
+      type: "ClearChoice";
       questionId: string;
     }
   | {
       mutationId: string;
       baseRevision: number;
-      type: 'SetEssayText';
+      type: "SetEssayText";
       taskId: string;
       value: string;
     }
   | {
       mutationId: string;
       baseRevision: number;
-      type: 'ClearEssayText';
+      type: "ClearEssayText";
       taskId: string;
     }
   | {
       mutationId: string;
       baseRevision: number;
-      type: 'SetFlag';
+      type: "SetFlag";
       questionId: string;
       value: boolean;
     };
 
 function toOperationCommand(
   mutation: StudentAttemptMutation,
-  baseRevision: number,
+  baseRevision: number
 ): OperationCommandPayload | null {
-  if (mutation.type === 'answer') {
+  if (mutation.type === "answer") {
     const questionId = mutation.payload.questionId;
-    if (typeof questionId !== 'string' || !questionId.trim()) {
+    if (typeof questionId !== "string" || !questionId.trim()) {
       return null;
     }
 
     const slotIndex = mutation.payload.slotIndex;
     const rawValue = mutation.payload.value;
-    if (typeof slotIndex === 'number' && Number.isInteger(slotIndex) && slotIndex >= 0) {
+    if (typeof slotIndex === "number" && Number.isInteger(slotIndex) && slotIndex >= 0) {
       if (Array.isArray(rawValue)) {
         // Guard against partial/unloaded slot payloads so missing indices never become accidental clears.
         if (slotIndex >= rawValue.length) {
           return null;
         }
         const slotValue = rawValue[slotIndex];
-        if (typeof slotValue === 'string') {
+        if (typeof slotValue === "string") {
           if (slotValue.trim().length > 0) {
             return {
               mutationId: mutation.id,
               baseRevision,
-              type: 'SetSlot',
+              type: "SetSlot",
               questionId,
               slotIndex,
               value: slotValue,
@@ -1083,7 +1122,7 @@ function toOperationCommand(
           return {
             mutationId: mutation.id,
             baseRevision,
-            type: 'ClearSlot',
+            type: "ClearSlot",
             questionId,
             slotIndex,
           };
@@ -1092,7 +1131,7 @@ function toOperationCommand(
           return {
             mutationId: mutation.id,
             baseRevision,
-            type: 'ClearSlot',
+            type: "ClearSlot",
             questionId,
             slotIndex,
           };
@@ -1100,12 +1139,12 @@ function toOperationCommand(
         return null;
       }
 
-      if (typeof rawValue === 'string') {
+      if (typeof rawValue === "string") {
         if (rawValue.trim().length > 0) {
           return {
             mutationId: mutation.id,
             baseRevision,
-            type: 'SetSlot',
+            type: "SetSlot",
             questionId,
             slotIndex,
             value: rawValue,
@@ -1114,7 +1153,7 @@ function toOperationCommand(
         return {
           mutationId: mutation.id,
           baseRevision,
-          type: 'ClearSlot',
+          type: "ClearSlot",
           questionId,
           slotIndex,
         };
@@ -1124,7 +1163,7 @@ function toOperationCommand(
         return {
           mutationId: mutation.id,
           baseRevision,
-          type: 'ClearSlot',
+          type: "ClearSlot",
           questionId,
           slotIndex,
         };
@@ -1134,37 +1173,39 @@ function toOperationCommand(
     }
 
     if (Array.isArray(rawValue)) {
-      const values = rawValue.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+      const values = rawValue.filter(
+        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
+      );
       if (values.length === 0) {
         return {
           mutationId: mutation.id,
           baseRevision,
-          type: 'ClearChoice',
+          type: "ClearChoice",
           questionId,
         };
       }
       return {
         mutationId: mutation.id,
         baseRevision,
-        type: 'SetChoice',
+        type: "SetChoice",
         questionId,
         value: values,
       };
     }
 
-    if (typeof rawValue === 'string') {
+    if (typeof rawValue === "string") {
       if (rawValue.trim().length === 0) {
         return {
           mutationId: mutation.id,
           baseRevision,
-          type: 'ClearScalar',
+          type: "ClearScalar",
           questionId,
         };
       }
       return {
         mutationId: mutation.id,
         baseRevision,
-        type: 'SetScalar',
+        type: "SetScalar",
         questionId,
         value: rawValue,
       };
@@ -1179,7 +1220,7 @@ function toOperationCommand(
       return {
         mutationId: mutation.id,
         baseRevision,
-        type: 'ClearScalar',
+        type: "ClearScalar",
         questionId,
       };
     }
@@ -1187,20 +1228,20 @@ function toOperationCommand(
     return null;
   }
 
-  if (mutation.type === 'writing_answer') {
+  if (mutation.type === "writing_answer") {
     const taskId = mutation.payload.taskId;
     const value = mutation.payload.value;
-    if (typeof taskId !== 'string' || !taskId.trim()) {
+    if (typeof taskId !== "string" || !taskId.trim()) {
       return null;
     }
-    if (typeof value !== 'string') {
+    if (typeof value !== "string") {
       return null;
     }
-    if (typeof value === 'string' && value.trim()) {
+    if (typeof value === "string" && value.trim()) {
       return {
         mutationId: mutation.id,
         baseRevision,
-        type: 'SetEssayText',
+        type: "SetEssayText",
         taskId,
         value,
       };
@@ -1208,21 +1249,21 @@ function toOperationCommand(
     return {
       mutationId: mutation.id,
       baseRevision,
-      type: 'ClearEssayText',
+      type: "ClearEssayText",
       taskId,
     };
   }
 
-  if (mutation.type === 'flag') {
+  if (mutation.type === "flag") {
     const questionId = mutation.payload.questionId;
     const value = mutation.payload.value;
-    if (typeof questionId !== 'string' || !questionId.trim() || typeof value !== 'boolean') {
+    if (typeof questionId !== "string" || !questionId.trim() || typeof value !== "boolean") {
       return null;
     }
     return {
       mutationId: mutation.id,
       baseRevision,
-      type: 'SetFlag',
+      type: "SetFlag",
       questionId,
       value,
     };
@@ -1241,9 +1282,9 @@ function getMutationWatermarkStorageKey(attemptId: string, clientSessionId: stri
 
 function readStoredMutationSequenceWatermark(
   attemptId: string,
-  clientSessionId: string,
+  clientSessionId: string
 ): number | null {
-  const session = getBrowserStorage('sessionStorage');
+  const session = getBrowserStorage("sessionStorage");
   if (!session) {
     return null;
   }
@@ -1260,11 +1301,11 @@ function readStoredMutationSequenceWatermark(
 function storeMutationSequenceWatermark(
   attemptId: string,
   clientSessionId: string,
-  watermark: number,
+  watermark: number
 ): void {
   mutationSequenceWatermarks.set(mutationWatermarkKey(attemptId, clientSessionId), watermark);
 
-  const session = getBrowserStorage('sessionStorage');
+  const session = getBrowserStorage("sessionStorage");
   if (!session) {
     return;
   }
@@ -1295,10 +1336,10 @@ function readOrPrimeMutationSequenceWatermark(attemptId: string, clientSessionId
 function ensureClientSessionId(
   scheduleId: string,
   studentKey: string,
-  preferredClientSessionId: string | null = null,
+  preferredClientSessionId: string | null = null
 ): string {
-  const session = getBrowserStorage('sessionStorage');
-  const local = getBrowserStorage('localStorage');
+  const session = getBrowserStorage("sessionStorage");
+  const local = getBrowserStorage("localStorage");
 
   const storageKey = getClientSessionStorageKey(scheduleId, studentKey);
   const stored = session?.getItem(storageKey) ?? local?.getItem(storageKey) ?? null;
@@ -1317,7 +1358,7 @@ function ensureClientSessionId(
   }
 
   const generated =
-    typeof preferredClientSessionId === 'string' && preferredClientSessionId.trim().length > 0
+    typeof preferredClientSessionId === "string" && preferredClientSessionId.trim().length > 0
       ? preferredClientSessionId
       : generateUuid();
   try {
@@ -1339,12 +1380,11 @@ export function ensureClientSessionIdForAttempt(attempt: StudentAttempt): string
   return ensureClientSessionId(attempt.scheduleId, attempt.studentKey, preferredClientSessionId);
 }
 
-export async function refreshAttemptCredentialForAttempt(attempt: StudentAttempt): Promise<boolean> {
+export async function refreshAttemptCredentialForAttempt(
+  attempt: StudentAttempt
+): Promise<boolean> {
   const clientSessionId = ensureClientSessionIdForAttempt(attempt);
-  return refreshAttemptCredentialForAttemptFromAdapter(
-    attempt,
-    clientSessionId,
-  );
+  return refreshAttemptCredentialForAttemptFromAdapter(attempt, clientSessionId);
 }
 
 function mutationWatermarkKey(attemptId: string, clientSessionId: string): string {
@@ -1353,7 +1393,7 @@ function mutationWatermarkKey(attemptId: string, clientSessionId: string): strin
 
 export function mapBackendStudentAttempt(
   payload: BackendStudentAttempt,
-  receipt?: Pick<BackendSubmitResponse, 'submissionId' | 'submittedAt'>,
+  receipt?: Pick<BackendSubmitResponse, "submissionId" | "submittedAt" | "score">
 ): StudentAttempt {
   rememberAttemptSchedule(payload.id, payload.scheduleId);
 
@@ -1363,22 +1403,25 @@ export function mapBackendStudentAttempt(
   const writingAnswers = payload.writingAnswers ?? payload.finalSubmission?.writingAnswers ?? {};
   const flags = payload.flags ?? payload.finalSubmission?.flags ?? {};
 
-  const finalSubmission = payload.finalSubmission?.submissionId && payload.finalSubmission.submittedAt
-    ? {
-        submissionId: payload.finalSubmission.submissionId,
-        submittedAt: payload.finalSubmission.submittedAt,
-        ...(payload.finalSubmission.answers ? { answers: payload.finalSubmission.answers } : {}),
-        ...(payload.finalSubmission.writingAnswers
-          ? { writingAnswers: payload.finalSubmission.writingAnswers }
-          : {}),
-        ...(payload.finalSubmission.flags ? { flags: payload.finalSubmission.flags } : {}),
-      }
-    : receipt
+  const finalSubmission =
+    payload.finalSubmission?.submissionId && payload.finalSubmission.submittedAt
       ? {
-          submissionId: receipt.submissionId,
-          submittedAt: receipt.submittedAt,
+          submissionId: payload.finalSubmission.submissionId,
+          submittedAt: payload.finalSubmission.submittedAt,
+          ...(payload.finalSubmission.answers ? { answers: payload.finalSubmission.answers } : {}),
+          ...(payload.finalSubmission.writingAnswers
+            ? { writingAnswers: payload.finalSubmission.writingAnswers }
+            : {}),
+          ...(payload.finalSubmission.flags ? { flags: payload.finalSubmission.flags } : {}),
+          ...(payload.finalSubmission.score ? { score: payload.finalSubmission.score } : {}),
         }
-      : null;
+      : receipt
+        ? {
+            submissionId: receipt.submissionId,
+            submittedAt: receipt.submittedAt,
+            ...(receipt.score ? { score: receipt.score } : {}),
+          }
+        : null;
 
   return normalizeStudentAttempt({
     id: payload.id,
@@ -1398,9 +1441,10 @@ export function mapBackendStudentAttempt(
     writingAnswers,
     flags,
     violations: payload.violationsSnapshot ?? [],
-    submittedAt: payload.submittedAt ?? payload.finalSubmission?.submittedAt ?? receipt?.submittedAt ?? null,
+    submittedAt:
+      payload.submittedAt ?? payload.finalSubmission?.submittedAt ?? receipt?.submittedAt ?? null,
     ...(finalSubmission ? { finalSubmission } : {}),
-    proctorStatus: payload.proctorStatus ?? 'active',
+    proctorStatus: payload.proctorStatus ?? "active",
     proctorNote: payload.proctorNote ?? null,
     proctorUpdatedAt: payload.proctorUpdatedAt ?? null,
     proctorUpdatedBy: payload.proctorUpdatedBy ?? null,
@@ -1410,13 +1454,11 @@ export function mapBackendStudentAttempt(
       preCheck: payload.integrity?.preCheck ?? null,
       deviceFingerprintHash: payload.integrity?.deviceFingerprintHash ?? null,
       clientSessionId:
-        payload.integrity?.clientSessionId ??
-        payload.recovery?.clientSessionId ??
-        null,
+        payload.integrity?.clientSessionId ?? payload.recovery?.clientSessionId ?? null,
       lastDisconnectAt: payload.integrity?.lastDisconnectAt ?? null,
       lastReconnectAt: payload.integrity?.lastReconnectAt ?? null,
       lastHeartbeatAt: payload.integrity?.lastHeartbeatAt ?? null,
-      lastHeartbeatStatus: payload.integrity?.lastHeartbeatStatus ?? 'idle',
+      lastHeartbeatStatus: payload.integrity?.lastHeartbeatStatus ?? "idle",
     },
     recovery: {
       finalSubmissionPending: payload.recovery?.finalSubmissionPending ?? false,
@@ -1427,10 +1469,8 @@ export function mapBackendStudentAttempt(
       pendingMutationCount: payload.recovery?.pendingMutationCount ?? 0,
       serverAcceptedThroughSeq: payload.recovery?.serverAcceptedThroughSeq ?? 0,
       clientSessionId:
-        payload.recovery?.clientSessionId ??
-        payload.integrity?.clientSessionId ??
-        null,
-      syncState: payload.recovery?.syncState ?? 'idle',
+        payload.recovery?.clientSessionId ?? payload.integrity?.clientSessionId ?? null,
+      syncState: payload.recovery?.syncState ?? "idle",
     },
     createdAt: payload.createdAt,
     updatedAt: payload.updatedAt,
@@ -1458,8 +1498,8 @@ export function clearAttemptMutationWatermark(attempt: StudentAttempt): void {
 
   mutationSequenceWatermarks.delete(mutationWatermarkKey(attempt.id, clientSessionId));
   try {
-    getBrowserStorage('sessionStorage')?.removeItem(
-      getMutationWatermarkStorageKey(attempt.id, clientSessionId),
+    getBrowserStorage("sessionStorage")?.removeItem(
+      getMutationWatermarkStorageKey(attempt.id, clientSessionId)
     );
   } catch {
     // ignore
@@ -1507,11 +1547,16 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     localStorage.setItem(key, JSON.stringify(data));
   }
 
-  async getAttemptByScheduleId(scheduleId: string, studentKey: string): Promise<StudentAttempt | null> {
-    const attempts = this.getItem<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeStudentAttempt);
+  async getAttemptByScheduleId(
+    scheduleId: string,
+    studentKey: string
+  ): Promise<StudentAttempt | null> {
+    const attempts =
+      this.getItem<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeStudentAttempt);
     const exactMatch =
-      attempts.find((attempt) => attempt.scheduleId === scheduleId && attempt.studentKey === studentKey) ??
-      null;
+      attempts.find(
+        (attempt) => attempt.scheduleId === scheduleId && attempt.studentKey === studentKey
+      ) ?? null;
 
     if (exactMatch) {
       return exactMatch;
@@ -1520,11 +1565,11 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     const prefix = `student-${scheduleId}-`;
     const candidateId = studentKey.startsWith(prefix)
       ? studentKey.slice(prefix.length)
-      : studentKey.split('-').pop() || studentKey;
+      : studentKey.split("-").pop() || studentKey;
 
     return (
       attempts.find(
-        (attempt) => attempt.scheduleId === scheduleId && attempt.candidateId === candidateId,
+        (attempt) => attempt.scheduleId === scheduleId && attempt.candidateId === candidateId
       ) ?? null
     );
   }
@@ -1534,12 +1579,14 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
   }
 
   async getAttemptsByScheduleId(scheduleId: string): Promise<StudentAttempt[]> {
-    const attempts = this.getItem<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeStudentAttempt);
+    const attempts =
+      this.getItem<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeStudentAttempt);
     return attempts.filter((attempt) => attempt.scheduleId === scheduleId);
   }
 
   async saveAttempt(attempt: StudentAttempt): Promise<void> {
-    const attempts = this.getItem<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeStudentAttempt);
+    const attempts =
+      this.getItem<StudentAttempt>(STORAGE_KEY_ATTEMPTS).map(normalizeStudentAttempt);
     const normalizedAttempt = normalizeStudentAttempt({
       ...attempt,
       updatedAt: new Date().toISOString(),
@@ -1558,27 +1605,27 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
   async submitAttempt(attempt: StudentAttempt): Promise<StudentAttempt> {
     if ((attempt.recovery.pendingMutationCount ?? 0) > 0) {
       emitStudentObservabilityMetric(
-        'student_answer_loss_risk_total',
+        "student_answer_loss_risk_total",
         withStudentObservabilityDimensions({
           scheduleId: attempt.scheduleId,
           attemptId: attempt.id,
-          endpoint: '/v1/student/sessions/:scheduleId/submit',
-          reason: 'submit_with_pending_mutations',
+          endpoint: "/v1/student/sessions/:scheduleId/submit",
+          reason: "submit_with_pending_mutations",
           pendingMutationCount: attempt.recovery.pendingMutationCount,
           syncState: attempt.recovery.syncState,
-        }),
+        })
       );
     }
 
     const submittedAttempt = normalizeStudentAttempt({
       ...attempt,
-      phase: 'post-exam',
+      phase: "post-exam",
       currentQuestionId: null,
       recovery: {
         ...attempt.recovery,
         lastPersistedAt: new Date().toISOString(),
         pendingMutationCount: 0,
-        syncState: 'saved',
+        syncState: "saved",
       },
     });
 
@@ -1591,7 +1638,7 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
   async createAttempt(seed: StudentAttemptSeed): Promise<StudentAttempt> {
     const now = new Date().toISOString();
     const attempt: StudentAttempt = {
-      id: generateId('attempt'),
+      id: generateId("attempt"),
       scheduleId: seed.scheduleId,
       studentKey: seed.studentKey,
       examId: seed.examId,
@@ -1600,14 +1647,14 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
       candidateId: seed.candidateId,
       candidateName: seed.candidateName,
       candidateEmail: seed.candidateEmail,
-      phase: seed.phase ?? 'pre-check',
-      currentModule: seed.currentModule ?? 'listening',
+      phase: seed.phase ?? "pre-check",
+      currentModule: seed.currentModule ?? "listening",
       currentQuestionId: seed.currentQuestionId ?? null,
       answers: {},
       writingAnswers: {},
       flags: {},
       violations: [],
-      proctorStatus: 'active',
+      proctorStatus: "active",
       proctorNote: null,
       proctorUpdatedAt: null,
       proctorUpdatedBy: null,
@@ -1620,7 +1667,7 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
         lastDisconnectAt: null,
         lastReconnectAt: null,
         lastHeartbeatAt: null,
-        lastHeartbeatStatus: 'idle',
+        lastHeartbeatStatus: "idle",
       },
       recovery: {
         finalSubmissionPending: false,
@@ -1631,7 +1678,7 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
         pendingMutationCount: 0,
         serverAcceptedThroughSeq: 0,
         clientSessionId: null,
-        syncState: 'idle',
+        syncState: "idle",
       },
       createdAt: now,
       updatedAt: now,
@@ -1641,7 +1688,10 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     return attempt;
   }
 
-  async savePendingMutations(attemptId: string, mutations: StudentAttemptMutation[]): Promise<void> {
+  async savePendingMutations(
+    attemptId: string,
+    mutations: StudentAttemptMutation[]
+  ): Promise<void> {
     const pending = this.getItem<PendingAttemptMutationRecord>(STORAGE_KEY_PENDING_MUTATIONS);
     const index = pending.findIndex((entry) => entry.attemptId === attemptId);
     const nextEntry: PendingAttemptMutationRecord = {
@@ -1705,7 +1755,8 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
       }
     }
 
-    const localResult = localPending.find((entry) => entry.attemptId === attemptId)?.mutations ?? [];
+    const localResult =
+      localPending.find((entry) => entry.attemptId === attemptId)?.mutations ?? [];
     if (localResult.length > 0) {
       this.pendingMutationFallbackMemory.delete(attemptId);
       return localResult;
@@ -1722,7 +1773,7 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     try {
       this.setItem(
         STORAGE_KEY_PENDING_MUTATIONS,
-        pending.filter((entry) => entry.attemptId !== attemptId),
+        pending.filter((entry) => entry.attemptId !== attemptId)
       );
     } catch (error) {
       localWriteError = error;
@@ -1742,7 +1793,7 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     const attemptEvents = events
       .filter((candidate) => candidate.attemptId === event.attemptId)
       .sort(
-        (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
+        (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
       );
     const pruned =
       attemptEvents.length > MAX_HEARTBEAT_EVENTS_PER_ATTEMPT
@@ -1756,14 +1807,16 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     const events = this.getItem<StudentHeartbeatEvent>(STORAGE_KEY_HEARTBEAT_EVENTS);
     return events
       .filter((event) => event.attemptId === attemptId)
-      .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+      .sort(
+        (left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
+      );
   }
 
   async deleteHeartbeatEvent(attemptId: string, eventId: string): Promise<void> {
     const events = this.getItem<StudentHeartbeatEvent>(STORAGE_KEY_HEARTBEAT_EVENTS);
     this.setItem(
       STORAGE_KEY_HEARTBEAT_EVENTS,
-      events.filter((event) => !(event.attemptId === attemptId && event.id === eventId)),
+      events.filter((event) => !(event.attemptId === attemptId && event.id === eventId))
     );
   }
 
@@ -1786,7 +1839,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     });
     const lock = previous.then(
       () => gate,
-      () => gate,
+      () => gate
     );
 
     this.saveAttemptLocks.set(attemptId, lock);
@@ -1822,22 +1875,18 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     attempt: StudentAttempt,
     endpoint: string,
     body: unknown,
-    options?: Omit<ApiRequestConfig, 'headers'> & {
+    options?: Omit<ApiRequestConfig, "headers"> & {
       headers?: Record<string, string> | undefined;
-    },
+    }
   ): Promise<T> {
     const doPost = async (): Promise<T> =>
-      backendPost<T>(
-        endpoint,
-        body,
-        {
-          ...options,
-          headers: {
-            ...(options?.headers ?? {}),
-            ...buildAttemptAuthorizationHeaderFromAdapter(attempt),
-          },
+      backendPost<T>(endpoint, body, {
+        ...options,
+        headers: {
+          ...(options?.headers ?? {}),
+          ...buildAttemptAuthorizationHeaderFromAdapter(attempt),
         },
-      );
+      });
 
     try {
       return await doPost();
@@ -1858,15 +1907,18 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     }
   }
 
-  private async recordDroppedMutationsAudit(attempt: StudentAttempt, payload: Record<string, unknown>): Promise<void> {
+  private async recordDroppedMutationsAudit(
+    attempt: StudentAttempt,
+    payload: Record<string, unknown>
+  ): Promise<void> {
     try {
       await backendPost(
         studentSessionTransport.paths.audit(attempt.scheduleId),
         {
-          actionType: 'AUTO_ACTION',
+          actionType: "AUTO_ACTION",
           clientTimestamp: new Date().toISOString(),
           payload: {
-            event: 'MUTATION_DROPPED_STALE_SECTION',
+            event: "MUTATION_DROPPED_STALE_SECTION",
             ...payload,
           },
         },
@@ -1874,7 +1926,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
           headers: buildAttemptAuthorizationHeaderFromAdapter(attempt),
           retries: 0,
           timeout: 5_000,
-        },
+        }
       );
     } catch {
       // Best-effort only: never block saving/flush.
@@ -1883,7 +1935,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 
   private async reconcileAttemptWithCachedState(
     attempt: StudentAttempt,
-    pendingMutations: StudentAttemptMutation[],
+    pendingMutations: StudentAttemptMutation[]
   ): Promise<StudentAttempt> {
     const localAttempt =
       (await this.cache.getAllAttempts()).find((candidate) => candidate.id === attempt.id) ?? null;
@@ -1891,7 +1943,10 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     return replayPendingMutationsOntoAttempt(acceptedAttempt, pendingMutations);
   }
 
-  private filterTombstonedMutations(attemptId: string, mutations: StudentAttemptMutation[]): StudentAttemptMutation[] {
+  private filterTombstonedMutations(
+    attemptId: string,
+    mutations: StudentAttemptMutation[]
+  ): StudentAttemptMutation[] {
     const tombstones = this.droppedMutationTombstones.get(attemptId);
     if (!tombstones || tombstones.size === 0) {
       return mutations;
@@ -1929,9 +1984,9 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     let flagsChanged = false;
 
     for (const mutation of dropped) {
-      if (mutation.type === 'answer') {
+      if (mutation.type === "answer") {
         const questionId = mutation.payload.questionId;
-        if (typeof questionId !== 'string' || questionId.trim().length === 0) {
+        if (typeof questionId !== "string" || questionId.trim().length === 0) {
           continue;
         }
         const serverAnswer = serverAttempt.answers[questionId];
@@ -1948,22 +2003,22 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         continue;
       }
 
-      if (mutation.type === 'writing_answer') {
+      if (mutation.type === "writing_answer") {
         const taskId = mutation.payload.taskId;
-        if (typeof taskId !== 'string' || taskId.trim().length === 0) {
+        if (typeof taskId !== "string" || taskId.trim().length === 0) {
           continue;
         }
         nextWritingAnswers = {
           ...nextWritingAnswers,
-          [taskId]: serverAttempt.writingAnswers[taskId] ?? '',
+          [taskId]: serverAttempt.writingAnswers[taskId] ?? "",
         };
         writingChanged = true;
         continue;
       }
 
-      if (mutation.type === 'flag') {
+      if (mutation.type === "flag") {
         const questionId = mutation.payload.questionId;
-        if (typeof questionId !== 'string' || questionId.trim().length === 0) {
+        if (typeof questionId !== "string" || questionId.trim().length === 0) {
           continue;
         }
         nextFlags = {
@@ -2032,9 +2087,11 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
               ...(args.lifecycleContext?.flushCycleId
                 ? { [STUDENT_FLUSH_CYCLE_ID_HEADER]: args.lifecycleContext.flushCycleId }
                 : {}),
-              [STUDENT_LIFECYCLE_SAMPLE_HEADER]: String(Boolean(args.lifecycleContext?.sampledSuccessLogs)),
+              [STUDENT_LIFECYCLE_SAMPLE_HEADER]: String(
+                Boolean(args.lifecycleContext?.sampledSuccessLogs)
+              ),
             },
-          },
+          }
         );
 
         nextSeq = response.serverAcceptedThroughSeq;
@@ -2042,7 +2099,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         storeMutationSequenceWatermark(
           currentAttempt.id,
           args.clientSessionId,
-          response.serverAcceptedThroughSeq,
+          response.serverAcceptedThroughSeq
         );
         storeAttemptCredentialFromAdapter(currentAttempt, response.refreshedAttemptCredential);
 
@@ -2086,16 +2143,19 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     return reconciledAttempt;
   }
 
-  async getAttemptByScheduleId(scheduleId: string, studentKey: string): Promise<StudentAttempt | null> {
+  async getAttemptByScheduleId(
+    scheduleId: string,
+    studentKey: string
+  ): Promise<StudentAttempt | null> {
     const candidateId = studentSessionTransport.resolveCandidateIdFromStudentKey(
       scheduleId,
-      studentKey,
+      studentKey
     );
     if (!candidateId) {
       return null;
     }
     const session = await backendGet<BackendStudentSessionContext>(
-      studentSessionTransport.paths.session(scheduleId, candidateId),
+      studentSessionTransport.paths.session(scheduleId, candidateId)
     );
     if (!session.attempt) {
       return null;
@@ -2118,7 +2178,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     await this.withSaveAttemptLock(attempt.id, async () => {
       const pendingMutations = this.filterTombstonedMutations(
         attempt.id,
-        await this.cache.getPendingMutations(attempt.id),
+        await this.cache.getPendingMutations(attempt.id)
       );
       let currentAttempt = await this.reconcileAttemptWithCachedState(attempt, pendingMutations);
       await this.cache.saveAttempt(currentAttempt);
@@ -2153,13 +2213,13 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
       const reason = statusCode === 409 ? backendConflictReason(first.error) : null;
       const latestRevision = statusCode === 409 ? backendConflictLatestRevision(first.error) : null;
 
-      if (statusCode === 409 && reason === 'BASE_REVISION_MISMATCH') {
+      if (statusCode === 409 && reason === "BASE_REVISION_MISMATCH") {
         const session = await backendGet<BackendStudentSessionContext>(
           studentSessionTransport.paths.session(
             currentAttempt.scheduleId,
-            currentAttempt.candidateId,
+            currentAttempt.candidateId
           ),
-          { retries: 0 },
+          { retries: 0 }
         );
         if (!session.attempt) {
           throw first.error;
@@ -2171,13 +2231,13 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 
         const rebasedMutations = first.remainingMutations.map((mutation) => ({
           ...mutation,
-          id: generateId('mutation'),
+          id: generateId("mutation"),
         }));
         await this.cache.savePendingMutations(refreshedAttempt.id, rebasedMutations);
 
         const rebasedAttempt = mergeStudentAttemptRecovery(refreshedAttempt, {
           pendingMutationCount: rebasedMutations.length,
-          syncState: rebasedMutations.length > 0 ? 'saving' : 'saved',
+          syncState: rebasedMutations.length > 0 ? "saving" : "saved",
         });
         await this.cache.saveAttempt(rebasedAttempt);
 
@@ -2195,16 +2255,15 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         throw second.error;
       }
 
-      if (statusCode === 409 && reason === 'ACTIVE_SESSION_SUPERSEDED') {
+      if (statusCode === 409 && reason === "ACTIVE_SESSION_SUPERSEDED") {
         const staleAttempt = mergeStudentAttemptRecovery(currentAttempt, {
-          syncState: 'error',
+          syncState: "error",
         });
         await this.cache.saveAttempt(staleAttempt);
         throw first.error;
       }
 
-      const shouldAttemptPrune =
-        statusCode === 409 && reason === 'SECTION_MISMATCH';
+      const shouldAttemptPrune = statusCode === 409 && reason === "SECTION_MISMATCH";
       if (!shouldAttemptPrune) {
         throw first.error;
       }
@@ -2212,15 +2271,16 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
       const session = await backendGet<BackendStudentSessionContext>(
         studentSessionTransport.paths.session(
           currentAttempt.scheduleId,
-          currentAttempt.candidateId,
+          currentAttempt.candidateId
         ),
-        { retries: 0 },
+        { retries: 0 }
       );
       const serverAttempt = session.attempt ? mapBackendStudentAttempt(session.attempt) : null;
       const runtimeStatus = session.runtime?.status ?? null;
       const runtimeSectionKey = session.runtime?.currentSectionKey ?? null;
-      const sectionHint = runtimeSectionKey ?? serverAttempt?.currentModule ?? currentAttempt.currentModule;
-      const runtimeTerminal = runtimeStatus === 'completed' || runtimeStatus === 'cancelled';
+      const sectionHint =
+        runtimeSectionKey ?? serverAttempt?.currentModule ?? currentAttempt.currentModule;
+      const runtimeTerminal = runtimeStatus === "completed" || runtimeStatus === "cancelled";
 
       const dropped = first.remainingMutations.filter((mutation) => {
         if (!isObjectiveMutation(mutation)) {
@@ -2238,13 +2298,15 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         }
         return moduleKey !== sectionHint;
       });
-      const prunedMutations = first.remainingMutations.filter((mutation) => !dropped.includes(mutation));
+      const prunedMutations = first.remainingMutations.filter(
+        (mutation) => !dropped.includes(mutation)
+      );
 
       if (dropped.length > 0) {
         const droppedModuleKeys = new Set(
           dropped
             .map(mutationModuleKey)
-            .filter((value): value is ModuleType => typeof value === 'string' && value.length > 0),
+            .filter((value): value is ModuleType => typeof value === "string" && value.length > 0)
         );
         const affectedAnswers = new Set<string>();
         const affectedAnswerSlots = new Map<string, { questionId: string; slotIndex: number }>();
@@ -2252,11 +2314,11 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         const affectedFlags = new Set<string>();
 
         for (const mutation of dropped) {
-          if (mutation.type === 'answer') {
+          if (mutation.type === "answer") {
             const questionId = mutation.payload.questionId;
-            if (typeof questionId === 'string' && questionId.trim().length > 0) {
+            if (typeof questionId === "string" && questionId.trim().length > 0) {
               const slotIndex = mutation.payload.slotIndex;
-              if (typeof slotIndex === 'number' && Number.isInteger(slotIndex) && slotIndex >= 0) {
+              if (typeof slotIndex === "number" && Number.isInteger(slotIndex) && slotIndex >= 0) {
                 affectedAnswerSlots.set(`${questionId}:${slotIndex}`, { questionId, slotIndex });
               } else {
                 affectedAnswers.add(questionId);
@@ -2265,17 +2327,17 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
             continue;
           }
 
-          if (mutation.type === 'writing_answer') {
+          if (mutation.type === "writing_answer") {
             const taskId = mutation.payload.taskId;
-            if (typeof taskId === 'string' && taskId.trim().length > 0) {
+            if (typeof taskId === "string" && taskId.trim().length > 0) {
               affectedWritingAnswers.add(taskId);
             }
             continue;
           }
 
-          if (mutation.type === 'flag') {
+          if (mutation.type === "flag") {
             const questionId = mutation.payload.questionId;
-            if (typeof questionId === 'string' && questionId.trim().length > 0) {
+            if (typeof questionId === "string" && questionId.trim().length > 0) {
               affectedFlags.add(questionId);
             }
           }
@@ -2285,26 +2347,22 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
             ? null
             : droppedModuleKeys.size === 1
               ? ([...droppedModuleKeys][0] ?? null)
-              : 'multiple';
+              : "multiple";
         const summary = {
           at: new Date().toISOString(),
           count: dropped.length,
           fromModule,
           toModule: sectionHint,
-          reason: reason ?? 'UNKNOWN',
-          ...(affectedAnswers.size > 0
-            ? { affectedAnswers: [...affectedAnswers] }
-            : {}),
+          reason: reason ?? "UNKNOWN",
+          ...(affectedAnswers.size > 0 ? { affectedAnswers: [...affectedAnswers] } : {}),
           ...(affectedAnswerSlots.size > 0
             ? { affectedAnswerSlots: [...affectedAnswerSlots.values()] }
             : {}),
           ...(affectedWritingAnswers.size > 0
             ? { affectedWritingAnswers: [...affectedWritingAnswers] }
             : {}),
-          ...(affectedFlags.size > 0
-            ? { affectedFlags: [...affectedFlags] }
-            : {}),
-        } satisfies StudentAttempt['recovery']['lastDroppedMutations'];
+          ...(affectedFlags.size > 0 ? { affectedFlags: [...affectedFlags] } : {}),
+        } satisfies StudentAttempt["recovery"]["lastDroppedMutations"];
 
         this.addDroppedMutationTombstones(currentAttempt.id, dropped);
         currentAttempt = this.reconcileDroppedMutationValues({
@@ -2316,11 +2374,11 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         currentAttempt = mergeStudentAttemptRecovery(currentAttempt, {
           lastDroppedMutations: summary,
           pendingMutationCount: prunedMutations.length,
-          syncState: prunedMutations.length > 0 ? 'saving' : 'saved',
+          syncState: prunedMutations.length > 0 ? "saving" : "saved",
         });
         await this.cache.saveAttempt(currentAttempt);
         emitStudentObservabilityMetric(
-          'student_attempt_dropped_mutation_total',
+          "student_attempt_dropped_mutation_total",
           withStudentObservabilityDimensions({
             scheduleId: currentAttempt.scheduleId,
             attemptId: currentAttempt.id,
@@ -2329,7 +2387,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
             count: summary.count,
             reason: summary.reason,
             syncState: currentAttempt.recovery.syncState,
-          }),
+          })
         );
         void this.recordDroppedMutationsAudit(currentAttempt, {
           at: summary.at,
@@ -2373,7 +2431,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 
   private async buildSubmitPayload(
     attempt: StudentAttempt,
-    submissionId: string,
+    submissionId: string
   ): Promise<BackendSubmitRequest> {
     const clientSessionId = ensureClientSessionIdForAttempt(attempt);
     const watermark = readOrPrimeMutationSequenceWatermark(attempt.id, clientSessionId);
@@ -2382,14 +2440,14 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     const finalClientSnapshotHash = await sha256Hex(finalAnswerPatch);
 
     emitStudentObservabilityMetric(
-      'student_submit_final_patch_built_total',
+      "student_submit_final_patch_built_total",
       withStudentObservabilityDimensions({
         scheduleId: attempt.scheduleId,
         attemptId: attempt.id,
         endpoint: studentSessionTransport.paths.submit(attempt.scheduleId),
         pendingMutationCount: attempt.recovery.pendingMutationCount,
         syncState: attempt.recovery.syncState,
-      }),
+      })
     );
 
     return {
@@ -2407,45 +2465,42 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     const pendingBeforeSubmit = await this.cache.getPendingMutations(attempt.id);
     if (pendingBeforeSubmit.length > 0 || (attempt.recovery.pendingMutationCount ?? 0) > 0) {
       emitStudentObservabilityMetric(
-        'student_answer_loss_risk_total',
+        "student_answer_loss_risk_total",
         withStudentObservabilityDimensions({
           scheduleId: attempt.scheduleId,
           attemptId: attempt.id,
           endpoint: studentSessionTransport.paths.submit(attempt.scheduleId),
-          reason: 'submit_with_pending_mutations',
+          reason: "submit_with_pending_mutations",
           pendingMutationCount: Math.max(
             pendingBeforeSubmit.length,
-            attempt.recovery.pendingMutationCount ?? 0,
+            attempt.recovery.pendingMutationCount ?? 0
           ),
           syncState: attempt.recovery.syncState,
-        }),
+        })
       );
     }
 
     if (!(await this.ensureAttemptCredential(attempt))) {
-      throw new Error('Missing attempt credential for student session.');
+      throw new Error("Missing attempt credential for student session.");
     }
 
     const submissionId = `student-submit-${attempt.id}`;
     const submitCycleId = generateUuid();
-    const sampledSuccessLogs = shouldEmitStudentLifecycleSuccessLog(STUDENT_LIFECYCLE_LOG_SAMPLE_RATE);
+    const sampledSuccessLogs = shouldEmitStudentLifecycleSuccessLog(
+      STUDENT_LIFECYCLE_LOG_SAMPLE_RATE
+    );
     const endpoint = studentSessionTransport.paths.submit(attempt.scheduleId);
     const submitOnce = async (candidate: StudentAttempt): Promise<BackendSubmitResponse> => {
       const payload = await this.buildSubmitPayload(candidate, submissionId);
-      return this.postWithAttemptAuth<BackendSubmitResponse>(
-        candidate,
-        endpoint,
-        payload,
-        {
-          headers: {
-            'Idempotency-Key': submissionId,
-            [STUDENT_SUBMIT_CYCLE_ID_HEADER]: submitCycleId,
-            [STUDENT_LIFECYCLE_SAMPLE_HEADER]: String(sampledSuccessLogs),
-          },
-          timeout: 60_000,
-          retries: 0,
+      return this.postWithAttemptAuth<BackendSubmitResponse>(candidate, endpoint, payload, {
+        headers: {
+          "Idempotency-Key": submissionId,
+          [STUDENT_SUBMIT_CYCLE_ID_HEADER]: submitCycleId,
+          [STUDENT_LIFECYCLE_SAMPLE_HEADER]: String(sampledSuccessLogs),
         },
-      );
+        timeout: 60_000,
+        retries: 0,
+      });
     };
 
     let attemptForSubmit = attempt;
@@ -2454,19 +2509,19 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
       response = await submitOnce(attemptForSubmit);
     } catch (error) {
       const reason = backendConflictReason(error);
-      if (reason !== 'FINAL_FLUSH_REQUIRED') {
+      if (reason !== "FINAL_FLUSH_REQUIRED") {
         throw error;
       }
 
       emitStudentObservabilityMetric(
-        'student_submit_final_patch_retry_total',
+        "student_submit_final_patch_retry_total",
         withStudentObservabilityDimensions({
           scheduleId: attempt.scheduleId,
           attemptId: attempt.id,
           endpoint,
           reason,
           syncState: attempt.recovery.syncState,
-        }),
+        })
       );
 
       await this.saveAttempt(attemptForSubmit, {
@@ -2482,6 +2537,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     const submittedAttempt = mapBackendStudentAttempt(response.attempt, {
       submissionId: response.submissionId,
       submittedAt: response.submittedAt,
+      score: response.score,
     });
     clearAttemptCredentialFromAdapter(attemptForSubmit);
     await this.cache.saveAttempt(submittedAttempt);
@@ -2499,11 +2555,11 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         candidateName: seed.candidateName,
         candidateEmail: seed.candidateEmail,
         clientSessionId: ensureClientSessionId(seed.scheduleId, seed.studentKey),
-      },
+      }
     );
 
     if (!session.attempt) {
-      throw new Error('Backend bootstrap did not return an attempt');
+      throw new Error("Backend bootstrap did not return an attempt");
     }
 
     const attempt = mapBackendStudentAttempt(session.attempt);
@@ -2511,7 +2567,10 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     return this.cacheAttempt(attempt);
   }
 
-  async savePendingMutations(attemptId: string, mutations: StudentAttemptMutation[]): Promise<void> {
+  async savePendingMutations(
+    attemptId: string,
+    mutations: StudentAttemptMutation[]
+  ): Promise<void> {
     await this.cache.savePendingMutations(attemptId, mutations);
   }
 
@@ -2541,7 +2600,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
         attempt,
         studentSessionTransport.paths.heartbeat(
           event.scheduleId,
-          event.type === 'heartbeat' ? 'ack' : undefined,
+          event.type === "heartbeat" ? "ack" : undefined
         ),
         {
           attemptId: event.attemptId,
@@ -2551,7 +2610,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
           payload: event.payload,
           clientTimestamp: event.timestamp,
         },
-        undefined,
+        undefined
       );
 
       storeAttemptCredentialFromAdapter(attempt, response.refreshedAttemptCredential);
@@ -2595,7 +2654,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
           attempt,
           studentSessionTransport.paths.heartbeat(
             event.scheduleId,
-            event.type === 'heartbeat' ? 'ack' : undefined,
+            event.type === "heartbeat" ? "ack" : undefined
           ),
           {
             attemptId: event.attemptId,
@@ -2605,7 +2664,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
             payload: event.payload,
             clientTimestamp: event.timestamp,
           },
-          undefined,
+          undefined
         );
 
         storeAttemptCredentialFromAdapter(attempt, response.refreshedAttemptCredential);
@@ -2623,6 +2682,5 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 }
 
 const studentAttemptCache = new LocalStorageStudentAttemptCache();
-export const studentAttemptRepository: IStudentAttemptRepository = new BackendStudentAttemptRepository(
-  studentAttemptCache,
-);
+export const studentAttemptRepository: IStudentAttemptRepository =
+  new BackendStudentAttemptRepository(studentAttemptCache);
