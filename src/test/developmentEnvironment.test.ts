@@ -13,6 +13,11 @@ function readBackendFile(relativePath: string): string {
   return fs.readFileSync(path.join(backendRoot, relativePath), "utf8");
 }
 
+function readOptionalBackendEnv(): string {
+  const envPath = path.join(backendRoot, ".env");
+  return fs.existsSync(envPath) ? readBackendFile(".env") : readBackendFile(".env.example");
+}
+
 describe("development environment wiring", () => {
   it("preserves the browser origin for backend CSRF validation in dev", () => {
     const config = viteConfigFactory({ command: "serve", mode: "development" });
@@ -26,7 +31,8 @@ describe("development environment wiring", () => {
 
   it("aligns backend compose ports, env defaults, and bootstrap flow", () => {
     const compose = readBackendFile("docker-compose.yml");
-    const backendEnv = readBackendFile(".env");
+    // `.env` is a local-only override and is intentionally not committed.
+    const backendEnv = readOptionalBackendEnv();
     const backendEnvExample = readBackendFile(".env.example");
     const makefile = readBackendFile("Makefile");
 

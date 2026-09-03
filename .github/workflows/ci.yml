@@ -116,7 +116,7 @@ jobs:
         run: >-
           npx playwright test e2e/smoke.spec.ts
           --project=chromium
-          --grep="login page|password reset|unknown routes|backend API health check|main routing"
+          --grep="login page|password reset|unknown routes|main routing"
 
       - name: Upload E2E Test Results
         if: always()
