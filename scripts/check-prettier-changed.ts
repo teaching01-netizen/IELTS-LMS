@@ -37,6 +37,11 @@ export function resolvePrettierRange(
   env: Record<string, string | undefined> = process.env,
   event: Record<string, unknown> = readGitHubEvent(env['GITHUB_EVENT_PATH']),
 ): { base: string; head: string } {
+  const baseRef = env['GITHUB_BASE_REF'];
+  if (baseRef) {
+    return { base: `origin/${baseRef}`, head: 'HEAD' };
+  }
+
   const base =
     pullRequestSha(event, 'base') ??
     event['before'] ??
