@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { CheckCircle2, Plus, X } from "lucide-react";
 import { validateSatStudentResponse } from "../providers/sat/studentResponse";
 
@@ -11,6 +11,9 @@ export function SatStudentResponseEditor({
   acceptedResponses,
   onChange,
 }: SatStudentResponseEditorProps) {
+  const idPrefix = useId();
+  const primaryResponseId = `sat-primary-response-${idPrefix}`;
+  const primaryResponseHelpId = `sat-primary-response-help-${idPrefix}`;
   const [equivalentDraft, setEquivalentDraft] = useState("");
   const [equivalentError, setEquivalentError] = useState<string | null>(null);
   const primary = acceptedResponses[0] ?? "";
@@ -49,7 +52,7 @@ export function SatStudentResponseEditor({
             <span className="text-[11px] text-slate-400">5 characters · 6 with a minus sign</span>
           </span>
           <input
-            id="sat-primary-response"
+            id={primaryResponseId}
             aria-label="Primary answer"
             value={primary}
             onChange={(event) => updatePrimary(event.target.value)}
@@ -58,12 +61,12 @@ export function SatStudentResponseEditor({
             spellCheck={false}
             maxLength={32}
             aria-invalid={Boolean(primary && !primaryValidation.valid)}
-            aria-describedby="sat-primary-response-help"
-            className={`w-full rounded-[12px] border bg-white px-3.5 py-3 font-mono text-[16px] text-slate-950 outline-none transition focus:ring-4 ${primary && !primaryValidation.valid ? "border-au-danger/40 focus:border-au-danger focus:ring-au-danger/10" : "border-au-separator-strong focus:border-au-accent/35 focus:ring-au-accent/10"}`}
+            aria-describedby={primaryResponseHelpId}
+            className={`w-full rounded-[12px] border bg-au-surface px-3.5 py-3 font-mono text-[16px] text-slate-950 outline-none transition focus:ring-4 ${primary && !primaryValidation.valid ? "border-au-danger/40 focus:border-au-danger focus:ring-au-danger/10" : "border-au-separator-strong focus:border-au-accent/35 focus:ring-au-accent/10"}`}
             placeholder="12"
           />
         </div>
-        <div id="sat-primary-response-help" className="mt-1.5 min-h-5 text-[11px] leading-5">
+        <div id={primaryResponseHelpId} className="mt-1.5 min-h-5 text-[11px] leading-5">
           {primary && !primaryValidation.valid ? (
             <span className="text-au-danger-text">{primaryValidation.message}</span>
           ) : primaryValidation.valid ? (
@@ -89,16 +92,16 @@ export function SatStudentResponseEditor({
             {equivalents.map((response) => (
               <span
                 key={response}
-                className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1.5 font-mono text-[11px] text-slate-700 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]"
+                className="inline-flex items-center gap-1 rounded-full border border-au-separator bg-au-surface px-2.5 py-1.5 font-mono text-[11px] text-slate-700"
               >
                 {response}
                 <button
                   type="button"
                   onClick={() => removeEquivalent(response)}
-                  className="rounded-full p-0.5 text-slate-400 hover:bg-au-fill hover:text-slate-700"
+                  className="authoring-interactive rounded-full p-0.5 text-slate-400 hover:bg-au-fill hover:text-slate-700"
                   aria-label={`Remove accepted response ${response}`}
                 >
-                  <X size={11} />
+                  <X size={11} aria-hidden="true" />
                 </button>
               </span>
             ))}
@@ -122,7 +125,7 @@ export function SatStudentResponseEditor({
             spellCheck={false}
             maxLength={32}
             aria-label="Add accepted equivalent"
-            className="min-w-0 flex-1 rounded-[12px] border border-au-separator-strong bg-white px-3 py-2.5 font-mono text-[13px] text-slate-900 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
+            className="min-w-0 flex-1 rounded-[12px] border border-au-separator-strong bg-au-surface px-3 py-2.5 font-mono text-[13px] text-slate-900 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
             placeholder="Example: 24/2"
           />
           <button
@@ -136,7 +139,7 @@ export function SatStudentResponseEditor({
           </button>
         </div>
         {equivalentError ? (
-          <p className="mt-1.5 text-[11px] text-au-danger-text">{equivalentError}</p>
+          <p role="alert" className="mt-1.5 text-[11px] text-au-danger-text">{equivalentError}</p>
         ) : null}
       </div>
     </div>

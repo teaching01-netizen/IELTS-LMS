@@ -20,7 +20,7 @@ describe("SAT rich question composer capabilities", () => {
       expect(screen.getByRole("textbox", { name: "Answer choice A" })).toBeInTheDocument()
     );
     expect(screen.getByRole("toolbar", { name: "Formatting tools" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Underline (⌘U)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Underline (⌘U)" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Insert equation" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Insert image or graph" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Code block" })).toBeInTheDocument();

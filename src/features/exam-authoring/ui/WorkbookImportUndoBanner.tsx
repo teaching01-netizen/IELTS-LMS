@@ -5,7 +5,7 @@ interface WorkbookImportUndoBannerProps {
 
 export function WorkbookImportUndoBanner({ busy, onUndo }: WorkbookImportUndoBannerProps) {
   return (
-    <div className="shrink-0 border-b border-au-separator bg-white/85 px-4 py-2 authoring-glass">
+    <div className="shrink-0 border-b border-au-separator px-4 py-2 authoring-glass">
       <div className="mx-auto flex max-w-[1920px] items-center justify-center gap-2 text-[12px] font-medium text-slate-500">
         <span>Imported from Excel</span>
         <span className="text-slate-300" aria-hidden="true">

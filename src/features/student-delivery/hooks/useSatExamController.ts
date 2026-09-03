@@ -7,6 +7,7 @@ import type {
   AssessmentResult,
   AssessmentTimingSnapshot,
 } from "../contracts/assessmentDelivery";
+import type { StudentAttempt } from "../../../types/studentAttempt";
 import { normalizeSatAnnotations, responseForQuestion } from "../domain/satResponses";
 import {
   breakRemainingSeconds,
@@ -44,18 +45,26 @@ export interface UseSatExamControllerOptions {
   scheduleId: string;
   attemptId: string;
   candidateId: string;
+  attemptSnapshot?: StudentAttempt | null;
   runtimeSnapshot?: ExamSessionRuntime | null;
   liveSocketConnected?: boolean;
   attemptUpdateToken?: number;
+  leaseEpoch?: number | null | undefined;
+  controlEpoch?: number | null | undefined;
+  useV2DurabilityEngine?: boolean | undefined;
 }
 
 export function useSatExamController({
   scheduleId,
   attemptId,
   candidateId,
+  attemptSnapshot = null,
   runtimeSnapshot = null,
   liveSocketConnected = false,
   attemptUpdateToken = 0,
+  leaseEpoch,
+  controlEpoch,
+  useV2DurabilityEngine,
 }: UseSatExamControllerOptions) {
   const [state, dispatch] = useReducer(
     satRunnerReducer,
@@ -71,6 +80,30 @@ export function useSatExamController({
   const timeoutSubmissionKeyRef = useRef<string | null>(null);
   const initialAutoStartKeyRef = useRef<string | null>(null);
   const nextSectionAutoStartRef = useRef<{ key: string; attemptedAt: number } | null>(null);
+  const recoveredPendingRef = useRef(false);
+  const finalizationInFlightRef = useRef<Promise<AssessmentResult | null> | null>(null);
+  const finalizationRecoveryKeyRef = useRef<string | null>(null);
+  const identityGenerationRef = useRef(0);
+  const identityKey = `${scheduleId}:${attemptId}:${candidateId}`;
+  const previousIdentityKeyRef = useRef<string | null>(null);
+  if (previousIdentityKeyRef.current !== identityKey) {
+    previousIdentityKeyRef.current = identityKey;
+    identityGenerationRef.current += 1;
+  }
+  const renderIdentityGeneration = identityGenerationRef.current;
+
+  useEffect(() => {
+    setData(null);
+    setResult(null);
+    setError(null);
+    setIsSubmitting(false);
+    setIsStarting(false);
+    timeoutSubmissionKeyRef.current = null;
+    initialAutoStartKeyRef.current = null;
+    nextSectionAutoStartRef.current = null;
+    recoveredPendingRef.current = false;
+    dispatch({ type: "recover", state: createSatRunnerState(scheduleId, attemptId) });
+  }, [attemptId, candidateId, identityKey, scheduleId]);
 
   useEffect(() => {
     configureSatDeliveryAttempt(scheduleId, attemptId, candidateId);
@@ -85,12 +118,26 @@ export function useSatExamController({
     attemptId,
     gateway: satDeliveryGateway,
     onSavedRevision: handleSavedRevision,
+    leaseEpoch,
+    controlEpoch,
+    credentialAttempt: attemptSnapshot,
+    ...(useV2DurabilityEngine !== undefined ? { useV2DurabilityEngine } : {}),
   });
+  const persistenceRef = useRef(persistence);
+  persistenceRef.current = persistence;
   const hydrateBootstrap = persistence.hydrateBootstrap;
 
   const applyPayload = useCallback(
-    (payload: AssessmentDeliveryBootstrap) => {
+    (payload: AssessmentDeliveryBootstrap): boolean => {
+      if (
+        identityGenerationRef.current !== renderIdentityGeneration ||
+        payload.scheduleId !== scheduleId ||
+        payload.attempt.id !== attemptId
+      ) {
+        return false;
+      }
       setData((current) => {
+        if (identityGenerationRef.current !== renderIdentityGeneration) return current;
         const timing = mergeAuthoritativeTiming(current?.timing ?? null, payload.timing);
         return timing === payload.timing ? payload : { ...payload, timing };
       });
@@ -98,18 +145,18 @@ export function useSatExamController({
       setResult(payload.result);
       setError(null);
       hydrateBootstrap(payload);
+      return true;
     },
-    [hydrateBootstrap]
+    [attemptId, hydrateBootstrap, renderIdentityGeneration, scheduleId]
   );
 
   const refresh = useCallback(
     async (surfaceError = false) => {
       try {
         const payload = await satDeliveryGateway.bootstrap(scheduleId, attemptId);
-        applyPayload(payload);
-        return payload;
+        return applyPayload(payload) ? payload : null;
       } catch (loadError) {
-        if (surfaceError) {
+        if (surfaceError && identityGenerationRef.current === renderIdentityGeneration) {
           setError(
             loadError instanceof Error ? loadError.message : "Unable to load the SAT attempt."
           );
@@ -117,7 +164,7 @@ export function useSatExamController({
         return null;
       }
     },
-    [applyPayload, attemptId, scheduleId]
+    [applyPayload, attemptId, renderIdentityGeneration, scheduleId]
   );
 
   useEffect(() => {
@@ -125,8 +172,7 @@ export function useSatExamController({
     void satDeliveryGateway
       .bootstrap(scheduleId, attemptId)
       .then((payload) => {
-        if (!mounted) return;
-        applyPayload(payload);
+        if (!mounted || !applyPayload(payload)) return;
         dispatch({ type: "bootstrapLoaded", assessmentId: payload.versionId });
       })
       .catch((loadError: unknown) => {
@@ -142,7 +188,11 @@ export function useSatExamController({
   }, [applyPayload, attemptId, scheduleId]);
 
   useEffect(() => {
-    if (data?.timing.timingModel === "cohort_stage_v2") return;
+    if (
+      data?.timing.timingModel === "cohort_stage_v2" ||
+      data?.timing.timingModel === "cohort_section_v3"
+    )
+      return;
     const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, [data?.timing.timingModel]);
@@ -183,6 +233,22 @@ export function useSatExamController({
       const questionIds = new Set(module.questions.map((question) => question.examQuestionId));
       for (const response of payload.attempt.responses) {
         if (!questionIds.has(response.examQuestionId)) continue;
+        const durableDraft = useV2DurabilityEngine
+          ? persistence.visibleDrafts[response.examQuestionId]
+          : persistence.pendingDrafts[response.examQuestionId];
+        if (durableDraft) {
+          dispatch({
+            type: "hydrateResponse",
+            revision: response.revision,
+            response: durableDraft,
+          });
+          continue;
+        }
+        const currentRev =
+          state.phase === "module" || state.phase === "review"
+            ? state.responseRevisions[response.examQuestionId]
+            : undefined;
+        if (currentRev !== undefined && currentRev >= response.revision) continue;
         const answer =
           typeof response.response === "string" || typeof response.response === "number"
             ? String(response.response)
@@ -200,7 +266,7 @@ export function useSatExamController({
         });
       }
     },
-    []
+    [persistence.pendingDrafts, persistence.visibleDrafts, state, useV2DurabilityEngine]
   );
 
   const startModuleFrom = useCallback(
@@ -329,22 +395,25 @@ export function useSatExamController({
 
   const startPendingModule = useCallback(async () => {
     if (!data || !pendingModule || isStarting) return;
+    const generation = identityGenerationRef.current;
     setIsStarting(true);
     setError(null);
     try {
       const payload = await satDeliveryGateway.startModule(scheduleId, attemptId, {
         moduleId: pendingModule.id,
       });
-      applyPayload(payload);
+      if (!applyPayload(payload)) return;
       const activeAttempt = findActiveAttempt(payload);
       const activeModule = moduleForAttempt(payload, activeAttempt);
       if (activeModule) startModuleFrom(payload, activeModule);
     } catch (startError) {
-      setError(
-        startError instanceof Error ? startError.message : "The SAT module could not be started."
-      );
+      if (identityGenerationRef.current === generation) {
+        setError(
+          startError instanceof Error ? startError.message : "The SAT module could not be started."
+        );
+      }
     } finally {
-      setIsStarting(false);
+      if (identityGenerationRef.current === generation) setIsStarting(false);
     }
   }, [applyPayload, attemptId, data, isStarting, pendingModule, scheduleId, startModuleFrom]);
 
@@ -418,32 +487,112 @@ export function useSatExamController({
     state.phase,
   ]);
 
+  const finalizeAssessment = useCallback(
+    (generation: number, assessmentId: string): Promise<AssessmentResult | null> => {
+      const existing = finalizationInFlightRef.current;
+      if (existing) return existing;
+
+      const operation = (async () => {
+        await persistenceRef.current.flush();
+        if (identityGenerationRef.current !== generation) return null;
+        if (useV2DurabilityEngine) {
+          await persistenceRef.current.submit();
+          if (identityGenerationRef.current !== generation) return null;
+        }
+        const finalResult = await satDeliveryGateway.submitAssessment(scheduleId, attemptId, {
+          submissionId: attemptId,
+        });
+        if (identityGenerationRef.current !== generation) return null;
+        setResult(finalResult);
+        dispatch({
+          type: "recover",
+          state: {
+            phase: "complete",
+            scheduleId,
+            candidateId: attemptId,
+            assessmentId,
+            resultId: finalResult.id,
+          },
+        });
+        return finalResult;
+      })();
+      finalizationInFlightRef.current = operation;
+      void operation.then(
+        () => {
+          if (finalizationInFlightRef.current === operation) {
+            finalizationInFlightRef.current = null;
+          }
+        },
+        () => {
+          if (finalizationInFlightRef.current === operation) {
+            finalizationInFlightRef.current = null;
+          }
+        }
+      );
+      return operation;
+    },
+    [attemptId, scheduleId, useV2DurabilityEngine]
+  );
+
+  useEffect(() => {
+    if (
+      !data ||
+      data.result ||
+      state.phase !== "directions" ||
+      data.proctorStatus === "terminated" ||
+      data.scheduleRuntimeStatus === "cancelled" ||
+      findPendingAttempt(data) ||
+      data.attempt.moduleAttempts.length === 0 ||
+      !data.attempt.moduleAttempts.every((moduleAttempt) =>
+        matchesFinalModuleState(moduleAttempt.state)
+      )
+    ) {
+      return;
+    }
+    const recoveryKey = `${attemptId}:${data.versionId}:${data.attempt.moduleAttempts
+      .map(
+        (moduleAttempt) => `${moduleAttempt.id}:${moduleAttempt.state}:${moduleAttempt.revision}`
+      )
+      .join(",")}`;
+    if (finalizationRecoveryKeyRef.current === recoveryKey) return;
+    finalizationRecoveryKeyRef.current = recoveryKey;
+    const generation = identityGenerationRef.current;
+    void finalizeAssessment(generation, data.versionId).catch((finalizationError: unknown) => {
+      if (identityGenerationRef.current !== generation) return;
+      setError(
+        finalizationError instanceof Error
+          ? finalizationError.message
+          : "The SAT result could not be finalized."
+      );
+    });
+  }, [attemptId, data, finalizeAssessment, state.phase]);
+
   const submitModule = useCallback(
     async (moduleId: string) => {
       if (isSubmitting) return;
+      const generation = identityGenerationRef.current;
+      const isCurrent = () => identityGenerationRef.current === generation;
       const submittedModuleAttemptId = data ? findAttemptForModule(data, moduleId)?.id : undefined;
       setIsSubmitting(true);
       setError(null);
       try {
         await persistence.flush();
+        if (!isCurrent()) return;
         const next = await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
+        if (!applyPayload(next)) return;
         if (submittedModuleAttemptId) {
           clearCalculatorWorkspace(
             calculatorWorkspaceKey(scheduleId, attemptId, submittedModuleAttemptId)
           );
         }
-        applyPayload(next);
         const nextAttempt = findPendingAttempt(next);
         const nextModule = moduleForAttempt(next, nextAttempt);
         if (!nextModule) {
           dispatch({ type: "submit" });
-          const finalResult = await satDeliveryGateway.submitAssessment(scheduleId, attemptId, {
-            submissionId: attemptId,
-          });
+          const finalResult = await finalizeAssessment(generation, next.versionId);
+          if (!finalResult || !isCurrent()) return;
           clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
           clearSatReadingPreferences(scheduleId, attemptId);
-          setResult(finalResult);
-          dispatch({ type: "completed", resultId: finalResult.id });
           return;
         }
 
@@ -459,7 +608,9 @@ export function useSatExamController({
           dispatch({ type: "showDirections" });
         }
       } catch (submitError) {
+        if (!isCurrent()) return;
         const refreshed = await refresh(false);
+        if (!isCurrent()) return;
         if (refreshed?.result) {
           clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
           clearSatReadingPreferences(scheduleId, attemptId);
@@ -492,10 +643,19 @@ export function useSatExamController({
         }
         setError(submitError instanceof Error ? submitError.message : "Module submission failed.");
       } finally {
-        setIsSubmitting(false);
+        if (isCurrent()) setIsSubmitting(false);
       }
     },
-    [applyPayload, attemptId, data, isSubmitting, persistence, refresh, scheduleId]
+    [
+      applyPayload,
+      attemptId,
+      data,
+      isSubmitting,
+      persistence,
+      refresh,
+      finalizeAssessment,
+      scheduleId,
+    ]
   );
 
   const stateModule = useMemo(() => {
@@ -517,12 +677,28 @@ export function useSatExamController({
     return sectionForModule(data, stateModule.id) ?? null;
   }, [data, stateModule]);
 
+  const stateResponses =
+    state.phase === "module" || state.phase === "review" ? state.responses : null;
+  const stateResponseRevisions =
+    state.phase === "module" || state.phase === "review" ? state.responseRevisions : null;
+
   useEffect(() => {
-    if (!data || (state.phase !== "module" && state.phase !== "review") || !stateModule) return;
+    if (
+      !data ||
+      (state.phase !== "module" && state.phase !== "review") ||
+      !stateModule ||
+      !stateResponses ||
+      !stateResponseRevisions
+    )
+      return;
+    if (recoveredPendingRef.current && !useV2DurabilityEngine) return;
+    if (!useV2DurabilityEngine) recoveredPendingRef.current = true;
     for (const question of stateModule.questions) {
-      const pending = persistence.pendingDrafts[question.examQuestionId];
+      const pending = useV2DurabilityEngine
+        ? persistence.visibleDrafts[question.examQuestionId]
+        : persistence.pendingDrafts[question.examQuestionId];
       if (!pending) continue;
-      const current = state.responses[question.examQuestionId];
+      const current = stateResponses[question.examQuestionId];
       const sameDraft =
         current &&
         current.answer === pending.answer &&
@@ -535,13 +711,22 @@ export function useSatExamController({
           (response) => response.examQuestionId === question.examQuestionId
         )?.revision ?? 0;
       const revision = Math.max(
-        state.responseRevisions[question.examQuestionId] ?? 0,
+        stateResponseRevisions[question.examQuestionId] ?? 0,
         serverRevision
       );
-      if (sameDraft && state.responseRevisions[question.examQuestionId] === revision) continue;
+      if (sameDraft && stateResponseRevisions[question.examQuestionId] === revision) continue;
       dispatch({ type: "hydrateResponse", revision, response: pending });
     }
-  }, [data, persistence.pendingDrafts, state, stateModule]);
+  }, [
+    data,
+    persistence.pendingDrafts,
+    persistence.visibleDrafts,
+    state.phase,
+    stateResponseRevisions,
+    stateResponses,
+    stateModule,
+    useV2DurabilityEngine,
+  ]);
 
   const personalModuleRemainingSeconds = stateModuleAttempt
     ? snapshotRemainingSeconds(stateModuleAttempt, snapshotReceivedAt, now)
@@ -698,6 +883,7 @@ export function useSatExamController({
     commands: {
       startPendingModule,
       submitModule,
+      takeOverDurabilityLease: persistence.takeOverLease,
       setAnswer,
       toggleReview,
       toggleEliminatedOption,

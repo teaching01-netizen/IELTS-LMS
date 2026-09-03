@@ -27,8 +27,15 @@ export function createStudentAttemptDurabilityAdapter(
       return repository.saveAttempt(attempt);
     },
     async flushPendingMutations(attemptId) {
-      await repository.getPendingMutations(attemptId);
-      return true;
+      try {
+        const pending = await repository.getPendingMutations(attemptId);
+        if (pending && pending.length > 0) {
+          await repository.savePendingMutations(attemptId, pending);
+        }
+        return true;
+      } catch {
+        return false;
+      }
     },
   } satisfies StudentDurabilityPort;
 }

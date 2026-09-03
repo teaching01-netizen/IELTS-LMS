@@ -53,11 +53,25 @@ async function enqueue(
   if (!mutation || !context.outbox) {
     return;
   }
-  await context.outbox.enqueue(mutation);
-  context.store.getState().actions.setPersistence({
-    pendingMutationCount: context.outbox.pendingCount(),
-    syncState: 'saving',
-  });
+  try {
+    await context.outbox.enqueue(mutation);
+    context.store.getState().actions.setPersistence({
+      pendingMutationCount: context.outbox.pendingCount(),
+      syncState: 'saving',
+    });
+  } catch (error) {
+    const currentBlocking = context.store.getState().blocking;
+    context.store.getState().actions.setPersistence({
+      pendingMutationCount: context.outbox.pendingCount(),
+      syncState: 'error',
+    });
+    context.store.getState().actions.setBlocking({
+      active: true,
+      reason: 'storage_unavailable',
+      timeRemaining: currentBlocking.timeRemaining,
+    });
+    throw error;
+  }
 }
 
 export function createStudentAnswerCommands(

@@ -245,7 +245,9 @@ export function StudentApp({
   const [warningMessage, setWarningMessage] = useState('');
   const [warningSeverity, setWarningSeverity] = useState<'medium' | 'high' | 'critical'>('medium');
   const blockingOverlayRef = useRef<HTMLDivElement | null>(null);
+  const durabilityLeaseOverlayRef = useRef<HTMLDivElement | null>(null);
   const finalSubmitOverlayRef = useRef<HTMLDivElement | null>(null);
+  const [leaseTakeoverPending, setLeaseTakeoverPending] = useState(false);
   const submitConfirmModuleRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
@@ -306,6 +308,35 @@ export function StudentApp({
     liveObjectiveAnswersRef.current = attemptAnswers;
     liveWritingAnswersRef.current = attemptWritingAnswers;
   }, [attemptAnswers, attemptWritingAnswers, runtimeState]);
+
+  // The V2 engine owns response durability. The exam-session store remains a
+  // presentation model for the shared IELTS workspace and is hydrated from the
+  // authoritative V2-visible attempt state after recovery/acknowledgements.
+  useEffect(() => {
+    if (attemptState.attempt?.protocolVersion !== 2) return;
+    for (const [questionId, answer] of Object.entries(attemptAnswers)) {
+      examSessionCommandsRef.current.setObjectiveAnswer(
+        questionId,
+        answer,
+        Array.isArray(answer) ? { arrayUpdateMode: 'replace' } : undefined
+      );
+    }
+    for (const [taskId, answer] of Object.entries(attemptWritingAnswers)) {
+      examSessionCommandsRef.current.setWritingAnswer(taskId, answer);
+    }
+    for (const [questionId, flagged] of Object.entries(attemptFlags)) {
+      const current = examSessionStore.getState().attempt.flags[questionId] ?? false;
+      if (current !== flagged) {
+        examSessionCommandsRef.current.toggleFlag(questionId);
+      }
+    }
+  }, [
+    attemptAnswers,
+    attemptFlags,
+    attemptState.attempt?.protocolVersion,
+    attemptWritingAnswers,
+    examSessionStore,
+  ]);
 
   const commitWritingDraft = useCallback(() => {
     writingDraftCommitRef.current?.();
@@ -393,6 +424,12 @@ export function StudentApp({
       blockingOverlayRef.current?.focus();
     }
   }, [blockingCopy, runtimeState.blocking.active]);
+
+  useEffect(() => {
+    if (attemptState.durabilityLeaseConflict) {
+      durabilityLeaseOverlayRef.current?.focus();
+    }
+  }, [attemptState.durabilityLeaseConflict]);
 
   useEffect(() => {
     if (
@@ -523,7 +560,10 @@ export function StudentApp({
 
   const handleAnswerChange = useCallback(
     (questionId: string, answer: StudentAnswerValue, meta?: StudentAnswerMutationMeta) => {
-      if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
+      if (
+        runtimeStateRef.current.blocking.reason === 'storage_unavailable' ||
+        attemptState.durabilityLeaseConflict
+      ) {
         return;
       }
       const currentValue = latestAnswersRef.current[questionId];
@@ -547,17 +587,20 @@ export function StudentApp({
       examSessionCommandsRef.current.setObjectiveAnswer(questionId, resolvedAnswer, meta);
       attemptActionsRef.current.persistAnswer(questionId, resolvedAnswer, meta);
     },
-    []
+    [attemptState.durabilityLeaseConflict]
   );
 
   const handleFlagToggle = useCallback((questionId: string) => {
-    if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
+    if (
+      runtimeStateRef.current.blocking.reason === 'storage_unavailable' ||
+      attemptState.durabilityLeaseConflict
+    ) {
       return;
     }
     const nextFlagged = !attemptFlagsRef.current[questionId];
     examSessionCommandsRef.current.toggleFlag(questionId);
     attemptActionsRef.current.persistFlag(questionId, nextFlagged);
-  }, []);
+  }, [attemptState.durabilityLeaseConflict]);
 
   const registerLiveObjectiveAnswer = useCallback(
     (questionId: string, value: StudentAnswerValue) => {
@@ -577,7 +620,10 @@ export function StudentApp({
   }, []);
 
   const handleWritingChange = useCallback((taskId: string, text: string) => {
-    if (runtimeStateRef.current.blocking.reason === 'storage_unavailable') {
+    if (
+      runtimeStateRef.current.blocking.reason === 'storage_unavailable' ||
+      attemptState.durabilityLeaseConflict
+    ) {
       return;
     }
     liveWritingAnswersRef.current = {
@@ -586,7 +632,7 @@ export function StudentApp({
     };
     examSessionCommandsRef.current.setWritingAnswer(taskId, text);
     attemptActionsRef.current.persistWritingAnswer(taskId, text);
-  }, []);
+  }, [attemptState.durabilityLeaseConflict]);
 
   const registerWritingDraftCommit = useCallback((commitDraft: (() => void) | null) => {
     writingDraftCommitRef.current = commitDraft;
@@ -610,6 +656,48 @@ export function StudentApp({
     runtimeState.currentModule === 'reading' ||
     runtimeState.currentModule === 'listening' ||
     runtimeState.currentModule === 'writing';
+
+  const handleDurabilityLeaseTakeover = useCallback(async () => {
+    if (leaseTakeoverPending) return;
+    setLeaseTakeoverPending(true);
+    try {
+      await attemptActions.takeOverDurabilityLease();
+    } finally {
+      setLeaseTakeoverPending(false);
+    }
+  }, [attemptActions, leaseTakeoverPending]);
+
+  const durabilityLeaseOverlay = attemptState.durabilityLeaseConflict ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
+      <div
+        ref={durabilityLeaseOverlayRef}
+        tabIndex={-1}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="durability-lease-overlay-title"
+        className="max-w-md w-full bg-white rounded-lg border border-gray-200 shadow-xl p-6 md:p-8 text-center"
+      >
+        <p className="text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide text-gray-500 mb-3">
+          Session recovery
+        </p>
+        <h2 id="durability-lease-overlay-title" className="text-2xl font-black text-gray-900 mb-3">
+          This session is open in another tab
+        </h2>
+        <p className="text-sm text-gray-700 leading-6">
+          New answers are paused to protect your saved work. Take over this session here if this is
+          the tab you want to continue using.
+        </p>
+        <Button
+          variant="primary"
+          onClick={() => void handleDurabilityLeaseTakeover()}
+          disabled={leaseTakeoverPending}
+          className="mt-6 h-11 w-full text-base font-semibold"
+        >
+          {leaseTakeoverPending ? 'Taking over…' : 'Take over this session'}
+        </Button>
+      </div>
+    </div>
+  ) : null;
 
   const blockingOverlay =
     runtimeState.blocking.active && blockingCopy ? (
@@ -831,6 +919,7 @@ export function StudentApp({
       </StudentExamViewport>
       {droppedMutationsBanner}
       {blockingOverlay}
+      {durabilityLeaseOverlay}
       {finalSubmitOverlay}
       {examState.config.progression.showWarnings ? (
         <WarningOverlay

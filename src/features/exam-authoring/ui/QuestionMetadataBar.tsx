@@ -8,7 +8,7 @@ export interface QuestionMetadataBarProps {
 }
 
 const controlClass =
-  "h-9 min-w-0 rounded-[10px] border border-transparent bg-white/80 px-2.5 text-[11px] font-semibold text-slate-700 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05)] outline-none transition hover:bg-white focus:border-au-accent/30 focus:bg-white focus:ring-4 focus:ring-au-accent/10 disabled:opacity-45";
+  "h-9 min-w-0 rounded-[10px] border border-transparent bg-au-surface px-2.5 text-[11px] font-semibold text-slate-700 shadow-sm outline-none transition hover:bg-au-surface focus:border-au-accent/30 focus:bg-au-surface focus:ring-4 focus:ring-au-accent/10 disabled:opacity-45";
 
 export function QuestionMetadataBar({ question, onChange }: QuestionMetadataBarProps) {
   const domains = question.metadata.sectionKey === "math" ? SAT_DOMAINS.math : SAT_DOMAINS["reading-writing"];
@@ -62,7 +62,7 @@ export function QuestionMetadataBar({ question, onChange }: QuestionMetadataBarP
         <summary className="authoring-interactive flex min-h-9 cursor-pointer list-none items-center rounded-[9px] px-2.5 text-[11px] font-semibold text-slate-500 marker:hidden hover:bg-au-fill hover:text-slate-800">
           Tags{question.metadata.tags.length ? ` · ${question.metadata.tags.length}` : ""}
         </summary>
-        <div className="au-elevation-menu absolute right-0 top-10 z-20 w-56 rounded-[12px] border border-au-separator bg-white p-2">
+        <div className="au-elevation-menu absolute right-0 top-10 z-20 w-56 rounded-[12px] border border-au-separator bg-au-surface p-2">
           <input
             id={`sat-question-tags-${question.id}`}
             aria-label="Question tags"

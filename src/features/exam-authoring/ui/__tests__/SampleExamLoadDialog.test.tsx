@@ -14,6 +14,7 @@ describe("SampleExamLoadDialog", () => {
         onConfirm={onConfirm}
       />
     );
+    expect(screen.getByRole("dialog", { name: "Load sample SAT" })).toBeInTheDocument();
     expect(screen.getByText(/147 original SAT-style questions/i)).toBeInTheDocument();
     expect(screen.getByText(/12 current draft questions will be replaced/i)).toBeInTheDocument();
     expect(screen.getByText(/Published versions are untouched/i)).toBeInTheDocument();

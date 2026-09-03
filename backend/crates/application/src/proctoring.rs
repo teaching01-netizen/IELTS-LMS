@@ -20,10 +20,10 @@ use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
 
 use crate::delivery::{
-    auto_submit_schedule_attempts_in_tx, seal_attempt_in_tx, DeliveryError, SealAttemptCommand,
-    TerminalizationActorKind,
+    auto_submit_schedule_attempts_in_tx, extend_v2_attempt_deadline_in_tx, seal_attempt_in_tx,
+    sync_v2_runtime_timing_in_tx, DeliveryError, SealAttemptCommand, TerminalizationActorKind,
 };
-use crate::scheduling::{SchedulingError, SchedulingService};
+use crate::scheduling::{lock_schedule_attempts_in_tx, SchedulingError, SchedulingService};
 
 #[derive(Error, Debug)]
 pub enum ProctoringError {
@@ -463,6 +463,9 @@ impl ProctoringService {
         }
 
         let mut tx = self.pool.begin().await?;
+        lock_schedule_attempts_in_tx(&mut tx, &schedule_id.to_string())
+            .await
+            .map_err(map_scheduling_error)?;
         let runtime = sqlx::query_as::<_, RuntimeRow>(
             "SELECT * FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
         )
@@ -617,6 +620,17 @@ impl ProctoringService {
                 })?;
         }
 
+        if let Some(next_key) = next_section_key.as_deref() {
+            sync_v2_runtime_timing_in_tx(
+                &mut *tx,
+                &schedule_id.to_string(),
+                &runtime.id.to_string(),
+                next_key,
+                Some("running"),
+            )
+            .await?;
+        }
+
         insert_control_event(
             &mut tx,
             runtime.id.into_uuid(),
@@ -724,6 +738,9 @@ impl ProctoringService {
         }
 
         let mut tx = self.pool.begin().await?;
+        lock_schedule_attempts_in_tx(&mut tx, &schedule_id.to_string())
+            .await
+            .map_err(map_scheduling_error)?;
         let runtime = sqlx::query_as::<_, RuntimeRow>(
             "SELECT * FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
         )
@@ -813,6 +830,15 @@ impl ProctoringService {
             .execute(&mut *tx)
             .await?;
         }
+
+        sync_v2_runtime_timing_in_tx(
+            &mut *tx,
+            &schedule_id.to_string(),
+            &runtime.id.to_string(),
+            &active_section_key,
+            None,
+        )
+        .await?;
 
         insert_control_event(
             &mut tx,
@@ -939,6 +965,13 @@ impl ProctoringService {
                 "The student does not have an active SAT module to extend.".to_owned(),
             ));
         }
+        extend_v2_attempt_deadline_in_tx(
+            &mut *tx,
+            &attempt_id.to_string(),
+            &schedule_id.to_string(),
+            req.minutes,
+        )
+        .await?;
         insert_audit_log(
             &mut tx,
             schedule_id,
@@ -1008,6 +1041,12 @@ impl ProctoringService {
 
         let now = Utc::now();
         let mut tx = self.pool.begin().await?;
+        // Match schedule-wide terminalization lock order: attempts first,
+        // then runtime/section rows. This prevents a completion command from
+        // deadlocking with a concurrent pause or student terminalization.
+        lock_schedule_attempts_in_tx(&mut tx, &schedule_id.to_string())
+            .await
+            .map_err(map_scheduling_error)?;
 
         sqlx::query(
             r#"
@@ -1156,6 +1195,24 @@ impl ProctoringService {
             | DeliveryError::Internal(message) => ProctoringError::Conflict(message),
         })?;
 
+        let terminal: (Option<DateTime<Utc>>, String) = sqlx::query_as(
+            "SELECT submitted_at, COALESCE(delivery_status, 'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+        )
+        .bind(attempt_id.to_string())
+        .bind(schedule_id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        if terminal.0.is_some()
+            || matches!(
+                terminal.1.as_str(),
+                "submitted" | "terminated" | "locked" | "cancelled"
+            )
+        {
+            return Err(ProctoringError::Conflict(
+                "The attempt is already terminal and cannot accept a warning.".to_owned(),
+            ));
+        }
+
         sqlx::query(
             r#"
             INSERT INTO student_violation_events (
@@ -1184,7 +1241,8 @@ impl ProctoringService {
                 last_warning_id = ?,
                 violations_snapshot = JSON_MERGE_PRESERVE(COALESCE(violations_snapshot, JSON_ARRAY()), ?),
                 updated_at = NOW(),
-                revision = revision + 1
+                revision = revision + 1,
+                control_epoch = control_epoch + 1
             WHERE id = ? AND schedule_id = ?
             "#,
         )
@@ -1345,7 +1403,13 @@ impl ProctoringService {
         &self,
         limit: i64,
     ) -> Result<Vec<AutoAdvanceOutcome>, ProctoringError> {
-        self.reconcile_expired_sections_at_with_origin(Utc::now(), limit, "runtime-auto-advance")
+        // Use the database clock that also guards response writes. A worker's
+        // host clock must not advance a section before the authoritative grace
+        // boundary observed by clients and V2 delivery.
+        let server_now: DateTime<Utc> = sqlx::query_scalar("SELECT UTC_TIMESTAMP(6)")
+            .fetch_one(&self.pool)
+            .await?;
+        self.reconcile_expired_sections_at_with_origin(server_now, limit, "runtime-auto-advance")
             .await
     }
 
@@ -1387,7 +1451,7 @@ impl ProctoringService {
                   ) = 'true'
               AND ? >= DATE_ADD(
                     s.actual_start_at,
-                    INTERVAL ((s.planned_duration_minutes + s.extension_minutes) * 60 + s.accumulated_paused_seconds) SECOND
+                    INTERVAL ((s.planned_duration_minutes + s.extension_minutes) * 60 + s.accumulated_paused_seconds + 30) SECOND
                   )
             ORDER BY s.actual_start_at ASC
             LIMIT ?
@@ -1425,6 +1489,11 @@ impl ProctoringService {
         origin_instance_id: &str,
     ) -> Result<Option<i64>, ProctoringError> {
         let mut tx = self.pool.begin().await?;
+        // Schedule reconciliation must acquire the same attempts-first lock
+        // order as manual pause/complete and auto-finalization.
+        lock_schedule_attempts_in_tx(&mut tx, &schedule_id.to_string())
+            .await
+            .map_err(map_scheduling_error)?;
 
         let runtime = sqlx::query_as::<_, RuntimeRow>(
             "SELECT * FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
@@ -1471,7 +1540,7 @@ impl ProctoringService {
             let Some(actual_start_at) = active_section.actual_start_at else {
                 break;
             };
-            if !section_expired_at(
+            if !section_closing_grace_expired_at(
                 actual_start_at,
                 active_section.planned_duration_minutes,
                 active_section.extension_minutes,
@@ -1556,6 +1625,14 @@ impl ProctoringService {
                 .bind(next_duration)
                 .bind(runtime.id)
                 .execute(tx.as_mut())
+                .await?;
+                sync_v2_runtime_timing_in_tx(
+                    &mut *tx,
+                    &schedule_id.to_string(),
+                    &runtime.id.to_string(),
+                    &next_key,
+                    Some("running"),
+                )
                 .await?;
                 insert_audit_log(
                     &mut tx,
@@ -1735,14 +1812,20 @@ impl ProctoringService {
             | DeliveryError::Internal(message) => ProctoringError::Conflict(message),
         })?;
         if action_type != "STUDENT_TERMINATE" {
-            let terminal: (Option<chrono::DateTime<Utc>>, String) = sqlx::query_as(
-                "SELECT submitted_at, COALESCE(proctor_status, 'active') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+            let terminal: (Option<chrono::DateTime<Utc>>, String, String) = sqlx::query_as(
+                "SELECT submitted_at, COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
             )
             .bind(attempt_id.to_string())
             .bind(schedule_id.to_string())
             .fetch_one(&mut *tx)
             .await?;
-            if terminal.0.is_some() || terminal.1 == "terminated" {
+            if terminal.0.is_some()
+                || terminal.1 == "terminated"
+                || matches!(
+                    terminal.2.as_str(),
+                    "submitted" | "terminated" | "locked" | "cancelled"
+                )
+            {
                 return Err(ProctoringError::Conflict(
                     "The attempt is already terminal and cannot accept this command.".to_owned(),
                 ));
@@ -1754,16 +1837,73 @@ impl ProctoringService {
                 r#"
                 UPDATE student_attempts
                 SET
+                    delivery_status = CASE
+                        WHEN COALESCE(protocol_version, 1) <> 2 THEN delivery_status
+                        WHEN ? = 'paused' THEN CASE
+                            WHEN COALESCE(delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled')
+                                THEN delivery_status
+                            ELSE 'paused'
+                        END
+                        WHEN ? = 'active'
+                             AND COALESCE(proctor_status, 'active') = 'paused'
+                             AND COALESCE(delivery_status, 'running') = 'paused'
+                            THEN 'running'
+                        ELSE delivery_status
+                    END,
+                    closing_grace_until = CASE
+                        WHEN COALESCE(protocol_version, 1) = 2
+                             AND ? = 'active'
+                             AND COALESCE(proctor_status, 'active') = 'paused'
+                             AND deadline_at IS NOT NULL
+                            THEN DATE_ADD(
+                                DATE_ADD(
+                                    deadline_at,
+                                    INTERVAL GREATEST(
+                                        TIMESTAMPDIFF(
+                                            SECOND,
+                                            COALESCE(proctor_updated_at, UTC_TIMESTAMP(6)),
+                                            UTC_TIMESTAMP(6)
+                                        ),
+                                        0
+                                    ) SECOND
+                                ),
+                                INTERVAL 30 SECOND
+                            )
+                        ELSE closing_grace_until
+                    END,
+                    deadline_at = CASE
+                        WHEN COALESCE(protocol_version, 1) = 2
+                             AND ? = 'active'
+                             AND COALESCE(proctor_status, 'active') = 'paused'
+                             AND deadline_at IS NOT NULL
+                            THEN DATE_ADD(
+                                deadline_at,
+                                INTERVAL GREATEST(
+                                    TIMESTAMPDIFF(
+                                        SECOND,
+                                        COALESCE(proctor_updated_at, UTC_TIMESTAMP(6)),
+                                        UTC_TIMESTAMP(6)
+                                    ),
+                                    0
+                                ) SECOND
+                            )
+                        ELSE deadline_at
+                    END,
                     proctor_status = ?,
                     phase = COALESCE(?, phase),
                     proctor_note = COALESCE(?, proctor_note),
-                    proctor_updated_at = NOW(),
+                    proctor_updated_at = UTC_TIMESTAMP(6),
                     proctor_updated_by = ?,
-                    updated_at = NOW(),
-                    revision = revision + 1
+                    updated_at = UTC_TIMESTAMP(6),
+                    revision = revision + 1,
+                    control_epoch = control_epoch + 1
                 WHERE id = ? AND schedule_id = ?
                 "#,
             )
+            .bind(proctor_status)
+            .bind(proctor_status)
+            .bind(proctor_status)
+            .bind(proctor_status)
             .bind(proctor_status)
             .bind(phase)
             .bind(req.reason.clone().or(req.message.clone()))
@@ -2335,12 +2475,12 @@ struct ComputedSectionTime {
 }
 
 fn compute_runtime_remaining_seconds(
-    current_section_key: Option<&str>,
     active_section_key: Option<&str>,
+    current_section_key: Option<&str>,
     sections: &[RuntimeHydrationSectionRow],
     now: DateTime<Utc>,
 ) -> Option<ComputedSectionTime> {
-    let section_key = current_section_key.or(active_section_key)?;
+    let section_key = active_section_key.or(current_section_key)?;
     let section = sections
         .iter()
         .find(|section| section.section_key == section_key)?;
@@ -2416,6 +2556,22 @@ fn section_expired_at(
         )
 }
 
+fn section_closing_grace_expired_at(
+    actual_start_at: DateTime<Utc>,
+    planned_duration_minutes: i32,
+    extension_minutes: i32,
+    accumulated_paused_seconds: i32,
+    as_of: DateTime<Utc>,
+) -> bool {
+    as_of
+        >= section_deadline(
+            actual_start_at,
+            planned_duration_minutes,
+            extension_minutes,
+            accumulated_paused_seconds,
+        ) + Duration::seconds(30)
+}
+
 fn runtime_hydration_row_to_runtime(
     row: RuntimeHydrationRow,
     section_rows: Vec<RuntimeHydrationSectionRow>,
@@ -2423,8 +2579,8 @@ fn runtime_hydration_row_to_runtime(
     let server_now = Utc::now();
     let computed_time = if matches!(row.status, RuntimeStatus::Live | RuntimeStatus::Paused) {
         compute_runtime_remaining_seconds(
-            row.current_section_key.as_deref(),
             row.active_section_key.as_deref(),
+            row.current_section_key.as_deref(),
             &section_rows,
             server_now,
         )
@@ -2438,8 +2594,9 @@ fn runtime_hydration_row_to_runtime(
         .map(|computed| computed.is_overrun)
         .unwrap_or(row.is_overrun);
     let current_section_deadline_at = row
-        .current_section_key
+        .active_section_key
         .as_deref()
+        .or(row.current_section_key.as_deref())
         .and_then(|section_key| {
             section_rows
                 .iter()
@@ -2565,7 +2722,7 @@ fn attempt_row_to_session(
     let runtime_section_status = runtime
         .sections
         .iter()
-        .find(|section| Some(section.section_key.clone()) == runtime.current_section_key)
+        .find(|section| Some(section.section_key.clone()) == runtime.active_section_key)
         .map(|section| section_status_name(&section.status));
     let last_activity = row.presence_last_heartbeat_at.unwrap_or_else(|| {
         row.integrity
@@ -2592,7 +2749,11 @@ fn attempt_row_to_session(
         .unwrap_or_else(|| i32::from(row.last_warning_id.is_some()));
 
     let is_sat = row.provider_key == "sat";
-    let cohort_timed_sat = is_sat && runtime.timing_model == "cohort_stage_v2";
+    let cohort_timed_sat = is_sat
+        && matches!(
+            runtime.timing_model.as_str(),
+            "cohort_stage_v2" | "cohort_section_v3"
+        );
     let time_remaining = if cohort_timed_sat {
         runtime.current_section_remaining_seconds
     } else if is_sat {
@@ -2857,6 +3018,27 @@ mod runtime_hydration_tests {
             deadline - Duration::milliseconds(1)
         ));
         assert!(section_expired_at(started_at, 1, 0, 0, deadline));
+    }
+
+    #[test]
+    fn section_auto_advance_waits_until_the_inclusive_response_grace_boundary() {
+        let started_at = Utc::now();
+        let deadline = section_deadline(started_at, 1, 0, 0);
+
+        assert!(!section_closing_grace_expired_at(
+            started_at,
+            1,
+            0,
+            0,
+            deadline + Duration::seconds(29)
+        ));
+        assert!(section_closing_grace_expired_at(
+            started_at,
+            1,
+            0,
+            0,
+            deadline + Duration::seconds(30)
+        ));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -23,6 +23,7 @@ import type {
   AssessmentValidationReport,
 } from "../contracts/assessment";
 import type { AssessmentReleaseState } from "../contracts/release";
+import { AuthoringConfirmDialog, AuthoringDialog } from "./authoringPrimitives";
 
 interface SatDeliveryReleasePageProps {
   exam: ExamEntity;
@@ -43,8 +44,7 @@ interface SatDeliveryReleasePageProps {
   onOpenStudentAccess: () => void;
 }
 
-const surfaceClass =
-  "rounded-[22px] border border-black/[0.06] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]";
+const surfaceClass = "authoring-surface";
 
 export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
   const {
@@ -67,6 +67,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
   } = props;
   const [dirtySections, setDirtySections] = useState<Set<string>>(() => new Set());
   const [showPublishDialog, setShowPublishDialog] = useState(false);
+  const [showLeaveDialog, setShowLeaveDialog] = useState(false);
 
   const setSectionDirty = useCallback((sectionId: string, dirty: boolean) => {
     setDirtySections((current) => {
@@ -78,14 +79,32 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
     });
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || dirtySections.size === 0) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dirtySections.size]);
+
+  const requestBackToBuilder = () => {
+    if (dirtySections.size > 0) {
+      setShowLeaveDialog(true);
+      return;
+    }
+    onBackToBuilder();
+  };
+
   if (isLoading) {
     return <ReleaseLoadingSurface />;
   }
 
   if (loadError || !shell || !releaseState) {
     return (
-      <div className="min-h-screen bg-au-fill px-6 py-12">
-        <div className="mx-auto max-w-2xl rounded-[22px] border border-red-200 bg-white p-6">
+      <div className="sat-product sat-authoring min-h-screen bg-au-fill px-6 py-12">
+        <div className="authoring-surface mx-auto max-w-2xl p-6">
           <p className="text-base font-semibold text-slate-950">
             Delivery & Release could not load
           </p>
@@ -95,7 +114,7 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
           <button
             type="button"
             onClick={onBackToExams}
-            className="mt-5 min-h-11 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white"
+            className="mt-5 min-h-11 rounded-xl bg-au-accent px-4 text-sm font-semibold text-white"
           >
             Exam Library
           </button>
@@ -118,10 +137,10 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
     !isPublishing;
 
   return (
-    <div className="min-h-screen bg-au-fill text-slate-950">
+    <div className="sat-product sat-authoring min-h-screen bg-au-fill text-slate-950">
       <ReleaseHeader
         examTitle={exam.title}
-        onBack={onBackToBuilder}
+        onBack={requestBackToBuilder}
         onOpenStudentAccess={releaseState.currentPublishedVersion ? onOpenStudentAccess : undefined}
       />
       <main className="mx-auto w-full max-w-[1240px] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
@@ -193,6 +212,17 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
         onClose={() => setShowPublishDialog(false)}
         onConfirm={onPublish}
       />
+      <AuthoringConfirmDialog
+        open={showLeaveDialog}
+        title="Leave with unsaved changes?"
+        description="Your delivery settings have not been saved. Leaving now discards those changes."
+        confirmLabel="Leave without saving"
+        onCancel={() => setShowLeaveDialog(false)}
+        onConfirm={() => {
+          setShowLeaveDialog(false);
+          onBackToBuilder();
+        }}
+      />
     </div>
   );
 }
@@ -207,12 +237,12 @@ function ReleaseHeader({
   onOpenStudentAccess?: (() => void) | undefined;
 }) {
   return (
-    <header className="sticky top-0 z-40 border-b border-au-separator bg-white/88 authoring-glass">
+    <header className="sticky top-0 z-40 border-b border-au-separator bg-au-surface authoring-glass">
       <div className="mx-auto flex min-h-[68px] max-w-[1240px] items-center gap-3 px-4 sm:px-6 lg:px-8">
         <button
           type="button"
           onClick={onBack}
-          className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm font-medium text-slate-600 transition-colors hover:bg-au-fill hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm font-medium text-slate-600 transition-colors hover:bg-au-fill hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
         >
           <ArrowLeft size={17} aria-hidden="true" />
           Questions
@@ -277,8 +307,8 @@ function ReleaseStatusHero({
   return (
     <section className={`${surfaceClass} flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6`}>
       <div className="flex items-start gap-3">
-        <div className={`mt-0.5 flex h-10 w-10 items-center justify-center rounded-full ${tone === "emerald" ? "bg-emerald-50 text-emerald-600" : tone === "amber" ? "bg-amber-50 text-amber-600" : "bg-slate-100 text-slate-500"}`}>
-          {isChecking && !publishedCurrent ? <LoaderCircle size={19} className="animate-spin" /> : publishedCurrent || ready ? <CheckCircle2 size={20} /> : <ShieldCheck size={20} />}
+        <div className={`mt-0.5 flex h-10 w-10 items-center justify-center rounded-full ${tone === "emerald" ? "bg-au-success-tint text-au-success-text" : tone === "amber" ? "bg-au-warning-tint text-au-warning-text" : "bg-au-fill text-slate-500"}`}>
+          {isChecking && !publishedCurrent ? <LoaderCircle size={19} className="animate-spin" aria-hidden="true" /> : publishedCurrent || ready ? <CheckCircle2 size={20} aria-hidden="true" /> : <ShieldCheck size={20} aria-hidden="true" />}
         </div>
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Release status</p>
@@ -383,7 +413,7 @@ function SectionDeliveryEditor({
 
   if (!base || !lower || !higher || !routing) {
     return (
-      <div className="rounded-2xl border border-red-200 bg-au-danger-tint p-4 text-sm leading-6 text-red-800">
+      <div className="rounded-2xl border border-au-danger/20 bg-au-danger-tint p-4 text-sm leading-6 text-au-danger-text">
         <p className="font-semibold">{section.title} has an incomplete adaptive structure.</p>
         <p className="mt-1 text-au-danger-text">
           A base module plus lower and higher branches are required before publishing.
@@ -439,7 +469,7 @@ function SectionDeliveryEditor({
             {breakMinutes > 0 ? ` + ${breakMinutes} min break` : ""}
           </p>
         </div>
-        <div className="flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 ring-1 ring-au-accent/10">
+        <div className="flex items-center gap-1.5 rounded-full bg-au-surface px-2.5 py-1 text-[11px] font-semibold text-slate-500 ring-1 ring-au-accent/10">
           <Clock3 size={12} aria-hidden="true" /> Server timed
         </div>
       </div>
@@ -451,7 +481,7 @@ function SectionDeliveryEditor({
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_180px]">
-        <div className="rounded-2xl border border-au-separator bg-white p-4">
+        <div className="rounded-2xl border border-au-separator bg-au-surface p-4">
           <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
             <GitBranch size={14} className="text-slate-400" aria-hidden="true" /> Adaptive routing
           </div>
@@ -478,7 +508,7 @@ function SectionDeliveryEditor({
             </div>
           </div>
         </div>
-        <div className="rounded-2xl border border-au-separator bg-white p-4">
+        <div className="rounded-2xl border border-au-separator bg-au-surface p-4">
           <MinuteField
             label="Break after section"
             value={breakMinutes}
@@ -502,12 +532,12 @@ function SectionDeliveryEditor({
           type="button"
           onClick={() => void save()}
           disabled={!dirty || update.isPending}
-          className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="authoring-button authoring-button--primary flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
         >
           {update.isPending ? (
-            <LoaderCircle size={15} className="animate-spin" />
+            <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
           ) : (
-            <Save size={15} />
+            <Save size={15} aria-hidden="true" />
           )}
           {update.isPending ? "Saving…" : dirty ? "Save section" : "Saved"}
         </button>
@@ -530,11 +560,11 @@ function MinuteField({
   const minimum = allowZero ? 0 : 1;
   return (
     <label htmlFor={id} className="block text-xs font-medium text-slate-500">
-      {label}
-      <div className="mt-1.5 flex min-h-11 items-center rounded-xl border border-au-separator bg-white px-3 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15">
+      <span id={`${id}-label`}>{label}</span>
+      <div className="mt-1.5 flex min-h-11 items-center rounded-xl border border-au-separator bg-au-surface px-3 focus-within:border-au-accent focus-within:ring-2 focus-within:ring-au-accent/15">
         <input
           id={id}
-          aria-label={label}
+          aria-labelledby={`${id}-label`}
           type="number"
           min={minimum}
           value={value}
@@ -564,18 +594,18 @@ function NumberField({
   const id = useId();
   return (
     <label htmlFor={id} className="block text-xs font-medium text-slate-500">
-      {label}
-      <div className="mt-1.5 flex min-h-11 items-center rounded-xl border border-au-separator bg-white px-3 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15">
+      <span id={`${id}-label`}>{label}</span>
+      <div className="mt-1.5 flex min-h-11 items-center rounded-xl border border-au-separator bg-au-surface px-3 focus-within:border-au-accent focus-within:ring-2 focus-within:ring-au-accent/15">
         <input
           id={id}
-          aria-label={label}
+          aria-labelledby={`${id}-label`}
           type="number"
           min={min}
           max={max}
-          value={value}
           onChange={(event) =>
             onChange(Math.min(max, Math.max(min, Number(event.target.value) || min)))
           }
+          value={value}
           className="min-w-0 flex-1 bg-transparent py-2 text-sm font-semibold text-slate-950 outline-none"
         />
         <span className="text-[11px] text-slate-400">{suffix}</span>
@@ -617,9 +647,9 @@ function ReadinessPanel({
           className="flex min-h-11 items-center gap-2 rounded-xl bg-au-fill px-3.5 text-sm font-semibold text-slate-700 hover:bg-au-fill-strong disabled:opacity-50"
         >
           {isChecking ? (
-            <LoaderCircle size={15} className="animate-spin" />
+            <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
           ) : (
-            <RefreshCw size={15} />
+            <RefreshCw size={15} aria-hidden="true" />
           )}
           {isChecking ? "Checking…" : "Run checks"}
         </button>
@@ -639,13 +669,13 @@ function ReadinessPanel({
       {readiness ? (
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <ReadinessCount
-            icon={blockers.length === 0 ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
+            icon={blockers.length === 0 ? <CheckCircle2 size={17} aria-hidden="true" /> : <AlertTriangle size={17} aria-hidden="true" />}
             label="Blocking issues"
             value={blockers.length}
             tone={blockers.length === 0 ? "success" : "danger"}
           />
           <ReadinessCount
-            icon={<Info size={17} />}
+            icon={<Info size={17} aria-hidden="true" />}
             label="Recommendations"
             value={warnings.length}
             tone={warnings.length === 0 ? "neutral" : "warning"}
@@ -659,7 +689,7 @@ function ReadinessPanel({
           onIssueClick={onIssueClick}
         />
       ) : readiness ? (
-        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-au-success-tint px-4 py-3 text-sm font-medium text-emerald-800">
+        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-au-success-tint px-4 py-3 text-sm font-medium text-au-success-text">
           <CheckCircle2 size={17} aria-hidden="true" /> No blocking release issues.
         </div>
       ) : null}
@@ -683,10 +713,10 @@ function ReadinessCount({
   tone: "success" | "danger" | "warning" | "neutral";
 }) {
   const classes = {
-    success: "bg-emerald-50 text-emerald-800",
-    danger: "bg-red-50 text-red-800",
-    warning: "bg-amber-50 text-amber-800",
-    neutral: "bg-[#f5f5f7] text-slate-700",
+    success: "bg-au-success-tint text-au-success-text",
+    danger: "bg-au-danger-tint text-au-danger-text",
+    warning: "bg-au-warning-tint text-au-warning-text",
+    neutral: "bg-au-fill text-slate-700",
   } as const;
   return (
     <div className={`flex items-center justify-between rounded-2xl px-4 py-3 ${classes[tone]}`}>
@@ -713,7 +743,7 @@ function IssueList({
   return (
     <div className="mt-5">
       <p className="mb-2 text-xs font-semibold text-slate-700">{title}</p>
-      <div className="divide-y divide-black/[0.05] overflow-hidden rounded-2xl border border-au-separator bg-white">
+      <div className="divide-y divide-au-separator overflow-hidden rounded-2xl border border-au-separator bg-au-surface">
         {issues.slice(0, 20).map((issue) => {
           const questionIssue = issue.path.startsWith("examQuestion:");
           return (
@@ -721,10 +751,10 @@ function IssueList({
               key={`${issue.code}-${issue.path}`}
               type="button"
               onClick={() => onIssueClick(issue)}
-              className="flex min-h-14 w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
+              className="flex min-h-14 w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-au-accent"
             >
               {warning ? (
-                <Info size={16} className="mt-0.5 shrink-0 text-amber-600" aria-hidden="true" />
+                <Info size={16} className="mt-0.5 shrink-0 text-au-warning-text" aria-hidden="true" />
               ) : (
                 <AlertTriangle
                   size={16}
@@ -751,7 +781,7 @@ function IssueList({
 function RuntimePolicyPanel() {
   return (
     <details className={`${surfaceClass} group p-5 sm:p-6`}>
-      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
             Runtime policy
@@ -834,7 +864,7 @@ function ReleaseSummary({
                 : "Publish once the exam is ready for students."}
           </p>
         </div>
-        <dl className="divide-y divide-black/[0.05] px-5">
+        <dl className="divide-y divide-au-separator px-5">
           {published ? (
             <SummaryRow
               label="Current release"
@@ -864,8 +894,8 @@ function ReleaseSummary({
         </dl>
         <div className="p-5">
           {dirtyCount > 0 ? (
-            <div className="mb-4 flex items-start gap-2 rounded-xl bg-au-warning-tint p-3 text-xs leading-5 text-amber-800">
-              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            <div className="mb-4 flex items-start gap-2 rounded-xl bg-au-warning-tint p-3 text-xs leading-5 text-au-warning-text">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
               Save all delivery changes before publishing.
             </div>
           ) : null}
@@ -873,9 +903,9 @@ function ReleaseSummary({
             <button
               type="button"
               onClick={onOpenStudentAccess}
-              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-au-accent px-4 text-sm font-semibold text-white transition-colors hover:bg-au-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-au-accent px-4 text-sm font-semibold text-white transition-colors hover:bg-au-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2"
             >
-              <Link2 size={16} />
+              <Link2 size={16} aria-hidden="true" />
               Student Access
             </button>
           ) : (
@@ -883,9 +913,9 @@ function ReleaseSummary({
               type="button"
               onClick={onPublish}
               disabled={!canPublish || isPublishing}
-              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-au-accent px-4 text-sm font-semibold text-white transition-colors hover:bg-au-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-au-accent px-4 text-sm font-semibold text-white transition-colors hover:bg-au-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2"
             >
-              {isPublishing ? <LoaderCircle size={16} className="animate-spin" /> : <Rocket size={16} />}
+              {isPublishing ? <LoaderCircle size={16} className="animate-spin" aria-hidden="true" /> : <Rocket size={16} aria-hidden="true" />}
               {isPublishing ? "Publishing…" : isUpdate ? "Publish Update" : "Publish"}
             </button>
           )}
@@ -942,33 +972,8 @@ function PublishAssessmentDialog({
   onClose: () => void;
   onConfirm: (publishNotes?: string) => Promise<void>;
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const [notes, setNotes] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
-  }, [open]);
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const handleCancel = (event: Event) => {
-      event.preventDefault();
-      if (!isPublishing) onClose();
-    };
-    const handleClose = () => {
-      if (open && !isPublishing) onClose();
-    };
-    dialog.addEventListener("cancel", handleCancel);
-    dialog.addEventListener("close", handleClose);
-    return () => {
-      dialog.removeEventListener("cancel", handleCancel);
-      dialog.removeEventListener("close", handleClose);
-    };
-  }, [isPublishing, onClose, open]);
 
   useEffect(() => {
     if (!open) {
@@ -990,10 +995,14 @@ function PublishAssessmentDialog({
     }
   };
   return (
-    <dialog
-      ref={dialogRef}
-      aria-labelledby="sat-publish-dialog-title"
-      className="m-auto w-[min(94vw,620px)] max-h-[88vh] overflow-y-auto rounded-[24px] border-0 bg-white p-0 text-slate-950 shadow-2xl"
+    <AuthoringDialog
+      open={open}
+      title={isUpdate ? `Publish changes to ${examTitle}?` : `Publish ${examTitle}?`}
+      description="Review delivery details and add optional notes before creating the immutable release."
+      onClose={onClose}
+      closeDisabled={isPublishing}
+      showHeader={false}
+      contentClassName="w-[min(94vw,620px)] max-h-[88vh] overflow-y-auto rounded-[24px] p-0"
     >
       <div className="p-5 sm:p-6">
         <div className="flex items-start gap-3">
@@ -1037,9 +1046,9 @@ function PublishAssessmentDialog({
 
         <div className="mt-4 flex items-start gap-2 rounded-2xl border border-au-separator p-4">
           {blockerCount === 0 ? (
-            <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-emerald-600" />
+            <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-au-success-text" aria-hidden="true" />
           ) : (
-            <AlertTriangle size={17} className="mt-0.5 shrink-0 text-au-danger-text" />
+            <AlertTriangle size={17} className="mt-0.5 shrink-0 text-au-danger-text" aria-hidden="true" />
           )}
           <div className="text-sm leading-6 text-slate-600">
             <p className="font-semibold text-slate-800">
@@ -1063,12 +1072,12 @@ function PublishAssessmentDialog({
             rows={3}
             maxLength={1000}
             placeholder="What changed in this release?"
-            className="mt-1.5 w-full resize-y rounded-xl border border-au-separator px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15"
+            className="mt-1.5 w-full resize-y rounded-xl border border-au-separator px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-au-accent focus:ring-2 focus:ring-au-accent/15"
           />
         </label>
 
         {warningCount > 0 && blockerCount === 0 ? (
-          <p className="mt-3 text-xs leading-5 text-amber-700">
+          <p className="mt-3 text-xs leading-5 text-au-warning-text">
             Recommendations do not block publishing; review them if they affect your intended
             delivery.
           </p>
@@ -1095,34 +1104,34 @@ function PublishAssessmentDialog({
             className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
           >
             {isPublishing ? (
-              <LoaderCircle size={15} className="animate-spin" />
+              <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
             ) : (
-              <Rocket size={15} />
+              <Rocket size={15} aria-hidden="true" />
             )}
             {isPublishing ? "Publishing…" : isUpdate ? "Publish Update" : "Publish"}
           </button>
         </div>
       </div>
-    </dialog>
+    </AuthoringDialog>
   );
 }
 
 function ReleaseLoadingSurface() {
   return (
-    <div className="min-h-screen bg-au-fill text-slate-950" aria-busy="true">
-      <div className="border-b border-au-separator bg-white/88">
+    <div className="sat-product sat-authoring min-h-screen bg-au-fill text-slate-950" aria-busy="true">
+      <div className="border-b border-au-separator bg-au-surface">
         <div className="mx-auto flex min-h-[68px] max-w-[1240px] items-center px-4 sm:px-6 lg:px-8">
-          <div className="h-4 w-48 animate-pulse rounded-full bg-slate-200" />
+          <div className="h-4 w-48 animate-pulse rounded-full bg-au-fill-strong" />
         </div>
       </div>
       <main className="mx-auto max-w-[1240px] px-4 py-8 sm:px-6 lg:px-8">
-        <div className="h-32 animate-pulse rounded-[22px] bg-white" />
+        <div className="h-32 animate-pulse rounded-[22px] bg-au-surface" />
         <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-6">
-            <div className="h-[420px] animate-pulse rounded-[22px] bg-white" />
-            <div className="h-72 animate-pulse rounded-[22px] bg-white" />
+            <div className="h-[420px] animate-pulse rounded-[22px] bg-au-surface" />
+            <div className="h-72 animate-pulse rounded-[22px] bg-au-surface" />
           </div>
-          <div className="h-96 animate-pulse rounded-[22px] bg-white" />
+          <div className="h-96 animate-pulse rounded-[22px] bg-au-surface" />
         </div>
       </main>
     </div>

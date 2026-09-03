@@ -195,6 +195,22 @@ describe("SatDeliveryReleasePage", () => {
     expect(screen.getByText("Save all delivery changes before publishing.")).toBeInTheDocument();
   });
 
+  it("protects unsaved delivery settings when leaving release", () => {
+    const onBackToBuilder = vi.fn();
+    render(<SatDeliveryReleasePage {...pageProps({ onBackToBuilder })} />);
+
+    fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
+    fireEvent.click(screen.getByRole("button", { name: "Questions" }));
+
+    expect(onBackToBuilder).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("alertdialog", { name: "Leave with unsaved changes?" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+
+    expect(onBackToBuilder).toHaveBeenCalledOnce();
+  });
+
   it("keeps warning-only drafts publishable", () => {
     const warning: AssessmentValidationIssue = {
       code: "sat.delivery.nonstandard_timing",

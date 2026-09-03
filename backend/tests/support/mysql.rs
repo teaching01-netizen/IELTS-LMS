@@ -107,6 +107,9 @@ impl TestDatabase {
             if !effective_migrations.contains(&"0048_exam_event_timestamp_precision.sql") {
                 effective_migrations.push("0048_exam_event_timestamp_precision.sql");
             }
+            if !effective_migrations.contains(&"0049_response_durability_v2.sql") {
+                effective_migrations.push("0049_response_durability_v2.sql");
+            }
         }
         for migration in effective_migrations {
             let sql = fs::read_to_string(migration_path(migration)).expect("read migration");

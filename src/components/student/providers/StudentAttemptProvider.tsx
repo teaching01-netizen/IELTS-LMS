@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
   type ReactNode,
-} from 'react';
+} from "react";
 import {
   backendPost,
   backendConflictReason,
@@ -21,16 +21,24 @@ import {
   PendingMutationDurabilityMirror,
   readAnswerSyncCheckpoint,
   refreshAttemptCredentialForAttempt,
+  rotateClientSessionIdForAttempt,
+  restoreClientSessionIdForAttempt,
   saveStudentAuditEvent,
   studentAttemptRepository,
-} from '@student/application/studentAttemptFacade';
-import type { DurablePersistTriggerSource } from '@student/application/studentAttemptFacade';
-import { queryClient } from '../../../app/data/queryClient';
+} from "@student/application/studentAttemptFacade";
+import type { DurablePersistTriggerSource } from "@student/application/studentAttemptFacade";
+import { DurableResponseEngine } from "@shared/durability/DurableResponseEngine";
+import {
+  createResponseDurabilityV2Transport,
+  takeOverResponseDurabilityLease,
+} from "@student/api/responseDurabilityTransport";
+import { getVisibleResponse, type ResponsePayload } from "@shared/durability/types";
+import { queryClient } from "../../../app/data/queryClient";
 import {
   emitStudentObservabilityMetric,
   withStudentObservabilityDimensions,
-} from '../../../utils/studentObservability';
-import type { ModuleType, Violation } from '../../../types';
+} from "../../../utils/studentObservability";
+import type { ModuleType, Violation } from "../../../types";
 import type {
   AttemptSyncState,
   HeartbeatEventType,
@@ -41,14 +49,14 @@ import type {
   StudentAttemptMutationPayload,
   StudentAttemptMutationType,
   StudentPreCheckResult,
-} from '../../../types/studentAttempt';
-import { emitAnswerMutationDebugLog } from '../answerMutationDebug';
+} from "../../../types/studentAttempt";
+import { emitAnswerMutationDebugLog } from "../answerMutationDebug";
 import {
   useStudentRuntime,
   useStudentRuntimeSession,
   useStudentRuntimeLiveRef,
-} from './StudentRuntimeProvider';
-import { isVerifiedTerminalStudentState } from './verifiedTerminalState';
+} from "./StudentRuntimeProvider";
+import { isVerifiedTerminalStudentState } from "./verifiedTerminalState";
 
 interface StudentAttemptState {
   attempt: StudentAttempt | null;
@@ -56,6 +64,7 @@ interface StudentAttemptState {
   lastLocalMutationAt: string | null;
   lastPersistedAt: string | null;
   pendingMutationCount: number;
+  durabilityLeaseConflict: boolean;
 }
 
 interface StudentAttemptActions {
@@ -70,13 +79,14 @@ interface StudentAttemptActions {
   persistPosition: (
     currentModule: ModuleType,
     currentQuestionId: string | null,
-    phase: StudentAttempt['phase']
+    phase: StudentAttempt["phase"]
   ) => void;
   recordPreCheckResult: (result: StudentPreCheckResult) => Promise<void>;
-  recordNetworkStatus: (status: 'offline' | 'online', timestamp?: string) => Promise<void>;
+  recordNetworkStatus: (status: "offline" | "online", timestamp?: string) => Promise<void>;
   recordHeartbeat: (type: HeartbeatEventType, payload?: Record<string, unknown>) => Promise<void>;
   acknowledgeProctorWarning: (warningId: string) => Promise<void>;
   submitAttempt: () => Promise<boolean>;
+  takeOverDurabilityLease: (reason?: string) => Promise<boolean>;
   setDeviceFingerprintHash: (hash: string) => Promise<void>;
   flushPending: () => Promise<boolean>;
   flushAnswerDurabilityNow: () => void;
@@ -100,11 +110,16 @@ interface StudentAttemptProviderProps {
   scheduleId?: string | undefined;
   attemptSnapshot?: StudentAttempt | null;
   persistenceEnabled?: boolean | undefined;
+  useV2DurabilityEngine?: boolean | undefined;
+  writingQuestionIds?: readonly string[] | undefined;
 }
 
-type AttemptPatch = Omit<Partial<StudentAttempt>, 'integrity' | 'recovery'> & {
-  integrity?: Partial<StudentAttempt['integrity']> | undefined;
-  recovery?: Partial<StudentAttempt['recovery']> | undefined;
+type AttemptPatch = Omit<Partial<StudentAttempt>, "integrity" | "recovery" | "writingAnswers"> & {
+  integrity?: Partial<StudentAttempt["integrity"]> | undefined;
+  recovery?: Partial<StudentAttempt["recovery"]> | undefined;
+  // `null` is a deletion marker for a V2 writing response. It is consumed
+  // while merging and never escapes into the StudentAttempt string map.
+  writingAnswers?: Record<string, string | null> | undefined;
 };
 
 const StudentAttemptContext = createContext<StudentAttemptContextValue | null>(null);
@@ -128,40 +143,40 @@ function pendingMutationOldestAgeMs(mutations: StudentAttemptMutation[]): number
   return Math.max(0, Date.now() - oldest);
 }
 
-function detectClientDeviceClass(): 'phone' | 'tablet' | 'desktop' | 'unknown' {
-  if (typeof navigator === 'undefined') {
-    return 'unknown';
+function detectClientDeviceClass(): "phone" | "tablet" | "desktop" | "unknown" {
+  if (typeof navigator === "undefined") {
+    return "unknown";
   }
 
-  const ua = navigator.userAgent || '';
+  const ua = navigator.userAgent || "";
   if (/iPad|Tablet|PlayBook|Silk|Kindle|Android(?!.*Mobile)/i.test(ua)) {
-    return 'tablet';
+    return "tablet";
   }
   if (/iPhone|iPod|Mobile|Android/i.test(ua)) {
-    return 'phone';
+    return "phone";
   }
   if (ua.trim().length === 0) {
-    return 'unknown';
+    return "unknown";
   }
-  return 'desktop';
+  return "desktop";
 }
 
-function detectBrowserEngine(): 'webkit' | 'blink' | 'gecko' | 'unknown' {
-  if (typeof navigator === 'undefined') {
-    return 'unknown';
+function detectBrowserEngine(): "webkit" | "blink" | "gecko" | "unknown" {
+  if (typeof navigator === "undefined") {
+    return "unknown";
   }
 
-  const ua = navigator.userAgent || '';
+  const ua = navigator.userAgent || "";
   if (/AppleWebKit/i.test(ua)) {
-    return 'webkit';
+    return "webkit";
   }
   if (/Gecko\//i.test(ua) || /Firefox/i.test(ua)) {
-    return 'gecko';
+    return "gecko";
   }
   if (/Chrome|Chromium|Edg|OPR/i.test(ua)) {
-    return 'blink';
+    return "blink";
   }
-  return 'unknown';
+  return "unknown";
 }
 
 function isEditableDomTarget(target: EventTarget | null): boolean {
@@ -172,7 +187,7 @@ function isEditableDomTarget(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
-    target.getAttribute('contenteditable') === 'true'
+    target.getAttribute("contenteditable") === "true"
   );
 }
 
@@ -203,7 +218,14 @@ function mergeAttempt(attempt: StudentAttempt, patch: AttemptPatch): StudentAtte
     ...patch,
     answers: patch.answers ? { ...attempt.answers, ...patch.answers } : attempt.answers,
     writingAnswers: patch.writingAnswers
-      ? { ...attempt.writingAnswers, ...patch.writingAnswers }
+      ? Object.entries(patch.writingAnswers).reduce<Record<string, string>>(
+          (writingAnswers, [questionId, answer]) => {
+            if (answer === null) delete writingAnswers[questionId];
+            else writingAnswers[questionId] = answer;
+            return writingAnswers;
+          },
+          { ...attempt.writingAnswers }
+        )
       : attempt.writingAnswers,
     flags: patch.flags ? { ...attempt.flags, ...patch.flags } : attempt.flags,
     violations: patch.violations ?? attempt.violations,
@@ -237,11 +259,11 @@ function shouldPreferLocalAttemptState(
   }
 
   const localRevision =
-    typeof localAttempt.revision === 'number' && Number.isFinite(localAttempt.revision)
+    typeof localAttempt.revision === "number" && Number.isFinite(localAttempt.revision)
       ? localAttempt.revision
       : null;
   const incomingRevision =
-    typeof incomingAttempt.revision === 'number' && Number.isFinite(incomingAttempt.revision)
+    typeof incomingAttempt.revision === "number" && Number.isFinite(incomingAttempt.revision)
       ? incomingAttempt.revision
       : null;
 
@@ -291,8 +313,8 @@ function shouldPreferLocalAttemptState(
   }
 
   if (
-    localAttempt.recovery.syncState === 'saved' &&
-    incomingAttempt.recovery.syncState === 'idle'
+    localAttempt.recovery.syncState === "saved" &&
+    incomingAttempt.recovery.syncState === "idle"
   ) {
     return true;
   }
@@ -307,14 +329,34 @@ export function StudentAttemptProvider({
   scheduleId,
   attemptSnapshot = null,
   persistenceEnabled = true,
+  useV2DurabilityEngine,
+  writingQuestionIds = [],
 }: StudentAttemptProviderProps) {
+  const v2DurabilityEnabled =
+    (useV2DurabilityEngine ??
+      String(import.meta.env["VITE_USE_V2_DURABILITY_ENGINE"] ?? "false") === "true") &&
+    attemptSnapshot?.protocolVersion === 2;
   const { state: runtimeState, actions: runtimeActions } = useStudentRuntimeSession();
   const runtimeLiveRef = useStudentRuntimeLiveRef();
   const setRuntimeAttemptSyncState = runtimeActions.setAttemptSyncState;
   const [attempt, setAttempt] = useState<StudentAttempt | null>(attemptSnapshot);
+  const renderedAttemptIdentityRef = useRef<{
+    attemptId: string | null;
+    scheduleId: string | null;
+  }>({
+    attemptId: attemptSnapshot?.id ?? null,
+    scheduleId: scheduleId ?? attemptSnapshot?.scheduleId ?? null,
+  });
+  renderedAttemptIdentityRef.current = {
+    attemptId: attemptSnapshot?.id ?? null,
+    scheduleId: scheduleId ?? attemptSnapshot?.scheduleId ?? null,
+  };
+  const attemptSnapshotRef = useRef<StudentAttempt | null>(attemptSnapshot);
+  attemptSnapshotRef.current = attemptSnapshot;
   // Source of truth for UI pending badge is the durability mirror via onPendingMutationCountChange.
   // attempt.recovery.pendingMutationCount is persisted for recovery but not used for badge display.
   const [pendingMutationCount, setPendingMutationCount] = useState(0);
+  const [durabilityLeaseConflict, setDurabilityLeaseConflict] = useState(false);
   const attemptRef = useRef<StudentAttempt | null>(attemptSnapshot);
   const controlScheduleIdRef = useRef<string | undefined>(
     scheduleId ?? attemptSnapshot?.scheduleId
@@ -322,8 +364,8 @@ export function StudentAttemptProvider({
   const controlAttemptIdRef = useRef<string | undefined>(attemptSnapshot?.id);
   const observedPositionRef = useRef<string>(
     JSON.stringify({
-      phase: attemptSnapshot?.phase ?? 'pre-check',
-      currentModule: attemptSnapshot?.currentModule ?? 'listening',
+      phase: attemptSnapshot?.phase ?? "pre-check",
+      currentModule: attemptSnapshot?.currentModule ?? "listening",
       currentQuestionId: attemptSnapshot?.currentQuestionId ?? null,
     })
   );
@@ -337,6 +379,13 @@ export function StudentAttemptProvider({
 
   const syncAttemptState = useCallback(
     (nextAttempt: StudentAttempt) => {
+      const renderedIdentity = renderedAttemptIdentityRef.current;
+      if (
+        renderedIdentity.attemptId !== nextAttempt.id ||
+        renderedIdentity.scheduleId !== nextAttempt.scheduleId
+      ) {
+        return;
+      }
       attemptRef.current = nextAttempt;
       controlScheduleIdRef.current = scheduleId ?? nextAttempt.scheduleId;
       controlAttemptIdRef.current = nextAttempt.id;
@@ -345,6 +394,8 @@ export function StudentAttemptProvider({
     },
     [scheduleId, setRuntimeAttemptSyncState]
   );
+  const syncAttemptStateRef = useRef(syncAttemptState);
+  syncAttemptStateRef.current = syncAttemptState;
 
   useEffect(() => {
     controlScheduleIdRef.current = scheduleId ?? attemptRef.current?.scheduleId;
@@ -353,19 +404,203 @@ export function StudentAttemptProvider({
 
   const setStorageDurabilityBlocking = useCallback(
     (active: boolean) => {
-      if (active) {
-        if (runtimeState.blocking.reason !== 'storage_unavailable') {
-          runtimeActions.transitionBlocking('storage_unavailable', true);
+      runtimeActions.transitionBlocking("storage_unavailable", active);
+    },
+    [runtimeActions]
+  );
+
+  const v2EngineRef = useRef<DurableResponseEngine | null>(null);
+  const v2ReadyRef = useRef<Promise<void> | null>(null);
+  const v2PendingAcceptancesRef = useRef(new Set<Promise<void>>());
+  const v2IdentityGenerationRef = useRef(0);
+  const v2IdentityKey = `${scheduleId ?? attemptSnapshot?.scheduleId ?? ""}:${attemptSnapshot?.id ?? ""}:${v2DurabilityEnabled}`;
+  const previousV2IdentityKeyRef = useRef<string | null>(null);
+  const v2FieldKindRef = useRef(new Map<string, "answer" | "writing" | "flag">());
+  if (previousV2IdentityKeyRef.current !== v2IdentityKey) {
+    previousV2IdentityKeyRef.current = v2IdentityKey;
+    v2IdentityGenerationRef.current += 1;
+    v2FieldKindRef.current.clear();
+  }
+  const v2HydratedSnapshotKeyRef = useRef<string | null>(null);
+  for (const questionId of writingQuestionIds) {
+    if (questionId.trim()) {
+      v2FieldKindRef.current.set(questionId, "writing");
+    }
+  }
+
+  useEffect(() => {
+    v2PendingAcceptancesRef.current.clear();
+  }, [v2IdentityKey]);
+
+  const publishV2EngineState = useCallback(
+    (states: ReadonlyMap<string, import("@shared/durability/types").QuestionResponseState>) => {
+      const currentAttempt = attemptRef.current;
+      if (!currentAttempt) return;
+      const answerPatch: Record<string, StudentAnswerValue> = {};
+      const writingPatch: Record<string, string | null> = {};
+      const flagPatch: Record<string, boolean> = {};
+      let pending = 0;
+
+      for (const [questionId, state] of states) {
+        if (state.pending) pending += 1;
+        const visible = getVisibleResponse(state);
+        if (!visible) continue;
+        const kind =
+          v2FieldKindRef.current.get(questionId) ??
+          (Object.prototype.hasOwnProperty.call(currentAttempt.writingAnswers, questionId)
+            ? "writing"
+            : "answer");
+        if (
+          visible.markedForReview ||
+          Object.prototype.hasOwnProperty.call(currentAttempt.flags, questionId) ||
+          kind === "flag"
+        ) {
+          flagPatch[questionId] = visible.markedForReview;
         }
-        return;
+        if (kind === "writing") {
+          writingPatch[questionId] =
+            typeof visible.answer === "string" ? visible.answer : null;
+        } else if (
+          visible.answer === null ||
+          typeof visible.answer === "string" ||
+          Array.isArray(visible.answer)
+        ) {
+          answerPatch[questionId] = visible.answer;
+        }
       }
 
-      if (runtimeState.blocking.reason === 'storage_unavailable') {
-        runtimeActions.transitionBlocking('storage_unavailable', false);
+      setPendingMutationCount(pending);
+      if (
+        Object.keys(answerPatch).length === 0 &&
+        Object.keys(writingPatch).length === 0 &&
+        Object.keys(flagPatch).length === 0
+      ) {
+        return;
       }
+      syncAttemptStateRef.current(
+        mergeAttempt(currentAttempt, {
+          answers: answerPatch,
+          writingAnswers: writingPatch,
+          flags: flagPatch,
+          recovery: {
+            pendingMutationCount: pending,
+          },
+        })
+      );
     },
-    [runtimeActions, runtimeState.blocking.reason]
+    []
   );
+
+  useEffect(() => {
+    const snapshot = attemptSnapshotRef.current;
+    const enabled = v2DurabilityEnabled && persistenceEnabled && Boolean(snapshot?.id);
+    if (!enabled) {
+      v2EngineRef.current?.destroy();
+      v2EngineRef.current = null;
+      v2ReadyRef.current = null;
+      setDurabilityLeaseConflict(false);
+      return;
+    }
+
+    const generation = v2IdentityGenerationRef.current;
+    const engine = new DurableResponseEngine({
+      scheduleId: scheduleId ?? snapshot?.scheduleId ?? "unknown",
+      attemptId: snapshot?.id ?? "unknown",
+      leaseEpoch: snapshot?.leaseEpoch ?? 1,
+      controlEpoch: snapshot?.controlEpoch ?? 1,
+      transport: createResponseDurabilityV2Transport(
+        scheduleId ?? snapshot?.scheduleId ?? "unknown",
+        snapshot ?? undefined
+      ),      onStateChange: (states) => {
+        if (v2EngineRef.current !== engine || v2IdentityGenerationRef.current !== generation)
+          return;
+        publishV2EngineState(states);
+      },
+      onStatusChange: (status, error) => {
+        if (v2EngineRef.current !== engine || v2IdentityGenerationRef.current !== generation)
+          return;
+        const currentAttempt = attemptRef.current;
+        if (currentAttempt) {
+          syncAttemptState(
+            mergeAttempt(currentAttempt, {
+              recovery: {
+                pendingMutationCount: engine.getPendingCount(),
+                syncState:
+                  status === "synced"
+                    ? "saved"
+                    : status === "saving"
+                      ? "saving"
+                      : status === "saved_locally"
+                        ? "offline"
+                        : "error",
+              },
+            })
+          );
+        }
+        if (status === "durability_fault") {
+          setStorageDurabilityBlocking(true);
+        }
+        if (status === "conflict_fenced") {
+          setDurabilityLeaseConflict(true);
+          setRuntimeAttemptSyncState("error");
+        }
+        if (status === "conflict_terminal") {
+          setDurabilityLeaseConflict(false);
+          setRuntimeAttemptSyncState("error");
+        }
+        if (status === "synced") {
+          setDurabilityLeaseConflict(false);
+          setStorageDurabilityBlocking(false);
+        }
+        void error;
+      },
+    });
+    v2EngineRef.current = engine;
+    const recovery = engine.recover().catch((error: unknown) => {
+      if (v2EngineRef.current !== engine || v2IdentityGenerationRef.current !== generation) return;
+      const currentAttempt = attemptRef.current;
+      if (currentAttempt) {
+        syncAttemptState(
+          mergeAttempt(currentAttempt, {
+            recovery: { syncState: "error" },
+          })
+        );
+      }
+      setStorageDurabilityBlocking(true);
+      void error;
+    });
+    v2ReadyRef.current = recovery;
+
+    return () => {
+      engine.destroy();
+      if (v2EngineRef.current === engine) v2EngineRef.current = null;
+      if (v2ReadyRef.current === recovery) v2ReadyRef.current = null;
+    };
+  }, [
+    attemptSnapshot?.id,
+    attemptSnapshot?.scheduleId,
+    attemptSnapshot?.leaseEpoch,
+    attemptSnapshot?.controlEpoch,
+    persistenceEnabled,
+    publishV2EngineState,
+    scheduleId,
+    setRuntimeAttemptSyncState,
+    setStorageDurabilityBlocking,
+    syncAttemptState,
+    v2DurabilityEnabled,
+  ]);
+
+  const waitForV2Acceptances = useCallback(async () => {
+    let firstError: unknown;
+    while (v2PendingAcceptancesRef.current.size > 0) {
+      const settled = await Promise.allSettled([...v2PendingAcceptancesRef.current]);
+      if (firstError === undefined) {
+        const rejected = settled.find((entry) => entry.status === "rejected");
+        if (rejected?.status === "rejected") firstError = rejected.reason;
+      }
+    }
+    if (firstError !== undefined) throw firstError;
+  }, []);
 
   const recordPendingMutationPersistenceError = useCallback(
     (
@@ -373,30 +608,39 @@ export function StudentAttemptProvider({
       pendingMutationCountForError: number,
       fallbackAttempt: StudentAttempt,
       source: DurablePersistTriggerSource,
-      durablePersistResult: 'failed' | 'checkpoint_failed' = 'failed'
+      durablePersistResult: "failed" | "checkpoint_failed" = "failed"
     ) => {
+      const renderedIdentity = renderedAttemptIdentityRef.current;
+      if (
+        renderedIdentity.attemptId !== fallbackAttempt.id ||
+        renderedIdentity.scheduleId !== fallbackAttempt.scheduleId ||
+        attemptRef.current?.id !== fallbackAttempt.id ||
+        attemptRef.current?.scheduleId !== fallbackAttempt.scheduleId
+      ) {
+        return;
+      }
       const erroredAttempt = mergeAttempt(attemptRef.current ?? fallbackAttempt, {
         recovery: {
-          syncState: 'error',
+          syncState: "error",
           pendingMutationCount: pendingMutationCountForError,
         },
       });
       syncAttemptState(erroredAttempt);
       setStorageDurabilityBlocking(true);
       emitStudentObservabilityMetric(
-        'student_pending_persist_failure_total',
+        "student_pending_persist_failure_total",
         withStudentObservabilityDimensions({
           scheduleId: scheduleId ?? fallbackAttempt.scheduleId,
           attemptId: fallbackAttempt.id,
-          endpoint: '/v1/student/sessions/:scheduleId/mutations:pending',
+          endpoint: "/v1/student/sessions/:scheduleId/mutations:pending",
           statusCode: null,
-          reason: error instanceof Error ? error.message : 'pending_mirror_persist_failed',
-          syncState: 'error',
+          reason: error instanceof Error ? error.message : "pending_mirror_persist_failed",
+          syncState: "error",
           lifecycleEventSource: source,
           durablePersistResult,
           browserEngine: detectBrowserEngine(),
           platform:
-            typeof navigator !== 'undefined'
+            typeof navigator !== "undefined"
               ? ((
                   navigator as Navigator & {
                     userAgentData?: {
@@ -404,7 +648,7 @@ export function StudentAttemptProvider({
                     };
                   }
                 ).userAgentData?.platform ?? navigator.platform)
-              : 'unknown',
+              : "unknown",
           deviceClass: detectClientDeviceClass(),
           pendingMutationAgeMs: pendingMutationOldestAgeMs(
             durabilityMirrorRef.current?.getPendingMutations() ?? []
@@ -414,9 +658,9 @@ export function StudentAttemptProvider({
       );
       void saveStudentAuditEvent(
         scheduleId ?? fallbackAttempt.scheduleId,
-        'PERSISTENCE_STORAGE_ERROR',
+        "PERSISTENCE_STORAGE_ERROR",
         {
-          message: error instanceof Error ? error.message : 'Failed to persist pending mutations',
+          message: error instanceof Error ? error.message : "Failed to persist pending mutations",
           pendingMutationCount: pendingMutationCountForError,
           lifecycleEventSource: source,
           durablePersistResult,
@@ -449,7 +693,7 @@ export function StudentAttemptProvider({
     (
       nextMutations: StudentAttemptMutation[],
       options?: {
-        durableWriteMode?: 'immediate' | 'debounced';
+        durableWriteMode?: "immediate" | "debounced";
         includesAnswerMutation?: boolean;
         awaitPersistence?: boolean;
         source?: DurablePersistTriggerSource;
@@ -460,8 +704,8 @@ export function StudentAttemptProvider({
     []
   );
 
-  const scheduleFlush = useCallback((kind: 'objective' | 'writing', delayMs: number) => {
-    const timeoutRef = kind === 'writing' ? writingFlushTimeoutRef : objectiveFlushTimeoutRef;
+  const scheduleFlush = useCallback((kind: "objective" | "writing", delayMs: number) => {
+    const timeoutRef = kind === "writing" ? writingFlushTimeoutRef : objectiveFlushTimeoutRef;
 
     if (timeoutRef.current) {
       window.clearTimeout(timeoutRef.current);
@@ -480,7 +724,12 @@ export function StudentAttemptProvider({
       payload: StudentAttemptMutationPayload<StudentAttemptMutationType>
     ) => {
       const currentAttempt = attemptRef.current;
-      if (!currentAttempt) {
+      const renderedIdentity = renderedAttemptIdentityRef.current;
+      if (
+        !currentAttempt ||
+        currentAttempt.id !== renderedIdentity.attemptId ||
+        currentAttempt.scheduleId !== renderedIdentity.scheduleId
+      ) {
         return;
       }
 
@@ -493,7 +742,7 @@ export function StudentAttemptProvider({
             lastLocalMutationAt: timestamp,
             lastPersistedAt: timestamp,
             pendingMutationCount: 0,
-            syncState: 'idle',
+            syncState: "idle",
           },
         });
         syncAttemptState(nextAttempt);
@@ -501,7 +750,7 @@ export function StudentAttemptProvider({
       }
 
       const isObjectiveMutation =
-        mutationType === 'answer' || mutationType === 'flag' || mutationType === 'writing_answer';
+        mutationType === "answer" || mutationType === "flag" || mutationType === "writing_answer";
       const runtimeModule =
         runtimeLiveRef.current.runtimeSnapshot?.currentSectionKey ??
         runtimeLiveRef.current.currentModule ??
@@ -512,7 +761,7 @@ export function StudentAttemptProvider({
         : undefined;
       const payloadWithModule: StudentAttemptMutationPayload<StudentAttemptMutationType> =
         isObjectiveMutation &&
-        (typeof existingModule !== 'string' || existingModule.trim().length === 0)
+        (typeof existingModule !== "string" || existingModule.trim().length === 0)
           ? {
               ...payload,
               module: authoritativeModule,
@@ -524,12 +773,12 @@ export function StudentAttemptProvider({
         runtimeLiveRef.current.timeRemaining;
       const forceImmediateDurability =
         isObjectiveMutation &&
-        runtimeLiveRef.current.phase === 'exam' &&
+        runtimeLiveRef.current.phase === "exam" &&
         Number.isFinite(reportedRemaining) &&
         reportedRemaining >= 0 &&
         reportedRemaining <= BOUNDARY_IMMEDIATE_DURABILITY_THRESHOLD_SECONDS;
       const mutation: StudentAttemptMutation = {
-        id: generateId('mutation'),
+        id: generateId("mutation"),
         attemptId: currentAttempt.id,
         scheduleId: currentAttempt.scheduleId,
         timestamp,
@@ -548,7 +797,7 @@ export function StudentAttemptProvider({
       setPendingMutations(enqueue.nextPendingMutations, {
         durableWriteMode: enqueue.durableWriteMode,
         includesAnswerMutation: enqueue.includesAnswerMutation,
-        source: 'mutation',
+        source: "mutation",
       });
 
       const syncState: AttemptSyncState = enqueue.syncState;
@@ -576,49 +825,115 @@ export function StudentAttemptProvider({
       return flushInFlightRef.current;
     }
 
+    const generation = v2IdentityGenerationRef.current;
+    const expectedIdentity = renderedAttemptIdentityRef.current;
+    const isCurrent = () => {
+      const renderedIdentity = renderedAttemptIdentityRef.current;
+      return (
+        v2IdentityGenerationRef.current === generation &&
+        renderedIdentity.attemptId === expectedIdentity.attemptId &&
+        renderedIdentity.scheduleId === expectedIdentity.scheduleId &&
+        attemptRef.current?.id === expectedIdentity.attemptId &&
+        attemptRef.current?.scheduleId === expectedIdentity.scheduleId
+      );
+    };
+    if (!isCurrent()) return false;
+
     const promise = (async () => {
-      const mirror = durabilityMirrorRef.current;
-      if (!mirror) {
-        return true;
+      const flushLegacyMutationQueue = async (): Promise<boolean> => {
+        if (!isCurrent()) return false;
+        const mirror = durabilityMirrorRef.current;
+        if (!mirror) {
+          return true;
+        }
+
+        const outbox = createStudentMutationOutbox({
+          getAttempt: () => (isCurrent() ? attemptRef.current : null),
+          syncAttemptState: (nextAttempt) => {
+            if (isCurrent()) syncAttemptState(nextAttempt);
+          },
+          setRuntimeAttemptSyncState: (state) => {
+            if (isCurrent()) setRuntimeAttemptSyncState(state);
+          },
+          setStorageDurabilityBlocking: (active) => {
+            if (isCurrent()) setStorageDurabilityBlocking(active);
+          },
+          mirror,
+          persistenceEnabled: () => isCurrent() && persistenceEnabled,
+          isOnline: () => isCurrent() && navigator.onLine,
+          hasAttemptCredential,
+          refreshAttemptCredentialForAttempt: async (attempt) => {
+            if (!isCurrent() || attempt.id !== expectedIdentity.attemptId) return false;
+            const refreshed = await refreshAttemptCredentialForAttempt(attempt);
+            return isCurrent() && refreshed;
+          },
+          backendConflictReason,
+          clearAttemptMutationWatermark: (attempt) => {
+            if (isCurrent()) clearAttemptMutationWatermark(attempt);
+          },
+          onReplayAfterSubmit: (attempt) => {
+            if (!isCurrent()) return;
+            emitStudentObservabilityMetric(
+              "student_mutation_replay_after_submit_total",
+              withStudentObservabilityDimensions({
+                scheduleId: attempt.scheduleId,
+                attemptId: attempt.id,
+                endpoint: "mutations:batch",
+                reason: "ATTEMPT_SUBMITTED",
+                syncState: attempt.recovery.syncState,
+              })
+            );
+          },
+          saveAttempt: async (attempt, context) => {
+            if (!isCurrent() || attempt.id !== expectedIdentity.attemptId) {
+              throw new Error("The student attempt changed while durability was flushing.");
+            }
+            await studentAttemptRepository.saveAttempt(attempt, context);
+            if (!isCurrent()) {
+              throw new Error("The student attempt changed while durability was flushing.");
+            }
+          },
+          clearPendingMutations: async (attemptId) => {
+            if (!isCurrent() || attemptId !== expectedIdentity.attemptId) return;
+            await studentAttemptRepository.clearPendingMutations(attemptId);
+          },
+          getAttemptsByScheduleId: async (scheduleId) => {
+            if (!isCurrent() || scheduleId !== expectedIdentity.scheduleId) return [];
+            return studentAttemptRepository.getAttemptsByScheduleId(scheduleId);
+          },
+          getCanonicalAttempt: async (attempt) => {
+            if (!isCurrent() || attempt.id !== expectedIdentity.attemptId) return null;
+            return studentAttemptRepository.getCanonicalAttemptByScheduleId(
+              attempt.scheduleId,
+              attempt.studentKey
+            );
+          },
+        });
+
+        return outbox.flushNow();
+      };
+
+      if (v2DurabilityEnabled) {
+        await waitForV2Acceptances();
+        if (!isCurrent()) return false;
+        const ready = v2ReadyRef.current;
+        if (ready) await ready;
+        if (!isCurrent()) return false;
+        const engine = v2EngineRef.current;
+        if (
+          !engine ||
+          engine.attemptId !== expectedIdentity.attemptId ||
+          engine.scheduleId !== expectedIdentity.scheduleId
+        )
+          return false;
+        await engine.flush();
+        if (!isCurrent() || engine.getPendingCount() > 0) return false;
       }
 
-      const outbox = createStudentMutationOutbox({
-        getAttempt: () => attemptRef.current,
-        syncAttemptState,
-        setRuntimeAttemptSyncState,
-        setStorageDurabilityBlocking,
-        mirror,
-        persistenceEnabled: () => persistenceEnabled,
-        isOnline: () => navigator.onLine,
-        hasAttemptCredential,
-        refreshAttemptCredentialForAttempt,
-        backendConflictReason,
-        clearAttemptMutationWatermark,
-        onReplayAfterSubmit: (attempt) => {
-          emitStudentObservabilityMetric(
-            'student_mutation_replay_after_submit_total',
-            withStudentObservabilityDimensions({
-              scheduleId: attempt.scheduleId,
-              attemptId: attempt.id,
-              endpoint: 'mutations:batch',
-              reason: 'ATTEMPT_SUBMITTED',
-              syncState: attempt.recovery.syncState,
-            })
-          );
-        },
-        saveAttempt: (attempt) => studentAttemptRepository.saveAttempt(attempt),
-        clearPendingMutations: (attemptId) =>
-          studentAttemptRepository.clearPendingMutations(attemptId),
-        getAttemptsByScheduleId: (scheduleId) =>
-          studentAttemptRepository.getAttemptsByScheduleId(scheduleId),
-        getCanonicalAttempt: (attempt) =>
-          studentAttemptRepository.getCanonicalAttemptByScheduleId(
-            attempt.scheduleId,
-            attempt.studentKey
-          ),
-      });
-
-      return outbox.flushNow();
+      // V2 owns answer durability, but position, violations, network events,
+      // and other non-response mutations still use the legacy mutation ledger.
+      if (!isCurrent()) return false;
+      return flushLegacyMutationQueue();
     })();
 
     flushInFlightRef.current = promise;
@@ -634,6 +949,8 @@ export function StudentAttemptProvider({
     setRuntimeAttemptSyncState,
     setStorageDurabilityBlocking,
     syncAttemptState,
+    v2DurabilityEnabled,
+    waitForV2Acceptances,
   ]);
 
   // Keep flushPending stable via refs: flushPending reads attemptRef/durabilityMirrorRef (not snapshot closure).
@@ -651,46 +968,46 @@ export function StudentAttemptProvider({
       if (!isEditableDomTarget(event.target)) {
         return;
       }
-      flushAnswerDurableMirrorNow('focusout');
+      flushAnswerDurableMirrorNow("focusout");
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'hidden') {
+      if (document.visibilityState !== "hidden") {
         return;
       }
-      flushAnswerDurableMirrorNow('visibility_hidden');
+      flushAnswerDurableMirrorNow("visibility_hidden");
     };
 
     const handlePageHide = () => {
-      flushAnswerDurableMirrorNow('pagehide');
+      flushAnswerDurableMirrorNow("pagehide");
     };
 
     const handleBeforeUnload = () => {
-      flushAnswerDurableMirrorNow('beforeunload');
+      flushAnswerDurableMirrorNow("beforeunload");
     };
 
     const handleFreeze = () => {
-      flushAnswerDurableMirrorNow('freeze');
+      flushAnswerDurableMirrorNow("freeze");
     };
 
     const handleWindowBlur = () => {
-      flushAnswerDurableMirrorNow('window_blur');
+      flushAnswerDurableMirrorNow("window_blur");
     };
 
-    document.addEventListener('focusout', handleFocusOut, true);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    document.addEventListener('freeze', handleFreeze as EventListener);
-    window.addEventListener('pagehide', handlePageHide);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener("focusout", handleFocusOut, true);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("freeze", handleFreeze as EventListener);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("blur", handleWindowBlur);
 
     return () => {
-      document.removeEventListener('focusout', handleFocusOut, true);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      document.removeEventListener('freeze', handleFreeze as EventListener);
-      window.removeEventListener('pagehide', handlePageHide);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener("focusout", handleFocusOut, true);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("freeze", handleFreeze as EventListener);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("blur", handleWindowBlur);
     };
   }, [flushAnswerDurableMirrorNow]);
 
@@ -700,14 +1017,66 @@ export function StudentAttemptProvider({
     if (!attemptSnapshot) {
       attemptRef.current = null;
       observedPositionRef.current = JSON.stringify({
-        phase: 'pre-check',
-        currentModule: 'listening',
+        phase: "pre-check",
+        currentModule: "listening",
         currentQuestionId: null,
       });
       observedViolationsRef.current = JSON.stringify([]);
-      setRuntimeAttemptSyncState('idle');
+      setRuntimeAttemptSyncState("idle");
       setAttempt(null);
       setPendingMutationCount(0);
+      setDurabilityLeaseConflict(false);
+      durabilityMirrorRef.current?.reset();
+      return;
+    }
+
+    if (v2DurabilityEnabled) {
+      const snapshotKey = JSON.stringify([
+        attemptSnapshot.id,
+        attemptSnapshot.phase,
+        attemptSnapshot.deliveryStatus,
+        attemptSnapshot.submittedAt,
+        attemptSnapshot.finalSubmission?.submissionId,
+        attemptSnapshot.proctorStatus,
+        attemptSnapshot.proctorNote,
+        attemptSnapshot.leaseEpoch,
+        attemptSnapshot.controlEpoch,
+        attemptSnapshot.deadlineAt,
+        attemptSnapshot.closingGraceUntil,
+        attemptSnapshot.activeClientSessionId,
+      ]);
+      if (
+        v2HydratedSnapshotKeyRef.current === snapshotKey &&
+        attemptRef.current?.id === attemptSnapshot.id
+      ) {
+        return;
+      }
+      v2HydratedSnapshotKeyRef.current = snapshotKey;
+      setDurabilityLeaseConflict(false);
+      const currentAttempt = attemptRef.current;
+      const nextAttempt =
+        currentAttempt?.id === attemptSnapshot.id
+          ? (() => {
+              const {
+                answers: _remoteAnswers,
+                writingAnswers: _remoteWritingAnswers,
+                flags: _remoteFlags,
+                ...remoteMetadata
+              } = attemptSnapshot;
+              return mergeAttempt(currentAttempt, {
+                ...remoteMetadata,
+                recovery: {
+                  ...attemptSnapshot.recovery,
+                  pendingMutationCount: v2EngineRef.current?.getPendingCount() ?? 0,
+                  syncState: currentAttempt.recovery.syncState,
+                },
+              });
+            })()
+          : attemptSnapshot;
+      attemptRef.current = nextAttempt;
+      setAttempt(nextAttempt);
+      setPendingMutationCount(v2EngineRef.current?.getPendingCount() ?? 0);
+      setRuntimeAttemptSyncState(nextAttempt.recovery.syncState);
       durabilityMirrorRef.current?.reset();
       return;
     }
@@ -734,13 +1103,13 @@ export function StudentAttemptProvider({
               recovery: {
                 ...currentAttempt.recovery,
                 pendingMutationCount: 0,
-                syncState: 'idle' as AttemptSyncState,
+                syncState: "idle" as AttemptSyncState,
               },
             }
           : mergeAttempt(attemptSnapshot, {
               recovery: {
                 pendingMutationCount: 0,
-                syncState: 'idle' as AttemptSyncState,
+                syncState: "idle" as AttemptSyncState,
               },
             });
       attemptRef.current = ephemeralAttempt;
@@ -751,7 +1120,7 @@ export function StudentAttemptProvider({
         currentQuestionId: ephemeralAttempt.currentQuestionId,
       });
       observedViolationsRef.current = JSON.stringify(ephemeralAttempt.violations ?? []);
-      setRuntimeAttemptSyncState('idle');
+      setRuntimeAttemptSyncState("idle");
       setPendingMutationCount(0);
       durabilityMirrorRef.current?.reset();
       return;
@@ -776,8 +1145,8 @@ export function StudentAttemptProvider({
           isVerifiedTerminalStudentState({
             attempt: attemptSnapshot,
             runtimeSnapshot: runtimeState.runtimeSnapshot,
-          }) !== 'not_terminal'
-            ? 'post-exam'
+          }) !== "not_terminal"
+            ? "post-exam"
             : currentAttempt.phase,
         proctorStatus: attemptSnapshot.proctorStatus,
         proctorNote: attemptSnapshot.proctorNote,
@@ -828,19 +1197,19 @@ export function StudentAttemptProvider({
           pendingMutations = checkpointMutations;
           recoveredFromCheckpoint = true;
           emitStudentObservabilityMetric(
-            'student_pending_checkpoint_recovered_total',
+            "student_pending_checkpoint_recovered_total",
             withStudentObservabilityDimensions({
               scheduleId: attemptSnapshot.scheduleId,
               attemptId: attemptSnapshot.id,
-              endpoint: '/v1/student/sessions/:scheduleId/mutations:pending',
+              endpoint: "/v1/student/sessions/:scheduleId/mutations:pending",
               statusCode: null,
-              reason: 'sync_checkpoint_recovery',
+              reason: "sync_checkpoint_recovery",
               syncState: attemptSnapshot.recovery.syncState,
-              lifecycleEventSource: 'hydrate_checkpoint',
-              durablePersistResult: 'recovered',
+              lifecycleEventSource: "hydrate_checkpoint",
+              durablePersistResult: "recovered",
               browserEngine: detectBrowserEngine(),
               platform:
-                typeof navigator !== 'undefined'
+                typeof navigator !== "undefined"
                   ? ((
                       navigator as Navigator & {
                         userAgentData?: {
@@ -848,7 +1217,7 @@ export function StudentAttemptProvider({
                         };
                       }
                     ).userAgentData?.platform ?? navigator.platform)
-                  : 'unknown',
+                  : "unknown",
               deviceClass: detectClientDeviceClass(),
               pendingMutationAgeMs: pendingMutationOldestAgeMs(checkpointMutations),
               pendingMutationCount: checkpointMutations.length,
@@ -868,35 +1237,35 @@ export function StudentAttemptProvider({
         const replayFlags: Record<string, boolean> = {};
 
         for (const mutation of pendingMutations) {
-          if (mutation.type === 'answer') {
+          if (mutation.type === "answer") {
             const questionId = mutation.payload.questionId;
-            if (typeof questionId !== 'string' || questionId.trim() === '') {
+            if (typeof questionId !== "string" || questionId.trim() === "") {
               continue;
             }
             replayAnswers[questionId] = mutation.payload.value;
             continue;
           }
 
-          if (mutation.type === 'writing_answer') {
+          if (mutation.type === "writing_answer") {
             const taskId = mutation.payload.taskId;
-            if (typeof taskId !== 'string' || taskId.trim() === '') {
+            if (typeof taskId !== "string" || taskId.trim() === "") {
               continue;
             }
             const value = mutation.payload.value;
-            if (typeof value !== 'string') {
+            if (typeof value !== "string") {
               continue;
             }
             replayWritingAnswers[taskId] = value;
             continue;
           }
 
-          if (mutation.type === 'flag') {
+          if (mutation.type === "flag") {
             const questionId = mutation.payload.questionId;
-            if (typeof questionId !== 'string' || questionId.trim() === '') {
+            if (typeof questionId !== "string" || questionId.trim() === "") {
               continue;
             }
             const value = mutation.payload.value;
-            if (typeof value !== 'boolean') {
+            if (typeof value !== "boolean") {
               continue;
             }
             replayFlags[questionId] = value;
@@ -910,7 +1279,7 @@ export function StudentAttemptProvider({
           flags: replayFlags,
           recovery: {
             pendingMutationCount: pendingMutations.length,
-            syncState: navigator.onLine ? currentAttempt.recovery.syncState : 'offline',
+            syncState: navigator.onLine ? currentAttempt.recovery.syncState : "offline",
           },
         });
 
@@ -937,6 +1306,8 @@ export function StudentAttemptProvider({
     persistenceEnabled,
     runtimeState.runtimeSnapshot,
     setRuntimeAttemptSyncState,
+    syncAttemptState,
+    v2DurabilityEnabled,
   ]);
 
   useEffect(() => {
@@ -951,9 +1322,9 @@ export function StudentAttemptProvider({
     });
     const effectivePhase =
       runtimeState.runtimeBacked &&
-      runtimeState.phase === 'post-exam' &&
-      verifiedTerminalState === 'not_terminal'
-        ? 'exam'
+      runtimeState.phase === "post-exam" &&
+      verifiedTerminalState === "not_terminal"
+        ? "exam"
         : runtimeState.phase;
     const nextPosition = JSON.stringify({
       phase: effectivePhase,
@@ -978,15 +1349,15 @@ export function StudentAttemptProvider({
     }
 
     if (objectivePatch.violations) {
-      void applyPatch(objectivePatch, 'violation', 400, {
-        changedAreas: ['violation'],
+      void applyPatch(objectivePatch, "violation", 400, {
+        changedAreas: ["violation"],
         violations: runtimeState.violations,
       });
     }
 
     if (nextPosition !== observedPositionRef.current) {
-      void applyPatch(objectivePatch, 'position', 400, {
-        changedAreas: ['position'],
+      void applyPatch(objectivePatch, "position", 400, {
+        changedAreas: ["position"],
         phase: effectivePhase,
         currentModule: runtimeState.currentModule,
         currentQuestionId: runtimeState.currentQuestionId,
@@ -1017,30 +1388,122 @@ export function StudentAttemptProvider({
     };
   }, []);
 
+  const enqueueV2Response = useCallback(
+    (
+      questionId: string,
+      payload: ResponsePayload,
+      kind: "answer" | "writing" | "flag",
+      patch: AttemptPatch
+    ) => {
+      const generation = v2IdentityGenerationRef.current;
+      const renderedIdentity = renderedAttemptIdentityRef.current;
+      const currentAttempt = attemptRef.current;
+      if (
+        !currentAttempt ||
+        currentAttempt.id !== renderedIdentity.attemptId ||
+        currentAttempt.scheduleId !== renderedIdentity.scheduleId
+      ) {
+        return;
+      }
+      v2FieldKindRef.current.set(questionId, kind);
+      syncAttemptState(mergeAttempt(currentAttempt, patch));
+      const send = async () => {
+        if (!v2EngineRef.current) {
+          const ready = v2ReadyRef.current;
+          if (ready) await ready;
+        }
+        const engine = v2EngineRef.current;
+        if (
+          !engine ||
+          engine.attemptId !== renderedIdentity.attemptId ||
+          engine.scheduleId !== renderedIdentity.scheduleId ||
+          v2IdentityGenerationRef.current !== generation
+        )
+          return;
+        await engine.acceptResponse(questionId, payload);
+      };
+      const acceptance = send();
+      v2PendingAcceptancesRef.current.add(acceptance);
+      void acceptance.then(
+        () => v2PendingAcceptancesRef.current.delete(acceptance),
+        () => v2PendingAcceptancesRef.current.delete(acceptance)
+      );
+      void acceptance.catch((error: unknown) => {
+        if (v2IdentityGenerationRef.current !== generation) return;
+        const current = attemptRef.current;
+        if (current) {
+          syncAttemptState(
+            mergeAttempt(current, {
+              recovery: {
+                syncState: "error",
+              },
+            })
+          );
+        }
+        setStorageDurabilityBlocking(true);
+        void error;
+      });
+    },
+    [setStorageDurabilityBlocking, syncAttemptState]
+  );
+
+  const durablePayloadForQuestion = useCallback((questionId: string): ResponsePayload => {
+    const state = v2EngineRef.current?.getStates().get(questionId);
+    const visible = state ? getVisibleResponse(state) : null;
+    const currentAttempt = attemptRef.current;
+    const fallbackAnswer = Object.prototype.hasOwnProperty.call(
+      currentAttempt?.writingAnswers ?? {},
+      questionId
+    )
+      ? (currentAttempt?.writingAnswers[questionId] ?? null)
+      : (currentAttempt?.answers[questionId] ?? null);
+    return {
+      // `null` is an authoritative V2 clear; only fall back when no V2
+      // response state exists at all.
+      answer: visible ? visible.answer : fallbackAnswer,
+      markedForReview: visible?.markedForReview ?? currentAttempt?.flags[questionId] ?? false,
+      eliminatedOptions: visible ? [...visible.eliminatedOptions] : [],
+      annotations: visible ? visible.annotations.map((annotation) => ({ ...annotation })) : [],
+    };
+  }, []);
+
   const persistAnswer = useCallback(
     (questionId: string, answer: StudentAnswerValue, meta?: StudentAnswerMutationMeta) => {
-      const payload: StudentAttemptMutationPayload<'answer'> = { questionId, value: answer };
-      if (meta?.interactionType === 'typing' || meta?.interactionType === 'discrete') {
+      if (v2DurabilityEnabled) {
+        enqueueV2Response(
+          questionId,
+          {
+            ...durablePayloadForQuestion(questionId),
+            answer,
+          },
+          "answer",
+          { answers: { [questionId]: answer } }
+        );
+        return;
+      }
+
+      const payload: StudentAttemptMutationPayload<"answer"> = { questionId, value: answer };
+      if (meta?.interactionType === "typing" || meta?.interactionType === "discrete") {
         payload.interactionType = meta.interactionType;
       }
       if (
-        typeof meta?.slotIndex === 'number' &&
+        typeof meta?.slotIndex === "number" &&
         Number.isInteger(meta.slotIndex) &&
         meta.slotIndex >= 0
       ) {
         payload.slotIndex = meta.slotIndex;
       }
-      if (typeof meta?.slotId === 'string' && meta.slotId.trim()) {
+      if (typeof meta?.slotId === "string" && meta.slotId.trim()) {
         payload.slotId = meta.slotId;
       }
       if (
-        typeof meta?.slotCount === 'number' &&
+        typeof meta?.slotCount === "number" &&
         Number.isInteger(meta.slotCount) &&
         meta.slotCount > 0
       ) {
         payload.slotCount = meta.slotCount;
       }
-      emitAnswerMutationDebugLog('StudentAttemptProvider.persistAnswer', {
+      emitAnswerMutationDebugLog("StudentAttemptProvider.persistAnswer", {
         questionId,
         answer,
         mutationMeta: meta ?? null,
@@ -1053,44 +1516,68 @@ export function StudentAttemptProvider({
             [questionId]: answer,
           },
         },
-        'answer',
+        "answer",
         400,
         payload
       );
     },
-    [applyPatch]
+    [applyPatch, durablePayloadForQuestion, enqueueV2Response, v2DurabilityEnabled]
   );
 
   const persistWritingAnswer = useCallback(
     (taskId: string, text: string) => {
+      if (v2DurabilityEnabled) {
+        enqueueV2Response(
+          taskId,
+          {
+            ...durablePayloadForQuestion(taskId),
+            answer: text,
+          },
+          "writing",
+          { writingAnswers: { [taskId]: text } }
+        );
+        return;
+      }
       void applyPatch(
         {
           writingAnswers: {
             [taskId]: text,
           },
         },
-        'writing_answer',
+        "writing_answer",
         1_500,
         { taskId, value: text }
       );
     },
-    [applyPatch]
+    [applyPatch, durablePayloadForQuestion, enqueueV2Response, v2DurabilityEnabled]
   );
 
   const persistFlag = useCallback(
     (questionId: string, flagged: boolean) => {
+      if (v2DurabilityEnabled) {
+        enqueueV2Response(
+          questionId,
+          {
+            ...durablePayloadForQuestion(questionId),
+            markedForReview: flagged,
+          },
+          "flag",
+          { flags: { [questionId]: flagged } }
+        );
+        return;
+      }
       void applyPatch(
         {
           flags: {
             [questionId]: flagged,
           },
         },
-        'flag',
+        "flag",
         400,
         { questionId, value: flagged }
       );
     },
-    [applyPatch]
+    [applyPatch, durablePayloadForQuestion, enqueueV2Response, v2DurabilityEnabled]
   );
 
   const persistViolation = useCallback(
@@ -1110,7 +1597,7 @@ export function StudentAttemptProvider({
         {
           violations: nextViolations,
         },
-        'violation',
+        "violation",
         400,
         {
           violationId: violation.id,
@@ -1126,7 +1613,7 @@ export function StudentAttemptProvider({
     (
       currentModule: ModuleType,
       currentQuestionId: string | null,
-      phase: StudentAttempt['phase']
+      phase: StudentAttempt["phase"]
     ) => {
       void applyPatch(
         {
@@ -1134,7 +1621,7 @@ export function StudentAttemptProvider({
           currentQuestionId,
           phase,
         },
-        'position',
+        "position",
         400,
         {
           currentModule,
@@ -1150,7 +1637,7 @@ export function StudentAttemptProvider({
     async (result: StudentPreCheckResult) => {
       const currentAttempt = attemptRef.current;
       if (!currentAttempt) {
-        throw new Error('Missing student attempt context.');
+        throw new Error("Missing student attempt context.");
       }
 
       if (!persistenceEnabled) {
@@ -1160,7 +1647,7 @@ export function StudentAttemptProvider({
               preCheck: result,
             },
             recovery: {
-              syncState: 'idle',
+              syncState: "idle",
               pendingMutationCount: 0,
             },
           })
@@ -1173,7 +1660,7 @@ export function StudentAttemptProvider({
         currentAttempt.id,
         ensureClientSessionIdForAttempt(currentAttempt),
         result.completedAt,
-      ].join(':');
+      ].join(":");
 
       try {
         const persisted = await backendPost<any>(
@@ -1190,7 +1677,7 @@ export function StudentAttemptProvider({
           {
             retries: 0,
             headers: {
-              'Idempotency-Key': precheckIdempotencyKey,
+              "Idempotency-Key": precheckIdempotencyKey,
             },
           }
         );
@@ -1205,21 +1692,21 @@ export function StudentAttemptProvider({
         syncAttemptState(
           mergeAttempt(currentAttempt, {
             recovery: {
-              syncState: 'error',
+              syncState: "error",
             },
           })
         );
-        throw error instanceof Error ? error : new Error('Failed to save system check.');
+        throw error instanceof Error ? error : new Error("Failed to save system check.");
       }
 
-      await saveStudentAuditEvent(resolvedScheduleId, 'PRECHECK_COMPLETED', {
+      await saveStudentAuditEvent(resolvedScheduleId, "PRECHECK_COMPLETED", {
         completedAt: result.completedAt,
         checks: result.checks,
         acknowledgedSafariLimitation: result.acknowledgedSafariLimitation,
       });
 
       if (result.acknowledgedSafariLimitation) {
-        await saveStudentAuditEvent(resolvedScheduleId, 'PRECHECK_WARNING_ACKNOWLEDGED', {
+        await saveStudentAuditEvent(resolvedScheduleId, "PRECHECK_WARNING_ACKNOWLEDGED", {
           completedAt: result.completedAt,
         });
       }
@@ -1228,11 +1715,11 @@ export function StudentAttemptProvider({
   );
 
   const recordNetworkStatus = useCallback(
-    async (status: 'offline' | 'online', timestamp = new Date().toISOString()) => {
+    async (status: "offline" | "online", timestamp = new Date().toISOString()) => {
       await applyPatch(
         {
           integrity:
-            status === 'offline'
+            status === "offline"
               ? {
                   lastDisconnectAt: timestamp,
                 }
@@ -1240,10 +1727,10 @@ export function StudentAttemptProvider({
                   lastReconnectAt: timestamp,
                 },
           recovery: {
-            syncState: status === 'offline' ? 'offline' : 'syncing_reconnect',
+            syncState: status === "offline" ? "offline" : "syncing_reconnect",
           },
         },
-        'network',
+        "network",
         0,
         {
           status,
@@ -1286,9 +1773,9 @@ export function StudentAttemptProvider({
       const nextAttempt = mergeAttempt(currentAttempt, {
         lastAcknowledgedWarningId: warningId,
         proctorStatus:
-          currentAttempt.proctorStatus === 'warned' ? 'active' : currentAttempt.proctorStatus,
+          currentAttempt.proctorStatus === "warned" ? "active" : currentAttempt.proctorStatus,
         proctorUpdatedAt: new Date().toISOString(),
-        proctorUpdatedBy: 'Candidate',
+        proctorUpdatedBy: "Candidate",
       });
 
       if (!persistenceEnabled) {
@@ -1300,7 +1787,7 @@ export function StudentAttemptProvider({
       syncAttemptState(nextAttempt);
       await saveStudentAuditEvent(
         scheduleId,
-        'ALERT_ACKNOWLEDGED',
+        "ALERT_ACKNOWLEDGED",
         {
           warningId,
         },
@@ -1322,6 +1809,20 @@ export function StudentAttemptProvider({
 
       const retryWindowMs = 60 * 60 * 1000;
       const startedAtMs = Date.now();
+      const generation = v2IdentityGenerationRef.current;
+      const expectedIdentity = renderedAttemptIdentityRef.current;
+      const isCurrent = () => {
+        const renderedIdentity = renderedAttemptIdentityRef.current;
+        return (
+          v2IdentityGenerationRef.current === generation &&
+          renderedIdentity.attemptId === expectedIdentity.attemptId &&
+          renderedIdentity.scheduleId === expectedIdentity.scheduleId &&
+          expectedIdentity.attemptId === seedAttempt.id &&
+          attemptRef.current?.id === seedAttempt.id &&
+          attemptRef.current?.scheduleId === seedAttempt.scheduleId
+        );
+      };
+      if (!isCurrent()) return;
 
       const promise = (async () => {
         let retryDelayMs = 5_000;
@@ -1330,26 +1831,75 @@ export function StudentAttemptProvider({
           window.setTimeout(resolve, retryDelayMs);
         });
 
-        while (Date.now() - startedAtMs <= retryWindowMs) {
+        while (isCurrent() && Date.now() - startedAtMs <= retryWindowMs) {
           if (!navigator.onLine) {
             await new Promise<void>((resolve) => {
               window.setTimeout(resolve, retryDelayMs);
             });
+            if (!isCurrent()) return;
             retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
             continue;
           }
 
-          const candidateAttempt = attemptRef.current ?? seedAttempt;
+          const candidateAttempt = attemptRef.current;
+          if (!candidateAttempt) return;
           try {
+            if (v2DurabilityEnabled) {
+              const flushed = await flushPending();
+              if (!flushed || !isCurrent()) return;
+              const ready = v2ReadyRef.current;
+              if (ready) await ready;
+              if (!isCurrent()) return;
+              const engine = v2EngineRef.current;
+              if (!engine) throw new Error("V2 response durability engine is not ready.");
+              const submitted = await engine.submit(
+                candidateAttempt.id,
+                engine.getAttemptRevision()
+              );
+              if (!isCurrent()) return;
+              const submittedAttempt = mergeAttempt(attemptRef.current ?? candidateAttempt, {
+                phase: "post-exam",
+                submittedAt: submitted.submittedAt,
+                responseRevision: submitted.attemptRevision,
+                finalResponseDigest: submitted.finalResponseDigest,
+                finalSubmission: {
+                  submissionId: submitted.submissionId,
+                  submittedAt: submitted.submittedAt,
+                },
+                recovery: {
+                  finalSubmissionPending: false,
+                  pendingMutationCount: 0,
+                  syncState: "saved",
+                },
+              });
+              if (!isCurrent()) return;
+              runtimeActions.setPhase("post-exam");
+              syncAttemptState(submittedAttempt);
+              void queryClient.invalidateQueries();
+              return;
+            }
             const submittedAttempt = await studentAttemptRepository.submitAttempt(candidateAttempt);
-            syncAttemptState(mergeAttempt(submittedAttempt, {
-              recovery: {
-                finalSubmissionPending: false,
-              },
-            }));
+            if (!isCurrent()) return;
+            syncAttemptState(
+              mergeAttempt(attemptRef.current ?? submittedAttempt, {
+                recovery: {
+                  finalSubmissionPending: false,
+                },
+              })
+            );
             void queryClient.invalidateQueries();
             return;
           } catch {
+            if (!isCurrent()) return;
+            if (v2DurabilityEnabled) {
+              const engine = v2EngineRef.current;
+              if (
+                engine?.getStatus() === "conflict_fenced" ||
+                engine?.getStatus() === "conflict_terminal"
+              ) {
+                return;
+              }
+            }
             await new Promise<void>((resolve) => {
               window.setTimeout(resolve, retryDelayMs);
             });
@@ -1365,47 +1915,201 @@ export function StudentAttemptProvider({
         }
       });
     },
-    [persistenceEnabled, syncAttemptState]
+    [
+      flushPending,
+      persistenceEnabled,
+      runtimeActions,
+      syncAttemptState,
+      v2DurabilityEnabled,
+    ]
+  );
+
+  const takeOverDurabilityLease = useCallback(
+    async (reason = "Candidate explicitly requested lease takeover"): Promise<boolean> => {
+      if (!v2DurabilityEnabled) return false;
+      const generation = v2IdentityGenerationRef.current;
+      const renderedIdentity = renderedAttemptIdentityRef.current;
+      const currentAttempt = attemptRef.current;
+      const engine = v2EngineRef.current;
+      if (
+        !currentAttempt ||
+        !engine ||
+        v2IdentityGenerationRef.current !== generation ||
+        currentAttempt.id !== renderedIdentity.attemptId ||
+        currentAttempt.scheduleId !== renderedIdentity.scheduleId ||
+        engine.attemptId !== renderedIdentity.attemptId ||
+        engine.scheduleId !== renderedIdentity.scheduleId ||
+        currentAttempt.id !== controlAttemptIdRef.current
+      )
+        return false;
+
+      const previousClientSessionId = ensureClientSessionIdForAttempt(currentAttempt);
+      const nextClientSessionId = rotateClientSessionIdForAttempt(currentAttempt);
+      let takeoverAccepted = false;
+      let takeover: Awaited<ReturnType<typeof takeOverResponseDurabilityLease>>;
+      try {
+        takeover = await takeOverResponseDurabilityLease(
+          currentAttempt.scheduleId,
+          currentAttempt.id,
+          {
+            clientSessionId: nextClientSessionId,
+            reason,
+          },
+          currentAttempt
+        );
+        takeoverAccepted = true;
+      } catch (error) {
+        if (!takeoverAccepted) {
+          restoreClientSessionIdForAttempt(currentAttempt, previousClientSessionId);
+        }
+        if (v2IdentityGenerationRef.current === generation) {
+          syncAttemptState(
+            mergeAttempt(currentAttempt, {
+              recovery: { syncState: "error" },
+            })
+          );
+        }
+        void error;
+        return false;
+      }
+
+      if (
+        v2IdentityGenerationRef.current !== generation ||
+        renderedAttemptIdentityRef.current.attemptId !== currentAttempt.id ||
+        renderedAttemptIdentityRef.current.scheduleId !== currentAttempt.scheduleId
+      )
+        return false;
+      const currentEngine = v2EngineRef.current;
+      if (
+        !currentEngine ||
+        currentEngine.attemptId !== currentAttempt.id ||
+        currentEngine.scheduleId !== currentAttempt.scheduleId
+      )
+        return false;
+      currentEngine.updateEpochs(takeover.leaseEpoch, currentEngine.getControlEpoch());
+      const nextAttempt = mergeAttempt(attemptRef.current ?? currentAttempt, {
+        activeClientSessionId: takeover.clientSessionId,
+        leaseEpoch: takeover.leaseEpoch,
+        integrity: { clientSessionId: takeover.clientSessionId },
+        recovery: {
+          clientSessionId: takeover.clientSessionId,
+          syncState: "saved",
+        },
+      });
+      setDurabilityLeaseConflict(false);
+      syncAttemptState(nextAttempt);
+
+      try {
+        await currentEngine.recover();
+      } catch (error) {
+        if (
+          v2IdentityGenerationRef.current === generation &&
+          v2EngineRef.current === currentEngine
+        ) {
+          syncAttemptState(
+            mergeAttempt(attemptRef.current ?? nextAttempt, {
+              recovery: { syncState: "error" },
+            })
+          );
+        }
+        void error;
+      }
+      return v2IdentityGenerationRef.current === generation && v2EngineRef.current === currentEngine;
+    },
+    [syncAttemptState, v2DurabilityEnabled]
   );
 
   const submitAttempt = useCallback(async (): Promise<boolean> => {
     const currentAttempt = attemptRef.current;
-    if (!currentAttempt) {
+    const renderedIdentity = renderedAttemptIdentityRef.current;
+    if (
+      !currentAttempt ||
+      currentAttempt.id !== renderedIdentity.attemptId ||
+      currentAttempt.scheduleId !== renderedIdentity.scheduleId
+    ) {
       return false;
     }
+    const generation = v2IdentityGenerationRef.current;
+    const isCurrent = () =>
+      v2IdentityGenerationRef.current === generation &&
+      renderedAttemptIdentityRef.current.attemptId === currentAttempt.id &&
+      renderedAttemptIdentityRef.current.scheduleId === currentAttempt.scheduleId &&
+      attemptRef.current?.id === currentAttempt.id &&
+      attemptRef.current?.scheduleId === currentAttempt.scheduleId;
 
     const latestAttempt = attemptRef.current ?? currentAttempt;
     if (!persistenceEnabled) {
       // Preview mode intentionally completes locally; production submissions must use the server receipt path below.
       const submittedAttempt = mergeAttempt(latestAttempt, {
-        phase: 'post-exam',
+        phase: "post-exam",
         submittedAt: new Date().toISOString(),
         recovery: {
-          syncState: 'idle',
+          syncState: "idle",
           pendingMutationCount: 0,
         },
       });
-      runtimeActions.setPhase('post-exam');
+      if (!isCurrent()) return false;
+      runtimeActions.setPhase("post-exam");
       syncAttemptState(submittedAttempt);
       return true;
     }
 
     try {
+      if (v2DurabilityEnabled) {
+        const flushed = await flushPending();
+        if (!isCurrent()) return false;
+        if (!flushed) {
+          throw new Error("Not all attempt changes were durably saved.");
+        }
+        const ready = v2ReadyRef.current;
+        if (ready) await ready;
+        const engine = v2EngineRef.current;
+        if (
+          !isCurrent() ||
+          !engine ||
+          engine.attemptId !== currentAttempt.id ||
+          engine.scheduleId !== currentAttempt.scheduleId
+        )
+          return false;
+        const submitted = await engine.submit(latestAttempt.id, engine.getAttemptRevision());
+        if (!isCurrent()) return false;
+        const confirmedAttempt = mergeAttempt(attemptRef.current ?? latestAttempt, {
+          phase: "post-exam",
+          submittedAt: submitted.submittedAt,
+          responseRevision: submitted.attemptRevision,
+          finalResponseDigest: submitted.finalResponseDigest,
+          finalSubmission: {
+            submissionId: submitted.submissionId,
+            submittedAt: submitted.submittedAt,
+          },
+          recovery: {
+            finalSubmissionPending: false,
+            pendingMutationCount: 0,
+            syncState: "saved",
+          },
+        });
+        runtimeActions.setPhase("post-exam");
+        syncAttemptState(confirmedAttempt);
+        void queryClient.invalidateQueries();
+        return true;
+      }
       const submittedAttempt = await studentAttemptRepository.submitAttempt(latestAttempt);
-      const confirmedAttempt = mergeAttempt(submittedAttempt, {
+      if (!isCurrent()) return false;
+      const confirmedAttempt = mergeAttempt(attemptRef.current ?? submittedAttempt, {
         recovery: {
           finalSubmissionPending: false,
         },
       });
-      runtimeActions.setPhase('post-exam');
+      runtimeActions.setPhase("post-exam");
       syncAttemptState(confirmedAttempt);
       void queryClient.invalidateQueries();
       return true;
     } catch {
+      if (!isCurrent()) return false;
       const pendingAttempt = mergeAttempt(latestAttempt, {
         recovery: {
           finalSubmissionPending: true,
-          syncState: 'syncing_reconnect',
+          syncState: "syncing_reconnect",
         },
       });
       syncAttemptState(pendingAttempt);
@@ -1414,13 +2118,20 @@ export function StudentAttemptProvider({
     }
 
     return true;
-  }, [persistenceEnabled, runtimeActions, scheduleBackgroundSubmitRetry, syncAttemptState]);
+  }, [
+    flushPending,
+    persistenceEnabled,
+    runtimeActions,
+    scheduleBackgroundSubmitRetry,
+    syncAttemptState,
+    v2DurabilityEnabled,
+  ]);
 
   const flushAnswerDurabilityNow = useCallback(() => {
     if (!persistenceEnabled) {
       return;
     }
-    flushAnswerDurableMirrorNow('dom_rescue_commit');
+    flushAnswerDurableMirrorNow("dom_rescue_commit");
   }, [flushAnswerDurableMirrorNow, persistenceEnabled]);
 
   const setDeviceFingerprintHash = useCallback(
@@ -1431,7 +2142,7 @@ export function StudentAttemptProvider({
             deviceFingerprintHash: hash,
           },
         },
-        'device_fingerprint',
+        "device_fingerprint",
         0,
         {
           hash,
@@ -1484,6 +2195,7 @@ export function StudentAttemptProvider({
         lastLocalMutationAt: attempt?.recovery.lastLocalMutationAt ?? null,
         lastPersistedAt: attempt?.recovery.lastPersistedAt ?? null,
         pendingMutationCount,
+        durabilityLeaseConflict,
       },
       actions: {
         persistAnswer,
@@ -1496,6 +2208,7 @@ export function StudentAttemptProvider({
         recordHeartbeat,
         acknowledgeProctorWarning,
         submitAttempt,
+        takeOverDurabilityLease,
         setDeviceFingerprintHash,
         flushPending,
         flushAnswerDurabilityNow,
@@ -1508,6 +2221,7 @@ export function StudentAttemptProvider({
       attempt,
       flushPending,
       pendingMutationCount,
+      durabilityLeaseConflict,
       persistAnswer,
       persistFlag,
       persistPosition,
@@ -1517,6 +2231,7 @@ export function StudentAttemptProvider({
       recordNetworkStatus,
       recordPreCheckResult,
       submitAttempt,
+      takeOverDurabilityLease,
       setDeviceFingerprintHash,
       flushHeartbeatEvents,
       flushAnswerDurabilityNow,
@@ -1543,7 +2258,7 @@ export function StudentAttemptProvider({
 export function useStudentAttempt() {
   const context = useContext(StudentAttemptContext);
   if (!context) {
-    throw new Error('useStudentAttempt must be used within StudentAttemptProvider');
+    throw new Error("useStudentAttempt must be used within StudentAttemptProvider");
   }
   return context;
 }

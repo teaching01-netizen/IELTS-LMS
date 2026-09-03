@@ -1,6 +1,6 @@
-import '@testing-library/jest-dom/vitest';
-import { afterEach } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import "@testing-library/jest-dom/vitest";
+import { afterEach } from "vitest";
+import { cleanup } from "@testing-library/react";
 
 // Cleanup after each test
 afterEach(() => {
@@ -22,17 +22,28 @@ const localStorageMock = (() => {
     clear: () => {
       store = {};
     },
+    key: (index: number) => Object.keys(store)[index] ?? null,
+    get length() {
+      return Object.keys(store).length;
+    },
   };
 })();
 
-if (typeof window !== 'undefined') {
-  Object.defineProperty(window, 'localStorage', {
+if (typeof window !== "undefined") {
+  Object.defineProperty(window, "localStorage", {
     value: localStorageMock,
   });
 }
 
-if (typeof Element !== 'undefined') {
-  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+if (typeof Element !== "undefined") {
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    configurable: true,
+    value: () => {},
+  });
+}
+
+if (typeof window !== "undefined") {
+  Object.defineProperty(window, "scrollTo", {
     configurable: true,
     value: () => {},
   });

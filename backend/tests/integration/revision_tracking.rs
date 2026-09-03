@@ -133,8 +133,8 @@ async fn revision_increments_and_mutations_record_applied_revision() {
                         seq: 2,
                         timestamp: Utc.with_ymd_and_hms(2026, 1, 10, 9, 10, 5).unwrap(),
                         command: command(
-                            MutationType::WritingAnswer,
-                            json!({"taskId": "task-1", "value": "Draft 1"}),
+                            MutationType::Answer,
+                            json!({"questionId": "q2", "value": "B"}),
                         ),
                         base_revision: None,
                     },
@@ -395,8 +395,8 @@ async fn seed_schedule(pool: &sqlx::MySqlPool) -> ielts_backend_domain::schedule
                 }),
                 config_snapshot: json!({
                     "sections": {
-                        "listening": {"enabled": true, "label": "Listening", "order": 1, "duration": 30, "gapAfterMinutes": 5, "bandScoreTable": {"1": 1.0}},
-                        "reading": {"enabled": true, "label": "Reading", "order": 2, "duration": 60, "gapAfterMinutes": 0, "bandScoreTable": {"1": 1.0}},
+                        "listening": {"enabled": true, "label": "Listening", "order": 2, "duration": 30, "gapAfterMinutes": 5, "bandScoreTable": {"1": 1.0}},
+                        "reading": {"enabled": true, "label": "Reading", "order": 1, "duration": 60, "gapAfterMinutes": 0, "bandScoreTable": {"1": 1.0}},
                         "writing": {"enabled": true, "label": "Writing", "order": 3, "duration": 60, "gapAfterMinutes": 10},
                         "speaking": {"enabled": true, "label": "Speaking", "order": 4, "duration": 15, "gapAfterMinutes": 0}
                     }

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { SatErrorSurface, SatLoadingSurface } from "../ui/feedback/SatStateSurfaces";
 import { hasStructuredContent } from "../../exam-authoring/api/renderingPublic";
 import type { ExamSessionRuntime } from "../../../types/domain";
+import type { StudentAttempt } from "../../../types/studentAttempt";
 import { useSatExamController } from "../hooks/useSatExamController";
 import { useSatReadingPreferences } from "../hooks/useSatReadingPreferences";
 import {
@@ -25,6 +26,7 @@ import { SatDirectionsScreen } from "../ui/transitions/SatDirectionsScreen";
 import {
   SatBlockingOverlay,
   SatControlBanner,
+  SatLeaseConflictNotice,
   SatSubmissionOverlay,
 } from "../ui/feedback/SatControlFeedback";
 
@@ -32,9 +34,13 @@ export interface SatStudentSessionRouteProps {
   scheduleId: string;
   attemptId: string;
   candidateId: string;
+  attemptSnapshot?: StudentAttempt | null;
   runtimeSnapshot: ExamSessionRuntime | null;
   liveSocketConnected: boolean;
   attemptUpdateToken: number;
+  leaseEpoch?: number | null | undefined;
+  controlEpoch?: number | null | undefined;
+  useV2DurabilityEngine?: boolean | undefined;
   onExit: () => void | Promise<void>;
 }
 
@@ -46,18 +52,26 @@ export function SatStudentSessionRoute({
   scheduleId,
   attemptId,
   candidateId,
+  attemptSnapshot,
   runtimeSnapshot,
   liveSocketConnected,
   attemptUpdateToken,
+  leaseEpoch,
+  controlEpoch,
+  useV2DurabilityEngine,
   onExit,
 }: SatStudentSessionRouteProps) {
   const exam = useSatExamController({
     scheduleId,
     attemptId,
     candidateId,
+    attemptSnapshot: attemptSnapshot ?? null,
     runtimeSnapshot,
     liveSocketConnected,
     attemptUpdateToken,
+    leaseEpoch,
+    controlEpoch,
+    ...(useV2DurabilityEngine !== undefined ? { useV2DurabilityEngine } : {}),
   });
   const reading = useSatReadingPreferences(scheduleId, attemptId);
   const [eliminationMode, setEliminationMode] = useState(false);
@@ -122,8 +136,9 @@ export function SatStudentSessionRoute({
       ? exam.stateModuleAttempt.id
       : (calculatorWarmAttempt?.id ??
         (calculatorWarmModule ? `prewarm:${calculatorWarmModule.id}` : null));
-  const calculatorDisabled =
-    exam.blocked || exam.isSubmitting || persistence.failureKind === "superseded";
+  const persistenceInteractionBlocked =
+    persistence.failureKind === "superseded" || persistence.failureKind === "terminal";
+  const calculatorDisabled = exam.blocked || exam.isSubmitting || persistenceInteractionBlocked;
   const calculatorHost = calculatorModuleAttemptId ? (
     <SatCalculatorPanel
       key="sat-calculator-warm-host"
@@ -137,6 +152,21 @@ export function SatStudentSessionRoute({
   ) : null;
   const withCalculatorHost = (content: ReactNode) => (
     <>
+      {persistence.failureKind === "superseded" ? (
+        <SatLeaseConflictNotice
+          error={persistence.failure}
+          isTakingOver={persistence.isTakingOver}
+          onTakeOver={() => {
+            void exam.commands.takeOverDurabilityLease().catch((takeoverError: unknown) => {
+              exam.setError(
+                takeoverError instanceof Error
+                  ? takeoverError.message
+                  : "Unable to take over this attempt."
+              );
+            });
+          }}
+        />
+      ) : null}
       {content}
       {calculatorHost}
     </>
@@ -260,8 +290,7 @@ export function SatStudentSessionRoute({
   }
 
   const response = responseForQuestion(state.responses, questionId);
-  const interactionBlocked =
-    exam.blocked || exam.isSubmitting || persistence.failureKind === "superseded";
+  const interactionBlocked = exam.blocked || exam.isSubmitting || persistenceInteractionBlocked;
   const directions = hasStructuredContent(exam.stateModule.instructions)
     ? exam.stateModule.instructions
     : hasStructuredContent(exam.stateSection.instructions)

@@ -24,6 +24,10 @@ pub struct AttemptTokenClaims {
     pub attempt_id: String,
     pub client_session_id: String,
     pub exp: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_epoch: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +153,8 @@ mod tests {
             attempt_id: "attempt-1".to_owned(),
             client_session_id: "client-1".to_owned(),
             exp: now - Duration::seconds(1),
+            lease_epoch: Some(1),
+            organization_id: None,
         };
 
         let token = sign_attempt_token(&config, &claims);

@@ -36,6 +36,10 @@ export default defineConfig(({mode}) => {
           changeOrigin: false,
           ws: true,
         },
+        '/v2': {
+          target: backendApiUrl,
+          changeOrigin: false,
+        },
       },
     },
     build: {

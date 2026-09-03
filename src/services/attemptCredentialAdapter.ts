@@ -1,4 +1,4 @@
-import { backendGet } from './backendBridge';
+import { backendGet, backendPost, hasBackendStatusCode } from './backendBridge';
 import { studentSessionTransport } from './studentSessionTransport';
 import type { StudentAttempt } from '../types/studentAttempt';
 
@@ -10,6 +10,7 @@ export interface BackendAttemptCredential {
 }
 
 interface BackendStudentSessionContextWithCredential {
+  attempt?: unknown;
   attemptCredential?: BackendAttemptCredential | null;
 }
 
@@ -27,6 +28,9 @@ export interface AttemptCredentialRef {
 
 export interface AttemptCredentialRefreshRef extends AttemptCredentialRef {
   candidateId: string;
+  studentKey?: string;
+  candidateName?: string;
+  candidateEmail?: string;
 }
 
 export interface AttemptCredentialStatus {
@@ -236,12 +240,42 @@ export async function refreshAttemptCredential(
   attempt: AttemptCredentialRefreshRef,
   clientSessionId: string,
 ): Promise<boolean> {
-  const session = await backendGet<BackendStudentSessionContextWithCredential>(
-    studentSessionTransport.paths.credentialRefresh(
-      attempt.scheduleId,
-      attempt.candidateId,
+  try {
+    const session = await backendGet<BackendStudentSessionContextWithCredential>(
+      studentSessionTransport.paths.credentialRefresh(
+        attempt.scheduleId,
+        attempt.candidateId,
+        clientSessionId,
+      ),
+      { retries: 0 },
+    );
+
+    if (session.attemptCredential) {
+      storeAttemptCredential(attempt, session.attemptCredential);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    // A second tab has no bearer token yet, and the refresh endpoint correctly
+    // refuses to silently replace the active writer. Bootstrap is the
+    // authenticated, non-takeover path that issues a credential so the tab
+    // can present it to the explicit takeover endpoint.
+    if (!hasBackendStatusCode(error, 401) && !hasBackendStatusCode(error, 409)) {
+      throw error;
+    }
+  }
+
+  const session = await backendPost<BackendStudentSessionContextWithCredential>(
+    studentSessionTransport.paths.bootstrap(attempt.scheduleId),
+    {
+      wcode: null,
+      email: attempt.candidateEmail ?? null,
+      studentKey: attempt.studentKey ?? attempt.candidateId,
+      candidateId: attempt.candidateId,
+      candidateName: attempt.candidateName ?? '',
+      candidateEmail: attempt.candidateEmail ?? '',
       clientSessionId,
-    ),
+    },
     { retries: 0 },
   );
 

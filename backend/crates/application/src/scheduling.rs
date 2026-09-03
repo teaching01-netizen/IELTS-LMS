@@ -11,7 +11,9 @@ use sqlx::{FromRow, MySql, MySqlPool, Transaction};
 use thiserror::Error;
 use uuid::{fmt::Hyphenated, Uuid};
 
-use crate::delivery::{auto_submit_schedule_attempts_in_tx, DeliveryError};
+use crate::delivery::{
+    auto_submit_schedule_attempts_in_tx, sync_v2_runtime_timing_in_tx, DeliveryError,
+};
 
 #[derive(Error, Debug)]
 pub enum SchedulingError {
@@ -634,6 +636,9 @@ impl SchedulingService {
         let timing_model = context.timing_model();
 
         let mut tx = self.pool.begin().await?;
+        // Runtime creation is a control boundary for already-created V2
+        // attempts, so acquire attempt rows before any runtime locks.
+        lock_schedule_attempts_in_tx(&mut tx, &schedule_id.to_string()).await?;
 
         let runtime_insert = sqlx::query(
             r#"
@@ -713,6 +718,17 @@ impl SchedulingService {
         .execute(&mut *tx)
         .await?;
 
+        if let Some(first_section) = context.plan.first() {
+            sync_v2_runtime_timing_in_tx(
+                &mut *tx,
+                &schedule_id.to_string(),
+                &runtime_id.to_string(),
+                &first_section.section_key,
+                Some("running"),
+            )
+            .await?;
+        }
+
         insert_control_event(
             &mut tx,
             runtime_id.to_string(),
@@ -772,8 +788,8 @@ impl SchedulingService {
             "UPDATE exam_session_runtime_sections SET status = ?, paused_at = NOW() WHERE runtime_id = ? AND section_key = ?",
         )
         .bind(SectionRuntimeStatus::Paused)
-        .bind(runtime.id)
-        .bind(active_section_key)
+        .bind(&runtime.id)
+        .bind(&active_section_key)
         .execute(&mut *tx)
         .await?;
 
@@ -799,6 +815,15 @@ impl SchedulingService {
             .execute(&mut *tx)
             .await?;
         }
+
+        sync_v2_runtime_timing_in_tx(
+            &mut *tx,
+            &schedule_id.to_string(),
+            &runtime.id.to_string(),
+            &active_section_key,
+            Some("paused"),
+        )
+        .await?;
 
         insert_control_event(
             &mut tx,
@@ -866,8 +891,8 @@ impl SchedulingService {
         )
         .bind(SectionRuntimeStatus::Live)
         .bind(paused_seconds)
-        .bind(runtime.id)
-        .bind(active_section_key)
+        .bind(&runtime.id)
+        .bind(&active_section_key)
         .execute(&mut *tx)
         .await?;
 
@@ -894,6 +919,15 @@ impl SchedulingService {
             .execute(&mut *tx)
             .await?;
         }
+
+        sync_v2_runtime_timing_in_tx(
+            &mut *tx,
+            &schedule_id.to_string(),
+            &runtime.id.to_string(),
+            &active_section_key,
+            Some("running"),
+        )
+        .await?;
 
         insert_control_event(
             &mut tx,
@@ -1033,8 +1067,8 @@ impl SchedulingService {
             RuntimeStatus::Live | RuntimeStatus::Paused
         ) {
             compute_runtime_remaining_seconds(
-                runtime_row.current_section_key.as_deref(),
                 runtime_row.active_section_key.as_deref(),
+                runtime_row.current_section_key.as_deref(),
                 &sections,
                 server_now,
             )
@@ -1048,8 +1082,9 @@ impl SchedulingService {
             .map(|computed| computed.is_overrun)
             .unwrap_or(runtime_row.is_overrun);
         let current_section_deadline_at = runtime_row
-            .current_section_key
+            .active_section_key
             .as_deref()
+            .or(runtime_row.current_section_key.as_deref())
             .and_then(|section_key| {
                 sections
                     .iter()
@@ -1649,12 +1684,12 @@ struct ComputedSectionTime {
 }
 
 fn compute_runtime_remaining_seconds(
-    current_section_key: Option<&str>,
     active_section_key: Option<&str>,
+    current_section_key: Option<&str>,
     sections: &[RuntimeSectionRow],
     now: DateTime<Utc>,
 ) -> Option<ComputedSectionTime> {
-    let section_key = current_section_key.or(active_section_key)?;
+    let section_key = active_section_key.or(current_section_key)?;
     let section = sections
         .iter()
         .find(|section| section.section_key == section_key)?;
@@ -1997,7 +2032,7 @@ fn plan_total_minutes(plan: &[ScheduleSectionPlanEntry]) -> i32 {
         .unwrap_or(0)
 }
 
-async fn lock_schedule_attempts_in_tx(
+pub(crate) async fn lock_schedule_attempts_in_tx(
     tx: &mut Transaction<'_, MySql>,
     schedule_id: &str,
 ) -> Result<(), SchedulingError> {

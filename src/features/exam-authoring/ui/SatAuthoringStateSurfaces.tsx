@@ -9,7 +9,7 @@ export function SatAuthoringLoadingSurface({ label }: { label: string }) {
       aria-busy="true"
       aria-live="polite"
     >
-      <div className="w-full max-w-sm rounded-[20px] border border-au-separator bg-au-surface px-6 py-8 text-center shadow-[var(--au-elevation-sheet)]">
+      <div className="authoring-surface w-full max-w-sm px-6 py-8 text-center">
         <LoaderCircle
           className="mx-auto h-7 w-7 animate-spin text-au-accent motion-reduce:animate-none"
           aria-hidden="true"
@@ -39,7 +39,7 @@ export function SatAuthoringErrorSurface({
   return (
     <main className="sat-product sat-authoring flex min-h-screen items-center justify-center bg-au-canvas px-6 text-slate-950">
       <section
-        className="w-full max-w-lg rounded-[20px] border border-au-danger/20 bg-au-surface px-6 py-8 shadow-[var(--au-elevation-sheet)] sm:px-8"
+        className="authoring-surface authoring-surface--error w-full max-w-lg px-6 py-8 sm:px-8"
         data-sat-authoring-state="error"
         role="alert"
       >

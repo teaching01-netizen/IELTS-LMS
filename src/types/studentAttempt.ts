@@ -122,6 +122,16 @@ export interface StudentAttempt {
   };
   createdAt: string;
   updatedAt: string;
+  /** Protocol-v2 durability metadata. Omitted by legacy/v1 servers. */
+  protocolVersion?: number | null;
+  deliveryStatus?: 'running' | 'paused' | 'closing' | 'submitted' | 'terminated' | string | null;
+  leaseEpoch?: number | null;
+  controlEpoch?: number | null;
+  responseRevision?: number | null;
+  deadlineAt?: string | null;
+  closingGraceUntil?: string | null;
+  finalResponseDigest?: string | null;
+  activeClientSessionId?: string | null;
 }
 
 export interface StudentFinalAnswerPatch {

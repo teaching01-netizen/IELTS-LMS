@@ -3,6 +3,8 @@ export {
   buildStudentHeartbeatEvent,
   hasAttemptCredential,
   ensureClientSessionIdForAttempt,
+  rotateClientSessionIdForAttempt,
+  restoreClientSessionIdForAttempt,
   mapBackendStudentAttempt,
   refreshAttemptCredentialForAttempt,
   studentAttemptRepository,

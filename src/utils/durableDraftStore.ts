@@ -118,28 +118,90 @@ function parseFallbackRecord<T>(key: string): DurableDraftRecord<T> | null {
     return null;
   }
 }
+function isNewerRecord<T>(
+  candidate: DurableDraftRecord<T>,
+  current: DurableDraftRecord<T> | undefined
+): boolean {
+  return current === undefined || candidate.updatedAt >= current.updatedAt;
+}
+
+export async function listDurableDrafts<T>(
+  prefix: string
+): Promise<Array<{ key: string; value: T }>> {
+  // IndexedDB and the synchronous fallback can both contain a record for the
+  // same key after an interrupted/failing IndexedDB write. Choose by the
+  // record timestamp instead of letting whichever store is read first win.
+  const records = new Map<string, DurableDraftRecord<T>>();
+  const consider = (record: DurableDraftRecord<T> | null | undefined): void => {
+    if (
+      !record ||
+      record.schemaVersion !== 1 ||
+      typeof record.key !== "string" ||
+      !record.key.startsWith(prefix)
+    ) {
+      return;
+    }
+    if (isNewerRecord(record, records.get(record.key))) {
+      records.set(record.key, record);
+    }
+  };
+
+  const database = await openDatabase();
+  if (database) {
+    try {
+      const transaction = database.transaction(DURABLE_DRAFT_STORE, "readonly");
+      const request = transaction.objectStore(DURABLE_DRAFT_STORE).getAll();
+      const stored = (await requestToPromise(request)) as Array<DurableDraftRecord<T>>;
+      await transactionDone(transaction);
+      for (const record of stored) consider(record);
+    } catch {
+      // Compatibility fallback below remains available when IndexedDB is unavailable.
+    }
+  }
+
+  const storage = fallbackStorage();
+  if (storage) {
+    for (let index = 0; index < storage.length; index += 1) {
+      const storageKey = storage.key(index);
+      if (!storageKey?.startsWith(DURABLE_DRAFT_FALLBACK_PREFIX)) continue;
+      const key = storageKey.slice(DURABLE_DRAFT_FALLBACK_PREFIX.length);
+      if (!key.startsWith(prefix)) continue;
+      consider(parseFallbackRecord<T>(key));
+    }
+  }
+
+  return [...records.values()].map((record) => ({ key: record.key, value: record.value }));
+}
+
 export async function loadDurableDraft<T>(key: string): Promise<T | null> {
   await writeChains.get(key)?.catch(() => undefined);
   const database = await openDatabase();
+  let indexedRecord: DurableDraftRecord<T> | undefined;
   if (database) {
     try {
       const transaction = database.transaction(DURABLE_DRAFT_STORE, "readonly");
       const request = transaction.objectStore(DURABLE_DRAFT_STORE).get(key);
       const record = (await requestToPromise(request)) as DurableDraftRecord<T> | undefined;
       await transactionDone(transaction);
-      if (record?.schemaVersion === 1) return record.value;
+      if (record?.schemaVersion === 1) indexedRecord = record;
     } catch {
       // Compatibility fallback below remains durable and explicit.
     }
   }
 
   const fallback = parseFallbackRecord<T>(key);
-  if (!fallback) return null;
-  if (database) {
+  const record = fallback && isNewerRecord(fallback, indexedRecord) ? fallback : indexedRecord;
+  if (!record) return null;
+
+  if (database && fallback && record === fallback) {
     await writeRecord(fallback);
-    fallbackStorage()?.removeItem(fallbackKey(key));
+    try {
+      fallbackStorage()?.removeItem(fallbackKey(key));
+    } catch {
+      // The IndexedDB copy is already durable; cleanup can be retried later.
+    }
   }
-  return fallback.value;
+  return record.value;
 }
 async function clearRecord(key: string): Promise<void> {
   const database = await openDatabase();

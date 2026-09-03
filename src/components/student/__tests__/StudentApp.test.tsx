@@ -2553,6 +2553,10 @@ describe("StudentApp runtime-backed mode", () => {
           recovery: expect.objectContaining({
             syncState: "saved",
           }),
+        }),
+        expect.objectContaining({
+          flushCycleId: expect.any(String),
+          sampledSuccessLogs: expect.any(Boolean),
         })
       );
     });

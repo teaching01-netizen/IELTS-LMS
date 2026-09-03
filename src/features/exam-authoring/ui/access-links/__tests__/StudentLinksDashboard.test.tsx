@@ -94,13 +94,13 @@ describe('StudentLinksDashboard', () => {
     render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
 
     fireEvent.click(screen.getByLabelText('More actions for Saturday Class'));
-    fireEvent.click(screen.getByRole('button', { name: 'Pause Link' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Pause Link' }));
     await waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledWith({
       linkId: 'link-current', request: { revision: 3, state: 'paused' },
     }));
 
     fireEvent.click(screen.getByLabelText('More actions for Saturday Class'));
-    fireEvent.click(screen.getByRole('button', { name: 'Duplicate Link' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate Link' }));
     await waitFor(() => expect(mocks.duplicate).toHaveBeenCalledWith({
       linkId: 'link-current', request: { revision: 3, name: 'Saturday Class Copy', releaseTarget: 'source' },
     }));
