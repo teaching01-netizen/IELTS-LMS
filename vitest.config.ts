@@ -20,5 +20,18 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     exclude: ["**/node_modules/**", ".mimocode/**", "dist/**", "e2e/**"],
+    coverage: {
+      // The gate measures shipped product code. Storybook stories are
+      // interactive demos (built by the storybook job), and test files
+      // trivially cover themselves at 100% — both must not dilute or
+      // inflate the unit-test coverage signal.
+      exclude: [
+        "**/*.stories.ts",
+        "**/*.stories.tsx",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/__tests__/**",
+      ],
+    },
   },
 });

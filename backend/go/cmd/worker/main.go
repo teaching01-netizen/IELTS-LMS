@@ -360,9 +360,17 @@ func (w *worker) executeOutboxEvent(ctx context.Context, event outbox.Event) err
 		}
 		rows.Close()
 	}
-	reason := payload.Reason
-	if reason == "" {
-		reason = terminalization.ReasonProctorComplete
+	// Defense in depth: the seal reason must be terminalization vocabulary.
+	// CompleteExam now always enqueues proctor_complete, but rows written by
+	// older builds (or a future free-text regression) must degrade to the
+	// fixed vocabulary instead of failing validation on every retry until
+	// the outbox event goes terminal with students unsubmitted.
+	reason := terminalization.ReasonProctorComplete
+	switch payload.Reason {
+	case terminalization.ReasonProctorComplete, terminalization.ReasonProctorEnd,
+		terminalization.ReasonTimeExpired, terminalization.ReasonAutoStop,
+		terminalization.ReasonProctorForceSub:
+		reason = payload.Reason
 	}
 	for _, attemptID := range payload.AttemptIDs {
 		var providerKey, proctorStatus string

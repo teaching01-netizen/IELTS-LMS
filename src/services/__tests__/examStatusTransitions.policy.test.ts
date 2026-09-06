@@ -24,4 +24,15 @@ describe('exam status transition policy', () => {
     expect(canTransition('draft', 'in_review', 'reviewer')).toBe(false);
     expect(canTransition('approved', 'published', 'owner')).toBe(false);
   });
+
+  it('lets the system role satisfy any gated transition (background jobs)', () => {
+    expect(canTransition('draft', 'in_review', 'system')).toBe(true);
+    expect(canTransition('approved', 'published', 'system')).toBe(true);
+    expect(canTransition('published', 'archived', 'system')).toBe(true);
+  });
+
+  it('rejects unknown pairs even for the system role', () => {
+    expect(canTransition('draft', 'published', 'system')).toBe(false);
+    expect(canTransition('archived', 'published', 'system')).toBe(false);
+  });
 });

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
+
+var errTimeoutComplete = errors.New("complete_assessment timeout")
 
 func deliveryCodeOf(err error) apperrors.Code {
 	if e, ok := apperrors.As(err); ok {
@@ -244,6 +247,93 @@ func TestDeliveryReconcileMissingAttemptNoop(t *testing.T) {
 // locked/time_expired; terminal completion fires only when no follow-up
 // module is inserted. Row order: reconcile tx (attempt, runtime, open row,
 // scoring, finalize CAS, current section, next-section lookup) then commit.
+// A drained attempt with terminal modules but no SAT result re-arms
+// completion: the previous pass finalized everything and committed, but the
+// completer failed afterwards. The next sweep must retry completion instead
+// of stranding the attempt (audit P1).
+func TestDeliveryReconcileDrainedMissingResultRetriesCompletion(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	completed := false
+	svc := deliverySvc(db)
+	svc.SetCompleter(func(ctx context.Context, scheduleID, attemptID string) error {
+		completed = true
+		return nil
+	})
+	deliveryReconcileDrainedStranded(mock)
+	changed, err := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("expected stranded reconcile to succeed, got %v", err)
+	}
+	if changed {
+		t.Fatal("expected stranded reconcile to report unchanged (no module work this pass)")
+	}
+	if !completed {
+		t.Fatal("completer must fire for a drained attempt with terminal modules and no result")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A drained attempt whose result already exists stays a no-op: the backstop
+// terminal-module probe finds nothing and the completer never fires, so
+// steady-state reads of finished attempts cost one probe and no 503.
+func TestDeliveryReconcileDrainedCompletedNoop(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := deliverySvc(db)
+	svc.SetCompleter(func(ctx context.Context, scheduleID, attemptID string) error {
+		t.Fatal("completer must not fire for a fully completed attempt")
+		return nil
+	})
+	deliveryReconcileDrained(mock)
+	changed, err := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("expected completed reconcile to succeed, got %v", err)
+	}
+	if changed {
+		t.Fatal("expected completed reconcile to report unchanged")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A completer failure after commit surfaces a retryable recovery error and
+// reports changed so the worker revisits the attempt instead of dropping it.
+func TestDeliveryReconcileCompleterFailureRetryable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := deliverySvc(db)
+	svc.SetCompleter(func(ctx context.Context, scheduleID, attemptID string) error {
+		return errTimeoutComplete
+	})
+	deliveryReconcileDrainedStranded(mock)
+	changed, err := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", time.Now().UTC())
+	if err == nil {
+		t.Fatal("expected completer failure to surface a retryable error")
+	}
+	if deliveryCodeOf(err) != apperrors.CodeRecoveryFailed {
+		t.Fatalf("expected SERVICE_RECOVERY_FAILED, got %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed=true so the sweep revisits the attempt")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeliveryReconcileLegacyExpiryFinalizes(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

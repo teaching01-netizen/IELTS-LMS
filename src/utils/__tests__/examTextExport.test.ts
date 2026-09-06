@@ -439,3 +439,589 @@ describe('examTextExport', () => {
     expect(exportedSubQuestions).toBe(subStems.length);
   });
 });
+
+describe('examTextExport uncovered branches', () => {
+  const EXPORT_DATE = new Date('2026-04-30T12:00:00.000Z');
+
+  function createMinimalExam(id: string, title: string, readingBlocks: QuestionBlock[]): Exam {
+    const exam = createExamFixture(id, title);
+    exam.content.reading.passages = [
+      {
+        id: 'passage-1',
+        title: 'Solo',
+        content: '',
+        blocks: readingBlocks,
+        images: [],
+        wordCount: 0,
+      },
+    ];
+    exam.content.listening.parts = [];
+    exam.content.config.sections.listening.enabled = false;
+    exam.content.config.sections.writing.enabled = false;
+    exam.content.config.sections.speaking.enabled = false;
+    return exam;
+  }
+
+  function countOccurrences(haystack: string, needle: string): number {
+    return haystack.split(needle).length - 1;
+  }
+
+  it('pads single-digit month and day in the export filename', () => {
+    expect(buildExamTextExportFilename(new Date('2026-01-05T08:00:00.000Z'))).toBe(
+      'exam-export-2026-01-05.txt',
+    );
+  });
+
+  it('exports an empty exam list with zero totals and a trailing newline', () => {
+    const output = buildExamTextExport([], EXPORT_DATE);
+
+    expect(output).toContain('IELTS EXAM TEXT EXPORT');
+    expect(output).toContain('Generated At: 2026-04-30T12:00:00.000Z');
+    expect(output).toContain('Total Exams: 0');
+    expect(output).not.toContain('EXAM 1 OF');
+    expect(output.endsWith('\n')).toBe(true);
+    expect(output.endsWith('\n\n')).toBe(false);
+  });
+
+  it('renders exam header metadata fields and an empty answer key', () => {
+    const exam = createMinimalExam('exam-meta', 'Meta Exam', []);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Total Exams: 1');
+    expect(output).toContain('EXAM 1 OF 1');
+    expect(output).toContain('Title: Meta Exam');
+    expect(output).toContain('Exam ID: exam-meta');
+    expect(output).toContain('Type: Academic');
+    expect(output).toContain('Status: Draft');
+    expect(output).toContain('Owner: Admin User');
+    expect(output).toContain('Updated: 2026-04-30T10:00:00.000Z');
+    expect(output).toContain('Passage 1: Solo');
+    expect(output).not.toContain('Content:');
+    expect(output).toContain('ANSWER KEY (READING)');
+    expect(output).toContain('(no objective questions)');
+  });
+
+  it('renders a MULTI_MCQ spanning a question-number range', () => {
+    const exam = createMinimalExam('exam-multi', 'Multi Range', [
+      {
+        id: 'blk-multi',
+        type: 'MULTI_MCQ',
+        instruction: 'Pick two',
+        stem: 'Which are renewable?',
+        requiredSelections: 2,
+        options: [
+          { id: 'opt-a', text: 'Solar', isCorrect: true },
+          { id: 'opt-b', text: 'Coal', isCorrect: false },
+          { id: 'opt-c', text: 'Wind', isCorrect: true },
+        ],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Stem: Which are renewable?');
+    expect(output).toContain('Correct options: 2');
+    expect(output).toContain('Q1-2. Which are renewable?');
+    expect(output).toContain('Answer: A. Solar | C. Wind');
+    expect(output).toContain('Q1-2 -> A. Solar | C. Wind');
+  });
+
+  it('renders a MULTI_MCQ with no marked-correct options as (none)', () => {
+    const exam = createMinimalExam('exam-multi-none', 'Multi None', [
+      {
+        id: 'blk-multi',
+        type: 'MULTI_MCQ',
+        instruction: '',
+        stem: 'Which are renewable?',
+        requiredSelections: 1,
+        options: [
+          { id: 'opt-a', text: 'Coal', isCorrect: false },
+          { id: 'opt-b', text: 'Oil', isCorrect: false },
+        ],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Correct options: 0');
+    expect(output).toContain('Answer: (none)');
+    expect(output).toContain('Q1 -> (none)');
+  });
+
+  it('falls back for empty TFNG statements and CLOZE/SHORT prompts', () => {
+    const exam = createMinimalExam('exam-empty', 'Empty Text', [
+      {
+        id: 'blk-tfng',
+        type: 'TFNG',
+        mode: 'TFNG',
+        instruction: '',
+        questions: [{ id: 'q1', statement: '', correctAnswer: 'NG' }],
+      },
+      {
+        id: 'blk-cloze',
+        type: 'CLOZE',
+        instruction: '',
+        answerRule: 'ONE_WORD',
+        questions: [{ id: 'q2', prompt: '', correctAnswer: 'Bangkok' }],
+      },
+      {
+        id: 'blk-short',
+        type: 'SHORT_ANSWER',
+        instruction: '',
+        questions: [{ id: 'q3', prompt: '   ', correctAnswer: 'dog', answerRule: 'ONE_WORD' }],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Q1. (empty statement)');
+    expect(output).toContain('Q2. (empty prompt)');
+    expect(output).toContain('Q3. (empty prompt)');
+    expect(output).not.toContain('Instruction:');
+  });
+
+  it('resolves MATCHING answers by id, roman index, and raw fallback', () => {
+    const exam = createMinimalExam('exam-match', 'Matching Display', [
+      {
+        id: 'blk-match',
+        type: 'MATCHING',
+        instruction: '',
+        headings: [
+          { id: 'A', text: 'Alpha' },
+          { id: 'B', text: '' },
+        ],
+        questions: [
+          { id: 'q-roman', paragraphLabel: '', correctHeading: 'i' },
+          { id: 'q-by-id-empty', paragraphLabel: 'C', correctHeading: 'B' },
+          { id: 'q-unknown', paragraphLabel: 'D', correctHeading: 'ZZZ' },
+        ],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Choices:');
+    expect(output).toContain('  - A. Alpha');
+    expect(output).toContain('  - B');
+    expect(output).toContain('Q1. Paragraph q-roman');
+    expect(output).toContain('Answer: i. Alpha');
+    expect(output).toContain('Q2. Paragraph C');
+    expect(output).toContain('Answer: B');
+    expect(output).toContain('Q3. Paragraph D');
+    expect(output).toContain('Answer: ZZZ');
+  });
+
+  it('falls back to the MAP question id when the label is empty', () => {
+    const exam = createMinimalExam('exam-map', 'Map Labels', [
+      {
+        id: 'blk-map',
+        type: 'MAP',
+        instruction: '',
+        assetUrl: 'https://example.com/map.png',
+        questions: [
+          { id: 'map-q', label: '', correctAnswer: 'C', x: 10, y: 20 },
+          { id: 'map-q2', label: 'Entrance', correctAnswer: 'A', x: 25, y: 35 },
+        ],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Q1. map-q (x:10, y:20)');
+    expect(output).toContain('Answer: C');
+    expect(output).toContain('Q2. Entrance (x:25, y:35)');
+    expect(output).toContain('Answer: A');
+  });
+
+  it('renders block-level SINGLE_MCQ stems, options, and answers', () => {
+    const exam = createMinimalExam('exam-single', 'Single Block', [
+      {
+        id: 'blk-single',
+        type: 'SINGLE_MCQ',
+        instruction: 'Pick one',
+        stem: 'Block stem?',
+        options: [
+          { id: 'a', text: 'First', isCorrect: false },
+          { id: 'b', text: 'Second', isCorrect: true },
+        ],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Stem: Block stem?');
+    expect(output).toContain('  A. First');
+    expect(output).toContain('  B. Second');
+    expect(output).toContain('Q1. Block stem?');
+    expect(output).toContain('Answer: B. Second');
+    expect(output).toContain('Q1 -> B. Second');
+  });
+
+  it('falls back to block options for SINGLE_MCQ sub-questions without options', () => {
+    const exam = createMinimalExam('exam-sub-fallback', 'Sub Fallback', [
+      {
+        id: 'blk-single',
+        type: 'SINGLE_MCQ',
+        instruction: '',
+        stem: 'Block stem?',
+        options: [{ id: 'a', text: 'Block A', isCorrect: true }],
+        questions: [{ id: 'sq-1', stem: 'Sub stem?', options: [] }],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Stem: Sub stem?');
+    expect(output).toContain('  A. Block A');
+    expect(output).toContain('Answer: A. Block A');
+  });
+
+  it('renders (none) for SINGLE_MCQ with no correct option', () => {
+    const exam = createMinimalExam('exam-single-none', 'Single None', [
+      {
+        id: 'blk-single',
+        type: 'SINGLE_MCQ',
+        instruction: '',
+        stem: 'Block stem?',
+        options: [{ id: 'a', text: 'Only', isCorrect: false }],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Answer: (none)');
+    expect(output).toContain('Q1 -> (none)');
+  });
+
+  it('groups SENTENCE_COMPLETION blanks sharing a score group into one row', () => {
+    const exam = createMinimalExam('exam-sent', 'Sentence Groups', [
+      {
+        id: 'blk-s1',
+        type: 'SENTENCE_COMPLETION',
+        instruction: '',
+        questions: [
+          {
+            id: 'q1',
+            sentence: 'The ____ jumps.',
+            blanks: [
+              { id: 'b1', correctAnswer: 'fox', position: 0 },
+              { id: 'b2', correctAnswer: 'dog', position: 1 },
+            ],
+            answerRule: 'ONE_WORD',
+          },
+        ],
+      },
+      {
+        id: 'blk-s2',
+        type: 'SENTENCE_COMPLETION',
+        instruction: '',
+        questions: [
+          {
+            id: 'q2',
+            sentence: 'It is ____ and ____.',
+            blanks: [
+              { id: 'b3', correctAnswer: 'red', position: 0, scoreGroupId: 'g1' },
+              { id: 'b4', correctAnswer: 'blue', position: 1, scoreGroupId: 'g1' },
+            ],
+            answerRule: 'ONE_WORD',
+          },
+        ],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Q1 -> fox');
+    expect(output).toContain('Q2 -> dog');
+    expect(output).toContain('Q3 -> red | blue');
+    expect(output).toContain('[Blank 1, Blank 2]');
+    expect(output).toContain('Answer: red | blue');
+  });
+
+  it('renders diagram image lines with Label fallback and (none) answers', () => {
+    const exam = createMinimalExam('exam-diagram', 'Diagram', [
+      {
+        id: 'blk-diagram',
+        type: 'DIAGRAM_LABELING',
+        instruction: '',
+        imageUrl: 'https://example.com/d.png',
+        labels: [{ id: 'l1', x: 1, y: 2, correctAnswer: '' }],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Diagram image: https://example.com/d.png');
+    expect(output).toContain('Q1. Label');
+    expect(output).toContain('Answer: (none)');
+  });
+
+  it('omits diagram image lines for empty urls and skips inserted images', () => {
+    const exam = createMinimalExam('exam-diagram-empty', 'Diagram Empty', [
+      {
+        id: 'blk-diagram',
+        type: 'DIAGRAM_LABELING',
+        instruction: '',
+        imageUrl: '',
+        labels: [{ id: 'l1', x: 1, y: 2, prompt: 'Top', correctAnswer: 'Engine' }],
+        insertedImages: [
+          { id: 'img-1', url: 'https://example.com/should-not-export.png', caption: 'Skip me' },
+        ],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).not.toContain('Diagram image:');
+    expect(output).toContain('Q1. Top');
+    expect(output).toContain('Answer: Engine');
+    expect(output).not.toContain('should-not-export');
+    expect(output).not.toContain('Skip me');
+  });
+
+  it('falls back to Step for FLOW_CHART steps without labels', () => {
+    const exam = createMinimalExam('exam-flow', 'Flow', [
+      {
+        id: 'blk-flow',
+        type: 'FLOW_CHART',
+        instruction: '',
+        steps: [{ id: 's1', label: '', correctAnswer: 'Input' }],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Q1. Step');
+    expect(output).toContain('Answer: Input');
+  });
+
+  it('renders TABLE_COMPLETION headers, rows, and cell coordinates', () => {
+    const exam = createMinimalExam('exam-table', 'Table', [
+      {
+        id: 'blk-table',
+        type: 'TABLE_COMPLETION',
+        instruction: '',
+        headers: ['H1', 'H2'],
+        rows: [
+          ['a', '____'],
+          ['b', '____'],
+        ],
+        cells: [{ id: 'c1', correctAnswer: 'X', row: 0, col: 1 }],
+        answerRule: 'ONE_WORD',
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Headers: H1 | H2');
+    expect(output).toContain('Row 1: a | ____');
+    expect(output).toContain('Row 2: b | ____');
+    expect(output).toContain('Cell row 1, col 2');
+    expect(output).toContain('Answer: X');
+  });
+
+  it('renders NOTE_COMPLETION note text with per-blank numbering', () => {
+    const exam = createMinimalExam('exam-note', 'Notes', [
+      {
+        id: 'blk-note',
+        type: 'NOTE_COMPLETION',
+        instruction: '',
+        questions: [
+          {
+            id: 'n1',
+            noteText: '<p>Take ____ and ____.</p>',
+            blanks: [
+              { id: 'nb1', correctAnswer: 'one', position: 0 },
+              { id: 'nb2', correctAnswer: 'two', position: 1 },
+            ],
+            answerRule: 'ONE_WORD',
+          },
+        ],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Note 1:');
+    expect(output).toContain('Take ____ and ____.');
+    expect(output).toContain('Note 1 blank 1');
+    expect(output).toContain('Note 1 blank 2');
+    expect(output).toContain('Answer: one');
+    expect(output).toContain('Answer: two');
+  });
+
+  it('renders CLASSIFICATION categories with item fallbacks and omits empty category lines', () => {
+    const exam = createMinimalExam('exam-cls', 'Classification', [
+      {
+        id: 'blk-cls',
+        type: 'CLASSIFICATION',
+        instruction: '',
+        categories: ['Mammal', 'Bird'],
+        items: [{ id: 'item-x', text: '', correctCategory: '' }],
+      },
+      {
+        id: 'blk-cls-plain',
+        type: 'CLASSIFICATION',
+        instruction: '',
+        categories: [],
+        items: [{ id: 'i1', text: 'Eagle', correctCategory: 'Bird' }],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Categories: Mammal | Bird');
+    expect(countOccurrences(output, 'Categories:')).toBe(1);
+    expect(output).toContain('Q1. item-x');
+    expect(output).toContain('Q1 -> (none)');
+    expect(output).toContain('Q2. Eagle');
+    expect(output).toContain('Q2 -> Bird');
+  });
+
+  it('renders MATCHING_FEATURES options with feature fallbacks and omits empty option lines', () => {
+    const exam = createMinimalExam('exam-mf', 'Matching Features', [
+      {
+        id: 'blk-mf',
+        type: 'MATCHING_FEATURES',
+        instruction: '',
+        options: [],
+        features: [{ id: 'f-x', text: '', correctMatch: 'Alice' }],
+      },
+      {
+        id: 'blk-mf-plain',
+        type: 'MATCHING_FEATURES',
+        instruction: '',
+        options: ['A', 'B'],
+        features: [{ id: 'f1', text: 'Loves hiking', correctMatch: 'A' }],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(countOccurrences(output, 'Options:')).toBe(1);
+    expect(output).toContain('Options: A | B');
+    expect(output).toContain('Q1. f-x');
+    expect(output).toContain('Q1 -> Alice');
+    expect(output).toContain('Q2. Loves hiking');
+  });
+
+  it('renders inserted images with only a url or only a caption', () => {
+    const exam = createMinimalExam('exam-img', 'Inserted Images', [
+      {
+        id: 'blk-tfng',
+        type: 'TFNG',
+        mode: 'TFNG',
+        instruction: 'Read closely',
+        questions: [{ id: 'q1', statement: 'Sky.', correctAnswer: 'T' }],
+        insertedImages: [
+          { id: 'img-1', url: 'https://example.com/only.png' },
+          { id: 'img-2', url: '', caption: 'Only caption' },
+        ],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Instruction: Read closely');
+    expect(output).toContain('Inserted image 1: https://example.com/only.png');
+    expect(output).not.toContain('Inserted image 1 caption');
+    expect(output).toContain('Inserted image 2 caption: Only caption');
+    expect(output).not.toContain('Inserted image 2: http');
+  });
+
+  it('joins accepted-answer alternatives for short answers and cloze prompts', () => {
+    const exam = createMinimalExam('exam-alt', 'Alternatives', [
+      {
+        id: 'blk-short',
+        type: 'SHORT_ANSWER',
+        instruction: '',
+        questions: [
+          {
+            id: 'q1',
+            prompt: 'Name one pet.',
+            correctAnswer: 'dog',
+            acceptedAnswers: ['dog', 'cat'],
+            answerRule: 'ONE_WORD',
+          },
+        ],
+      },
+      {
+        id: 'blk-cloze',
+        type: 'CLOZE',
+        instruction: '',
+        answerRule: 'ONE_WORD',
+        questions: [
+          {
+            id: 'q2',
+            prompt: 'Capital?',
+            correctAnswer: 'Bangkok',
+            acceptedAnswers: ['Bangkok', 'Krung Thep'],
+          },
+        ],
+      },
+    ]);
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Answer: dog | cat');
+    expect(output).toContain('Answer: Bangkok | Krung Thep');
+  });
+
+  it('renders the writing tasks array branch with ids and missing-prompt fallback', () => {
+    const exam = createExamFixture('exam-w', 'Writing Tasks');
+    exam.content.writing.tasks = [
+      { taskId: 't1', prompt: '<p>Write about <b>cars</b>.</p>' },
+      { taskId: '', prompt: '' },
+    ];
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('[WRITING]');
+    expect(output).toContain('Task 1 (t1)');
+    expect(output).toContain('Write about cars.');
+    expect(output).toContain('Task 2');
+    expect(countOccurrences(output, '(no prompt)')).toBe(1);
+  });
+
+  it('falls back to (no prompt) for legacy writing prompts when empty', () => {
+    const exam = createExamFixture('exam-wl', 'Legacy Writing');
+    exam.content.writing.tasks = undefined;
+    exam.content.writing.task1Prompt = '';
+    exam.content.writing.task2Prompt = '';
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Task 1');
+    expect(output).toContain('Task 2');
+    expect(countOccurrences(output, '(no prompt)')).toBe(2);
+  });
+
+  it('renders speaking cue-card details and (none) for empty lists', () => {
+    const exam = createExamFixture('exam-s', 'Speaking Details');
+    exam.content.speaking.part1Topics = [];
+    exam.content.speaking.cueCard = '';
+    exam.content.speaking.cueCardDetails = {
+      topic: '<b>Park</b>',
+      bullets: ['<i>Where</i>', 'When'],
+      timeAllocation: '1 min',
+      evaluatorNotes: '',
+    };
+    exam.content.speaking.part3Discussion = [];
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('Part 1 Topics:');
+    expect(output).toContain('Cue Card:');
+    expect(output).toContain('Topic: Park');
+    expect(output).toContain('- 1. Where');
+    expect(output).toContain('- 2. When');
+    expect(output).toContain('Part 3 Discussion:');
+    expect(countOccurrences(output, '(none)')).toBe(2);
+  });
+
+  it('renders (none) for a fully empty speaking cue card', () => {
+    const exam = createExamFixture('exam-s-empty', 'Speaking Empty');
+    exam.content.speaking.part1Topics = [];
+    exam.content.speaking.cueCard = '';
+    exam.content.speaking.cueCardDetails = undefined;
+    exam.content.speaking.part3Discussion = [];
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(countOccurrences(output, '(none)')).toBe(3);
+  });
+
+  it('handles empty passages and listening parts without content or audio lines', () => {
+    const exam = createExamFixture('exam-empty-mod', 'Empty Modules');
+    exam.content.reading.passages = [];
+    exam.content.listening.parts = [{ id: 'part-1', title: '', audioUrl: '', pins: [], blocks: [] }];
+    exam.content.config.sections.writing.enabled = false;
+    exam.content.config.sections.speaking.enabled = false;
+    const output = buildExamTextExport([exam], EXPORT_DATE);
+
+    expect(output).toContain('[READING]');
+    expect(output).toContain('[LISTENING]');
+    expect(output).toContain('Part 1: Part 1');
+    expect(output).not.toContain('Content:');
+    expect(output).not.toContain('Audio:');
+    expect(countOccurrences(output, '(no objective questions)')).toBe(2);
+  });
+});

@@ -78,6 +78,11 @@ jobs:
       - name: Migration validation
         run: go run ./cmd/migrate --validate-only
 
+      - name: Integration tests (real MySQL)
+        env:
+          TEST_MYSQL_DSN: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
+        run: go test ./integration/ -v -count=1
+
       - name: OpenAPI lint
         run: npx --yes @redocly/cli lint ../../api/openapi/openapi.yaml
 
@@ -154,7 +159,20 @@ jobs:
           let covered = 0;
           let total = 0;
 
-          for (const file of Object.values(report)) {
+          // The gate measures shipped product code (src/). Config, e2e
+          // harnesses, load scripts, and generated tooling are exercised by
+          // other jobs (typecheck/build/e2e/k6) and must not dilute or
+          // inflate the unit-test coverage signal. Test files and stories
+          // are excluded here as well as in vitest.config.ts so the gate
+          // stays honest even if coverage is generated with other flags:
+          // tests cover themselves at ~100% and stories at ~0%.
+          const excluded = (path) =>
+            !path.includes('/src/') ||
+            path.endsWith('.test.ts') || path.endsWith('.test.tsx') ||
+            path.includes('__tests__') ||
+            path.endsWith('.stories.ts') || path.endsWith('.stories.tsx');
+          for (const [path, file] of Object.entries(report)) {
+            if (excluded(path)) continue;
             for (const count of Object.values(file.s ?? {})) {
               total += 1;
               if (count > 0) covered += 1;

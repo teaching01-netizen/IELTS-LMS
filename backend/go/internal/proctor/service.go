@@ -745,6 +745,11 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 // the terminalization-compatible proctor_complete path. The per-attempt seal
 // itself runs through the injected Terminalizer after this tx commits; this
 // tx only advances the cohort clock so the seal race keeps receipt-first order.
+//
+// Reason hygiene: cmd.Reason is free-text operator context (audit/control
+// events only). The auto-submit payload always carries the fixed
+// terminalization vocabulary reason (proctor_complete) so the worker seal
+// never fails vocabulary validation and exhausts its outbox retries.
 func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID string, cmd CompleteExamCommand) error {
 	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
@@ -786,11 +791,10 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 		// The schedule lock above also locks every attempt in a stable order.
 		// Capture the remaining writable attempts in the same transaction so a
 		// committed runtime completion always has a durable auto-submit job.
-		reason := terminalization.ReasonProctorComplete
-		if cmd.Reason != nil && strings.TrimSpace(*cmd.Reason) != "" {
-			reason = *cmd.Reason
-		}
-		if err := s.enqueueAutoSubmitForSchedule(ctx, q, scheduleID, revision+1, actor.ID, reason); err != nil {
+		// cmd.Reason stays out of the seal path: it is free-text operator
+		// context for audit/control rows, while the worker must seal with
+		// the fixed terminalization vocabulary (proctor_complete).
+		if err := s.enqueueAutoSubmitForSchedule(ctx, q, scheduleID, revision+1, actor.ID, terminalization.ReasonProctorComplete); err != nil {
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": "complete_exam"})

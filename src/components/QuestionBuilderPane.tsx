@@ -737,19 +737,31 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
         blockContent = null;
     }
 
+    // Selection is a container behavior (click/focus selects the block); it
+    // must not be a <button> nor role="button" because every block editor
+    // renders its own buttons and inputs. A button wrapper creates invalid
+    // interactive nesting (<button> inside <button>, or interactive
+    // descendants of role="button") plus React's validateDOMNesting
+    // warning, and breaks keyboard/screen-reader semantics. Instead the
+    // wrapper is role="group" (which legitimately contains widgets): mouse
+    // clicks select via onClick, and keyboard users select implicitly when
+    // focus enters the block (onFocus bubbles from inner controls) or via
+    // the toolbar actions, which operate on the focused/selected block.
+    // Selected state is exposed textually in the accessible label.
     return (
       <div
         className={`transition-all rounded-sm ${isSelected ? 'ring-2 ring-green-500 ring-offset-2' : 'hover:ring-2 hover:ring-gray-300 hover:ring-offset-1'}`}
       >
-        <button
-          type="button"
+        {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- selectable group pattern: keyboard selection follows focus (onFocus) rather than a container key handler, since inner widgets own key events. */}
+        <div
+          role="group"
           onClick={() => setSelectedBlockId(block.id)}
-          aria-pressed={isSelected}
-          aria-label={`Select question block ${startNum} to ${endNum}`}
+          onFocus={() => setSelectedBlockId(block.id)}
+          aria-label={`Question block ${startNum} to ${endNum}${isSelected ? ' (selected)' : ''}`}
           className="block w-full text-left cursor-pointer rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2"
         >
           {blockContent}
-        </button>
+        </div>
         {INLINE_ADD_SUPPORTED_BLOCK_TYPES.has(block.type) ? (
           <button
             type="button"

@@ -35,6 +35,19 @@ if (typeof window !== "undefined") {
   });
 }
 
+// jsdom lacks ResizeObserver, which @dnd-kit/dom references at import time.
+if (typeof (globalThis as Record<string, unknown>).ResizeObserver === "undefined") {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  (globalThis as Record<string, unknown>).ResizeObserver = ResizeObserverStub;
+  if (typeof window !== "undefined") {
+    (window as unknown as Record<string, unknown>).ResizeObserver = ResizeObserverStub;
+  }
+}
+
 if (typeof Element !== "undefined") {
   Object.defineProperty(Element.prototype, "scrollIntoView", {
     configurable: true,

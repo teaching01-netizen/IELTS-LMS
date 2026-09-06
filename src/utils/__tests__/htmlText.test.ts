@@ -30,4 +30,14 @@ describe('htmlToPlainText', () => {
     const input = 'Line 1\nLine 2\n\n\nLine 5';
     expect(htmlToPlainTextPreserveLineBreaks(input)).toBe('Line 1\nLine 2\n\n\nLine 5');
   });
+
+  test('strips trailing newlines in preserve mode and decodes entities', () => {
+    expect(htmlToPlainTextPreserveLineBreaks('<p>A&amp;B</p><br>')).toBe('A&B');
+    expect(htmlToPlainTextPreserveLineBreaks('a\r\nb&nbsp;c')).toBe('a\nb c');
+  });
+
+  test('drops empty output to an empty string', () => {
+    expect(htmlToPlainText('   ')).toBe('');
+    expect(htmlToPlainText('<div>  </div>')).toBe('');
+  });
 });

@@ -776,3 +776,309 @@ describe('ExamLifecycleService - Phase 3: Versioning', () => {
     });
   });
 });
+
+describe('ExamLifecycleService - Status Transitions (transitionStatus + review wrappers)', () => {
+  let mockRepo: MockExamRepository;
+  let service: ExamLifecycleService;
+
+  beforeEach(() => {
+    mockRepo = new MockExamRepository();
+    service = new ExamLifecycleService(mockRepo);
+  });
+
+  async function createDraftExam(owner = 'Owner1', title = 'Transition Exam') {
+    const result = await service.createExam(title, 'Academic', createMockExamState(), owner);
+    expect(result.success).toBe(true);
+    expect(result.exam).toBeDefined();
+    return result.exam!;
+  }
+
+  async function createInReviewExamId(owner = 'Owner1') {
+    const exam = await createDraftExam(owner);
+    const submitted = await service.transitionStatus(exam.id, 'in_review', owner);
+    expect(submitted.success).toBe(true);
+    return exam.id;
+  }
+
+  async function createApprovedExamId(owner = 'Owner1') {
+    const examId = await createInReviewExamId(owner);
+    const approved = await service.transitionStatus(examId, 'approved', 'Reviewer1');
+    expect(approved.success).toBe(true);
+    return examId;
+  }
+
+  describe('transitionStatus happy paths', () => {
+    it('transitions draft -> in_review as owner with a submitted_for_review audit event', async () => {
+      const exam = await createDraftExam();
+
+      const result = await service.transitionStatus(exam.id, 'in_review', 'Owner1', 'Ready for review');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('in_review');
+      expect(result.event?.action).toBe('submitted_for_review');
+      expect(result.event?.fromState).toBe('draft');
+      expect(result.event?.toState).toBe('in_review');
+      expect(result.event?.actor).toBe('Owner1');
+      expect(result.event?.payload).toEqual({ notes: 'Ready for review' });
+    });
+
+    it('transitions in_review -> approved as reviewer with an approved audit event', async () => {
+      const examId = await createInReviewExamId();
+
+      const result = await service.transitionStatus(examId, 'approved', 'Reviewer1');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('approved');
+      expect(result.event?.action).toBe('approved');
+      expect(result.event?.fromState).toBe('in_review');
+      expect(result.event?.toState).toBe('approved');
+    });
+
+    it('transitions in_review -> rejected as reviewer with a rejected audit event', async () => {
+      const examId = await createInReviewExamId();
+
+      const result = await service.transitionStatus(examId, 'rejected', 'Reviewer1', 'Needs more questions');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('rejected');
+      expect(result.event?.action).toBe('rejected');
+      expect(result.event?.payload).toEqual({ notes: 'Needs more questions' });
+    });
+
+    it('transitions approved -> published as admin, setting publishedAt', async () => {
+      const examId = await createApprovedExamId();
+
+      const result = await service.transitionStatus(examId, 'published', 'AdminUser');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('published');
+      expect(result.event?.action).toBe('published');
+      expect(result.event?.fromState).toBe('approved');
+      expect(result.event?.toState).toBe('published');
+      expect(result.exam?.publishedAt).toBeDefined();
+      expect(new Date(result.exam!.publishedAt!).toString()).not.toBe('Invalid Date');
+
+      const stored = await mockRepo.getExamById(examId);
+      expect(stored?.publishedAt).toBe(result.exam?.publishedAt);
+    });
+
+    it('transitions published -> archived as admin, setting archivedAt', async () => {
+      const examId = await createApprovedExamId();
+      const published = await service.transitionStatus(examId, 'published', 'AdminUser');
+      expect(published.success).toBe(true);
+
+      const result = await service.transitionStatus(examId, 'archived', 'AdminUser');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('archived');
+      expect(result.event?.action).toBe('archived');
+      expect(result.event?.fromState).toBe('published');
+      expect(result.event?.toState).toBe('archived');
+      expect(result.exam?.archivedAt).toBeDefined();
+      expect(new Date(result.exam!.archivedAt!).toString()).not.toBe('Invalid Date');
+    });
+
+    it('transitions draft -> archived as owner, setting archivedAt', async () => {
+      const exam = await createDraftExam();
+
+      const result = await service.transitionStatus(exam.id, 'archived', 'Owner1');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('archived');
+      expect(result.event?.action).toBe('archived');
+      expect(result.exam?.archivedAt).toBeDefined();
+    });
+  });
+
+  describe('transitionStatus rejections', () => {
+    it('rejects transitions for unknown exams', async () => {
+      const result = await service.transitionStatus('missing-exam', 'in_review', 'Owner1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Exam not found');
+    });
+
+    it('rejects draft -> published via transitionStatus (no policy rule allows it)', async () => {
+      const exam = await createDraftExam();
+
+      const result = await service.transitionStatus(exam.id, 'published', 'AdminUser');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Cannot transition from draft to published');
+
+      const stored = await mockRepo.getExamById(exam.id);
+      expect(stored?.status).toBe('draft');
+    });
+
+    it('rejects other transitions with no policy rule (in_review -> published, approved -> archived)', async () => {
+      const inReviewId = await createInReviewExamId();
+      const approvedId = await createApprovedExamId();
+
+      const direct = await service.transitionStatus(inReviewId, 'published', 'AdminUser');
+      expect(direct.success).toBe(false);
+      expect(direct.error).toBe('Cannot transition from in_review to published');
+
+      const skip = await service.transitionStatus(approvedId, 'archived', 'AdminUser');
+      expect(skip.success).toBe(false);
+      expect(skip.error).toBe('Cannot transition from approved to archived');
+    });
+
+    it('rejects draft -> in_review for an unauthorized actor (non-owner, non-admin)', async () => {
+      const exam = await createDraftExam();
+
+      const result = await service.transitionStatus(exam.id, 'in_review', 'RandomUser');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Cannot transition from draft to in_review');
+
+      const stored = await mockRepo.getExamById(exam.id);
+      expect(stored?.status).toBe('draft');
+    });
+
+    it('rejects in_review -> approved for the owner (requires the reviewer role)', async () => {
+      const examId = await createInReviewExamId();
+
+      const result = await service.transitionStatus(examId, 'approved', 'Owner1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Cannot transition from in_review to approved');
+    });
+
+    it('rejects published -> archived for the owner (requires the admin role)', async () => {
+      const examId = await createApprovedExamId();
+      const published = await service.transitionStatus(examId, 'published', 'AdminUser');
+      expect(published.success).toBe(true);
+
+      const result = await service.transitionStatus(examId, 'archived', 'Owner1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Cannot transition from published to archived');
+    });
+
+    it('allows the System actor to satisfy role requirements', async () => {
+      const exam = await createDraftExam();
+
+      const result = await service.transitionStatus(exam.id, 'in_review', 'System');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('in_review');
+    });
+  });
+
+  describe('submitForReview wrapper', () => {
+    it('moves a ready draft to in_review with a submitted_for_review event', async () => {
+      const exam = await createDraftExam();
+
+      const result = await service.submitForReview(exam.id, 'Owner1');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('in_review');
+
+      const events = await mockRepo.getEvents(exam.id);
+      expect(events.some((e) => e.action === 'submitted_for_review')).toBe(true);
+    });
+
+    it('returns not-found for unknown exams', async () => {
+      const result = await service.submitForReview('missing-exam', 'Owner1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Exam not found');
+    });
+
+    it('rejects exams that are not drafts', async () => {
+      const examId = await createInReviewExamId();
+
+      const result = await service.submitForReview(examId, 'Owner1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/only draft exams/i);
+    });
+  });
+
+  describe('approveExam wrapper', () => {
+    it('approves an in_review exam and records notes', async () => {
+      const examId = await createInReviewExamId();
+
+      const result = await service.approveExam(examId, 'Reviewer1', 'Looks good');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('approved');
+      expect(result.event?.action).toBe('approved');
+      expect(result.event?.payload).toEqual({ notes: 'Looks good' });
+    });
+
+    it('returns not-found for unknown exams', async () => {
+      const result = await service.approveExam('missing-exam', 'Reviewer1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Exam not found');
+    });
+
+    it('rejects exams that are not in review', async () => {
+      const exam = await createDraftExam();
+
+      const result = await service.approveExam(exam.id, 'Reviewer1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/only exams in review/i);
+    });
+  });
+
+  describe('rejectExam wrapper', () => {
+    it('rejects an in_review exam and records the reason', async () => {
+      const examId = await createInReviewExamId();
+
+      const result = await service.rejectExam(examId, 'Reviewer1', 'Add more passages');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('rejected');
+      expect(result.event?.action).toBe('rejected');
+      expect(result.event?.payload).toEqual({ notes: 'Add more passages' });
+    });
+
+    it('returns not-found for unknown exams', async () => {
+      const result = await service.rejectExam('missing-exam', 'Reviewer1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Exam not found');
+    });
+
+    it('rejects exams that are not in review', async () => {
+      const exam = await createDraftExam();
+
+      const result = await service.rejectExam(exam.id, 'Reviewer1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/only exams in review/i);
+    });
+  });
+
+  describe('archiveExam wrapper', () => {
+    it('archives a draft as owner, setting archivedAt with an archived event', async () => {
+      const exam = await createDraftExam();
+
+      const result = await service.archiveExam(exam.id, 'Owner1');
+
+      expect(result.success).toBe(true);
+      expect(result.exam?.status).toBe('archived');
+      expect(result.event?.action).toBe('archived');
+      expect(result.exam?.archivedAt).toBeDefined();
+    });
+
+    it('returns not-found for unknown exams', async () => {
+      const result = await service.archiveExam('missing-exam', 'Owner1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Exam not found');
+    });
+
+    it('rejects unauthorized actors', async () => {
+      const exam = await createDraftExam();
+
+      const result = await service.archiveExam(exam.id, 'RandomUser');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Cannot transition from draft to archived');
+    });
+  });
+});

@@ -54,6 +54,14 @@ type reconcileStage struct {
 // or runtime commits a no-op (false); each expired module is finalized via
 // finalizeModuleTx("time_expired"); when the last open module is finalized,
 // the completer runs CompleteAssessment outside the tx.
+//
+// Retry contract: the finalize tx commits before the completer runs, so a
+// completer failure must stay retryable. The loop below arms completion only
+// when this pass finalized the last open module (drained-after-work), plus a
+// drained-at-entry backstop when the SAT result is still missing — i.e. a
+// previous pass finalized everything but completion never landed. Callers
+// treat the returned CodeRecoveryFailed error as a retry signal: the tx work
+// is durable and only completion is outstanding.
 func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attemptID string, asOf time.Time) (bool, error) {
 	var shouldComplete bool
 	changed := false
@@ -91,12 +99,36 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				currentStageOrder = &order
 			}
 		}
+		// didWork tracks whether this pass finalized at least one module.
+		// Drained-at-entry (no open rows before any finalize) is the steady
+		// state for finished attempts — not a retry signal by itself; the
+		// missing-result backstop below re-arms completion only when the
+		// SAT result row is still absent. Drained-after-work means this pass
+		// just finalized the last open module, so completion is newly due.
+		// Mixing the two without the backstop would turn every read of a
+		// finished attempt into a spurious completion attempt and a 503.
+		didWork := false
+		drainedAtEntry := false
 		for i := 0; i < reconcileCap; i++ {
 			mod, err := lockReconcileRowTx(ctx, t, attemptID)
 			if err != nil {
 				return err
 			}
 			if mod == nil {
+				if i == 0 {
+					drainedAtEntry = true
+				}
+				if didWork {
+					// This pass finalized the last open module:
+					// completion is newly due.
+					shouldComplete = true
+				} else if changed {
+					// Defensive: changed is only set alongside a
+					// finalize, so reaching here without didWork
+					// should be impossible. Treat as completion-due
+					// rather than risk stranding a finished attempt.
+					shouldComplete = true
+				}
 				break
 			}
 			expired, err := reconcileModuleExpiredTx(ctx, t, runtimeID, runtimeStatus, timingModel, currentStageKey, currentStageOrder, mod, asOf)
@@ -117,9 +149,38 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				return err
 			}
 			changed = true
+			didWork = true
 			if next == nil {
 				shouldComplete = true
 				break
+			}
+		}
+		if drainedAtEntry && !shouldComplete {
+			// Backstop for the audit's P1: a previous pass finalized the
+			// last open module and committed, but completion failed
+			// afterwards. The next sweep finds no open modules and must
+			// still retry completion — otherwise the attempt strands
+			// with locked modules and no result. Only re-arm when a
+			// terminal module exists but the SAT result row is still
+			// missing, so attempts that never had expirations (steady
+			// drained state, no terminal modules) stay a cheap no-op
+			// with exactly one extra existence probe.
+			var terminalModules int
+			if err := t.QueryRowContext(ctx,
+				"SELECT COUNT(*) FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('submitted', 'locked')",
+				attemptID).Scan(&terminalModules); err != nil {
+				return err
+			}
+			if terminalModules > 0 {
+				var resultCount int
+				if err := t.QueryRowContext(ctx,
+					"SELECT COUNT(*) FROM assessment_results WHERE attempt_id = ?",
+					attemptID).Scan(&resultCount); err != nil {
+					return err
+				}
+				if resultCount == 0 {
+					shouldComplete = true
+				}
 			}
 		}
 		return nil

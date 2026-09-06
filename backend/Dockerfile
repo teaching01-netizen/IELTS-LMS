@@ -2,6 +2,11 @@
 # Builds the frontend SPA plus the Go API, migrate, and worker in one image.
 # Single service: start.sh supervises /app/api + /app/worker in the same
 # container, so the worker needs no separate deploy (same DB, same env).
+#
+# Both processes always run: the Go API has no embedded background runner
+# (no ApiBackgroundJobs equivalent), so activity_driven must not skip the
+# worker — otherwise auto-submit, grading projection, and background recovery
+# stop running in exactly the topology that needs them.
 
 FROM node:22-bookworm-slim AS frontend-builder
 
@@ -66,15 +71,12 @@ OTEL_EXPORTER_OTLP_ENDPOINT="${API_OTEL_EXPORTER_OTLP_ENDPOINT}" \
 /app/api &
 API_PID=$!
 
+# BACKGROUND_RUNTIME_MODE is normalized for API config parity only; it never
+# gates the worker. The Go API serves requests in every mode, and the worker
+# owns the background job set (outbox drain, reconcile/repair, grading
+# projection, retention/media) in every mode.
 BACKGROUND_RUNTIME_MODE="$(/app/normalize-background-runtime-mode.sh "${BACKGROUND_RUNTIME_MODE:-continuous}")"
-if [[ "${BACKGROUND_RUNTIME_MODE}" == "activity_driven" ]]; then
-    trap 'kill "$API_PID" 2>/dev/null || true' INT TERM EXIT
-    set +e
-    wait "$API_PID"
-    STATUS=$?
-    set -e
-    exit "$STATUS"
-fi
+export BACKGROUND_RUNTIME_MODE
 
 /app/worker &
 WORKER_PID=$!

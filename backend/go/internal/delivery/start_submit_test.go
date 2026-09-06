@@ -14,7 +14,9 @@ import (
 
 // deliveryReconcileDrained stages the reconcile-then-write prologue
 // (Rust start_module:402 / submit_module:730): attempt + runtime rows exist
-// (legacy timing model) and the open-module loop drains immediately.
+// (legacy timing model) and the open-module loop drains immediately with no
+// terminal modules, so the drained-at-entry missing-result backstop stays a
+// no-op (one terminal-module existence probe, then commit).
 func deliveryReconcileDrained(mock sqlmock.Sqlmock) {
 	deliverySaveBegin(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
@@ -27,6 +29,33 @@ func deliveryReconcileDrained(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('submitted', 'locked')")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
+	mock.ExpectCommit()
+}
+
+// deliveryReconcileDrainedStranded stages the drained-at-entry retry case: no
+// open modules, terminal modules present, but the SAT result row is still
+// missing, so the missing-result backstop re-arms completion.
+func deliveryReconcileDrainedStranded(mock sqlmock.Sqlmock) {
+	deliverySaveBegin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
+		WithArgs("att-1", "sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
+			AddRow("rt-1", "live", "legacy", nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('submitted', 'locked')")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(2))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_results WHERE attempt_id = ?")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
 	mock.ExpectCommit()
 }
 
