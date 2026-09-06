@@ -39,10 +39,8 @@ export interface StudentSessionTransport {
     ) => string;
     precheck: (scheduleId: string) => string;
     bootstrap: (scheduleId: string) => string;
-    mutationsBatch: (scheduleId: string) => string;
     heartbeat: (scheduleId: string, responseMode?: HeartbeatResponseMode) => string;
     audit: (scheduleId: string) => string;
-    submit: (scheduleId: string) => string;
   };
   readonly resolveCandidateIdFromStudentKey: (
     scheduleId: string,
@@ -68,14 +66,12 @@ export const studentSessionTransport: StudentSessionTransport = {
       ),
     precheck: (scheduleId) => `/v1/student/sessions/${scheduleId}/precheck`,
     bootstrap: (scheduleId) => `/v1/student/sessions/${scheduleId}/bootstrap`,
-    mutationsBatch: (scheduleId) => `/v1/student/sessions/${scheduleId}/mutations:batch`,
     heartbeat: (scheduleId, responseMode) =>
       appendQuery(
         `/v1/student/sessions/${scheduleId}/heartbeat`,
         responseMode ? new URLSearchParams({ responseMode }) : new URLSearchParams(),
       ),
     audit: (scheduleId) => `/v1/student/sessions/${scheduleId}/audit`,
-    submit: (scheduleId) => `/v1/student/sessions/${scheduleId}/submit`,
   },
   resolveCandidateIdFromStudentKey,
 };

@@ -59,11 +59,11 @@ export DATABASE_URL='mysql://...'
 export E2E_ALLOW_PROD_DB_MUTATIONS=true
 
 # after bootstrap, read scheduleId from e2e/.generated/prod-runtime.json and provision:
-cd backend
-cargo run -p ielts-backend-api --bin e2e_provision_staff -- \
+cd backend/go
+go run ./cmd/e2e_provision_staff -- \
   --schedule-id <SCHEDULE_ID> \
-  --target ../e2e/prod-data/prod-target.json \
-  --output-creds ../e2e/prod-data/prod-creds.json
+  --target ../../e2e/prod-data/prod-target.json \
+  --output-creds ../../e2e/prod-data/prod-creds.json
 ```
 
 Then run the Playwright shards (they will use `e2e/prod-data/prod-creds.json` for logins).

@@ -3,15 +3,15 @@
  * Centralized HTTP communication with interceptors, error handling, and retry logic
  */
 
-import { AuthError, NetworkError, ServiceUnavailableError } from "../error/errorTypes";
+import { ApiError } from "../api-client/errors";
 import { logError, logInfo, logWarn } from "../observability/errorLogger";
 
-export class ApiClientError extends Error {
-  public readonly statusCode: number;
-  public readonly backendCode: string | undefined;
-  public readonly backendDetails: Record<string, unknown> | undefined;
-  public readonly backendRequestId: string | undefined;
-
+/**
+ * @deprecated Use {@link ApiError} from "../api-client/errors" instead.
+ * Kept as a subclass alias so existing `instanceof ApiClientError` guards keep
+ * matching errors thrown by this client.
+ */
+export class ApiClientError extends ApiError {
   constructor(args: {
     message: string;
     statusCode: number;
@@ -19,12 +19,14 @@ export class ApiClientError extends Error {
     backendDetails: Record<string, unknown> | undefined;
     backendRequestId: string | undefined;
   }) {
-    super(args.message);
+    super({
+      code: args.backendCode ?? "UNKNOWN",
+      message: args.message,
+      status: args.statusCode,
+      details: args.backendDetails,
+      requestId: args.backendRequestId,
+    });
     this.name = "ApiClientError";
-    this.statusCode = args.statusCode;
-    this.backendCode = args.backendCode;
-    this.backendDetails = args.backendDetails;
-    this.backendRequestId = args.backendRequestId;
   }
 }
 
@@ -36,6 +38,24 @@ export interface ApiRequestConfig {
   retries?: number;
   signal?: AbortSignal;
   skipUnauthorizedHandler?: boolean;
+  /**
+   * Per-request bearer token. Merged as an `Authorization` header without
+   * mutating the client's default headers.
+   */
+  token?: string;
+  /**
+   * Per-request CSRF token. Takes precedence over the cookie-derived token
+   * and any configured `x-csrf-token` default header.
+   */
+  csrf?: string;
+}
+
+/** Request options accepted by the legacy `apiRequest` wrapper. */
+export interface RequestOpts {
+  method?: string;
+  token?: string;
+  csrf?: string;
+  body?: unknown;
 }
 
 export interface ApiResponse<T = unknown> {
@@ -159,9 +179,10 @@ class ApiClient {
   }
 
   /**
-   * Make an HTTP request with retry logic
+   * Make an HTTP request with retry logic.
+   * Public for the `apiRequest` adapter; prefer the typed verb helpers.
    */
-  private async request<T>(
+  async request<T>(
     endpoint: string,
     config: ApiRequestConfig = {}
   ): Promise<ApiResponse<T>> {
@@ -175,32 +196,55 @@ class ApiClient {
       skipUnauthorizedHandler = false,
     } = config;
 
-    const url = `${this.baseURL}${endpoint}`;
+    const url = endpoint.startsWith("/api/") ? endpoint : `${this.baseURL}${endpoint}`;
     const requestId = this.generateRequestId();
 
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-        // Combine external signal with timeout signal
-        if (signal) {
-          signal.addEventListener("abort", () => controller.abort(), { once: true });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      // Named handler so the external-signal subscription can be removed in
+      // `finally`: an anonymous `{ once: true }` listener is never removed on
+      // the non-abort path and leaks a closure per attempt on reused signals.
+      const forwardExternalAbort = () => controller.abort();
+      if (signal) {
+        if (signal.aborted) {
+          controller.abort();
+        } else {
+          signal.addEventListener("abort", forwardExternalAbort, { once: true });
         }
+      }
 
-        const requestHeaders = { ...this.defaultHeaders, ...headers };
+      try {
+        const requestHeaders: Record<string, string> = { ...this.defaultHeaders, ...headers };
+        if (config.token) {
+          requestHeaders["Authorization"] = `Bearer ${config.token}`;
+        }
+        // Double-submit CSRF: the per-session csrf cookie is the live,
+        // authoritative value for cookie-authenticated mutations, so prefer
+        // it over the default `x-csrf-token` header whenever it is readable.
+        // The default header is only refreshed when a login/session payload
+        // carries a csrfToken; after the session rotates (a new login in
+        // another tab, backend session re-issue, backend cutover) it can hold
+        // a stale token, and then every mutation is rejected with 403
+        // CSRF_REJECTED even though the session cookie is valid. An explicit
+        // per-request `csrf` still wins (flows whose token never rides a
+        // cookie). When no cookie is readable the default header is kept as a
+        // fallback.
+        const isStateChangingMethod = method !== "GET";
+        if (config.csrf) {
+          requestHeaders["x-csrf-token"] = config.csrf;
+        } else if (isStateChangingMethod) {
+          const cookieToken = getCsrfCookieToken();
+          if (cookieToken) {
+            requestHeaders["x-csrf-token"] = cookieToken;
+          }
+        }
         const isFormDataBody = typeof FormData !== "undefined" && body instanceof FormData;
         if (isFormDataBody) {
           for (const key of Object.keys(requestHeaders)) {
             if (key.toLowerCase() === "content-type") delete requestHeaders[key];
-          }
-        }
-        if (method !== "GET" && requestHeaders["x-csrf-token"] === undefined) {
-          const cookieToken = getCsrfCookieToken();
-          if (cookieToken) {
-            requestHeaders["x-csrf-token"] = cookieToken;
           }
         }
 
@@ -234,7 +278,8 @@ class ApiClient {
           }
         }
 
-        clearTimeout(timeoutId);
+        // Timeout always cleared exactly once, on every path (success,
+        // HTTP error, thrown fetch, abort) via the finally below.
 
         // Log request
         logInfo(`API ${method} ${endpoint}`, {
@@ -297,11 +342,14 @@ class ApiClient {
           });
           await this.delay(delay);
         }
+      } finally {
+        clearTimeout(timeoutId);
+        signal?.removeEventListener("abort", forwardExternalAbort);
       }
     }
 
     // All retries failed
-    const statusCode = this.getStatusCode(lastError || new Error("Request failed"));
+    const statusCode = ApiClient.getStatusCode(lastError || new Error("Request failed"));
     // Log 401 as warning since it's expected for unauthenticated requests
     if (statusCode === 401) {
       logWarn("Request failed with 401 Unauthorized", {
@@ -328,7 +376,15 @@ class ApiClient {
       throw lastError;
     }
 
-    throw new NetworkError("Request failed");
+    // Unreachable: the loop always sets lastError before falling through,
+    // but keep a typed network error for exhaustiveness.
+    const networkError = new ApiError({
+      code: "NETWORK_ERROR",
+      message: "Request failed",
+      status: 0,
+    });
+    networkError.category = "network";
+    throw networkError;
   }
 
   /**
@@ -347,7 +403,15 @@ class ApiClient {
 
     const contentType = response.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) {
-      return undefined;
+      const text = await response.text();
+      if (!text) {
+        return undefined;
+      }
+      throw new ApiError({
+        code: "UNEXPECTED_CONTENT_TYPE",
+        message: `Expected a JSON response but received ${contentType || "an unknown content type"}.`,
+        status: response.status,
+      });
     }
 
     return (await response.json()) as T;
@@ -371,25 +435,15 @@ class ApiClient {
     const status = response.status;
     const parsed = this.extractBackendErrorEnvelope(errorData);
     const message = parsed.message ?? this.extractErrorMessage(errorData, response.statusText);
-
-    if (status === 401) {
-      return new AuthError(message);
-    }
-
-    if (status === 503) {
-      return new ServiceUnavailableError(message);
-    }
-
-    if (status >= 500) {
-      return new NetworkError(message);
-    }
+    const headerRequestId =
+      response.headers.get("X-Request-Id") ?? response.headers.get("x-request-id") ?? undefined;
 
     return new ApiClientError({
       message,
       statusCode: status,
-      backendCode: parsed.code,
+      backendCode: parsed.code ?? "UNKNOWN",
       backendDetails: parsed.details,
-      backendRequestId: parsed.requestId,
+      backendRequestId: parsed.requestId ?? headerRequestId,
     });
   }
 
@@ -459,7 +513,9 @@ class ApiClient {
     const details =
       detailsRaw && typeof detailsRaw === "object" && !Array.isArray(detailsRaw)
         ? (detailsRaw as Record<string, unknown>)
-        : undefined;
+        : Array.isArray(detailsRaw)
+          ? { items: detailsRaw }
+          : undefined;
 
     const requestId =
       metadata &&
@@ -476,7 +532,7 @@ class ApiClient {
    * Determine if error should not be retried
    */
   private shouldNotRetry(error: Error): boolean {
-    const statusCode = this.getStatusCode(error);
+    const statusCode = ApiClient.getStatusCode(error);
 
     // Don't retry on client errors (4xx)
     if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) {
@@ -491,13 +547,10 @@ class ApiClient {
     return false;
   }
 
-  private withStatusCode(error: Error, statusCode: number): StatusError {
-    const typedError = error as StatusError;
-    typedError.statusCode = statusCode;
-    return typedError;
-  }
-
-  private getStatusCode(error: Error): number | undefined {
+  private static getStatusCode(error: Error): number | undefined {
+    if (error instanceof ApiError) {
+      return error.status;
+    }
     return (error as StatusError).statusCode;
   }
 
@@ -618,4 +671,29 @@ export async function patch<T>(
  */
 export async function del<T>(endpoint: string, config?: ApiRequestConfig): Promise<ApiResponse<T>> {
   return apiClient.delete<T>(endpoint, config);
+}
+
+/**
+ * Generated-client-shaped typed fetch wrapper (plan 99). Now a thin adapter
+ * over the single canonical fetch path: per-call token/csrf/body ride
+ * `ApiRequestConfig`, the baseURL/CSRF-cookie/retry/unauthorized semantics stay
+ * in `ApiClient.request`, and errors are always `ApiError`.
+ */
+export async function apiRequest<T>(path: string, opts: RequestOpts = {}): Promise<T> {
+  const config: ApiRequestConfig = { retries: 0 };
+  const method = opts.method as ApiRequestConfig["method"] | undefined;
+  if (method !== undefined) {
+    config.method = method;
+  }
+  if (opts.token !== undefined) {
+    config.token = opts.token;
+  }
+  if (opts.csrf !== undefined) {
+    config.csrf = opts.csrf;
+  }
+  if (opts.body !== undefined) {
+    config.body = opts.body;
+  }
+  const response = await apiClient.request<T>(path, config);
+  return response.data as T;
 }

@@ -8,7 +8,9 @@ import {
   storeAttemptCredential as storeAttemptCredentialFromAdapter,
   tryBuildAttemptAuthorizationHeader as tryBuildAttemptAuthorizationHeaderFromAdapter,
 } from "./attemptCredentialAdapter";
-import { ApiClientError, type ApiRequestConfig } from "../app/api/apiClient";
+import type { ApiRequestConfig } from "../app/api/apiClient";
+import { ApiError } from "../shared/api-client/errors";
+import { ApiClientError } from "../app/api/apiClient";
 import type {
   StudentAttempt,
   StudentFinalAnswerPatch,
@@ -39,13 +41,8 @@ const STORAGE_KEY_CLIENT_SESSION_PREFIX = "ielts-student-client-session:v1:";
 const STORAGE_KEY_MUTATION_WATERMARK_PREFIX = "ielts-student-mutation-watermark:v1:";
 const MAX_HEARTBEAT_EVENTS_PER_ATTEMPT = 200;
 const MAX_HEARTBEAT_FLUSH_EVENTS = 50;
-const MUTATION_BATCH_CHUNK_SIZE = 100;
 const MAX_PENDING_MUTATIONS_PER_ATTEMPT = 5_000;
 const MAX_PENDING_MUTATION_BYTES_PER_ATTEMPT = 2 * 1024 * 1024;
-const STUDENT_LIFECYCLE_LOG_SAMPLE_RATE = 0.2;
-const STUDENT_LIFECYCLE_SAMPLE_HEADER = "x-student-lifecycle-sampled";
-const STUDENT_FLUSH_CYCLE_ID_HEADER = "x-student-flush-cycle-id";
-const STUDENT_SUBMIT_CYCLE_ID_HEADER = "x-student-submit-cycle-id";
 
 export interface StudentLocalCachePolicy {
   submittedReceiptTtlMs: number;
@@ -83,16 +80,6 @@ export interface StudentAttemptLocalCacheStats {
   pendingMutationCount: number;
   heartbeatEventCount: number;
 }
-
-type FlushQueueResult =
-  | { ok: true; nextSeq: number; attempt: StudentAttempt }
-  | {
-      ok: false;
-      error: unknown;
-      nextSeq: number;
-      remainingMutations: StudentAttemptMutation[];
-      attempt: StudentAttempt;
-    };
 
 interface PendingAttemptMutationRecord {
   attemptId: string;
@@ -161,43 +148,10 @@ interface BackendStudentSessionContext {
     | undefined;
 }
 
-interface BackendMutationBatchResponse {
-  attempt?: BackendStudentAttempt | null | undefined;
-  appliedMutationCount: number;
-  serverAcceptedThroughSeq: number;
-  revision?: number | null | undefined;
-  mutationResults?:
-    | Array<{
-        mutationId: string;
-        status: "applied" | "duplicate";
-        serverSeq: number;
-        appliedRevision?: number | null | undefined;
-      }>
-    | undefined;
-  refreshedAttemptCredential?: BackendAttemptCredential | null | undefined;
-}
-
 interface BackendHeartbeatResponse {
   attempt?: BackendStudentAttempt | null | undefined;
   runtime?: unknown;
   refreshedAttemptCredential?: BackendAttemptCredential | null | undefined;
-}
-
-interface BackendSubmitResponse {
-  attempt: BackendStudentAttempt;
-  submissionId: string;
-  submittedAt: string;
-  refreshedAttemptCredential?: BackendAttemptCredential | null | undefined;
-}
-
-interface BackendSubmitRequest {
-  attemptId: string;
-  lastSeenRevision: number;
-  submissionId: string;
-  clientFinalSeq?: number | undefined;
-  serverAcceptedThroughSeq?: number | undefined;
-  finalAnswerPatch?: StudentFinalAnswerPatch | undefined;
-  finalClientSnapshotHash?: string | undefined;
 }
 
 interface SaveAttemptLifecycleContext {
@@ -220,73 +174,12 @@ function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function generateUuid(): string {
+function generateClientUuid(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
 
   return `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
-}
-
-function shouldEmitStudentLifecycleSuccessLog(sampleRate: number): boolean {
-  if (!(sampleRate > 0)) {
-    return false;
-  }
-  if (sampleRate >= 1) {
-    return true;
-  }
-  return Math.random() < sampleRate;
-}
-
-function buildFinalAnswerPatch(attempt: StudentAttempt): StudentFinalAnswerPatch {
-  return {
-    answers: attempt.answers,
-    writingAnswers: attempt.writingAnswers,
-    flags: attempt.flags,
-  };
-}
-
-type CanonicalJsonValue =
-  null | boolean | number | string | CanonicalJsonValue[] | { [key: string]: CanonicalJsonValue };
-
-function stableStringifyCanonicalJson(value: CanonicalJsonValue): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringifyCanonicalJson(item)).join(",")}]`;
-  }
-
-  const keys = Object.keys(value).sort();
-  return `{${keys
-    .map(
-      (key) =>
-        `${JSON.stringify(key)}:${stableStringifyCanonicalJson(value[key] as CanonicalJsonValue)}`
-    )
-    .join(",")}}`;
-}
-
-function canonicalJsonForHash(value: unknown): string {
-  const serialized = JSON.stringify(value);
-  if (serialized === undefined) {
-    return "null";
-  }
-  const normalized = JSON.parse(serialized) as CanonicalJsonValue;
-  return stableStringifyCanonicalJson(normalized);
-}
-
-async function sha256Hex(value: unknown): Promise<string | null> {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle) {
-    return null;
-  }
-
-  const serialized = canonicalJsonForHash(value);
-  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(serialized));
-  return Array.from(new Uint8Array(digest))
-    .map((chunk) => chunk.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function getBrowserStorage(type: "localStorage" | "sessionStorage"): Storage | null {
@@ -705,12 +598,6 @@ function isMissingAttemptCredentialError(error: unknown): boolean {
   );
 }
 
-function isObjectiveMutation(mutation: StudentAttemptMutation): boolean {
-  return (
-    mutation.type === "answer" || mutation.type === "flag" || mutation.type === "writing_answer"
-  );
-}
-
 function mutationSupersessionKey(mutation: StudentAttemptMutation): string | null {
   if (mutation.type === "answer" || mutation.type === "flag") {
     const questionId = mutation.payload.questionId;
@@ -980,8 +867,8 @@ function preserveNewerAcceptedLocalState(
 }
 
 export function backendConflictReason(error: unknown): string | null {
-  if (error instanceof ApiClientError) {
-    const reason = error.backendDetails?.["reason"];
+  if (error instanceof ApiError || error instanceof ApiClientError) {
+    const reason = error.details?.["reason"];
     return typeof reason === "string" && reason.trim() ? reason : null;
   }
 
@@ -995,226 +882,6 @@ export function backendConflictReason(error: unknown): string | null {
       const reason = (details as Record<string, unknown>)["reason"];
       return typeof reason === "string" && reason.trim() ? reason : null;
     }
-  }
-
-  return null;
-}
-
-type OperationCommandPayload =
-  | {
-      mutationId: string;
-      type: "SetSlot";
-      questionId: string;
-      slotIndex: number;
-      value: string;
-    }
-  | {
-      mutationId: string;
-      type: "ClearSlot";
-      questionId: string;
-      slotIndex: number;
-    }
-  | {
-      mutationId: string;
-      type: "SetScalar";
-      questionId: string;
-      value: string;
-    }
-  | {
-      mutationId: string;
-      type: "ClearScalar";
-      questionId: string;
-    }
-  | {
-      mutationId: string;
-      type: "SetChoice";
-      questionId: string;
-      value: string | string[];
-    }
-  | {
-      mutationId: string;
-      type: "ClearChoice";
-      questionId: string;
-    }
-  | {
-      mutationId: string;
-      type: "SetEssayText";
-      taskId: string;
-      value: string;
-    }
-  | {
-      mutationId: string;
-      type: "ClearEssayText";
-      taskId: string;
-    }
-  | {
-      mutationId: string;
-      type: "SetFlag";
-      questionId: string;
-      value: boolean;
-    };
-
-function toOperationCommand(mutation: StudentAttemptMutation): OperationCommandPayload | null {
-  if (mutation.type === "answer") {
-    const questionId = mutation.payload.questionId;
-    if (typeof questionId !== "string" || !questionId.trim()) {
-      return null;
-    }
-
-    const slotIndex = mutation.payload.slotIndex;
-    const rawValue = mutation.payload.value;
-    if (typeof slotIndex === "number" && Number.isInteger(slotIndex) && slotIndex >= 0) {
-      if (Array.isArray(rawValue)) {
-        // Guard against partial/unloaded slot payloads so missing indices never become accidental clears.
-        if (slotIndex >= rawValue.length) {
-          return null;
-        }
-        const slotValue = rawValue[slotIndex];
-        if (typeof slotValue === "string") {
-          if (slotValue.trim().length > 0) {
-            return {
-              mutationId: mutation.id,
-              type: "SetSlot",
-              questionId,
-              slotIndex,
-              value: slotValue,
-            };
-          }
-          return {
-            mutationId: mutation.id,
-            type: "ClearSlot",
-            questionId,
-            slotIndex,
-          };
-        }
-        if (slotValue === null) {
-          return {
-            mutationId: mutation.id,
-            type: "ClearSlot",
-            questionId,
-            slotIndex,
-          };
-        }
-        return null;
-      }
-
-      if (typeof rawValue === "string") {
-        if (rawValue.trim().length > 0) {
-          return {
-            mutationId: mutation.id,
-            type: "SetSlot",
-            questionId,
-            slotIndex,
-            value: rawValue,
-          };
-        }
-        return {
-          mutationId: mutation.id,
-          type: "ClearSlot",
-          questionId,
-          slotIndex,
-        };
-      }
-
-      if (rawValue === null) {
-        return {
-          mutationId: mutation.id,
-          type: "ClearSlot",
-          questionId,
-          slotIndex,
-        };
-      }
-
-      return null;
-    }
-
-    if (Array.isArray(rawValue)) {
-      const values = rawValue.filter(
-        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
-      );
-      if (values.length === 0) {
-        return {
-          mutationId: mutation.id,
-          type: "ClearChoice",
-          questionId,
-        };
-      }
-      return {
-        mutationId: mutation.id,
-        type: "SetChoice",
-        questionId,
-        value: values,
-      };
-    }
-
-    if (typeof rawValue === "string") {
-      if (rawValue.trim().length === 0) {
-        return {
-          mutationId: mutation.id,
-          type: "ClearScalar",
-          questionId,
-        };
-      }
-      return {
-        mutationId: mutation.id,
-        type: "SetScalar",
-        questionId,
-        value: rawValue,
-      };
-    }
-
-    // Treat malformed/missing values as no-ops to avoid accidental server-side clears.
-    if (rawValue === undefined) {
-      return null;
-    }
-
-    if (rawValue === null) {
-      return {
-        mutationId: mutation.id,
-        type: "ClearScalar",
-        questionId,
-      };
-    }
-
-    return null;
-  }
-
-  if (mutation.type === "writing_answer") {
-    const taskId = mutation.payload.taskId;
-    const value = mutation.payload.value;
-    if (typeof taskId !== "string" || !taskId.trim()) {
-      return null;
-    }
-    if (typeof value !== "string") {
-      return null;
-    }
-    if (typeof value === "string" && value.trim()) {
-      return {
-        mutationId: mutation.id,
-        type: "SetEssayText",
-        taskId,
-        value,
-      };
-    }
-    return {
-      mutationId: mutation.id,
-      type: "ClearEssayText",
-      taskId,
-    };
-  }
-
-  if (mutation.type === "flag") {
-    const questionId = mutation.payload.questionId;
-    const value = mutation.payload.value;
-    if (typeof questionId !== "string" || !questionId.trim() || typeof value !== "boolean") {
-      return null;
-    }
-    return {
-      mutationId: mutation.id,
-      type: "SetFlag",
-      questionId,
-      value,
-    };
   }
 
   return null;
@@ -1309,7 +976,7 @@ function ensureClientSessionId(
   const generated =
     typeof preferredClientSessionId === "string" && preferredClientSessionId.trim().length > 0
       ? preferredClientSessionId
-      : generateUuid();
+      : generateClientUuid();
   try {
     session?.setItem(storageKey, generated);
   } catch {
@@ -1354,7 +1021,7 @@ function mutationWatermarkKey(attemptId: string, clientSessionId: string): strin
 
 export function mapBackendStudentAttempt(
   payload: BackendStudentAttempt,
-  receipt?: Pick<BackendSubmitResponse, "submissionId" | "submittedAt">
+  receipt?: { submissionId: string; submittedAt: string } | null | undefined
 ): StudentAttempt {
   rememberAttemptSchedule(payload.id, payload.scheduleId);
 
@@ -1493,7 +1160,6 @@ export interface IStudentAttemptRepository {
   getAllAttempts(): Promise<StudentAttempt[]>;
   getAttemptsByScheduleId(scheduleId: string): Promise<StudentAttempt[]>;
   saveAttempt(attempt: StudentAttempt, context?: SaveAttemptLifecycleContext): Promise<void>;
-  submitAttempt(attempt: StudentAttempt): Promise<StudentAttempt>;
   createAttempt(seed: StudentAttemptSeed): Promise<StudentAttempt>;
   savePendingMutations(attemptId: string, mutations: StudentAttemptMutation[]): Promise<void>;
   getPendingMutations(attemptId: string): Promise<StudentAttemptMutation[]>;
@@ -1508,12 +1174,11 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
   private readonly pendingMutationFallbackMemory = new Map<string, StudentAttemptMutation[]>();
 
   private getItem<T>(key: string): T[] {
-    const item = localStorage.getItem(key);
-    if (!item) {
-      return [];
-    }
-
     try {
+      const item = localStorage.getItem(key);
+      if (!item) {
+        return [];
+      }
       const parsed = JSON.parse(item) as unknown;
       return Array.isArray(parsed) ? (parsed as T[]) : [];
     } catch {
@@ -1585,39 +1250,6 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
     }
 
     this.setItem(STORAGE_KEY_ATTEMPTS, attempts);
-  }
-
-  async submitAttempt(attempt: StudentAttempt): Promise<StudentAttempt> {
-    if ((attempt.recovery.pendingMutationCount ?? 0) > 0) {
-      emitStudentObservabilityMetric(
-        "student_answer_loss_risk_total",
-        withStudentObservabilityDimensions({
-          scheduleId: attempt.scheduleId,
-          attemptId: attempt.id,
-          endpoint: "/v1/student/sessions/:scheduleId/submit",
-          reason: "submit_with_pending_mutations",
-          pendingMutationCount: attempt.recovery.pendingMutationCount,
-          syncState: attempt.recovery.syncState,
-        })
-      );
-    }
-
-    const submittedAttempt = normalizeStudentAttempt({
-      ...attempt,
-      phase: "post-exam",
-      currentQuestionId: null,
-      recovery: {
-        ...attempt.recovery,
-        lastPersistedAt: new Date().toISOString(),
-        pendingMutationCount: 0,
-        syncState: "saved",
-      },
-    });
-
-    await this.saveAttempt(submittedAttempt);
-    await this.clearPendingMutations(attempt.id);
-    clearAttemptMutationWatermark(submittedAttempt);
-    return submittedAttempt;
   }
 
   async createAttempt(seed: StudentAttemptSeed): Promise<StudentAttempt> {
@@ -1814,7 +1446,6 @@ class LocalStorageStudentAttemptCache implements IStudentAttemptRepository {
 
 class BackendStudentAttemptRepository implements IStudentAttemptRepository {
   private readonly saveAttemptLocks = new Map<string, Promise<void>>();
-  private readonly droppedMutationTombstones = new Map<string, Set<string>>();
 
   constructor(private readonly cache: LocalStorageStudentAttemptCache) {}
 
@@ -1930,399 +1561,6 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     return replayPendingMutationsOntoAttempt(acceptedAttempt, pendingMutations);
   }
 
-  private filterTombstonedMutations(
-    attemptId: string,
-    mutations: StudentAttemptMutation[]
-  ): StudentAttemptMutation[] {
-    const tombstones = this.droppedMutationTombstones.get(attemptId);
-    if (!tombstones || tombstones.size === 0) {
-      return mutations;
-    }
-    return mutations.filter((mutation) => !tombstones.has(mutation.id));
-  }
-
-  private addDroppedMutationTombstones(attemptId: string, dropped: StudentAttemptMutation[]): void {
-    if (dropped.length === 0) {
-      return;
-    }
-    const tombstones = this.droppedMutationTombstones.get(attemptId) ?? new Set<string>();
-    for (const mutation of dropped) {
-      tombstones.add(mutation.id);
-    }
-    this.droppedMutationTombstones.set(attemptId, tombstones);
-  }
-
-  private reconcileDroppedMutationValues(args: {
-    attempt: StudentAttempt;
-    serverAttempt: StudentAttempt | null;
-    dropped: StudentAttemptMutation[];
-  }): StudentAttempt {
-    const { attempt, serverAttempt, dropped } = args;
-    if (!serverAttempt || dropped.length === 0) {
-      return attempt;
-    }
-
-    let nextAttempt = attempt;
-    let nextAnswers = attempt.answers;
-    let nextWritingAnswers = attempt.writingAnswers;
-    let nextFlags = attempt.flags;
-    let answersChanged = false;
-    let writingChanged = false;
-    let flagsChanged = false;
-
-    for (const mutation of dropped) {
-      if (mutation.type === "answer") {
-        const questionId = mutation.payload.questionId;
-        if (typeof questionId !== "string" || questionId.trim().length === 0) {
-          continue;
-        }
-        const serverAnswer = serverAttempt.answers[questionId];
-        if (serverAnswer === undefined) {
-          const { [questionId]: _removed, ...rest } = nextAnswers;
-          nextAnswers = rest;
-        } else {
-          nextAnswers = {
-            ...nextAnswers,
-            [questionId]: serverAnswer,
-          };
-        }
-        answersChanged = true;
-        continue;
-      }
-
-      if (mutation.type === "writing_answer") {
-        const taskId = mutation.payload.taskId;
-        if (typeof taskId !== "string" || taskId.trim().length === 0) {
-          continue;
-        }
-        nextWritingAnswers = {
-          ...nextWritingAnswers,
-          [taskId]: serverAttempt.writingAnswers[taskId] ?? "",
-        };
-        writingChanged = true;
-        continue;
-      }
-
-      if (mutation.type === "flag") {
-        const questionId = mutation.payload.questionId;
-        if (typeof questionId !== "string" || questionId.trim().length === 0) {
-          continue;
-        }
-        nextFlags = {
-          ...nextFlags,
-          [questionId]: Boolean(serverAttempt.flags[questionId]),
-        };
-        flagsChanged = true;
-      }
-    }
-
-    if (answersChanged || writingChanged || flagsChanged) {
-      nextAttempt = {
-        ...nextAttempt,
-        ...(answersChanged ? { answers: nextAnswers } : {}),
-        ...(writingChanged ? { writingAnswers: nextWritingAnswers } : {}),
-        ...(flagsChanged ? { flags: nextFlags } : {}),
-      };
-    }
-
-    return nextAttempt;
-  }
-
-  private staleMutationModule(mutation: StudentAttemptMutation): ModuleType | null {
-    if (
-      mutation.type !== "answer" &&
-      mutation.type !== "writing_answer" &&
-      mutation.type !== "flag"
-    ) {
-      return null;
-    }
-    const module = mutation.payload.module;
-    return isModuleType(module) ? module : null;
-  }
-
-  private buildDroppedMutationEvidence(args: {
-    dropped: StudentAttemptMutation[];
-    toModule: ModuleType | null;
-    reason: string;
-  }): NonNullable<StudentAttempt["recovery"]["lastDroppedMutations"]> {
-    const modules = new Set<ModuleType>();
-    const affectedAnswers = new Set<string>();
-    const affectedAnswerSlots: Array<{ questionId: string; slotIndex: number }> = [];
-    const affectedWritingAnswers = new Set<string>();
-    const affectedFlags = new Set<string>();
-
-    for (const mutation of args.dropped) {
-      const module = this.staleMutationModule(mutation);
-      if (module) modules.add(module);
-      if (mutation.type === "answer") {
-        affectedAnswers.add(mutation.payload.questionId);
-        if (typeof mutation.payload.slotIndex === "number") {
-          affectedAnswerSlots.push({
-            questionId: mutation.payload.questionId,
-            slotIndex: mutation.payload.slotIndex,
-          });
-        }
-      } else if (mutation.type === "writing_answer") {
-        affectedWritingAnswers.add(mutation.payload.taskId);
-      } else if (mutation.type === "flag") {
-        affectedFlags.add(mutation.payload.questionId);
-      }
-    }
-
-    return {
-      at: new Date().toISOString(),
-      count: args.dropped.length,
-      fromModule: modules.size === 1 ? [...modules][0]! : modules.size > 1 ? "multiple" : null,
-      toModule: args.toModule,
-      reason: args.reason,
-      ...(affectedAnswers.size > 0 ? { affectedAnswers: [...affectedAnswers] } : {}),
-      ...(affectedAnswerSlots.length > 0 ? { affectedAnswerSlots } : {}),
-      ...(affectedWritingAnswers.size > 0
-        ? { affectedWritingAnswers: [...affectedWritingAnswers] }
-        : {}),
-      ...(affectedFlags.size > 0 ? { affectedFlags: [...affectedFlags] } : {}),
-    };
-  }
-
-  private selectProvablyStaleMutations(args: {
-    mutations: StudentAttemptMutation[];
-    reason: string;
-    runtimeModule: ModuleType | null;
-  }): StudentAttemptMutation[] {
-    if (!args.runtimeModule) return [];
-    return args.mutations.filter((mutation) => {
-      if (!isObjectiveMutation(mutation)) return false;
-      const module = this.staleMutationModule(mutation);
-      if (!module) return false;
-      if (args.reason === "DEADLINE_EXPIRED") {
-        return module === args.runtimeModule;
-      }
-      if (args.reason === "SECTION_MISMATCH") {
-        return module !== args.runtimeModule;
-      }
-      return false;
-    });
-  }
-
-  private async recoverProvablyStaleMutations(args: {
-    attempt: StudentAttempt;
-    clientSessionId: string;
-    watermarkKey: string;
-    nextSeq: number;
-    failedMutations: StudentAttemptMutation[];
-    reason: string;
-    lifecycleContext?: SaveAttemptLifecycleContext;
-  }): Promise<FlushQueueResult | null> {
-    let session: BackendStudentSessionContext;
-    try {
-      session = await backendGet<BackendStudentSessionContext>(
-        studentSessionTransport.paths.session(args.attempt.scheduleId, args.attempt.candidateId),
-        { retries: 0 }
-      );
-    } catch {
-      // Recovery evidence is advisory. If canonical state cannot be read, preserve the
-      // durable queue and surface the original conflict rather than guessing or masking it.
-      return null;
-    }
-    const runtimeModule = isModuleType(session.runtime?.currentSectionKey)
-      ? session.runtime.currentSectionKey
-      : null;
-    if (!session.attempt || !runtimeModule) return null;
-
-    const canonical = mapBackendStudentAttempt(session.attempt);
-    storeAttemptCredentialFromAdapter(canonical, session.attemptCredential);
-    const dropped = this.selectProvablyStaleMutations({
-      mutations: args.failedMutations,
-      reason: args.reason,
-      runtimeModule,
-    });
-    if (dropped.length === 0) return null;
-
-    const droppedIds = new Set(dropped.map((mutation) => mutation.id));
-    const remaining = args.failedMutations.filter((mutation) => !droppedIds.has(mutation.id));
-    this.addDroppedMutationTombstones(args.attempt.id, dropped);
-    await this.cache.savePendingMutations(args.attempt.id, remaining);
-
-    const evidence = this.buildDroppedMutationEvidence({
-      dropped,
-      toModule: runtimeModule,
-      reason: args.reason === "DEADLINE_EXPIRED" ? "DEADLINE_EXPIRED" : "SECTION_ADVANCED",
-    });
-    let recovered = this.reconcileDroppedMutationValues({
-      attempt: args.attempt,
-      serverAttempt: canonical,
-      dropped,
-    });
-    recovered = {
-      ...recovered,
-      revision: canonical.revision ?? recovered.revision ?? 0,
-      phase: canonical.phase,
-      currentModule: canonical.currentModule,
-      currentQuestionId: canonical.currentQuestionId,
-      ...(canonical.submittedAt !== undefined ? { submittedAt: canonical.submittedAt } : {}),
-      recovery: {
-        ...recovered.recovery,
-        lastDroppedMutations: evidence,
-        pendingMutationCount: remaining.length,
-        serverAcceptedThroughSeq: canonical.recovery.serverAcceptedThroughSeq,
-        syncState: remaining.length > 0 ? "saving" : "saved",
-      },
-      updatedAt: canonical.updatedAt,
-    };
-    recovered = replayPendingMutationsOntoAttempt(recovered, remaining);
-    await this.cache.saveAttempt(recovered);
-    await this.recordDroppedMutationsAudit(recovered, {
-      reason: evidence.reason,
-      count: evidence.count,
-      fromModule: evidence.fromModule,
-      toModule: evidence.toModule,
-      affectedAnswers: evidence.affectedAnswers ?? [],
-      affectedAnswerSlots: evidence.affectedAnswerSlots ?? [],
-      affectedWritingAnswers: evidence.affectedWritingAnswers ?? [],
-      affectedFlags: evidence.affectedFlags ?? [],
-    });
-
-    if (remaining.length === 0) {
-      return { ok: true, nextSeq: args.nextSeq, attempt: recovered };
-    }
-
-    return this.flushMutationQueue({
-      attempt: recovered,
-      clientSessionId: args.clientSessionId,
-      watermarkKey: args.watermarkKey,
-      startSeq: Math.max(args.nextSeq, canonical.recovery.serverAcceptedThroughSeq ?? 0),
-      mutations: remaining,
-      ...(args.lifecycleContext ? { lifecycleContext: args.lifecycleContext } : {}),
-    });
-  }
-
-  private async flushMutationQueue(args: {
-    attempt: StudentAttempt;
-    clientSessionId: string;
-    watermarkKey: string;
-    startSeq: number;
-    mutations: StudentAttemptMutation[];
-    lifecycleContext?: SaveAttemptLifecycleContext;
-  }): Promise<FlushQueueResult> {
-    let currentAttempt = args.attempt;
-    let nextSeq = args.startSeq;
-    let nextRevision = Number(currentAttempt.revision ?? 0);
-    let remainingMutations = [...args.mutations];
-
-    while (remainingMutations.length > 0) {
-      const chunk = remainingMutations.slice(0, MUTATION_BATCH_CHUNK_SIZE);
-      const mappedEntries = chunk.map((mutation) => ({
-        mutation,
-        command: toOperationCommand(mutation),
-      }));
-      const malformedDurableMutation = mappedEntries.find(
-        ({ mutation, command }) => isObjectiveMutation(mutation) && command === null
-      );
-      if (malformedDurableMutation) {
-        return {
-          ok: false,
-          error: new Error(
-            `Pending ${malformedDurableMutation.mutation.type} mutation could not be encoded; durable queue was preserved.`
-          ),
-          nextSeq,
-          remainingMutations,
-          attempt: currentAttempt,
-        };
-      }
-
-      const mappedCommands = mappedEntries
-        .map(({ command }) => command)
-        .filter((command): command is OperationCommandPayload => command !== null);
-
-      if (mappedCommands.length === 0) {
-        remainingMutations = remainingMutations.slice(chunk.length);
-        await this.cache.savePendingMutations(currentAttempt.id, remainingMutations);
-        continue;
-      }
-
-      try {
-        const response = await this.postWithAttemptAuth<BackendMutationBatchResponse>(
-          currentAttempt,
-          studentSessionTransport.paths.mutationsBatch(currentAttempt.scheduleId),
-          {
-            attemptId: currentAttempt.id,
-            mutations: mappedCommands,
-          },
-          {
-            retries: 0,
-            headers: {
-              ...(args.lifecycleContext?.flushCycleId
-                ? { [STUDENT_FLUSH_CYCLE_ID_HEADER]: args.lifecycleContext.flushCycleId }
-                : {}),
-              [STUDENT_LIFECYCLE_SAMPLE_HEADER]: String(
-                Boolean(args.lifecycleContext?.sampledSuccessLogs)
-              ),
-            },
-          }
-        );
-
-        const sentMutationIds = new Set(mappedCommands.map((command) => command.mutationId));
-        const acknowledgedMutationIds = new Set(
-          (response.mutationResults ?? [])
-            .filter((result) => result.status === "applied" || result.status === "duplicate")
-            .map((result) => result.mutationId)
-        );
-        const missingAcknowledgement = [...sentMutationIds].find(
-          (mutationId) => !acknowledgedMutationIds.has(mutationId)
-        );
-        if (missingAcknowledgement) {
-          return {
-            ok: false,
-            error: new Error(
-              `Mutation ${missingAcknowledgement} was not acknowledged by the server; durable queue was preserved.`
-            ),
-            nextSeq,
-            remainingMutations,
-            attempt: currentAttempt,
-          };
-        }
-
-        nextSeq = response.serverAcceptedThroughSeq;
-        nextRevision = Number(response.revision ?? nextRevision);
-        storeMutationSequenceWatermark(
-          currentAttempt.id,
-          args.clientSessionId,
-          response.serverAcceptedThroughSeq
-        );
-        storeAttemptCredentialFromAdapter(currentAttempt, response.refreshedAttemptCredential);
-
-        remainingMutations = remainingMutations.slice(chunk.length);
-        await this.cache.savePendingMutations(currentAttempt.id, remainingMutations);
-
-        const responseAttempt = response.attempt
-          ? mapBackendStudentAttempt(response.attempt)
-          : {
-              ...currentAttempt,
-              revision: nextRevision,
-            };
-        currentAttempt = mergeStudentAttemptRecovery(responseAttempt, {
-          lastDroppedMutations: currentAttempt.recovery.lastDroppedMutations,
-          lastLocalMutationAt: currentAttempt.recovery.lastLocalMutationAt,
-          lastPersistedAt: currentAttempt.recovery.lastPersistedAt,
-          pendingMutationCount: remainingMutations.length,
-          serverAcceptedThroughSeq: response.serverAcceptedThroughSeq,
-          syncState: currentAttempt.recovery.syncState,
-        });
-        await this.cache.saveAttempt(currentAttempt);
-      } catch (error) {
-        return {
-          ok: false,
-          error,
-          nextSeq,
-          remainingMutations,
-          attempt: currentAttempt,
-        };
-      }
-    }
-
-    return { ok: true, nextSeq, attempt: currentAttempt };
-  }
-
   private async cacheAttempt(attempt: StudentAttempt): Promise<StudentAttempt> {
     const pendingMutations = await this.cache.getPendingMutations(attempt.id);
     const reconciledAttempt = await this.reconcileAttemptWithCachedState(attempt, pendingMutations);
@@ -2381,186 +1619,13 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
   }
 
   async saveAttempt(attempt: StudentAttempt, context?: SaveAttemptLifecycleContext): Promise<void> {
+    void context;
     await this.withSaveAttemptLock(attempt.id, async () => {
-      const pendingMutations = this.filterTombstonedMutations(
-        attempt.id,
-        await this.cache.getPendingMutations(attempt.id)
-      );
-      let currentAttempt = await this.reconcileAttemptWithCachedState(attempt, pendingMutations);
+      const pendingMutations = await this.cache.getPendingMutations(attempt.id);
+      const currentAttempt = await this.reconcileAttemptWithCachedState(attempt, pendingMutations);
       await this.cache.saveAttempt(currentAttempt);
       primeMutationSequenceWatermark(currentAttempt);
-
-      if (pendingMutations.length === 0) {
-        return;
-      }
-
-      if (!(await this.ensureAttemptCredential(currentAttempt))) {
-        return;
-      }
-
-      const clientSessionId = ensureClientSessionIdForAttempt(currentAttempt);
-      const watermarkKey = mutationWatermarkKey(currentAttempt.id, clientSessionId);
-      const startSeq = readOrPrimeMutationSequenceWatermark(currentAttempt.id, clientSessionId);
-
-      const first = await this.flushMutationQueue({
-        attempt: currentAttempt,
-        clientSessionId,
-        watermarkKey,
-        startSeq,
-        mutations: pendingMutations,
-        ...(context ? { lifecycleContext: context } : {}),
-      });
-      if (first.ok) {
-        return;
-      }
-
-      currentAttempt = first.attempt;
-      const statusCode = (first.error as { statusCode?: number }).statusCode;
-      const reason = statusCode === 409 ? backendConflictReason(first.error) : null;
-
-      if (statusCode === 409 && (reason === "SECTION_MISMATCH" || reason === "DEADLINE_EXPIRED")) {
-        const recovered = await this.recoverProvablyStaleMutations({
-          attempt: currentAttempt,
-          clientSessionId,
-          watermarkKey,
-          nextSeq: first.nextSeq,
-          failedMutations: first.remainingMutations,
-          reason,
-          ...(context ? { lifecycleContext: context } : {}),
-        });
-        if (recovered?.ok) {
-          return;
-        }
-        if (recovered && !recovered.ok) {
-          throw recovered.error;
-        }
-      }
-
-      if (statusCode === 409 && reason === "ACTIVE_SESSION_SUPERSEDED") {
-        const staleAttempt = mergeStudentAttemptRecovery(currentAttempt, {
-          syncState: "error",
-        });
-        await this.cache.saveAttempt(staleAttempt);
-        throw first.error;
-      }
-      throw first.error;
     });
-  }
-
-  private async buildSubmitPayload(
-    attempt: StudentAttempt,
-    submissionId: string
-  ): Promise<BackendSubmitRequest> {
-    const clientSessionId = ensureClientSessionIdForAttempt(attempt);
-    const watermark = readOrPrimeMutationSequenceWatermark(attempt.id, clientSessionId);
-    const clientFinalSeq = Math.max(watermark, attempt.recovery.serverAcceptedThroughSeq ?? 0);
-    const finalAnswerPatch = buildFinalAnswerPatch(attempt);
-    const finalClientSnapshotHash = await sha256Hex(finalAnswerPatch);
-
-    emitStudentObservabilityMetric(
-      "student_submit_final_patch_built_total",
-      withStudentObservabilityDimensions({
-        scheduleId: attempt.scheduleId,
-        attemptId: attempt.id,
-        endpoint: studentSessionTransport.paths.submit(attempt.scheduleId),
-        pendingMutationCount: attempt.recovery.pendingMutationCount,
-        syncState: attempt.recovery.syncState,
-      })
-    );
-
-    return {
-      attemptId: attempt.id,
-      lastSeenRevision: Number(attempt.revision ?? 0),
-      submissionId,
-      clientFinalSeq,
-      serverAcceptedThroughSeq: attempt.recovery.serverAcceptedThroughSeq ?? 0,
-      finalAnswerPatch,
-      finalClientSnapshotHash: finalClientSnapshotHash ?? undefined,
-    };
-  }
-
-  async submitAttempt(attempt: StudentAttempt): Promise<StudentAttempt> {
-    const pendingBeforeSubmit = await this.cache.getPendingMutations(attempt.id);
-    if (pendingBeforeSubmit.length > 0 || (attempt.recovery.pendingMutationCount ?? 0) > 0) {
-      emitStudentObservabilityMetric(
-        "student_answer_loss_risk_total",
-        withStudentObservabilityDimensions({
-          scheduleId: attempt.scheduleId,
-          attemptId: attempt.id,
-          endpoint: studentSessionTransport.paths.submit(attempt.scheduleId),
-          reason: "submit_with_pending_mutations",
-          pendingMutationCount: Math.max(
-            pendingBeforeSubmit.length,
-            attempt.recovery.pendingMutationCount ?? 0
-          ),
-          syncState: attempt.recovery.syncState,
-        })
-      );
-    }
-
-    if (!(await this.ensureAttemptCredential(attempt))) {
-      throw new Error("Missing attempt credential for student session.");
-    }
-
-    const submissionId = `student-submit-${attempt.id}`;
-    const submitCycleId = generateUuid();
-    const sampledSuccessLogs = shouldEmitStudentLifecycleSuccessLog(
-      STUDENT_LIFECYCLE_LOG_SAMPLE_RATE
-    );
-    const endpoint = studentSessionTransport.paths.submit(attempt.scheduleId);
-    const submitOnce = async (candidate: StudentAttempt): Promise<BackendSubmitResponse> => {
-      const payload = await this.buildSubmitPayload(candidate, submissionId);
-      return this.postWithAttemptAuth<BackendSubmitResponse>(candidate, endpoint, payload, {
-        headers: {
-          "Idempotency-Key": submissionId,
-          [STUDENT_SUBMIT_CYCLE_ID_HEADER]: submitCycleId,
-          [STUDENT_LIFECYCLE_SAMPLE_HEADER]: String(sampledSuccessLogs),
-        },
-        timeout: 60_000,
-        retries: 0,
-      });
-    };
-
-    let attemptForSubmit = attempt;
-    let response: BackendSubmitResponse;
-    try {
-      response = await submitOnce(attemptForSubmit);
-    } catch (error) {
-      const reason = backendConflictReason(error);
-      if (reason !== "FINAL_FLUSH_REQUIRED") {
-        throw error;
-      }
-
-      emitStudentObservabilityMetric(
-        "student_submit_final_patch_retry_total",
-        withStudentObservabilityDimensions({
-          scheduleId: attempt.scheduleId,
-          attemptId: attempt.id,
-          endpoint,
-          reason,
-          syncState: attempt.recovery.syncState,
-        })
-      );
-
-      await this.saveAttempt(attemptForSubmit, {
-        flushCycleId: generateUuid(),
-        sampledSuccessLogs,
-      });
-      attemptForSubmit =
-        (await this.cache.getAllAttempts()).find((candidate) => candidate.id === attempt.id) ??
-        attemptForSubmit;
-      response = await submitOnce(attemptForSubmit);
-    }
-
-    const submittedAttempt = mapBackendStudentAttempt(response.attempt, {
-      submissionId: response.submissionId,
-      submittedAt: response.submittedAt,
-    });
-    clearAttemptCredentialFromAdapter(attemptForSubmit);
-    await this.cache.saveAttempt(submittedAttempt);
-    await this.cache.clearPendingMutations(attempt.id);
-    clearAttemptMutationWatermark(submittedAttempt);
-    return submittedAttempt;
   }
 
   async createAttempt(seed: StudentAttemptSeed): Promise<StudentAttempt> {

@@ -4,9 +4,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ErrorSurface } from '../../../components/ui/ErrorSurface';
 import { LoadingSurface } from '../../../components/ui/LoadingSurface';
 import { useAuthSession } from '../../../features/auth/authSession';
+import { useAuthoritativeDeadlineClock } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { useProctorRouteController } from '../../../features/proctor/hooks/useProctorRouteController';
 import { examDeliveryService } from '../../../features/proctor/infrastructure/proctorGateway';
 import type { StudentSession } from '../../../types';
+import type { ExamSessionRuntime } from '../../../types/domain';
 import { SatConfirmDialog } from '../ui/ConfirmDialog';
 import { SatMenu, type SatMenuItem } from '../ui/Menu';
 
@@ -53,6 +55,13 @@ export function SatSessionRoomRoute() {
   }, [search, students]);
   const selectedStudent = students.find((student) => student.id === selectedStudentId) ?? students[0] ?? null;
   const currentStage = runtime?.sections.find((section) => section.sectionKey === runtime.currentSectionKey)?.label ?? runtime?.currentSectionKey ?? 'Waiting to begin';
+  const currentStageStatus = runtime?.sections.find((section) => section.sectionKey === runtime?.currentSectionKey)?.status ?? null;
+  const stageRemainingSeconds = useAuthoritativeDeadlineClock({
+    deadlineAt: runtime?.currentSectionDeadlineAt ?? null,
+    serverNow: runtime?.serverNow ?? null,
+    fallbackSeconds: runtime?.currentSectionRemainingSeconds ?? 0,
+    running: runtime?.status === 'live' && currentStageStatus === 'live',
+  });
   const proctorName = session?.user.displayName?.trim() || session?.user.email || 'Proctor';
   const openAlerts = controller.alerts.filter((alert) => !alert.isAcknowledged).length;
   const isStale = Boolean(controller.error);
@@ -109,11 +118,11 @@ export function SatSessionRoomRoute() {
       <main className="mx-auto grid min-h-[calc(100vh-64px)] max-w-[1500px] lg:grid-cols-[310px_minmax(0,1fr)]">
         <section className="border-b border-black/[0.065] bg-white/45 lg:border-b-0 lg:border-r" aria-label="Students">
           <div className="border-b border-black/[0.055] px-3 py-3">
-            <div className="flex items-center justify-between"><div><p className="text-[10px] font-semibold text-slate-700">Students</p><p className="mt-0.5 text-[9px] tabular-nums text-slate-400">{students.length} joined · {students.filter((student) => student.status === 'active').length} active</p></div><span className="text-[10px] font-semibold tabular-nums text-slate-400">{formatRemaining(runtime.currentSectionRemainingSeconds)}</span></div>
+            <div className="flex items-center justify-between"><div><p className="text-[10px] font-semibold text-slate-700">Students</p><p className="mt-0.5 text-[9px] tabular-nums text-slate-400">{students.length} joined · {students.filter((student) => student.status === 'active').length} active</p></div><span className="text-[10px] font-semibold tabular-nums text-slate-400">{formatRemaining(stageRemainingSeconds)}</span></div>
             <label htmlFor="sat-room-student-search" className="relative mt-3 block"><Search size={13} className="pointer-events-none absolute left-3 top-2.5 text-slate-400" /><span className="sr-only">Search students</span><input id="sat-room-student-search" aria-label="Search students" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search students" className="h-9 w-full rounded-[10px] border border-black/[0.07] bg-white pl-8 pr-3 text-[11px] outline-none focus:border-[#0071e3]/40 focus:ring-4 focus:ring-[#0071e3]/10" /></label>
           </div>
           <div className="max-h-[44vh] overflow-y-auto lg:max-h-[calc(100vh-166px)]">
-            {visibleStudents.length ? visibleStudents.map((student) => <button key={student.id} type="button" aria-label={`Open ${student.name}`} onClick={() => setSelectedStudentId(student.id)} className={`grid min-h-[64px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-black/[0.045] px-3 text-left transition ${selectedStudent?.id === student.id ? 'bg-white' : 'hover:bg-white/70'}`}><div className="min-w-0"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${studentTone(student)}`} /><p className="truncate text-[11px] font-semibold text-slate-800">{student.name}</p>{student.warnings > 0 || student.violations.length > 0 ? <AlertTriangle size={11} className="shrink-0 text-amber-500" /> : null}</div><p className="mt-1 truncate pl-3.5 text-[8px] text-slate-400">{String(student.runtimeCurrentSection ?? student.currentSection)}</p></div><div className="text-right"><p className="text-[11px] font-semibold tabular-nums text-slate-600">{formatRemaining(student.runtimeTimeRemainingSeconds ?? student.timeRemaining)}</p><p className="mt-1 text-[8px] capitalize text-slate-400">{student.status}</p></div></button>) : <div className="px-5 py-10 text-center text-[11px] text-slate-400">{students.length ? 'No matching students.' : 'Students appear here when they join.'}</div>}
+            {visibleStudents.length ? visibleStudents.map((student) => <SatRoomStudentRow key={student.id} student={student} runtime={runtime} selected={selectedStudent?.id === student.id} onSelect={() => setSelectedStudentId(student.id)} />) : <div className="px-5 py-10 text-center text-[11px] text-slate-400">{students.length ? 'No matching students.' : 'Students appear here when they join.'}</div>}
           </div>
         </section>
 
@@ -122,7 +131,7 @@ export function SatSessionRoomRoute() {
             <div className="min-w-0">
               <div className="border-b border-black/[0.065] pb-6">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.13em] text-slate-400">Current stage</p>
-                <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-[25px] font-semibold tracking-[-0.04em]">{currentStage}</h1><p className="mt-1 text-[10px] text-slate-400">Server-authoritative session clock</p></div><p className="text-[36px] font-semibold tabular-nums tracking-[-0.045em] text-slate-900">{formatRemaining(runtime.currentSectionRemainingSeconds)}</p></div>
+                <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-[25px] font-semibold tracking-[-0.04em]">{currentStage}</h1><p className="mt-1 text-[10px] text-slate-400">Server-authoritative session clock</p></div><p className="text-[36px] font-semibold tabular-nums tracking-[-0.045em] text-slate-900">{formatRemaining(stageRemainingSeconds)}</p></div>
               </div>
 
               {selectedStudent ? <StudentDetail student={selectedStudent} pending={pending} blocked={isStale} onAddTime={(minutes) => void runStudentAction(`student-extend-${minutes}`, () => examDeliveryService.extendStudentAttempt(selectedStudent.id, proctorName, minutes), `Added ${minutes} minutes for ${selectedStudent.name}.`)} onWarn={() => void runStudentAction('student-warn', () => examDeliveryService.warnStudent(selectedStudent.id, 'Please return your attention to the exam.', proctorName), `Warning sent to ${selectedStudent.name}.`)} onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`)} onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`)} onTerminate={() => setConfirm('terminate')} /> : <div className="flex min-h-[380px] flex-col items-center justify-center text-center"><UserRound size={24} className="text-slate-300" /><p className="mt-3 text-[12px] font-semibold text-slate-500">No student selected</p><p className="mt-1 text-[10px] text-slate-400">Select a student to inspect their SAT attempt.</p></div>}
@@ -159,8 +168,23 @@ function SessionControls({ runtimeStatus, pending, blocked, onStart, onPause, on
   );
 }
 
+function SatRoomStudentRow({ student, runtime, selected, onSelect }: { student: StudentSession; runtime: ExamSessionRuntime | null; selected: boolean; onSelect: () => void }) {
+  const remaining = useAuthoritativeDeadlineClock({
+    deadlineAt: student.runtimeDeadlineAt ?? runtime?.currentSectionDeadlineAt ?? null,
+    serverNow: student.runtimeServerNow ?? runtime?.serverNow ?? null,
+    fallbackSeconds: student.runtimeTimeRemainingSeconds ?? student.timeRemaining,
+    running: student.runtimeStatus === 'live' && student.runtimeSectionStatus === 'live' && student.status !== 'terminated',
+  });
+  return <button type="button" aria-label={`Open ${student.name}`} onClick={onSelect} className={`grid min-h-[64px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-black/[0.045] px-3 text-left transition ${selected ? 'bg-white' : 'hover:bg-white/70'}`}><div className="min-w-0"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${studentTone(student)}`} /><p className="truncate text-[11px] font-semibold text-slate-800">{student.name}</p>{student.warnings > 0 || student.violations.length > 0 ? <AlertTriangle size={11} className="shrink-0 text-amber-500" /> : null}</div><p className="mt-1 truncate pl-3.5 text-[8px] text-slate-400">{String(student.runtimeCurrentSection ?? student.currentSection)}</p></div><div className="text-right"><p className="text-[11px] font-semibold tabular-nums text-slate-600">{formatRemaining(remaining)}</p><p className="mt-1 text-[8px] capitalize text-slate-400">{student.status}</p></div></button>;
+}
+
 function StudentDetail({ student, pending, blocked, onAddTime, onWarn, onPause, onResume, onTerminate }: { student: StudentSession; pending: string | null; blocked: boolean; onAddTime: (minutes: number) => void; onWarn: () => void; onPause: () => void; onResume: () => void; onTerminate: () => void }) {
-  const remaining = student.runtimeTimeRemainingSeconds ?? student.timeRemaining;
+  const remaining = useAuthoritativeDeadlineClock({
+    deadlineAt: student.runtimeDeadlineAt ?? null,
+    serverNow: student.runtimeServerNow ?? null,
+    fallbackSeconds: student.runtimeTimeRemainingSeconds ?? student.timeRemaining,
+    running: student.runtimeStatus === 'live' && student.runtimeSectionStatus === 'live' && student.status !== 'terminated',
+  });
   return <div className="pt-6"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[0.13em] text-slate-400">Student</p><h2 className="mt-1 truncate text-[22px] font-semibold tracking-[-0.035em]">{student.name}</h2><p className="mt-1 text-[10px] text-slate-400">{student.studentId}{student.email ? ` · ${student.email}` : ''}</p></div><div><SatMenu label="Student actions" compact align="end" width={176} icon={MoreHorizontal} items={[{ id: 'extend-5', label: 'Add 5 minutes', disabled: Boolean(pending) || blocked, onSelect: () => onAddTime(5) }, { id: 'warn', label: 'Send warning', disabled: Boolean(pending) || blocked, onSelect: onWarn }, { id: 'toggle', label: student.status === 'paused' ? 'Resume attempt' : 'Pause attempt', disabled: Boolean(pending) || blocked, onSelect: student.status === 'paused' ? onResume : onPause }, { id: 'terminate', label: 'End attempt…', destructive: true, disabled: Boolean(pending) || blocked, separatorBefore: true, onSelect: onTerminate }]} /></div></div>
     <div className="mt-7 grid gap-4 border-y border-black/[0.055] py-5 sm:grid-cols-3"><div><p className="text-[9px] text-slate-400">Current module</p><p className="mt-1 text-[12px] font-semibold text-slate-700">{String(student.runtimeCurrentSection ?? student.currentSection)}</p></div><div><p className="text-[9px] text-slate-400">Time remaining</p><p className="mt-1 text-[19px] font-semibold tabular-nums tracking-[-0.03em]">{formatRemaining(remaining)}</p></div><div><p className="text-[9px] text-slate-400">Attempt</p><p className="mt-1 text-[12px] font-semibold capitalize text-slate-700">{student.status}</p></div></div>
     <div className="mt-6"><h3 className="text-[12px] font-semibold tracking-[-0.01em]">Attention</h3>{student.warnings === 0 && student.violations.length === 0 ? <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />No current warnings or integrity events.</div> : <div className="mt-3 space-y-2">{student.warnings > 0 ? <div className="rounded-[11px] bg-amber-50 px-3 py-2.5 text-[10px] text-amber-700">{student.warnings} proctor warning{student.warnings === 1 ? '' : 's'}</div> : null}{student.violations.slice(0, 5).map((violation) => <div key={violation.id} className="rounded-[11px] bg-amber-50 px-3 py-2.5"><p className="text-[10px] font-semibold text-amber-800">{violation.type.replace(/_/g, ' ')}</p><p className="mt-1 text-[9px] leading-4 text-amber-700">{violation.description}</p></div>)}</div>}</div>

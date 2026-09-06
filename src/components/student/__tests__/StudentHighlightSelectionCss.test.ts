@@ -36,6 +36,11 @@ describe('highlight tool selection tint CSS', () => {
     expect(css).not.toMatch(/(?:input|textarea|select)::selection/);
   });
 
+  it('keeps highlight marks legible under forced-colors (S1-M5)', () => {
+    expect(css).toMatch(/@media\s*\(forced-colors:\s*active\)[\s\S]*?\[data-highlighted="true"\]/);
+    expect(css).toMatch(/\[data-highlighted="true"\][\s\S]*?forced-color-adjust:\s*auto/);
+  });
+
   it('declares the tint rules after the static blue fallback so marks stay tinted', () => {
     const tintedMarksIndex = css.indexOf(
       '[data-student-highlight-selection="true"] [data-highlighted="true"]::selection',

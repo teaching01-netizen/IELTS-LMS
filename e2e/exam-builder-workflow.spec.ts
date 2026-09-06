@@ -6,214 +6,143 @@ import {
 
 test.use({ storageState: BUILDER_STORAGE_STATE_PATH });
 
-async function waitForAuthSession(page: Page) {
-  const sessionResponse = page.waitForResponse((response) =>
-    response.url().includes('/api/v1/auth/session') && response.request().method() === 'GET',
-  );
-  await sessionResponse;
+type ApiPayload<T> = T | { data: T };
+
+interface ExamSnapshot {
+  id: string;
+  status: string;
+  revision: number;
+  currentDraftVersionId?: string | null;
+  currentPublishedVersionId?: string | null;
 }
 
-async function readExamSnapshot(
-  page: Page,
-  examId: string,
-) {
+interface VersionSnapshot {
+  id: string;
+  revision: number;
+  isDraft: boolean;
+  isPublished: boolean;
+  contentSnapshot?: unknown;
+}
+
+interface ValidationSnapshot {
+  canPublish: boolean;
+}
+
+function unwrap<T>(payload: ApiPayload<T>): T {
+  if (typeof payload === 'object' && payload !== null && 'data' in payload) {
+    return payload.data;
+  }
+  return payload as T;
+}
+
+async function readExamSnapshot(page: Page, examId: string) {
   return page.evaluate(async (seedExamId) => {
-    const [examResponse, versionsResponse, validationResponse] = await Promise.all([
+    const responses = await Promise.all([
       fetch(`/api/v1/exams/${seedExamId}`, { credentials: 'include' }),
       fetch(`/api/v1/exams/${seedExamId}/versions`, { credentials: 'include' }),
       fetch(`/api/v1/exams/${seedExamId}/validation`, { credentials: 'include' }),
     ]);
+    const payloads = await Promise.all(responses.map((response) => response.json()));
+    if (responses.some((response) => !response.ok)) {
+      throw new Error(`Builder snapshot request failed: ${responses.map((response) => response.status).join(', ')}`);
+    }
 
-    const examPayload = await examResponse.json();
-    const versionsPayload = await versionsResponse.json();
-    const validationPayload = await validationResponse.json();
+    const normalize = <T,>(payload: T | { data: T }): T => {
+      if (typeof payload === 'object' && payload !== null && 'data' in payload) {
+        return payload.data;
+      }
+      return payload as T;
+    };
 
     return {
-      exam: examPayload.data,
-      versions: versionsPayload.data,
-      validation: validationPayload.data,
+      exam: normalize<ExamSnapshot>(payloads[0]),
+      versions: normalize<VersionSnapshot[]>(payloads[1]),
+      validation: normalize<ValidationSnapshot>(payloads[2]),
     };
   }, examId);
 }
 
-test.describe('Backend-backed builder workflow', () => {
-  test('loads seeded draft, saves a backend revision, validates, and publishes', async ({
-    page,
-  }) => {
-    const manifest = readBackendE2EManifest();
-    const editedPrompt = 'Builder prompt updated through backend E2E';
+async function writeApi(
+  page: Page,
+  endpoint: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; payload: unknown }> {
+  const csrf = (await page.context().cookies()).find((cookie) => cookie.name === 'csrf')?.value;
+  if (!csrf) {
+    throw new Error('Builder storage state did not contain a CSRF cookie.');
+  }
+  return page.evaluate(async ({ endpoint: requestEndpoint, body: requestBody, csrf: token }) => {
+    const response = await fetch(requestEndpoint, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'content-type': 'application/json',
+        'x-csrf-token': token,
+      },
+      body: JSON.stringify(requestBody),
+    });
+    return { status: response.status, payload: await response.json() };
+  }, { endpoint, body, csrf });
+}
 
-    const authSessionResponse = waitForAuthSession(page);
-    await page.goto(`/builder/${manifest.builder.examId}/builder`);
-    await authSessionResponse;
+test.describe('Backend-backed builder workflow', () => {
+  test('loads the Go draft, saves, validates, publishes, and exposes its audit event', async ({ page }) => {
+    const manifest = readBackendE2EManifest();
+    const examId = manifest.builder.examId;
+    const editedPrompt = `Builder prompt updated through Go E2E ${Date.now()}`;
+
+    await page.goto(`/builder/${examId}/builder`);
     await expect(page.getByLabel('Exam title')).toBeVisible();
 
-    const initialSnapshot = await readExamSnapshot(page, manifest.builder.examId);
-    expect(initialSnapshot.exam.id).toBe(manifest.builder.examId);
-    expect(initialSnapshot.exam.revision).toBe(manifest.builder.initialRevision);
+    const initialSnapshot = await readExamSnapshot(page, examId);
+    expect(initialSnapshot.exam.id).toBe(examId);
     expect(initialSnapshot.versions).toHaveLength(manifest.builder.initialVersionCount);
 
-    await page.getByPlaceholder('Enter the question prompt...').fill(editedPrompt);
-    await expect(page.getByPlaceholder('Enter the question prompt...')).toHaveValue(editedPrompt);
-    await page.getByPlaceholder('Enter the question prompt...').press('Tab');
-
+    const prompt = page.getByPlaceholder('Enter the question prompt...').first();
+    await prompt.fill(editedPrompt);
     await page.getByLabel('Save draft').click();
 
-    await expect
-      .poll(async () => {
-        const snapshot = await readExamSnapshot(page, manifest.builder.examId);
-        return {
-          latestPrompt:
-            snapshot.versions[0]?.contentSnapshot?.reading?.passages?.[0]?.blocks?.[0]?.questions?.[0]
-              ?.prompt ?? null,
-          revision: snapshot.exam.revision,
-          versionCount: snapshot.versions.length,
-        };
-      })
-      .toMatchObject({
-        latestPrompt: editedPrompt,
-      });
+    await expect.poll(async () => {
+      const snapshot = await readExamSnapshot(page, examId);
+      return snapshot.versions.some((version) => JSON.stringify(version.contentSnapshot).includes(editedPrompt));
+    }).toBe(true);
 
-    const savedSnapshot = await readExamSnapshot(page, manifest.builder.examId);
+    const savedSnapshot = await readExamSnapshot(page, examId);
     expect(savedSnapshot.exam.revision).toBeGreaterThan(manifest.builder.initialRevision);
-    expect(savedSnapshot.versions.length).toBeGreaterThan(
-      manifest.builder.initialVersionCount,
-    );
-    expect(
-      savedSnapshot.versions[0]?.contentSnapshot?.reading?.passages?.[0]?.blocks?.[0]?.questions?.[0]
-        ?.prompt,
-    ).toBe(editedPrompt);
     expect(savedSnapshot.validation.canPublish).toBe(true);
 
-    await page.goto(`/builder/${manifest.builder.examId}/review`);
-    await expect(
-      page.getByRole('heading', { name: 'Review & Publish' }),
-    ).toBeVisible();
-    await expect(page.locator('p').filter({ hasText: 'Technical Validation Passed' }).first()).toBeVisible();
+    const draft = savedSnapshot.versions.find((version) => version.isDraft);
+    expect(draft).toBeDefined();
+    const publishResponse = await writeApi(page, `/api/v1/exams/${examId}/publish`, {
+      publishNotes: 'Published by Go-backed builder E2E',
+      revision: draft?.revision ?? -1,
+    });
+    expect(publishResponse.status).toBe(200);
 
-    const scheduleButton = page.getByRole('button', { name: 'Toggle schedule options' });
-    await scheduleButton.click();
-
-    const scheduledInput = page.getByLabel('Scheduled time');
-    await scheduledInput.fill('2026-05-01T09:00');
-
-    await page.getByLabel('Publish notes').fill('Published by backend-backed E2E');
-    await page.getByRole('button', { name: 'Publish & Schedule' }).click();
-    await expect(page.getByRole('dialog', { name: 'Publish Exam' })).toBeVisible();
-    await page.getByRole('button', { name: 'Confirm Publish' }).click();
-    await expect
-      .poll(async () => {
-        const snapshot = await readExamSnapshot(page, manifest.builder.examId);
-        return {
-          status: snapshot.exam.status,
-          publishedVersionId: snapshot.exam.currentPublishedVersionId ?? null,
-        };
-      })
-      .toMatchObject({
-        status: 'published',
-      });
-
-    await page.reload();
-
-    const publishedSnapshot = await readExamSnapshot(page, manifest.builder.examId);
+    const publishedSnapshot = await readExamSnapshot(page, examId);
     expect(publishedSnapshot.exam.status).toBe('published');
     expect(publishedSnapshot.exam.currentPublishedVersionId).toBeTruthy();
     const publishedVersion = publishedSnapshot.versions.find(
-      (version: { id: string }) => version.id === publishedSnapshot.exam.currentPublishedVersionId,
+      (version) => version.id === publishedSnapshot.exam.currentPublishedVersionId,
     );
-    expect(
-      publishedVersion?.contentSnapshot?.reading?.passages?.[0]?.blocks?.[0]?.questions?.[0]?.prompt,
-    ).toBe(editedPrompt);
-    expect(
-      publishedSnapshot.versions.some(
-        (version: { id: string; isPublished: boolean }) =>
-          version.id === publishedSnapshot.exam.currentPublishedVersionId &&
-          version.isPublished,
-      ),
-    ).toBe(true);
+    expect(publishedVersion?.isPublished).toBe(true);
+    expect(JSON.stringify(publishedVersion?.contentSnapshot)).toContain(editedPrompt);
+
+    const eventsResponse = await page.evaluate(async (seedExamId) => {
+      const response = await fetch(`/api/v1/exams/${seedExamId}/events`, { credentials: 'include' });
+      return { status: response.status, payload: await response.json() };
+    }, examId);
+    expect(eventsResponse.status).toBe(200);
+    const events = unwrap<Array<{ action: string }>>(eventsResponse.payload as ApiPayload<Array<{ action: string }>>);
+    expect(events.some((event) => event.action === 'published')).toBe(true);
   });
 
-  test('configures security settings and severity thresholds', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(`/builder/${manifest.builder.examId}/builder`);
-    await expect(page.getByLabel('Exam title')).toBeVisible();
-
-    // Navigate to security settings
-    await page.getByRole('tab', { name: 'Security' }).click();
-
-    // Configure tab switching detection
-    const tabSwitchCheckbox = page.getByLabel('Detect Tab Switching');
-    await tabSwitchCheckbox.check();
-    await expect(tabSwitchCheckbox).toBeChecked();
-
-    // Configure secondary screen detection
-    const secondaryScreenCheckbox = page.getByLabel('Detect Secondary Screen');
-    await secondaryScreenCheckbox.check();
-    await expect(secondaryScreenCheckbox).toBeChecked();
-
-    // Configure severity thresholds
-    await page.getByRole('tab', { name: 'Severity' }).click();
-
-    const lowThresholdInput = page.getByLabel('Low Severity Threshold');
-    await lowThresholdInput.fill('5');
-    await expect(lowThresholdInput).toHaveValue('5');
-
-    const mediumThresholdInput = page.getByLabel('Medium Severity Threshold');
-    await mediumThresholdInput.fill('3');
-    await expect(mediumThresholdInput).toHaveValue('3');
-
-    const highThresholdInput = page.getByLabel('High Severity Threshold');
-    await highThresholdInput.fill('2');
-    await expect(highThresholdInput).toHaveValue('2');
-
-    // Save changes
-    await page.getByLabel('Save draft').click();
-    await expect(page.getByText('Draft saved successfully')).toBeVisible();
-  });
-
-  test('clones exam for new version and archives old versions', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(`/builder/${manifest.builder.examId}/review`);
-    await expect(page.getByRole('heading', { name: 'Review & Publish' })).toBeVisible();
-
-    // Clone exam
-    await page.getByRole('button', { name: 'Clone Exam' }).click();
-    await expect(page.getByRole('dialog', { name: 'Clone Exam' })).toBeVisible();
-    await page.getByRole('button', { name: 'Confirm Clone' }).click();
-
-    // Verify new version created
-    await expect(page.getByText('Exam cloned successfully')).toBeVisible();
-
-    const snapshot = await readExamSnapshot(page, manifest.builder.examId);
-    expect(snapshot.versions.length).toBeGreaterThan(1);
-
-    // Archive old version if needed
-    if (snapshot.versions.length > 2) {
-      await page.getByRole('button', { name: 'Manage Versions' }).click();
-      const oldVersionButton = page.locator('[data-version-id]').first();
-      await oldVersionButton.getByRole('button', { name: 'Archive' }).click();
-      await expect(page.getByText('Version archived successfully')).toBeVisible();
-    }
-  });
-
-  test('verifies audit logs for builder actions', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-
-    await page.goto(`/builder/${manifest.builder.examId}/builder`);
-    await expect(page.getByLabel('Exam title')).toBeVisible();
-
-    // Make a change to trigger audit log
-    const editedTitle = 'E2E Test Exam - Updated Title';
-    await page.getByLabel('Exam title').fill(editedTitle);
-    await page.getByLabel('Save draft').click();
-
-    // Navigate to audit logs
-    await page.goto(`/builder/${manifest.builder.examId}/audit`);
-    await expect(page.getByRole('heading', { name: 'Audit Logs' })).toBeVisible();
-
-    // Verify audit log entry exists
-    await expect(page.getByText('Draft saved')).toBeVisible();
+  test('fails closed when a builder requests an exam outside the available scope', async ({ page }) => {
+    await page.goto('/login');
+    const response = await page.evaluate(async () => {
+      const result = await fetch('/api/v1/exams/00000000-0000-4000-8000-000000000000', { credentials: 'include' });
+      return { status: result.status, payload: await result.json() };
+    });
+    expect(response.status).toBe(404);
   });
 });

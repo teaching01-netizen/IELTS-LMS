@@ -13,7 +13,6 @@ import {
   backendGet,
   backendPost,
   backendPut,
-  isBackendGradingEnabled,
 } from './backendBridge';
 import { getReviewDraftRevision, gradingRepository } from './gradingRepository';
 import { examRepository } from './examRepository';
@@ -33,11 +32,8 @@ import {
   GradingQueueFilters,
   SessionDetailFilters,
   SessionQueuePage,
-  RubricAssessment,
   WritingAnnotation,
   StudentResult,
-  ReleaseAction,
-  ReleaseEvent,
   GradingScheduleObjectiveOverrideRow,
   ObjectiveGradingSourceResponse,
   ObjectiveOverrideDeleteRequest,
@@ -222,10 +218,6 @@ export class GradingService {
     scheduleId: string,
   ): Promise<GradingServiceResult<GradingScheduleObjectiveOverrideRow[]>> {
     try {
-      if (!isBackendGradingEnabled()) {
-        return { success: false, error: 'Objective overrides require backend grading.' };
-      }
-
       const overrides = await backendGet<GradingScheduleObjectiveOverrideRow[]>(
         `/v1/grading/schedules/${scheduleId}/objective-overrides`,
       );
@@ -239,10 +231,6 @@ export class GradingService {
     scheduleId: string,
   ): Promise<GradingServiceResult<ObjectiveGradingSourceResponse>> {
     try {
-      if (!isBackendGradingEnabled()) {
-        return { success: false, error: 'Objective grading source requires backend grading.' };
-      }
-
       const source = await backendGet<ObjectiveGradingSourceResponse>(
         `/v1/grading/schedules/${scheduleId}/objective-grading-source`,
       );
@@ -256,10 +244,6 @@ export class GradingService {
     scheduleId: string,
   ): Promise<GradingServiceResult<ObjectiveIntegrityOverview>> {
     try {
-      if (!isBackendGradingEnabled()) {
-        return { success: false, error: 'Objective integrity requires backend grading.' };
-      }
-
       const overview = await backendGet<ObjectiveIntegrityOverview>(
         `/v1/grading/schedules/${scheduleId}/objective-integrity`,
       );
@@ -275,10 +259,6 @@ export class GradingService {
     request: ObjectiveOverrideUpsertRequest,
   ): Promise<GradingServiceResult<ObjectiveOverrideMutationResponse>> {
     try {
-      if (!isBackendGradingEnabled()) {
-        return { success: false, error: 'Objective overrides require backend grading.' };
-      }
-
       const response = await backendPut<ObjectiveOverrideMutationResponse>(
         `/v1/grading/schedules/${scheduleId}/objective-overrides/${encodeURIComponent(questionId)}`,
         request,
@@ -295,10 +275,6 @@ export class GradingService {
     request: ObjectiveOverrideDeleteRequest,
   ): Promise<GradingServiceResult<ObjectiveOverrideMutationResponse>> {
     try {
-      if (!isBackendGradingEnabled()) {
-        return { success: false, error: 'Objective overrides require backend grading.' };
-      }
-
       const response = await backendDeleteWithBody<ObjectiveOverrideMutationResponse>(
         `/v1/grading/schedules/${scheduleId}/objective-overrides/${encodeURIComponent(questionId)}`,
         request,
@@ -314,10 +290,6 @@ export class GradingService {
     request: ObjectiveLatestDraftRegradeRequest,
   ): Promise<GradingServiceResult<ObjectiveLatestDraftRegradeResponse>> {
     try {
-      if (!isBackendGradingEnabled()) {
-        return { success: false, error: 'Objective regrade requires backend grading.' };
-      }
-
       const response = await backendPost<ObjectiveLatestDraftRegradeResponse>(
         `/v1/grading/schedules/${scheduleId}/objective-regrade-latest-draft`,
         request,
@@ -335,10 +307,6 @@ export class GradingService {
     request: ObjectiveQuestionOverrideRequest,
   ): Promise<GradingServiceResult<SectionSubmission>> {
     try {
-      if (!isBackendGradingEnabled()) {
-        return { success: false, error: 'Per-student objective overrides require backend grading.' };
-      }
-
       const response = await backendPut<SectionSubmission>(
         `/v1/grading/submissions/${encodeURIComponent(submissionId)}/sections/${section}/questions/${encodeURIComponent(questionId)}/override`,
         request,
@@ -400,9 +368,6 @@ export class GradingService {
       
       // Create section submissions
       await this.createSectionSubmissions(submissionId, sectionAnswers);
-      
-      // Update session counters
-      await this.updateSessionCounters(scheduleId);
       
       return { success: true, data: submission };
     } catch (error) {
@@ -497,69 +462,14 @@ export class GradingService {
     teacherName: string
   ): Promise<GradingServiceResult<ReviewDraft>> {
     try {
-      if (isBackendGradingEnabled()) {
-        const draft = await backendPost<ReviewDraft>(
-          `/v1/grading/submissions/${submissionId}/start-review`,
-          {
-            teacherId,
-            teacherName,
-          },
-        );
-        await gradingRepository.saveReviewDraft(draft);
-        return { success: true, data: draft };
-      }
-
-      // Check if draft already exists
-      const existingDraft = await gradingRepository.getReviewDraftBySubmission(submissionId);
-      if (existingDraft) {
-        return { success: true, data: existingDraft };
-      }
-      
-      // Get submission to get studentId
-      const submission = await gradingRepository.getSubmissionById(submissionId);
-      if (!submission) {
-        return { success: false, error: 'Submission not found' };
-      }
-      
-      // Create new review draft
-      const draft: ReviewDraft = {
-        id: `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        submissionId,
-        studentId: submission.studentId,
-        teacherId,
-        releaseStatus: 'draft',
-        sectionDrafts: {},
-        annotations: [],
-        drawings: [],
-        checklist: {
-          listeningReviewed: false,
-          readingReviewed: false,
-          writingTask1Reviewed: false,
-          writingTask2Reviewed: false,
-          speakingReviewed: false,
-          overallFeedbackWritten: false,
-          rubricComplete: false,
-          annotationsComplete: false
+      const draft = await backendPost<ReviewDraft>(
+        `/v1/grading/submissions/${submissionId}/start-review`,
+        {
+          teacherId,
+          teacherName,
         },
-        hasUnsavedChanges: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      
+      );
       await gradingRepository.saveReviewDraft(draft);
-      
-      // Log review started event
-      await this.logReviewEvent(submissionId, teacherId, teacherName, 'review_started');
-      
-      // Update submission status
-      const existingSubmission = await gradingRepository.getSubmissionById(submissionId);
-      if (existingSubmission) {
-        existingSubmission.gradingStatus = 'in_progress';
-        existingSubmission.assignedTeacherId = teacherId;
-        existingSubmission.assignedTeacherName = teacherName;
-        await gradingRepository.saveSubmission(existingSubmission);
-      }
-      
       return { success: true, data: draft };
     } catch (error) {
       return { success: false, error: `Failed to start review: ${error}` };
@@ -575,42 +485,30 @@ export class GradingService {
     teacherName: string
   ): Promise<GradingServiceResult<ReviewDraft>> {
     try {
-      if (isBackendGradingEnabled()) {
-        const savedDraft = await backendPut<ReviewDraft>(
-          `/v1/grading/submissions/${draft.submissionId}/review-draft`,
-          {
-            teacherId,
-            releaseStatus: draft.releaseStatus,
-            sectionDrafts: draft.sectionDrafts,
-            annotations: draft.annotations,
-            drawings: draft.drawings,
-            overallFeedback: draft.overallFeedback,
-            studentVisibleNotes: draft.studentVisibleNotes,
-            internalNotes: draft.internalNotes,
-            teacherSummary: draft.teacherSummary ?? {
-              strengths: [],
-              improvementPriorities: [],
-              recommendedPractice: [],
-            },
-            checklist: draft.checklist,
-            hasUnsavedChanges: draft.hasUnsavedChanges,
-            revision: getReviewDraftRevision(draft.id),
+      const savedDraft = await backendPut<ReviewDraft>(
+        `/v1/grading/submissions/${draft.submissionId}/review-draft`,
+        {
+          teacherId,
+          releaseStatus: draft.releaseStatus,
+          sectionDrafts: draft.sectionDrafts,
+          annotations: draft.annotations,
+          drawings: draft.drawings,
+          overallFeedback: draft.overallFeedback,
+          studentVisibleNotes: draft.studentVisibleNotes,
+          internalNotes: draft.internalNotes,
+          teacherSummary: draft.teacherSummary ?? {
+            strengths: [],
+            improvementPriorities: [],
+            recommendedPractice: [],
           },
-        );
-        await gradingRepository.saveReviewDraft(savedDraft);
-        await this.logReviewEvent(draft.submissionId, teacherId, teacherName, 'draft_saved');
-        return { success: true, data: savedDraft };
-      }
-
-      draft.updatedAt = new Date().toISOString();
-      draft.hasUnsavedChanges = false;
-      draft.lastAutoSaveAt = new Date().toISOString();
-      
-      await gradingRepository.saveReviewDraft(draft);
-      
+          checklist: draft.checklist,
+          hasUnsavedChanges: draft.hasUnsavedChanges,
+          revision: getReviewDraftRevision(draft.id),
+        },
+      );
+      await gradingRepository.saveReviewDraft(savedDraft);
       await this.logReviewEvent(draft.submissionId, teacherId, teacherName, 'draft_saved');
-      
-      return { success: true, data: draft };
+      return { success: true, data: savedDraft };
     } catch (error) {
       return { success: false, error: `Failed to save draft: ${error}` };
     }
@@ -708,17 +606,6 @@ export class GradingService {
         await gradingRepository.deleteReviewDraft(draft.id);
       }
       
-      await this.logReviewEvent(
-        submissionId,
-        teacherId,
-        teacherName,
-        'review_finalized',
-        { reason }
-      );
-      
-      // Update session counters
-      await this.updateSessionCounters(submission.scheduleId);
-      
       return { success: true };
     } catch (error) {
       return { success: false, error: `Failed to finalize review: ${error}` };
@@ -735,67 +622,15 @@ export class GradingService {
     reason: string
   ): Promise<GradingServiceResult<ReviewDraft>> {
     try {
-      if (isBackendGradingEnabled()) {
-        const draft = await backendPost<ReviewDraft>(
-          `/v1/grading/submissions/${submissionId}/reopen-review`,
-          {
-            actorId: teacherId,
-            teacherName,
-            reason,
-          },
-        );
-        await gradingRepository.saveReviewDraft(draft);
-        return { success: true, data: draft };
-      }
-
-      const submission = await gradingRepository.getSubmissionById(submissionId);
-      if (!submission) {
-        return { success: false, error: 'Submission not found' };
-      }
-      
-      // Update submission status
-      submission.gradingStatus = 'reopened';
-      submission.updatedAt = new Date().toISOString();
-      await gradingRepository.saveSubmission(submission);
-      
-      // Create new draft
-      const draft: ReviewDraft = {
-        id: `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        submissionId,
-        studentId: submission.studentId,
-        teacherId,
-        releaseStatus: 'reopened',
-        sectionDrafts: {},
-        annotations: [],
-        drawings: [],
-        checklist: {
-          listeningReviewed: false,
-          readingReviewed: false,
-          writingTask1Reviewed: false,
-          writingTask2Reviewed: false,
-          speakingReviewed: false,
-          overallFeedbackWritten: false,
-          rubricComplete: false,
-          annotationsComplete: false
+      const draft = await backendPost<ReviewDraft>(
+        `/v1/grading/submissions/${submissionId}/reopen-review`,
+        {
+          actorId: teacherId,
+          teacherName,
+          reason,
         },
-        hasUnsavedChanges: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      
-      await gradingRepository.saveReviewDraft(draft);
-      
-      await this.logReviewEvent(
-        submissionId,
-        teacherId,
-        teacherName,
-        'review_reopened',
-        { reason }
       );
-      
-      // Update session counters
-      await this.updateSessionCounters(submission.scheduleId);
-      
+      await gradingRepository.saveReviewDraft(draft);
       return { success: true, data: draft };
     } catch (error) {
       return { success: false, error: `Failed to reopen review: ${error}` };
@@ -811,34 +646,14 @@ export class GradingService {
     teacherName: string
   ): Promise<GradingServiceResult<ReviewDraft>> {
     try {
-      if (isBackendGradingEnabled()) {
-        const draft = await backendPost<ReviewDraft>(
-          `/v1/grading/submissions/${submissionId}/mark-grading-complete`,
-          {
-            actorId: teacherId,
-            teacherName,
-          },
-        );
-        await gradingRepository.saveReviewDraft(draft);
-        return { success: true, data: draft };
-      }
-
-      const draft = await gradingRepository.getReviewDraftBySubmission(submissionId);
-      if (!draft) {
-        return { success: false, error: 'Review draft not found' };
-      }
-      
-      draft.releaseStatus = 'grading_complete';
-      draft.updatedAt = new Date().toISOString();
-      draft.hasUnsavedChanges = false;
-      
+      const draft = await backendPost<ReviewDraft>(
+        `/v1/grading/submissions/${submissionId}/mark-grading-complete`,
+        {
+          actorId: teacherId,
+          teacherName,
+        },
+      );
       await gradingRepository.saveReviewDraft(draft);
-      
-      await this.logReleaseEvent(submissionId, 'mark_grading_complete', teacherId, teacherName, {
-        fromStatus: 'draft',
-        toStatus: 'grading_complete'
-      });
-      
       return { success: true, data: draft };
     } catch (error) {
       return { success: false, error: `Failed to mark grading complete: ${error}` };
@@ -854,34 +669,14 @@ export class GradingService {
     teacherName: string
   ): Promise<GradingServiceResult<ReviewDraft>> {
     try {
-      if (isBackendGradingEnabled()) {
-        const draft = await backendPost<ReviewDraft>(
-          `/v1/grading/submissions/${submissionId}/mark-ready-to-release`,
-          {
-            actorId: teacherId,
-            teacherName,
-          },
-        );
-        await gradingRepository.saveReviewDraft(draft);
-        return { success: true, data: draft };
-      }
-
-      const draft = await gradingRepository.getReviewDraftBySubmission(submissionId);
-      if (!draft) {
-        return { success: false, error: 'Review draft not found' };
-      }
-      
-      draft.releaseStatus = 'ready_to_release';
-      draft.updatedAt = new Date().toISOString();
-      draft.hasUnsavedChanges = false;
-      
+      const draft = await backendPost<ReviewDraft>(
+        `/v1/grading/submissions/${submissionId}/mark-ready-to-release`,
+        {
+          actorId: teacherId,
+          teacherName,
+        },
+      );
       await gradingRepository.saveReviewDraft(draft);
-      
-      await this.logReleaseEvent(submissionId, 'mark_ready_to_release', teacherId, teacherName, {
-        fromStatus: 'grading_complete',
-        toStatus: 'ready_to_release'
-      });
-      
       return { success: true, data: draft };
     } catch (error) {
       return { success: false, error: `Failed to mark ready to release: ${error}` };
@@ -898,93 +693,14 @@ export class GradingService {
     graderOverrideConfirmed = false,
   ): Promise<GradingServiceResult<StudentResult>> {
     try {
-      if (isBackendGradingEnabled()) {
-        const result = await backendPost<StudentResult>(
-          `/v1/grading/submissions/${submissionId}/release-now`,
-          {
-            actorId: teacherId,
-            graderOverrideConfirmed,
-          },
-        );
-        await gradingRepository.saveStudentResult(result);
-        return { success: true, data: result };
-      }
-
-      const draft = await gradingRepository.getReviewDraftBySubmission(submissionId);
-      if (!draft) {
-        return { success: false, error: 'Review draft not found' };
-      }
-      
-      const submission = await gradingRepository.getSubmissionById(submissionId);
-      if (!submission) {
-        return { success: false, error: 'Submission not found' };
-      }
-      const writingTasks = await gradingRepository.getWritingSubmissionsBySubmissionId(submissionId);
-      const latestResult = await this.getLatestStudentResult(submissionId);
-      const now = new Date().toISOString();
-      const result: StudentResult = latestResult && latestResult.releaseStatus === 'ready_to_release'
-        ? {
-            ...latestResult,
-            releaseStatus: 'released',
-            releasedAt: now,
-            releasedBy: teacherId,
-            overallBand: this.calculateOverallBand(draft),
-            sectionBands: this.calculateSectionBands(draft),
-            writingResults: this.buildWritingResults(draft, writingTasks),
-            teacherSummary: draft.teacherSummary || {
-              strengths: [],
-              improvementPriorities: [],
-              recommendedPractice: [],
-            },
-            updatedAt: now,
-          }
-        : {
-            id: `result-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            submissionId,
-            studentId: submission.studentId,
-            studentName: submission.studentName,
-            releaseStatus: 'released',
-            releasedAt: now,
-            releasedBy: teacherId,
-            overallBand: this.calculateOverallBand(draft),
-            sectionBands: this.calculateSectionBands(draft),
-            writingResults: this.buildWritingResults(draft, writingTasks),
-            teacherSummary: draft.teacherSummary || {
-              strengths: [],
-              improvementPriorities: [],
-              recommendedPractice: [],
-            },
-            version: latestResult ? latestResult.version + 1 : 1,
-            previousVersionId: latestResult?.id,
-            createdAt: now,
-            updatedAt: now,
-          };
-      
-      // Save result
+      const result = await backendPost<StudentResult>(
+        `/v1/grading/submissions/${submissionId}/release-now`,
+        {
+          actorId: teacherId,
+          graderOverrideConfirmed,
+        },
+      );
       await gradingRepository.saveStudentResult(result);
-      
-      // Update submission status
-      submission.gradingStatus = 'released';
-      submission.updatedAt = now;
-      await gradingRepository.saveSubmission(submission);
-      
-      // Update draft status
-      draft.releaseStatus = 'released';
-      draft.updatedAt = now;
-      await gradingRepository.saveReviewDraft(draft);
-      
-      // Delete draft (review is complete)
-      await gradingRepository.deleteReviewDraft(draft.id);
-      
-      await this.logReleaseEvent(submissionId, 'release_now', teacherId, teacherName, {
-        fromStatus: 'ready_to_release',
-        toStatus: 'released',
-        resultId: result.id
-      });
-      
-      // Update session counters
-      await this.updateSessionCounters(submission.scheduleId);
-      
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: `Failed to release result: ${error}` };
@@ -1001,87 +717,15 @@ export class GradingService {
     teacherName: string
   ): Promise<GradingServiceResult<ReviewDraft>> {
     try {
-      if (isBackendGradingEnabled()) {
-        const draft = await backendPost<ReviewDraft>(
-          `/v1/grading/submissions/${submissionId}/schedule-release`,
-          {
-            actorId: teacherId,
-            teacherName,
-            releaseAt: releaseDate,
-          },
-        );
-        await gradingRepository.saveReviewDraft(draft);
-        return { success: true, data: draft };
-      }
-
-      const draft = await gradingRepository.getReviewDraftBySubmission(submissionId);
-      if (!draft) {
-        return { success: false, error: 'Review draft not found' };
-      }
-      const submission = await gradingRepository.getSubmissionById(submissionId);
-      if (!submission) {
-        return { success: false, error: 'Submission not found' };
-      }
-      const writingTasks = await gradingRepository.getWritingSubmissionsBySubmissionId(submissionId);
-
-      const latestResult = await this.getLatestStudentResult(submissionId);
-      const now = new Date().toISOString();
-      const result: StudentResult = latestResult && latestResult.releaseStatus === 'ready_to_release'
-        ? {
-            ...latestResult,
-            releaseStatus: 'ready_to_release',
-            releasedAt: undefined,
-            releasedBy: undefined,
-            scheduledReleaseDate: releaseDate,
-            overallBand: this.calculateOverallBand(draft),
-            sectionBands: this.calculateSectionBands(draft),
-            writingResults: this.buildWritingResults(draft, writingTasks),
-            teacherSummary: draft.teacherSummary || {
-              strengths: [],
-              improvementPriorities: [],
-              recommendedPractice: [],
-            },
-            updatedAt: now,
-          }
-        : {
-            id: `result-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            submissionId,
-            studentId: submission.studentId,
-            studentName: submission.studentName,
-            releaseStatus: 'ready_to_release',
-            scheduledReleaseDate: releaseDate,
-            overallBand: this.calculateOverallBand(draft),
-            sectionBands: this.calculateSectionBands(draft),
-            writingResults: this.buildWritingResults(draft, writingTasks),
-            teacherSummary: draft.teacherSummary || {
-              strengths: [],
-              improvementPriorities: [],
-              recommendedPractice: [],
-            },
-            version: latestResult ? latestResult.version + 1 : 1,
-            previousVersionId: latestResult?.id,
-            createdAt: now,
-            updatedAt: now,
-          };
-
-      await gradingRepository.saveStudentResult(result);
-
-      draft.releaseStatus = 'ready_to_release';
-      draft.updatedAt = now;
-      draft.hasUnsavedChanges = false;
+      const draft = await backendPost<ReviewDraft>(
+        `/v1/grading/submissions/${submissionId}/schedule-release`,
+        {
+          actorId: teacherId,
+          teacherName,
+          releaseAt: releaseDate,
+        },
+      );
       await gradingRepository.saveReviewDraft(draft);
-
-      submission.gradingStatus = 'ready_to_release';
-      submission.updatedAt = now;
-      await gradingRepository.saveSubmission(submission);
-      
-      await this.logReleaseEvent(submissionId, 'schedule_release', teacherId, teacherName, {
-        fromStatus: 'grading_complete',
-        toStatus: 'ready_to_release',
-        resultId: result.id,
-        scheduledReleaseDate: releaseDate
-      });
-      
       return { success: true, data: draft };
     } catch (error) {
       return { success: false, error: `Failed to schedule release: ${error}` };
@@ -1147,63 +791,10 @@ export class GradingService {
       
       await gradingRepository.saveReviewDraft(draft);
       
-      await this.logReleaseEvent(submissionId, 'reopen_result', teacherId, teacherName, {
-        fromStatus: 'released',
-        toStatus: 'reopened',
-        resultId,
-        reason
-      });
-      
-      // Update session counters
-      await this.updateSessionCounters(submission.scheduleId);
-      
       return { success: true, data: draft };
     } catch (error) {
       return { success: false, error: `Failed to reopen result: ${error}` };
     }
-  }
-  
-  /**
-   * Calculate overall band score from rubric assessments
-   */
-  private calculateOverallBand(draft: ReviewDraft): number {
-    const bands: number[] = [];
-    
-    if (draft.sectionDrafts.listening?.overallBand) bands.push(draft.sectionDrafts.listening.overallBand);
-    if (draft.sectionDrafts.reading?.overallBand) bands.push(draft.sectionDrafts.reading.overallBand);
-    if (draft.sectionDrafts.writing?.task1?.overallBand) bands.push(draft.sectionDrafts.writing.task1.overallBand);
-    if (draft.sectionDrafts.writing?.task2?.overallBand) bands.push(draft.sectionDrafts.writing.task2.overallBand);
-    if (draft.sectionDrafts.speaking?.overallBand) bands.push(draft.sectionDrafts.speaking.overallBand);
-    
-    if (bands.length === 0) return 0;
-    const sum = bands.reduce((a, b) => a + b, 0);
-    return Math.round((sum / bands.length) * 2) / 2; // Round to nearest 0.5
-  }
-  
-  /**
-   * Calculate section band scores
-   */
-  private calculateSectionBands(draft: ReviewDraft): { listening: number; reading: number; writing: number; speaking: number } {
-    return {
-      listening: draft.sectionDrafts.listening?.overallBand || 0,
-      reading: draft.sectionDrafts.reading?.overallBand || 0,
-      writing: this.calculateWritingBand(draft),
-      speaking: draft.sectionDrafts.speaking?.overallBand || 0
-    };
-  }
-  
-  /**
-   * Calculate writing band (average of task1 and task2)
-   */
-  private calculateWritingBand(draft: ReviewDraft): number {
-    const task1Band = draft.sectionDrafts.writing?.task1?.overallBand || 0;
-    const task2Band = draft.sectionDrafts.writing?.task2?.overallBand || 0;
-    
-    if (task1Band === 0 && task2Band === 0) return 0;
-    if (task1Band === 0) return task2Band;
-    if (task2Band === 0) return task1Band;
-    
-    return Math.round(((task1Band + task2Band) / 2) * 2) / 2;
   }
   
   private compareTimestampsDesc(left: string | undefined, right: string | undefined): number {
@@ -1216,92 +807,6 @@ export class GradingService {
     return Number.isFinite(timestamp) ? timestamp : 0;
   }
 
-  private buildWritingResults(
-    draft: ReviewDraft,
-    writingTasks: WritingTaskSubmission[],
-  ): StudentResult['writingResults'] {
-    const results: StudentResult['writingResults'] = {};
-
-    for (const task of writingTasks) {
-      results[task.taskId as 'task1' | 'task2'] = this.buildWritingResult(task, draft);
-    }
-
-    return results;
-  }
-
-  /**
-   * Build writing result from rubric assessment
-   */
-  private buildWritingResult(
-    task: WritingTaskSubmission,
-    draft: ReviewDraft,
-  ): import('../types/grading').WritingResult {
-    const rubric = draft.sectionDrafts.writing?.[task.taskId as 'task1' | 'task2'];
-    const studentVisibleAnnotations = draft.annotations.filter(
-      (annotation) =>
-        annotation.taskId === task.taskId && annotation.visibility === 'student_visible',
-    );
-    const studentVisibleDrawings = draft.drawings.filter(
-      (drawing) => drawing.taskId === task.taskId && drawing.visibility === 'student_visible',
-    );
-
-    return {
-      taskId: task.taskId,
-      taskLabel: task.taskLabel || (task.taskId === 'task1' ? 'Task 1' : 'Task 2'),
-      prompt: task.prompt,
-      studentText: task.studentText,
-      wordCount: task.wordCount,
-      rubricScores: {
-        taskResponse: rubric?.taskResponseBand || 0,
-        coherence: rubric?.coherenceBand || 0,
-        lexical: rubric?.lexicalBand || 0,
-        grammar: rubric?.grammarBand || 0
-      },
-      annotations: studentVisibleAnnotations,
-      drawings: studentVisibleDrawings,
-      criterionFeedback: {
-        taskResponse: rubric?.taskResponseNotes,
-        coherence: rubric?.coherenceNotes,
-        lexical: rubric?.lexicalNotes,
-        grammar: rubric?.grammarNotes
-      }
-    };
-  }
-  
-  /**
-   * Log release event for audit trail
-   */
-  private async logReleaseEvent(
-    submissionId: string,
-    action: ReleaseAction,
-    teacherId: string,
-    teacherName: string,
-    payload?: Record<string, any>
-  ): Promise<void> {
-    const event: ReleaseEvent = {
-      id: `rel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      resultId: submissionId, // Using submissionId as resultId for now
-      action,
-      actor: teacherId,
-      actorName: teacherName,
-      timestamp: new Date().toISOString(),
-      payload
-    };
-    
-    await gradingRepository.saveReleaseEvent(event);
-  }
-
-  private async getLatestStudentResult(submissionId: string): Promise<StudentResult | null> {
-    const results = await gradingRepository.getStudentResultsBySubmission(submissionId);
-    if (results.length === 0) {
-      return null;
-    }
-
-    return results.sort(
-      (left, right) => this.compareTimestampsDesc(left.updatedAt, right.updatedAt),
-    )[0] ?? null;
-  }
-  
   /**
    * Get next ungraded student in session
    */
@@ -1345,25 +850,6 @@ export class GradingService {
     };
     
     await gradingRepository.saveReviewEvent(event);
-  }
-  
-  /**
-   * Update session counters
-   */
-  private async updateSessionCounters(scheduleId: string): Promise<void> {
-    const session = await gradingRepository.getSessionById(scheduleId);
-    if (!session) return;
-    
-    const submissions = await gradingRepository.getSubmissionsBySession(scheduleId);
-    
-    session.totalStudents = submissions.length;
-    session.submittedCount = submissions.filter(s => s.gradingStatus !== 'not_submitted').length;
-    session.pendingManualReviews = submissions.filter(s => s.gradingStatus === 'submitted').length;
-    session.inProgressReviews = submissions.filter(s => s.gradingStatus === 'in_progress').length;
-    session.finalizedReviews = submissions.filter(s => s.gradingStatus === 'released').length;
-    session.overdueReviews = submissions.filter(s => s.isOverdue && s.gradingStatus !== 'released').length;
-    
-    await gradingRepository.saveSession(session);
   }
 }
 

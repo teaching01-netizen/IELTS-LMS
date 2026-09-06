@@ -57,24 +57,46 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
   });
   const searchTimerRef = useRef<number | undefined>(undefined);
 
+  // Single in-flight page request: a sequence guard drops stale resolves when
+  // page/search change rapidly, and the guard also prevents setState after unmount.
+  const loadSeqRef = useRef(0);
   const loadPage = useCallback(async (page: number, pageSize: number, search: string) => {
+    const seq = (loadSeqRef.current += 1);
     setLoading(true);
     setLoadError(null);
-    const result = await gradingService.getSessionQueuePage({ page, pageSize, searchQuery: search });
-    if (result.success && result.data) {
-      setSessions(result.data.sessions);
-      setPagination(result.data.pagination);
-    } else {
+    try {
+      const result = await gradingService.getSessionQueuePage({ page, pageSize, searchQuery: search });
+      if (seq !== loadSeqRef.current) {
+        return;
+      }
+      if (result.success && result.data) {
+        setSessions(result.data.sessions);
+        setPagination(result.data.pagination);
+      } else {
+        setSessions([]);
+        setLoadError(result.error ?? 'Failed to load grading sessions.');
+      }
+    } catch (error) {
+      if (seq !== loadSeqRef.current) {
+        return;
+      }
       setSessions([]);
-      setLoadError(result.error ?? 'Failed to load grading sessions.');
+      setLoadError(error instanceof Error ? error.message : 'Failed to load grading sessions.');
+    } finally {
+      if (seq === loadSeqRef.current) {
+        setLoading(false);
+      }
     }
-    setLoading(false);
   }, []);
 
   const loadSummary = useCallback(async () => {
-    const result = await gradingService.getSessionQueueSummary();
-    if (result.success && result.data) {
-      setSummary(result.data);
+    try {
+      const result = await gradingService.getSessionQueueSummary();
+      if (result.success && result.data) {
+        setSummary(result.data);
+      }
+    } catch {
+      // Summary is best-effort; the table error surface covers hard failures.
     }
   }, []);
 
@@ -158,8 +180,16 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
     setExporting(true);
     try {
       const result = await gradingService.getSessionQueue();
-      const rows = result.success && result.data ? result.data : sessions;
-      const filename = `grading-sessions-${new Date().toISOString().split('T')[0]}.csv`;
+      if (!result.success || !result.data) {
+        throw new Error(result.error ?? 'Failed to load sessions for export.');
+      }
+      const rows = result.data;
+      const datePart = new Date().toISOString().split('T')[0] ?? 'export';
+      const filename = `grading-sessions-${datePart}.csv`;
+      if (rows.length === 0) {
+        setLoadError('No sessions available to export.');
+        return;
+      }
       downloadCsv(filename, [
         'Session ID',
         'Exam',
@@ -189,10 +219,12 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
         session.overdueReviews,
         session.assignedTeachers.join('; '),
       ]));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Failed to export sessions.');
     } finally {
       setExporting(false);
     }
-  }, [exporting, sessions]);
+  }, [exporting]);
 
   const hasSearch = searchQuery.trim() !== '';
   const showingEmpty = !loading && sessions.length === 0;
@@ -351,13 +383,9 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
                 </thead>
                 <tbody className="divide-y divide-gray-200 text-sm">
                   {sessions.map((session) => (
-                    // Clickable row convenience; the explicit View button is the keyboard-accessible action.
-                    // eslint-disable-next-line jsx-a11y/control-has-associated-label -- label text lives deeper than the rule's scan depth
                     <tr
                       key={session.id}
-                      className="hover:bg-gray-50 cursor-pointer transition-colors"
-                      onClick={() => onSessionSelect(session.id)}
-                      aria-label={`Open grading session for ${session.examTitle}`}
+                      className="hover:bg-gray-50 transition-colors"
                     >
                       <td className="px-6 py-4">
                         <p className="font-medium text-gray-900">{session.examTitle}</p>
@@ -404,11 +432,9 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
                       <td className="px-6 py-4 text-right">
                         <button
                           type="button"
+                          aria-label={`Open grading session for ${session.examTitle}`}
                           className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1 ml-auto focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSessionSelect(session.id);
-                          }}
+                          onClick={() => onSessionSelect(session.id)}
                         >
                           View
                           <ArrowRight size={14} />

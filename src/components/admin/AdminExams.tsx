@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Search, Filter, MoreHorizontal, Copy, CheckCircle, Archive, X, Layers, Book, BookOpen, Pen, Headset, Mic, Settings2, LayoutTemplate, GitCommit, XCircle, Download, Trash2, type LucideIcon } from 'lucide-react';
+import { Plus, Search, Filter, MoreHorizontal, Copy, CheckCircle, Archive, X, Layers, Book, BookOpen, Pen, Headset, Mic, FlaskConical, Settings2, LayoutTemplate, GitCommit, XCircle, Download, Trash2, type LucideIcon } from 'lucide-react';
 import { StatusBadge } from '../ui/StatusBadge';
-import { Exam, ExamConfig } from '../../types';
+import { Exam, ExamPreset, ExamType } from '../../types';
 import { lazyLoad } from '../../app/performance/lazyLoad';
 import { ExamEntity, ExamEvent, ExamVersionSummary, BulkOperationResult } from '../../types/domain';
 import { getExamStatsFromExam, ExamFilterOptions, ExamSortOptions, DEFAULT_FILTERS, DEFAULT_SORT, hasActiveFilters } from '../../utils/examStats';
@@ -235,7 +235,7 @@ export function AdminExams({
   // View state
   const [view, setView] = useState<'grid' | 'list'>('list');
   
-  // Modal states
+  // Dialog states (one shared Dialog primitive; see ExamBulkActionBar / delete flows)
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCloneModal, setShowCloneModal] = useState(false);
   const [selectedExamForClone, setSelectedExamForClone] = useState<Exam | null>(null);
@@ -244,9 +244,9 @@ export function AdminExams({
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   const [newExamTitle, setNewExamTitle] = useState('');
-  const [newProviderKey, setNewProviderKey] = useState<'ielts' | 'sat'>('ielts');
-  const [newExamType, setNewExamType] = useState<'Academic' | 'General Training'>('Academic');
-  const [newExamPreset, setNewExamPreset] = useState<ExamConfig['general']['preset']>('Academic');
+  const [newProviderKey, setNewProviderKey] = useState<'ielts' | 'sat' | 'act'>('ielts');
+  const [newExamType, setNewExamType] = useState<ExamType>('Academic');
+  const [newExamPreset, setNewExamPreset] = useState<ExamPreset>('Academic');
   const [includeScheduling, setIncludeScheduling] = useState(false);
   const [scheduleData, setScheduleData] = useState({
     cohort: 'Elite 2025-A',
@@ -267,6 +267,7 @@ export function AdminExams({
   const [bulkOperationResult, setBulkOperationResult] = useState<BulkOperationResult | null>(null);
   const [showBulkResult, setShowBulkResult] = useState(false);
   const [showBulkDuplicateModal, setShowBulkDuplicateModal] = useState(false);
+  const [pendingDeleteExam, setPendingDeleteExam] = useState<Exam | null>(null);
   const [bulkDuplicateTitlePattern, setBulkDuplicateTitlePattern] = useState('{title} (Copy)');
 
   // Close dropdown when clicking outside
@@ -399,41 +400,56 @@ export function AdminExams({
     setSelectedExamIds(new Set());
   };
   
-  // Phase 4: Bulk action handlers
+  // Phase 4: Bulk action handlers — only clear the ids that actually succeeded
+  // so failed exams stay selected for retry.
+  const clearSucceededIds = (result: BulkOperationResult) => {
+    const succeededIds = new Set(result.results.filter((item) => item.success).map((item) => item.examId));
+    if (succeededIds.size === 0) {
+      return;
+    }
+    setSelectedExamIds((previous) => {
+      const next = new Set(previous);
+      for (const examId of succeededIds) {
+        next.delete(examId);
+      }
+      return next;
+    });
+  };
+
   const handleBulkPublish = async () => {
     if (!onBulkPublish || selectedExamIds.size === 0) return;
-    
+
     const result = await onBulkPublish(Array.from(selectedExamIds));
     setBulkOperationResult(result);
     setShowBulkResult(true);
-    clearSelection();
+    clearSucceededIds(result);
   };
-  
+
   const handleBulkUnpublish = async () => {
     if (!onBulkUnpublish || selectedExamIds.size === 0) return;
-    
+
     const result = await onBulkUnpublish(Array.from(selectedExamIds));
     setBulkOperationResult(result);
     setShowBulkResult(true);
-    clearSelection();
+    clearSucceededIds(result);
   };
-  
+
   const handleBulkArchive = async () => {
     if (!onBulkArchive || selectedExamIds.size === 0) return;
-    
+
     const result = await onBulkArchive(Array.from(selectedExamIds));
     setBulkOperationResult(result);
     setShowBulkResult(true);
-    clearSelection();
+    clearSucceededIds(result);
   };
-  
+
   const handleBulkDuplicate = async () => {
     if (!onBulkDuplicate || selectedExamIds.size === 0) return;
 
     const result = await onBulkDuplicate(Array.from(selectedExamIds), bulkDuplicateTitlePattern);
     setBulkOperationResult(result);
     setShowBulkResult(true);
-    clearSelection();
+    clearSucceededIds(result);
     setShowBulkDuplicateModal(false);
   };
 
@@ -474,21 +490,18 @@ export function AdminExams({
       }
     }
 
-    clearSelection();
+    clearSucceededIds(result);
   };
 
+  // Bulk delete uses the ExamBulkActionBar inline confirmation (no window.confirm),
+  // so the flow stays inside React and remains testable.
   const handleBulkDelete = async () => {
     if (!onBulkDelete || selectedExamIds.size === 0) return;
-
-    const count = selectedExamIds.size;
-    if (!confirm(`Delete ${count} exam${count !== 1 ? 's' : ''}? This cannot be undone.`)) {
-      return;
-    }
 
     const result = await onBulkDelete(Array.from(selectedExamIds));
     setBulkOperationResult(result);
     setShowBulkResult(true);
-    clearSelection();
+    clearSucceededIds(result);
   };
   
   // Phase 4: Filter handlers
@@ -512,9 +525,10 @@ export function AdminExams({
     setSearchQuery('');
   };
 
-  const presets: { id: ExamConfig['general']['preset'], label: string, icon: LucideIcon, description: string }[] = [
+  const presets: { id: ExamPreset, label: string, icon: LucideIcon, description: string }[] = [
     { id: 'Academic', label: 'Academic Full', icon: Layers, description: 'Standard 4-module academic exam' },
     { id: 'General Training', label: 'GT Full', icon: Layers, description: 'Standard 4-module general training' },
+    { id: 'ACT Science', label: 'ACT Science', icon: FlaskConical, description: 'One-section ACT Science practice' },
     { id: 'Listening', label: 'Listening Drill', icon: Headset, description: 'Section-only listening practice' },
     { id: 'Reading', label: 'Reading Drill', icon: Book, description: 'Section-only reading practice' },
     { id: 'Writing', label: 'Writing Drill', icon: Pen, description: 'Section-only writing practice' },
@@ -534,15 +548,17 @@ export function AdminExams({
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const title = newExamTitle || 'Untitled Exam';
-    const resolvedProviderKey = providerScope === 'ielts' ? 'ielts' : newProviderKey;
+    const resolvedProviderKey = providerScope === 'all' ? newProviderKey : providerScope;
     const input: CreateExamInput = resolvedProviderKey === 'sat'
       ? { providerKey: 'sat', title, providerExamType: 'SAT' }
-      : {
-          providerKey: 'ielts',
-          title,
-          providerExamType: newExamType,
-          preset: newExamPreset,
-        };
+      : resolvedProviderKey === 'act'
+        ? { providerKey: 'act', title, providerExamType: 'ACT', preset: 'ACT Science' }
+        : {
+            providerKey: 'ielts',
+            title,
+            providerExamType: newExamType === 'ACT' ? 'Academic' : newExamType,
+            preset: newExamPreset === 'ACT Science' ? 'Academic' : newExamPreset,
+          };
     onCreateExam(input);
     setShowCreateModal(false);
   };
@@ -862,7 +878,7 @@ export function AdminExams({
               {providerScope === 'all' ? (
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Assessment provider</label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <button
                       type="button"
                       onClick={() => setNewProviderKey('ielts')}
@@ -878,6 +894,18 @@ export function AdminExams({
                     >
                       <span className="block font-semibold">Digital SAT</span>
                       <span className="text-xs text-gray-500">Reading & Writing and Math</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewProviderKey('act');
+                        setNewExamType('ACT');
+                        setNewExamPreset('ACT Science');
+                      }}
+                      className={`rounded-md border px-3 py-2 text-left text-sm ${newProviderKey === 'act' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                    >
+                      <span className="block font-semibold">ACT Science</span>
+                      <span className="text-xs text-gray-500">Science and data interpretation</span>
                     </button>
                   </div>
                 </div>
@@ -1108,8 +1136,8 @@ export function AdminExams({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {bulkOperationResult.results.map((result, idx: number) => (
-                        <tr key={idx} className={result.success ? 'bg-white' : 'bg-red-50'}>
+                      {bulkOperationResult.results.map((result) => (
+                        <tr key={result.examId} className={result.success ? 'bg-white' : 'bg-red-50'}>
                           <td className="px-4 py-2 text-gray-900">{result.examTitle}</td>
                           <td className="px-4 py-2">
                             {result.success ? (
@@ -1287,20 +1315,48 @@ export function AdminExams({
               </button>
             )}
             {onDeleteExam && (
-              <button
-                onClick={() => {
-                  const exam = exams.find(e => e.id === activeDropdown);
-                  if (exam && confirm(`Are you sure you want to delete "${exam.title}"?`)) {
-                    onDeleteExam(exam.id);
-                    setActiveDropdown(null);
-                    setDropdownPosition(null);
-                  }
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded"
-              >
-                <Trash2 size={14} />
-                Delete Exam
-              </button>
+              pendingDeleteExam ? (
+                <div role="alertdialog" aria-label={`Confirm delete ${pendingDeleteExam.title}`} className="px-1 py-1">
+                  <p className="px-2 py-1 text-sm font-medium text-gray-900">
+                    Delete “{pendingDeleteExam.title}”? This cannot be undone.
+                  </p>
+                  <div className="flex gap-2 px-2 py-1">
+                    <button
+                      onClick={() => {
+                        void (async () => {
+                          await onDeleteExam(pendingDeleteExam.id);
+                          setPendingDeleteExam(null);
+                          setActiveDropdown(null);
+                          setDropdownPosition(null);
+                        })();
+                      }}
+                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm bg-red-600 text-white hover:bg-red-700 rounded"
+                    >
+                      <Trash2 size={14} />
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => setPendingDeleteExam(null)}
+                      className="flex-1 px-3 py-2 text-sm text-gray-700 border border-gray-300 hover:bg-gray-100 rounded"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    const exam = exams.find(e => e.id === activeDropdown);
+                    if (exam) {
+                      setPendingDeleteExam(exam);
+                    }
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded"
+                >
+                  <Trash2 size={14} />
+                  Delete Exam
+                </button>
+              )
             )}
           </div>
         </div>,

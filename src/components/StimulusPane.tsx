@@ -11,7 +11,7 @@ import {
   ListOrdered,
   Underline,
 } from 'lucide-react';
-import { Passage, ExamState, StimulusImageAsset } from '../types';
+import { ActScienceStimulus, Passage, ExamState, StimulusImageAsset } from '../types';
 import { StimulusImageEditor } from './StimulusImageEditor';
 import { getPassageMetrics } from '../utils/builderEnhancements';
 import { normalizeImageUrl } from '../utils/imageUrl';
@@ -23,10 +23,21 @@ const metricTone = {
   red: 'text-red-700 bg-red-50 border-red-100',
 };
 
+function toParagraphLabel(index: number): string {
+  let label = "";
+  let n = index;
+  do {
+    label = String.fromCharCode(65 + (n % 26)) + label;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return label;
+}
+
 interface StimulusPaneProps {
-  passage: Passage;
+  passage: Passage | ActScienceStimulus;
   state: ExamState;
   setState: (next: ExamState | ((previous: ExamState) => ExamState)) => void | Promise<void>;
+  section?: 'reading' | 'science';
 }
 
 function areStimulusPanePropsEqual(previous: StimulusPaneProps, next: StimulusPaneProps) {
@@ -35,6 +46,7 @@ function areStimulusPanePropsEqual(previous: StimulusPaneProps, next: StimulusPa
     && previous.passage.content === next.passage.content
     && previous.passage.images === next.passage.images
     && previous.passage.wordCount === next.passage.wordCount
+    && previous.section === next.section
     && previous.state.config.standards.passageWordCount === next.state.config.standards.passageWordCount
     && previous.setState === next.setState
   );
@@ -44,9 +56,13 @@ export const StimulusPane = React.memo(function StimulusPane({
   passage,
   state,
   setState,
+  section = 'reading',
 }: StimulusPaneProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [isImageEditorOpen, setIsImageEditorOpen] = useState(false);
+  const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkError, setLinkError] = useState('');
   const passageWordCount = state.config.standards.passageWordCount;
   const metrics = useMemo(
     () => getPassageMetrics(passage.content, passageWordCount),
@@ -59,22 +75,38 @@ export const StimulusPane = React.memo(function StimulusPane({
     }
   }, [passage.content]);
 
-  const updatePassage = (updater: (current: Passage) => Passage) => {
+  const updatePassage = (
+    updater: (current: Passage | ActScienceStimulus) => Passage | ActScienceStimulus,
+  ) => {
     void setState((previous) => {
-      const currentPassage = previous.reading.passages.find((item) => item.id === passage.id);
+      const currentPassage = section === 'science'
+        ? previous.science.stimuli.find((item) => item.id === passage.id)
+        : previous.reading.passages.find((item) => item.id === passage.id);
       if (!currentPassage) {
         return previous;
       }
 
       const nextPassage = updater(currentPassage);
       const nextMetrics = getPassageMetrics(nextPassage.content, passageWordCount);
+      const updatedPassage = {
+        ...nextPassage,
+        wordCount: nextMetrics.words,
+      };
+
+      if (section === 'science') {
+        return {
+          ...previous,
+          science: {
+            ...previous.science,
+            stimuli: previous.science.stimuli.map((item) =>
+              item.id === currentPassage.id ? updatedPassage as ActScienceStimulus : item,
+            ),
+          },
+        };
+      }
+
       const newPassages = previous.reading.passages.map((item) =>
-        item.id === currentPassage.id
-          ? {
-              ...nextPassage,
-              wordCount: nextMetrics.words,
-            }
-          : item,
+        item.id === currentPassage.id ? updatedPassage as Passage : item,
       );
 
       return {
@@ -152,7 +184,7 @@ export const StimulusPane = React.memo(function StimulusPane({
         return;
       }
 
-      const label = String.fromCharCode(65 + index);
+      const label = toParagraphLabel(index);
       if (!text.match(/^[A-Z]\s/)) {
         element.innerHTML = `<strong>${label}</strong> ${element.innerHTML}`;
       }
@@ -166,10 +198,23 @@ export const StimulusPane = React.memo(function StimulusPane({
   };
 
   const handleInsertLink = () => {
-    const url = window.prompt('Paste link URL');
-    if (url) {
-      applyCommand('createLink', url);
+    setLinkUrl('');
+    setLinkError('');
+    setIsLinkDialogOpen(true);
+  };
+
+  const confirmInsertLink = () => {
+    const url = linkUrl.trim();
+    if (!url) {
+      setLinkError('Enter a link URL.');
+      return;
     }
+    if (!/^(?:https?:|mailto:|tel:|\/|#)/i.test(url)) {
+      setLinkError('Use a valid http(s), mailto, tel, site-relative, or anchor link.');
+      return;
+    }
+    setIsLinkDialogOpen(false);
+    applyCommand('createLink', url);
   };
 
   const handleSaveImage = (image: StimulusImageAsset) => {
@@ -183,19 +228,19 @@ export const StimulusPane = React.memo(function StimulusPane({
   return (
     <>
       <div className="flex-1 flex flex-col bg-white overflow-hidden h-full min-h-0">
-        <div className="border-b border-gray-100 bg-white px-4 py-3 flex items-center gap-1 flex-wrap">
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('bold')}><Bold size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('italic')}><Italic size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('underline')}><Underline size={16} /></button>
-          <div className="w-px h-6 bg-gray-200 mx-1" />
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('formatBlock', 'h1')}><Heading1 size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('formatBlock', 'h2')}><Heading2 size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('formatBlock', 'h3')}><Heading3 size={16} /></button>
-          <div className="w-px h-6 bg-gray-200 mx-1" />
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('insertUnorderedList')}><List size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => applyCommand('insertOrderedList')}><ListOrdered size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={handleInsertLink}><LinkIcon size={16} /></button>
-          <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => setIsImageEditorOpen(true)}><ImageIcon size={16} /></button>
+        <div className="border-b border-gray-100 bg-white px-4 py-3 flex items-center gap-1 flex-wrap" role="toolbar" aria-label="Passage formatting">
+          <button type="button" aria-label="Bold" title="Bold" className="p-2 min-w-6 min-h-6 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" onClick={() => applyCommand('bold')}><Bold size={16} aria-hidden="true" /></button>
+          <button type="button" aria-label="Italic" title="Italic" className="p-2 min-w-6 min-h-6 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" onClick={() => applyCommand('italic')}><Italic size={16} aria-hidden="true" /></button>
+          <button type="button" aria-label="Underline" title="Underline" className="p-2 min-w-6 min-h-6 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" onClick={() => applyCommand('underline')}><Underline size={16} aria-hidden="true" /></button>
+          <div className="w-px h-6 bg-gray-200 mx-1" aria-hidden="true" />
+          <button type="button" aria-label="Heading 1" title="Heading 1" className="p-2 min-w-6 min-h-6 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" onClick={() => applyCommand('formatBlock', 'h1')}><Heading1 size={16} aria-hidden="true" /></button>
+          <button type="button" aria-label="Heading 2" title="Heading 2" className="p-2 min-w-6 min-h-6 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" onClick={() => applyCommand('formatBlock', 'h2')}><Heading2 size={16} aria-hidden="true" /></button>
+          <button type="button" aria-label="Heading 3" title="Heading 3" className="p-2 min-w-6 min-h-6 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" onClick={() => applyCommand('formatBlock', 'h3')}><Heading3 size={16} aria-hidden="true" /></button>
+          <div className="w-px h-6 bg-gray-200 mx-1" aria-hidden="true" />
+          <button type="button" aria-label="Bulleted list" title="Bulleted list" className="p-2 min-w-6 min-h-6 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" onClick={() => applyCommand('insertUnorderedList')}><List size={16} aria-hidden="true" /></button>
+          <button type="button" aria-label="Numbered list" title="Numbered list" className="p-2 min-w-6 min-h-6 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" onClick={() => applyCommand('insertOrderedList')}><ListOrdered size={16} aria-hidden="true" /></button>
+          <button type="button" aria-label="Insert link" title="Insert link" className="p-2 min-w-6 min-h-6 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" onClick={handleInsertLink}><LinkIcon size={16} aria-hidden="true" /></button>
+          <button type="button" aria-label="Insert image" title="Insert image" className="p-2 min-w-6 min-h-6 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1" onClick={() => setIsImageEditorOpen(true)}><ImageIcon size={16} aria-hidden="true" /></button>
           <button
             onClick={addParagraphLabels}
             className="ml-auto text-xs font-semibold text-blue-800 hover:bg-blue-50 px-3 py-2 rounded-lg border border-transparent hover:border-blue-200 transition-all"
@@ -212,8 +257,14 @@ export const StimulusPane = React.memo(function StimulusPane({
             onInput={syncEditor}
             onPaste={handlePaste}
             onDrop={handleDrop}
-            className="min-h-[420px] rounded-[28px] border border-gray-100 bg-white px-8 py-8 outline-none text-gray-900 leading-relaxed font-sans text-sm md:text-base shadow-sm [&_h1]:text-3xl [&_h1]:font-black [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mb-3 [&_h3]:text-xl [&_h3]:font-bold [&_h3]:mb-2 [&_img]:max-w-full [&_img]:rounded-2xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-4"
-            data-placeholder="Enter reading passage text here..."
+            role="textbox"
+            aria-label={section === 'science' ? 'ACT Science stimulus editor' : 'Reading passage editor'}
+            aria-multiline="true"
+            tabIndex={0}
+            className="min-h-[420px] rounded-[28px] border border-gray-100 bg-white px-8 py-8 outline-none text-gray-900 leading-relaxed font-sans text-sm md:text-base shadow-sm focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 focus-visible:border-blue-600 [&_h1]:text-3xl [&_h1]:font-black [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mb-3 [&_h3]:text-xl [&_h3]:font-bold [&_h3]:mb-2 [&_img]:max-w-full [&_img]:rounded-2xl [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-4"
+            data-placeholder={section === 'science'
+              ? 'Enter ACT Science stimulus text here...'
+              : 'Enter reading passage text here...'}
           />
 
           {(passage.images ?? []).length > 0 && (
@@ -283,6 +334,33 @@ export const StimulusPane = React.memo(function StimulusPane({
           </div>
         </div>
       </div>
+
+      {isLinkDialogOpen ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="stimulus-link-title">
+          <div className="fixed inset-0 bg-black/50" aria-hidden="true" onClick={() => setIsLinkDialogOpen(false)} />
+          <div className="relative w-full max-w-sm bg-white rounded-xl shadow-xl p-6 space-y-4">
+            <h2 id="stimulus-link-title" className="text-base font-semibold text-gray-900">Insert link</h2>
+            <div>
+              <label htmlFor="stimulus-link-url" className="block text-sm font-medium text-gray-700 mb-1">Link URL</label>
+              <input
+                id="stimulus-link-url"
+                value={linkUrl}
+                onChange={(event) => { setLinkUrl(event.target.value); if (linkError) setLinkError(''); }}
+                onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); confirmInsertLink(); } if (event.key === 'Escape') setIsLinkDialogOpen(false); }}
+                placeholder="https://example.com"
+                className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:border-blue-600"
+                aria-invalid={Boolean(linkError)}
+                aria-describedby={linkError ? 'stimulus-link-error' : undefined}
+              />
+              {linkError ? <p id="stimulus-link-error" role="alert" className="mt-1 text-sm text-red-700">{linkError}</p> : null}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setIsLinkDialogOpen(false)} className="px-4 py-2 min-h-11 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400">Cancel</button>
+              <button type="button" onClick={confirmInsertLink} className="px-4 py-2 min-h-11 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2">Insert link</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <StimulusImageEditor
         isOpen={isImageEditorOpen}

@@ -6,6 +6,15 @@
  */
 
 export const routeManifest = {
+  auth: {
+    path: '/login',
+    children: {
+      login: '/login',
+      activate: '/activate',
+      passwordReset: '/password/reset',
+      passwordResetComplete: '/password/reset/complete',
+    },
+  },
   admin: {
     path: '/admin',
     children: {
@@ -16,6 +25,22 @@ export const routeManifest = {
       grading: '/admin/grading',
       results: '/admin/results',
       settings: '/admin/settings',
+      answerHistory: '/admin/answer-history/:submissionId',
+    },
+  },
+  sat: {
+    path: '/sat',
+    children: {
+      root: '/sat',
+      exams: '/sat/exams',
+      sessions: '/sat/sessions',
+      results: '/sat/results',
+      resultDetail: '/sat/results/:resultId',
+      examDetail: '/sat/exams/:examId',
+      examRelease: '/sat/exams/:examId/release',
+      examPreview: '/sat/exams/:examId/preview',
+      examAccess: '/sat/exams/:examId/access',
+      sessionRoom: '/sat/sessions/:scheduleId',
     },
   },
   builder: {
@@ -25,12 +50,14 @@ export const routeManifest = {
       builder: '/builder/:examId/builder',
       review: '/builder/:examId/review',
       preview: '/builder/:examId/preview',
+      answerKey: '/builder/:examId/answer-key',
     },
   },
   proctor: {
     path: '/proctor',
     children: {
       root: '/proctor',
+      answerHistory: '/proctor/answer-history/:attemptId',
     },
   },
   student: {
@@ -39,6 +66,12 @@ export const routeManifest = {
       entry: '/student/:scheduleId',
       register: '/student/:scheduleId/register',
       session: '/student/:scheduleId/:studentId',
+    },
+  },
+  join: {
+    path: '/join',
+    children: {
+      entry: '/join/:accessLinkId',
     },
   },
 } as const;

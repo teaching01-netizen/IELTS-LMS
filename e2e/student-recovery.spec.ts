@@ -119,11 +119,11 @@ test.describe('Student session recovery', () => {
 
     await context.setOffline(true);
 
-    await expect(page.getByRole('heading', { name: 'Connection lost' })).toBeVisible();
+    await expect(page.getByTestId('student-auto-save-status')).toHaveText('Offline');
 
     await context.setOffline(false);
 
-    await expect(page.getByRole('heading', { name: 'Connection lost' })).not.toBeVisible();
+    await expect(page.getByTestId('student-auto-save-status')).toHaveText(/Saved|Syncing/);
     await expect(page.getByLabel('Answer for question 1')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByLabel('Answer for question 1')).toHaveValue(testAnswer);
 
@@ -143,7 +143,7 @@ test.describe('Student session recovery', () => {
     await enterRuntimeBackedExam(page, manifest.student.scheduleId, wcode);
 
     await context.setOffline(true);
-    await expect(page.getByRole('heading', { name: 'Connection lost' })).toBeVisible();
+    await expect(page.getByTestId('student-auto-save-status')).toHaveText('Offline');
 
     const answerField = page.getByLabel('Answer for question 1');
     const offlineAnswer = `offline-answer-${Date.now()}`;
@@ -151,7 +151,7 @@ test.describe('Student session recovery', () => {
 
     await context.setOffline(false);
 
-    await expect(page.getByRole('heading', { name: 'Connection lost' })).not.toBeVisible();
+    await expect(page.getByTestId('student-auto-save-status')).toHaveText(/Saved|Syncing/);
 
     await expect
       .poll(async () => {

@@ -26,7 +26,7 @@ export function EmptyState({
   };
 
   return (
-    <div className={`flex flex-col items-center justify-center p-8 text-center ${className}`}>
+    <div role="status" aria-live="polite" className={`flex flex-col items-center justify-center p-8 text-center ${className}`}>
       <div className="mb-4">
         {icon || variantIcons[variant]}
       </div>

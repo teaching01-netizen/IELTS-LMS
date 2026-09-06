@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckSquare, ChevronLeft, Filter, LayoutGrid, List, Pause, Play, Square, StopCircle, Timer, X } from 'lucide-react';
-import type { AuditActionType, ExamGroup, ModuleType, ProctorAlert, SessionAuditLog, SessionNote, StudentSession, StudentStatus } from '../../types';
+import { AlertTriangle, CheckSquare, ChevronLeft, Filter, LayoutGrid, List, Pause, Play, Settings, SkipForward, Square, StopCircle, Timer, X } from 'lucide-react';
+import type { AuditActionType, ExamGroup, ModuleType, ProctorAlert, SessionAuditLog, SessionNote, StudentSession, StudentStatus, ViolationRule } from '../../types';
 import type { ExamSchedule, ExamSessionRuntime } from '../../types/domain';
 import { ConfirmModal } from '../ConfirmModal';
 import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
 import { Toast, ToastContainer, type ToastVariant } from '../ui/Toast';
-import { PresenceIndicator } from './PresenceIndicator';
+import { CollisionWarning, PresenceIndicator } from './PresenceIndicator';
 import { StudentCard } from './StudentCard';
 import { StudentDetailPanel, type StudentDrawerTab } from './StudentDetailPanel';
 import { ExamGroupCard } from './ExamGroupCard';
+import { ViolationRulePanel } from './ViolationRulePanel';
 import { examRepository, examDeliveryService, backendPost } from '../../features/proctor/infrastructure/proctorGateway';
 import { useStudentFilters } from './hooks/useStudentFilters';
 import { logger } from '../../utils/logger';
@@ -33,11 +34,13 @@ interface ProctorDashboardProps {
   railSelection?: 'dashboard' | 'alerts' | 'audit' | 'notes';
   auditLogs?: SessionAuditLog[];
   notes?: SessionNote[];
+  violationRules?: ViolationRule[];
   selectedScheduleId: string | null;
   onSelectScheduleId: (scheduleId: string | null) => void;
   onUpdateSessions: (sessions: StudentSession[]) => void;
   onUpdateAlerts: (alerts: ProctorAlert[]) => void;
   onUpdateNotes?: (notes: SessionNote[]) => void;
+  onUpdateRules?: (rules: ViolationRule[]) => void;
   onStartScheduledSession: (scheduleId: string) => Promise<void> | void;
   onPauseCohort: (scheduleId: string) => Promise<void> | void;
   onResumeCohort: (scheduleId: string) => Promise<void> | void;
@@ -59,20 +62,22 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   railSelection = 'dashboard',
   auditLogs = [],
   notes = [],
+  violationRules = [],
   selectedScheduleId,
   onSelectScheduleId,
   onUpdateSessions,
   onUpdateAlerts: _onUpdateAlerts,
   onUpdateNotes,
+  onUpdateRules,
   onStartScheduledSession,
   onPauseCohort,
   onResumeCohort,
-  onEndSectionNow: _onEndSectionNow,
+  onEndSectionNow,
   onExtendCurrentSection,
   onCompleteExam,
   onOpenAnswerHistory,
 }: ProctorDashboardProps) {
-  type CohortControlAction = 'start' | 'pause' | 'resume' | 'extend_5' | 'extend_10' | 'complete';
+  type CohortControlAction = 'start' | 'pause' | 'resume' | 'extend_5' | 'extend_10' | 'end_section' | 'complete';
 
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
@@ -81,16 +86,20 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const [sortBy, setSortBy] = useState<'name' | 'violations' | 'status'>('violations');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [listDensity, setListDensity] = useState<'compact' | 'comfortable'>('compact');
+  const [showViolationRules, setShowViolationRules] = useState(false);
   const [drawerTab, setDrawerTab] = useState<StudentDrawerTab>('timeline');
   const [overviewBucket, setOverviewBucket] = useState<OverviewBucket>('active');
   const [pastStatusFilter, setPastStatusFilter] = useState<PastSessionStatusFilter>('all');
   const [pendingCohortAction, setPendingCohortAction] = useState<CohortControlAction | null>(null);
-  const [confirmAction, setConfirmAction] = useState<'complete' | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'complete' | 'end_section' | null>(null);
   const [confirmDisciplineAction, setConfirmDisciplineAction] = useState<
     | null
     | { scope: 'single'; studentId: string; studentName: string; action: 'pause' | 'terminate' }
     | { scope: 'bulk'; studentIds: string[]; action: 'pause' | 'terminate' }
   >(null);
+  // Collision override: proctor acknowledged the multi-proctor warning and
+  // chose to proceed anyway (per selected student).
+  const [collisionOverrideStudentId, setCollisionOverrideStudentId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<
     Array<{ id: string; variant: ToastVariant; title?: string; message: string }>
   >([]);
@@ -231,23 +240,73 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   );
   const scopedAuditLogs = auditLogs.filter((log) => !selectedScheduleId || log.sessionId === selectedScheduleId);
   const scopedNotes = notes.filter((note) => !selectedScheduleId || note.scheduleId === selectedScheduleId);
+  const selectedViolationRules = violationRules.filter((rule) => rule.scheduleId === selectedScheduleId);
 
+  useEffect(() => {
+    setShowViolationRules(false);
+  }, [selectedScheduleId]);
+
+  const handleUpdateViolationRules = useCallback(
+    (nextRules: ViolationRule[]) => {
+      if (!selectedScheduleId || !onUpdateRules) return;
+      onUpdateRules([
+        ...violationRules.filter((rule) => rule.scheduleId !== selectedScheduleId),
+        ...nextRules,
+      ]);
+    },
+    [onUpdateRules, selectedScheduleId, violationRules],
+  );
+
+  // Proctor presence: idempotent join (guarded so StrictMode double-mount
+  // sends one join), 30s heartbeat, and sendBeacon leave so the leave
+  // signal survives tab close. Effect depends on the proctor actor too so a
+  // handed-off session re-joins under the new identity.
   useEffect(() => {
     if (!selectedScheduleId) {
       return;
     }
+    const scheduleId = selectedScheduleId;
+    const actor = currentProctorId ?? 'unknown';
 
     let cancelled = false;
     let heartbeatInterval: number | null = null;
+    let joined = false;
 
     const sendPresence = async (action: 'join' | 'heartbeat' | 'leave') => {
+      // Idempotent join: only one join per (schedule, actor) mount.
+      if (action === 'join') {
+        if (joined) {
+          return;
+        }
+        joined = true;
+      }
       try {
-        await backendPost(`/v1/proctor/sessions/${selectedScheduleId}/presence`, { action }, { retries: 0 });
+        await backendPost(`/v1/proctor/sessions/${scheduleId}/presence`, { action }, { retries: 0 });
       } catch (error) {
+        if (action === 'join') {
+          joined = false;
+        }
         if (!cancelled) {
           logger.warn('Failed to update proctor presence', { action, error });
         }
       }
+    };
+
+    const sendLeaveBeacon = () => {
+      // offcut: beacon can't carry Authorization, so its delivery is unreliable;
+      // always fire the authenticated fetch too (leave is idempotent).
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+          const url = `/api/v1/proctor/sessions/${scheduleId}/presence`;
+          const payload = new Blob([JSON.stringify({ action: 'leave' })], {
+            type: 'application/json',
+          });
+          navigator.sendBeacon(url, payload);
+        }
+      } catch {
+        // Authenticated fetch below is the reliable path.
+      }
+      void sendPresence('leave');
     };
 
     void sendPresence('join');
@@ -260,19 +319,31 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
       if (heartbeatInterval) {
         window.clearInterval(heartbeatInterval);
       }
-      void sendPresence('leave');
+      sendLeaveBeacon();
     };
-  }, [selectedScheduleId]);
+  }, [selectedScheduleId, currentProctorId]);
 
+  // Rail auto-select: tab always follows the rail selection; student
+  // auto-select happens only when the schedule changes OR when the rail
+  // selection itself changes (e.g. dashboard → notes should open the
+  // drawer on the first student). Filter keystrokes alone must NOT yank
+  // the drawer selection out from the proctor.
+  const previousRailContextRef = React.useRef<string | null>(null);
   useEffect(() => {
-    if (railSelection === 'dashboard') return;
+    if (railSelection === 'dashboard') {
+      previousRailContextRef.current = `${selectedScheduleId ?? ''}::${railSelection}`;
+      return;
+    }
 
     const targetTab: StudentDrawerTab =
       railSelection === 'alerts' ? 'violations' : railSelection === 'audit' ? 'audit' : 'notes';
 
     setDrawerTab(targetTab);
 
-    if (!selectedStudentId && selectedScheduleId && filteredSessions.length > 0) {
+    const railContext = `${selectedScheduleId ?? ''}::${railSelection}`;
+    const railContextChanged = previousRailContextRef.current !== railContext;
+    previousRailContextRef.current = railContext;
+    if (railContextChanged && !selectedStudentId && selectedScheduleId && filteredSessions.length > 0) {
       setSelectedStudentId(filteredSessions[0]?.id ?? null);
     }
   }, [filteredSessions, railSelection, selectedScheduleId, selectedStudentId]);
@@ -357,10 +428,10 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
 
   const runDisciplineAction = useCallback(
     async (studentId: string, action: 'warn' | 'pause' | 'resume' | 'terminate', payload?: unknown) => {
-      const updatedSessions = [...sessions];
-      const index = updatedSessions.findIndex((session) => session.id === studentId);
-      if (index < 0) return { success: false, error: 'Student not found.' as const };
-      const currentSession = updatedSessions[index];
+      // Fresh-state read: resolve the session from the latest prop value at
+      // call time (not the closure capture) so rapid successive actions do
+      // not operate on stale copies.
+      const currentSession = sessions.find((session) => session.id === studentId);
       if (!currentSession) return { success: false, error: 'Student not found.' as const };
 
       let deliveryResult: { success: boolean; error?: string } = { success: true };
@@ -385,8 +456,9 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
       }
 
       const nextSession = applyStudentAction(currentSession, action, payload);
-      updatedSessions[index] = nextSession;
-      onUpdateSessions(updatedSessions);
+      onUpdateSessions(
+        sessions.map((session) => (session.id === studentId ? nextSession : session)),
+      );
       return { success: true as const };
     },
     [currentProctorName, onUpdateSessions, sessions],
@@ -403,6 +475,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
         throw new Error(result.error ?? 'Failed to extend student time');
       }
 
+      const targetName = sessions.find((session) => session.id === studentId)?.name ?? 'the student';
       onUpdateSessions(
         sessions.map((session) =>
           session.id === studentId
@@ -418,7 +491,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
       pushToast({
         variant: 'success',
         title: 'Student time extended',
-        message: `Added ${minutes} minutes to the active SAT module.`,
+        message: `Added ${minutes} minutes to ${targetName}'s current section.`,
       });
     },
     [currentProctorName, onUpdateSessions, pushToast, sessions],
@@ -456,57 +529,59 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     [pushToast, runDisciplineAction],
   );
 
+  // Bulk actions run in batches of 5 with allSettled semantics: every
+  // student gets a per-student delivery attempt (no fail-fast), results
+  // merge by id, and failures report per-student names.
   const runBulkAction = useCallback(
     async (action: 'warn' | 'pause' | 'resume' | 'terminate', studentIds: string[]) => {
-      const updatedSessions = [...sessions];
-      let successCount = 0;
-      let failureCount = 0;
-
-      for (const studentId of studentIds) {
-        const index = updatedSessions.findIndex((session) => session.id === studentId);
-        if (index < 0) {
-          failureCount += 1;
-          continue;
-        }
-        const currentSession = updatedSessions[index];
-        if (!currentSession) {
-          failureCount += 1;
-          continue;
-        }
-
-        let deliveryResult: { success: boolean; error?: string } = { success: true };
+      const actor = currentProctorName ?? 'Proctor';
+      const byId = new Map(sessions.map((session) => [session.id, session]));
+      const deliverFor = (studentId: string): Promise<{ success: boolean; error?: string }> => {
         if (action === 'warn') {
-          deliveryResult = await examDeliveryService.warnStudent(studentId, 'Bulk warning issued by proctor', currentProctorName ?? 'Proctor');
-        } else if (action === 'pause') {
-          deliveryResult = await examDeliveryService.pauseStudentAttempt(studentId, currentProctorName ?? 'Proctor');
-        } else if (action === 'resume') {
-          deliveryResult = await examDeliveryService.resumeStudentAttempt(studentId, currentProctorName ?? 'Proctor');
-        } else if (action === 'terminate') {
-          deliveryResult = await examDeliveryService.terminateStudentAttempt(studentId, currentProctorName ?? 'Proctor');
+          return examDeliveryService.warnStudent(studentId, 'Bulk warning issued by proctor', actor);
         }
-
-        if (deliveryResult.success) {
-          updatedSessions[index] = applyStudentAction(currentSession, action);
-          successCount += 1;
-        } else {
-          failureCount += 1;
+        if (action === 'pause') {
+          return examDeliveryService.pauseStudentAttempt(studentId, actor);
         }
+        if (action === 'resume') {
+          return examDeliveryService.resumeStudentAttempt(studentId, actor);
+        }
+        return examDeliveryService.terminateStudentAttempt(studentId, actor);
+      };
+      const succeededIds: string[] = [];
+      const failedNames: string[] = [];
+      for (let offset = 0; offset < studentIds.length; offset += 5) {
+        const batch = studentIds.slice(offset, offset + 5);
+        const outcomes = await Promise.allSettled(batch.map((studentId) => deliverFor(studentId)));
+        outcomes.forEach((outcome, batchIndex) => {
+          const studentId = batch[batchIndex] as string;
+          const ok = outcome.status === 'fulfilled' && outcome.value.success;
+          if (ok) {
+            succeededIds.push(studentId);
+          } else {
+            failedNames.push(byId.get(studentId)?.name ?? studentId);
+          }
+        });
       }
 
-      onUpdateSessions(updatedSessions);
-
-      if (successCount > 0) {
+      if (succeededIds.length > 0) {
+        const succeeded = new Set(succeededIds);
+        onUpdateSessions(
+          sessions.map((session) =>
+            succeeded.has(session.id) ? applyStudentAction(session, action) : session,
+          ),
+        );
         pushToast({
           variant: 'success',
           title: 'Bulk action complete',
-          message: `${successCount} students updated.`,
+          message: `${succeededIds.length} student${succeededIds.length === 1 ? '' : 's'} updated (${action}).`,
         });
       }
-      if (failureCount > 0) {
+      if (failedNames.length > 0) {
         pushToast({
           variant: 'error',
           title: 'Bulk action partial failure',
-          message: `${failureCount} students failed to update.`,
+          message: `${failedNames.length} failed: ${failedNames.slice(0, 5).join(', ')}${failedNames.length > 5 ? ` (+${failedNames.length - 5} more)` : ''}.`,
         });
       }
     },
@@ -809,6 +884,23 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
               {pendingCohortAction === 'extend_10' ? 'Extending…' : 'Extend +10'}
             </button>
             <button
+              onClick={() => setConfirmAction('end_section')}
+              disabled={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') || controlsBusy}
+              title={controlDisabled || (selectedRuntimeStatus !== 'live' && selectedRuntimeStatus !== 'paused') || controlsBusy ? getSectionControlDisabledReason() : undefined}
+              aria-busy={pendingCohortAction === 'end_section'}
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              {pendingCohortAction === 'end_section' ? (
+                <>
+                  <LoadingMark size="sm" className="bg-slate-200" />
+                  <SrLoadingText>Ending section…</SrLoadingText>
+                </>
+              ) : (
+                <SkipForward size={14} />
+              )}
+              {pendingCohortAction === 'end_section' ? 'Ending…' : 'End Section'}
+            </button>
+            <button
               onClick={() => setConfirmAction('complete')}
               disabled={controlDisabled || selectedRuntimeStatus === 'completed' || controlsBusy}
               title={controlDisabled || selectedRuntimeStatus === 'completed' || controlsBusy ? getCompleteDisabledReason() : undefined}
@@ -825,6 +917,15 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
               )}
               {pendingCohortAction === 'complete' ? 'Completing…' : 'Complete'}
             </button>
+            <button
+              type="button"
+              onClick={() => setShowViolationRules(true)}
+              disabled={!selectedScheduleId || !onUpdateRules}
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              <Settings size={14} />
+              Auto-Response Rules
+            </button>
           </div>
         </div>
         {selectedRuntime?.isOverrun ? (
@@ -837,6 +938,45 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
           </div>
         ) : null}
       </section>
+
+      {showViolationRules && selectedScheduleId && onUpdateRules ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Auto-Response Rules">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            aria-label="Close auto-response rules"
+            onClick={() => setShowViolationRules(false)}
+          />
+          <div className="relative z-10 flex h-[min(760px,calc(100vh-2rem))] w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl">
+            <ViolationRulePanel
+              rules={selectedViolationRules}
+              scheduleId={selectedScheduleId}
+              currentProctor={currentProctorName ?? 'Proctor'}
+              onUpdateRules={handleUpdateViolationRules}
+              onClose={() => setShowViolationRules(false)}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <ConfirmModal
+        isOpen={confirmAction === 'end_section'}
+        onClose={() => setConfirmAction(null)}
+        title="End the current section now?"
+        description="Candidates advance to the next section immediately. Unanswered items in this section are locked. This action cannot be undone."
+        confirmLabel="End section now"
+        tone="danger"
+        onConfirm={async () => {
+          return await runCohortAction('end_section', {
+            label: 'End section',
+            successMessage: 'Current section ended for the cohort.',
+            fn: async () => {
+              if (!selectedScheduleId) return;
+              await onEndSectionNow(selectedScheduleId);
+            },
+          });
+        }}
+      />
 
       <ConfirmModal
         isOpen={confirmAction === 'complete'}
@@ -1027,6 +1167,20 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
               </div>
             </aside>
 
+              {(() => {
+                const otherProctorsHere = (selectedRuntime?.proctorPresence ?? []).filter(
+                  (entry) => entry.proctorId !== (currentProctorId ?? 'unknown'),
+                );
+                const showCollision =
+                  otherProctorsHere.length > 0 && collisionOverrideStudentId !== selectedStudent.id;
+                return showCollision ? (
+                  <CollisionWarning
+                    otherProctorName={otherProctorsHere[0]?.proctorName ?? 'Another proctor'}
+                    onProceed={() => setCollisionOverrideStudentId(selectedStudent.id)}
+                    onCancel={() => setSelectedStudentId(null)}
+                  />
+                ) : null;
+              })()}
               <StudentDetailPanel
                 student={selectedStudent}
                 cohort={selectedGroup}

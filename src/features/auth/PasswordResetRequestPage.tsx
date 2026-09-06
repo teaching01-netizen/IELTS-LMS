@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { LoadingSurface } from '@components/ui';
 import { resolveRoleLandingPath, useAuthSession } from './authSession';
+import { passwordResetRequestFormSchema } from './validation/authForms';
 
 export function PasswordResetRequestPage() {
   const { requestPasswordReset, session, status } = useAuthSession();
@@ -9,6 +10,7 @@ export function PasswordResetRequestPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const inFlightRef = useRef(false);
 
   if (status === 'loading') {
     return <LoadingSurface label="Loading Session..." />;
@@ -20,17 +22,27 @@ export function PasswordResetRequestPage() {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting || inFlightRef.current) {
+      return;
+    }
+    const parsed = passwordResetRequestFormSchema.safeParse({ email });
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Enter a valid email address.');
+      return;
+    }
+    inFlightRef.current = true;
     setIsSubmitting(true);
     setError(null);
 
     try {
-      await requestPasswordReset(email);
+      await requestPasswordReset(parsed.data.email);
       setIsSubmitted(true);
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : 'Password reset request failed.',
       );
     } finally {
+      inFlightRef.current = false;
       setIsSubmitting(false);
     }
   };

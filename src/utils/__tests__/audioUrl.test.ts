@@ -20,4 +20,10 @@ describe('audioUrl', () => {
   it('leaves non-drive urls unchanged', () => {
     expect(normalizeAudioUrl('https://example.com/audio.mp3')).toBe('https://example.com/audio.mp3');
   });
+
+  it('drops javascript:/vbscript:/data:text/html sources to an empty string', () => {
+    expect(normalizeAudioUrl('javascript:alert(1)')).toBe('');
+    expect(normalizeAudioUrl('vbscript:msgbox(1)')).toBe('');
+    expect(normalizeAudioUrl('data:text/html,<script>alert(1)</script>')).toBe('');
+  });
 });

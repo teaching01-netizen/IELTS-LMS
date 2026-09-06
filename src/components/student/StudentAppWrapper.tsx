@@ -30,7 +30,6 @@ interface StudentAppWrapperProps {
   persistenceEnabled?: boolean | undefined;
   enableMonitoring?: boolean | undefined;
   allowPreviewStart?: boolean | undefined;
-  useV2DurabilityEngine?: boolean | undefined;
 }
 
 export function StudentAppWrapper({
@@ -46,7 +45,6 @@ export function StudentAppWrapper({
   persistenceEnabled = true,
   enableMonitoring = true,
   allowPreviewStart = false,
-  useV2DurabilityEngine,
 }: StudentAppWrapperProps) {
   const enabledModules = getEnabledModules(state.config);
   const writingQuestionIds = React.useMemo(
@@ -135,7 +133,6 @@ export function StudentAppWrapper({
         attemptSnapshot={attemptSnapshot}
         persistenceEnabled={persistenceEnabled}
         writingQuestionIds={writingQuestionIds}
-        {...(useV2DurabilityEngine !== undefined ? { useV2DurabilityEngine } : {})}
       >
         <StudentExamSessionProvider key={sessionScopeKey} seed={sessionSeed}>
           <ProctoringProvider

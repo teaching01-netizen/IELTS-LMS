@@ -179,7 +179,7 @@ export type AnswerKeyEdit =
   | { kind: 'set_tfng'; questionId: string; value: 'T' | 'F' | 'NG' | 'Y' | 'N' | 'NG' }
   | { kind: 'set_text_answer'; questionId: string; value: string }
   | { kind: 'set_accepted_answer_fields'; questionId: string; acceptedAnswers: string[] }
-  | { kind: 'set_matching_heading'; questionId: string; headingId: string }
+  | { kind: 'set_matching_heading'; questionId: string; headingKey: string }
   | { kind: 'set_single_mcq_correct'; questionId: string; optionId: string }
   | { kind: 'set_multi_mcq_correct'; optionIds: string[] }
   | { kind: 'set_diagram_label_answer'; labelIndex: number; value: string }
@@ -291,7 +291,7 @@ function updateSubAnswerTreeLeafAcceptedAnswers(
 
   const parsed = parseSubAnswerLeafId(leafId);
   if (!parsed) {
-    return roots as SubAnswerTreeNode[] | undefined;
+    throw new Error(`Invalid sub-answer leafId: "${leafId}" (expected "<blockId>::tree::<rootId>::<nodeId>")`);
   }
 
   const visit = (node: SubAnswerTreeNode): SubAnswerTreeNode => {
@@ -346,9 +346,10 @@ export function applyAnswerKeyEdit(
     if (edit.kind === 'set_matching_heading') {
       if (block.type !== 'MATCHING') return block;
       const match = block as MatchingBlock;
+      // The matching key space is the roman numeral of the heading index ('i', 'ii', ...).
       return {
         ...match,
-        questions: match.questions.map((q) => (q.id === edit.questionId ? { ...q, correctHeading: edit.headingId } : q)),
+        questions: match.questions.map((q) => (q.id === edit.questionId ? { ...q, correctHeading: edit.headingKey } : q)),
       };
     }
 

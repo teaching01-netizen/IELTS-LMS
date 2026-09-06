@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, expect, test, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('../../../services/gradingRepository', () => {
   return {
@@ -586,8 +586,6 @@ describe('StudentReviewWorkspace objective answers', () => {
         },
       });
 
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-
     render(
       <StudentReviewWorkspace
         submissionId="sub-4"
@@ -599,14 +597,19 @@ describe('StudentReviewWorkspace objective answers', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /release now/i }));
 
+    // C15: override-required opens the app ConfirmModal (never window.confirm).
+    const overrideDialog = await screen.findByRole('dialog', { name: /grader override/i });
+    expect(overrideDialog).toBeInTheDocument();
+    expect(gradingService.releaseResult).toHaveBeenNthCalledWith(
+      1,
+      'sub-4',
+      't-1',
+      'Teacher',
+      false,
+    );
+    fireEvent.click(within(overrideDialog).getByRole('button', { name: /release anyway/i }));
+
     await waitFor(() => {
-      expect(gradingService.releaseResult).toHaveBeenNthCalledWith(
-        1,
-        'sub-4',
-        't-1',
-        'Teacher',
-        false,
-      );
       expect(gradingService.releaseResult).toHaveBeenNthCalledWith(
         2,
         'sub-4',
@@ -615,7 +618,126 @@ describe('StudentReviewWorkspace objective answers', () => {
         true,
       );
     });
-    expect(confirmSpy).toHaveBeenCalledOnce();
-    confirmSpy.mockRestore();
+  });
+
+  test('schedule release validates the date before calling scheduleRelease', async () => {
+    const { createInitialExamState } = await import('../../../services/examAdapterService');
+    const { gradingRepository } = await import('../../../services/gradingRepository');
+    const { gradingService } = await import('../../../services/gradingService');
+    const { examRepository } = await import('../../../services/examRepository');
+    const { StudentReviewWorkspace } = await import('../StudentReviewWorkspace');
+
+    const examState = createInitialExamState('Exam', 'Academic');
+    (examRepository.getVersionById as any).mockResolvedValue({
+      id: 'ver-5',
+      contentSnapshot: examState,
+    });
+    (gradingRepository.getSubmissionById as any).mockResolvedValue({
+      id: 'sub-5',
+      submissionId: 'sub-5',
+      scheduleId: 'sched-5',
+      examId: 'exam-5',
+      publishedVersionId: 'ver-5',
+      studentId: 'stu-5',
+      studentName: 'Eli',
+      studentEmail: 'eli@example.com',
+      cohortName: 'Cohort',
+      submittedAt: new Date().toISOString(),
+      timeSpentSeconds: 0,
+      gradingStatus: 'in_progress',
+      assignedTeacherId: undefined,
+      assignedTeacherName: undefined,
+      isFlagged: false,
+      flagReason: undefined,
+      isOverdue: false,
+      dueDate: undefined,
+      sectionStatuses: {
+        listening: 'pending',
+        reading: 'auto_graded',
+        writing: 'needs_review',
+        speaking: 'pending',
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    (gradingRepository.getSectionSubmissionsBySubmissionId as any).mockResolvedValue([]);
+    (gradingRepository.getWritingSubmissionsBySubmissionId as any).mockResolvedValue([]);
+    (gradingRepository.getReviewDraftBySubmission as any).mockResolvedValue({
+      id: 'draft-5',
+      submissionId: 'sub-5',
+      studentId: 'stu-5',
+      teacherId: 't-1',
+      releaseStatus: 'ready_to_release',
+      sectionDrafts: { writing: {} },
+      annotations: [],
+      drawings: [],
+      overallFeedback: undefined,
+      studentVisibleNotes: undefined,
+      internalNotes: undefined,
+      teacherSummary: { strengths: [], improvementPriorities: [], recommendedPractice: [] },
+      checklist: {},
+      hasUnsavedChanges: false,
+      lastAutoSaveAt: undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    (gradingService.scheduleRelease as any).mockResolvedValue({
+      success: true,
+      data: {
+        id: 'draft-5',
+        submissionId: 'sub-5',
+        studentId: 'stu-5',
+        teacherId: 't-1',
+        releaseStatus: 'scheduled',
+        sectionDrafts: { writing: {} },
+        annotations: [],
+        drawings: [],
+        teacherSummary: { strengths: [], improvementPriorities: [], recommendedPractice: [] },
+        checklist: {},
+        hasUnsavedChanges: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    render(
+      <StudentReviewWorkspace
+        submissionId="sub-5"
+        onBack={() => {}}
+        currentTeacherId="t-1"
+        currentTeacherName="Teacher"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /schedule release/i }));
+    const scheduleDialog = await screen.findByRole('dialog', { name: /schedule release/i });
+    const dateInput = within(scheduleDialog).getByLabelText(/release date/i);
+
+    // Empty submit is rejected client-side; no backend call.
+    fireEvent.click(within(scheduleDialog).getByRole('button', { name: /^schedule$/i }));
+    expect(await within(scheduleDialog).findByRole('alert')).toBeInTheDocument();
+    expect(gradingService.scheduleRelease).not.toHaveBeenCalled();
+
+    // Past date is rejected client-side; no backend call.
+    fireEvent.change(dateInput, { target: { value: '2000-01-02' } });
+    fireEvent.click(within(scheduleDialog).getByRole('button', { name: /^schedule$/i }));
+    expect(await within(scheduleDialog).findByRole('alert')).toHaveTextContent(/past/i);
+    expect(gradingService.scheduleRelease).not.toHaveBeenCalled();
+
+    // Today is accepted and forwarded to the backend.
+    const today = new Date();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayIso = `${today.getFullYear()}-${month}-${day}`;
+    fireEvent.change(dateInput, { target: { value: todayIso } });
+    fireEvent.click(within(scheduleDialog).getByRole('button', { name: /^schedule$/i }));
+    await waitFor(() => {
+      expect(gradingService.scheduleRelease).toHaveBeenCalledWith(
+        'sub-5',
+        todayIso,
+        't-1',
+        'Teacher',
+      );
+    });
   });
 });

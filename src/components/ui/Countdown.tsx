@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 interface CountdownProps {
   seconds: number;
@@ -17,29 +17,47 @@ export function Countdown({
   showLabel = false,
   className = '',
 }: CountdownProps) {
-  const [timeLeft, setTimeLeft] = useState(seconds);
+  const [timeLeft, setTimeLeft] = useState(() => Math.max(0, seconds));
+  // Fires exactly once per mount/prop-cycle: guards StrictMode double-effects
+  // and prevents re-firing when a parent re-renders with an inline onComplete.
+  const completedRef = useRef(false);
+  const onCompleteRef = useRef(onComplete);
 
   useEffect(() => {
-    setTimeLeft(seconds);
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    completedRef.current = false;
+    setTimeLeft(Math.max(0, seconds));
   }, [seconds]);
 
+  // Derived boolean keeps the interval stable: the effect only re-runs when the
+  // countdown transitions between running and finished, instead of every tick
+  // (tearing the interval down each second would drift the cadence).
+  const isComplete = timeLeft <= 0;
+
   useEffect(() => {
-    if (timeLeft <= 0) {
-      onComplete?.();
-      return;
+    if (isComplete) {
+      if (!completedRef.current) {
+        completedRef.current = true;
+        onCompleteRef.current?.();
+      }
+      return undefined;
     }
 
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => prev - 1);
+    const timer = window.setInterval(() => {
+      setTimeLeft((prev) => Math.max(0, prev - 1));
     }, 1000);
 
-    return () => clearInterval(timer);
-  }, [timeLeft, onComplete]);
+    return () => window.clearInterval(timer);
+  }, [isComplete]);
 
   const formatTime = useCallback((totalSeconds: number) => {
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const secs = totalSeconds % 60;
+    const safe = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(safe / 3600);
+    const minutes = Math.floor((safe % 3600) / 60);
+    const secs = safe % 60;
 
     if (hours > 0) {
       return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
@@ -74,8 +92,13 @@ export function Countdown({
   const style = variants[variant];
 
   return (
-    <div className={`inline-flex items-center gap-2 border rounded-sm font-mono font-bold ${style.bg} ${style.border} ${style.text} ${sizes[size]} ${className}`}>
-      <span>{formatTime(Math.max(0, timeLeft))}</span>
+    <div
+      className={`inline-flex items-center gap-2 border rounded-sm font-mono font-bold ${style.bg} ${style.border} ${style.text} ${sizes[size]} ${className}`}
+      role="timer"
+      aria-live="off"
+      aria-label={`${formatTime(timeLeft)} remaining`}
+    >
+      <span>{formatTime(timeLeft)}</span>
       {showLabel && timeLeft > 0 && (
         <span className="text-xs font-normal text-gray-600">
           {timeLeft === 1 ? 'second' : 'seconds'} remaining

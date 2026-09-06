@@ -101,7 +101,9 @@ export function PassageLibrary({ onAddToExam, onClose }: PassageLibraryProps) {
 
   const handleAddToExam = (item: PassageLibraryItem) => {
     onAddToExam(item.passage);
-    passageLibraryService.incrementUsageCount(item.id);
+    void passageLibraryService.incrementUsageCount(item.id).catch((error) => {
+      console.error('[passage-library] usage tracking failed', error);
+    });
   };
 
   return (

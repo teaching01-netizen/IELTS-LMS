@@ -25,7 +25,9 @@ function positiveDimension(node: RichTextNode, name: string): number | undefined
 }
 
 function directSource(value: string): string {
-  return /^(https?:\/\/|data:|blob:|\/)/i.test(value) ? value : "";
+  if (/^blob:/i.test(value)) return value;
+  if (/^data:image\/(?:png|gif|jpeg|webp)[;,]/i.test(value)) return value;
+  return /^(?:https?:\/\/|\/)/i.test(value) ? value : "";
 }
 
 function initialImageSource(node: RichTextNode): string {

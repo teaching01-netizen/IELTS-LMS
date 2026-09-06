@@ -73,6 +73,8 @@ interface QuestionRendererProps {
   studentId?: string | undefined;
   hideDiagramReference?: boolean | undefined;
   registerLiveAnswer?: ((payload: { value: QuestionAnswer }) => void) | undefined;
+  eliminatedOptionIds?: readonly string[] | undefined;
+  onToggleOptionElimination?: ((optionId: string) => void) | undefined;
 }
 
 export function QuestionRenderer({
@@ -96,6 +98,8 @@ export function QuestionRenderer({
   studentId,
   hideDiagramReference = false,
   registerLiveAnswer,
+  eliminatedOptionIds = [],
+  onToggleOptionElimination,
 }: QuestionRendererProps) {
   const stringArrayAnswer = Array.isArray(answer) ? answer : [];
   const isCompactPane = tabletMode && compactPane;
@@ -521,47 +525,69 @@ export function QuestionRenderer({
         <div className={`${fieldIndentClass} space-y-3`}>
           {options.map((option, index) => {
             const letter = String.fromCharCode(65 + index);
+            const isEliminated = eliminatedOptionIds.includes(option.id);
             return (
-              <label
+              <div
                 key={option.id}
-                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
+                className={`flex items-start gap-3 rounded-md border p-3 transition-colors ${
                   answer === option.id
                     ? "border-blue-500 bg-blue-50"
-                    : "border-gray-200 hover:border-blue-300"
+                    : isEliminated
+                      ? "border-gray-200 bg-gray-50"
+                      : "border-gray-200 hover:border-blue-300"
                 }`}
               >
-                <input
-                  type="radio"
-                  name={inputGroupName}
-                  checked={answer === option.id}
-                  onChange={() => commitAnswerChange(option.id)}
-                  className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <div className="flex gap-2">
-                  <StudentQuestionText
-                    as="span"
-                    className="font-bold text-gray-700"
-                    text={`${letter}.`}
-                    highlightEnabled={highlightEnabled}
-                    highlightColor={highlightColor}
-                    highlightSurfaceId={getHighlightSurfaceId(
-                      `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
-                      "option-letter"
-                    )}
+                <label className={`flex min-w-0 flex-1 items-start gap-3 ${isEliminated ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                  <input
+                    type="radio"
+                    name={inputGroupName}
+                    checked={answer === option.id}
+                    disabled={isEliminated}
+                    onChange={() => commitAnswerChange(option.id)}
+                    className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
-                  <StudentQuestionText
-                    as="span"
-                    className="text-gray-800"
-                    text={option.text}
-                    highlightEnabled={highlightEnabled}
-                    highlightColor={highlightColor}
-                    highlightSurfaceId={getHighlightSurfaceId(
-                      `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
-                      "option-text"
-                    )}
-                  />
-                </div>
-              </label>
+                  <div className={`flex min-w-0 gap-2 ${isEliminated ? "text-gray-400 line-through" : ""}`}>
+                    <StudentQuestionText
+                      as="span"
+                      className="font-bold text-gray-700"
+                      text={`${letter}.`}
+                      highlightEnabled={highlightEnabled}
+                      highlightColor={highlightColor}
+                      highlightSurfaceId={getHighlightSurfaceId(
+                        `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
+                        "option-letter"
+                      )}
+                    />
+                    <StudentQuestionText
+                      as="span"
+                      className="text-gray-800"
+                      text={option.text}
+                      highlightEnabled={highlightEnabled}
+                      highlightColor={highlightColor}
+                      highlightSurfaceId={getHighlightSurfaceId(
+                        `${questionLevel?.id ?? mcqBlock.id}:${option.id}`,
+                        "option-text"
+                      )}
+                    />
+                  </div>
+                </label>
+                {onToggleOptionElimination ? (
+                  <button
+                    type="button"
+                    onClick={() => onToggleOptionElimination(option.id)}
+                    aria-pressed={isEliminated}
+                    aria-label={`${isEliminated ? "Restore" : "Eliminate"} option ${letter}`}
+                    title={isEliminated ? "Restore option" : "Eliminate option"}
+                    className={`shrink-0 rounded px-2 py-1 text-xs font-semibold transition-colors ${
+                      isEliminated
+                        ? "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                        : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                    }`}
+                  >
+                    {isEliminated ? "Restore" : "Eliminate"}
+                  </button>
+                ) : null}
+              </div>
             );
           })}
         </div>

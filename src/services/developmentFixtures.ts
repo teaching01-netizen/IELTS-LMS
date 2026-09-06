@@ -1,20 +1,15 @@
-import { isBackendGradingEnabled } from './backendBridge';
-
 export async function seedDevelopmentFixtures() {
-  if (!import.meta.env.DEV || isBackendGradingEnabled()) {
+  if (!import.meta.env.DEV) {
     return;
   }
 
-  if (
-    String(
-      import.meta.env['VITE_FEATURE_USE_BACKEND_GRADING'] ??
-        import.meta.env['FEATURE_USE_BACKEND_GRADING'] ??
-        'false',
-    ) === 'true'
-  ) {
+  // The Go-backed grading queue owns its fixtures and persistence. Running
+  // the legacy browser-only seed here makes redundant requests and can create
+  // schedule-id/session-id mismatches while the backend is authoritative.
+  if (import.meta.env["VITE_FEATURE_USE_BACKEND_GRADING"] === "true") {
     return;
   }
 
-  const { seedGradingData } = await import('../utils/gradingSeedData');
+  const { seedGradingData } = await import("../utils/gradingSeedData");
   await seedGradingData();
 }

@@ -53,6 +53,8 @@ export function StimulusImageEditor({
   const [draft, setDraft] = useState<StimulusImageAsset>(initialImage ?? createEmptyImage());
   const [tool, setTool] = useState<StimulusAnnotationTool>('pointer');
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [pendingTextPoint, setPendingTextPoint] = useState<{ x: number; y: number } | null>(null);
+  const [pendingTextLabel, setPendingTextLabel] = useState('Label');
   const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -122,6 +124,12 @@ export function StimulusImageEditor({
     const x = ((event.clientX - rect.left) / rect.width) * 100;
     const y = ((event.clientY - rect.top) / rect.height) * 100;
 
+    if (tool === 'text') {
+      setPendingTextPoint({ x, y });
+      setPendingTextLabel('Label');
+      return;
+    }
+
     const baseAnnotation: StimulusAnnotation = {
       id: createId('ann'),
       type: tool,
@@ -129,7 +137,7 @@ export function StimulusImageEditor({
       y,
       width: tool === 'box' ? 18 : undefined,
       height: tool === 'box' ? 12 : undefined,
-      text: tool === 'text' ? window.prompt('Label text', 'Label') ?? 'Label' : undefined,
+      text: undefined,
       color: tool === 'hotspot' ? '#dc2626' : '#2563eb',
     };
 
@@ -139,14 +147,56 @@ export function StimulusImageEditor({
     }));
   };
 
+  const confirmPendingTextAnnotation = () => {
+    if (!pendingTextPoint) return;
+    const label = pendingTextLabel.trim() || 'Label';
+    const annotation: StimulusAnnotation = {
+      id: createId('ann'),
+      type: 'text',
+      x: pendingTextPoint.x,
+      y: pendingTextPoint.y,
+      text: label,
+      color: '#2563eb',
+    };
+    setDraft((current) => ({
+      ...current,
+      annotations: [...current.annotations, annotation],
+    }));
+    setPendingTextPoint(null);
+  };
+
   return (
     <Dialog
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => { setPendingTextPoint(null); onClose(); }}
       title="Stimulus Image Editor"
       size="full"
       className="rounded-[32px]"
     >
+      {/* S4-C5: validated label dialog replaces window.prompt; Escape cancels. */}
+      {pendingTextPoint ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="stimulus-text-label-title">
+          <div className="fixed inset-0 bg-black/50" aria-hidden="true" onClick={() => setPendingTextPoint(null)} />
+          <div className="relative w-full max-w-sm bg-white rounded-xl shadow-xl p-6 space-y-4">
+            <h2 id="stimulus-text-label-title" className="text-base font-semibold text-gray-900">Annotation label</h2>
+            <div>
+              <label htmlFor="stimulus-text-label" className="block text-sm font-medium text-gray-700 mb-1">Label text</label>
+              <input
+                id="stimulus-text-label"
+                value={pendingTextLabel}
+                onChange={(event) => setPendingTextLabel(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); confirmPendingTextAnnotation(); } if (event.key === 'Escape') setPendingTextPoint(null); }}
+                maxLength={120}
+                className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:border-blue-600"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setPendingTextPoint(null)} className="px-4 py-2 min-h-11 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400">Cancel</button>
+              <button type="button" onClick={confirmPendingTextAnnotation} className="px-4 py-2 min-h-11 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2">Add label</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
         <div className="space-y-4">
           <div className="rounded-3xl border border-gray-200 bg-gray-50 p-4">

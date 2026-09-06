@@ -527,8 +527,7 @@ export class ExamDeliveryService {
     _now: Date | string = new Date(),
   ): Promise<RuntimeMutationResult> {
     try {
-      const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
-      const runtimePayload = await backendPost<any>(
+      await backendPost<any>(
         `/v1/proctor/sessions/${scheduleId}/control/end-section-now`,
         {
           actorId: actor,
@@ -537,10 +536,17 @@ export class ExamDeliveryService {
         },
         { retries: 0 },
       );
+      // The Go compatibility route returns { ok: true } after the command;
+      // re-read the authoritative projection instead of mapping that ack as a
+      // runtime payload.
+      const runtime = await this.getRuntimeSnapshot(scheduleId);
+      if (!runtime) {
+        throw new Error('Runtime snapshot unavailable after ending section');
+      }
 
       return {
         success: true,
-        runtime: mapBackendRuntime(runtimePayload, mapBackendSchedule(schedulePayload)),
+        runtime,
       };
     } catch (error) {
       return {

@@ -1,0 +1,90 @@
+package attempts
+
+import (
+	"testing"
+	"time"
+
+	"example.com/ielts-proctoring/internal/platform/apperrors"
+)
+
+func liveGate(now time.Time) RuntimeGate {
+	return RuntimeGate{Status: "live", ActiveSectionKey: "*", SectionLive: true, SectionStarted: true, Now: now}
+}
+
+func openAttempt() AttemptState {
+	return AttemptState{ID: "a", ScheduleID: "s", UserID: "u", ProtocolVersion: 2, DeliveryStatus: "running", Phase: "exam", LeaseEpoch: 1, ControlEpoch: 1, ProctorStatus: "active"}
+}
+
+func TestEnsureWritableMatrix(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name string
+		mut  func(*AttemptState, *RuntimeGate)
+		code apperrors.Code
+	}{
+		{"open", func(a *AttemptState, g *RuntimeGate) {}, ""},
+		{"submitted", func(a *AttemptState, g *RuntimeGate) { a.DeliveryStatus = "submitted" }, apperrors.CodeAttemptNotWritable},
+		{"terminated", func(a *AttemptState, g *RuntimeGate) { a.DeliveryStatus = "terminated" }, apperrors.CodeAttemptNotWritable},
+		{"locked", func(a *AttemptState, g *RuntimeGate) { a.DeliveryStatus = "locked" }, apperrors.CodeAttemptNotWritable},
+		{"cancelled", func(a *AttemptState, g *RuntimeGate) { a.DeliveryStatus = "cancelled" }, apperrors.CodeAttemptNotWritable},
+		{"paused", func(a *AttemptState, g *RuntimeGate) { a.DeliveryStatus = "paused" }, apperrors.CodeAttemptNotWritable},
+		{"post-exam", func(a *AttemptState, g *RuntimeGate) { a.Phase = "post-exam" }, apperrors.CodeAttemptNotWritable},
+		{"submittedAt", func(a *AttemptState, g *RuntimeGate) { t := now; a.SubmittedAt = &t }, apperrors.CodeAttemptNotWritable},
+		{"proctor-terminated", func(a *AttemptState, g *RuntimeGate) { a.ProctorStatus = "terminated" }, apperrors.CodeAttemptProctorBlocked},
+		{"proctor-paused", func(a *AttemptState, g *RuntimeGate) { a.ProctorStatus = "paused" }, apperrors.CodeAttemptProctorBlocked},
+		{"runtime-not-live", func(a *AttemptState, g *RuntimeGate) { g.Status = "paused" }, apperrors.CodeAttemptNotWritable},
+		{"runtime-waiting", func(a *AttemptState, g *RuntimeGate) { g.WaitingForNextSection = true }, apperrors.CodeAttemptNotWritable},
+		{"past-grace", func(a *AttemptState, g *RuntimeGate) { t := now.Add(-time.Microsecond); a.ClosingGraceUntil = &t }, apperrors.CodeDeadlineExpired},
+		{"at-grace-inclusive", func(a *AttemptState, g *RuntimeGate) { t := now; a.ClosingGraceUntil = &t }, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, g := openAttempt(), liveGate(now)
+			tc.mut(&a, &g)
+			err := ensureWritable(a, g, now)
+			if tc.code == "" {
+				if err != nil {
+					t.Fatalf("expected writable, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error code")
+			}
+			appErr, ok := apperrors.As(err)
+			if !ok || appErr.Code != tc.code {
+				t.Fatalf("expected code, got %v", err)
+			}
+		})
+	}
+}
+
+func TestFencingErrorCodes(t *testing.T) {
+	if e := leaseFenced(); e.Code != apperrors.CodeLeaseFenced || e.HTTPStatus != 403 {
+		t.Fatalf("leaseFenced wrong: %+v", e)
+	}
+	if e := controlStale(4, 5); e.Code != apperrors.CodeControlEpochStale || e.HTTPStatus != 409 {
+		t.Fatalf("controlStale wrong: %+v", e)
+	}
+}
+
+func TestCommandHashDeterministic(t *testing.T) {
+	c := ResponseCommand{WriteID: "w1", QuestionID: "q1", ClientVersion: 2, Response: ResponsePayload{Answer: map[string]any{"b": 1, "a": 2}, EliminatedOptions: []string{"B"}}}
+	h1, err := commandHash(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2, err := commandHash(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h1 != h2 || h1 == "" {
+		t.Fatal("command hash not deterministic")
+	}
+	c2 := c
+	c2.ClientVersion = 3
+	h3, _ := commandHash(c2)
+	if h3 == h1 {
+		t.Fatal("version change did not affect hash")
+	}
+}

@@ -57,7 +57,6 @@ describe('SAT V2 response persistence integration', () => {
           attemptId,
           gateway: gateway(),
           onSavedRevision: vi.fn(),
-          useV2DurabilityEngine: true,
         }),
       { initialProps: { attemptId: 'attempt-a' } }
     );

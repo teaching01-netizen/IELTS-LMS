@@ -19,6 +19,7 @@ export function WritingTaskPanel({
 }: WritingTaskPanelProps) {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState<string | null>(null);
 
   const moveTask = (taskId: string, direction: 'up' | 'down') => {
     const index = tasks.findIndex(t => t.id === taskId);
@@ -85,7 +86,9 @@ export function WritingTaskPanel({
         </div>
         <div className="px-4 py-2 flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => setShowAddMenu(!showAddMenu)}
+            onClick={() => setShowAddMenu((previous) => !previous)}
+            aria-expanded={showAddMenu}
+            aria-label={showAddMenu ? 'Close add task menu' : 'Open add task menu'}
             className="bg-blue-800 text-white hover:bg-blue-700 px-3 py-1.5 rounded-sm text-xs font-medium flex items-center gap-1 transition-colors shadow-sm"
           >
             <Plus size={14} /> Add Task
@@ -179,6 +182,7 @@ export function WritingTaskPanel({
                       disabled={index === 0}
                       className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                       title="Move up"
+                      aria-label={`Move ${task.label} up`}
                     >
                       <ChevronUp size={14} />
                     </button>
@@ -187,20 +191,24 @@ export function WritingTaskPanel({
                       disabled={index === tasks.length - 1}
                       className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                       title="Move down"
+                      aria-label={`Move ${task.label} down`}
                     >
                       <ChevronDown size={14} />
                     </button>
                     <button
-                      onClick={() => setEditingTaskId(editingTaskId === task.id ? null : task.id)}
+                      onClick={() => setEditingTaskId((previous) => (previous === task.id ? null : task.id))}
                       className="p-1 text-gray-400 hover:text-blue-700 transition-colors"
                       title="Configure"
+                      aria-label={`Configure ${task.label}`}
+                      aria-expanded={editingTaskId === task.id}
                     >
                       <Edit size={14} />
                     </button>
                     <button
-                      onClick={() => onDeleteTask(task.id)}
+                      onClick={() => setPendingDeleteTaskId(task.id)}
                       className="p-1 text-gray-400 hover:text-red-600 transition-colors"
                       title="Delete task"
+                      aria-label={`Delete ${task.label}`}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -303,6 +311,32 @@ export function WritingTaskPanel({
           </div>
         )}
       </div>
+
+      {pendingDeleteTaskId && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-900/40 p-4" role="alertdialog" aria-label="Confirm delete writing task">
+          <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-gray-900">Delete this task?</h3>
+            <p className="mt-1 text-sm text-gray-600">This removes the task and its configuration. This cannot be undone.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setPendingDeleteTaskId(null)}
+                className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  onDeleteTask(pendingDeleteTaskId);
+                  setPendingDeleteTaskId(null);
+                }}
+                className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-sm"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

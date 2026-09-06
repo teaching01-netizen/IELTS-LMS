@@ -1,5 +1,11 @@
-import { expect, test, type Page } from '@playwright/test';
-import { readBackendE2EManifest } from './support/backendE2e';
+import { expect, test } from "@playwright/test";
+import { readBackendE2EManifest } from "./support/backendE2e";
+import { closeDb, queryDb } from "./support/db";
+import {
+  newAdminControlContext,
+  proctorEndSection,
+  proctorStartExam,
+} from "./support/proctorControls";
 import {
   completePreCheckIfPresent,
   deterministicWcode,
@@ -7,262 +13,88 @@ import {
   startLobbyIfPresent,
   studentCheckIn,
   stubScreenDetails,
-} from './support/studentUi';
+} from "./support/studentUi";
 
-async function enterRuntimeBackedExam(
-  page: Page,
-  scheduleId: string,
-  wcode: string,
-) {
-  await studentCheckIn(page, scheduleId, {
-    wcode,
-    email: `e2e+${wcode.toLowerCase()}@example.com`,
-    fullName: 'E2E Candidate',
-  });
-  await openStudentSessionWithRetry(page, scheduleId, wcode);
-  await completePreCheckIfPresent(page);
-  await startLobbyIfPresent(page);
-  await openStudentSessionWithRetry(page, scheduleId, wcode);
-  await expect(page.getByLabel('Answer for question 1')).toBeVisible({ timeout: 30_000 });
+async function waitForSavedBanner(page: import("@playwright/test").Page) {
+  await expect
+    .poll(
+      async () => {
+        const banner = page.getByRole("banner");
+        return banner
+          .getByText("Saved")
+          .isVisible()
+          .catch(() => false);
+      },
+      { timeout: 30_000, message: "student answer is acknowledged as saved" }
+    )
+    .toBe(true);
 }
 
-test.describe('Student submission flow (LRW)', () => {
-  test.describe.configure({ timeout: 120_000 });
+test.describe("Student submission flow (Go runtime)", () => {
+  test.describe.configure({ timeout: 240_000 });
 
-  test('submit with unanswered questions triggers confirmation dialog', async ({
-    browser,
-  }, testInfo) => {
-    const manifest = readBackendE2EManifest();
-    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
-
-    const context = await browser.newContext();
-    await stubScreenDetails(context);
-    const page = await context.newPage();
-
-    await enterRuntimeBackedExam(page, manifest.student.scheduleId, wcode);
-
-    const answerField = page.getByLabel('Answer for question 1');
-    await answerField.fill('partial answer');
-
-    await expect
-      .poll(async () => {
-        const banner = page.getByRole('banner');
-        return banner.getByText('Saved').isVisible().catch(() => false);
-      }, { timeout: 20_000 })
-      .toBe(true);
-
-    const finishButton = page.getByRole('button', { name: 'Finish' });
-    await finishButton.scrollIntoViewIfNeeded();
-    await finishButton.click({ force: true });
-
-    const confirmationDialog = page.getByRole('dialog', { name: /submit/i });
-    const confirmationVisible = await confirmationDialog.isVisible().catch(() => false);
-
-    if (confirmationVisible) {
-      const unansweredWarning = page.getByText(/unanswered/i);
-      const hasUnansweredWarning = await unansweredWarning.isVisible().catch(() => false);
-      if (hasUnansweredWarning) {
-        await expect(unansweredWarning).toBeVisible();
-      }
-
-      const confirmSubmit = page.getByRole('button', { name: /submit|confirm/i });
-      const submitResponsePromise = page
-        .waitForResponse(
-          (response) =>
-            response.request().method() === 'POST' &&
-            response.url().includes(
-              `/api/v1/student/sessions/${manifest.student.scheduleId}/submit`,
-            ),
-          { timeout: 60_000 },
-        )
-        .catch(() => null);
-
-      await confirmSubmit.click({ force: true });
-      const submitResponse = await submitResponsePromise;
-      if (submitResponse) {
-        expect(submitResponse.ok()).toBeTruthy();
-      }
-    }
-
-    const completionHeading = page.getByRole('heading', { name: /Examination Complete!/i });
-    await expect
-      .poll(async () => {
-        if (await completionHeading.isVisible().catch(() => false)) return 'complete';
-        return 'pending';
-      }, { timeout: 45_000 })
-      .toBe('complete');
-
-    await context.close();
+  test.afterAll(async () => {
+    await closeDb();
   });
 
-  test('submit with all questions answered goes through without confirmation', async ({
+  test("student saves answers and the proctor-owned runtime auto-submits the attempt", async ({
     browser,
   }, testInfo) => {
     const manifest = readBackendE2EManifest();
+    const scheduleId = manifest.student.submissionScheduleId;
     const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
+    const email = `submission-${wcode.toLowerCase()}@example.com`;
 
-    const context = await browser.newContext();
-    await stubScreenDetails(context);
-    const page = await context.newPage();
+    const adminContext = await newAdminControlContext(browser);
+    const studentContext = await browser.newContext();
+    await stubScreenDetails(studentContext);
+    const studentPage = await studentContext.newPage();
 
-    await enterRuntimeBackedExam(page, manifest.student.scheduleId, wcode);
+    await studentCheckIn(studentPage, scheduleId, {
+      wcode,
+      email,
+      fullName: "Submission Flow Candidate",
+    });
+    await completePreCheckIfPresent(studentPage);
+    await openStudentSessionWithRetry(studentPage, scheduleId, wcode);
 
-    await page.getByLabel('Answer for question 1').fill(manifest.student.expectedAnswer);
+    await proctorStartExam(adminContext, scheduleId);
+    await startLobbyIfPresent(studentPage);
+    await openStudentSessionWithRetry(studentPage, scheduleId, wcode);
 
+    await studentPage.getByLabel("Answer for question 1").fill("saved before proctor submit");
+    await waitForSavedBanner(studentPage);
+
+    // Runtime-backed IELTS delivery has no student Finish action. The
+    // authoritative submit is the proctor's final section transition.
+    await expect(studentPage.getByRole("button", { name: "Finish" })).toHaveCount(0);
+    await proctorEndSection(adminContext, scheduleId, "listening", "advance listening");
+    await expect(studentPage.getByText("Write the missing word from the passage.")).toBeVisible({
+      timeout: 60_000,
+    });
+    await proctorEndSection(adminContext, scheduleId, "reading", "advance reading");
+    await expect(studentPage.getByText(/Task 1: Summarise/).first()).toBeVisible({
+      timeout: 60_000,
+    });
+    await proctorEndSection(adminContext, scheduleId, "writing", "complete exam");
+
+    await expect(studentPage.getByText(/Examination Complete!/i)).toBeVisible({ timeout: 60_000 });
     await expect
-      .poll(async () => {
-        const banner = page.getByRole('banner');
-        return banner.getByText('Saved').isVisible().catch(() => false);
-      }, { timeout: 20_000 })
-      .toBe(true);
-
-    const finishButton = page.getByRole('button', { name: 'Finish' });
-    const submitResponsePromise = page
-      .waitForResponse(
-        (response) =>
-          response.request().method() === 'POST' &&
-          response.url().includes(
-            `/api/v1/student/sessions/${manifest.student.scheduleId}/submit`,
-          ),
-        { timeout: 60_000 },
+      .poll(
+        async () => {
+          const rows = await queryDb<{ phase: string; submitted_at: string | null }>(
+            "SELECT phase, submitted_at FROM student_attempts WHERE schedule_id = ? AND candidate_email = ?",
+            [scheduleId, email]
+          );
+          return (
+            rows.length === 1 && rows[0]?.phase === "post-exam" && rows[0].submitted_at !== null
+          );
+        },
+        { timeout: 120_000, message: "Go worker auto-submits the student attempt" }
       )
-      .catch(() => null);
-
-    await finishButton.scrollIntoViewIfNeeded();
-    await finishButton.click({ force: true });
-
-    const submitResponse = await submitResponsePromise;
-    if (submitResponse) {
-      expect(submitResponse.ok()).toBeTruthy();
-    }
-
-    const completionHeading = page.getByRole('heading', { name: /Examination Complete!/i });
-    await expect
-      .poll(async () => {
-        if (await completionHeading.isVisible().catch(() => false)) return 'complete';
-        return 'pending';
-      }, { timeout: 45_000 })
-      .toBe('complete');
-
-    await context.close();
-  });
-
-  test('submit preserves answer integrity through the full pipeline', async ({
-    browser,
-  }, testInfo) => {
-    const manifest = readBackendE2EManifest();
-    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
-
-    const context = await browser.newContext();
-    await stubScreenDetails(context);
-    const page = await context.newPage();
-
-    const submittedValues: string[] = [];
-    await page.route(
-      `**/api/v1/student/sessions/${manifest.student.scheduleId}/mutations:batch`,
-      async (route) => {
-        const payload = route.request().postDataJSON();
-        const mutations = payload?.mutations ?? [];
-        for (const m of mutations) {
-          if (typeof m.value === 'string') submittedValues.push(m.value);
-        }
-        await route.continue();
-      },
-    );
-
-    await enterRuntimeBackedExam(page, manifest.student.scheduleId, wcode);
-
-    const answerField = page.getByLabel('Answer for question 1');
-    const finalAnswer = `integrity-${Date.now()}-verified`;
-    await answerField.fill(finalAnswer);
-
-    await expect
-      .poll(async () => {
-        const banner = page.getByRole('banner');
-        return banner.getByText('Saved').isVisible().catch(() => false);
-      }, { timeout: 20_000 })
       .toBe(true);
 
-    const finishButton = page.getByRole('button', { name: 'Finish' });
-    const submitResponsePromise = page
-      .waitForResponse(
-        (response) =>
-          response.request().method() === 'POST' &&
-          response.url().includes(
-            `/api/v1/student/sessions/${manifest.student.scheduleId}/submit`,
-          ),
-        { timeout: 60_000 },
-      )
-      .catch(() => null);
-
-    await finishButton.scrollIntoViewIfNeeded();
-    await finishButton.click({ force: true });
-
-    const submitResponse = await submitResponsePromise;
-    if (submitResponse) {
-      expect(submitResponse.ok()).toBeTruthy();
-    }
-
-    const completionHeading = page.getByRole('heading', { name: /Examination Complete!/i });
-    await expect
-      .poll(async () => {
-        if (await completionHeading.isVisible().catch(() => false)) return 'complete';
-        return 'pending';
-      }, { timeout: 45_000 })
-      .toBe('complete');
-
-    expect(submittedValues).toContain(finalAnswer);
-
-    await context.close();
-  });
-
-  test('submit is idempotent — double-clicking Finish does not create duplicate submissions', async ({
-    browser,
-  }, testInfo) => {
-    const manifest = readBackendE2EManifest();
-    const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
-
-    const context = await browser.newContext();
-    await stubScreenDetails(context);
-    const page = await context.newPage();
-
-    let submitCount = 0;
-    await page.route(
-      `**/api/v1/student/sessions/${manifest.student.scheduleId}/submit`,
-      async (route) => {
-        submitCount += 1;
-        await route.continue();
-      },
-    );
-
-    await enterRuntimeBackedExam(page, manifest.student.scheduleId, wcode);
-
-    await page.getByLabel('Answer for question 1').fill('idempotent-test');
-
-    await expect
-      .poll(async () => {
-        const banner = page.getByRole('banner');
-        return banner.getByText('Saved').isVisible().catch(() => false);
-      }, { timeout: 20_000 })
-      .toBe(true);
-
-    const finishButton = page.getByRole('button', { name: 'Finish' });
-    await finishButton.scrollIntoViewIfNeeded();
-
-    await finishButton.click({ force: true });
-    await page.waitForTimeout(200);
-    await finishButton.click({ force: true }).catch(() => {});
-
-    const completionHeading = page.getByRole('heading', { name: /Examination Complete!/i });
-    await expect
-      .poll(async () => {
-        if (await completionHeading.isVisible().catch(() => false)) return 'complete';
-        return 'pending';
-      }, { timeout: 45_000 })
-      .toBe('complete');
-
-    expect(submitCount).toBeLessThanOrEqual(1);
-
-    await context.close();
+    await studentContext.close();
+    await adminContext.close();
   });
 });

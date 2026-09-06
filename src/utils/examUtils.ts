@@ -7,6 +7,7 @@ import {
   FlowChartBlock, TableCompletionBlock, NoteCompletionBlock, ClassificationBlock,
   MatchingFeaturesBlock, ShortAnswerQuestion, SentenceCompletionQuestion,
   NoteCompletionQuestion, ClassificationItem, MatchingFeature, SingleMCQQuestion,
+  ActScienceStimulus, ACT_SCIENCE_SKILL_CATEGORIES,
   SentenceBlank, TableCell, QuestionType
 } from '../types';
 import { createDefaultConfig, normalizeExamConfig } from '../constants/examDefaults';
@@ -14,6 +15,7 @@ import { hydrateExamState } from '../features/exam-authoring/infrastructure/exam
 import { resolveAcceptedAnswers } from './acceptedAnswers';
 import { getMultiSelectCorrectCount, getMultiSelectSelectionLimit } from './multiSelectMcq';
 import { countUniqueSharedSentenceKeys } from './sentenceCompletionAnswerPool';
+import { createId } from './idUtils';
 
 /**
  * A single question as far as counting, numbering, and TXT export are concerned.
@@ -769,6 +771,65 @@ export const validateListeningModule = (parts: ListeningPart[]): ValidationError
   return errors;
 };
 
+export const getActScienceTotalQuestions = (stimuli: ActScienceStimulus[]): number =>
+  stimuli.reduce(
+    (total, stimulus) => total + stimulus.blocks.reduce((count, block) => count + (block.questions?.length || 1), 0),
+    0,
+  );
+
+export const validateActScienceModule = (stimuli: ActScienceStimulus[]): ValidationError[] => {
+  const errors: ValidationError[] = [];
+  const allowedSkills = new Set(ACT_SCIENCE_SKILL_CATEGORIES.map((category) => category.value));
+
+  if (stimuli.length === 0) {
+    errors.push({ field: 'science.stimuli', message: 'At least one ACT Science stimulus is required', type: 'error' });
+    return errors;
+  }
+
+  stimuli.forEach((stimulus, stimulusIndex) => {
+    const stimulusPath = `science.stimuli[${stimulusIndex}]`;
+    if (!stimulus.title.trim()) {
+      errors.push({ field: `${stimulusPath}.title`, message: `Stimulus ${stimulusIndex + 1} title is required`, type: 'error' });
+    }
+    if (!stimulus.content.trim()) {
+      errors.push({ field: `${stimulusPath}.content`, message: `Stimulus ${stimulusIndex + 1} content is required`, type: 'error' });
+    }
+    if (stimulus.blocks.length === 0) {
+      errors.push({ field: `${stimulusPath}.blocks`, message: `Stimulus ${stimulusIndex + 1} needs at least one question`, type: 'error' });
+      return;
+    }
+
+    stimulus.blocks.forEach((block, blockIndex) => {
+      const questions = block.questions?.length
+        ? block.questions
+        : [{ id: block.id, stem: block.stem, options: block.options }];
+      questions.forEach((question, questionIndex) => {
+        const questionPath = `${stimulusPath}.blocks[${blockIndex}].questions[${questionIndex}]`;
+        if (!question.stem.trim()) {
+          errors.push({ field: `${questionPath}.stem`, message: `Question ${questionIndex + 1} stem is required`, type: 'error' });
+        }
+        if (question.options.length !== 4) {
+          errors.push({ field: `${questionPath}.options`, message: `Question ${questionIndex + 1} must have exactly four options`, type: 'error' });
+        }
+        const correctCount = question.options.filter((option) => option.isCorrect).length;
+        if (correctCount !== 1) {
+          errors.push({ field: `${questionPath}.options`, message: `Question ${questionIndex + 1} must have exactly one correct option`, type: 'error' });
+        }
+        question.options.forEach((option, optionIndex) => {
+          if (!option.text.trim()) {
+            errors.push({ field: `${questionPath}.options[${optionIndex}].text`, message: `Option ${optionIndex + 1} in question ${questionIndex + 1} is required`, type: 'error' });
+          }
+        });
+        if (!question.skillCategory || !allowedSkills.has(question.skillCategory)) {
+          errors.push({ field: `${questionPath}.skillCategory`, message: `Question ${questionIndex + 1} needs a valid ACT Science skill category`, type: 'error' });
+        }
+      });
+    });
+  });
+
+  return errors;
+};
+
 export const canPublishExam = (exam: Exam): { canPublish: boolean; errors: ValidationError[] } => {
   const errors: ValidationError[] = [];
   
@@ -785,7 +846,7 @@ export const canPublishExam = (exam: Exam): { canPublish: boolean; errors: Valid
   };
 };
 
-const toRoman = (num: number): string => {
+export const toRoman = (num: number): string => {
   const roman = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi', 'xii'];
   return roman[num] || num.toString();
 };
@@ -858,7 +919,7 @@ const migrateLegacyBlock = (block: LegacyBlock): QuestionBlock => {
         type: 'TFNG',
         mode: 'TFNG',
         questions: (block.questions || []).map((q) => ({
-          id: q.id || `q${Date.now()}${Math.random()}`,
+          id: q.id || createId('q'),
           statement: q.text || q.statement || '',
           correctAnswer: q.answer === 'T' ? 'T' : q.answer === 'F' ? 'F' : q.answer === 'NG' ? 'NG' : 'T'
         }))
@@ -870,7 +931,7 @@ const migrateLegacyBlock = (block: LegacyBlock): QuestionBlock => {
         type: 'CLOZE',
         answerRule: 'TWO_WORDS',
         questions: (block.questions || []).map((q) => ({
-          id: q.id || `q${Date.now()}${Math.random()}`,
+          id: q.id || createId('q'),
           prompt: q.text || q.prompt || '',
           correctAnswer: q.answer || ''
         }))
@@ -881,11 +942,11 @@ const migrateLegacyBlock = (block: LegacyBlock): QuestionBlock => {
         ...baseBlock,
         type: 'MATCHING',
         headings: (block.headings || []).map((h) => ({
-          id: h.id || `h${Date.now()}${Math.random()}`,
+          id: h.id || createId('h'),
           text: h.text || ''
         })),
         questions: (block.questions || []).map((q) => ({
-          id: q.id || `q${Date.now()}${Math.random()}`,
+          id: q.id || createId('q'),
           paragraphLabel: q.paragraph || q.paragraphLabel || '',
           correctHeading: q.answer || q.correctHeading || ''
         }))
@@ -897,7 +958,7 @@ const migrateLegacyBlock = (block: LegacyBlock): QuestionBlock => {
         type: 'MAP',
         assetUrl: block.assetUrl || '',
         questions: (block.questions || []).map((q) => ({
-          id: q.id || `q${Date.now()}${Math.random()}`,
+          id: q.id || createId('q'),
           label: q.label || q.text || '',
           correctAnswer: q.answer || '',
           x: q.x ?? 50,
@@ -907,7 +968,7 @@ const migrateLegacyBlock = (block: LegacyBlock): QuestionBlock => {
       
     case 'MULTI_MCQ': {
       const options = (block.options || []).map((o) => ({
-        id: o.id || `o${Date.now()}${Math.random()}`,
+        id: o.id || createId('o'),
         text: o.text || '',
         isCorrect: o.isCorrect || false
       }));
@@ -968,7 +1029,7 @@ const migrateLegacyListeningPart = (part: LegacyListeningPart): ListeningPart =>
     title: part.title || '',
     audioUrl: part.audioUrl ?? '',
     pins: (part.pins || []).map((p) => ({
-      id: p.id || `pin${Date.now()}${Math.random()}`,
+      id: p.id || createId('pin'),
       time: p.time || '00:00',
       label: p.label || ''
     })),
@@ -984,7 +1045,7 @@ export const migrateExam = (exam: Exam): Exam => {
       ...content,
       config: createDefaultConfig(
         exam.type,
-        exam.type as ExamConfig['general']['preset']
+        exam.type === 'ACT' ? 'ACT Science' : exam.type as ExamConfig['general']['preset'],
       )
     } as ExamState;
   }

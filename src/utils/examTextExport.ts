@@ -19,6 +19,7 @@ import {
   enumerateBlockQuestionUnits,
   sentenceBlankGroupKey,
   tableCellGroupKey,
+  toRoman,
   type QuestionUnit,
 } from './examUtils';
 
@@ -74,13 +75,20 @@ function formatOptionWithLetter(option: MCQOption, index: number): string {
 }
 
 function mapMatchingHeadingDisplay(block: MatchingBlock, headingId: string): string {
-  const matching = block.headings.find((heading) => heading.id === headingId);
-  if (!matching) {
-    return headingId;
+  const byId = block.headings.find((heading) => heading.id === headingId);
+  if (byId) {
+    const text = toPlainText(byId.text);
+    return text ? `${byId.id}. ${text}` : byId.id;
   }
 
-  const text = toPlainText(matching.text);
-  return text ? `${matching.id}. ${text}` : matching.id;
+  const romanIndex = block.headings.findIndex((_, index) => toRoman(index) === headingId);
+  const byRoman = romanIndex >= 0 ? block.headings[romanIndex] : undefined;
+  if (byRoman) {
+    const text = toPlainText(byRoman.text);
+    return text ? `${headingId}. ${text}` : headingId;
+  }
+
+  return headingId;
 }
 
 function buildMcqAnswerDisplay(options: MCQOption[], answerIds: string[]): string {

@@ -72,16 +72,7 @@ test.describe('Application smoke tests', () => {
     await adminPage.goto('/admin/exams');
     await adminPage.waitForLoadState('networkidle');
     
-    // Check if page loaded successfully or shows loading/error state
-    const loadingText = adminPage.getByText('Loading Admin...');
-    const isloading = await loadingText.isVisible().catch(() => false);
-    
-    if (isloading) {
-      throw new Error('Admin page stuck in loading state');
-    }
-    
-    // TODO: Fix selector - temporarily skipping this assertion
-    // await expect(adminPage.getByRole('heading', { name: /Exam Library/i })).toBeVisible();
+    await expect(adminPage.getByRole('heading', { name: 'Exam Library' })).toBeVisible();
 
     await adminContext.close();
   });
@@ -95,8 +86,7 @@ test.describe('Application smoke tests', () => {
 
     await builderPage.goto(`/builder/${manifest.builder.examId}/builder`);
     await builderPage.waitForLoadState('networkidle');
-    // TODO: Fix selector - temporarily skipping this assertion
-    // await expect(builderPage.getByLabel('Exam title')).toBeVisible();
+    await expect(builderPage.getByLabel('Exam title')).toBeVisible();
 
     await builderContext.close();
   });
@@ -109,8 +99,7 @@ test.describe('Application smoke tests', () => {
 
     await proctorPage.goto('/proctor');
     await proctorPage.waitForLoadState('networkidle');
-    // TODO: Fix selector - temporarily skipping this assertion
-    // await expect(proctorPage.getByRole('heading', { name: /Cohorts and students/i })).toBeVisible();
+    await expect(proctorPage.getByRole('heading', { name: 'Cohorts and students' })).toBeVisible();
 
     await adminContext.close();
   });

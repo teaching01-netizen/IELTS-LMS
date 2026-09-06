@@ -16,9 +16,9 @@ function loadEnvFile(filePath: string) {
   dotenv.config({ path: filePath, override: false });
 }
 
-function runCargoCommand(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn('cargo', args, {
+function runGoCommand(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
+	return new Promise<void>((resolve, reject) => {
+		const child = spawn('go', args, {
       cwd,
       env,
       stdio: 'inherit',
@@ -31,7 +31,7 @@ function runCargoCommand(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
         return;
       }
 
-      reject(new Error(`e2e cargo command failed with exit code ${code ?? 'unknown'}`));
+		reject(new Error(`e2e Go command failed with exit code ${code ?? 'unknown'}`));
     });
   });
 }
@@ -41,30 +41,28 @@ export default async function globalSetup(config: FullConfig) {
   const backendRoot = path.resolve(workspaceRoot, 'backend');
   const frontendOrigin = config.projects[0]?.use?.baseURL?.toString() ?? 'http://localhost:3000';
 
-  loadEnvFile(path.resolve(workspaceRoot, '.env'));
-  loadEnvFile(path.resolve(backendRoot, '.env'));
-  loadEnvFile(path.resolve(workspaceRoot, '.env.example'));
+	loadEnvFile(path.resolve(workspaceRoot, '.env'));
+	loadEnvFile(path.resolve(backendRoot, '.env'));
+	loadEnvFile(path.resolve(workspaceRoot, '.env.example'));
 
-  process.env.AUTH_COOKIE_SECURE ??= 'false';
-  process.env.AUTH_SESSION_COOKIE_NAME ??= 'session';
-  process.env.AUTH_CSRF_COOKIE_NAME ??= 'csrf';
+	process.env.COOKIE_SECURE ??= 'false';
+	process.env.SESSION_COOKIE_NAME ??= 'session';
+	process.env.CSRF_COOKIE_NAME ??= 'csrf';
+	process.env.APP_ENV ??= 'test';
+	process.env.MIGRATIONS_DIR ??= 'migrations';
 
   await fs.mkdir(GENERATED_DIR, { recursive: true });
 
-  await runCargoCommand(
-    ['run', '-p', 'ielts-backend-api', '--bin', 'migrate'],
-    backendRoot,
-    process.env,
-  );
+	await runGoCommand(
+		['run', './cmd/migrate'],
+		path.resolve(backendRoot, 'go'),
+		process.env,
+	);
 
-  const cargoArgs = [
-    'run',
-    '-p',
-    'ielts-backend-api',
-    '--bin',
-    'e2e_seed',
-    '--',
-    '--manifest',
+	const seedArgs = [
+		'run',
+		'./cmd/e2e_seed',
+		'--manifest',
     MANIFEST_PATH,
     '--builder-storage',
     BUILDER_STORAGE_STATE_PATH,
@@ -78,5 +76,5 @@ export default async function globalSetup(config: FullConfig) {
     frontendOrigin,
   ];
 
-  await runCargoCommand(cargoArgs, backendRoot, process.env);
+	await runGoCommand(seedArgs, path.resolve(backendRoot, 'go'), process.env);
 }

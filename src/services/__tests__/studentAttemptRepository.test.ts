@@ -246,104 +246,6 @@ describe("studentAttemptRepository", () => {
     expect(remaining.map((event) => event.id)).toEqual(["hb-2", "hb-3"]);
   });
 
-  it("clears pending mutations only after explicit per-mutation acknowledgement", async () => {
-    const attempt = makeAttempt({
-      answers: { q1: "A" },
-      recovery: { ...makeAttempt().recovery, clientSessionId: "client-session-2" },
-      integrity: { ...makeAttempt().integrity, clientSessionId: "client-session-2" },
-    });
-    await studentAttemptRepository.saveAttempt(attempt);
-    storeAttemptCredential(attempt);
-
-    await studentAttemptRepository.savePendingMutations(attempt.id, [
-      {
-        id: "mutation-1",
-        attemptId: attempt.id,
-        scheduleId: attempt.scheduleId,
-        timestamp: "2026-01-10T09:00:01.000Z",
-        type: "answer",
-        payload: { questionId: "q1", value: "A" },
-      },
-    ]);
-
-    const post = vi.mocked(backendPost);
-    post.mockResolvedValueOnce({
-      appliedMutationCount: 1,
-      serverAcceptedThroughSeq: 1,
-      revision: 2,
-      mutationResults: [
-        { mutationId: "mutation-1", status: "applied", serverSeq: 1, appliedRevision: 2 },
-      ],
-    });
-
-    await studentAttemptRepository.saveAttempt(attempt);
-
-    expect(post).toHaveBeenCalledWith(
-      "/v1/student/sessions/schedule-1/mutations:batch",
-      expect.objectContaining({
-        attemptId: attempt.id,
-        mutations: [
-          expect.objectContaining({
-            mutationId: "mutation-1",
-            type: "SetScalar",
-            questionId: "q1",
-            value: "A",
-          }),
-        ],
-      }),
-      expect.any(Object)
-    );
-    expect(await studentAttemptRepository.getPendingMutations(attempt.id)).toEqual([]);
-    const cachedAttempts = await studentAttemptRepository.getAttemptsByScheduleId(
-      attempt.scheduleId
-    );
-    expect(cachedAttempts[0]?.answers).toEqual({ q1: "A" });
-    expect(cachedAttempts[0]?.recovery.serverAcceptedThroughSeq).toBe(1);
-  });
-
-  it("preserves malformed durable mutations instead of silently clearing or skipping them", async () => {
-    const attempt = makeAttempt({
-      answers: { q1: "SERVER" },
-      recovery: { ...makeAttempt().recovery, clientSessionId: "client-session-2" },
-      integrity: { ...makeAttempt().integrity, clientSessionId: "client-session-2" },
-    });
-    await studentAttemptRepository.saveAttempt(attempt);
-    storeAttemptCredential(attempt);
-
-    const pending: StudentAttemptMutation[] = [
-      {
-        id: "mutation-malformed",
-        attemptId: attempt.id,
-        scheduleId: attempt.scheduleId,
-        timestamp: "2026-01-10T09:00:01.000Z",
-        type: "answer",
-        payload: {
-          questionId: "q1",
-          value: undefined,
-        } as unknown as StudentAttemptMutation["payload"],
-      } as unknown as StudentAttemptMutation,
-      {
-        id: "mutation-valid",
-        attemptId: attempt.id,
-        scheduleId: attempt.scheduleId,
-        timestamp: "2026-01-10T09:00:02.000Z",
-        type: "answer",
-        payload: { questionId: "q2", value: "A" },
-      },
-    ];
-    await studentAttemptRepository.savePendingMutations(attempt.id, pending);
-
-    await expect(studentAttemptRepository.saveAttempt(attempt)).rejects.toThrow(
-      /could not be encoded; durable queue was preserved/i
-    );
-    expect(vi.mocked(backendPost)).not.toHaveBeenCalled();
-    expect(
-      (await studentAttemptRepository.getPendingMutations(attempt.id)).map((m) => m.id)
-    ).toEqual(["mutation-malformed", "mutation-valid"]);
-    const cached = await getCachedAttempt(attempt.id);
-    expect(cached?.answers.q1).toBe("SERVER");
-  });
-
   it("preserves cached local answers when local accepted sequence is newer than incoming", async () => {
     const localAttempt = makeAttempt({
       answers: { q1: "LOCAL" },
@@ -455,53 +357,6 @@ describe("studentAttemptRepository", () => {
     const cached = await getCachedAttempt(localAttempt.id);
     expect(cached?.answers.q1).toBe("SERVER_EQUAL");
     expect(cached?.recovery.serverAcceptedThroughSeq).toBe(7);
-  });
-
-  it("chunks pending mutation flushes to respect server caps", async () => {
-    const attempt = makeAttempt({
-      phase: "exam",
-      currentModule: "listening",
-      integrity: { ...makeAttempt().integrity, clientSessionId: "client-session-2" },
-      recovery: { ...makeAttempt().recovery, clientSessionId: "client-session-2" },
-    });
-    await studentAttemptRepository.saveAttempt(attempt);
-    storeAttemptCredential(attempt);
-
-    const pending: StudentAttemptMutation[] = Array.from({ length: 205 }, (_value, index) => ({
-      id: `m-${index + 1}`,
-      attemptId: attempt.id,
-      scheduleId: attempt.scheduleId,
-      timestamp: new Date(2026, 0, 10, 9, 0, index).toISOString(),
-      type: "answer",
-      payload: { questionId: "q1", value: "A" },
-    }));
-    await studentAttemptRepository.savePendingMutations(attempt.id, pending);
-
-    const post = vi.mocked(backendPost);
-    let acceptedThrough = 0;
-    post.mockImplementation(async (_endpoint, body) => {
-      const payload = body as { mutations: Array<{ mutationId: string }> };
-      const priorAcceptedThrough = acceptedThrough;
-      acceptedThrough += payload.mutations.length;
-      return {
-        appliedMutationCount: payload.mutations.length,
-        serverAcceptedThroughSeq: acceptedThrough,
-        revision: acceptedThrough,
-        mutationResults: payload.mutations.map((mutation, index) => ({
-          mutationId: mutation.mutationId,
-          status: "applied" as const,
-          serverSeq: priorAcceptedThrough + index + 1,
-          appliedRevision: priorAcceptedThrough + index + 1,
-        })),
-      };
-    });
-
-    await studentAttemptRepository.saveAttempt(attempt);
-
-    const callSizes = post.mock.calls.map(
-      (call) => (call[1] as { mutations: unknown[] }).mutations.length
-    );
-    expect(callSizes).toEqual([100, 100, 5]);
   });
 
   it("retains distinct slot-index answer mutations when pending mutations are compacted", async () => {
@@ -849,5 +704,20 @@ describe("studentAttemptRepository", () => {
     };
 
     expect(backendConflictReason(error)).toBe("FINAL_FLUSH_REQUIRED");
+  });
+
+  it("extracts conflict reason from canonical ApiError details", async () => {
+    const { ApiError } = await import("../../shared/api-client/errors");
+    const { backendConflictReason } = await import("../studentAttemptRepository");
+
+    const error = new ApiError({
+      code: "CONFLICT",
+      message: "Conflict",
+      status: 409,
+      details: { reason: "SECTION_MISMATCH" },
+      requestId: "req-1",
+    });
+
+    expect(backendConflictReason(error)).toBe("SECTION_MISMATCH");
   });
 });

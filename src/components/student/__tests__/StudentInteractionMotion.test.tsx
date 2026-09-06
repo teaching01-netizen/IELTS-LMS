@@ -199,7 +199,7 @@ describe('student interaction motion class contracts', () => {
       renderHeader();
       fireEvent.click(screen.getByRole('button', { name: 'Choose highlight color' }));
 
-      for (const name of ['Yellow', 'Pink', 'Green', 'Blue', 'Purple']) {
+      for (const name of ['Yellow', 'Amber', 'Green', 'Blue', 'Purple']) {
         expect(screen.getByRole('button', { name })).toHaveClass(pressRecipe);
         expect(screen.getByRole('button', { name })).toHaveClass('hover:bg-gray-100');
       }
@@ -245,7 +245,7 @@ describe('student interaction motion class contracts', () => {
         expect(screen.getByRole('button', { name })).toHaveClass(pressRecipe);
         expect(screen.getByRole('button', { name })).toHaveClass('hover:bg-gray-50');
       }
-      for (const name of ['Yellow', 'Pink', 'Green', 'Blue', 'Purple']) {
+      for (const name of ['Yellow', 'Amber', 'Green', 'Blue', 'Purple']) {
         expect(screen.getByRole('button', { name })).toHaveClass(pressRecipe);
         expect(screen.getByRole('button', { name })).toHaveClass('hover:bg-gray-50');
       }

@@ -46,9 +46,7 @@ describe("useQuestionAutosave offline behavior", () => {
   it("keeps edits local while offline and retries the newest draft after reconnecting", async () => {
     setOnline(false);
     const save = vi.fn().mockResolvedValue(revision);
-    const hook = renderHook(() =>
-      useQuestionAutosave({ save, durableKey: null, debounceMs: 0 }),
-    );
+    const hook = renderHook(() => useQuestionAutosave({ save, durableKey: null, debounceMs: 0 }));
 
     act(() => hook.result.current.scheduleAutosave(revision));
 
@@ -59,6 +57,6 @@ describe("useQuestionAutosave offline behavior", () => {
     act(() => window.dispatchEvent(new Event("online")));
 
     await waitFor(() => expect(save).toHaveBeenCalledWith(revision));
-    expect(hook.result.current.status).toBe("saved");
+    await waitFor(() => expect(hook.result.current.status).toBe("saved"));
   });
 });

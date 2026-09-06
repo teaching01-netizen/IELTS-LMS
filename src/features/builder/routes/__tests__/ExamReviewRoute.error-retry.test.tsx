@@ -5,6 +5,7 @@ import { ExamReviewRoute } from '../ExamReviewRoute';
 
 const mockNavigate = vi.fn();
 const mockReload = vi.fn().mockResolvedValue(undefined);
+const mockBackToAdmin = vi.fn();
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
@@ -29,7 +30,7 @@ const errorController = {
   handleOpenScheduling: vi.fn(),
   loadScheduleContent: vi.fn(),
   handleCreateSchedule: vi.fn(),
-  handleBackToAdmin: vi.fn(),
+  handleBackToAdmin: mockBackToAdmin,
   reload: mockReload,
 };
 
@@ -69,6 +70,9 @@ describe('ExamReviewRoute error retry', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockReload.mockClear().mockResolvedValue(undefined);
+    // Restore the default failing-load state mutated by the not-found test.
+    errorController.error = 'Review exploded';
+    errorController.exam = undefined;
   });
 
   it('offers a retry action when loading the review fails', () => {
@@ -77,5 +81,16 @@ describe('ExamReviewRoute error retry', () => {
     expect(screen.getByText('Review exploded')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /retry/i }));
     expect(mockReload).toHaveBeenCalled();
+  });
+
+  it('offers a way back to admin when the exam is not found', () => {
+    errorController.error = null;
+    errorController.exam = undefined;
+
+    render(<ExamReviewRoute />);
+
+    expect(screen.getByText('Exam Not Found')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /back to admin/i }));
+    expect(mockBackToAdmin).toHaveBeenCalled();
   });
 });

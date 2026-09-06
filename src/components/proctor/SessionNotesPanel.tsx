@@ -49,6 +49,30 @@ export function SessionNotesPanel({ notes, scheduleId, currentProctor, onUpdateN
     handover: 'bg-orange-100 text-orange-800 border-orange-200'
   };
 
+  // Persist with optimistic apply + rollback so the panel stays responsive
+  // while the backend request is in flight.
+  const [persistError, setPersistError] = useState<string | null>(null);
+  const [pendingNoteId, setPendingNoteId] = useState<string | null>(null);
+  const persistNotes = async (next: SessionNote[], pendingId: string | null, deletedId: string | null, previous: SessionNote[]) => {
+    setPendingNoteId(pendingId);
+    setPersistError(null);
+    onUpdateNotes(next);
+    try {
+      const { examRepository } = await import('../../features/proctor/infrastructure/proctorGateway');
+      const changed = pendingId ? next.find((note) => note.id === pendingId) : undefined;
+      if (deletedId) {
+        await examRepository.deleteSessionNote(deletedId);
+      } else if (changed) {
+        await examRepository.saveSessionNote(changed);
+      }
+    } catch (error) {
+      onUpdateNotes(previous);
+      setPersistError(error instanceof Error ? error.message : 'Failed to save note.');
+    } finally {
+      setPendingNoteId(null);
+    }
+  };
+
   const handleSaveNote = () => {
     if (!newNoteContent.trim()) return;
 
@@ -62,7 +86,7 @@ export function SessionNotesPanel({ notes, scheduleId, currentProctor, onUpdateN
       isResolved: false
     };
 
-    onUpdateNotes([...notes, newNote]);
+    void persistNotes([...notes, newNote], newNote.id, null, notes);
     setNewNoteContent('');
     setShowNewNote(false);
     setNewNoteCategory('general');
@@ -70,14 +94,14 @@ export function SessionNotesPanel({ notes, scheduleId, currentProctor, onUpdateN
 
   const handleDeleteNote = (noteId: string) => {
     const updatedNotes = notes.filter(note => note.id !== noteId);
-    onUpdateNotes(updatedNotes);
+    void persistNotes(updatedNotes, null, noteId, notes);
   };
 
   const handleToggleResolved = (noteId: string) => {
     const updatedNotes = notes.map(note =>
       note.id === noteId ? { ...note, isResolved: !note.isResolved } : note
     );
-    onUpdateNotes(updatedNotes);
+    void persistNotes(updatedNotes, noteId, null, notes);
   };
 
   const formatTime = (timestamp: string) => {
@@ -123,6 +147,16 @@ export function SessionNotesPanel({ notes, scheduleId, currentProctor, onUpdateN
             <X size={20} />
           </button>
         </div>
+        {persistError ? (
+          <p className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+            {persistError}
+          </p>
+        ) : null}
+        {pendingNoteId ? (
+          <p className="mb-3 text-xs text-slate-500" role="status" aria-live="polite">
+            Saving note…
+          </p>
+        ) : null}
 
         {/* Filter Controls */}
         <div className="flex items-center gap-2">

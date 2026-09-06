@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer } from 'react';
+import { useCallback, useMemo, useReducer, useRef } from 'react';
 
 interface HistoryEntry<T> {
   label: string;
@@ -96,6 +96,35 @@ function historyReducer<T>(state: HistoryState<T>, action: HistoryAction<T>): Hi
   }
 }
 
+function applySetToMirror<T>(mirror: HistoryState<T>, label: string, limit: number, next: T): void {
+  if (Object.is(next, mirror.present.value)) return;
+  const nextPast = [...mirror.past, mirror.present];
+  mirror.past = nextPast.length > limit ? nextPast.slice(nextPast.length - limit) : nextPast;
+  mirror.future = [];
+  mirror.present = { label, value: next };
+}
+
+/**
+ * Undo/redo history for builder state. Backward compatible: the existing
+ * `{ state, canUndo, canRedo, ..., setState, undo, redo, reset }` shape is
+ * unchanged; the additions below are purely additive.
+ *
+ * Added (additive only):
+ * - `getSnapshot()` — synchronous post-update snapshot of the present value.
+ *   `dispatch` (useReducer) applies asynchronously, so `history.state` read
+ *   immediately after `setState/undo/redo/reset` still holds the previous
+ *   value. Call sites that must act on the new value synchronously (e.g.
+ *   `currentStateRef.current = next; scheduleAutosave(next)`) should use the
+ *   value returned by the mutator itself or `getSnapshot()`.
+ * - `setState`/`undo`/`redo`/`reset` now RETURN the post-update present value,
+ *   so `const next = history.setState(v, label)` replaces the
+ *   read-after-dispatch anti-pattern without breaking existing callers that
+ *   ignore the return value.
+ *
+ * The mirror ref replicates the pure reducer transitions eagerly so returns
+ * and `getSnapshot()` are correct between dispatch and re-render; the reducer
+ * remains the source of truth for rendering and the two converge after flush.
+ */
 export function useUndoRedo<T>(initialState: T, options: UndoRedoOptions = {}) {
   const { limit = Number.POSITIVE_INFINITY, initialLabel = 'Initial state' } = options;
   const [history, dispatch] = useReducer(historyReducer<T>, {
@@ -106,37 +135,67 @@ export function useUndoRedo<T>(initialState: T, options: UndoRedoOptions = {}) {
       value: initialState,
     },
   });
+  const mirrorRef = useRef<HistoryState<T>>({
+    future: [],
+    past: [],
+    present: { label: initialLabel, value: initialState },
+  });
 
   const setState = useCallback(
-    (nextState: T | ((current: T) => T), label = 'Updated') => {
+    (nextState: T | ((current: T) => T), label = 'Updated'): T => {
+      const mirror = mirrorRef.current;
+      const resolved =
+        typeof nextState === 'function' ? (nextState as (prev: T) => T)(mirror.present.value) : nextState;
+      applySetToMirror(mirror, label, limit, resolved);
       dispatch({
         type: 'set',
         label,
         limit,
         nextValue: nextState,
       });
+      return mirror.present.value;
     },
     [limit],
   );
 
-  const undo = useCallback(() => {
+  const undo = useCallback((): T => {
+    const mirror = mirrorRef.current;
+    const previousEntry = mirror.past[mirror.past.length - 1];
+    if (previousEntry) {
+      mirror.future = [mirror.present, ...mirror.future];
+      mirror.past = mirror.past.slice(0, -1);
+      mirror.present = previousEntry;
+    }
     dispatch({ type: 'undo' });
+    return mirror.present.value;
   }, []);
 
-  const redo = useCallback(() => {
+  const redo = useCallback((): T => {
+    const mirror = mirrorRef.current;
+    const [nextEntry, ...remaining] = mirror.future;
+    if (nextEntry) {
+      mirror.past = [...mirror.past, mirror.present];
+      mirror.future = remaining;
+      mirror.present = nextEntry;
+    }
     dispatch({ type: 'redo' });
+    return mirror.present.value;
   }, []);
 
   const reset = useCallback(
-    (nextState: T, label = initialLabel) => {
+    (nextState: T, label = initialLabel): T => {
+      mirrorRef.current = { future: [], past: [], present: { label, value: nextState } };
       dispatch({
         type: 'reset',
         label,
         nextValue: nextState,
       });
+      return nextState;
     },
     [initialLabel],
   );
+
+  const getSnapshot = useCallback((): T => mirrorRef.current.present.value, []);
 
   return useMemo(
     () => ({
@@ -152,7 +211,8 @@ export function useUndoRedo<T>(initialState: T, options: UndoRedoOptions = {}) {
       undo,
       redo,
       reset,
+      getSnapshot,
     }),
-    [history, redo, reset, setState, undo],
+    [history, redo, reset, setState, undo, getSnapshot],
   );
 }

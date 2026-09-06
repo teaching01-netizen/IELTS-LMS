@@ -13,14 +13,9 @@ import {
   backendConflictReason,
   buildQueuedMutationUpdate,
   buildStudentHeartbeatEvent,
-  clearAttemptMutationWatermark,
-  createStudentMutationOutbox,
   ensureClientSessionIdForAttempt,
-  hasAttemptCredential,
   mapBackendStudentAttempt,
   PendingMutationDurabilityMirror,
-  readAnswerSyncCheckpoint,
-  refreshAttemptCredentialForAttempt,
   rotateClientSessionIdForAttempt,
   restoreClientSessionIdForAttempt,
   saveStudentAuditEvent,
@@ -50,7 +45,6 @@ import type {
   StudentAttemptMutationType,
   StudentPreCheckResult,
 } from "../../../types/studentAttempt";
-import { emitAnswerMutationDebugLog } from "../answerMutationDebug";
 import {
   useStudentRuntime,
   useStudentRuntimeSession,
@@ -110,7 +104,6 @@ interface StudentAttemptProviderProps {
   scheduleId?: string | undefined;
   attemptSnapshot?: StudentAttempt | null;
   persistenceEnabled?: boolean | undefined;
-  useV2DurabilityEngine?: boolean | undefined;
   writingQuestionIds?: readonly string[] | undefined;
 }
 
@@ -126,22 +119,6 @@ const StudentAttemptContext = createContext<StudentAttemptContextValue | null>(n
 const StudentAttemptControlContext = createContext<StudentAttemptControlContextValue | null>(null);
 const ANSWER_DURABLE_WRITE_DEBOUNCE_MS = 100;
 const BOUNDARY_IMMEDIATE_DURABILITY_THRESHOLD_SECONDS = 20;
-
-function pendingMutationOldestAgeMs(mutations: StudentAttemptMutation[]): number | null {
-  let oldest = Number.POSITIVE_INFINITY;
-  for (const mutation of mutations) {
-    const ts = Date.parse(mutation.timestamp);
-    if (Number.isFinite(ts) && ts < oldest) {
-      oldest = ts;
-    }
-  }
-
-  if (!Number.isFinite(oldest)) {
-    return null;
-  }
-
-  return Math.max(0, Date.now() - oldest);
-}
 
 function detectClientDeviceClass(): "phone" | "tablet" | "desktop" | "unknown" {
   if (typeof navigator === "undefined") {
@@ -245,97 +222,15 @@ function mergeAttempt(attempt: StudentAttempt, patch: AttemptPatch): StudentAtte
   };
 }
 
-function shouldPreferLocalAttemptState(
-  localAttempt: StudentAttempt,
-  incomingAttempt: StudentAttempt
-): boolean {
-  const localAcceptedSeq = localAttempt.recovery.serverAcceptedThroughSeq ?? 0;
-  const incomingAcceptedSeq = incomingAttempt.recovery.serverAcceptedThroughSeq ?? 0;
-  if (localAcceptedSeq > incomingAcceptedSeq) {
-    return true;
-  }
-  if (localAcceptedSeq < incomingAcceptedSeq) {
-    return false;
-  }
-
-  const localRevision =
-    typeof localAttempt.revision === "number" && Number.isFinite(localAttempt.revision)
-      ? localAttempt.revision
-      : null;
-  const incomingRevision =
-    typeof incomingAttempt.revision === "number" && Number.isFinite(incomingAttempt.revision)
-      ? incomingAttempt.revision
-      : null;
-
-  if (localRevision !== null || incomingRevision !== null) {
-    if (localRevision !== null && incomingRevision === null) {
-      return true;
-    }
-    if (localRevision === null && incomingRevision !== null) {
-      return false;
-    }
-    if (localRevision !== null && incomingRevision !== null) {
-      if (localRevision > incomingRevision) {
-        return true;
-      }
-      if (localRevision < incomingRevision) {
-        return false;
-      }
-    }
-  }
-
-  const hasLocalMutationSignal =
-    Boolean(localAttempt.recovery.lastLocalMutationAt) ||
-    localAttempt.recovery.pendingMutationCount > 0 ||
-    localAttempt.recovery.finalSubmissionPending;
-  if (hasLocalMutationSignal) {
-    return true;
-  }
-
-  const localFingerprint = JSON.stringify({
-    phase: localAttempt.phase,
-    currentModule: localAttempt.currentModule,
-    currentQuestionId: localAttempt.currentQuestionId,
-    answers: localAttempt.answers,
-    writingAnswers: localAttempt.writingAnswers,
-    flags: localAttempt.flags,
-  });
-  const incomingFingerprint = JSON.stringify({
-    phase: incomingAttempt.phase,
-    currentModule: incomingAttempt.currentModule,
-    currentQuestionId: incomingAttempt.currentQuestionId,
-    answers: incomingAttempt.answers,
-    writingAnswers: incomingAttempt.writingAnswers,
-    flags: incomingAttempt.flags,
-  });
-  if (localFingerprint !== incomingFingerprint) {
-    return true;
-  }
-
-  if (
-    localAttempt.recovery.syncState === "saved" &&
-    incomingAttempt.recovery.syncState === "idle"
-  ) {
-    return true;
-  }
-
-  // When accepted sequence is tied and no authoritative revision breaks the tie,
-  // keep local state to avoid regressing visible student answers.
-  return false;
-}
-
 export function StudentAttemptProvider({
   children,
   scheduleId,
   attemptSnapshot = null,
   persistenceEnabled = true,
-  useV2DurabilityEngine,
   writingQuestionIds = [],
 }: StudentAttemptProviderProps) {
-  const v2DurabilityEnabled =
-    (useV2DurabilityEngine ??
-      String(import.meta.env["VITE_USE_V2_DURABILITY_ENGINE"] ?? "false") === "true") &&
-    attemptSnapshot?.protocolVersion === 2;
+  // Response durability is always V2: the backend serves only the V2 response
+  // protocol and the V1 mutation endpoints are unavailable.
   const { state: runtimeState, actions: runtimeActions } = useStudentRuntimeSession();
   const runtimeLiveRef = useStudentRuntimeLiveRef();
   const setRuntimeAttemptSyncState = runtimeActions.setAttemptSyncState;
@@ -402,18 +297,22 @@ export function StudentAttemptProvider({
     controlAttemptIdRef.current = attemptRef.current?.id;
   }, [attempt, scheduleId]);
 
-  const setStorageDurabilityBlocking = useCallback(
-    (active: boolean) => {
-      runtimeActions.transitionBlocking("storage_unavailable", active);
-    },
-    [runtimeActions]
-  );
+  // Stable forwarder: the runtime `actions` object identity changes whenever stable
+  // runtime state updates (including sync-state dispatches the V2 engine itself emits).
+  // The engine lifecycle effect depends on this callback, so it must not change
+  // identity per render or the engine would be destroyed/recreated mid-flight and
+  // recovery would republish stale drafts over newer edits.
+  const runtimeActionsRef = useRef(runtimeActions);
+  runtimeActionsRef.current = runtimeActions;
+  const setStorageDurabilityBlocking = useCallback((active: boolean) => {
+    runtimeActionsRef.current.transitionBlocking("storage_unavailable", active);
+  }, []);
 
   const v2EngineRef = useRef<DurableResponseEngine | null>(null);
   const v2ReadyRef = useRef<Promise<void> | null>(null);
   const v2PendingAcceptancesRef = useRef(new Set<Promise<void>>());
   const v2IdentityGenerationRef = useRef(0);
-  const v2IdentityKey = `${scheduleId ?? attemptSnapshot?.scheduleId ?? ""}:${attemptSnapshot?.id ?? ""}:${v2DurabilityEnabled}`;
+  const v2IdentityKey = `${scheduleId ?? attemptSnapshot?.scheduleId ?? ""}:${attemptSnapshot?.id ?? ""}`;
   const previousV2IdentityKeyRef = useRef<string | null>(null);
   const v2FieldKindRef = useRef(new Map<string, "answer" | "writing" | "flag">());
   if (previousV2IdentityKeyRef.current !== v2IdentityKey) {
@@ -458,8 +357,7 @@ export function StudentAttemptProvider({
           flagPatch[questionId] = visible.markedForReview;
         }
         if (kind === "writing") {
-          writingPatch[questionId] =
-            typeof visible.answer === "string" ? visible.answer : null;
+          writingPatch[questionId] = typeof visible.answer === "string" ? visible.answer : null;
         } else if (
           visible.answer === null ||
           typeof visible.answer === "string" ||
@@ -493,7 +391,7 @@ export function StudentAttemptProvider({
 
   useEffect(() => {
     const snapshot = attemptSnapshotRef.current;
-    const enabled = v2DurabilityEnabled && persistenceEnabled && Boolean(snapshot?.id);
+    const enabled = persistenceEnabled && Boolean(snapshot?.id);
     if (!enabled) {
       v2EngineRef.current?.destroy();
       v2EngineRef.current = null;
@@ -511,7 +409,8 @@ export function StudentAttemptProvider({
       transport: createResponseDurabilityV2Transport(
         scheduleId ?? snapshot?.scheduleId ?? "unknown",
         snapshot ?? undefined
-      ),      onStateChange: (states) => {
+      ),
+      onStateChange: (states) => {
         if (v2EngineRef.current !== engine || v2IdentityGenerationRef.current !== generation)
           return;
         publishV2EngineState(states);
@@ -521,18 +420,24 @@ export function StudentAttemptProvider({
           return;
         const currentAttempt = attemptRef.current;
         if (currentAttempt) {
+          const terminalState = isVerifiedTerminalStudentState({
+            attempt: currentAttempt,
+            runtimeSnapshot: null,
+          });
           syncAttemptState(
             mergeAttempt(currentAttempt, {
               recovery: {
                 pendingMutationCount: engine.getPendingCount(),
                 syncState:
-                  status === "synced"
+                  terminalState !== "not_terminal"
                     ? "saved"
-                    : status === "saving"
-                      ? "saving"
-                      : status === "saved_locally"
-                        ? "offline"
-                        : "error",
+                    : status === "synced"
+                      ? "saved"
+                      : status === "saving"
+                        ? "saving"
+                        : status === "saved_locally"
+                          ? "offline"
+                          : "error",
               },
             })
           );
@@ -587,7 +492,6 @@ export function StudentAttemptProvider({
     setRuntimeAttemptSyncState,
     setStorageDurabilityBlocking,
     syncAttemptState,
-    v2DurabilityEnabled,
   ]);
 
   const waitForV2Acceptances = useCallback(async () => {
@@ -650,9 +554,16 @@ export function StudentAttemptProvider({
                 ).userAgentData?.platform ?? navigator.platform)
               : "unknown",
           deviceClass: detectClientDeviceClass(),
-          pendingMutationAgeMs: pendingMutationOldestAgeMs(
-            durabilityMirrorRef.current?.getPendingMutations() ?? []
-          ),
+          pendingMutationAgeMs: (() => {
+            let oldest = Number.POSITIVE_INFINITY;
+            for (const mutation of durabilityMirrorRef.current?.getPendingMutations() ?? []) {
+              const ts = Date.parse(mutation.timestamp);
+              if (Number.isFinite(ts) && ts < oldest) {
+                oldest = ts;
+              }
+            }
+            return Number.isFinite(oldest) ? Math.max(0, Date.now() - oldest) : null;
+          })(),
           pendingMutationCount: pendingMutationCountForError,
         })
       );
@@ -756,6 +667,10 @@ export function StudentAttemptProvider({
         runtimeLiveRef.current.currentModule ??
         null;
       const authoritativeModule = runtimeModule ?? currentAttempt.currentModule;
+      const terminalState = isVerifiedTerminalStudentState({
+        attempt: currentAttempt,
+        runtimeSnapshot: null,
+      });
       const existingModule = isObjectiveMutation
         ? (payload as { module?: unknown }).module
         : undefined;
@@ -789,7 +704,15 @@ export function StudentAttemptProvider({
         currentAttempt,
         pending: durabilityMirrorRef.current?.getPendingMutations() ?? [],
         mutation,
-        patchSyncState: patch.recovery?.syncState,
+        // V2 response writes own the server acknowledgement/status. Position,
+        // violation, and device metadata are retained in the local recovery
+        // mirror, but they are not V2 response batches and must not reset a
+        // confirmed response to a perpetual "saving" state.
+        patchSyncState:
+          terminalState !== "not_terminal" ||
+          (currentAttempt.protocolVersion === 2 && !isObjectiveMutation && mutationType !== "network")
+            ? currentAttempt.recovery.syncState
+            : patch.recovery?.syncState,
         online: navigator.onLine,
         flushDelayMs: forceImmediateDurability ? 0 : delayMs,
         forceImmediateDurability,
@@ -800,7 +723,11 @@ export function StudentAttemptProvider({
         source: "mutation",
       });
 
-      const syncState: AttemptSyncState = enqueue.syncState;
+      const syncState: AttemptSyncState =
+        terminalState !== "not_terminal" ||
+        (currentAttempt.protocolVersion === 2 && !isObjectiveMutation && mutationType !== "network")
+          ? currentAttempt.recovery.syncState
+          : enqueue.syncState;
       const nextAttempt = mergeAttempt(currentAttempt, {
         ...patch,
         recovery: {
@@ -840,100 +767,23 @@ export function StudentAttemptProvider({
     if (!isCurrent()) return false;
 
     const promise = (async () => {
-      const flushLegacyMutationQueue = async (): Promise<boolean> => {
-        if (!isCurrent()) return false;
-        const mirror = durabilityMirrorRef.current;
-        if (!mirror) {
-          return true;
-        }
-
-        const outbox = createStudentMutationOutbox({
-          getAttempt: () => (isCurrent() ? attemptRef.current : null),
-          syncAttemptState: (nextAttempt) => {
-            if (isCurrent()) syncAttemptState(nextAttempt);
-          },
-          setRuntimeAttemptSyncState: (state) => {
-            if (isCurrent()) setRuntimeAttemptSyncState(state);
-          },
-          setStorageDurabilityBlocking: (active) => {
-            if (isCurrent()) setStorageDurabilityBlocking(active);
-          },
-          mirror,
-          persistenceEnabled: () => isCurrent() && persistenceEnabled,
-          isOnline: () => isCurrent() && navigator.onLine,
-          hasAttemptCredential,
-          refreshAttemptCredentialForAttempt: async (attempt) => {
-            if (!isCurrent() || attempt.id !== expectedIdentity.attemptId) return false;
-            const refreshed = await refreshAttemptCredentialForAttempt(attempt);
-            return isCurrent() && refreshed;
-          },
-          backendConflictReason,
-          clearAttemptMutationWatermark: (attempt) => {
-            if (isCurrent()) clearAttemptMutationWatermark(attempt);
-          },
-          onReplayAfterSubmit: (attempt) => {
-            if (!isCurrent()) return;
-            emitStudentObservabilityMetric(
-              "student_mutation_replay_after_submit_total",
-              withStudentObservabilityDimensions({
-                scheduleId: attempt.scheduleId,
-                attemptId: attempt.id,
-                endpoint: "mutations:batch",
-                reason: "ATTEMPT_SUBMITTED",
-                syncState: attempt.recovery.syncState,
-              })
-            );
-          },
-          saveAttempt: async (attempt, context) => {
-            if (!isCurrent() || attempt.id !== expectedIdentity.attemptId) {
-              throw new Error("The student attempt changed while durability was flushing.");
-            }
-            await studentAttemptRepository.saveAttempt(attempt, context);
-            if (!isCurrent()) {
-              throw new Error("The student attempt changed while durability was flushing.");
-            }
-          },
-          clearPendingMutations: async (attemptId) => {
-            if (!isCurrent() || attemptId !== expectedIdentity.attemptId) return;
-            await studentAttemptRepository.clearPendingMutations(attemptId);
-          },
-          getAttemptsByScheduleId: async (scheduleId) => {
-            if (!isCurrent() || scheduleId !== expectedIdentity.scheduleId) return [];
-            return studentAttemptRepository.getAttemptsByScheduleId(scheduleId);
-          },
-          getCanonicalAttempt: async (attempt) => {
-            if (!isCurrent() || attempt.id !== expectedIdentity.attemptId) return null;
-            return studentAttemptRepository.getCanonicalAttemptByScheduleId(
-              attempt.scheduleId,
-              attempt.studentKey
-            );
-          },
-        });
-
-        return outbox.flushNow();
-      };
-
-      if (v2DurabilityEnabled) {
-        await waitForV2Acceptances();
-        if (!isCurrent()) return false;
-        const ready = v2ReadyRef.current;
-        if (ready) await ready;
-        if (!isCurrent()) return false;
-        const engine = v2EngineRef.current;
-        if (
-          !engine ||
-          engine.attemptId !== expectedIdentity.attemptId ||
-          engine.scheduleId !== expectedIdentity.scheduleId
-        )
-          return false;
-        await engine.flush();
-        if (!isCurrent() || engine.getPendingCount() > 0) return false;
-      }
-
-      // V2 owns answer durability, but position, violations, network events,
-      // and other non-response mutations still use the legacy mutation ledger.
+      // V2 is the only durability engine: responses flush through the V2
+      // engine and non-response mutations persist via the durability mirror.
+      await waitForV2Acceptances();
       if (!isCurrent()) return false;
-      return flushLegacyMutationQueue();
+      const ready = v2ReadyRef.current;
+      if (ready) await ready;
+      if (!isCurrent()) return false;
+      const engine = v2EngineRef.current;
+      if (
+        !engine ||
+        engine.attemptId !== expectedIdentity.attemptId ||
+        engine.scheduleId !== expectedIdentity.scheduleId
+      )
+        return false;
+      await engine.flush();
+      if (!isCurrent() || engine.getPendingCount() > 0) return false;
+      return true;
     })();
 
     flushInFlightRef.current = promise;
@@ -949,7 +799,6 @@ export function StudentAttemptProvider({
     setRuntimeAttemptSyncState,
     setStorageDurabilityBlocking,
     syncAttemptState,
-    v2DurabilityEnabled,
     waitForV2Acceptances,
   ]);
 
@@ -1012,8 +861,6 @@ export function StudentAttemptProvider({
   }, [flushAnswerDurableMirrorNow]);
 
   useEffect(() => {
-    let cancelled = false;
-
     if (!attemptSnapshot) {
       attemptRef.current = null;
       observedPositionRef.current = JSON.stringify({
@@ -1026,57 +873,6 @@ export function StudentAttemptProvider({
       setAttempt(null);
       setPendingMutationCount(0);
       setDurabilityLeaseConflict(false);
-      durabilityMirrorRef.current?.reset();
-      return;
-    }
-
-    if (v2DurabilityEnabled) {
-      const snapshotKey = JSON.stringify([
-        attemptSnapshot.id,
-        attemptSnapshot.phase,
-        attemptSnapshot.deliveryStatus,
-        attemptSnapshot.submittedAt,
-        attemptSnapshot.finalSubmission?.submissionId,
-        attemptSnapshot.proctorStatus,
-        attemptSnapshot.proctorNote,
-        attemptSnapshot.leaseEpoch,
-        attemptSnapshot.controlEpoch,
-        attemptSnapshot.deadlineAt,
-        attemptSnapshot.closingGraceUntil,
-        attemptSnapshot.activeClientSessionId,
-      ]);
-      if (
-        v2HydratedSnapshotKeyRef.current === snapshotKey &&
-        attemptRef.current?.id === attemptSnapshot.id
-      ) {
-        return;
-      }
-      v2HydratedSnapshotKeyRef.current = snapshotKey;
-      setDurabilityLeaseConflict(false);
-      const currentAttempt = attemptRef.current;
-      const nextAttempt =
-        currentAttempt?.id === attemptSnapshot.id
-          ? (() => {
-              const {
-                answers: _remoteAnswers,
-                writingAnswers: _remoteWritingAnswers,
-                flags: _remoteFlags,
-                ...remoteMetadata
-              } = attemptSnapshot;
-              return mergeAttempt(currentAttempt, {
-                ...remoteMetadata,
-                recovery: {
-                  ...attemptSnapshot.recovery,
-                  pendingMutationCount: v2EngineRef.current?.getPendingCount() ?? 0,
-                  syncState: currentAttempt.recovery.syncState,
-                },
-              });
-            })()
-          : attemptSnapshot;
-      attemptRef.current = nextAttempt;
-      setAttempt(nextAttempt);
-      setPendingMutationCount(v2EngineRef.current?.getPendingCount() ?? 0);
-      setRuntimeAttemptSyncState(nextAttempt.recovery.syncState);
       durabilityMirrorRef.current?.reset();
       return;
     }
@@ -1126,180 +922,58 @@ export function StudentAttemptProvider({
       return;
     }
 
-    const currentAttempt = attemptRef.current;
-    const sameAttempt = currentAttempt?.id === attemptSnapshot.id;
-    const shouldKeepLocalAttempt =
-      sameAttempt &&
-      !!currentAttempt &&
-      ((durabilityMirrorRef.current?.getPendingMutations().length ?? 0) > 0 ||
-        shouldPreferLocalAttemptState(currentAttempt, attemptSnapshot));
-
-    if (shouldKeepLocalAttempt && currentAttempt) {
-      const mergedViolations = mergeViolationsById(
-        currentAttempt.violations ?? [],
-        attemptSnapshot.violations ?? []
-      );
-
-      const mergedAttempt = mergeAttempt(currentAttempt, {
-        phase:
-          isVerifiedTerminalStudentState({
-            attempt: attemptSnapshot,
-            runtimeSnapshot: runtimeState.runtimeSnapshot,
-          }) !== "not_terminal"
-            ? "post-exam"
-            : currentAttempt.phase,
-        proctorStatus: attemptSnapshot.proctorStatus,
-        proctorNote: attemptSnapshot.proctorNote,
-        proctorUpdatedAt: attemptSnapshot.proctorUpdatedAt,
-        proctorUpdatedBy: attemptSnapshot.proctorUpdatedBy,
-        lastWarningId: attemptSnapshot.lastWarningId ?? currentAttempt.lastWarningId,
-        lastAcknowledgedWarningId:
-          currentAttempt.lastAcknowledgedWarningId ?? attemptSnapshot.lastAcknowledgedWarningId,
-        violations: mergedViolations,
-      });
-
-      syncAttemptState(mergedAttempt);
-      observedPositionRef.current = JSON.stringify({
-        phase: mergedAttempt.phase,
-        currentModule: mergedAttempt.currentModule,
-        currentQuestionId: mergedAttempt.currentQuestionId,
-      });
-      observedViolationsRef.current = JSON.stringify(mergedAttempt.violations ?? []);
+    // V2 is the only durability engine: hydrate response-visible state from the
+    // engine and merge non-response metadata from the fresh snapshot.
+    {
+      const snapshotKey = JSON.stringify([
+        attemptSnapshot.id,
+        attemptSnapshot.phase,
+        attemptSnapshot.deliveryStatus,
+        attemptSnapshot.submittedAt,
+        attemptSnapshot.finalSubmission?.submissionId,
+        attemptSnapshot.proctorStatus,
+        attemptSnapshot.proctorNote,
+        attemptSnapshot.leaseEpoch,
+        attemptSnapshot.controlEpoch,
+        attemptSnapshot.deadlineAt,
+        attemptSnapshot.closingGraceUntil,
+        attemptSnapshot.activeClientSessionId,
+      ]);
+      if (
+        v2HydratedSnapshotKeyRef.current === snapshotKey &&
+        attemptRef.current?.id === attemptSnapshot.id
+      ) {
+        return;
+      }
+      v2HydratedSnapshotKeyRef.current = snapshotKey;
+      setDurabilityLeaseConflict(false);
+      const currentAttempt = attemptRef.current;
+      const nextAttempt =
+        currentAttempt?.id === attemptSnapshot.id
+          ? (() => {
+              const {
+                answers: _remoteAnswers,
+                writingAnswers: _remoteWritingAnswers,
+                flags: _remoteFlags,
+                ...remoteMetadata
+              } = attemptSnapshot;
+              return mergeAttempt(currentAttempt, {
+                ...remoteMetadata,
+                recovery: {
+                  ...attemptSnapshot.recovery,
+                  pendingMutationCount: v2EngineRef.current?.getPendingCount() ?? 0,
+                  syncState: currentAttempt.recovery.syncState,
+                },
+              });
+            })()
+          : attemptSnapshot;
+      attemptRef.current = nextAttempt;
+      setAttempt(nextAttempt);
+      setPendingMutationCount(v2EngineRef.current?.getPendingCount() ?? 0);
+      setRuntimeAttemptSyncState(nextAttempt.recovery.syncState);
+      durabilityMirrorRef.current?.reset();
       return;
     }
-
-    attemptRef.current = attemptSnapshot;
-    setAttempt(attemptSnapshot);
-    observedPositionRef.current = JSON.stringify({
-      phase: attemptSnapshot.phase,
-      currentModule: attemptSnapshot.currentModule,
-      currentQuestionId: attemptSnapshot.currentQuestionId,
-    });
-    observedViolationsRef.current = JSON.stringify(attemptSnapshot.violations ?? []);
-    setRuntimeAttemptSyncState(attemptSnapshot.recovery.syncState);
-
-    void (async () => {
-      let pendingMutations = await studentAttemptRepository.getPendingMutations(attemptSnapshot.id);
-      if (cancelled) {
-        return;
-      }
-
-      // Local edits that happen during mount hydration are authoritative for this tab.
-      // Do not replace them with a stale durable snapshot that resolved later.
-      if ((durabilityMirrorRef.current?.getPendingMutations().length ?? 0) > 0) {
-        return;
-      }
-
-      let recoveredFromCheckpoint = false;
-      if (pendingMutations.length === 0) {
-        const checkpointMutations = readAnswerSyncCheckpoint(attemptSnapshot.id);
-        if (checkpointMutations.length > 0) {
-          pendingMutations = checkpointMutations;
-          recoveredFromCheckpoint = true;
-          emitStudentObservabilityMetric(
-            "student_pending_checkpoint_recovered_total",
-            withStudentObservabilityDimensions({
-              scheduleId: attemptSnapshot.scheduleId,
-              attemptId: attemptSnapshot.id,
-              endpoint: "/v1/student/sessions/:scheduleId/mutations:pending",
-              statusCode: null,
-              reason: "sync_checkpoint_recovery",
-              syncState: attemptSnapshot.recovery.syncState,
-              lifecycleEventSource: "hydrate_checkpoint",
-              durablePersistResult: "recovered",
-              browserEngine: detectBrowserEngine(),
-              platform:
-                typeof navigator !== "undefined"
-                  ? ((
-                      navigator as Navigator & {
-                        userAgentData?: {
-                          platform?: string;
-                        };
-                      }
-                    ).userAgentData?.platform ?? navigator.platform)
-                  : "unknown",
-              deviceClass: detectClientDeviceClass(),
-              pendingMutationAgeMs: pendingMutationOldestAgeMs(checkpointMutations),
-              pendingMutationCount: checkpointMutations.length,
-            })
-          );
-        }
-      }
-
-      durabilityMirrorRef.current?.hydratePendingMutations({
-        mutations: pendingMutations,
-        recoveredFromCheckpoint,
-      });
-
-      if (pendingMutations.length > 0) {
-        const replayAnswers: Record<string, StudentAnswerValue> = {};
-        const replayWritingAnswers: Record<string, string> = {};
-        const replayFlags: Record<string, boolean> = {};
-
-        for (const mutation of pendingMutations) {
-          if (mutation.type === "answer") {
-            const questionId = mutation.payload.questionId;
-            if (typeof questionId !== "string" || questionId.trim() === "") {
-              continue;
-            }
-            replayAnswers[questionId] = mutation.payload.value;
-            continue;
-          }
-
-          if (mutation.type === "writing_answer") {
-            const taskId = mutation.payload.taskId;
-            if (typeof taskId !== "string" || taskId.trim() === "") {
-              continue;
-            }
-            const value = mutation.payload.value;
-            if (typeof value !== "string") {
-              continue;
-            }
-            replayWritingAnswers[taskId] = value;
-            continue;
-          }
-
-          if (mutation.type === "flag") {
-            const questionId = mutation.payload.questionId;
-            if (typeof questionId !== "string" || questionId.trim() === "") {
-              continue;
-            }
-            const value = mutation.payload.value;
-            if (typeof value !== "boolean") {
-              continue;
-            }
-            replayFlags[questionId] = value;
-          }
-        }
-
-        const currentAttempt = attemptRef.current ?? attemptSnapshot;
-        const replayedAttempt = mergeAttempt(currentAttempt, {
-          answers: replayAnswers,
-          writingAnswers: replayWritingAnswers,
-          flags: replayFlags,
-          recovery: {
-            pendingMutationCount: pendingMutations.length,
-            syncState: navigator.onLine ? currentAttempt.recovery.syncState : "offline",
-          },
-        });
-
-        syncAttemptState(replayedAttempt);
-        observedPositionRef.current = JSON.stringify({
-          phase: replayedAttempt.phase,
-          currentModule: replayedAttempt.currentModule,
-          currentQuestionId: replayedAttempt.currentQuestionId,
-        });
-        observedViolationsRef.current = JSON.stringify(replayedAttempt.violations ?? []);
-      }
-
-      if (pendingMutations.length > 0 && navigator.onLine) {
-        await flushPending();
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
   }, [
     attemptSnapshot,
     flushPending,
@@ -1307,7 +981,6 @@ export function StudentAttemptProvider({
     runtimeState.runtimeSnapshot,
     setRuntimeAttemptSyncState,
     syncAttemptState,
-    v2DurabilityEnabled,
   ]);
 
   useEffect(() => {
@@ -1469,115 +1142,48 @@ export function StudentAttemptProvider({
 
   const persistAnswer = useCallback(
     (questionId: string, answer: StudentAnswerValue, meta?: StudentAnswerMutationMeta) => {
-      if (v2DurabilityEnabled) {
-        enqueueV2Response(
-          questionId,
-          {
-            ...durablePayloadForQuestion(questionId),
-            answer,
-          },
-          "answer",
-          { answers: { [questionId]: answer } }
-        );
-        return;
-      }
-
-      const payload: StudentAttemptMutationPayload<"answer"> = { questionId, value: answer };
-      if (meta?.interactionType === "typing" || meta?.interactionType === "discrete") {
-        payload.interactionType = meta.interactionType;
-      }
-      if (
-        typeof meta?.slotIndex === "number" &&
-        Number.isInteger(meta.slotIndex) &&
-        meta.slotIndex >= 0
-      ) {
-        payload.slotIndex = meta.slotIndex;
-      }
-      if (typeof meta?.slotId === "string" && meta.slotId.trim()) {
-        payload.slotId = meta.slotId;
-      }
-      if (
-        typeof meta?.slotCount === "number" &&
-        Number.isInteger(meta.slotCount) &&
-        meta.slotCount > 0
-      ) {
-        payload.slotCount = meta.slotCount;
-      }
-      emitAnswerMutationDebugLog("StudentAttemptProvider.persistAnswer", {
+      void meta;
+      enqueueV2Response(
         questionId,
-        answer,
-        mutationMeta: meta ?? null,
-        payload,
-      });
-
-      void applyPatch(
         {
-          answers: {
-            [questionId]: answer,
-          },
+          ...durablePayloadForQuestion(questionId),
+          answer,
         },
         "answer",
-        400,
-        payload
+        { answers: { [questionId]: answer } }
       );
     },
-    [applyPatch, durablePayloadForQuestion, enqueueV2Response, v2DurabilityEnabled]
+    [durablePayloadForQuestion, enqueueV2Response]
   );
 
   const persistWritingAnswer = useCallback(
     (taskId: string, text: string) => {
-      if (v2DurabilityEnabled) {
-        enqueueV2Response(
-          taskId,
-          {
-            ...durablePayloadForQuestion(taskId),
-            answer: text,
-          },
-          "writing",
-          { writingAnswers: { [taskId]: text } }
-        );
-        return;
-      }
-      void applyPatch(
+      enqueueV2Response(
+        taskId,
         {
-          writingAnswers: {
-            [taskId]: text,
-          },
+          ...durablePayloadForQuestion(taskId),
+          answer: text,
         },
-        "writing_answer",
-        1_500,
-        { taskId, value: text }
+        "writing",
+        { writingAnswers: { [taskId]: text } }
       );
     },
-    [applyPatch, durablePayloadForQuestion, enqueueV2Response, v2DurabilityEnabled]
+    [durablePayloadForQuestion, enqueueV2Response]
   );
 
   const persistFlag = useCallback(
     (questionId: string, flagged: boolean) => {
-      if (v2DurabilityEnabled) {
-        enqueueV2Response(
-          questionId,
-          {
-            ...durablePayloadForQuestion(questionId),
-            markedForReview: flagged,
-          },
-          "flag",
-          { flags: { [questionId]: flagged } }
-        );
-        return;
-      }
-      void applyPatch(
+      enqueueV2Response(
+        questionId,
         {
-          flags: {
-            [questionId]: flagged,
-          },
+          ...durablePayloadForQuestion(questionId),
+          markedForReview: flagged,
         },
         "flag",
-        400,
-        { questionId, value: flagged }
+        { flags: { [questionId]: flagged } }
       );
     },
-    [applyPatch, durablePayloadForQuestion, enqueueV2Response, v2DurabilityEnabled]
+    [durablePayloadForQuestion, enqueueV2Response]
   );
 
   const persistViolation = useCallback(
@@ -1666,6 +1272,7 @@ export function StudentAttemptProvider({
         const persisted = await backendPost<any>(
           `/v1/student/sessions/${resolvedScheduleId}/precheck`,
           {
+            attemptId: currentAttempt.id,
             studentKey: currentAttempt.studentKey,
             candidateId: currentAttempt.candidateId,
             candidateName: currentAttempt.candidateName,
@@ -1868,55 +1475,43 @@ export function StudentAttemptProvider({
             return;
           }
           try {
-            if (v2DurabilityEnabled) {
-              const flushed = await flushPending();
-              if (!flushed || !isCurrent()) return;
-              const ready = v2ReadyRef.current;
-              if (ready) await ready;
-              if (!isCurrent()) return;
-              const engine = v2EngineRef.current;
-              if (!engine) throw new Error("V2 response durability engine is not ready.");
-              const submitted = await engine.submit(
-                candidateAttempt.id,
-                engine.getAttemptRevision()
-              );
-              if (!isCurrent()) return;
-              const submittedAttempt = mergeAttempt(attemptRef.current ?? candidateAttempt, {
-                phase: "post-exam",
-                submittedAt: submitted.submittedAt,
-                responseRevision: submitted.attemptRevision,
-                finalResponseDigest: submitted.finalResponseDigest,
-                finalSubmission: {
-                  submissionId: submitted.submissionId,
-                  submittedAt: submitted.submittedAt,
-                },
-                recovery: {
-                  finalSubmissionPending: false,
-                  pendingMutationCount: 0,
-                  syncState: "saved",
-                },
-              });
-              if (!isCurrent()) return;
-              runtimeActions.setPhase("post-exam");
-              syncAttemptState(submittedAttempt);
-              void queryClient.invalidateQueries();
-              return;
-            }
-            const submittedAttempt = await studentAttemptRepository.submitAttempt(candidateAttempt);
+            const flushed = await flushPending();
+            if (!flushed || !isCurrent()) return;
+            const ready = v2ReadyRef.current;
+            if (ready) await ready;
             if (!isCurrent()) return;
-            const confirmedAttempt = mergeAttempt(submittedAttempt, {
+            const engine = v2EngineRef.current;
+            if (!engine) throw new Error("V2 response durability engine is not ready.");
+            const submitted = await engine.submit(candidateAttempt.id, engine.getAttemptRevision());
+            if (!isCurrent()) return;
+            const submittedAt =
+              submitted.submittedAt ??
+              attemptRef.current?.submittedAt ??
+              candidateAttempt.submittedAt ??
+              new Date().toISOString();
+            const submittedAttempt = mergeAttempt(attemptRef.current ?? candidateAttempt, {
               phase: "post-exam",
+              submittedAt,
+              responseRevision: submitted.attemptRevision,
+              finalResponseDigest: submitted.finalResponseDigest,
+              finalSubmission: {
+                submissionId: submitted.submissionId,
+                submittedAt,
+              },
               recovery: {
                 finalSubmissionPending: false,
+                pendingMutationCount: 0,
+                syncState: "saved",
               },
             });
+            if (!isCurrent()) return;
             runtimeActions.setPhase("post-exam");
-            syncAttemptState(confirmedAttempt);
+            syncAttemptState(submittedAttempt);
             void queryClient.invalidateQueries();
             return;
           } catch (error) {
             if (!isCurrent()) return;
-            if (v2DurabilityEnabled) {
+            {
               const engine = v2EngineRef.current;
               if (
                 engine?.getStatus() === "conflict_fenced" ||
@@ -1957,18 +1552,11 @@ export function StudentAttemptProvider({
         }
       });
     },
-    [
-      flushPending,
-      persistenceEnabled,
-      runtimeActions,
-      syncAttemptState,
-      v2DurabilityEnabled,
-    ]
+    [flushPending, persistenceEnabled, runtimeActions, syncAttemptState]
   );
 
   const takeOverDurabilityLease = useCallback(
     async (reason = "Candidate explicitly requested lease takeover"): Promise<boolean> => {
-      if (!v2DurabilityEnabled) return false;
       const generation = v2IdentityGenerationRef.current;
       const renderedIdentity = renderedAttemptIdentityRef.current;
       const currentAttempt = attemptRef.current;
@@ -2056,9 +1644,11 @@ export function StudentAttemptProvider({
         }
         void error;
       }
-      return v2IdentityGenerationRef.current === generation && v2EngineRef.current === currentEngine;
+      return (
+        v2IdentityGenerationRef.current === generation && v2EngineRef.current === currentEngine
+      );
     },
-    [syncAttemptState, v2DurabilityEnabled]
+    [syncAttemptState]
   );
 
   const submitAttempt = useCallback(async (): Promise<boolean> => {
@@ -2097,50 +1687,38 @@ export function StudentAttemptProvider({
     }
 
     try {
-      if (v2DurabilityEnabled) {
-        const flushed = await flushPending();
-        if (!isCurrent()) return false;
-        if (!flushed) {
-          throw new Error("Not all attempt changes were durably saved.");
-        }
-        const ready = v2ReadyRef.current;
-        if (ready) await ready;
-        const engine = v2EngineRef.current;
-        if (
-          !isCurrent() ||
-          !engine ||
-          engine.attemptId !== currentAttempt.id ||
-          engine.scheduleId !== currentAttempt.scheduleId
-        )
-          return false;
-        const submitted = await engine.submit(latestAttempt.id, engine.getAttemptRevision());
-        if (!isCurrent()) return false;
-        const confirmedAttempt = mergeAttempt(attemptRef.current ?? latestAttempt, {
-          phase: "post-exam",
-          submittedAt: submitted.submittedAt,
-          responseRevision: submitted.attemptRevision,
-          finalResponseDigest: submitted.finalResponseDigest,
-          finalSubmission: {
-            submissionId: submitted.submissionId,
-            submittedAt: submitted.submittedAt,
-          },
-          recovery: {
-            finalSubmissionPending: false,
-            pendingMutationCount: 0,
-            syncState: "saved",
-          },
-        });
-        runtimeActions.setPhase("post-exam");
-        syncAttemptState(confirmedAttempt);
-        void queryClient.invalidateQueries();
-        return true;
-      }
-      const submittedAttempt = await studentAttemptRepository.submitAttempt(latestAttempt);
+      const flushed = await flushPending();
       if (!isCurrent()) return false;
-      const confirmedAttempt = mergeAttempt(submittedAttempt, {
+      if (!flushed) {
+        throw new Error("Not all attempt changes were durably saved.");
+      }
+      const ready = v2ReadyRef.current;
+      if (ready) await ready;
+      const engine = v2EngineRef.current;
+      if (
+        !isCurrent() ||
+        !engine ||
+        engine.attemptId !== currentAttempt.id ||
+        engine.scheduleId !== currentAttempt.scheduleId
+      )
+        return false;
+      const submitted = await engine.submit(latestAttempt.id, engine.getAttemptRevision());
+      if (!isCurrent()) return false;
+      const submittedAt =
+        submitted.submittedAt ?? latestAttempt.submittedAt ?? new Date().toISOString();
+      const confirmedAttempt = mergeAttempt(attemptRef.current ?? latestAttempt, {
         phase: "post-exam",
+        submittedAt,
+        responseRevision: submitted.attemptRevision,
+        finalResponseDigest: submitted.finalResponseDigest,
+        finalSubmission: {
+          submissionId: submitted.submissionId,
+          submittedAt,
+        },
         recovery: {
           finalSubmissionPending: false,
+          pendingMutationCount: 0,
+          syncState: "saved",
         },
       });
       runtimeActions.setPhase("post-exam");
@@ -2149,6 +1727,49 @@ export function StudentAttemptProvider({
       return true;
     } catch (error) {
       if (!isCurrent()) return false;
+
+      // A proctor or worker may seal the attempt after the student's final
+      // flush but before this submit request reaches the server. The V2
+      // engine correctly fences that request; reconcile the canonical attempt
+      // before exposing a retryable failure so the student sees completion
+      // instead of an indefinite "Submitting" overlay.
+      const engine = v2EngineRef.current;
+      const statusCode =
+        typeof error === "object" && error !== null && "statusCode" in error
+          ? (error as { statusCode?: unknown }).statusCode
+          : undefined;
+      // The API can return ATTEMPT_NOT_WRITABLE as a plain 422 before the
+      // durability engine has classified the response. Treat submit-time
+      // conflict statuses as reconciliation candidates too; the canonical
+      // attempt decides whether the outcome is completed or terminated.
+      const submitConflict =
+        engine?.getStatus() === "conflict_terminal" || statusCode === 409 || statusCode === 422;
+      if (submitConflict) {
+        const canonical = await studentAttemptRepository
+          .getCanonicalAttemptByScheduleId(currentAttempt.scheduleId, currentAttempt.studentKey)
+          .catch(() => null);
+        if (
+          canonical &&
+          isCurrent() &&
+          isVerifiedTerminalStudentState({
+            attempt: canonical,
+            runtimeSnapshot: runtimeState.runtimeSnapshot,
+          }) !== "not_terminal"
+        ) {
+          const terminalAttempt = mergeAttempt(canonical, {
+            recovery: {
+              finalSubmissionPending: false,
+              pendingMutationCount: 0,
+              syncState: "saved",
+            },
+          });
+          runtimeActions.setPhase("post-exam");
+          syncAttemptState(terminalAttempt);
+          void queryClient.invalidateQueries();
+          return true;
+        }
+      }
+
       const pendingAttempt = mergeAttempt(latestAttempt, {
         recovery: {
           finalSubmissionPending: true,
@@ -2159,10 +1780,6 @@ export function StudentAttemptProvider({
       // A permanent authorization failure cannot be retried automatically;
       // the UI keeps the durable pending state and offers the explicit
       // retry action.
-      const statusCode =
-        typeof error === "object" && error !== null && "statusCode" in error
-          ? (error as { statusCode?: unknown }).statusCode
-          : undefined;
       const permanentFailure = statusCode === 401 || statusCode === 403;
       if (!permanentFailure) {
         scheduleBackgroundSubmitRetry(pendingAttempt);
@@ -2173,9 +1790,9 @@ export function StudentAttemptProvider({
     flushPending,
     persistenceEnabled,
     runtimeActions,
+    runtimeState.runtimeSnapshot,
     scheduleBackgroundSubmitRetry,
     syncAttemptState,
-    v2DurabilityEnabled,
   ]);
 
   // Resume a pending final submission after reload or after the automatic

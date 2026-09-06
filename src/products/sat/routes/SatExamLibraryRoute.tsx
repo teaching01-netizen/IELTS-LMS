@@ -10,8 +10,11 @@ import { examAuthoringFacade } from '../../../features/exam-authoring/applicatio
 import type { ExamEntity } from '../../../types/domain';
 import { SatFormDialog } from '../ui/ConfirmDialog';
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value));
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return '—';
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(time));
 }
 
 function statusLabel(exam: ExamEntity): string {
@@ -40,10 +43,15 @@ export function SatExamLibraryRoute() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const exams = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
+    const timeOf = (value: string | null | undefined): number => {
+      if (!value) return Number.NEGATIVE_INFINITY;
+      const time = new Date(value).getTime();
+      return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
+    };
     return (query.data?.entities ?? [])
       .filter((exam) => exam.providerKey === 'sat' && exam.status !== 'archived')
       .filter((exam) => !needle || exam.title.toLocaleLowerCase().includes(needle))
-      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+      .sort((left, right) => timeOf(right.updatedAt) - timeOf(left.updatedAt));
   }, [query.data?.entities, search]);
 
   const openCreate = () => {

@@ -15,7 +15,7 @@ export const liveQueryPolicy = {
 
 export const proctorKeys = {
   all: ['proctoring'] as const,
-  sessions: (providerKey?: 'sat' | 'ielts') => [...proctorKeys.all, 'sessions', providerKey ?? 'all'] as const,
+  sessions: (providerKey?: 'sat' | 'ielts' | 'act') => [...proctorKeys.all, 'sessions', providerKey ?? 'all'] as const,
   detail: (scheduleId: string) => [...proctorKeys.all, 'detail', scheduleId] as const,
 };
 
@@ -110,7 +110,7 @@ export function buildDashboardDetailEndpoint(scheduleId: string): string {
 }
 
 export function fetchProctorSessionSummaries(
-  providerKey?: 'sat' | 'ielts',
+  providerKey?: 'sat' | 'ielts' | 'act',
 ): Promise<ProctorSessionSummaryPayload[]> {
   const query = providerKey ? `?providerKey=${encodeURIComponent(providerKey)}` : '';
   return proctorFacade.backendGet<ProctorSessionSummaryPayload[]>(`/v1/proctor/sessions${query}`);
@@ -126,7 +126,7 @@ export function fetchProctorSessionDetail(
 
 export function useProctorSessionSummaries(
   refetchInterval: number,
-  providerKey?: 'sat' | 'ielts',
+  providerKey?: 'sat' | 'ielts' | 'act',
 ) {
   return useQuery({
     queryKey: proctorKeys.sessions(providerKey),

@@ -20,6 +20,14 @@ function getInitials(name: string) {
   return `${first}${last}`.toUpperCase();
 }
 
+function formatRefreshAge(refreshAt: string | null | undefined, nowMs: number): string | null {
+  if (!refreshAt) return null;
+  const atMs = Date.parse(refreshAt);
+  if (!Number.isFinite(atMs)) return null;
+  const ageSeconds = Math.max(0, Math.floor((nowMs - atMs) / 1000));
+  return `updated ${ageSeconds}s ago`;
+}
+
 export function ProctorApp({
   schedules,
   runtimeSnapshots,
@@ -28,7 +36,11 @@ export function ProctorApp({
   alerts,
   auditLogs,
   notes,
+  violationRules,
   connectionError,
+  degradedLiveMode,
+  wsConnected,
+  lastSuccessfulRefreshAt,
   selectedScheduleId,
   onSelectScheduleId,
   onExit,
@@ -36,6 +48,7 @@ export function ProctorApp({
   onUpdateSessions,
   onUpdateAlerts,
   onUpdateNotes,
+  onUpdateRules,
   onStartScheduledSession,
   onPauseCohort,
   onResumeCohort,
@@ -54,6 +67,48 @@ export function ProctorApp({
     'Proctor';
   const proctorId = session?.user.id;
   const initials = getInitials(proctorName);
+  const [pillNowMs, setPillNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!lastSuccessfulRefreshAt) return;
+    const timer = window.setInterval(() => setPillNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [lastSuccessfulRefreshAt]);
+
+  const degraded = degradedLiveMode === true || wsConnected === false;
+  const offline = wsConnected === false && Boolean(connectionError);
+  const reconnecting = Boolean(connectionError) && !offline;
+  const pillState: 'live' | 'degraded' | 'reconnecting' | 'offline' = offline
+    ? 'offline'
+    : reconnecting
+      ? 'reconnecting'
+      : degraded
+        ? 'degraded'
+        : 'live';
+  const refreshAgeLabel = formatRefreshAge(lastSuccessfulRefreshAt, pillNowMs);
+  const pillStyles: Record<typeof pillState, { container: string; dot: string; label: string }> = {
+    live: {
+      container: 'bg-green-50 text-green-700 border-green-100',
+      dot: 'bg-green-500 animate-pulse motion-reduce:animate-none',
+      label: 'Live',
+    },
+    degraded: {
+      container: 'bg-amber-50 text-amber-700 border-amber-100',
+      dot: 'bg-amber-500',
+      label: 'Degraded',
+    },
+    reconnecting: {
+      container: 'bg-amber-50 text-amber-700 border-amber-100',
+      dot: 'bg-amber-500',
+      label: 'Reconnecting',
+    },
+    offline: {
+      container: 'bg-red-50 text-red-700 border-red-100',
+      dot: 'bg-red-500',
+      label: 'Offline',
+    },
+  };
+  const pillStyle = pillStyles[pillState];
 
   useEffect(() => {
     if (!isAlertsOpen) return;
@@ -113,27 +168,20 @@ export function ProctorApp({
           </div>
           <div className="flex items-center gap-4">
             <div
-              className="flex items-center gap-2 px-3 py-1 bg-green-50 text-green-700 rounded-full border border-green-100"
+              className={`flex items-center gap-2 px-3 py-1 rounded-full border ${pillStyle.container}`}
               role="status"
               aria-live="polite"
+              title={connectionError ?? undefined}
             >
               <div
-                className="w-2 h-2 bg-green-500 rounded-full animate-pulse motion-reduce:animate-none"
+                className={`w-2 h-2 rounded-full ${pillStyle.dot}`}
                 aria-hidden="true"
               ></div>
-              <span className="text-xs font-bold uppercase tracking-wider">Live</span>
+              <span className="text-xs font-bold uppercase tracking-wider">{pillStyle.label}</span>
+              {refreshAgeLabel ? (
+                <span className="text-[10px] font-medium normal-case tracking-normal opacity-80">{refreshAgeLabel}</span>
+              ) : null}
             </div>
-            {connectionError ? (
-              <div
-                className="hidden sm:flex items-center gap-2 px-3 py-1 bg-red-50 text-red-700 rounded-full border border-red-100"
-                role="status"
-                aria-live="polite"
-                title={connectionError}
-              >
-                <div className="w-2 h-2 bg-red-500 rounded-full" aria-hidden="true"></div>
-                <span className="text-xs font-bold uppercase tracking-wider">Reconnecting</span>
-              </div>
-            ) : null}
             <button
               type="button"
               onClick={() => setIsAlertsOpen(true)}
@@ -182,11 +230,13 @@ export function ProctorApp({
             railSelection="dashboard"
             auditLogs={auditLogs}
             notes={notes}
+            violationRules={violationRules}
             selectedScheduleId={selectedScheduleId}
             onSelectScheduleId={onSelectScheduleId}
             onUpdateSessions={onUpdateSessions}
             onUpdateAlerts={onUpdateAlerts}
             onUpdateNotes={onUpdateNotes}
+            onUpdateRules={onUpdateRules}
             onStartScheduledSession={onStartScheduledSession}
             onPauseCohort={onPauseCohort}
             onResumeCohort={onResumeCohort}

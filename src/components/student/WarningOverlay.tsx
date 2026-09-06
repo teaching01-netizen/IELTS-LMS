@@ -57,11 +57,9 @@ export function WarningOverlay({
     }
   }, [isOpen]);
 
-  useEffect(() => {
-    if (isOpen && showCountdown && severity !== 'critical' && countdown === 0 && !hasResetRef.current) {
-      onAcknowledgeRef.current();
-    }
-  }, [isOpen, showCountdown, severity, countdown]);
+  // Countdown is informational only. A proctor warning must never be
+  // dismissed without an explicit operator action (S1-C5). The timer bar and
+  // "Auto-dismiss in" copy below deliberately do NOT call onAcknowledge.
 
   useEffect(() => {
     if (!isOpen) {

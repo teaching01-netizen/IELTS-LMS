@@ -1,36 +1,107 @@
-import React from 'react';
-import { Search, Filter, CheckSquare, Clock, AlertCircle, Play } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Search, Filter, CheckSquare, Clock, AlertCircle, Play, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 
+interface GradingTask {
+  id: string;
+  exam: string;
+  task: string;
+  student: string;
+  submitted: string;
+  status: 'Pending' | 'In Progress';
+  priority: 'High' | 'Medium';
+}
+
+const ALL_TASKS: GradingTask[] = [
+  { id: 'G-001', exam: 'Academic PT v3', task: 'Writing Task 2', student: 'Wei Zhang', submitted: '2h ago', status: 'Pending', priority: 'High' },
+  { id: 'G-002', exam: 'Academic PT v3', task: 'Writing Task 1', student: 'Wei Zhang', submitted: '2h ago', status: 'Pending', priority: 'Medium' },
+  { id: 'G-003', exam: 'GT Practice 5', task: 'Speaking Part 2', student: 'Maria Garcia', submitted: '5h ago', status: 'In Progress', priority: 'Medium' },
+  { id: 'G-004', exam: 'Diagnostic Q1', task: 'Writing Task 2', student: 'John Smith', submitted: '1d ago', status: 'Pending', priority: 'High' },
+  { id: 'G-005', exam: 'Diagnostic Q1', task: 'Writing Task 1', student: 'John Smith', submitted: '1d ago', status: 'Pending', priority: 'Medium' },
+];
+
 export function AdminGrading() {
-  const gradingTasks = [
-    { id: 'G-001', exam: 'Academic PT v3', task: 'Writing Task 2', student: 'Wei Zhang', submitted: '2h ago', status: 'Pending', priority: 'High' },
-    { id: 'G-002', exam: 'Academic PT v3', task: 'Writing Task 1', student: 'Wei Zhang', submitted: '2h ago', status: 'Pending', priority: 'Medium' },
-    { id: 'G-003', exam: 'GT Practice 5', task: 'Speaking Part 2', student: 'Maria Garcia', submitted: '5h ago', status: 'In Progress', priority: 'Medium' },
-    { id: 'G-004', exam: 'Diagnostic Q1', task: 'Writing Task 2', student: 'John Smith', submitted: '1d ago', status: 'Pending', priority: 'High' },
-    { id: 'G-005', exam: 'Diagnostic Q1', task: 'Writing Task 1', student: 'John Smith', submitted: '1d ago', status: 'Pending', priority: 'Medium' },
-  ];
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | GradingTask['status']>('all');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sessionStarted, setSessionStarted] = useState(false);
+
+  const filteredTasks = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return ALL_TASKS.filter((task) => {
+      if (statusFilter !== 'all' && task.status !== statusFilter) return false;
+      if (!query) return true;
+      return [task.id, task.exam, task.task, task.student].join(' ').toLowerCase().includes(query);
+    });
+  }, [searchQuery, statusFilter]);
+
+  const toggleSelected = (taskId: string) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((previous) =>
+      previous.size === filteredTasks.length ? new Set() : new Set(filteredTasks.map((task) => task.id)),
+    );
+  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Grading Queue</h1>
-        
+
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
-            <input 
-              type="text" 
-              placeholder="Search submissions..." 
-              className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            <input
+              type="text"
+              placeholder="Search submissions..."
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              aria-label="Search grading queue"
+              className="w-full pl-9 pr-8 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+                className="absolute right-2 top-2 p-0.5 rounded text-gray-400 hover:text-gray-600"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
-          <button className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+            aria-label="Filter by status"
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          >
+            <option value="all">All statuses</option>
+            <option value="Pending">Pending</option>
+            <option value="In Progress">In Progress</option>
+          </select>
+          <button className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50" aria-label="More filters">
             <Filter size={16} />
             Filter
           </button>
         </div>
       </div>
+
+      {sessionStarted && (
+        <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          Grading session started{selectedIds.size > 0 ? ` with ${selectedIds.size} selected submission${selectedIds.size === 1 ? '' : 's'}` : ''}.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex items-center justify-between">
@@ -61,7 +132,10 @@ export function AdminGrading() {
           </div>
         </div>
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex items-center justify-between">
-          <button className="w-full h-full flex items-center justify-center gap-2 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors">
+          <button
+            onClick={() => setSessionStarted(true)}
+            className="w-full h-full flex items-center justify-center gap-2 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors"
+          >
             <Play size={18} />
             Start Grading Session
           </button>
@@ -74,7 +148,13 @@ export function AdminGrading() {
             <thead>
               <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-200">
                 <th className="px-6 py-3 font-medium w-8">
-                  <input type="checkbox" className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                  <input
+                    type="checkbox"
+                    aria-label="Select all submissions"
+                    checked={filteredTasks.length > 0 && selectedIds.size === filteredTasks.length}
+                    onChange={toggleSelectAll}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
                 </th>
                 <th className="px-6 py-3 font-medium">Exam & Task</th>
                 <th className="px-6 py-3 font-medium">Student</th>
@@ -85,10 +165,16 @@ export function AdminGrading() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 text-sm">
-              {gradingTasks.map((task) => (
+              {filteredTasks.map((task) => (
                 <tr key={task.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
-                    <input type="checkbox" className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${task.id} ${task.task} for ${task.student}`}
+                      checked={selectedIds.has(task.id)}
+                      onChange={() => toggleSelected(task.id)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
                   </td>
                   <td className="px-6 py-4">
                     <p className="font-medium text-gray-900">{task.task}</p>
@@ -111,7 +197,7 @@ export function AdminGrading() {
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <Button variant="secondary" size="sm">
+                    <Button variant="secondary" size="sm" onClick={() => setSelectedIds(new Set([task.id]))}>
                       Grade
                     </Button>
                   </td>
@@ -119,6 +205,11 @@ export function AdminGrading() {
               ))}
             </tbody>
           </table>
+          {filteredTasks.length === 0 && (
+            <div role="status" className="px-6 py-10 text-center text-sm text-gray-500">
+              No submissions match the current search and filters.
+            </div>
+          )}
         </div>
       </div>
     </div>

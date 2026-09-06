@@ -1,6 +1,7 @@
-import type { ExamSessionRuntime } from '../../../../types/domain';
-import type { StudentAttempt } from '../../../../types/studentAttempt';
-import { STUDENT_EXAM_PHASE, type StudentExamPhase } from './studentExamPhase';
+import type { ExamSessionRuntime } from "../../../../types/domain";
+import type { StudentAttempt } from "../../../../types/studentAttempt";
+import { STUDENT_EXAM_PHASE, type StudentExamPhase } from "./studentExamPhase";
+import { getVerifiedTerminalState } from "./terminalState";
 
 export interface DeriveStudentPhaseInput {
   readonly attempt: StudentAttempt | null;
@@ -10,7 +11,7 @@ export interface DeriveStudentPhaseInput {
 
 export function deriveStudentPhase(input: DeriveStudentPhaseInput): StudentExamPhase {
   const verifiedTerminal =
-    input.attempt?.proctorStatus === 'terminated' || Boolean(input.attempt?.submittedAt);
+    getVerifiedTerminalState({ attempt: input.attempt, runtime: input.runtime }) !== "not_terminal";
 
   if (verifiedTerminal) {
     return STUDENT_EXAM_PHASE.POST_EXAM;
@@ -25,7 +26,7 @@ export function deriveStudentPhase(input: DeriveStudentPhaseInput): StudentExamP
   }
 
   if (input.runtimeBacked && input.attempt.integrity.preCheck?.completedAt) {
-    const runtimeIsActive = input.runtime?.status === 'live' || input.runtime?.status === 'paused';
+    const runtimeIsActive = input.runtime?.status === "live" || input.runtime?.status === "paused";
     return runtimeIsActive ? STUDENT_EXAM_PHASE.EXAM : STUDENT_EXAM_PHASE.LOBBY;
   }
 

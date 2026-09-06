@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useOptionalAuthSession } from '../../auth/api/authSession';
 import { examAuthoringFacade } from '../../exam-authoring/api/examAuthoringFacade';
 import type { ExamState } from '../../../types';
 import type { ExamEntity } from '../../../types/domain';
@@ -22,10 +23,19 @@ export interface BuilderRouteController {
   reload: () => Promise<void>;
 }
 
+function resolveStaffActor(session: { user: { id: string; displayName?: string | null | undefined; email?: string } } | null | undefined): string | null {
+  const user = session?.user;
+  if (!user) return null;
+  const candidate = user.displayName?.trim() || user.id?.trim() || user.email?.trim() || '';
+  return candidate === '' ? null : candidate;
+}
+
 export function useBuilderRouteController(
   examId?: string,
 ): BuilderRouteController {
   const navigate = useNavigate();
+  const authSession = useOptionalAuthSession();
+  const staffActor = resolveStaffActor(authSession?.session ?? null);
 
   const [state, setState] = useState<ExamState | null>(null);
   const [exam, setExam] = useState<ExamEntity | undefined>(undefined);
@@ -45,7 +55,10 @@ export function useBuilderRouteController(
     try {
       const entity = await examAuthoringFacade.repository.getExamById(examId);
       if (!entity) {
-        throw new Error('Exam not found');
+        // Exam was deleted or never existed: leave exam/state unset and error
+        // null so routes render their "Exam Not Found" surface with a way
+        // back to Admin, instead of a Retry that can never succeed.
+        return;
       }
 
       const examState = await examAuthoringFacade.getExamStateFromEntity(
@@ -74,7 +87,15 @@ export function useBuilderRouteController(
 
       const resolvedContent =
         typeof nextContent === 'function' ? nextContent(state) : nextContent;
-      const result = await examAuthoringFacade.lifecycle.saveDraft(examId, resolvedContent, 'System');
+      let actor = staffActor;
+      if (!actor && authSession) {
+        const refreshedSession = await authSession.refresh();
+        actor = resolveStaffActor(refreshedSession);
+      }
+      if (!actor) {
+        throw new Error('Sign in required: saving a draft is blocked without an authenticated staff user.');
+      }
+      const result = await examAuthoringFacade.lifecycle.saveDraft(examId, resolvedContent, actor);
 
       if (!result.success) {
         throw new Error(result.error ?? 'Failed to save draft');
@@ -82,7 +103,7 @@ export function useBuilderRouteController(
 
       setState(resolvedContent);
     },
-    [examId, state],
+    [authSession, examId, state, staffActor],
   );
 
   const handleSaveDraft = useCallback(
@@ -105,10 +126,13 @@ export function useBuilderRouteController(
         return;
       }
 
-      await examAuthoringFacade.lifecycle.publishExam(examId, 'System', notes);
+      if (!staffActor) {
+        throw new Error('Sign in required: publish is blocked without an authenticated staff user.');
+      }
+      await examAuthoringFacade.lifecycle.publishExam(examId, staffActor, notes);
       await loadExam();
     },
-    [examId, loadExam],
+    [examId, loadExam, staffActor],
   );
 
   const handleSchedulePublish = useCallback(
@@ -117,10 +141,13 @@ export function useBuilderRouteController(
         return;
       }
 
-      await examAuthoringFacade.lifecycle.schedulePublish(examId, 'System', scheduledTime);
+      if (!staffActor) {
+        throw new Error('Sign in required: scheduling is blocked without an authenticated staff user.');
+      }
+      await examAuthoringFacade.lifecycle.schedulePublish(examId, staffActor, scheduledTime);
       await loadExam();
     },
-    [examId, loadExam],
+    [examId, loadExam, staffActor],
   );
 
   const handleUnpublish = useCallback(
@@ -129,10 +156,13 @@ export function useBuilderRouteController(
         return;
       }
 
-      await examAuthoringFacade.lifecycle.unpublishExam(examId, 'System', reason);
+      if (!staffActor) {
+        throw new Error('Sign in required: unpublish is blocked without an authenticated staff user.');
+      }
+      await examAuthoringFacade.lifecycle.unpublishExam(examId, staffActor, reason);
       await loadExam();
     },
-    [examId, loadExam],
+    [examId, loadExam, staffActor],
   );
 
   const handleArchive = useCallback(async () => {
@@ -140,9 +170,12 @@ export function useBuilderRouteController(
       return;
     }
 
-    await examAuthoringFacade.lifecycle.archiveExam(examId, 'System');
+    if (!staffActor) {
+      throw new Error('Sign in required: archive is blocked without an authenticated staff user.');
+    }
+    await examAuthoringFacade.lifecycle.archiveExam(examId, staffActor);
     await loadExam();
-  }, [examId, loadExam]);
+  }, [examId, loadExam, staffActor]);
 
   return {
     error,

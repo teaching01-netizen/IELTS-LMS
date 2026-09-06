@@ -29,7 +29,7 @@ export interface DeleteExamInput {
 }
 
 export interface ExamListProps {
-  providerScope?: 'ielts' | 'all';
+  providerScope?: 'ielts' | 'sat' | 'act' | 'all';
   onNavigate: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
   exams: Exam[];
   examEntities?: ExamEntity[];

@@ -89,7 +89,7 @@ export function VersionCompareView({ isOpen, onClose, diff, onRestoreAsDraft }: 
               <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
                 <ul className="space-y-2">
                   {changes.map((change, idx) => (
-                    <li key={idx} className="flex items-start gap-2 text-sm">
+                    <li key={`${change}:${idx}`} className="flex items-start gap-2 text-sm">
                       <ArrowRight size={16} className="text-blue-500 flex-shrink-0 mt-0.5" />
                       <span className="text-gray-700">{change}</span>
                     </li>

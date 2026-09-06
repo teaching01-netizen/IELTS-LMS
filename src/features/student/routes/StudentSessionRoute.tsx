@@ -98,9 +98,6 @@ export function StudentSessionRoute() {
       );
     }
 
-    const v2DurabilityEnabled =
-      String(import.meta.env['VITE_USE_V2_DURABILITY_ENGINE'] ?? 'false') === 'true' &&
-      attemptSnapshot.protocolVersion === 2;
     return (
       <SatStudentSessionRoute
         scheduleId={scheduleId}
@@ -112,15 +109,10 @@ export function StudentSessionRoute() {
         attemptUpdateToken={satAttemptUpdateToken}
         leaseEpoch={attemptSnapshot.leaseEpoch}
         controlEpoch={attemptSnapshot.controlEpoch}
-        useV2DurabilityEngine={v2DurabilityEnabled}
         onExit={navigateToStudentCheckIn}
       />
     );
   }
-
-  const v2DurabilityEnabled =
-    String(import.meta.env['VITE_USE_V2_DURABILITY_ENGINE'] ?? 'false') === 'true' &&
-    attemptSnapshot?.protocolVersion === 2;
 
   return (
     <StudentAppWrapper
@@ -131,7 +123,9 @@ export function StudentSessionRoute() {
       onRuntimeRefresh={refreshRuntime}
       runtimeSnapshot={runtimeSnapshot}
       answerInvariantRollout={answerInvariantRollout}
-      useV2DurabilityEngine={v2DurabilityEnabled}
+      // Cohort/runtime-backed IELTS sessions are completed by the proctor or
+      // authoritative timeout. The student can save answers but must not
+      // locally advance or terminalize the shared runtime.
       showSubmitControls={false}
       allowExitDuringExam={false}
     />

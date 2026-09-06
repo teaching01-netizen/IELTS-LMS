@@ -316,6 +316,41 @@ describe('StudentRuntimeProvider', () => {
     expect(screen.getByTestId('current-question')).toHaveTextContent('task-1');
   });
 
+  it('keeps a local V2 save acknowledgement when a same-attempt polling snapshot is idle', () => {
+    const idleAttempt: StudentAttempt = {
+      ...baseAttempt,
+      recovery: { ...baseAttempt.recovery, syncState: 'idle' },
+    };
+    let captured: ReturnType<typeof useStudentRuntime> | null = null;
+    function SyncCapture() {
+      captured = useStudentRuntime();
+      return <span data-testid="sync-state">{captured.state.attemptSyncState}</span>;
+    }
+
+    const { rerender } = render(
+      <StudentRuntimeProvider state={mockExamState} onExit={vi.fn()} attemptSnapshot={idleAttempt}>
+        <SyncCapture />
+      </StudentRuntimeProvider>,
+    );
+
+    act(() => {
+      captured?.actions.setAttemptSyncState('saved');
+    });
+    expect(screen.getByTestId('sync-state')).toHaveTextContent('saved');
+
+    rerender(
+      <StudentRuntimeProvider
+        state={mockExamState}
+        onExit={vi.fn()}
+        attemptSnapshot={{ ...idleAttempt, updatedAt: '2026-01-01T00:00:30.000Z' }}
+      >
+        <SyncCapture />
+      </StudentRuntimeProvider>,
+    );
+
+    expect(screen.getByTestId('sync-state')).toHaveTextContent('saved');
+  });
+
   it('locks runtime-backed interaction at the authoritative deadline even when the snapshot remaining value is stale', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));

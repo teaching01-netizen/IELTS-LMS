@@ -11,7 +11,7 @@ import {
 test.describe('Student network resilience (runtime-backed LRW)', () => {
   test.describe.configure({ timeout: 90_000 });
 
-  test('shows Connection lost overlay when offline', async ({ browser }, testInfo) => {
+  test('shows offline sync status and resumes after reconnect', async ({ browser }, testInfo) => {
     const manifest = readBackendE2EManifest();
     const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
 
@@ -30,10 +30,10 @@ test.describe('Student network resilience (runtime-backed LRW)', () => {
     await expect(page.getByLabel('Answer for question 1')).toBeVisible({ timeout: 30_000 });
 
     await context.setOffline(true);
-    await expect(page.getByRole('heading', { name: 'Connection lost' })).toBeVisible();
+    await expect(page.getByTestId('student-auto-save-status')).toHaveText('Offline');
 
     await context.setOffline(false);
-    await expect(page.getByRole('heading', { name: 'Connection lost' })).not.toBeVisible();
+    await expect(page.getByTestId('student-auto-save-status')).toHaveText(/Saved|Syncing/);
     await expect(
       page.getByLabel('Answer for question 1'),
     ).toBeVisible();

@@ -96,17 +96,20 @@ test.describe('student exam interaction motion', () => {
 
       // MI-1 regression guard: the footer current-chip state colors are untouched.
       const footer = page.getByRole('contentinfo', { name: /question navigation and progress/i });
-      const currentChip = footer.getByRole('button', { name: '1', exact: true }).first();
+      const currentChip = footer.getByRole('button', { name: /Question 1, current/ }).first();
       await expect(currentChip).toBeVisible();
       expect(await currentChip.evaluate((element) => window.getComputedStyle(element).backgroundColor)).toBe(
-        'rgb(0, 82, 204)', // themed bg-blue-800 (#0052CC)
+        'rgb(24, 91, 170)', // themed bg-blue-800 (#185BAA)
       );
       expect(
         await currentChip.evaluate((element) => window.getComputedStyle(element).transitionDuration),
       ).toBe('0.15s');
 
       // MI-3: the navigator dialog and its backdrop animate in.
-      await questionsButton.click();
+      // Chromium marks the trigger inert immediately when the native modal dialog
+      // is opened; force still emits the real pointer/click sequence without the
+      // locator waiting for the now-inert trigger to become actionable again.
+      await questionsButton.click({ force: true });
       const dialog = page.getByRole('dialog', { name: 'Question Navigator' });
       await expect(dialog).toBeVisible();
       await expect
@@ -179,8 +182,8 @@ test.describe('student exam interaction motion', () => {
       // MI-2: the pressed tab renders themed blue-700 border, the unpressed one themed gray-300.
       const border = async (tab: ReturnType<Page['getByRole']>) =>
         tab.evaluate((element) => window.getComputedStyle(element).borderColor);
-      expect(await border(passageTab)).toBe('rgb(0, 101, 255)'); // themed border-blue-700 (#0065FF)
-      expect(await border(questionsTab)).toBe('rgb(165, 173, 186)'); // themed border-gray-300 (#A5ADBA)
+      expect(await border(passageTab)).toBe('rgb(29, 111, 199)'); // themed border-blue-700 (#1D6FC7)
+      expect(await border(questionsTab)).toBe('rgb(199, 197, 195)'); // themed border-gray-300 (#C7C5C3)
       expect(await passageTab.evaluate((element) => window.getComputedStyle(element).transitionDuration)).toBe(
         '0.15s',
       );
@@ -190,10 +193,10 @@ test.describe('student exam interaction motion', () => {
       // Border-color transitions over 150ms, so poll until the paint settles.
       await expect
         .poll(async () => border(questionsTab), { timeout: 5_000 })
-        .toBe('rgb(0, 101, 255)');
+        .toBe('rgb(29, 111, 199)');
       await expect
         .poll(async () => border(passageTab), { timeout: 5_000 })
-        .toBe('rgb(165, 173, 186)');
+        .toBe('rgb(199, 197, 195)');
 
       // Compact timer pill transitions its state colors.
       const pill = page.getByTestId('student-header-timer-slot');

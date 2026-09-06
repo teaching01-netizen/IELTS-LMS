@@ -4,6 +4,14 @@ const GOOGLE_DRIVE_FILE_ID_PATTERNS = [
   /https?:\/\/drive\.google\.com\/uc\?(?:[^#]*&)?id=([a-zA-Z0-9_-]+)/i,
 ];
 
+const UNSAFE_AUDIO_URL_PATTERN = /^\s*(javascript|vbscript):/i;
+const UNSAFE_DATA_HTML_PATTERN = /^\s*data\s*:\s*text\/html/i;
+
+/** True when a URL must never be used as an audio source (script execution vector). */
+export function isUnsafeAudioUrl(value: string): boolean {
+  return UNSAFE_AUDIO_URL_PATTERN.test(value) || UNSAFE_DATA_HTML_PATTERN.test(value);
+}
+
 export const extractGoogleDriveFileId = (value: string): string | null => {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -33,6 +41,10 @@ export const extractGoogleDriveFileId = (value: string): string | null => {
 export const normalizeAudioUrl = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed) {
+    return '';
+  }
+  // Mirror normalizeImageUrl: never emit an executable source downstream.
+  if (isUnsafeAudioUrl(trimmed)) {
     return '';
   }
 

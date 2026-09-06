@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { ExamState } from '../../types';
 import type { StudentExamPhase } from '@student/domain/exam-session/studentExamPhase';
 import { Lobby } from './Lobby';
@@ -31,6 +31,22 @@ export function StudentExamPhaseRenderer({
 }: StudentExamPhaseRendererProps) {
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
   const { state: runtimeState, actions: runtimeActions } = useStudentRuntimeSession();
+  const [preCheckError, setPreCheckError] = useState<string | null>(null);
+  // S1-C13: move focus into the new phase on every phase change (WCAG 2.4.3)
+  // and announce it via the sr-only live region so SR users know the exam
+  // step changed even though the route URL does not.
+  const phaseHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const [phaseAnnouncement, setPhaseAnnouncement] = useState('');
+  useEffect(() => {
+    phaseHeadingRef.current?.focus();
+    setPhaseAnnouncement(
+      phase === 'pre-check'
+        ? 'Pre-check step. Verify your setup, then continue.'
+        : phase === 'lobby'
+          ? 'Lobby. Review the exam details, then start when ready.'
+          : 'Exam submitted. Your completion summary is shown.',
+    );
+  }, [phase, shouldRenderPostExam]);
 
   if (!shouldRenderPostExam && phase === 'pre-check') {
     return (
@@ -38,17 +54,32 @@ export function StudentExamPhaseRenderer({
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
+        <span className="sr-only" role="status" aria-live="polite">{phaseAnnouncement}</span>
         <main id="main-content" role="main">
+          <h1 ref={phaseHeadingRef} tabIndex={-1} className="sr-only">Exam pre-check</h1>
           <PreCheck
             config={examState.config}
             examTitle={attemptState.attempt?.examTitle ?? examState.title}
             candidateName={attemptState.attempt?.candidateName}
             candidateId={attemptState.attempt?.candidateId}
             onComplete={async (result) => {
-              await attemptActions.recordPreCheckResult(result);
+              setPreCheckError(null);
+              try {
+                await attemptActions.recordPreCheckResult(result);
+              } catch (error) {
+                setPreCheckError(
+                  error instanceof Error ? error.message : 'Could not save the pre-check. Try again.',
+                );
+                return;
+              }
               runtimeActions.setPhase('lobby');
             }}
           />
+          {preCheckError ? (
+            <p role="alert" className="mx-auto mt-4 max-w-xl px-4 text-sm font-semibold text-red-700">
+              {preCheckError}
+            </p>
+          ) : null}
         </main>
         {finalSubmitOverlay}
       </div>
@@ -61,7 +92,9 @@ export function StudentExamPhaseRenderer({
         <a href="#main-content" className="skip-link">
           Skip to main content
         </a>
+        <span className="sr-only" role="status" aria-live="polite">{phaseAnnouncement}</span>
         <main id="main-content" role="main">
+          <h1 ref={phaseHeadingRef} tabIndex={-1} className="sr-only">Exam lobby</h1>
           <Lobby
             state={examState}
             candidateName={attemptState.attempt?.candidateName}

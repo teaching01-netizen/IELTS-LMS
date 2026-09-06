@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Navigate, createBrowserRouter, useParams } from "react-router-dom";
+import { Navigate, createBrowserRouter, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/AppShell";
 import { AppLoadingSkeleton } from "../../components/ui/AppLoadingSkeleton";
 import { ErrorSurface } from "../../components/ui/ErrorSurface";
@@ -9,7 +9,8 @@ import { LoginPage } from "../../features/auth/LoginPage";
 import { PasswordResetCompletePage } from "../../features/auth/PasswordResetCompletePage";
 import { PasswordResetRequestPage } from "../../features/auth/PasswordResetRequestPage";
 import { RequireAuth } from "../../features/auth/RequireAuth";
-import { resolveRoleLandingPath, useAuthSession } from "../../features/auth/authSession";
+import { resolvePostLoginPath, useAuthSession } from "../../features/auth/authSession";
+import { RouteErrorBoundary } from "../../routes/RouteErrorBoundary";
 
 const AdminRoot = lazy(() =>
   import("../../features/admin/routes/AdminRoot").then((module) => ({
@@ -141,16 +142,22 @@ function RouteLoadingFallback() {
 }
 
 function NotFoundRoute() {
+  const navigate = useNavigate();
   return (
     <ErrorSurface
       title="Route Not Found"
       description="This path is not part of the active route tree."
+      actionLabel="Home"
+      onAction={() => navigate("/")}
+      secondaryActionLabel="Login"
+      secondaryOnAction={() => navigate("/login")}
     />
   );
 }
 
 function AdminIndexRedirect() {
   const { session, status } = useAuthSession();
+  const [searchParams] = useSearchParams();
   if (status === "loading") {
     return <LoadingSurface label="Loading Session..." />;
   }
@@ -158,21 +165,30 @@ function AdminIndexRedirect() {
     return <Navigate to="/login" replace />;
   }
 
-  return <Navigate to={resolveRoleLandingPath(session.user.role)} replace />;
-}
-
-function StudentRegisterRedirect() {
-  const { scheduleId } = useParams<{ scheduleId: string }>();
-  return <Navigate to={`/student/${scheduleId}`} replace />;
+  return (
+    <Navigate
+      to={resolvePostLoginPath(session.user.role, searchParams.get("next"))}
+      replace
+    />
+  );
 }
 
 function SatIndexRedirect() {
   const { session, status } = useAuthSession();
+  const [searchParams] = useSearchParams();
   if (status === "loading") return <LoadingSurface label="Loading Session..." />;
   if (!session) return <Navigate to="/login" replace />;
-  if (session.user.role === "proctor") return <Navigate to="/sat/sessions" replace />;
-  if (session.user.role === "grader") return <Navigate to="/sat/results" replace />;
-  return <Navigate to="/sat/exams" replace />;
+  // S3-M3: preserve ?next= when the role allows it; otherwise keep the
+  // existing SAT workspace defaults (not the generic role landing path).
+  const next = searchParams.get("next");
+  const fallback =
+    session.user.role === "proctor"
+      ? "/sat/sessions"
+      : session.user.role === "grader"
+        ? "/sat/results"
+        : "/sat/exams";
+  const resolved = resolvePostLoginPath(session.user.role, next);
+  return <Navigate to={next && resolved === next ? next : fallback} replace />;
 }
 
 function withAuth(
@@ -186,29 +202,36 @@ const baseRoutes = [
   {
     path: "/login",
     element: <LoginPage />,
+    errorElement: <RouteErrorBoundary />,
   },
   {
     path: "/activate",
     element: <ActivateAccountPage />,
+    errorElement: <RouteErrorBoundary />,
   },
   {
     path: "/password/reset",
     element: <PasswordResetRequestPage />,
+    errorElement: <RouteErrorBoundary />,
   },
   {
     path: "/password/reset/complete",
     element: <PasswordResetCompletePage />,
+    errorElement: <RouteErrorBoundary />,
   },
   {
     path: "/",
     element: <AppShell />,
+    errorElement: <RouteErrorBoundary />,
     children: [
       {
         index: true,
+        errorElement: <RouteErrorBoundary />,
         element: <LoginPage />,
       },
       {
         path: "admin",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
             <AdminRoot />
@@ -218,6 +241,7 @@ const baseRoutes = [
         children: [
           {
             index: true,
+            errorElement: <RouteErrorBoundary />,
             element: <AdminIndexRedirect />,
           },
           {
@@ -287,6 +311,7 @@ const baseRoutes = [
       },
       {
         path: "sat",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
             <SatRoot />
@@ -294,7 +319,7 @@ const baseRoutes = [
           ["admin", "builder", "proctor", "grader"]
         ),
         children: [
-          { index: true, element: <SatIndexRedirect /> },
+          { index: true, errorElement: <RouteErrorBoundary />, element: <SatIndexRedirect /> },
           {
             path: "exams",
             element: withAuth(
@@ -323,10 +348,18 @@ const baseRoutes = [
               ["admin", "grader", "proctor"]
             ),
           },
+          {
+            path: "sessions/:scheduleId",
+            element: withAuth(
+              <Suspense fallback={<RouteLoadingFallback />}><SatSessionRoomRoute /></Suspense>,
+              ["admin", "proctor"]
+            ),
+          },
         ],
       },
       {
         path: "sat/exams/:examId",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}><ProviderBuilderRoute /></Suspense>,
           ["admin", "builder"]
@@ -334,6 +367,7 @@ const baseRoutes = [
       },
       {
         path: "sat/exams/:examId/release",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}><ProviderReviewRoute /></Suspense>,
           ["admin", "builder"]
@@ -341,6 +375,7 @@ const baseRoutes = [
       },
       {
         path: "sat/exams/:examId/preview",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}><ProviderPreviewRoute /></Suspense>,
           ["admin", "builder"]
@@ -348,20 +383,15 @@ const baseRoutes = [
       },
       {
         path: "sat/exams/:examId/access",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}><SatAccessRoute /></Suspense>,
           ["admin", "builder"]
         ),
       },
       {
-        path: "sat/sessions/:scheduleId",
-        element: withAuth(
-          <Suspense fallback={<RouteLoadingFallback />}><SatSessionRoomRoute /></Suspense>,
-          ["admin", "proctor"]
-        ),
-      },
-      {
         path: "builder/:examId",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
             <ProviderBuilderRoute />
@@ -371,6 +401,7 @@ const baseRoutes = [
       },
       {
         path: "builder/:examId/builder",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
             <BuilderRoot />
@@ -380,6 +411,7 @@ const baseRoutes = [
       },
       {
         path: "builder/:examId/review",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
             <ProviderReviewRoute />
@@ -389,6 +421,7 @@ const baseRoutes = [
       },
       {
         path: "builder/:examId/preview",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
             <ProviderPreviewRoute />
@@ -398,6 +431,7 @@ const baseRoutes = [
       },
       {
         path: "builder/:examId/answer-key",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
             <ExamAnswerKeyRoute />
@@ -407,6 +441,7 @@ const baseRoutes = [
       },
       {
         path: "proctor",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
             <ProctorRoot />
@@ -416,6 +451,7 @@ const baseRoutes = [
       },
       {
         path: "proctor/answer-history/:attemptId",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
             <ProctorAnswerHistoryRoute />
@@ -425,6 +461,7 @@ const baseRoutes = [
       },
       {
         path: "join/:accessLinkId",
+        errorElement: <RouteErrorBoundary />,
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>
             <StudentAccessLinkEntryRoute />
@@ -433,6 +470,7 @@ const baseRoutes = [
       },
       {
         path: "student/:scheduleId",
+        errorElement: <RouteErrorBoundary />,
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>
             <StudentRegistrationRoute />
@@ -441,10 +479,16 @@ const baseRoutes = [
       },
       {
         path: "student/:scheduleId/register",
-        element: <StudentRegisterRedirect />,
+        errorElement: <RouteErrorBoundary />,
+        element: (
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <StudentRegistrationRoute />
+          </Suspense>
+        ),
       },
       {
         path: "student/:scheduleId/:studentId",
+        errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<RouteLoadingFallback />}>
             <StudentSessionRoute />
@@ -454,6 +498,7 @@ const baseRoutes = [
       },
       {
         path: "*",
+        errorElement: <RouteErrorBoundary />,
         element: <NotFoundRoute />,
       },
     ],
@@ -464,6 +509,7 @@ const devRoutes = import.meta.env.DEV
   ? [
       {
         path: "/__dev/highlight-selection",
+        errorElement: <RouteErrorBoundary />,
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>
             <DevHighlightSelectionRoute />
@@ -472,6 +518,7 @@ const devRoutes = import.meta.env.DEV
       },
       {
         path: "/__dev/sat-accessibility",
+        errorElement: <RouteErrorBoundary />,
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>
             <DevSatAccessibilityRoute />

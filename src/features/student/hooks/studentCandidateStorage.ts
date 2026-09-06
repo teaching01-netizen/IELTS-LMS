@@ -32,12 +32,11 @@ export function loadStoredCandidateProfile(
     return null;
   }
 
-  const raw = window.localStorage.getItem(`${PROFILE_STORAGE_PREFIX}${scheduleId}:${candidateId}`);
-  if (!raw) {
-    return null;
-  }
-
   try {
+    const raw = window.localStorage.getItem(`${PROFILE_STORAGE_PREFIX}${scheduleId}:${candidateId}`);
+    if (!raw) {
+      return null;
+    }
     const parsed = JSON.parse(raw) as { studentName?: unknown; email?: unknown };
     const studentName = typeof parsed.studentName === 'string' ? parsed.studentName.trim() : '';
     const email = typeof parsed.email === 'string' ? parsed.email.trim() : '';

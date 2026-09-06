@@ -1,3 +1,12 @@
+/**
+ * Preview honesty contract.
+ *
+ * resolvePreviewRuntimeSession intentionally performs REAL backend writes
+ * (schedule + attempt + precheck + runtime transitions) scoped to the isolated
+ * ephemeral namespace '__preview_runtime__:<examId>:<author>:<module>' with
+ * 24h TTL + outdated-version cleanup, so preview never touches real cohorts;
+ * downstream answer-sync is separately disabled in the UI layer.
+ */
 import {
   backendPost,
   buildCreateSchedulePayload,
@@ -6,10 +15,11 @@ import {
 import { examDeliveryService, examRepository, getEnabledModules } from '../../exam-authoring/api/examAuthoringGateway';
 import { ensureClientSessionIdForAttempt, studentAttemptRepository } from '../../student/api/studentAttemptGateway';
 import { studentSessionTransport } from '../../student/api/studentSessionGateway';
+import { buildAttemptAuthorizationHeader } from '../infrastructure/attemptCredential';
 import type { ExamState, ModuleType } from '../../../types';
 import type { ExamEntity, ExamSchedule } from '../../../types/domain';
 
-const PREVIEW_COHORT_PREFIX = '__preview_runtime__';
+export const PREVIEW_COHORT_PREFIX = '__preview_runtime__';
 const PREVIEW_ACTOR = 'preview-runtime';
 const PREVIEW_CANDIDATE_NAME = 'Preview Candidate';
 const PREVIEW_CANDIDATE_EMAIL = 'preview@example.local';
@@ -29,11 +39,13 @@ interface ResolvePreviewRuntimeSessionOptions {
   now?: Date;
 }
 
+const inFlightPreviewSessions = new Map<string, Promise<PreviewRuntimeSession>>();
+
 export function isPreviewRuntimeCohortName(cohortName: string): boolean {
   return cohortName.startsWith(`${PREVIEW_COHORT_PREFIX}:`);
 }
 
-function buildPreviewRuntimeCohortName(examId: string, authorUserId: string, module: ModuleType): string {
+export function buildPreviewRuntimeCohortName(examId: string, authorUserId: string, module: ModuleType): string {
   const authorToken = sanitizeToken(authorUserId);
   return `${PREVIEW_COHORT_PREFIX}:${examId}:${authorToken}:${module}`;
 }
@@ -42,12 +54,12 @@ function sanitizeToken(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
-function parsePreviewRuntimeSection(
+export function parsePreviewRuntimeSection(
   schedule: Pick<ExamSchedule, 'cohortName'>,
 ): ModuleType | null {
   const parts = schedule.cohortName.split(':');
   const raw = parts[parts.length - 1]?.trim().toLowerCase();
-  if (raw === 'listening' || raw === 'reading' || raw === 'writing' || raw === 'speaking') {
+  if (raw === 'listening' || raw === 'reading' || raw === 'writing' || raw === 'speaking' || raw === 'science') {
     return raw;
   }
   return null;
@@ -225,13 +237,16 @@ async function ensurePreviewAttemptWithPrecheck(
       preCheck: createPrecheckPayload(),
       deviceFingerprintHash: attempt.integrity.deviceFingerprintHash ?? undefined,
     },
-    { retries: 0 },
+    {
+      headers: buildAttemptAuthorizationHeader(attempt),
+      retries: 0,
+    },
   );
 
   return { studentId };
 }
 
-export async function resolvePreviewRuntimeSession(
+async function resolvePreviewRuntimeSessionUncached(
   options: ResolvePreviewRuntimeSessionOptions,
 ): Promise<PreviewRuntimeSession> {
   const now = options.now ?? new Date();
@@ -318,4 +333,28 @@ export async function resolvePreviewRuntimeSession(
     scheduleId: schedule.id,
     studentId,
   };
+}
+
+export function resolvePreviewRuntimeSession(
+  options: ResolvePreviewRuntimeSessionOptions,
+): Promise<PreviewRuntimeSession> {
+  // React StrictMode and route revalidation can invoke the effect twice while
+  // the first preview is still being provisioned. Coalesce that identical
+  // backend workflow so two isolated schedules are never created concurrently.
+  const draftVersionId = options.exam.currentDraftVersionId ?? options.exam.currentPublishedVersionId ?? '';
+  const key = `${options.exam.id}:${options.authorUserId}:${draftVersionId}:${options.requestedModule ?? 'auto'}`;
+  const existing = inFlightPreviewSessions.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = resolvePreviewRuntimeSessionUncached(options);
+  inFlightPreviewSessions.set(key, pending);
+  const clearPending = () => {
+    if (inFlightPreviewSessions.get(key) === pending) {
+      inFlightPreviewSessions.delete(key);
+    }
+  };
+  void pending.then(clearPending, clearPending);
+  return pending;
 }

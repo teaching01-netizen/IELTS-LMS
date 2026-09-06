@@ -118,7 +118,7 @@ describe('WarningOverlay', () => {
     expect(screen.queryByText(/Auto-dismiss in:/)).not.toBeInTheDocument();
   });
 
-  it('auto-dismisses after countdown reaches zero', () => {
+  it('does not auto-dismiss after countdown reaches zero (explicit ack required)', () => {
     const onAcknowledge = vi.fn();
     render(
       <WarningOverlay
@@ -131,10 +131,10 @@ describe('WarningOverlay', () => {
     );
 
     act(() => {
-      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(60_000);
     });
 
-    expect(onAcknowledge).toHaveBeenCalledTimes(1);
+    expect(onAcknowledge).not.toHaveBeenCalled();
   });
 
   it('does not auto-dismiss when showCountdown is false', () => {
@@ -230,16 +230,12 @@ describe('WarningOverlay', () => {
       />,
     );
 
+    // Countdown is informational only: even a full 30s after reopening
+    // must not acknowledge without an explicit operator action.
     act(() => {
-      vi.advanceTimersByTime(25_000);
+      vi.advanceTimersByTime(30_000);
     });
 
     expect(onAcknowledge).not.toHaveBeenCalled();
-
-    act(() => {
-      vi.advanceTimersByTime(5_000);
-    });
-
-    expect(onAcknowledge).toHaveBeenCalledTimes(1);
   });
 });

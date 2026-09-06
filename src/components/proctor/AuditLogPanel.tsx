@@ -153,35 +153,42 @@ export function AuditLogPanel({ auditLogs, sessionId, onClose }: AuditLogPanelPr
     }
   };
 
+  // CSV/JSON export: shared csvExport util (BOM + formula-injection guard
+  // + detached-anchor download with async revoke). Guards empty rows.
   const exportToCSV = () => {
-    const headers = ['Timestamp', 'Actor', 'Action Type', 'Target Student ID', 'Payload'];
-    const rows = filteredLogs.map(log => [
-      new Date(log.timestamp).toISOString(),
-      log.actor,
-      log.actionType,
-      log.targetStudentId || '',
-      JSON.stringify(log.payload || {})
-    ]);
-    
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n');
-    
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `audit-log-${sessionId}-${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
+    if (filteredLogs.length === 0) {
+      return;
+    }
+    void (async () => {
+      const { downloadCsv } = await import('../../utils/csvExport');
+      downloadCsv(
+        `audit-log-${sessionId}-${new Date().toISOString().split('T')[0]}.csv`,
+        ['Timestamp', 'Actor', 'Action Type', 'Target Student ID', 'Payload'],
+        filteredLogs.map((log) => [
+          new Date(log.timestamp).toISOString(),
+          log.actor,
+          log.actionType,
+          log.targetStudentId || '',
+          JSON.stringify(log.payload || {}),
+        ]),
+      );
+    })();
   };
 
   const exportToJSON = () => {
+    if (filteredLogs.length === 0) {
+      return;
+    }
     const jsonContent = JSON.stringify(filteredLogs, null, 2);
     const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
+    link.href = url;
     link.download = `audit-log-${sessionId}-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
     link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
   };
 
   const formatTime = (timestamp: string) => {
@@ -374,7 +381,11 @@ export function AuditLogPanel({ auditLogs, sessionId, onClose }: AuditLogPanelPr
             <div className="absolute left-8 top-0 bottom-0 w-px bg-gray-200" />
             
             {filteredLogs.map((log, index) => {
-              const ActionIcon = actionIcons[log.actionType];
+              // Unknown-action fallback: backend may introduce action types
+              // the frontend Record does not know yet — render FileText +
+              // neutral gray instead of crashing on undefined indexing.
+              const ActionIcon = actionIcons[log.actionType] ?? FileText;
+              const actionColor = actionColors[log.actionType] ?? 'bg-gray-100 text-gray-800 border-gray-200';
               return (
                 <div
                   key={log.id}
@@ -397,7 +408,7 @@ export function AuditLogPanel({ auditLogs, sessionId, onClose }: AuditLogPanelPr
                       </div>
                     </div>
                     <div className="col-span-3">
-                      <Badge className={actionColors[log.actionType]}>
+                      <Badge className={actionColor}>
                         <div className="flex items-center gap-1">
                           <ActionIcon size={12} />
                           {resolveDisplayAction(log).replace(/_/g, ' ')}
@@ -414,7 +425,7 @@ export function AuditLogPanel({ auditLogs, sessionId, onClose }: AuditLogPanelPr
                     <div className="col-span-2">
                       {log.payload && (
                         <details className="text-xs">
-                          <summary className="cursor-pointer text-blue-600 hover:text-blue-800">View details</summary>
+                          <summary className="cursor-pointer text-blue-700 hover:text-blue-800">View details</summary>
                           <pre className="mt-2 p-2 bg-gray-100 rounded text-gray-700 overflow-x-auto">
                             {JSON.stringify(log.payload, null, 2)}
                           </pre>

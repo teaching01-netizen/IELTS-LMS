@@ -9,16 +9,31 @@ import {queryClient} from './app/data/queryClient';
 import {AuthSessionProvider} from './features/auth/authSession';
 import './index.css';
 
+// Reset transient UI chrome (scroll, focus) on navigation so a new route
+// never inherits scroll position or a stale focused control.
+let lastLocationKey: string | null = null;
+router.subscribe((state) => {
+  const location = state.location;
+  const key = location.pathname + location.search + location.hash;
+  if (lastLocationKey !== null && lastLocationKey !== key) {
+    window.scrollTo(0, 0);
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  }
+  lastLocationKey = key;
+});
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <MotionConfig reducedMotion="user">
-      <AuthSessionProvider>
-        <QueryClientProvider client={queryClient}>
-          <ErrorBoundary>
+    <ErrorBoundary>
+      <MotionConfig reducedMotion="user">
+        <AuthSessionProvider>
+          <QueryClientProvider client={queryClient}>
             <RouterProvider router={router} />
-          </ErrorBoundary>
-        </QueryClientProvider>
-      </AuthSessionProvider>
-    </MotionConfig>
+          </QueryClientProvider>
+        </AuthSessionProvider>
+      </MotionConfig>
+    </ErrorBoundary>
   </StrictMode>,
 );

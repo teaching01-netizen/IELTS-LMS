@@ -46,6 +46,23 @@ interface UIState {
   setGlobalLoading: (loading: boolean) => void;
 }
 
+/** Maximum toasts retained: the newest toast evicts the oldest (FIFO). */
+export const MAX_TOASTS = 5;
+
+// Auto-dismiss timer handles keyed by toast id. Tracked in module scope (not
+// in the persisted store) so manual dismiss and clearToasts can cancel a
+// pending setTimeout instead of leaving an orphaned timer that fires a stale
+// removeToast after the toast is gone.
+const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearToastTimer(id: string): void {
+  const timer = toastTimers.get(id);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    toastTimers.delete(id);
+  }
+}
+
 export const useUIStore = create<UIState>()(
   persist(
     (set, get) => ({
@@ -83,20 +100,41 @@ export const useUIStore = create<UIState>()(
       addToast: (toast) => {
         const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
         const newToast: Toast = { ...toast, id };
-        set((state) => ({ toasts: [...state.toasts, newToast] }));
+        // Cap: evict oldest first so the stack stays bounded; cancelled
+        // timers of evicted toasts are cleared to avoid orphaned callbacks.
+        set((state) => {
+          const next = [...state.toasts, newToast];
+          while (next.length > MAX_TOASTS) {
+            const evicted = next.shift();
+            if (evicted) clearToastTimer(evicted.id);
+          }
+          return { toasts: next };
+        });
 
-        // Auto-remove toast after duration
-        if (toast.duration !== 0) {
-          setTimeout(() => {
-            get().removeToast(id);
-          }, toast.duration || 5000);
+        // Auto-remove toast after duration. `duration <= 0` (including 0)
+        // means sticky: no timer, matching the Toast component semantics.
+        if (!(toast.duration !== undefined ? toast.duration > 0 : true)) {
+          return;
         }
+        const delay = toast.duration ?? 5000;
+        const timer = setTimeout(() => {
+          toastTimers.delete(id);
+          get().removeToast(id);
+        }, delay);
+        toastTimers.set(id, timer);
       },
-      removeToast: (id) =>
+      removeToast: (id) => {
+        clearToastTimer(id);
         set((state) => ({
           toasts: state.toasts.filter((toast) => toast.id !== id),
-        })),
-      clearToasts: () => set({ toasts: [] }),
+        }));
+      },
+      clearToasts: () => {
+        for (const id of toastTimers.keys()) {
+          clearToastTimer(id);
+        }
+        set({ toasts: [] });
+      },
 
       // Theme
       theme: 'system',

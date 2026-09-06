@@ -1,356 +1,151 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { readBackendE2EManifest } from "./support/backendE2e";
 import {
-  ADMIN_STORAGE_STATE_PATH,
-  readBackendE2EManifest,
-  STUDENT_STORAGE_STATE_PATH,
-} from './support/backendE2e';
+  completePreCheckIfPresent,
+  deterministicWcode,
+  openStudentSessionWithRetry,
+  startLobbyIfPresent,
+  studentCheckIn,
+  stubScreenDetails,
+} from "./support/studentUi";
 
-test.describe('Browser Compatibility', () => {
-  test('Chrome latest - core functionality', async ({ page, browserName }) => {
-    test.skip(browserName !== 'chromium', 'This test is for Chrome/Chromium');
+async function openRuntimeBackedExam(
+  browser: Browser,
+  testInfo: { project: { name: string }; title: string }
+): Promise<{ context: BrowserContext; page: Page }> {
+  const manifest = readBackendE2EManifest();
+  const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
+  const context = await browser.newContext();
+  await stubScreenDetails(context);
+  const page = await context.newPage();
 
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
+  await studentCheckIn(page, manifest.student.scheduleId, {
+    wcode,
+    email: `e2e+${wcode.toLowerCase()}@example.com`,
+    fullName: `E2E Candidate ${wcode}`,
+  });
+  await completePreCheckIfPresent(page);
+  await startLobbyIfPresent(page);
+  await openStudentSessionWithRetry(page, manifest.student.scheduleId, wcode);
 
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
+  return { context, page };
+}
+
+async function openRegistration(page: Page) {
+  const { studentSelfPaced } = readBackendE2EManifest();
+  await page.goto(`/student/${studentSelfPaced.scheduleId}/register`);
+  await expect(page.getByRole("heading", { name: "Exam Check-in" })).toBeVisible();
+}
+
+test.describe("Browser compatibility", () => {
+  test.describe.configure({ timeout: 180_000 });
+
+  test("runtime-backed student controls work in the active browser", async ({
+    browser,
+  }, testInfo) => {
+    const { context, page } = await openRuntimeBackedExam(browser, testInfo);
+    try {
+      const answer = page.getByLabel("Answer for question 1");
+      await expect(answer).toBeVisible({ timeout: 30_000 });
+      await answer.fill("browser compatibility answer");
+      await expect(answer).toHaveValue("browser compatibility answer");
+    } finally {
+      await context.close();
     }
-
-    await expect(page.getByLabel('Answer for question 1')).toBeVisible();
-    await page.getByLabel('Answer for question 1').fill('Chrome test answer');
-    expect(await page.getByLabel('Answer for question 1').inputValue()).toBe('Chrome test answer');
   });
 
-  test('Firefox latest - core functionality', async ({ page, browserName }) => {
-    test.skip(browserName !== 'firefox', 'This test is for Firefox');
+  test("student check-in remains usable on narrow and tablet viewports", async ({ page }) => {
+    const viewports = [
+      { width: 375, height: 667 },
+      { width: 768, height: 1024 },
+    ];
 
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await openRegistration(page);
+      await expect(page.getByLabel("Wcode")).toBeVisible();
+      await expect(page.getByLabel("Email")).toBeVisible();
+      await expect(page.getByLabel("Full Name")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
     }
-
-    await expect(page.getByLabel('Answer for question 1')).toBeVisible();
-    await page.getByLabel('Answer for question 1').fill('Firefox test answer');
-    expect(await page.getByLabel('Answer for question 1').inputValue()).toBe('Firefox test answer');
   });
 
-  test('Edge latest - core functionality', async ({ page, browserName }) => {
-    test.skip(browserName !== 'chromium', 'This test is for Edge/Chromium');
+  test("student check-in exposes keyboard and screen-reader labels", async ({ page }) => {
+    await openRegistration(page);
 
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    await expect(page.getByLabel('Answer for question 1')).toBeVisible();
-    await page.getByLabel('Answer for question 1').fill('Edge test answer');
-    expect(await page.getByLabel('Answer for question 1').inputValue()).toBe('Edge test answer');
+    const wcode = page.getByLabel("Wcode");
+    await wcode.focus();
+    await expect(wcode).toBeFocused();
+    await expect(page.getByLabel("Nickname")).toHaveAttribute("aria-label", "Nickname");
+    await expect(page.getByLabel("IELTS Course")).toHaveAttribute("aria-label", "IELTS Course");
   });
 
-  test('Safari - acknowledgment flow', async ({ page, browserName }) => {
-    test.skip(browserName !== 'webkit', 'This test is for Safari/Webkit');
+  test("browser media preferences are observable by the active UI", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+    await openRegistration(page);
 
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
+    const preferences = await page.evaluate(() => ({
+      dark: window.matchMedia("(prefers-color-scheme: dark)").matches,
+      reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      devicePixelRatio: window.devicePixelRatio,
+    }));
 
-    // Safari should show acknowledgment dialog
-    const safariAckDialog = page.getByRole('dialog', { name: /Safari/i });
-    const isAckVisible = await safariAckDialog.isVisible().catch(() => false);
-
-    if (isAckVisible) {
-      await expect(safariAckDialog).toBeVisible();
-      await page.getByRole('button', { name: 'Acknowledge' }).click();
-    }
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    await expect(page.getByLabel('Answer for question 1')).toBeVisible();
+    expect(preferences.dark).toBe(true);
+    expect(preferences.reducedMotion).toBe(true);
+    expect(preferences.devicePixelRatio).toBeGreaterThan(0);
   });
 
-  test('fallbacks for unsupported APIs', async ({ page }) => {
-    await page.goto('/student/test-compatibility');
+  test("required browser primitives are available before check-in", async ({ page }) => {
+    await page.goto("/login");
+    const features = await page.evaluate(() => ({
+      fetch: typeof fetch === "function",
+      localStorage: typeof localStorage !== "undefined",
+      sessionStorage: typeof sessionStorage !== "undefined",
+      webSocket: typeof WebSocket === "function",
+      webWorkers: typeof Worker === "function",
+    }));
 
-    // Check if browser supports required APIs
-    const apiSupport = await page.evaluate(() => {
-      return {
-        webSocket: typeof WebSocket !== 'undefined',
-        localStorage: typeof localStorage !== 'undefined',
-        sessionStorage: typeof sessionStorage !== 'undefined',
-        fetch: typeof fetch !== 'undefined',
-        mediaDevices: typeof navigator.mediaDevices !== 'undefined',
-      };
+    expect(features).toEqual({
+      fetch: true,
+      localStorage: true,
+      sessionStorage: true,
+      webSocket: true,
+      webWorkers: true,
     });
-
-    // Verify fallbacks are in place for missing APIs
-    if (!apiSupport.webSocket) {
-      const pollingIndicator = page.getByTestId('polling-fallback-active');
-      await expect(pollingIndicator).toBeVisible();
-    }
-
-    if (!apiSupport.mediaDevices) {
-      const cameraFallback = page.getByTestId('camera-fallback');
-      await expect(cameraFallback).toBeVisible();
-    }
   });
 
-  test('mobile responsive design', async ({ page, browserName }) => {
-    // Set mobile viewport
-    await page.setViewportSize({ width: 375, height: 667 });
-
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Verify mobile layout
-    await expect(page.getByLabel('Answer for question 1')).toBeVisible();
-    
-    // Check for mobile-specific elements
-    const mobileNav = page.getByTestId('mobile-navigation');
-    const isMobileNavVisible = await mobileNav.isVisible().catch(() => false);
-    
-    if (isMobileNavVisible) {
-      await expect(mobileNav).toBeVisible();
-    }
-  });
-
-  test('tablet responsive design', async ({ page }) => {
-    // Set tablet viewport
-    await page.setViewportSize({ width: 768, height: 1024 });
-
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Verify tablet layout
-    await expect(page.getByLabel('Answer for question 1')).toBeVisible();
-  });
-
-  test('high DPI display support', async ({ page }) => {
-    // Set high DPI viewport
-    await page.setViewportSize({ width: 1920, height: 1080 });
+  test("browser storage and cookies survive a page reload", async ({ page }) => {
+    await page.goto("/login");
     await page.evaluate(() => {
-      (window as any).devicePixelRatio = 2;
+      localStorage.setItem("browser-compatibility-local", "local-value");
+      sessionStorage.setItem("browser-compatibility-session", "session-value");
     });
-
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Verify elements render correctly at high DPI
-    await expect(page.getByLabel('Answer for question 1')).toBeVisible();
-  });
-
-  test('dark mode support', async ({ page }) => {
-    // Enable dark mode
-    await page.emulateMedia({ colorScheme: 'dark' });
-
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Verify dark mode styles are applied
-    const body = page.locator('body');
-    const hasDarkClass = await body.getAttribute('class');
-    
-    if (hasDarkClass) {
-      expect(hasDarkClass).toContain('dark');
-    }
-  });
-
-  test('reduced motion support', async ({ page }) => {
-    // Enable reduced motion
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Verify reduced motion is respected
-    await expect(page.getByLabel('Answer for question 1')).toBeVisible();
-  });
-
-  test('touch event support', async ({ page }) => {
-    // Set touch capabilities
-    const context = page.context();
-    await context.setGeolocation({ latitude: 0, longitude: 0 });
-
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Verify touch interactions work
-    await page.getByLabel('Answer for question 1').tap();
-    await expect(page.getByLabel('Answer for question 1')).toBeFocused();
-  });
-
-  test('keyboard navigation support', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Navigate using keyboard
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
-    
-    // Verify focus moves correctly
-    const focusedElement = page.locator(':focus');
-    await expect(focusedElement).toBeVisible();
-  });
-
-  test('screen reader compatibility', async ({ page }) => {
-    const manifest = readBackendE2EManifest();
-    await page.goto(`/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`);
-
-    const compatibilityCheck = page.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await page.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Verify ARIA labels are present
-    const answerInput = page.getByLabel('Answer for question 1');
-    await expect(answerInput).toBeVisible();
-    
-    // Check for aria-label or aria-labelledby
-    const ariaLabel = await answerInput.getAttribute('aria-label');
-    const ariaLabelledBy = await answerInput.getAttribute('aria-labelledby');
-    
-    expect(ariaLabel || ariaLabelledBy).toBeTruthy();
-  });
-
-  test('browser feature detection', async ({ page }) => {
-    await page.goto('/student/test-compatibility');
-
-    const features = await page.evaluate(() => {
-      return {
-        es6: typeof Promise !== 'undefined',
-        webGL: !!((window as any).WebGLRenderingContext),
-        webWorkers: typeof Worker !== 'undefined',
-        serviceWorker: 'serviceWorker' in navigator,
-        notifications: 'Notification' in window,
-      };
-    });
-
-    // Log feature support for debugging
-    console.log('Browser features:', features);
-
-    // Verify critical features are supported
-    expect(features.es6).toBe(true);
-  });
-
-  test('cross-browser localStorage persistence', async ({ page }) => {
-    await page.goto('/');
-
-    // Set a value in localStorage
-    await page.evaluate(() => {
-      localStorage.setItem('test-key', 'test-value');
-    });
-
-    // Reload page
-    await page.reload();
-
-    // Verify value persisted
-    const storedValue = await page.evaluate(() => {
-      return localStorage.getItem('test-key');
-    });
-
-    expect(storedValue).toBe('test-value');
-
-    // Cleanup
-    await page.evaluate(() => {
-      localStorage.removeItem('test-key');
-    });
-  });
-
-  test('cross-browser sessionStorage persistence', async ({ page }) => {
-    await page.goto('/');
-
-    // Set a value in sessionStorage
-    await page.evaluate(() => {
-      sessionStorage.setItem('test-key', 'test-value');
-    });
-
-    // Reload page
-    await page.reload();
-
-    // Verify value persisted
-    const storedValue = await page.evaluate(() => {
-      return sessionStorage.getItem('test-key');
-    });
-
-    expect(storedValue).toBe('test-value');
-  });
-
-  test('cookie support across browsers', async ({ page }) => {
-    await page.goto('/');
-
-    // Set a cookie
     await page.context().addCookies([
       {
-        name: 'test-cookie',
-        value: 'test-value',
-        domain: 'localhost',
-        path: '/',
+        name: "browser-compatibility-cookie",
+        value: "cookie-value",
+        domain: "localhost",
+        path: "/",
       },
     ]);
 
-    // Reload page
     await page.reload();
 
-    // Verify cookie is accessible
-    const cookies = await page.context().cookies();
-    const testCookie = cookies.find(c => c.name === 'test-cookie');
-    
-    expect(testCookie).toBeDefined();
-    expect(testCookie?.value).toBe('test-value');
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("browser-compatibility-local")))
+      .toBe("local-value");
+    await expect
+      .poll(() => page.evaluate(() => sessionStorage.getItem("browser-compatibility-session")))
+      .toBe("session-value");
+    expect(
+      (await page.context().cookies()).find(
+        (cookie) => cookie.name === "browser-compatibility-cookie"
+      )?.value
+    ).toBe("cookie-value");
+
+    await page.evaluate(() => {
+      localStorage.removeItem("browser-compatibility-local");
+      sessionStorage.removeItem("browser-compatibility-session");
+    });
   });
 });

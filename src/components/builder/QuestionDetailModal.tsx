@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   QuestionBankItem,
   QuestionType,
@@ -51,6 +51,51 @@ const DIFFICULTY_COLORS = {
 };
 
 export function QuestionDetailModal({ item, isOpen, onClose, onAddToExam }: QuestionDetailModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
+
+  // Focus trap + Escape to close + focus restore while open.
+  useEffect(() => {
+    if (!isOpen || !item) {
+      return;
+    }
+    previousActiveElementRef.current = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    dialog?.querySelector<HTMLElement>('button')?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) {
+        return;
+      }
+      const focusable = dialog.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) {
+        return;
+      }
+      const first = focusable[0] as HTMLElement;
+      const last = focusable[focusable.length - 1] as HTMLElement;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      previousActiveElementRef.current?.focus();
+    };
+  }, [isOpen, item, onClose]);
+
   if (!isOpen || !item) return null;
 
   const handleAddToExam = () => {
@@ -61,26 +106,34 @@ export function QuestionDetailModal({ item, isOpen, onClose, onAddToExam }: Ques
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Question details: ${QUESTION_TYPE_LABELS[item.block.type] ?? 'Question'}`}
+        onClick={(event) => event.stopPropagation()}
+        className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+      >
         {/* Header */}
         <div className="border-b border-gray-200 p-6 flex items-start justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
               <h3 className="text-xl font-semibold text-gray-900">Question Details</h3>
               <span className={`text-xs font-semibold px-2 py-1 rounded ${
-                DIFFICULTY_COLORS[item.metadata.difficulty]
+                DIFFICULTY_COLORS[item.metadata.difficulty] ?? 'bg-gray-100 text-gray-700'
               }`}>
-                {item.metadata.difficulty}
+                {item.metadata.difficulty || 'Unknown'}
               </span>
               <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
                 {QUESTION_TYPE_LABELS[item.block.type]}
               </span>
             </div>
-            <p className="text-sm text-gray-500">ID: {item.id}</p>
+            <p className="text-sm text-gray-500">ID: {item.id || 'Unknown'}</p>
           </div>
           <button
             onClick={onClose}
+            aria-label="Close question details"
             className="p-2 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600"
           >
             <X size={20} />
@@ -98,11 +151,11 @@ export function QuestionDetailModal({ item, isOpen, onClose, onAddToExam }: Ques
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span className="text-gray-500">Topic:</span>
-                <span className="ml-2 text-gray-900 font-medium">{item.metadata.topic}</span>
+                <span className="ml-2 text-gray-900 font-medium">{item.metadata.topic || 'Untagged'}</span>
               </div>
               <div>
                 <span className="text-gray-500">Author:</span>
-                <span className="ml-2 text-gray-900 font-medium">{item.metadata.author}</span>
+                <span className="ml-2 text-gray-900 font-medium">{item.metadata.author || 'Unknown author'}</span>
               </div>
               <div>
                 <span className="text-gray-500 flex items-center gap-1">
@@ -128,7 +181,7 @@ export function QuestionDetailModal({ item, isOpen, onClose, onAddToExam }: Ques
             </div>
 
             {/* Tags */}
-            {item.metadata.tags.length > 0 && (
+            {(item.metadata.tags?.length ?? 0) > 0 && (
               <div className="mt-4">
                 <span className="text-gray-500 text-sm flex items-center gap-1 mb-2">
                   <Tag size={14} />
@@ -162,11 +215,11 @@ export function QuestionDetailModal({ item, isOpen, onClose, onAddToExam }: Ques
                 <div className="text-xs text-gray-500">Questions</div>
               </div>
               <div className="bg-white rounded p-3">
-                <div className="text-2xl font-bold text-gray-900">{item.metadata.difficulty}</div>
+                <div className="text-2xl font-bold text-gray-900 capitalize">{item.metadata.difficulty || '—'}</div>
                 <div className="text-xs text-gray-500">Difficulty</div>
               </div>
               <div className="bg-white rounded p-3">
-                <div className="text-2xl font-bold text-gray-900">{item.metadata.tags.length}</div>
+                <div className="text-2xl font-bold text-gray-900">{item.metadata.tags?.length ?? 0}</div>
                 <div className="text-xs text-gray-500">Tags</div>
               </div>
             </div>
@@ -411,7 +464,7 @@ function QuestionContentRenderer({ block }: { block: QuestionBlock }) {
               <thead>
                 <tr className="bg-gray-100">
                   {block.headers.map((header: string, idx: number) => (
-                    <th key={idx} className="border border-gray-300 px-3 py-2 text-left">
+                    <th key={`${header}:${idx}`} className="border border-gray-300 px-3 py-2 text-left">
                       {header}
                     </th>
                   ))}
@@ -472,7 +525,7 @@ function QuestionContentRenderer({ block }: { block: QuestionBlock }) {
           <div className="mb-3">
             <span className="text-sm font-medium">Categories: </span>
             {block.categories.map((cat: string, idx: number) => (
-              <span key={idx} className="inline-block bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded ml-1">
+              <span key={`${cat}:${idx}`} className="inline-block bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded ml-1">
                 {cat}
               </span>
             ))}

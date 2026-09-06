@@ -151,7 +151,7 @@ export async function bootstrapExamAndSchedule(params: {
 }): Promise<BootstrapResult> {
   requireBootstrapConsent();
 
-  const csrfCookieName = process.env['AUTH_CSRF_COOKIE_NAME'];
+  const csrfCookieName = process.env['CSRF_COOKIE_NAME'] ?? process.env['AUTH_CSRF_COOKIE_NAME'];
   const candidates = [
     typeof csrfCookieName === 'string' && csrfCookieName.length > 0 ? csrfCookieName : null,
     '__Host-csrf',

@@ -16,7 +16,7 @@ import type { CreateExamInput } from '../contracts/provider';
 export function ExamsRoute() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const examListQuery = useExamListQuery(true, 'ielts');
+  const examListQuery = useExamListQuery();
   const deleteExamMutation = useDeleteExamMutation();
 
   if (examListQuery.isLoading) {
@@ -39,9 +39,6 @@ export function ExamsRoute() {
   }
 
   const examList = examListQuery.data ?? { entities: [], exams: [] };
-  const ieltsEntities = examList.entities.filter((exam) => exam.providerKey !== 'sat');
-  const ieltsExamIds = new Set(ieltsEntities.map((exam) => exam.id));
-  const ieltsExams = examList.exams.filter((exam) => ieltsExamIds.has(exam.id));
 
   const invalidateAfterSuccess = async (success: boolean) => {
     if (success) {
@@ -150,16 +147,16 @@ export function ExamsRoute() {
 
   return (
     <ExamList
-      providerScope="ielts"
+      providerScope="all"
       onNavigate={(mode) => navigate(`/${mode}`)}
-      exams={ieltsExams}
+      exams={examList.exams}
       onEditExam={(id) => navigate(`/builder/${id}`)}
       onGoToConfig={(id) => navigate(`/builder/${id}`)}
       onGoToReview={(id) => navigate(`/builder/${id}/review`)}
       onCreateExam={handleCreateExam}
       onCloneExam={handleCloneExam}
       onCreateFromTemplate={handleCreateFromTemplate}
-      examEntities={ieltsEntities}
+      examEntities={examList.entities}
       onGetVersions={handleGetVersions}
       onGetEvents={handleGetEvents}
       onRestoreVersion={handleRestoreVersion}

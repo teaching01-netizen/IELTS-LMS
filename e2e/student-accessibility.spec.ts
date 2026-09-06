@@ -102,7 +102,7 @@ test.describe('Student accessibility settings (E2E)', () => {
     await context.close();
   });
 
-  test('submit confirmation dialog is accessible', async ({ browser }, testInfo) => {
+  test('authoritative runtime keeps local submit terminalization unavailable', async ({ browser }, testInfo) => {
     const manifest = readBackendE2EManifest();
     const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
 
@@ -121,25 +121,9 @@ test.describe('Student accessibility settings (E2E)', () => {
       }, { timeout: 20_000 })
       .toBe(true);
 
-    const finishButton = page.getByRole('button', { name: 'Finish' });
-    await finishButton.scrollIntoViewIfNeeded();
-    await finishButton.click({ force: true });
-
-    const confirmationDialog = page.getByRole('dialog');
-    const dialogVisible = await confirmationDialog.isVisible().catch(() => false);
-
-    if (dialogVisible) {
-      const title = await confirmationDialog.getAttribute('aria-label')
-        ?? await confirmationDialog.locator('[role="heading"]').first().textContent().catch(() => null);
-      expect(title).toBeTruthy();
-
-      const cancelButton = page.getByRole('button', { name: /cancel|go back|continue exam/i });
-      const hasCancel = await cancelButton.isVisible().catch(() => false);
-      if (hasCancel) {
-        await cancelButton.click();
-        await expect(confirmationDialog).not.toBeVisible();
-      }
-    }
+    // Cohort-backed sessions are terminalized by the proctor or authoritative
+    // timeout; the student may save answers but cannot locally end the runtime.
+    await expect(page.getByRole('button', { name: 'Finish', exact: true })).toHaveCount(0);
 
     await context.close();
   });

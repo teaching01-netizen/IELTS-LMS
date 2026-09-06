@@ -14,6 +14,8 @@ import { gradingService, gradingRepository } from '../../features/grading/infras
 import { examRepository, hydrateExamState } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import type { ExamState, WritingTaskContent } from '../../types';
 import { WritingAnnotationCanvas } from './WritingAnnotationCanvas';
+import { ConfirmModal } from '../ConfirmModal';
+import { Dialog } from '@components/ui/Dialog';
 import { StudentReportPreview } from './StudentReportPreview';
 import { QuestionTracebackPanel } from './QuestionTracebackPanel';
 import { logger } from '../../utils/logger';
@@ -29,6 +31,16 @@ export interface StudentReviewWorkspaceProps {
   onPreviousStudent?: (() => void) | undefined;
   currentTeacherId: string;
   currentTeacherName: string;
+  /** When grader identity is unknown (no session), release actions stay disabled. Defaults to false. */
+  releaseActionsDisabled?: boolean;
+}
+
+function formatReviewSubmittedAt(value: string | null | undefined): string {
+  if (!value) {
+    return 'Not submitted';
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 'Not submitted' : parsed.toLocaleString();
 }
 
 type WritingPrintSlot = 'task1' | 'task2';
@@ -76,10 +88,14 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   onNextStudent,
   onPreviousStudent,
   currentTeacherId, 
-  currentTeacherName 
+  currentTeacherName,
+  releaseActionsDisabled = false,
 }: StudentReviewWorkspaceProps) {
-  void onNextStudent;
-  void onPreviousStudent;
+  // Never attribute grading to a false identity: empty id means unknown grader.
+  const isGraderUnknown = releaseActionsDisabled || currentTeacherId.trim() === '';
+  const releaseBlockedTitle = isGraderUnknown ? 'Sign in as a grader to enable release actions.' : undefined;
+  const hasPrevStudent = typeof onPreviousStudent === 'function';
+  const hasNextStudent = typeof onNextStudent === 'function';
 
   const [submission, setSubmission] = useState<StudentSubmission | null>(null);
   const [sectionSubmissions, setSectionSubmissions] = useState<SectionSubmission[]>([]);
@@ -114,6 +130,10 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   >(null);
   const [releaseError, setReleaseError] = useState<string | null>(null);
   const [showReportPreview, setShowReportPreview] = useState(false);
+  const [overrideConfirmOpen, setOverrideConfirmOpen] = useState(false);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleDateError, setScheduleDateError] = useState<string | null>(null);
   const [commentBank] = useState<CommentBankItem[]>([
     { id: '1', category: 'grammar', label: 'Subject-verb agreement', text: 'Check subject-verb agreement in this sentence.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
     { id: '2', category: 'vocabulary', label: 'Word choice', text: 'Consider using a more precise vocabulary word here.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
@@ -137,14 +157,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
     void (async () => {
       try {
-        const scheduleId = submission?.scheduleId;
-        const sourceResult = scheduleId
-          ? await gradingService.getObjectiveGradingSource(scheduleId)
-          : { success: false as const };
-        const versionId =
-          sourceResult.success && sourceResult.data?.draftVersionId
-            ? sourceResult.data.draftVersionId
-            : publishedVersionId;
+        // Published-first pinning (S2-C13): the student took the published
+        // version, so traceback resolves to it. Draft grading-source data is
+        // ignored here (no explicit draft override in this read path).
+        void submission?.scheduleId;
+        const versionId = publishedVersionId;
         const version = await examRepository.getVersionById(versionId);
         if (seq !== examLoadSeq.current) return;
 
@@ -449,7 +466,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     setReleaseAction('release_now');
     setReleaseError(null);
     try {
-      let result = await gradingService.releaseResult(
+      const result = await gradingService.releaseResult(
         submissionId,
         currentTeacherId,
         currentTeacherName,
@@ -458,19 +475,33 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       if (!result.success) {
         const releaseMessage = result.error ?? 'Failed to release result';
         if (requiresExplicitReleaseOverride(releaseMessage)) {
-          const confirmed = window.confirm(
-            'This submission requires explicit grader override before release. Continue?',
-          );
-          if (confirmed) {
-            result = await gradingService.releaseResult(
-              submissionId,
-              currentTeacherId,
-              currentTeacherName,
-              true,
-            );
-          }
+          // C15: explicit override needs app-modal confirmation, never window.confirm.
+          setOverrideConfirmOpen(true);
+          return;
         }
+        throw new Error(result.error ?? 'Failed to release result');
       }
+      await loadData();
+    } catch (error) {
+      logger.error('Failed to release result:', error);
+      setReleaseError(error instanceof Error ? error.message : 'Failed to release result.');
+    } finally {
+      setReleaseAction(null);
+    }
+  };
+
+  const handleConfirmOverrideRelease = async () => {
+    if (!reviewDraft) return;
+    setOverrideConfirmOpen(false);
+    setReleaseAction('release_now');
+    setReleaseError(null);
+    try {
+      const result = await gradingService.releaseResult(
+        submissionId,
+        currentTeacherId,
+        currentTeacherName,
+        true,
+      );
       if (result.success) {
         await loadData();
       } else {
@@ -482,6 +513,41 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     } finally {
       setReleaseAction(null);
     }
+  };
+
+  const todayIso = () => {
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${now.getFullYear()}-${month}-${day}`;
+  };
+
+  const validateScheduleDate = (value: string): string | null => {
+    if (!value) {
+      return 'Choose a release date.';
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return 'Use the YYYY-MM-DD format.';
+    }
+    const parsed = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+      return 'Enter a real calendar date.';
+    }
+    const today = todayIso();
+    if (value < today) {
+      return 'Release date cannot be in the past.';
+    }
+    return null;
+  };
+
+  const handleSubmitScheduleRelease = () => {
+    const validationError = validateScheduleDate(scheduleDate);
+    setScheduleDateError(validationError);
+    if (validationError) {
+      return;
+    }
+    setScheduleDialogOpen(false);
+    void handleScheduleRelease(scheduleDate);
   };
 
   const handleScheduleRelease = async (date: string) => {
@@ -566,13 +632,33 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   };
 
   const handleAnnotationAdd = (annotation: WritingAnnotation) => {
-    if (!reviewDraft) return;
-    const updatedDraft = {
-      ...reviewDraft,
-      annotations: [...reviewDraft.annotations, annotation],
-      hasUnsavedChanges: true
-    };
-    setReviewDraft(updatedDraft);
+    if (!reviewDraft || !annotation.taskId) return;
+    setReviewDraft((previous) => {
+      if (!previous) return previous;
+      if (previous.annotations.some((candidate) => candidate.id === annotation.id)) {
+        return previous;
+      }
+      return {
+        ...previous,
+        annotations: [...previous.annotations, annotation],
+        hasUnsavedChanges: true
+      };
+    });
+  };
+
+  // Canvas update path: replace the annotation in place (undo/redo restore).
+  const handleAnnotationUpdate = (annotation: WritingAnnotation) => {
+    if (!reviewDraft || !annotation.taskId) return;
+    setReviewDraft((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        annotations: previous.annotations.map((candidate) =>
+          candidate.id === annotation.id ? annotation : candidate,
+        ),
+        hasUnsavedChanges: true
+      };
+    });
   };
 
   const handleAnnotationDelete = (annotationId: string) => {
@@ -586,13 +672,30 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   };
 
   const handleDrawingAdd = (drawing: DrawingAnnotation) => {
-    if (!reviewDraft) return;
-    const updatedDraft = {
-      ...reviewDraft,
-      drawings: [...reviewDraft.drawings, drawing],
-      hasUnsavedChanges: true
-    };
-    setReviewDraft(updatedDraft);
+    if (!reviewDraft || !drawing.taskId) return;
+    setReviewDraft((previous) => {
+      if (!previous) return previous;
+      if (previous.drawings.some((candidate) => candidate.id === drawing.id)) {
+        return previous;
+      }
+      return {
+        ...previous,
+        drawings: [...previous.drawings, drawing],
+        hasUnsavedChanges: true
+      };
+    });
+  };
+
+  const handleDrawingDelete = (drawingId: string) => {
+    if (!reviewDraft || !drawingId) return;
+    setReviewDraft((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        drawings: previous.drawings.filter((candidate) => candidate.id !== drawingId),
+        hasUnsavedChanges: true
+      };
+    });
   };
 
   const getSectionSubmission = (section: 'listening' | 'reading' | 'writing' | 'speaking') => {
@@ -751,7 +854,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       };
     }
 
-    const writingDrafts = reviewDraft.sectionDrafts.writing;
+    const writingDrafts = reviewDraft.sectionDrafts?.writing;
     const task1Band = writingDrafts?.task1?.overallBand ?? 0;
     const task2Band = writingDrafts?.task2?.overallBand ?? 0;
     const writingBand =
@@ -1017,7 +1120,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 <div><strong>Task</strong></div>
                 <div>{task.label}</div>
                 <div><strong>Submitted</strong></div>
-                <div>{task.submittedAt ? new Date(task.submittedAt).toLocaleString() : 'Not submitted'}</div>
+                <div>{formatReviewSubmittedAt(task.submittedAt)}</div>
               </div>
             </header>
             <article className="writing-print-task">
@@ -1125,6 +1228,26 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 Print Writing
               </button>
             )}
+            <div className="flex items-center gap-1" role="group" aria-label="Student navigation">
+              <button
+                onClick={onPreviousStudent}
+                disabled={!hasPrevStudent}
+                aria-label="Previous student"
+                title={hasPrevStudent ? 'Previous student' : 'No previous student'}
+                className="p-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                onClick={onNextStudent}
+                disabled={!hasNextStudent}
+                aria-label="Next student"
+                title={hasNextStudent ? 'Next student' : 'No next student'}
+                className="p-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
             <button
               onClick={handleSaveDraft}
               disabled={!reviewDraft?.hasUnsavedChanges || saving}
@@ -1429,10 +1552,10 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     commentBank={commentBank}
                     currentTeacherId={currentTeacherId}
                     onAnnotationAdd={handleAnnotationAdd}
-                    onAnnotationUpdate={(a) => handleAnnotationAdd(a)}
+                    onAnnotationUpdate={handleAnnotationUpdate}
                     onAnnotationDelete={handleAnnotationDelete}
                     onDrawingAdd={handleDrawingAdd}
-                    onDrawingDelete={() => {}}
+                    onDrawingDelete={handleDrawingDelete}
                   />
                 </div>
               </div>
@@ -1619,6 +1742,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           {/* Release Controls */}
           <div className="p-4 border-t border-gray-200 bg-gray-50 space-y-3">
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Release Workflow</h2>
+            {isGraderUnknown ? (
+              <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Unknown grader — sign in to enable release actions. Actions stay disabled so nothing is attributed to a placeholder name.
+              </p>
+            ) : null}
 
             {releaseError ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="status" aria-live="polite">
@@ -1629,7 +1757,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             {reviewDraft?.releaseStatus === 'draft' && (
               <button
                 onClick={handleMarkGradingComplete}
-                disabled={releaseAction !== null}
+                disabled={releaseAction !== null || isGraderUnknown}
+                title={releaseBlockedTitle}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <CheckSquare size={16} />
@@ -1640,7 +1769,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             {reviewDraft?.releaseStatus === 'grading_complete' && (
               <button
                 onClick={handleMarkReadyToRelease}
-                disabled={releaseAction !== null}
+                disabled={releaseAction !== null || isGraderUnknown}
+                title={releaseBlockedTitle}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <CheckSquare size={16} />
@@ -1652,7 +1782,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               <>
                 <button
                   onClick={() => setShowReportPreview(true)}
-                  disabled={releaseAction !== null}
+                  disabled={releaseAction !== null || isGraderUnknown}
+                  title={releaseBlockedTitle}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Eye size={16} />
@@ -1660,7 +1791,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 </button>
                 <button
                   onClick={handleReleaseNow}
-                  disabled={releaseAction !== null}
+                  disabled={releaseAction !== null || isGraderUnknown}
+                  title={releaseBlockedTitle}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <CheckCircle size={16} />
@@ -1668,10 +1800,12 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 </button>
                 <button
                   onClick={() => {
-                    const date = prompt('Enter release date (YYYY-MM-DD):');
-                    if (date) handleScheduleRelease(date);
+                    setScheduleDate('');
+                    setScheduleDateError(null);
+                    setScheduleDialogOpen(true);
                   }}
-                  disabled={releaseAction !== null}
+                  disabled={releaseAction !== null || isGraderUnknown}
+                  title={releaseBlockedTitle}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Calendar size={16} />
@@ -1683,7 +1817,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             {reviewDraft?.releaseStatus === 'released' && (
               <button
                 onClick={handleReopen}
-                disabled={releaseAction !== null}
+                disabled={releaseAction !== null || isGraderUnknown}
+                title={releaseBlockedTitle}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {releaseAction === 'reopen' ? 'Working…' : 'Reopen Result'}
@@ -1693,7 +1828,64 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         </div>
       </div>
 
-      {/* Report Preview Modal */}
+      <ConfirmModal
+        isOpen={overrideConfirmOpen}
+        onClose={() => setOverrideConfirmOpen(false)}
+        title="Release with grader override?"
+        description="This submission requires explicit grader override before release. Confirming bypasses the incomplete-merge guard and releases the result anyway."
+        confirmLabel="Release anyway"
+        tone="warning"
+        onConfirm={() => void handleConfirmOverrideRelease()}
+      />
+
+      <Dialog
+        isOpen={scheduleDialogOpen}
+        onClose={() => setScheduleDialogOpen(false)}
+        title="Schedule release"
+        size="sm"
+        footer={
+          <>
+            <button
+              onClick={() => setScheduleDialogOpen(false)}
+              className="px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmitScheduleRelease}
+              disabled={releaseAction !== null}
+              className="px-3 py-2 text-sm font-semibold text-white rounded-lg transition-colors bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              Schedule
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-2">
+          <label htmlFor="release-date-input" className="block text-sm font-medium text-gray-700">
+            Release date
+          </label>
+          <input
+            id="release-date-input"
+            type="date"
+            value={scheduleDate}
+            min={todayIso()}
+            onChange={(event) => {
+              setScheduleDate(event.target.value);
+              setScheduleDateError(null);
+            }}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            aria-label="Release date (YYYY-MM-DD)"
+          />
+          {scheduleDateError ? (
+            <p role="alert" className="text-sm text-red-600">{scheduleDateError}</p>
+          ) : (
+            <p className="text-xs text-gray-500">Use YYYY-MM-DD. Today or a future date.</p>
+          )}
+        </div>
+      </Dialog>
+
+      {/* Report Preview Dialog (shared Dialog primitive handles focus trap + Escape) */}
       {showReportPreview && reviewDraft && (
         <StudentReportPreview
           result={{

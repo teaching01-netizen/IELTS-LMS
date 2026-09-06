@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateWordCountRanges } from '../validationHelpers';
+import { validateRubricWeights, validateWordCountRanges } from '../validationHelpers';
 
 describe('validateWordCountRanges', () => {
   it('flags NaN inputs as invalid', () => {
@@ -11,6 +11,13 @@ describe('validateWordCountRanges', () => {
     });
 
     expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('accepts float rubric weights that sum to ~100 within epsilon', () => {
+    expect(validateRubricWeights({ a: 33.3, b: 33.3, c: 33.4 })).toEqual([]);
+    expect(
+      validateRubricWeights({ a: 50, b: 49.9 }).some((message) => message.includes('sum to 100')),
+    ).toBe(true);
   });
 });
 

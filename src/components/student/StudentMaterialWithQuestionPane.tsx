@@ -16,6 +16,8 @@ interface StudentMaterialWithQuestionPaneProps {
   workspaceRef: React.RefObject<HTMLDivElement | null>;
   splitPaneStyle: React.CSSProperties | undefined;
   leftWidth: number;
+  splitMinWidth?: number;
+  splitMaxWidth?: number;
   onDividerPointerDown: (
     event: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
   ) => void;
@@ -24,6 +26,8 @@ interface StudentMaterialWithQuestionPaneProps {
   dividerAriaLabel: string;
   dividerTestId: string;
   materialPane: React.ReactNode;
+  /** S1-C3: sessionStorage key for the compact tab (per exam + module). Omit to disable. */
+  persistenceKey?: string | undefined;
   questionPanel: {
     blocks: QuestionBlock[];
     allQuestions: StudentQuestionDescriptor[];
@@ -50,6 +54,8 @@ interface StudentMaterialWithQuestionPaneProps {
     hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
     hideStepper?: boolean | undefined;
     shouldFocusQuestion?: (() => boolean) | undefined;
+    eliminatedOptionIdsByQuestion?: Readonly<Record<string, readonly string[]>> | undefined;
+    onToggleOptionElimination?: ((questionId: string, optionId: string) => void) | undefined;
   };
 }
 
@@ -59,23 +65,43 @@ function findScrollOwner(root: HTMLElement | null): HTMLElement | null {
   return root?.querySelector<HTMLElement>("[data-student-zoom-scroll]") ?? root;
 }
 
+// S1-C3: persist the compact tab per exam + module so a remount restores
+// the learner's tab instead of snapping back to "material". sessionStorage
+// keeps it tab-scoped; anything unexpected falls back to "material".
+function readPersistedCompactPane(storageKey: string | undefined): CompactPane {
+  if (!storageKey) {
+    return "material";
+  }
+  try {
+    return sessionStorage.getItem(storageKey) === "questions" ? "questions" : "material";
+  } catch {
+    return "material";
+  }
+}
+
 export function StudentMaterialWithQuestionPane({
   isTabletMode,
   layoutMode = "wide",
   workspaceRef,
   splitPaneStyle,
   leftWidth,
+  splitMinWidth,
+  splitMaxWidth,
   onDividerPointerDown,
   onDividerKeyDown,
   workspaceTestId,
   dividerAriaLabel,
   dividerTestId,
   materialPane,
+  persistenceKey,
   questionPanel,
 }: StudentMaterialWithQuestionPaneProps) {
   const isCompact = layoutMode === "compact";
-  const [activeCompactPane, setActiveCompactPane] = useState<CompactPane>("material");
-  const lastFocusedPaneRef = useRef<CompactPane>("material");
+  // S1-C3: lazy-init from sessionStorage so a remount restores the tab.
+  const [activeCompactPane, setActiveCompactPane] = useState<CompactPane>(() =>
+    readPersistedCompactPane(persistenceKey)
+  );
+  const lastFocusedPaneRef = useRef<CompactPane>(activeCompactPane);
   const previousCompactRef = useRef(isCompact);
   const previousQuestionIdRef = useRef(questionPanel.currentQuestionId);
   const materialPaneRef = useRef<HTMLDivElement>(null);
@@ -104,8 +130,16 @@ export function StudentMaterialWithQuestionPane({
       lastFocusedPaneRef.current = nextPane;
       saveCompactScrollPosition();
       setActiveCompactPane(nextPane);
+      // S1-C3: persist on change (try/catch; best-effort when storage is off).
+      if (persistenceKey) {
+        try {
+          sessionStorage.setItem(persistenceKey, nextPane);
+        } catch {
+          // Storage may be unavailable — in-memory state still works.
+        }
+      }
     },
-    [activeCompactPane, saveCompactScrollPosition]
+    [activeCompactPane, persistenceKey, saveCompactScrollPosition]
   );
 
   useEffect(() => {
@@ -188,6 +222,8 @@ export function StudentMaterialWithQuestionPane({
       hideDiagramReferenceForBlock={questionPanel.hideDiagramReferenceForBlock}
       hideStepper={questionPanel.hideStepper ?? isCompact}
       shouldFocusQuestion={questionPanel.shouldFocusQuestion}
+      eliminatedOptionIdsByQuestion={questionPanel.eliminatedOptionIdsByQuestion}
+      onToggleOptionElimination={questionPanel.onToggleOptionElimination}
     />
   );
 
@@ -267,6 +303,8 @@ export function StudentMaterialWithQuestionPane({
           <StudentSplitPaneResizer
             isTabletMode={isTabletMode}
             leftWidth={leftWidth}
+            minWidth={splitMinWidth}
+            maxWidth={splitMaxWidth}
             onDividerPointerDown={onDividerPointerDown}
             onDividerKeyDown={onDividerKeyDown}
             ariaLabel={dividerAriaLabel}

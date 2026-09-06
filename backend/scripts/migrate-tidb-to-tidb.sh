@@ -21,11 +21,11 @@ Optional variables:
   SOURCE_DB_PORT              default: 4000
   TARGET_DB_PORT              default: 4000
   DUMP_FILE                   default: temporary file
-  MIGRATIONS_DIR              default: backend/migrations
-  TARGET_DATABASE_URL         override URL used by the Rust migration binary
+  MIGRATIONS_DIR              default: backend/go/migrations
+  TARGET_DATABASE_URL         override URI/DSN used by the Go migration command
   IGNORE_TABLES               space-separated tables to skip; default: schema_migrations
   SINGLE_TRANSACTION=0        disable mysqldump --single-transaction
-  SKIP_TARGET_MIGRATIONS=1    do not run the Rust migration binary first
+  SKIP_TARGET_MIGRATIONS=1    do not run the Go migration command first
   ALLOW_NON_EMPTY_TARGET=1    import even if target already has rows
   KEEP_DUMP=1                 keep temporary dump after completion
 
@@ -175,7 +175,7 @@ backend_dir="$(cd "$script_dir/.." && pwd)"
 
 SOURCE_DB_PORT="${SOURCE_DB_PORT:-4000}"
 TARGET_DB_PORT="${TARGET_DB_PORT:-4000}"
-MIGRATIONS_DIR="${MIGRATIONS_DIR:-$backend_dir/migrations}"
+MIGRATIONS_DIR="${MIGRATIONS_DIR:-$backend_dir/go/migrations}"
 IGNORE_TABLES="${IGNORE_TABLES:-schema_migrations}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -214,13 +214,16 @@ echo "Checking target database connectivity"
 run_mysql_scalar TARGET "select 1" >/dev/null
 
 if [[ "${SKIP_TARGET_MIGRATIONS:-0}" != "1" ]]; then
-  require_command cargo
+  require_command go
   echo "Running target schema migrations"
+  target_database_url="${TARGET_DATABASE_URL:-${TARGET_DB_USER}:${TARGET_DB_PASSWORD}@tcp(${TARGET_DB_HOST}:${TARGET_DB_PORT})/${TARGET_DB_NAME}?parseTime=true&multiStatements=true&charset=utf8mb4}"
   (
-    cd "$backend_dir"
-    DATABASE_MIGRATOR_URL="${TARGET_DATABASE_URL:-mysql://${TARGET_DB_USER}:${TARGET_DB_PASSWORD}@${TARGET_DB_HOST}:${TARGET_DB_PORT}/${TARGET_DB_NAME}}" \
+    cd "$backend_dir/go"
+    DATABASE_URL="$target_database_url" \
+      DATABASE_DIRECT_URL="$target_database_url" \
+      DATABASE_MIGRATOR_URL="$target_database_url" \
       MIGRATIONS_DIR="$MIGRATIONS_DIR" \
-      cargo run -p ielts-backend-api --bin migrate
+      go run ./cmd/migrate
   )
 fi
 

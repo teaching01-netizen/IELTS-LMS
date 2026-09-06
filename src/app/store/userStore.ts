@@ -10,7 +10,7 @@ interface UserSession {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'proctor' | 'teacher' | 'student';
+  role: 'admin' | 'builder' | 'proctor' | 'grader' | 'student';
   organization?: string;
 }
 
@@ -47,7 +47,10 @@ export const useUserStore = create<UserStore>()(
     }),
     {
       name: 'user-storage',
-      partialize: (state) => ({ user: state.user }),
+      partialize: (state) => ({
+        user: state.user,
+        isAuthenticated: state.isAuthenticated,
+      }),
     }
   )
 );

@@ -40,10 +40,11 @@ function StaticConfirmDialog({
   onCancel,
   onConfirm,
 }: Omit<SatConfirmDialogProps, 'open'>) {
-  const confirmRef = useRef<HTMLButtonElement>(null);
+  // Focus the safe choice (Cancel), never the destructive confirm action.
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    confirmRef.current?.focus();
+    cancelRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onCancel();
     };
@@ -63,11 +64,10 @@ function StaticConfirmDialog({
         <h2 id="sat-confirm-title" className="text-[18px] font-semibold tracking-[-0.025em]">{title}</h2>
         <p id="sat-confirm-description" className="mt-2 text-[12px] leading-5 text-slate-500">{description}</p>
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" className={CANCEL_BUTTON_CLASS} onClick={onCancel}>
+          <button ref={cancelRef} type="button" className={CANCEL_BUTTON_CLASS} onClick={onCancel}>
             Cancel
           </button>
           <button
-            ref={confirmRef}
             type="button"
             className={destructive ? DESTRUCTIVE_BUTTON_CLASS : CONFIRM_BUTTON_CLASS}
             onClick={onConfirm}
@@ -106,7 +106,7 @@ export function SatConfirmDialog({
     <AlertDialog.Root open={open} onOpenChange={(next) => { if (!next) onCancel(); }}>
       <AlertDialog.Portal>
         <AlertDialog.Overlay className={OVERLAY_CLASS} />
-        <AlertDialog.Content className={CONFIRM_CLASS} aria-describedby={undefined}>
+        <AlertDialog.Content className={CONFIRM_CLASS}>
           <AlertDialog.Title className="text-[18px] font-semibold tracking-[-0.025em]">{title}</AlertDialog.Title>
           <AlertDialog.Description className="mt-2 text-[12px] leading-5 text-slate-500">{description}</AlertDialog.Description>
           <div className="mt-5 flex justify-end gap-2">
@@ -181,7 +181,7 @@ export function SatFormDialog({ open, eyebrow, title, onClose, children }: SatFo
     <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className={OVERLAY_CLASS} />
-        <Dialog.Content className={FORM_CLASS} aria-describedby={undefined}>
+        <Dialog.Content className={FORM_CLASS}>
           <div className="flex items-center justify-between px-5 pb-2 pt-4">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">{eyebrow}</p>

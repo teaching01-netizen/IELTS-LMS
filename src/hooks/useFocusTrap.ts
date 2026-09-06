@@ -15,11 +15,17 @@ export function useFocusTrap(isActive: boolean, onEscape?: () => void) {
 
     const container = containerRef.current;
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusableElements = container.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
-    const firstElement = (focusableElements[0] as HTMLElement | undefined) ?? container;
-    const lastElement = (focusableElements[focusableElements.length - 1] as HTMLElement | undefined) ?? container;
+    // Queried live on every Tab press so async content participates in the
+    // trap instead of being skipped by a mount-time snapshot.
+    const queryFocusable = (): HTMLElement[] =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), audio[controls], video[controls]',
+        ),
+      ).filter((element) => element.getAttribute('aria-hidden') !== 'true');
+    const firstOf = (): HTMLElement => queryFocusable()[0] ?? container;
+    const lastOf = (): HTMLElement => queryFocusable().slice(-1)[0] ?? container;
+    const firstElement = firstOf();
 
     // Focus the first element when trap activates
     if (firstElement) {
@@ -29,23 +35,25 @@ export function useFocusTrap(isActive: boolean, onEscape?: () => void) {
     const handleTabKey = (e: KeyboardEvent) => {
       if (e.key !== 'Tab') return;
 
+      const first = firstOf();
+      const last = lastOf();
       if (e.shiftKey) {
         // Shift + Tab
-        if (document.activeElement === firstElement) {
+        if (document.activeElement === first) {
           e.preventDefault();
-          lastElement?.focus();
+          last?.focus();
         }
       } else {
         // Tab
-        if (document.activeElement === lastElement) {
+        if (document.activeElement === last) {
           e.preventDefault();
-          firstElement?.focus();
+          first?.focus();
         }
       }
     };
 
     const handleEscapeKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && onEscape) {
+      if (e.key === 'Escape' && !e.defaultPrevented && onEscape) {
         onEscape();
       }
     };

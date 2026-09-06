@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { QuestionBankItem, QuestionBlock, QuestionType } from '../../types';
 import { questionBankService } from '../../features/content-library/infrastructure/libraryGateway';
 import { Search, Filter, Grid, List, BookOpen, Clock, TrendingUp, X } from 'lucide-react';
@@ -37,12 +37,26 @@ export function QuestionBankLibrary({ onSelectQuestion, onClose }: QuestionBankL
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedType, setSelectedType] = useState<QuestionType | 'all'>('all');
   const [selectedDifficulty, setSelectedDifficulty] = useState<'easy' | 'medium' | 'hard' | 'all'>('all');
-  const [searchTerm, setSearchTerm] = useState('');
+  // Debounced search input (raw keystrokes) vs applied filter term.
+  const [searchInput, setSearchInput] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const searchTerm = appliedSearch;
 
   const [allQuestions, setAllQuestions] = useState<QuestionBankItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const showSkeleton = useDelayedLoading(isLoading);
+  const searchTimerRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    window.clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = window.setTimeout(() => {
+      setAppliedSearch(searchInput.trim());
+    }, 250);
+    return () => window.clearTimeout(searchTimerRef.current);
+  }, [searchInput]);
+
+  useEffect(() => () => window.clearTimeout(searchTimerRef.current), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,7 +118,11 @@ export function QuestionBankLibrary({ onSelectQuestion, onClose }: QuestionBankL
     });
   }, [allQuestions, selectedType, selectedDifficulty, searchTerm]);
 
+  // Selection remains synchronous, but a backend usage failure is observable.
   const handleAddToExam = (item: QuestionBankItem) => {
+    void questionBankService.incrementUsageCount(item.id).catch((error) => {
+      console.error('[question-bank] usage tracking failed', error);
+    });
     onSelectQuestion(item);
   };
 
@@ -153,8 +171,9 @@ export function QuestionBankLibrary({ onSelectQuestion, onClose }: QuestionBankL
             <input
               type="text"
               placeholder="Search questions..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              aria-label="Search questions"
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>

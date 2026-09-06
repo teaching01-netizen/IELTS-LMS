@@ -33,6 +33,7 @@ import {
 } from '../../../utils/cloneExamContent';
 import { getBuilderStateRecoveryIssue, reconcileBuilderState } from '../utils/builderStateRecovery';
 import { createAcademicSampleExamState } from '../../../utils/academicSampleExam';
+import { getActScienceTotalQuestions } from '../../../utils/examUtils';
 import { useOptionalAuthSession } from '../../auth/api/authSession';
 import { buildStaffDraftKey } from '../../../utils/staffDraftKey';
 
@@ -48,8 +49,9 @@ function ScoringAside({
   state: ExamState;
 }) {
   if (state.activeModule === 'reading' || state.activeModule === 'listening') {
+    // Single type source: config.general.type (matches syncConfigWithStandards).
     const officialReading =
-      state.type === 'General Training'
+      state.config.general.type === 'General Training'
         ? DEFAULT_READING_GT_BAND_TABLE
         : DEFAULT_READING_ACADEMIC_BAND_TABLE;
     const deviationThreshold = state.config.standards.rubricDeviationThreshold;
@@ -127,6 +129,25 @@ function ScoringAside({
     );
   }
 
+  if (state.activeModule === 'science') {
+    const questionCount = getActScienceTotalQuestions(state.science.stimuli);
+    return (
+      <div className="w-[430px] flex-shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50/90 p-5 backdrop-blur-sm">
+        <p className="text-xs font-bold uppercase tracking-widest text-violet-700">ACT Science Scoring</p>
+        <h3 className="mt-2 text-lg font-bold text-gray-900">Raw score preview</h3>
+        <p className="mt-2 text-sm text-gray-600">
+          Current draft contains {questionCount} question{questionCount === 1 ? '' : 's'}.
+        </p>
+        <div className="mt-5 rounded-xl border border-violet-100 bg-violet-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-violet-800">Scoring rule</p>
+          <p className="mt-2 text-sm text-violet-950">
+            The first release reports correct answers and percentage. Scale score 1–36 and percentile are not configured.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-[520px] flex-shrink-0 border-l border-gray-200 bg-gray-50/90 backdrop-blur-sm overflow-y-auto p-4">
       <GradingWorkspace
@@ -181,13 +202,18 @@ export function BuilderRoot() {
     handleUpdateExamContent,
     reload,
   } = useBuilderRouteController(examId);
+  // Single-source undo/redo truth: history.present is the builder state (via currentState
+  // below); currentStateRef only mirrors it for async callbacks, never a second source.
   const history = useUndoRedo<ExamState | null>(null, { initialLabel: 'Loaded exam', limit: 50 });
   const [initializedExamId, setInitializedExamId] = useState<string | undefined>(undefined);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isScoringOpen, setIsScoringOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('builder-sidebar-collapsed');
-    return saved === 'true';
+    try {
+      return localStorage.getItem('builder-sidebar-collapsed') === 'true';
+    } catch {
+      return false;
+    }
   });
   const [toasts, setToasts] = useState<GlobalToastItem[]>([]);
   const currentStateRef = useRef<ExamState | null>(null);
@@ -202,7 +228,11 @@ export function BuilderRoot() {
   }, [examId, initializedExamId]);
 
   useEffect(() => {
-    localStorage.setItem('builder-sidebar-collapsed', isSidebarCollapsed.toString());
+    try {
+      localStorage.setItem('builder-sidebar-collapsed', isSidebarCollapsed.toString());
+    } catch {
+      // Storage may be unavailable (private mode, SSR); sidebar state stays in memory.
+    }
   }, [isSidebarCollapsed]);
 
   useEffect(() => {
@@ -233,10 +263,10 @@ export function BuilderRoot() {
     }
 
     const contentMatch = jumpField.match(
-      /^content\.(listening|reading)\.(parts|passages)\[(\d+)\]\.blocks\[(\d+)\]/,
+      /^content\.(listening|reading|science)\.(parts|passages|stimuli)\[(\d+)\]\.blocks\[(\d+)\]/,
     );
     if (contentMatch) {
-      const module = contentMatch[1] as 'listening' | 'reading';
+      const module = contentMatch[1] as 'listening' | 'reading' | 'science';
       const container = contentMatch[2];
       const sectionIndex = Number.parseInt(contentMatch[3] ?? '', 10);
       const blockIndex = Number.parseInt(contentMatch[4] ?? '', 10);
@@ -245,11 +275,11 @@ export function BuilderRoot() {
       }
     }
 
-    const shortMatch = jumpField.match(/^(listening|reading)\.parts\[(\d+)\]\.blocks\[(\d+)\]/);
+    const shortMatch = jumpField.match(/^(listening|reading|science)\.(parts|passages|stimuli)\[(\d+)\]\.blocks\[(\d+)\]/);
     if (shortMatch) {
-      const module = shortMatch[1] as 'listening' | 'reading';
-      const sectionIndex = Number.parseInt(shortMatch[2] ?? '', 10);
-      const blockIndex = Number.parseInt(shortMatch[3] ?? '', 10);
+      const module = shortMatch[1] as 'listening' | 'reading' | 'science';
+      const sectionIndex = Number.parseInt(shortMatch[3] ?? '', 10);
+      const blockIndex = Number.parseInt(shortMatch[4] ?? '', 10);
       if (Number.isFinite(sectionIndex) && Number.isFinite(blockIndex)) {
         return { jumpField, module, container: 'parts', sectionIndex, blockIndex };
       }
@@ -279,33 +309,46 @@ export function BuilderRoot() {
       if (targetPart?.id) {
         nextState.activeListeningPartId = targetPart.id;
       }
-    } else {
+    } else if (jumpTarget.module === 'reading') {
       nextState.activeModule = 'reading';
       const targetPassage = nextState.reading.passages[jumpTarget.sectionIndex];
       if (targetPassage?.id) {
         nextState.activePassageId = targetPassage.id;
       }
+    } else {
+      nextState.activeModule = 'science';
+      const targetStimulus = nextState.science.stimuli[jumpTarget.sectionIndex];
+      if (targetStimulus?.id) {
+        nextState.activeScienceStimulusId = targetStimulus.id;
+      }
     }
 
     updateBuilderState(nextState, 'Jump to validation field');
 
-    window.setTimeout(() => {
-      window.dispatchEvent(
-        new CustomEvent('builder:jump-to-block', {
-          detail: { blockIndex: jumpTarget.blockIndex },
-        }),
-      );
-    }, 50);
-
+    const blockIndex = jumpTarget.blockIndex;
     const nextParams = new URLSearchParams(location.search);
     nextParams.delete('jumpField');
-    navigate(
-      {
-        pathname: location.pathname,
-        search: nextParams.toString() ? `?${nextParams.toString()}` : '',
-      },
-      { replace: true },
-    );
+    const nextSearch = nextParams.toString() ? `?${nextParams.toString()}` : '';
+    // offcut: navigate inside the timer; navigating synchronously would change
+    // location.search, retrigger this effect, and clear the timer before dispatch.
+    const jumpTimer = window.setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent('builder:jump-to-block', {
+          detail: { blockIndex },
+        }),
+      );
+      if (window.location.search.includes('jumpField')) {
+        navigate(
+          {
+            pathname: location.pathname,
+            search: nextSearch,
+          },
+          { replace: true },
+        );
+      }
+    }, 50);
+
+    return () => window.clearTimeout(jumpTimer);
   }, [canInteractWithBuilder, currentState, jumpTarget, location.pathname, location.search, navigate]);
 
   useEffect(() => {
@@ -317,7 +360,7 @@ export function BuilderRoot() {
       ...current,
       {
         ...toast,
-        id: `toast-${Date.now()}-${Math.random()}`,
+        id: `toast-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       },
     ]);
   };
@@ -524,6 +567,12 @@ export function BuilderRoot() {
 
   const handleReturnToAdmin = () => {
     void (async () => {
+      // With no loaded state (e.g. exam was deleted) there is nothing to save
+      // — go straight back to Admin instead of dropping the click.
+      if (!currentStateRef.current) {
+        navigateToAdmin();
+        return;
+      }
       const saved = await saveDraftNow();
       if (!saved) {
         return;
@@ -718,9 +767,12 @@ export function BuilderRoot() {
     builderRecoveryIssue,
     currentState,
     handleRedo,
+    handleUndo,
     history.redoStackLabels,
     history.undoStackLabels,
     isScoringOpen,
+    saveDraftNow,
+    updateBuilderState,
   ]);
 
   useKeyboardShortcuts([

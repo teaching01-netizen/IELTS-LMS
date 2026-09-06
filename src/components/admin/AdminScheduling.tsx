@@ -144,7 +144,7 @@ export function AdminScheduling({
     });
 
     const schedule: ExamSchedule = {
-      id: editingScheduleId || `sched-${Date.now()}`,
+      id: editingScheduleId || `sched-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       examId: draft.examId,
       providerKey: selectedExamEntity?.providerKey ?? 'ielts',
       examTitle: selectedExamEntity?.title || selectedVersion.contentSnapshot.title,
@@ -176,7 +176,10 @@ export function AdminScheduling({
   const dayBuckets = useMemo(() => {
     const map = new Map<string, ExamSchedule[]>();
     schedules.forEach(schedule => {
-      const key = new Date(schedule.createdAt).toDateString();
+      const created = new Date(schedule.createdAt);
+      const key = Number.isNaN(created.getTime())
+        ? 'Unknown date'
+        : created.toISOString().slice(0, 10);
       map.set(key, [...(map.get(key) || []), schedule]);
     });
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));

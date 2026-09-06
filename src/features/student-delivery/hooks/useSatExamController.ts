@@ -51,7 +51,6 @@ export interface UseSatExamControllerOptions {
   attemptUpdateToken?: number;
   leaseEpoch?: number | null | undefined;
   controlEpoch?: number | null | undefined;
-  useV2DurabilityEngine?: boolean | undefined;
 }
 
 export function useSatExamController({
@@ -64,7 +63,6 @@ export function useSatExamController({
   attemptUpdateToken = 0,
   leaseEpoch,
   controlEpoch,
-  useV2DurabilityEngine,
 }: UseSatExamControllerOptions) {
   const [state, dispatch] = useReducer(
     satRunnerReducer,
@@ -80,7 +78,6 @@ export function useSatExamController({
   const timeoutSubmissionKeyRef = useRef<string | null>(null);
   const initialAutoStartKeyRef = useRef<string | null>(null);
   const nextSectionAutoStartRef = useRef<{ key: string; attemptedAt: number } | null>(null);
-  const recoveredPendingRef = useRef(false);
   const finalizationInFlightRef = useRef<Promise<AssessmentResult | null> | null>(null);
   const finalizationRecoveryKeyRef = useRef<string | null>(null);
   const identityGenerationRef = useRef(0);
@@ -101,7 +98,6 @@ export function useSatExamController({
     timeoutSubmissionKeyRef.current = null;
     initialAutoStartKeyRef.current = null;
     nextSectionAutoStartRef.current = null;
-    recoveredPendingRef.current = false;
     dispatch({ type: "recover", state: createSatRunnerState(scheduleId, attemptId) });
   }, [attemptId, candidateId, identityKey, scheduleId]);
 
@@ -121,7 +117,6 @@ export function useSatExamController({
     leaseEpoch,
     controlEpoch,
     credentialAttempt: attemptSnapshot,
-    ...(useV2DurabilityEngine !== undefined ? { useV2DurabilityEngine } : {}),
   });
   const persistenceRef = useRef(persistence);
   persistenceRef.current = persistence;
@@ -233,9 +228,7 @@ export function useSatExamController({
       const questionIds = new Set(module.questions.map((question) => question.examQuestionId));
       for (const response of payload.attempt.responses) {
         if (!questionIds.has(response.examQuestionId)) continue;
-        const durableDraft = useV2DurabilityEngine
-          ? persistence.visibleDrafts[response.examQuestionId]
-          : persistence.pendingDrafts[response.examQuestionId];
+        const durableDraft = persistence.visibleDrafts[response.examQuestionId];
         if (durableDraft) {
           dispatch({
             type: "hydrateResponse",
@@ -266,7 +259,7 @@ export function useSatExamController({
         });
       }
     },
-    [persistence.pendingDrafts, persistence.visibleDrafts, state, useV2DurabilityEngine]
+    [persistence.visibleDrafts, state]
   );
 
   const startModuleFrom = useCallback(
@@ -495,10 +488,8 @@ export function useSatExamController({
       const operation = (async () => {
         await persistenceRef.current.flush();
         if (identityGenerationRef.current !== generation) return null;
-        if (useV2DurabilityEngine) {
-          await persistenceRef.current.submit();
-          if (identityGenerationRef.current !== generation) return null;
-        }
+        await persistenceRef.current.submit();
+        if (identityGenerationRef.current !== generation) return null;
         const finalResult = await satDeliveryGateway.submitAssessment(scheduleId, attemptId, {
           submissionId: attemptId,
         });
@@ -531,7 +522,7 @@ export function useSatExamController({
       );
       return operation;
     },
-    [attemptId, scheduleId, useV2DurabilityEngine]
+    [attemptId, scheduleId]
   );
 
   useEffect(() => {
@@ -691,12 +682,8 @@ export function useSatExamController({
       !stateResponseRevisions
     )
       return;
-    if (recoveredPendingRef.current && !useV2DurabilityEngine) return;
-    if (!useV2DurabilityEngine) recoveredPendingRef.current = true;
     for (const question of stateModule.questions) {
-      const pending = useV2DurabilityEngine
-        ? persistence.visibleDrafts[question.examQuestionId]
-        : persistence.pendingDrafts[question.examQuestionId];
+      const pending = persistence.visibleDrafts[question.examQuestionId];
       if (!pending) continue;
       const current = stateResponses[question.examQuestionId];
       const sameDraft =
@@ -719,13 +706,11 @@ export function useSatExamController({
     }
   }, [
     data,
-    persistence.pendingDrafts,
     persistence.visibleDrafts,
     state.phase,
     stateResponseRevisions,
     stateResponses,
     stateModule,
-    useV2DurabilityEngine,
   ]);
 
   const personalModuleRemainingSeconds = stateModuleAttempt

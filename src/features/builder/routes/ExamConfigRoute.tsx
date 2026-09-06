@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { BasicInfoTab } from '../components/BasicInfoTab';
 import { ExamConfigTabs } from '../components/ExamConfigTabs';
 import { ModulesTab } from '../components/ModulesTab';
@@ -12,6 +12,7 @@ import { ErrorSurface, LoadingSurface } from '@components/ui';
 
 export function ExamConfigRoute() {
   const { examId } = useParams<{ examId: string }>();
+  const navigate = useNavigate();
   const controller = useConfigRouteController(examId);
   const [activeTab, setActiveTab] = useState<ConfigTab>('basic');
 
@@ -28,6 +29,17 @@ export function ExamConfigRoute() {
         onAction={() => {
           void controller.reload();
         }}
+      />
+    );
+  }
+
+  if (!controller.exam) {
+    return (
+      <ErrorSurface
+        title="Exam Not Found"
+        description="The requested exam could not be loaded."
+        actionLabel="Back to Admin"
+        onAction={() => navigate('/admin')}
       />
     );
   }
@@ -77,7 +89,11 @@ export function ExamConfigRoute() {
               </div>
             </div>
           </div>
-          <ExamConfigTabs activeTab={activeTab} onTabChange={setActiveTab} />
+          <ExamConfigTabs
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            examType={config.general.type}
+          />
         </div>
 
         <div className="p-8">

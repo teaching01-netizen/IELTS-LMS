@@ -1,8 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useAuthSession, type StudentQueuedAdmission } from '../../auth/api/authSession';
-import { studentAttemptRepository } from '@student/application/studentAttemptFacade';
-import { commonSchemas } from '@shared/lib/validateApiResponse';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useAuthSession, type StudentQueuedAdmission } from "../../auth/api/authSession";
+import { studentAttemptRepository } from "@student/application/studentAttemptFacade";
+import {
+  getStudentEntrySchedule,
+  isStudentEntryScheduleBlockedError,
+} from "../infrastructure/studentEntryGateway";
+import { commonSchemas } from "@shared/lib/validateApiResponse";
 
 interface EntryFormData {
   wcode: string;
@@ -12,8 +16,8 @@ interface EntryFormData {
   ieltsCourse: string;
 }
 
-const LAST_WCODE_STORAGE_PREFIX = 'ielts-student-last-wcode:';
-const PROFILE_STORAGE_PREFIX = 'ielts-student-profile:';
+const LAST_WCODE_STORAGE_PREFIX = "ielts-student-last-wcode:";
+const PROFILE_STORAGE_PREFIX = "ielts-student-profile:";
 
 function normalizeAccessCode(value: string): string {
   const trimmed = value.trim();
@@ -32,7 +36,7 @@ function validateEmail(email: string): boolean {
 }
 
 function loadLastWcode(scheduleId: string): string | null {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return null;
   }
 
@@ -40,7 +44,7 @@ function loadLastWcode(scheduleId: string): string | null {
 }
 
 function storeLastWcode(scheduleId: string, wcode: string): void {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return;
   }
 
@@ -50,23 +54,23 @@ function storeLastWcode(scheduleId: string, wcode: string): void {
 function storeCandidateProfile(
   scheduleId: string,
   wcode: string,
-  profile: { studentName: string; email: string; nickname: string; ieltsCourse: string },
+  profile: { studentName: string; email: string; nickname: string; ieltsCourse: string }
 ): void {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return;
   }
 
   window.localStorage.setItem(
     `${PROFILE_STORAGE_PREFIX}${scheduleId}:${wcode}`,
-    JSON.stringify(profile),
+    JSON.stringify(profile)
   );
 }
 
 function loadCandidateProfile(
   scheduleId: string,
-  wcode: string,
+  wcode: string
 ): { studentName: string; email: string; nickname: string; ieltsCourse: string } | null {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return null;
   }
 
@@ -82,10 +86,10 @@ function loadCandidateProfile(
       nickname?: unknown;
       ieltsCourse?: unknown;
     };
-    const studentName = typeof parsed.studentName === 'string' ? parsed.studentName.trim() : '';
-    const email = typeof parsed.email === 'string' ? parsed.email.trim() : '';
-    const nickname = typeof parsed.nickname === 'string' ? parsed.nickname.trim() : '';
-    const ieltsCourse = typeof parsed.ieltsCourse === 'string' ? parsed.ieltsCourse.trim() : '';
+    const studentName = typeof parsed.studentName === "string" ? parsed.studentName.trim() : "";
+    const email = typeof parsed.email === "string" ? parsed.email.trim() : "";
+    const nickname = typeof parsed.nickname === "string" ? parsed.nickname.trim() : "";
+    const ieltsCourse = typeof parsed.ieltsCourse === "string" ? parsed.ieltsCourse.trim() : "";
 
     if (!studentName || !email || !nickname || !ieltsCourse) {
       return null;
@@ -97,67 +101,322 @@ function loadCandidateProfile(
   }
 }
 
+const QUEUE_TICKET_STORAGE_PREFIX = "ielts-student-queue-ticket:";
+const QUEUE_POLL_FLOOR_MS = 500;
+const QUEUE_POLL_DEFAULT_MS = 1500;
+
+interface PersistedStudentQueue {
+  ticket: StudentQueuedAdmission;
+  payload: EntryFormData;
+}
+
+interface QueuePollFailure {
+  message: string;
+  ticketId: string;
+  position: number;
+  attempts: number;
+}
+
+function queueStorageKey(scheduleId: string): string {
+  return `${QUEUE_TICKET_STORAGE_PREFIX}${scheduleId}`;
+}
+
+function isPersistedStudentQueue(value: unknown): value is PersistedStudentQueue {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as { ticket?: unknown; payload?: unknown };
+  if (typeof candidate.ticket !== "object" || candidate.ticket === null) {
+    return false;
+  }
+  if (typeof candidate.payload !== "object" || candidate.payload === null) {
+    return false;
+  }
+  const ticket = candidate.ticket as { state?: unknown; ticketId?: unknown; position?: unknown };
+  const payload = candidate.payload as {
+    wcode?: unknown;
+    email?: unknown;
+    studentName?: unknown;
+    nickname?: unknown;
+    ieltsCourse?: unknown;
+  };
+  return (
+    ticket.state === "queued" &&
+    typeof ticket.ticketId === "string" &&
+    ticket.ticketId.length > 0 &&
+    typeof ticket.position === "number" &&
+    typeof payload.wcode === "string" &&
+    payload.wcode.length > 0 &&
+    typeof payload.email === "string" &&
+    typeof payload.studentName === "string" &&
+    typeof payload.nickname === "string" &&
+    typeof payload.ieltsCourse === "string"
+  );
+}
+
+function loadPersistedStudentQueue(scheduleId: string): PersistedStudentQueue | null {
+  if (!scheduleId || typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(queueStorageKey(scheduleId));
+    if (!raw) {
+      return null;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    return isPersistedStudentQueue(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistStudentQueue(
+  scheduleId: string,
+  ticket: StudentQueuedAdmission,
+  payload: EntryFormData
+): void {
+  if (!scheduleId || typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(queueStorageKey(scheduleId), JSON.stringify({ ticket, payload }));
+  } catch {
+    // Queue polling still works in memory when storage is unavailable.
+  }
+}
+
+function clearPersistedStudentQueue(scheduleId: string): void {
+  if (!scheduleId || typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.sessionStorage.removeItem(queueStorageKey(scheduleId));
+  } catch {
+    // Storage cleanup is best-effort.
+  }
+}
+
+function queueEtaSeconds(pollAfterMs: number | undefined): number {
+  const floored = Math.max(QUEUE_POLL_FLOOR_MS, pollAfterMs || QUEUE_POLL_DEFAULT_MS);
+  return Math.max(1, Math.round(floored / 1000));
+}
+
+type ScheduleAvailability =
+  | { state: "ready"; providerKey: "ielts" | "sat" | "act" }
+  | { state: "unavailable"; title: string; description: string }
+  | { state: "unknown" };
+
+function scheduleStatusCopy(status: string): { title: string; description: string } {
+  switch (status) {
+    case "completed":
+      return {
+        title: "This exam has ended",
+        description:
+          "Entry for this schedule has closed. Ask your teacher if you still need access.",
+      };
+    case "cancelled":
+      return {
+        title: "This exam was cancelled",
+        description: "Ask your teacher for a current check-in link.",
+      };
+    case "paused":
+      return {
+        title: "Entry is temporarily paused",
+        description:
+          "Your teacher can reopen entry for this schedule. You don\u2019t need a new URL.",
+      };
+    default:
+      return {
+        title: "This exam isn\u2019t open yet",
+        description: "Come back when your teacher opens entry for this schedule.",
+      };
+  }
+}
+
+function scheduleBlockedCopy(): { title: string; description: string } {
+  return {
+    title: "This check-in link isn\u2019t available",
+    description: "Ask your teacher for a current check-in link.",
+  };
+}
+
+function isScheduleBlockedError(error: unknown): boolean {
+  return isStudentEntryScheduleBlockedError(error);
+}
+
+async function loadScheduleAvailability(scheduleId: string): Promise<ScheduleAvailability> {
+  try {
+    const schedule = await getStudentEntrySchedule(scheduleId);
+    // Registration is allowed before the proctor starts the runtime. The Go
+    // registration transaction accepts both scheduled and live schedules;
+    // only terminal/closed schedule states should hide the check-in form.
+    if (
+      schedule.status === "completed" ||
+      schedule.status === "cancelled"
+    ) {
+      return { state: "unavailable", ...scheduleStatusCopy(schedule.status) };
+    }
+    return { state: "ready", providerKey: schedule.providerKey };
+  } catch (error) {
+    if (isScheduleBlockedError(error)) {
+      return { state: "unavailable", ...scheduleBlockedCopy() };
+    }
+    return { state: "unknown" };
+  }
+}
+
 export function StudentEntryRoute() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { studentEntry } = useAuthSession();
 
+  // S3-C8/M1: direct entry branches by provider. A SAT schedule requires
+  // only code + name + email (nickname/IELTS course are hidden and omitted
+  // from the payload). Detection prefers the fetched schedule provider and
+  // falls back to an explicit ?provider=sat override.
+  const providerOverride = searchParams.get("provider") === "sat" ? "sat" : null;
+  const [scheduleAvailability, setScheduleAvailability] = useState<ScheduleAvailability>({
+    state: "unknown",
+  });
+
+  useEffect(() => {
+    if (!scheduleId) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const availability = await loadScheduleAvailability(scheduleId);
+      if (!cancelled) {
+        setScheduleAvailability(availability);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scheduleId]);
+
+  const isSatSchedule =
+    scheduleAvailability.state === "ready" && scheduleAvailability.providerKey === "sat";
+  const isSat = providerOverride === "sat" || isSatSchedule;
+  const availabilityGate =
+    scheduleAvailability.state === "unavailable" ? scheduleAvailability : null;
+
   const initialWcode = useMemo(() => {
     if (!scheduleId) {
-      return '';
+      return "";
     }
 
-    const queryWcode = searchParams.get('wcode');
+    const queryWcode = searchParams.get("wcode");
     if (queryWcode) {
       return normalizeAccessCode(queryWcode);
     }
 
     const stored = loadLastWcode(scheduleId);
-    return stored ? normalizeAccessCode(stored) : '';
+    return stored ? normalizeAccessCode(stored) : "";
   }, [scheduleId, searchParams]);
 
-  const [formData, setFormData] = useState<EntryFormData>({
-    wcode: initialWcode,
-    email:
-      scheduleId && initialWcode
-        ? loadCandidateProfile(scheduleId, initialWcode)?.email ?? ''
-        : '',
-    studentName:
-      scheduleId && initialWcode
-        ? loadCandidateProfile(scheduleId, initialWcode)?.studentName ?? ''
-        : '',
-    nickname:
-      scheduleId && initialWcode
-        ? loadCandidateProfile(scheduleId, initialWcode)?.nickname ?? ''
-        : '',
-    ieltsCourse:
-      scheduleId && initialWcode
-        ? loadCandidateProfile(scheduleId, initialWcode)?.ieltsCourse ?? ''
-        : '',
-  });
+  const [restoredQueue] = useState<PersistedStudentQueue | null>(() =>
+    scheduleId ? loadPersistedStudentQueue(scheduleId) : null
+  );
+  const [formData, setFormData] = useState<EntryFormData>(
+    () =>
+      restoredQueue?.payload ?? {
+        wcode: initialWcode,
+        email:
+          scheduleId && initialWcode
+            ? (loadCandidateProfile(scheduleId, initialWcode)?.email ?? "")
+            : "",
+        studentName:
+          scheduleId && initialWcode
+            ? (loadCandidateProfile(scheduleId, initialWcode)?.studentName ?? "")
+            : "",
+        nickname:
+          scheduleId && initialWcode
+            ? (loadCandidateProfile(scheduleId, initialWcode)?.nickname ?? "")
+            : "",
+        ieltsCourse:
+          scheduleId && initialWcode
+            ? (loadCandidateProfile(scheduleId, initialWcode)?.ieltsCourse ?? "")
+            : "",
+      }
+  );
   const [errors, setErrors] = useState<Partial<Record<keyof EntryFormData, string>>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [queuedAdmission, setQueuedAdmission] = useState<StudentQueuedAdmission | null>(null);
-  const [queuedPayload, setQueuedPayload] = useState<EntryFormData | null>(null);
+  const [queuedAdmission, setQueuedAdmission] = useState<StudentQueuedAdmission | null>(
+    () => restoredQueue?.ticket ?? null
+  );
+  const [queuedPayload, setQueuedPayload] = useState<EntryFormData | null>(
+    () => restoredQueue?.payload ?? null
+  );
+  const submittingRef = useRef(false);
+  const [queuePollFailure, setQueuePollFailure] = useState<QueuePollFailure | null>(null);
+  const [lastQueuedTicket, setLastQueuedTicket] = useState<StudentQueuedAdmission | null>(
+    () => restoredQueue?.ticket ?? null
+  );
+  const pollAttemptsRef = useRef(0);
 
+  const mountSnapshotRef = useRef({
+    initialWcode,
+    scheduleId,
+    hadRestoredQueue: Boolean(restoredQueue),
+  });
   useEffect(() => {
-    const profile = scheduleId && initialWcode
-      ? loadCandidateProfile(scheduleId, initialWcode)
-      : null;
+    // Skip reset while the mounted schedule/wcode still matches the restored
+    // queue ticket, so a reload resumes polling instead of wiping the
+    // recovered position. Any in-place schedule/wcode change falls through
+    // and clears the queue. Snapshot comparison (not a one-shot flag) keeps
+    // this correct under StrictMode double-effect invocation.
+    const snapshot = mountSnapshotRef.current;
+    if (
+      snapshot.hadRestoredQueue &&
+      scheduleId === snapshot.scheduleId &&
+      initialWcode === snapshot.initialWcode
+    ) {
+      return;
+    }
+    // Navigated to a different schedule that already holds a persisted
+    // ticket (e.g. back-navigation): restore it instead of wiping it.
+    if (scheduleId && scheduleId !== snapshot.scheduleId) {
+      const persisted = loadPersistedStudentQueue(scheduleId);
+      if (persisted) {
+        setFormData(persisted.payload);
+        setErrors({});
+        setSubmitError(null);
+        setQueuedAdmission(persisted.ticket);
+        setQueuedPayload(persisted.payload);
+        setLastQueuedTicket(persisted.ticket);
+        setQueuePollFailure(null);
+        pollAttemptsRef.current = 0;
+        mountSnapshotRef.current = {
+          initialWcode,
+          scheduleId,
+          hadRestoredQueue: true,
+        };
+        return;
+      }
+    }
+    const profile =
+      scheduleId && initialWcode ? loadCandidateProfile(scheduleId, initialWcode) : null;
 
     setFormData({
       wcode: initialWcode,
-      email: profile?.email ?? '',
-      studentName: profile?.studentName ?? '',
-      nickname: profile?.nickname ?? '',
-      ieltsCourse: profile?.ieltsCourse ?? '',
+      email: profile?.email ?? "",
+      studentName: profile?.studentName ?? "",
+      nickname: profile?.nickname ?? "",
+      ieltsCourse: profile?.ieltsCourse ?? "",
     });
     setErrors({});
     setSubmitError(null);
     setQueuedAdmission(null);
     setQueuedPayload(null);
+    setQueuePollFailure(null);
+    setLastQueuedTicket(null);
+    pollAttemptsRef.current = 0;
+    if (scheduleId) {
+      clearPersistedStudentQueue(scheduleId);
+    }
   }, [initialWcode, scheduleId]);
 
   useEffect(() => {
@@ -176,8 +435,8 @@ export function StudentEntryRoute() {
         const attempts = await studentAttemptRepository.getAttemptsByScheduleId(scheduleId);
         const activeAttempt = attempts.find(
           (candidate) =>
-            candidate.phase !== 'post-exam' &&
-            normalizeAccessCode(candidate.candidateId) === normalizedWcode,
+            candidate.phase !== "post-exam" &&
+            normalizeAccessCode(candidate.candidateId) === normalizedWcode
         );
 
         if (activeAttempt && !cancelled) {
@@ -195,12 +454,12 @@ export function StudentEntryRoute() {
 
   const handleInputChange = (field: keyof EntryFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-    setErrors((prev) => ({ ...prev, [field]: '' }));
+    setErrors((prev) => ({ ...prev, [field]: "" }));
 
-    if (field === 'email' && value && !validateEmail(value)) {
+    if (field === "email" && value && !validateEmail(value)) {
       setErrors((prev) => ({
         ...prev,
-        email: 'Invalid email format',
+        email: "Invalid email format",
       }));
     }
   };
@@ -217,25 +476,27 @@ export function StudentEntryRoute() {
     const newErrors: Partial<Record<keyof EntryFormData, string>> = {};
 
     if (!normalizedWcode) {
-      newErrors.wcode = 'Wcode is required';
+      newErrors.wcode = "Wcode is required";
     }
 
     if (!normalizedEmail || !validateEmail(normalizedEmail)) {
-      newErrors.email = 'Email is required and must be valid';
+      newErrors.email = "Email is required and must be valid";
     }
 
     if (!normalizedName) {
-      newErrors.studentName = 'Name is required';
+      newErrors.studentName = "Name is required";
     }
 
-    if (!normalizedNickname) {
-      newErrors.nickname = 'Nickname is required';
-    } else if (normalizedNickname.length > 50) {
-      newErrors.nickname = 'Nickname must be 50 characters or less';
-    }
+    if (!isSat) {
+      if (!normalizedNickname) {
+        newErrors.nickname = "Nickname is required";
+      } else if (normalizedNickname.length > 50) {
+        newErrors.nickname = "Nickname must be 50 characters or less";
+      }
 
-    if (!normalizedIeltsCourse) {
-      newErrors.ieltsCourse = 'IELTS Course is required';
+      if (!normalizedIeltsCourse) {
+        newErrors.ieltsCourse = "IELTS Course is required";
+      }
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -244,13 +505,18 @@ export function StudentEntryRoute() {
     }
 
     if (!scheduleId) {
-      setSubmitError('Invalid schedule id');
+      setSubmitError("Invalid schedule id");
       return;
     }
 
+    if (isLoading || submittingRef.current) {
+      return;
+    }
+    submittingRef.current = true;
     setIsLoading(true);
     setSubmitError(null);
     setQueuedAdmission(null);
+    setQueuePollFailure(null);
 
     try {
       const result = await studentEntry({
@@ -258,22 +524,26 @@ export function StudentEntryRoute() {
         wcode: normalizedWcode,
         email: normalizedEmail,
         studentName: normalizedName,
-        nickname: normalizedNickname,
-        ieltsCourse: normalizedIeltsCourse,
+        ...(isSat ? {} : { nickname: normalizedNickname, ieltsCourse: normalizedIeltsCourse }),
       });
 
-      if ('state' in result && result.state === 'queued') {
-        setQueuedAdmission(result);
-        setQueuedPayload({
+      if ("state" in result && result.state === "queued") {
+        const payload = {
           wcode: normalizedWcode,
           email: normalizedEmail,
           studentName: normalizedName,
           nickname: normalizedNickname,
           ieltsCourse: normalizedIeltsCourse,
-        });
+        };
+        pollAttemptsRef.current = 0;
+        setQueuedAdmission(result);
+        setQueuedPayload(payload);
+        setLastQueuedTicket(result);
+        persistStudentQueue(scheduleId, result, payload);
         return;
       }
 
+      clearPersistedStudentQueue(scheduleId);
       storeLastWcode(scheduleId, normalizedWcode);
       storeCandidateProfile(scheduleId, normalizedWcode, {
         studentName: normalizedName,
@@ -283,39 +553,69 @@ export function StudentEntryRoute() {
       });
       navigate(buildStudentRoute(scheduleId, normalizedWcode));
     } catch (error) {
-      setSubmitError(
-        error instanceof Error ? error.message : 'Check-in failed. Please try again.',
-      );
+      setSubmitError(error instanceof Error ? error.message : "Check-in failed. Please try again.");
     } finally {
+      submittingRef.current = false;
       setIsLoading(false);
     }
   };
 
+  const handleRetryQueue = () => {
+    if (isLoading || !scheduleId || !queuedPayload || !lastQueuedTicket) {
+      return;
+    }
+    setSubmitError(null);
+    setQueuePollFailure(null);
+    setQueuedAdmission(lastQueuedTicket);
+    persistStudentQueue(scheduleId, lastQueuedTicket, queuedPayload);
+  };
+
+  const handleLeaveQueue = () => {
+    if (scheduleId) {
+      clearPersistedStudentQueue(scheduleId);
+    }
+    pollAttemptsRef.current = 0;
+    setQueuedAdmission(null);
+    setQueuedPayload(null);
+    setLastQueuedTicket(null);
+    setQueuePollFailure(null);
+    setSubmitError(null);
+  };
+
   useEffect(() => {
-    if (!scheduleId || !queuedAdmission || !queuedPayload) {
+    if (!scheduleId || !queuedAdmission || !queuedPayload || queuePollFailure) {
       return;
     }
 
     let cancelled = false;
-    const pollAfterMs = Math.max(300, queuedAdmission.pollAfterMs || 1500);
+    const pollAfterMs = Math.max(
+      QUEUE_POLL_FLOOR_MS,
+      queuedAdmission.pollAfterMs || QUEUE_POLL_DEFAULT_MS
+    );
+    const ticketAtPollStart = queuedAdmission;
     const timer = window.setTimeout(async () => {
+      pollAttemptsRef.current += 1;
       try {
         const result = await studentEntry({
           scheduleId,
           wcode: queuedPayload.wcode,
           email: queuedPayload.email,
           studentName: queuedPayload.studentName,
-          nickname: queuedPayload.nickname,
-          ieltsCourse: queuedPayload.ieltsCourse,
+          ...(isSat
+            ? {}
+            : { nickname: queuedPayload.nickname, ieltsCourse: queuedPayload.ieltsCourse }),
         });
         if (cancelled) {
           return;
         }
-        if ('state' in result && result.state === 'queued') {
+        if ("state" in result && result.state === "queued") {
           setQueuedAdmission(result);
+          setLastQueuedTicket(result);
+          persistStudentQueue(scheduleId, result, queuedPayload);
           return;
         }
 
+        clearPersistedStudentQueue(scheduleId);
         storeLastWcode(scheduleId, queuedPayload.wcode);
         storeCandidateProfile(scheduleId, queuedPayload.wcode, {
           studentName: queuedPayload.studentName,
@@ -326,9 +626,19 @@ export function StudentEntryRoute() {
         navigate(buildStudentRoute(scheduleId, queuedPayload.wcode));
       } catch (error) {
         if (!cancelled) {
-          setSubmitError(
-            error instanceof Error ? error.message : 'Admission polling failed. Please retry.',
-          );
+          const message =
+            error instanceof Error ? error.message : "Admission polling failed. Please retry.";
+          // S3-C2: a failed poll must not dead-lock the form. Clear the
+          // blocking queued state but keep the ticket + payload so Retry can
+          // resume polling and Leave can discard the ticket.
+          setQueuedAdmission(null);
+          setQueuePollFailure({
+            message,
+            ticketId: ticketAtPollStart.ticketId,
+            position: ticketAtPollStart.position,
+            attempts: pollAttemptsRef.current,
+          });
+          setSubmitError(message);
         }
       }
     }, pollAfterMs);
@@ -337,7 +647,18 @@ export function StudentEntryRoute() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [navigate, queuedAdmission, queuedPayload, scheduleId, studentEntry]);
+  }, [isSat, navigate, queuedAdmission, queuedPayload, queuePollFailure, scheduleId, studentEntry]);
+
+  if (availabilityGate && !queuedAdmission && !queuePollFailure) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8 text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{availabilityGate.title}</h1>
+          <p className="text-sm text-gray-600">{availabilityGate.description}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -351,10 +672,54 @@ export function StudentEntryRoute() {
         )}
 
         {queuedAdmission && (
-          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+          <div aria-live="polite" className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
             <p className="text-sm text-blue-700">
               You are in queue. Position: {queuedAdmission.position}
             </p>
+            <p className="mt-1 text-xs text-blue-600">
+              Ticket ref: {queuedAdmission.ticketId} · Checking again in ~
+              {queueEtaSeconds(queuedAdmission.pollAfterMs)}s. Keep this tab open.
+            </p>
+            <button
+              type="button"
+              onClick={handleLeaveQueue}
+              className="mt-2 text-xs font-medium text-blue-700 underline hover:text-blue-900"
+            >
+              Leave queue
+            </button>
+          </div>
+        )}
+
+        {queuePollFailure && (
+          <div
+            aria-live="polite"
+            className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-md"
+          >
+            <p className="text-sm font-medium text-amber-800">
+              Queue check failed after {queuePollFailure.attempts}{" "}
+              {queuePollFailure.attempts === 1 ? "attempt" : "attempts"}
+            </p>
+            <p className="mt-1 text-xs text-amber-700">
+              Ticket ref: {queuePollFailure.ticketId} · Position at failure:{" "}
+              {queuePollFailure.position}. Your details are saved — retry to keep your place or
+              leave the queue to edit the form.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={handleRetryQueue}
+                className="bg-blue-600 text-white text-sm py-1.5 px-3 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={handleLeaveQueue}
+                className="bg-white text-sm py-1.5 px-3 rounded-md border border-gray-300 hover:bg-gray-50"
+              >
+                Leave queue
+              </button>
+            </div>
           </div>
         )}
 
@@ -366,12 +731,12 @@ export function StudentEntryRoute() {
                 id="wcode"
                 type="text"
                 value={formData.wcode}
-                onChange={(e) => handleInputChange('wcode', e.target.value)}
+                onChange={(e) => handleInputChange("wcode", e.target.value)}
                 placeholder="Enter your wcode"
                 aria-label="Wcode"
                 disabled={isLoading || Boolean(queuedAdmission)}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.wcode ? 'border-red-300' : 'border-gray-300'
+                  errors.wcode ? "border-red-300" : "border-gray-300"
                 } focus:outline-none focus:ring-2 focus:ring-blue-500`}
               />
             </label>
@@ -386,12 +751,12 @@ export function StudentEntryRoute() {
                 id="email"
                 type="email"
                 value={formData.email}
-                onChange={(e) => handleInputChange('email', e.target.value)}
+                onChange={(e) => handleInputChange("email", e.target.value)}
                 placeholder="student@example.com"
                 aria-label="Email"
                 disabled={isLoading || Boolean(queuedAdmission)}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.email ? 'border-red-300' : 'border-gray-300'
+                  errors.email ? "border-red-300" : "border-gray-300"
                 } focus:outline-none focus:ring-2 focus:ring-blue-500`}
               />
             </label>
@@ -405,12 +770,12 @@ export function StudentEntryRoute() {
                 id="studentName"
                 type="text"
                 value={formData.studentName}
-                onChange={(e) => handleInputChange('studentName', e.target.value)}
+                onChange={(e) => handleInputChange("studentName", e.target.value)}
                 placeholder="John Doe"
                 aria-label="Full Name"
                 disabled={isLoading || Boolean(queuedAdmission)}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.studentName ? 'border-red-300' : 'border-gray-300'
+                  errors.studentName ? "border-red-300" : "border-gray-300"
                 } focus:outline-none focus:ring-2 focus:ring-blue-500`}
               />
             </label>
@@ -419,53 +784,63 @@ export function StudentEntryRoute() {
             )}
           </div>
 
-          <div>
-            <label htmlFor="nickname" className="block text-sm font-medium text-gray-700 mb-2">
-              Nickname
-              <input
-                id="nickname"
-                type="text"
-                value={formData.nickname}
-                onChange={(e) => handleInputChange('nickname', e.target.value)}
-                placeholder="Nickname"
-                aria-label="Nickname"
-                disabled={isLoading || Boolean(queuedAdmission)}
-                maxLength={50}
-                className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.nickname ? 'border-red-300' : 'border-gray-300'
-                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              />
-            </label>
-            {errors.nickname && <p className="mt-1 text-sm text-red-600">{errors.nickname}</p>}
-          </div>
-
-          <div>
-            <label htmlFor="ieltsCourse" className="block text-sm font-medium text-gray-700 mb-2">
-              IELTS Course
-              <input
-                id="ieltsCourse"
-                type="text"
-                value={formData.ieltsCourse}
-                onChange={(e) => handleInputChange('ieltsCourse', e.target.value)}
-                placeholder="IELTS Course"
-                aria-label="IELTS Course"
-                disabled={isLoading || Boolean(queuedAdmission)}
-                className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.ieltsCourse ? 'border-red-300' : 'border-gray-300'
-                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              />
-            </label>
-            {errors.ieltsCourse && (
-              <p className="mt-1 text-sm text-red-600">{errors.ieltsCourse}</p>
-            )}
-          </div>
+          {!isSat && (
+            <>
+              <div>
+                <label htmlFor="nickname" className="block text-sm font-medium text-gray-700 mb-2">
+                  Nickname
+                  <input
+                    id="nickname"
+                    type="text"
+                    value={formData.nickname}
+                    onChange={(e) => handleInputChange("nickname", e.target.value)}
+                    placeholder="Nickname"
+                    aria-label="Nickname"
+                    disabled={isLoading || Boolean(queuedAdmission)}
+                    maxLength={50}
+                    className={`mt-2 w-full px-3 py-2 border rounded-md ${
+                      errors.nickname ? "border-red-300" : "border-gray-300"
+                    } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  />
+                </label>
+                {errors.nickname && <p className="mt-1 text-sm text-red-600">{errors.nickname}</p>}
+              </div>
+              <div>
+                <label
+                  htmlFor="ieltsCourse"
+                  className="block text-sm font-medium text-gray-700 mb-2"
+                >
+                  IELTS Course
+                  <input
+                    id="ieltsCourse"
+                    type="text"
+                    value={formData.ieltsCourse}
+                    onChange={(e) => handleInputChange("ieltsCourse", e.target.value)}
+                    placeholder="IELTS Course"
+                    aria-label="IELTS Course"
+                    disabled={isLoading || Boolean(queuedAdmission)}
+                    className={`mt-2 w-full px-3 py-2 border rounded-md ${
+                      errors.ieltsCourse ? "border-red-300" : "border-gray-300"
+                    } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  />
+                </label>
+                {errors.ieltsCourse && (
+                  <p className="mt-1 text-sm text-red-600">{errors.ieltsCourse}</p>
+                )}
+              </div>
+            </>
+          )}
 
           <button
             type="submit"
             disabled={isLoading || Boolean(queuedAdmission)}
             className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
-            {queuedAdmission ? 'Waiting for Admission...' : isLoading ? 'Checking in...' : 'Continue'}
+            {queuedAdmission
+              ? "Waiting for Admission..."
+              : isLoading
+                ? "Checking in..."
+                : "Continue"}
           </button>
         </form>
       </div>

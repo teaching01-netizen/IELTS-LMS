@@ -1,21 +1,23 @@
 import React from 'react';
 import { Info, Layers, SlidersHorizontal, Clock, Shield } from 'lucide-react';
+import type { ExamType } from '../../../types';
 
 export type ConfigTab = 'basic' | 'modules' | 'standards' | 'timing' | 'security';
 
 interface ExamConfigTabsProps {
   activeTab: ConfigTab;
   onTabChange: (tab: ConfigTab) => void;
+  examType: ExamType;
 }
 
-export function ExamConfigTabs({ activeTab, onTabChange }: ExamConfigTabsProps) {
+export function ExamConfigTabs({ activeTab, onTabChange, examType }: ExamConfigTabsProps) {
   const tabs = [
     { id: 'basic' as ConfigTab, label: 'Basic Info', icon: Info },
     { id: 'modules' as ConfigTab, label: 'Modules', icon: Layers },
     { id: 'standards' as ConfigTab, label: 'Standards', icon: SlidersHorizontal },
     { id: 'timing' as ConfigTab, label: 'Timing', icon: Clock },
     { id: 'security' as ConfigTab, label: 'Security', icon: Shield },
-  ];
+  ].filter((tab) => examType !== 'ACT' || tab.id !== 'standards');
 
   return (
     <div className="flex border-b border-slate-100 bg-white/50 backdrop-blur-sm">

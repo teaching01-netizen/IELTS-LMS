@@ -22,9 +22,9 @@ export const answerHistoryKeys = {
     [...answerHistoryKeys.all, 'detail-attempt', attemptId, targetType, targetId] as const,
 };
 
-function requireId(value: string | null): string {
-  if (!value) {
-    throw new Error('Answer history query requires an identifier');
+function requireId(value: string | null | undefined, label = 'identifier'): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Answer history query requires a ${label}`);
   }
   return value;
 }
@@ -34,7 +34,7 @@ export function useAnswerHistoryOverviewBySubmission(submissionId: string | null
     queryKey: submissionId
       ? answerHistoryKeys.overviewBySubmission(submissionId)
       : [...answerHistoryKeys.all, 'overview', 'submission', 'none'],
-    queryFn: () => answerHistoryGateway.fetchOverviewBySubmission(requireId(submissionId)),
+    queryFn: () => answerHistoryGateway.fetchOverviewBySubmission(requireId(submissionId, 'submission id')),
     enabled: Boolean(submissionId),
     ...liveQueryPolicy,
   });
@@ -45,7 +45,7 @@ export function useAnswerHistoryOverviewByAttempt(attemptId: string | null) {
     queryKey: attemptId
       ? answerHistoryKeys.overviewByAttempt(attemptId)
       : [...answerHistoryKeys.all, 'overview', 'attempt', 'none'],
-    queryFn: () => answerHistoryGateway.fetchOverviewByAttempt(requireId(attemptId)),
+    queryFn: () => answerHistoryGateway.fetchOverviewByAttempt(requireId(attemptId, 'attempt id')),
     enabled: Boolean(attemptId),
     ...liveQueryPolicy,
   });
@@ -65,8 +65,8 @@ export function useAnswerHistoryTargetDetail(args: {
         : [...answerHistoryKeys.all, 'detail', 'none'],
     queryFn: () =>
       answerHistoryGateway.fetchTargetDetail({
-        submissionId: requireId(args.submissionId),
-        targetId: requireId(args.targetId),
+        submissionId: requireId(args.submissionId, 'submission id'),
+        targetId: requireId(args.targetId, 'target id'),
         targetType: args.targetType,
       }),
     enabled,
@@ -88,8 +88,8 @@ export function useAnswerHistoryTargetDetailByAttempt(args: {
         : [...answerHistoryKeys.all, 'detail-attempt', 'none'],
     queryFn: () =>
       answerHistoryGateway.fetchTargetDetailByAttempt({
-        attemptId: requireId(args.attemptId),
-        targetId: requireId(args.targetId),
+        attemptId: requireId(args.attemptId, 'attempt id'),
+        targetId: requireId(args.targetId, 'target id'),
         targetType: args.targetType,
       }),
     enabled,

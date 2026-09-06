@@ -28,19 +28,23 @@ describe('development environment wiring', () => {
     const compose = readBackendFile('docker-compose.yml');
     const backendEnv = readBackendFile('.env');
     const backendEnvExample = readBackendFile('.env.example');
-    const makefile = readBackendFile('Makefile');
+    const goModule = readBackendFile('go/go.mod');
+    const goApi = readBackendFile('go/cmd/api/main.go');
+    const goMigrator = readBackendFile('go/cmd/migrate/main.go');
 
     expect(compose).toContain('pingcap/tidb');
     expect(compose).toContain('"4000:4000"');
     expect(compose).toContain('mysqladmin ping');
 
     for (const envFile of [backendEnv, backendEnvExample]) {
-      expect(envFile).toMatch(/DATABASE_URL=mysql:\/\/.+/);
-      expect(envFile).toMatch(/DATABASE_DIRECT_URL=mysql:\/\/.+/);
-      expect(envFile).toMatch(/DATABASE_MIGRATOR_URL=mysql:\/\/.+/);
-      expect(envFile).toMatch(/DATABASE_WORKER_URL=mysql:\/\/.+/);
+      expect(envFile).toMatch(/DATABASE_URL=(?:mysql:\/\/|[^\n=]*@tcp\()[^\n]+/);
+      expect(envFile).toMatch(/DATABASE_DIRECT_URL=(?:mysql:\/\/|[^\n=]*@tcp\()[^\n]+/);
+      expect(envFile).toMatch(/DATABASE_MIGRATOR_URL=(?:mysql:\/\/|[^\n=]*@tcp\()[^\n]+/);
+      expect(envFile).toMatch(/DATABASE_WORKER_URL=(?:mysql:\/\/|[^\n=]*@tcp\()[^\n]+/);
     }
 
-    expect(makefile).toContain('docker-compose.yml up -d tidb minio');
+    expect(goModule).toContain('module example.com/ielts-proctoring');
+    expect(goApi).toContain('func main()');
+    expect(goMigrator).toContain('func main()');
   });
 });

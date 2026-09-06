@@ -14,11 +14,13 @@ vi.mock('../../app/api/apiClient', () => ({
 
 import {
   backendGet,
+  hasBackendStatusCode,
   mapBackendExamEntity,
   mapBackendExamEvent,
   mapBackendRuntime,
   mapBackendSchedule,
 } from '../backendBridge';
+import { ApiError } from '../../shared/api-client/errors';
 
 describe('backendBridge contract mappings', () => {
   it('maps backend exam entity field renames and permissions', () => {
@@ -135,5 +137,20 @@ describe('backendBridge contract mappings', () => {
   it('throws when backend envelope is successful but missing data', async () => {
     get.mockResolvedValueOnce({ data: { success: true } });
     await expect(backendGet('/v1/example')).rejects.toThrow('missing data payload');
+  });
+
+  it('throws ApiError when the backend envelope reports failure', async () => {
+    get.mockResolvedValueOnce({
+      data: { success: false, error: { code: 'CONFLICT', message: 'Conflict' } },
+    });
+    const failure = await backendGet('/v1/example').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(failure).toMatchObject({ code: 'CONFLICT', message: 'Conflict' });
+  });
+
+  it('hasBackendStatusCode matches ApiError by status', () => {
+    const error = new ApiError({ code: 'NOT_FOUND', message: 'missing', status: 404 });
+    expect(hasBackendStatusCode(error, 404)).toBe(true);
+    expect(hasBackendStatusCode(error, 409)).toBe(false);
   });
 });

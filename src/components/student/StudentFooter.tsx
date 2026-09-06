@@ -136,7 +136,7 @@ export function StudentFooter({
                       <button
                         key={targetQuestionId}
                         onClick={() => onNavigate(targetQuestionId)}
-                        className={`${pressClassName} relative text-[length:var(--student-chip-font-size)] flex items-center justify-center min-w-[1.6rem] md:min-w-[1.8rem] lg:min-w-[2rem] h-6 md:h-7 lg:h-8 px-1 md:px-1.5 rounded-sm font-bold border ${
+                        className={`${pressClassName} relative text-[length:var(--student-chip-font-size)] flex items-center justify-center min-w-[1.6rem] min-h-6 md:min-w-[1.8rem] lg:min-w-[2rem] h-6 md:h-7 lg:h-8 px-1 md:px-1.5 rounded-sm font-bold border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 ${
                           isCurrent
                             ? 'bg-blue-800 border-blue-800 text-white hover:bg-blue-700'
                             : isFlagged
@@ -167,7 +167,7 @@ export function StudentFooter({
                   }}
                   aria-label={`Jump to Part ${partNumber}`}
                   title={`Click to jump to Part ${partNumber}`}
-                  className={`${pressClassName} flex items-center gap-1 md:gap-1.5 rounded-sm px-1 py-0.5 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60`}
+                  className={`${pressClassName} min-h-6 min-w-6 flex items-center gap-1 md:gap-1.5 rounded-sm px-1 py-0.5 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60`}
                 >
                   <div className="w-8 md:w-10 lg:w-12 h-1 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
                     <div

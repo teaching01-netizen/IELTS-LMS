@@ -63,7 +63,11 @@ export function AdminSettings({ config, onChange }: AdminSettingsProps) {
             <RotateCcw size={18} />
             Reset Baseline
           </button>
-          <button className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors shadow-sm">
+          <button
+            type="button"
+            onClick={() => onChange(config)}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors shadow-sm"
+          >
             <Save size={18} />
             Save Profile
           </button>

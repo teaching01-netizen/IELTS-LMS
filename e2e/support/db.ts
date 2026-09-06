@@ -1,6 +1,6 @@
 import path from 'node:path';
 import dotenv from 'dotenv';
-import mysql from 'mysql2/promise';
+import mysql, { type PoolOptions } from 'mysql2/promise';
 
 /**
  * Minimal MySQL query helper for e2e database verification.
@@ -30,10 +30,41 @@ function resolveDatabaseUrl(): string {
   return url;
 }
 
+function databaseOptions(databaseUrl: string): PoolOptions {
+  const value = databaseUrl.trim();
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(value)) {
+    return { uri: value };
+  }
+
+  // Go's mysql driver accepts native DSNs while mysql2 expects either a URI
+  // or decomposed connection fields. Keep the e2e verifier compatible with
+  // the same local/Railway env files used by the migrated Go services.
+  const match = /^(?<user>[^:@/]+)(?::(?<password>[^@]*))?@tcp\((?<hostPort>[^)]+)\)\/(?<database>[^?]+)(?:\?(?<query>.*))?$/.exec(value);
+  if (!match?.groups) {
+    throw new Error('Unsupported MySQL connection string for the e2e verifier.');
+  }
+
+  const hostPort = match.groups.hostPort;
+  const separator = hostPort.lastIndexOf(':');
+  const rawHost = separator > 0 ? hostPort.slice(0, separator) : hostPort;
+  const port = separator > 0 ? Number(hostPort.slice(separator + 1)) : 3306;
+  const query = new URLSearchParams(match.groups.query ?? '');
+  const host = rawHost.replace(/^\[|\]$/g, '');
+
+  return {
+    host,
+    port: Number.isFinite(port) ? port : 3306,
+    user: match.groups.user,
+    ...(match.groups.password !== undefined ? { password: match.groups.password } : {}),
+    database: match.groups.database,
+    multipleStatements: query.get('multiStatements') === 'true',
+  };
+}
+
 function getPool(): mysql.Pool {
   if (!pool) {
     pool = mysql.createPool({
-      uri: resolveDatabaseUrl(),
+      ...databaseOptions(resolveDatabaseUrl()),
       connectionLimit: 2,
       // The Railway MySQL session is UTC (see backend/.env notes); do not
       // let the driver convert TIMESTAMP values into local time.

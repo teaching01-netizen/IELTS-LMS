@@ -60,6 +60,25 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
     terminate: 'bg-red-100 text-red-800 border-red-200'
   };
 
+  // Persist with optimistic apply + rollback so rule changes remain responsive
+  // while the backend request is in flight.
+  const [persistError, setPersistError] = useState<string | null>(null);
+  const persistRules = async (next: ViolationRule[], changed: ViolationRule | null, deletedId: string | null, previous: ViolationRule[]) => {
+    setPersistError(null);
+    onUpdateRules(next);
+    try {
+      const { examRepository } = await import('../../features/proctor/infrastructure/proctorGateway');
+      if (deletedId) {
+        await examRepository.deleteViolationRule(deletedId);
+      } else if (changed) {
+        await examRepository.saveViolationRule(changed);
+      }
+    } catch (error) {
+      onUpdateRules(previous);
+      setPersistError(error instanceof Error ? error.message : 'Failed to save rule.');
+    }
+  };
+
   const handleSaveRule = () => {
     if (!newRule.triggerType || !newRule.action || newRule.threshold === undefined) return;
 
@@ -76,7 +95,7 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
       createdBy: currentProctor
     };
 
-    onUpdateRules([...rules, rule]);
+    void persistRules([...rules, rule], rule, null, rules);
     setShowNewRule(false);
     setNewRule({
       scheduleId,
@@ -91,14 +110,15 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
 
   const handleDeleteRule = (ruleId: string) => {
     const updatedRules = rules.filter(rule => rule.id !== ruleId);
-    onUpdateRules(updatedRules);
+    void persistRules(updatedRules, null, ruleId, rules);
   };
 
   const handleToggleRule = (ruleId: string) => {
     const updatedRules = rules.map(rule =>
       rule.id === ruleId ? { ...rule, isEnabled: !rule.isEnabled } : rule
     );
-    onUpdateRules(updatedRules);
+    const changed = updatedRules.find((rule) => rule.id === ruleId) ?? null;
+    void persistRules(updatedRules, changed, null, rules);
   };
 
   const getRuleDescription = (rule: ViolationRule) => {
@@ -129,6 +149,11 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
+      {persistError ? (
+        <p className="mx-6 mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+          {persistError}
+        </p>
+      ) : null}
       <div className="p-6 border-b border-gray-200">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -138,8 +163,10 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors"
+            aria-label="Close auto-response rules"
           >
             <X size={20} />
           </button>
@@ -224,6 +251,7 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
                 Trigger Type
               </label>
               <select
+                aria-label="Rule trigger type"
                 value={newRule.triggerType}
                 onChange={(e) => setNewRule({ ...newRule, triggerType: e.target.value as ViolationTriggerType })}
                 className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -240,6 +268,7 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
                   Violation Type
                 </label>
                 <input
+                  aria-label="Specific violation type"
                   type="text"
                   value={newRule.specificViolationType || ''}
                   onChange={(e) => setNewRule({ ...newRule, specificViolationType: e.target.value })}
@@ -255,6 +284,7 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
                   Severity Level
                 </label>
                 <select
+                  aria-label="Specific severity"
                   value={newRule.specificSeverity || 'medium'}
                   onChange={(e) => setNewRule({ ...newRule, specificSeverity: e.target.value as ViolationSeverity })}
                   className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -272,6 +302,7 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
                 Threshold
               </label>
               <input
+                aria-label="Rule threshold"
                 type="number"
                 min="1"
                 value={newRule.threshold}
@@ -285,6 +316,7 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
                 Action
               </label>
               <select
+                aria-label="Rule action"
                 value={newRule.action}
                 onChange={(e) => setNewRule({ ...newRule, action: e.target.value as ViolationAutoAction })}
                 className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -298,6 +330,7 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
 
             <div className="flex items-center gap-2">
               <input
+                aria-label="Enable rule immediately"
                 type="checkbox"
                 checked={newRule.isEnabled ?? true}
                 onChange={(e) => setNewRule({ ...newRule, isEnabled: e.target.checked })}
@@ -339,6 +372,9 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
               return (
                 <div
                   key={rule.id}
+                  data-rule-item="true"
+                  data-rule-id={rule.id}
+                  data-enabled={String(rule.isEnabled)}
                   className={`p-4 rounded-lg border ${
                     rule.isEnabled ? 'bg-white border-gray-200 shadow-sm' : 'bg-gray-50 border-gray-200 opacity-60'
                   }`}
@@ -359,6 +395,7 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
                     </div>
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
                         onClick={() => handleToggleRule(rule.id)}
                         className={`p-1.5 rounded-md transition-colors ${
                           rule.isEnabled
@@ -366,13 +403,16 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
                             : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                         }`}
                         title={rule.isEnabled ? 'Disable rule' : 'Enable rule'}
+                        aria-label={rule.isEnabled ? 'Disable rule' : 'Enable rule'}
                       >
                         {rule.isEnabled ? <Play size={16} /> : <Pause size={16} />}
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleDeleteRule(rule.id)}
                         className="p-1.5 text-gray-400 hover:bg-red-100 hover:text-red-700 rounded-md transition-colors"
                         title="Delete rule"
+                        aria-label={`Delete rule ${rule.id}`}
                       >
                         <Trash2 size={16} />
                       </button>

@@ -34,9 +34,30 @@ interface UseFiltersReturn {
   hasActiveFiltersFlag: boolean;
 }
 
+const FILTER_LIST_KEYS = ['status', 'type', 'creator'] as const;
+type FilterListKey = (typeof FILTER_LIST_KEYS)[number];
+
+function isFilterListKey(type: keyof ExamFilterOptions): type is FilterListKey {
+  return (FILTER_LIST_KEYS as readonly string[]).includes(type);
+}
+
+function freshDefaultFilters(): ExamFilterOptions {
+  // Fresh object identity on every clear: DEFAULT_FILTERS holds shared array
+  // references, so reusing it directly would let a later mutation of one hook
+  // instance's state leak into the module-level default (and the next clear).
+  return {
+    search: DEFAULT_FILTERS.search,
+    status: [...DEFAULT_FILTERS.status],
+    type: [...DEFAULT_FILTERS.type],
+    creator: [...DEFAULT_FILTERS.creator],
+    dateRange: DEFAULT_FILTERS.dateRange ? { ...DEFAULT_FILTERS.dateRange } : undefined,
+    questionCount: DEFAULT_FILTERS.questionCount ? { ...DEFAULT_FILTERS.questionCount } : undefined,
+  };
+}
+
 export function useFilters({ exams }: UseFiltersProps): UseFiltersReturn {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filters, setFilters] = useState<ExamFilterOptions>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<ExamFilterOptions>(() => freshDefaultFilters());
   const [sort, setSort] = useState<ExamSortOptions>(DEFAULT_SORT);
   const [showFilters, setShowFilters] = useState(false);
 
@@ -48,24 +69,24 @@ export function useFilters({ exams }: UseFiltersProps): UseFiltersReturn {
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(exam =>
-        exam.title.toLowerCase().includes(query) ||
-        exam.type.toLowerCase().includes(query) ||
-        exam.author.toLowerCase().includes(query)
+        exam.title?.toLowerCase().includes(query) ||
+        exam.type?.toLowerCase().includes(query) ||
+        exam.author?.toLowerCase().includes(query)
       );
     }
     
     // Apply status filter
-    if (filters.status.length > 0) {
+    if ((filters.status?.length ?? 0) > 0) {
       filtered = filtered.filter(exam => filters.status.includes(exam.status));
     }
     
     // Apply type filter
-    if (filters.type.length > 0) {
+    if ((filters.type?.length ?? 0) > 0) {
       filtered = filtered.filter(exam => filters.type.includes(exam.type));
     }
     
     // Apply creator filter
-    if (filters.creator.length > 0) {
+    if ((filters.creator?.length ?? 0) > 0) {
       filtered = filtered.filter(exam => filters.creator.includes(exam.author));
     }
     
@@ -103,7 +124,7 @@ export function useFilters({ exams }: UseFiltersProps): UseFiltersReturn {
       
       switch (sort.field) {
         case 'title':
-          comparison = a.title.localeCompare(b.title);
+          comparison = (a.title ?? '').localeCompare(b.title ?? '');
           break;
         case 'modified':
           comparison = new Date(a.lastModified).getTime() - new Date(b.lastModified).getTime();
@@ -131,24 +152,34 @@ export function useFilters({ exams }: UseFiltersProps): UseFiltersReturn {
     return filtered;
   }, [exams, searchQuery, filters, sort]);
 
-  // Filter handlers
+  // Filter handlers — only the string-list keys (status/type/creator) are
+  // addressable here; other keys (search/dateRange/questionCount) are objects
+  // and are edited via setFilters directly. Unknown keys are ignored instead
+  // of spreading `undefined` into state.
   const addFilter = (type: keyof ExamFilterOptions, value: string) => {
+    if (!isFilterListKey(type)) return;
     setFilters(prev => {
-      const current = prev[type] as string[];
+      const current = prev[type];
+      if (!Array.isArray(current)) return prev;
       if (current.includes(value)) return prev;
       return { ...prev, [type]: [...current, value] };
     });
   };
   
   const removeFilter = (type: keyof ExamFilterOptions, value: string) => {
-    setFilters(prev => ({
-      ...prev,
-      [type]: (prev[type] as string[]).filter(v => v !== value)
-    }));
+    if (!isFilterListKey(type)) return;
+    setFilters(prev => {
+      const current = prev[type];
+      if (!Array.isArray(current)) return prev;
+      return {
+        ...prev,
+        [type]: current.filter(v => v !== value)
+      };
+    });
   };
   
   const clearAllFilters = () => {
-    setFilters(DEFAULT_FILTERS);
+    setFilters(freshDefaultFilters());
     setSearchQuery('');
   };
 

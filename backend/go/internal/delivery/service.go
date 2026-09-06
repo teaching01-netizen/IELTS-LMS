@@ -1,0 +1,1485 @@
+// Package delivery owns the assessment-delivery bootstrap slice for the Go
+// backend.
+//
+// Bootstrap assembles the candidate-facing delivery payload: the schedule
+// binding, the published-version content tree (sections -> modules ->
+// questions), the attempt snapshot (module attempts + responses with
+// Go-computed deadlines), attempt control fields, cohort timing, and an
+// already-persisted result for terminal attempts. It never computes a score
+// during a read.
+package delivery
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"example.com/ielts-proctoring/internal/act"
+	"example.com/ielts-proctoring/internal/liveupdates"
+	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/sat"
+)
+
+// Service wires delivery reads explicitly.
+type Service struct {
+	db     *sql.DB
+	runner *tx.Runner
+	// liveOrigin is this instance's bus origin id (mirrors App.LiveBus.Origin).
+	// liveHub fans committed events to in-process subscribers (App.LiveHub).
+	// Both are optional: nil hub disables fanout, empty origin writes an
+	// empty origin on bus rows (tests leave them unset).
+	liveOrigin string
+	liveHub    *liveupdates.Hub
+	// completer runs CompleteAssessment when reconcile finalizes the last open
+	// module (Rust complete_assessment, submission_id=attempt_id). Optional:
+	// nil disables the hook (tests leave it unset); invoked outside the tx.
+	completer AssessmentCompleter
+}
+
+// NewService wires dependencies explicitly.
+func NewService(db *sql.DB, runner *tx.Runner) *Service {
+	return &Service{db: db, runner: runner}
+}
+
+// SetLive wires the live-update bus origin + hub explicitly. Callers (BuildApp)
+// pass the LiveBus origin and LiveHub; Hub.Publish stays best-effort and never
+// fails the request.
+func (s *Service) SetLive(origin string, hub *liveupdates.Hub) *Service {
+	s.liveOrigin = origin
+	s.liveHub = hub
+	return s
+}
+
+// SetCompleter wires the terminal CompleteAssessment hook for reconcile.
+// Callers (BuildApp) pass the sat adapter; nil disables the hook.
+func (s *Service) SetCompleter(c AssessmentCompleter) *Service {
+	s.completer = c
+	return s
+}
+
+// DeliveredQuestion is one version-pinned question in delivery order.
+type DeliveredQuestion struct {
+	ExamQuestionID string          `json:"examQuestionId"`
+	QuestionID     string          `json:"questionId"`
+	DisplayOrder   int             `json:"displayOrder"`
+	IsPretest      bool            `json:"isPretest"`
+	QuestionType   string          `json:"questionType"`
+	Stimulus       json.RawMessage `json:"stimulus"`
+	Prompt         json.RawMessage `json:"prompt"`
+	Answer         json.RawMessage `json:"answer"`
+	Metadata       json.RawMessage `json:"metadata"`
+	Accessibility  json.RawMessage `json:"accessibility"`
+}
+
+// DeliveryModule is one module with its delivered questions.
+type DeliveryModule struct {
+	ID                  string              `json:"id"`
+	ModuleKey           string              `json:"moduleKey"`
+	Title               string              `json:"title"`
+	DisplayOrder        int                 `json:"displayOrder"`
+	DurationSeconds     int                 `json:"durationSeconds"`
+	TargetQuestionCount int                 `json:"targetQuestionCount"`
+	AdaptiveRole        string              `json:"adaptiveRole"`
+	Instructions        json.RawMessage     `json:"instructions"`
+	ToolPolicy          json.RawMessage     `json:"toolPolicy"`
+	Questions           []DeliveredQuestion `json:"questions"`
+}
+
+// DeliverySection is one section with its modules.
+type DeliverySection struct {
+	ID                string           `json:"id"`
+	SectionKey        string           `json:"sectionKey"`
+	Title             string           `json:"title"`
+	DisplayOrder      int              `json:"displayOrder"`
+	DurationSeconds   int              `json:"durationSeconds"`
+	BreakAfterSeconds int              `json:"breakAfterSeconds"`
+	Instructions      json.RawMessage  `json:"instructions"`
+	Modules           []DeliveryModule `json:"modules"`
+}
+
+// ModuleAttempt is one attempt-scoped module row with Go-computed timing.
+type ModuleAttempt struct {
+	ID                       string          `json:"id"`
+	ModuleID                 string          `json:"moduleId"`
+	State                    string          `json:"state"`
+	AllocatedSeconds         int             `json:"allocatedSeconds"`
+	AvailableAt              *time.Time      `json:"availableAt"`
+	StartedAt                *time.Time      `json:"startedAt"`
+	PausedAt                 *time.Time      `json:"pausedAt"`
+	AccumulatedPausedSeconds int             `json:"accumulatedPausedSeconds"`
+	ExtensionSeconds         int             `json:"extensionSeconds"`
+	DeadlineAt               *time.Time      `json:"deadlineAt"`
+	RemainingSeconds         *int64          `json:"remainingSeconds"`
+	CompletionReason         *string         `json:"completionReason"`
+	RawCorrect               *int64          `json:"rawCorrect"`
+	OperationalQuestionCount *int64          `json:"operationalQuestionCount"`
+	ToolState                json.RawMessage `json:"toolState"`
+	Revision                 int             `json:"revision"`
+}
+
+// ResponseSnapshot is one persisted question response.
+type ResponseSnapshot struct {
+	ID                string          `json:"id"`
+	ModuleAttemptID   string          `json:"moduleAttemptId"`
+	ExamQuestionID    string          `json:"examQuestionId"`
+	Response          json.RawMessage `json:"response"`
+	MarkedForReview   bool            `json:"markedForReview"`
+	EliminatedOptions json.RawMessage `json:"eliminatedOptions"`
+	Annotations       json.RawMessage `json:"annotations"`
+	Revision          int             `json:"revision"`
+}
+
+// AttemptSnapshot groups module attempts with their responses.
+type AttemptSnapshot struct {
+	ID             string             `json:"id"`
+	ModuleAttempts []ModuleAttempt    `json:"moduleAttempts"`
+	Responses      []ResponseSnapshot `json:"responses"`
+}
+
+// TimingSnapshot is the cohort/legacy timing projection.
+type TimingSnapshot struct {
+	Authority        string     `json:"authority"`
+	TimingModel      string     `json:"timingModel"`
+	StageKey         *string    `json:"stageKey"`
+	StageStatus      string     `json:"stageStatus"`
+	ServerNow        time.Time  `json:"serverNow"`
+	DeadlineAt       *time.Time `json:"deadlineAt"`
+	RemainingSeconds *int64     `json:"remainingSeconds"`
+	RuntimeRevision  *int64     `json:"runtimeRevision"`
+}
+
+// Bootstrap is the assessment-delivery bootstrap payload.
+type Bootstrap struct {
+	ScheduleID            string            `json:"scheduleId"`
+	ExamID                string            `json:"examId"`
+	ProviderKey           string            `json:"providerKey"`
+	VersionID             string            `json:"versionId"`
+	ServerNow             time.Time         `json:"serverNow"`
+	CandidateName         string            `json:"candidateName"`
+	ScheduleRuntimeStatus string            `json:"scheduleRuntimeStatus"`
+	Timing                TimingSnapshot    `json:"timing"`
+	ProctorStatus         string            `json:"proctorStatus"`
+	ProctorNote           *string           `json:"proctorNote"`
+	DeviceFingerprintHash *string           `json:"deviceFingerprintHash"`
+	Sections              []DeliverySection `json:"sections"`
+	Attempt               AttemptSnapshot   `json:"attempt"`
+	Result                any               `json:"result"`
+}
+
+// Bootstrap assembles the delivery payload for one SAT or ACT attempt. The bearer
+// schedule id (from the verified attempt token) must match the URL schedule
+// id; callers map typed errors via the stable apperrors envelope.
+func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID string) (*Bootstrap, error) {
+	if urlScheduleID != bearerScheduleID {
+		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
+	}
+	var scheduleID, examID, providerKey, versionID string
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT s.id, s.exam_id, e.provider_key, s.published_version_id FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?",
+		bearerScheduleID).Scan(&scheduleID, &examID, &providerKey, &versionID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
+		}
+		return nil, err
+	}
+	if providerKey != "sat" && providerKey != "act" {
+		err := apperrors.New(apperrors.CodeValidation, "The assessment provider is not supported.")
+		err.Details = map[string]any{"code": "UNSUPPORTED_PROVIDER"}
+		return nil, err
+	}
+	var attemptID, attemptScheduleID, attemptExamID string
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT id, schedule_id, exam_id FROM student_attempts WHERE id = ?",
+		bearerAttemptID).Scan(&attemptID, &attemptScheduleID, &attemptExamID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+		}
+		return nil, err
+	}
+	if attemptScheduleID != bearerScheduleID || attemptExamID != examID {
+		return nil, apperrors.New(apperrors.CodeValidation, "Attempt does not belong to this assessment schedule.")
+	}
+	// Reconcile-then-read (Rust bootstrap:372-378): finalize modules whose
+	// authoritative window elapsed before assembling the payload. A reconcile
+	// failure blocks the read so the caller retries: a failed terminal
+	// CompleteAssessment surfaces as a retryable error (never swallowed).
+	now := time.Now().UTC()
+	if _, err := s.ReconcileAttemptTimeout(ctx, bearerScheduleID, bearerAttemptID, now); err != nil {
+		return nil, err
+	}
+	sections, err := s.loadSections(ctx, versionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureBaseModuleAttempt(ctx, attemptID, sections); err != nil {
+		return nil, err
+	}
+	moduleAttempts, err := s.loadModuleAttempts(ctx, attemptID, now)
+	if err != nil {
+		return nil, err
+	}
+	responses, err := s.loadResponses(ctx, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	control, err := s.loadAttemptControl(ctx, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.loadBootstrapResult(ctx, providerKey, attemptID, control)
+	if err != nil {
+		return nil, err
+	}
+	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, now)
+	if err != nil {
+		return nil, err
+	}
+	return &Bootstrap{
+		ScheduleID:            scheduleID,
+		ExamID:                examID,
+		ProviderKey:           providerKey,
+		VersionID:             versionID,
+		ServerNow:             now,
+		CandidateName:         control.candidateName,
+		ScheduleRuntimeStatus: runtimeStatus,
+		Timing:                timing,
+		ProctorStatus:         control.proctorStatus,
+		ProctorNote:           control.proctorNote,
+		DeviceFingerprintHash: control.deviceFingerprintHash,
+		Sections:              sections,
+		Attempt: AttemptSnapshot{
+			ID:             attemptID,
+			ModuleAttempts: moduleAttempts,
+			Responses:      responses,
+		},
+		Result: result,
+	}, nil
+}
+
+// loadBootstrapResult reads a result only after the attempt crossed its
+// terminal projection boundary. Open attempts stay on the cheap read path and
+// never expose a transient result while the receipt transaction is in flight.
+func (s *Service) loadBootstrapResult(ctx context.Context, providerKey, attemptID string, control attemptControl) (any, error) {
+	if control.submittedAt == nil && control.deliveryStatus != "terminated" && control.deliveryStatus != "locked" && control.deliveryStatus != "cancelled" {
+		return nil, nil
+	}
+	switch providerKey {
+	case "sat":
+		return sat.LoadResultForAttempt(ctx, s.db, attemptID)
+	case "act":
+		return act.LoadResultForAttempt(ctx, s.db, attemptID)
+	default:
+		return nil, nil
+	}
+}
+
+// loadSections loads the published-version content tree: sections, then
+// per-section modules, then per-module questions.
+func (s *Service) loadSections(ctx context.Context, versionID string) ([]DeliverySection, error) {
+	sections := []DeliverySection{}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, section_key, title, display_order, duration_seconds, break_after_seconds, instructions FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order",
+		versionID)
+	if err != nil {
+		return nil, err
+	}
+	type sectionRow struct {
+		sec          DeliverySection
+		instructions sql.NullString
+	}
+	var order []sectionRow
+	for rows.Next() {
+		var r sectionRow
+		if err := rows.Scan(&r.sec.ID, &r.sec.SectionKey, &r.sec.Title, &r.sec.DisplayOrder,
+			&r.sec.DurationSeconds, &r.sec.BreakAfterSeconds, &r.instructions); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		r.sec.Instructions = rawJSON(r.instructions)
+		r.sec.Modules = []DeliveryModule{}
+		order = append(order, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, r := range order {
+		modules, err := s.loadModules(ctx, r.sec.ID)
+		if err != nil {
+			return nil, err
+		}
+		r.sec.Modules = modules
+		sections = append(sections, r.sec)
+	}
+	return sections, nil
+}
+
+// loadModules loads one section's modules with their questions.
+func (s *Service) loadModules(ctx context.Context, sectionID string) ([]DeliveryModule, error) {
+	modules := []DeliveryModule{}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, module_key, title, display_order, duration_seconds, target_question_count, adaptive_role, instructions, tool_policy FROM assessment_modules WHERE section_id = ? ORDER BY display_order",
+		sectionID)
+	if err != nil {
+		return nil, err
+	}
+	type moduleRow struct {
+		mod          DeliveryModule
+		instructions sql.NullString
+		toolPolicy   sql.NullString
+	}
+	var order []moduleRow
+	for rows.Next() {
+		var r moduleRow
+		if err := rows.Scan(&r.mod.ID, &r.mod.ModuleKey, &r.mod.Title, &r.mod.DisplayOrder,
+			&r.mod.DurationSeconds, &r.mod.TargetQuestionCount, &r.mod.AdaptiveRole,
+			&r.instructions, &r.toolPolicy); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		r.mod.Instructions = rawJSON(r.instructions)
+		r.mod.ToolPolicy = rawJSON(r.toolPolicy)
+		r.mod.Questions = []DeliveredQuestion{}
+		order = append(order, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, r := range order {
+		questions, err := s.loadQuestions(ctx, r.mod.ID)
+		if err != nil {
+			return nil, err
+		}
+		r.mod.Questions = questions
+		modules = append(modules, r.mod)
+	}
+	return modules, nil
+}
+
+// loadQuestions loads one module's delivered questions.
+func (s *Service) loadQuestions(ctx context.Context, moduleID string) ([]DeliveredQuestion, error) {
+	questions := []DeliveredQuestion{}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT eq.id AS exam_question_id, eq.question_id, eq.display_order, eq.is_pretest, qr.question_type, qr.stimulus, qr.prompt, qr.answer_definition, qr.metadata, qr.accessibility FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id WHERE eq.module_id = ? ORDER BY eq.display_order",
+		moduleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var q DeliveredQuestion
+		var stimulus, prompt, answer, metadata, accessibility sql.NullString
+		if err := rows.Scan(&q.ExamQuestionID, &q.QuestionID, &q.DisplayOrder, &q.IsPretest,
+			&q.QuestionType, &stimulus, &prompt, &answer, &metadata, &accessibility); err != nil {
+			return nil, err
+		}
+		q.Stimulus = rawJSON(stimulus)
+		q.Prompt = rawJSON(prompt)
+		q.Answer = rawJSON(answer)
+		q.Metadata = rawJSON(metadata)
+		q.Accessibility = rawJSON(accessibility)
+		questions = append(questions, q)
+	}
+	return questions, rows.Err()
+}
+
+// ensureBaseModuleAttempt seeds the first base module attempt when the
+// attempt has none yet, so bootstrap always returns at least the entry
+// module in not_started state. The insert is idempotent on the
+// (attempt_id, module_id) unique (uq_assessment_attempt_module): a lost seed
+// race stays a no-op instead of surfacing a 1062.
+func (s *Service) ensureBaseModuleAttempt(ctx context.Context, attemptID string, sections []DeliverySection) error {
+	var existing string
+	err := s.db.QueryRowContext(ctx,
+		"SELECT id FROM assessment_module_attempts WHERE attempt_id = ?", attemptID).Scan(&existing)
+	if err == nil {
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+	for _, sec := range sections {
+		for _, mod := range sec.Modules {
+			if mod.AdaptiveRole != "base" {
+				continue
+			}
+			_, err := s.db.ExecContext(ctx,
+				"INSERT INTO assessment_module_attempts (id, attempt_id, module_id, state, allocated_seconds, tool_state) VALUES (?, ?, ?, 'not_started', ?, '{}') ON DUPLICATE KEY UPDATE id = id",
+				uuid.NewString(), attemptID, mod.ID, mod.DurationSeconds)
+			return err
+		}
+	}
+	return nil
+}
+
+// loadModuleAttempts loads module rows with Go-computed deadlines.
+func (s *Service) loadModuleAttempts(ctx context.Context, attemptID string, now time.Time) ([]ModuleAttempt, error) {
+	out := []ModuleAttempt{}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason, raw_correct, operational_question_count, tool_state, revision FROM assessment_module_attempts WHERE attempt_id = ? ORDER BY created_at, id",
+		attemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var m ModuleAttempt
+		var availableAt, startedAt, pausedAt sql.NullTime
+		var completionReason sql.NullString
+		var rawCorrect, operationalCount sql.NullInt64
+		var toolState sql.NullString
+		if err := rows.Scan(&m.ID, &m.ModuleID, &m.State, &m.AllocatedSeconds,
+			&availableAt, &startedAt, &pausedAt, &m.AccumulatedPausedSeconds,
+			&m.ExtensionSeconds, &completionReason, &rawCorrect, &operationalCount,
+			&toolState, &m.Revision); err != nil {
+			return nil, err
+		}
+		m.AvailableAt = nullTime(availableAt)
+		m.StartedAt = nullTime(startedAt)
+		m.PausedAt = nullTime(pausedAt)
+		m.CompletionReason = nullString(completionReason)
+		m.RawCorrect = nullInt(rawCorrect)
+		m.OperationalQuestionCount = nullInt(operationalCount)
+		m.ToolState = rawJSON(toolState)
+		if len(m.ToolState) == 0 {
+			m.ToolState = json.RawMessage("{}")
+		}
+		m.DeadlineAt, m.RemainingSeconds = computeModuleTiming(
+			m.AvailableAt, m.StartedAt, m.PausedAt, m.AllocatedSeconds,
+			m.AccumulatedPausedSeconds, m.ExtensionSeconds, now)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// loadResponses loads persisted question responses for the attempt.
+func (s *Service) loadResponses(ctx context.Context, attemptID string) ([]ResponseSnapshot, error) {
+	out := []ResponseSnapshot{}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT ar.id, ar.module_attempt_id, ar.exam_question_id, ar.response, ar.marked_for_review, ar.eliminated_options, ar.annotations, ar.revision FROM assessment_question_responses ar JOIN assessment_module_attempts ma ON ma.id = ar.module_attempt_id WHERE ma.attempt_id = ? ORDER BY ar.updated_at, ar.id",
+		attemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r ResponseSnapshot
+		var response, eliminated, annotations sql.NullString
+		if err := rows.Scan(&r.ID, &r.ModuleAttemptID, &r.ExamQuestionID,
+			&response, &r.MarkedForReview, &eliminated, &annotations, &r.Revision); err != nil {
+			return nil, err
+		}
+		r.Response = rawJSON(response)
+		r.EliminatedOptions = rawJSON(eliminated)
+		r.Annotations = rawJSON(annotations)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// attemptControl carries the attempt-level control projection.
+type attemptControl struct {
+	candidateName         string
+	proctorStatus         string
+	proctorNote           *string
+	deviceFingerprintHash *string
+	deliveryStatus        string
+	submittedAt           *time.Time
+	phase                 string
+}
+
+// loadAttemptControl loads candidate/proctor/device/lifecycle fields.
+func (s *Service) loadAttemptControl(ctx context.Context, attemptID string) (attemptControl, error) {
+	var c attemptControl
+	var proctorNote sql.NullString
+	var submittedAt sql.NullTime
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT candidate_name, COALESCE(proctor_status, 'active'), proctor_note, COALESCE(delivery_status, 'running'), submitted_at, COALESCE(phase, '') FROM student_attempts WHERE id = ?",
+		attemptID).Scan(&c.candidateName, &c.proctorStatus, &proctorNote,
+		&c.deliveryStatus, &submittedAt, &c.phase); err != nil {
+		return c, err
+	}
+	c.proctorNote = nullStringToPtr(proctorNote)
+	c.submittedAt = nullTime(submittedAt)
+	var fingerprint sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		"SELECT device_fingerprint_hash FROM attempt_sessions WHERE attempt_id = ? ORDER BY issued_at DESC LIMIT 1",
+		attemptID).Scan(&fingerprint)
+	switch {
+	case err == nil:
+		c.deviceFingerprintHash = nullStringToPtr(fingerprint)
+	case err == sql.ErrNoRows:
+		// Attempts without a device-bound session carry no fingerprint.
+	default:
+		return c, err
+	}
+	return c, nil
+}
+
+// loadTiming loads the cohort runtime status; attempts without a runtime
+// row fall back to the legacy attempt-level timing projection.
+func (s *Service) loadTiming(ctx context.Context, scheduleID string, now time.Time) (TimingSnapshot, string, error) {
+	var status string
+	err := s.db.QueryRowContext(ctx,
+		"SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&status)
+	authority := "cohort"
+	if err == sql.ErrNoRows {
+		status = "live"
+		authority = "legacy_attempt"
+	} else if err != nil {
+		return TimingSnapshot{}, "", err
+	}
+	return TimingSnapshot{
+		Authority:   authority,
+		TimingModel: "legacy_section_v1",
+		StageStatus: status,
+		ServerNow:   now,
+	}, status, nil
+}
+
+// moduleDeadline is the single pause-aware deadline anchor shared by the
+// bootstrap projection and the admission/recovery gates: the personal timer
+// runs from started_at (falling back to available_at before start) over
+// allocated + extension, and every accumulated paused second is given back
+// (added) so pauses never consume the window. A live pause freezes the
+// remaining window via the ref selection in computeModuleTiming, matching
+// moduleRemainingSeconds in reconcile.go (elapsed minus accumulated pauses).
+func moduleDeadline(availableAt, startedAt *time.Time, allocated, accumulated, extension int) *time.Time {
+	anchor := availableAt
+	if startedAt != nil {
+		anchor = startedAt
+	}
+	if anchor == nil {
+		return nil
+	}
+	total := int64(allocated + extension + accumulated)
+	if total < 0 {
+		total = 0
+	}
+	deadline := anchor.Add(time.Duration(total) * time.Second)
+	return &deadline
+}
+
+// computeModuleTiming derives the authoritative deadline and remaining
+// window from the single moduleDeadline anchor. A paused module freezes its
+// remaining window at the pause instant.
+func computeModuleTiming(availableAt, startedAt, pausedAt *time.Time, allocated, accumulated, extension int, now time.Time) (*time.Time, *int64) {
+	deadline := moduleDeadline(availableAt, startedAt, allocated, accumulated, extension)
+	if deadline == nil {
+		return nil, nil
+	}
+	ref := now
+	if pausedAt != nil {
+		ref = *pausedAt
+	}
+	remaining := int64(deadline.Sub(ref) / time.Second)
+	if remaining < 0 {
+		remaining = 0
+	}
+	return deadline, &remaining
+}
+
+func rawJSON(v sql.NullString) json.RawMessage {
+	if !v.Valid || v.String == "" {
+		return nil
+	}
+	return json.RawMessage(v.String)
+}
+
+func nullTime(v sql.NullTime) *time.Time {
+	if !v.Valid {
+		return nil
+	}
+	t := v.Time.UTC()
+	return &t
+}
+
+func nullString(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	s := v.String
+	return &s
+}
+
+func nullStringToPtr(v sql.NullString) *string { return nullString(v) }
+
+// SaveResponseRequest mirrors AssessmentResponseRequest (camelCase) on the
+// Rust save_response_at flow
+// (backend/crates/application/src/assessment_delivery.rs).
+type SaveResponseRequest struct {
+	Revision          int             `json:"revision"`
+	Response          json.RawMessage `json:"response"`
+	MarkedForReview   bool            `json:"markedForReview"`
+	EliminatedOptions []string        `json:"eliminatedOptions"`
+	Annotations       json.RawMessage `json:"annotations"`
+	ModuleAttemptID   *string         `json:"moduleAttemptId"`
+	StageKey          *string         `json:"stageKey"`
+	RuntimeRevision   *int            `json:"runtimeRevision"`
+	ClientWriteID     *string         `json:"clientWriteId"`
+}
+
+// saveActiveModule is the locked active (or timeout-finalized) module row.
+type saveActiveModule struct {
+	id                       string
+	moduleID                 string
+	state                    string
+	allocatedSeconds         int
+	availableAt              *time.Time
+	startedAt                *time.Time
+	pausedAt                 *time.Time
+	accumulatedPausedSeconds int
+	extensionSeconds         int
+	completionReason         *string
+}
+
+// saveResponseRow is the locked existing response row.
+type saveResponseRow struct {
+	id                string
+	moduleAttemptID   string
+	examQuestionID    string
+	response          json.RawMessage
+	markedForReview   bool
+	eliminatedOptions []string
+	annotations       json.RawMessage
+	revision          int
+}
+
+// SaveResponse persists one question response. It mirrors save_response_at
+// (Rust assessment_delivery.rs ~470-722) using s.runner.WithTx for the whole
+// write with lock order attempt -> runtime -> module -> response. The bearer
+// schedule id (from the verified attempt token) must match the URL schedule
+// id; callers map typed errors via the stable apperrors envelope.
+// StructuredConflict reasons map to CodeAssessmentConflict with Details{reason}
+// preserved.
+func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, examQuestionID string, req SaveResponseRequest, clientSessionID ...string) (*ResponseSnapshot, error) {
+	if urlScheduleID != bearerScheduleID {
+		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
+	}
+	if err := validateSaveResponseRequest(req); err != nil {
+		return nil, err
+	}
+	scheduleID, examID, providerKey, err := s.saveScheduleBinding(ctx, bearerScheduleID)
+	if err != nil {
+		return nil, err
+	}
+	if providerKey != "sat" {
+		return nil, apperrors.New(apperrors.CodeUnsupportedProvider, "The assessment provider is not supported.")
+	}
+	if err := s.saveAttemptBinding(ctx, scheduleID, bearerAttemptID, examID); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	var out *ResponseSnapshot
+	if err := s.runner.WithTx(ctx, func(ctx context.Context, t tx.Tx) error {
+		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
+			return err
+		}
+		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, clientSessionID); err != nil {
+			return err
+		}
+		active, timeoutRecovery, err := s.lockActiveModuleTx(ctx, t, bearerAttemptID, req)
+		if err != nil {
+			return err
+		}
+		if timeoutRecovery {
+			if err := s.ensureTimeoutResponseRecoveryTx(ctx, t, scheduleID, bearerAttemptID, active, now, req); err != nil {
+				return err
+			}
+		} else {
+			gate, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID, now)
+			if err != nil {
+				return err
+			}
+			if gate == timingGateLegacy {
+				if err := ensureSaveModuleAdmitted(active, now); err != nil {
+					return err
+				}
+			}
+		}
+		var belongs string
+		if err := t.QueryRowContext(ctx,
+			"SELECT id FROM assessment_exam_questions WHERE id = ? AND module_id = ?",
+			examQuestionID, active.moduleID).Scan(&belongs); err != nil {
+			if err == sql.ErrNoRows {
+				return assessmentConflict("MODULE_MISMATCH", "Question does not belong to the active SAT module.")
+			}
+			return err
+		}
+		existing, existingClientWriteID, err := s.lockResponseTx(ctx, t, active.id, examQuestionID)
+		if err != nil {
+			return err
+		}
+		responseID := ""
+		if existing != nil {
+			responseID = existing.id
+			if req.ClientWriteID != nil && existingClientWriteID != nil && *req.ClientWriteID != *existingClientWriteID {
+				return assessmentConflict("RESPONSE_REVISION_MISMATCH", "Response write identity does not match the stored revision.")
+			}
+			payloadMatches := savePayloadMatches(existing, req)
+			if req.ClientWriteID != nil && existingClientWriteID != nil && *req.ClientWriteID == *existingClientWriteID && !payloadMatches {
+				return assessmentConflict("RESPONSE_REVISION_MISMATCH", "Response write identity was reused with a different payload.")
+			}
+			// A historical row may have no client identity. Once a caller
+			// supplies one, do not let an equal-revision payload silently
+			// replace that unidentifiable state: the caller cannot prove it
+			// authored the existing revision. Legacy callers without an
+			// identity retain the original optimistic-revision behavior.
+			if req.ClientWriteID != nil && existingClientWriteID == nil && !payloadMatches && req.Revision == existing.revision {
+				return assessmentConflict("RESPONSE_REVISION_MISMATCH", "Response write identity does not match the stored revision.")
+			}
+			if payloadMatches {
+				snap := &ResponseSnapshot{
+					ID:                existing.id,
+					ModuleAttemptID:   existing.moduleAttemptID,
+					ExamQuestionID:    existing.examQuestionID,
+					Response:          existing.response,
+					MarkedForReview:   existing.markedForReview,
+					EliminatedOptions: rawEliminated(existing.eliminatedOptions),
+					Annotations:       existing.annotations,
+					Revision:          existing.revision,
+				}
+				if timeoutRecovery {
+					if err := s.repairTimeoutFinalizedModuleTx(ctx, t, active); err != nil {
+						return err
+					}
+				}
+				out = snap
+				return nil
+			}
+		}
+		if existing != nil {
+			if existing.revision != req.Revision {
+				return assessmentConflict("RESPONSE_REVISION_MISMATCH", "Question response revision is stale.")
+			}
+		} else if req.Revision != 0 {
+			return assessmentConflict("RESPONSE_REVISION_MISMATCH", "Question response must start at revision zero.")
+		}
+		eliminated := req.EliminatedOptions
+		if eliminated == nil {
+			eliminated = []string{}
+		}
+		eliminatedJSON, err := json.Marshal(eliminated)
+		if err != nil {
+			return err
+		}
+		var clientWriteID any
+		if req.ClientWriteID != nil {
+			clientWriteID = *req.ClientWriteID
+		}
+		if existing != nil {
+			res, err := t.ExecContext(ctx,
+				"UPDATE assessment_question_responses SET response = ?, marked_for_review = ?, eliminated_options = ?, annotations = ?, client_write_id = COALESCE(?, client_write_id), revision = revision + 1, updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND revision = ?",
+				nullableSaveRaw(req.Response), req.MarkedForReview, string(eliminatedJSON), nullableSaveRaw(req.Annotations), clientWriteID, responseID, req.Revision)
+			if err != nil {
+				return err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n != 1 {
+				return assessmentConflict("RESPONSE_REVISION_MISMATCH", "Response changed while this write was being applied.")
+			}
+		} else {
+			responseID = uuid.NewString()
+			if _, err := t.ExecContext(ctx,
+				"INSERT INTO assessment_question_responses (id, module_attempt_id, exam_question_id, response, marked_for_review, eliminated_options, annotations, client_write_id, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+				responseID, active.id, examQuestionID, nullableSaveRaw(req.Response), req.MarkedForReview, string(eliminatedJSON), nullableSaveRaw(req.Annotations), clientWriteID); err != nil {
+				if isDuplicateKeyError(err) {
+					return assessmentConflict("RESPONSE_REVISION_MISMATCH", "Response changed while this write was being applied.")
+				}
+				return err
+			}
+		}
+		// delivery/mod.rs:287 increment SQL exact.
+		res, err := t.ExecContext(ctx,
+			"UPDATE student_attempts SET answer_revision = answer_revision + 1, updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND schedule_id = ? AND submitted_at IS NULL AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
+			bearerAttemptID, scheduleID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+		}
+		row, err := s.readResponseTx(ctx, t, responseID)
+		if err != nil {
+			return err
+		}
+		if timeoutRecovery {
+			if err := s.repairTimeoutFinalizedModuleTx(ctx, t, active); err != nil {
+				return err
+			}
+		}
+		out = row
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// assessmentConflict maps a Rust StructuredConflict (reason + message) to
+// CodeAssessmentConflict (ASSESSMENT_CONFLICT, 409) with Details{reason},
+// mirroring the Rust with_details reason. Plain Rust Conflict without a
+// reason (the terminal-attempt guard) uses CodeAssessmentConflict bare.
+func assessmentConflict(reason, msg string) *apperrors.Error {
+	err := apperrors.New(apperrors.CodeAssessmentConflict, msg)
+	err.Details = map[string]any{"reason": reason}
+	return err
+}
+
+// save payload size caps mirror the V2 attempts ValidatePayload aggregate
+// rules so both write paths fence oversized payloads identically.
+const (
+	maxSaveResponseBytes    = 256 << 10
+	maxSaveEliminated       = 16
+	maxSaveEliminatedLen    = 64
+	maxSaveAnnotations      = 64
+	maxSaveAnnotationIDLen  = 255
+	maxSaveAnnotationText   = 8 << 10
+	maxSaveAnnotationKind   = 64
+	maxSaveAnnotationRawLen = 64 << 10
+)
+
+// validateSaveResponseRequest mirrors validate_assessment_response_request.
+func validateSaveResponseRequest(req SaveResponseRequest) error {
+	if req.Revision < 0 {
+		return apperrors.New(apperrors.CodeValidation, "Response revision cannot be negative.")
+	}
+	if req.RuntimeRevision != nil && *req.RuntimeRevision < 0 {
+		return apperrors.New(apperrors.CodeValidation, "Runtime revision cannot be negative.")
+	}
+	if req.ModuleAttemptID != nil {
+		trimmed := strings.TrimSpace(*req.ModuleAttemptID)
+		if trimmed == "" || len(trimmed) > 64 {
+			return apperrors.New(apperrors.CodeValidation, "moduleAttemptId must contain between 1 and 64 characters.")
+		}
+	}
+	if req.StageKey != nil {
+		trimmed := strings.TrimSpace(*req.StageKey)
+		if trimmed == "" || len(trimmed) > 128 {
+			return apperrors.New(apperrors.CodeValidation, "stageKey must contain between 1 and 128 characters.")
+		}
+	}
+	if req.ClientWriteID != nil {
+		trimmed := strings.TrimSpace(*req.ClientWriteID)
+		if trimmed == "" || len(trimmed) > 128 {
+			return apperrors.New(apperrors.CodeValidation, "clientWriteId must contain between 1 and 128 characters.")
+		}
+	}
+	if len(req.Response) > maxSaveResponseBytes {
+		return apperrors.New(apperrors.CodePayloadTooLarge, "Response payload too large.")
+	}
+	if len(req.Annotations) > maxSaveAnnotationRawLen {
+		return apperrors.New(apperrors.CodePayloadTooLarge, "Annotations payload too large.")
+	}
+	if len(req.EliminatedOptions) > maxSaveEliminated {
+		return apperrors.New(apperrors.CodeValidation, "Too many eliminated options.")
+	}
+	for _, o := range req.EliminatedOptions {
+		if o == "" || len(o) > maxSaveEliminatedLen {
+			return apperrors.New(apperrors.CodeValidation, "Invalid eliminated option.")
+		}
+	}
+	if len(req.Annotations) > 0 && string(req.Annotations) != "null" {
+		var anns []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(req.Annotations, &anns); err == nil {
+			if len(anns) > maxSaveAnnotations {
+				return apperrors.New(apperrors.CodeValidation, "Too many annotations.")
+			}
+			for _, a := range anns {
+				if a.ID == "" || len(a.ID) > maxSaveAnnotationIDLen {
+					return apperrors.New(apperrors.CodeValidation, "Annotation id is required.")
+				}
+				if a.Kind == "" || len(a.Kind) > maxSaveAnnotationKind {
+					return apperrors.New(apperrors.CodeValidation, "Annotation kind is required.")
+				}
+				if len(a.Text) > maxSaveAnnotationText {
+					return apperrors.New(apperrors.CodeValidation, "Annotation text too large.")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// saveScheduleBinding mirrors schedule_binding: schedule + exam + provider.
+func (s *Service) saveScheduleBinding(ctx context.Context, scheduleID string) (id, examID, providerKey string, err error) {
+	var versionID string
+	if err = s.db.QueryRowContext(ctx,
+		"SELECT s.id, s.exam_id, e.provider_key, s.published_version_id FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?",
+		scheduleID).Scan(&id, &examID, &providerKey, &versionID); err != nil {
+		if err == sql.ErrNoRows {
+			return "", "", "", apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
+		}
+		return "", "", "", err
+	}
+	return id, examID, providerKey, nil
+}
+
+// saveAttemptBinding mirrors ensure_attempt_binding: the attempt must belong
+// to the schedule + exam.
+func (s *Service) saveAttemptBinding(ctx context.Context, scheduleID, attemptID, examID string) error {
+	var id, attemptScheduleID, attemptExamID string
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT id, schedule_id, exam_id FROM student_attempts WHERE id = ?",
+		attemptID).Scan(&id, &attemptScheduleID, &attemptExamID); err != nil {
+		if err == sql.ErrNoRows {
+			return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+		}
+		return err
+	}
+	if attemptScheduleID != scheduleID || attemptExamID != examID {
+		return apperrors.New(apperrors.CodeValidation, "Attempt does not belong to this SAT schedule.")
+	}
+	return nil
+}
+
+// ensureAttemptCanWorkTx mirrors ensure_attempt_can_work_tx: attempt FOR
+// UPDATE then runtime FOR UPDATE; proctor paused/terminated =>
+// StructuredConflict AttemptProctorBlocked; submitted/delivery-terminal /
+// post-exam => Conflict.
+func (s *Service) ensureAttemptCanWorkTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string) error {
+	var proctorStatus, deliveryStatus string
+	var submittedAt sql.NullTime
+	var phase sql.NullString
+	if err := t.QueryRowContext(ctx,
+		"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+		attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase); err != nil {
+		if err == sql.ErrNoRows {
+			return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+		}
+		return err
+	}
+	// Writer-session binding is enforced separately by enforceWriterSessionTx
+	// inside the same mutation tx (SELECT ... FOR UPDATE + equality), so a
+	// takeover racing the pre-tx EnsureActiveWriter gate cannot slip through.
+	switch proctorStatus {
+	case "paused":
+		return assessmentConflict("ATTEMPT_PROCTOR_BLOCKED", "Your SAT attempt is paused by the proctor.")
+	case "terminated":
+		return assessmentConflict("ATTEMPT_PROCTOR_BLOCKED", "Your SAT attempt has been terminated by the proctor.")
+	}
+	if submittedAt.Valid || deliveryStatus == "submitted" || deliveryStatus == "terminated" || deliveryStatus == "locked" || deliveryStatus == "cancelled" || (phase.Valid && phase.String == "post-exam") {
+		return apperrors.New(apperrors.CodeAssessmentConflict, "The SAT attempt is already terminal and cannot accept this command.")
+	}
+	var runtimeStatus sql.NullString
+	if err := t.QueryRowContext(ctx,
+		"SELECT status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+		scheduleID).Scan(&runtimeStatus); err != nil {
+		if err == sql.ErrNoRows {
+			return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT session has not been started by the proctor.")
+		}
+		return err
+	}
+	switch runtimeStatus.String {
+	case "live":
+		return nil
+	case "paused":
+		return assessmentConflict("RUNTIME_PAUSED", "The SAT session is paused by the proctor.")
+	default:
+		return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT session has not been started by the proctor.")
+	}
+}
+
+// lockActiveModuleTx mirrors the active module lookup: active/review FOR
+// UPDATE; module_attempt_id mismatch => ModuleMismatch; no-active fallback to
+// the locked/time_expired finalized row (recovery gate runs in SaveResponse)
+// else ModuleNotActive.
+func (s *Service) lockActiveModuleTx(ctx context.Context, t tx.Tx, attemptID string, req SaveResponseRequest) (saveActiveModule, bool, error) {
+	var m saveActiveModule
+	var availableAt, startedAt, pausedAt sql.NullTime
+	var completionReason sql.NullString
+	err := t.QueryRowContext(ctx,
+		"SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('active', 'review') ORDER BY created_at DESC LIMIT 1 FOR UPDATE",
+		attemptID).Scan(&m.id, &m.moduleID, &m.state, &m.allocatedSeconds, &availableAt, &startedAt, &pausedAt, &m.accumulatedPausedSeconds, &m.extensionSeconds, &completionReason)
+	if err == nil {
+		m.availableAt = nullTime(availableAt)
+		m.startedAt = nullTime(startedAt)
+		m.pausedAt = nullTime(pausedAt)
+		m.completionReason = nullString(completionReason)
+		if req.ModuleAttemptID != nil && *req.ModuleAttemptID != m.id {
+			return saveActiveModule{}, false, assessmentConflict("MODULE_MISMATCH", "Response module attempt does not match the active SAT module.")
+		}
+		return m, false, nil
+	}
+	if err != sql.ErrNoRows {
+		return saveActiveModule{}, false, err
+	}
+	if req.ModuleAttemptID == nil {
+		return saveActiveModule{}, false, assessmentConflict("MODULE_NOT_ACTIVE", "There is no active SAT module.")
+	}
+	var f saveActiveModule
+	var fAvailable, fStarted, fPaused sql.NullTime
+	var fCompletion sql.NullString
+	if err := t.QueryRowContext(ctx,
+		"SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason FROM assessment_module_attempts WHERE id = ? AND attempt_id = ? FOR UPDATE",
+		*req.ModuleAttemptID, attemptID).Scan(&f.id, &f.moduleID, &f.state, &f.allocatedSeconds, &fAvailable, &fStarted, &fPaused, &f.accumulatedPausedSeconds, &f.extensionSeconds, &fCompletion); err != nil {
+		if err == sql.ErrNoRows {
+			return saveActiveModule{}, false, assessmentConflict("MODULE_MISMATCH", "Response module attempt does not belong to this SAT attempt.")
+		}
+		return saveActiveModule{}, false, err
+	}
+	f.availableAt = nullTime(fAvailable)
+	f.startedAt = nullTime(fStarted)
+	f.pausedAt = nullTime(fPaused)
+	f.completionReason = nullString(fCompletion)
+	if f.state != "locked" || f.completionReason == nil || *f.completionReason != "time_expired" {
+		return saveActiveModule{}, false, assessmentConflict("MODULE_NOT_ACTIVE", "The SAT module is finalized and does not accept responses.")
+	}
+	return f, true, nil
+}
+
+type timingGate int
+
+const (
+	timingGateLegacy timingGate = iota
+	timingGateCohortStage
+	timingGateCohortSection
+)
+
+// moduleTimingGateTx mirrors ensure_module_matches_runtime_stage_tx: unknown
+// timing model => legacy; cohort models enforce stage identity + live/paused
+// gates + deadline.
+func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, moduleID string, now time.Time) (timingGate, error) {
+	var timingModel sql.NullString
+	var activeStage sql.NullString
+	if err := t.QueryRowContext(ctx,
+		"SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+		scheduleID).Scan(&timingModel, &activeStage); err != nil {
+		if err == sql.ErrNoRows {
+			return timingGateLegacy, nil
+		}
+		return timingGate(0), err
+	}
+	switch timingModel.String {
+	case "cohort_stage_v2":
+	case "cohort_section_v3":
+	default:
+		return timingGateLegacy, nil
+	}
+	var sectionKey, adaptiveRole string
+	if err := t.QueryRowContext(ctx,
+		"SELECT s.section_key, m.adaptive_role FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?",
+		moduleID).Scan(&sectionKey, &adaptiveRole); err != nil {
+		if err == sql.ErrNoRows {
+			return timingGate(0), apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+		}
+		return timingGate(0), err
+	}
+	expected := sectionKey
+	if timingModel.String == "cohort_stage_v2" {
+		suffix, err := saveStageSuffix(adaptiveRole)
+		if err != nil {
+			return timingGate(0), err
+		}
+		expected = sectionKey + ":" + suffix
+	}
+	if !activeStage.Valid || activeStage.String != expected {
+		return timingGate(0), assessmentConflict("MODULE_MISMATCH", "SAT section `"+expected+"` is not active for this cohort.")
+	}
+	var status string
+	var actualStart, pausedAt sql.NullTime
+	var plannedMinutes, extensionMinutes, pausedSeconds sql.NullInt64
+	if err := t.QueryRowContext(ctx,
+		"SELECT rs.status, rs.actual_start_at, rs.paused_at, rs.planned_duration_minutes, rs.extension_minutes, rs.accumulated_paused_seconds FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id WHERE r.schedule_id = ? AND rs.section_key = ? FOR UPDATE",
+		scheduleID, expected).Scan(&status, &actualStart, &pausedAt, &plannedMinutes, &extensionMinutes, &pausedSeconds); err != nil {
+		if err == sql.ErrNoRows {
+			return timingGate(0), assessmentConflict("MODULE_MISMATCH", "The authoritative SAT section clock is missing.")
+		}
+		return timingGate(0), err
+	}
+	if pausedAt.Valid {
+		return timingGate(0), assessmentConflict("RUNTIME_PAUSED", "The SAT cohort clock is paused.")
+	}
+	if status != "live" {
+		return timingGate(0), assessmentConflict("RUNTIME_NOT_LIVE", "The SAT section is not live.")
+	}
+	if !actualStart.Valid {
+		return timingGate(0), assessmentConflict("RUNTIME_NOT_LIVE", "The SAT section clock has not started.")
+	}
+	deadline := saveStageDeadline(actualStart.Time.UTC(), pausedInt(plannedMinutes), pausedInt(extensionMinutes), pausedInt(pausedSeconds))
+	if !now.Before(deadline) {
+		return timingGate(0), assessmentConflict("DEADLINE_EXPIRED", "The SAT section clock has expired.")
+	}
+	if timingModel.String == "cohort_stage_v2" {
+		return timingGateCohortStage, nil
+	}
+	return timingGateCohortSection, nil
+}
+
+func saveStageSuffix(adaptiveRole string) (string, error) {
+	switch adaptiveRole {
+	case "base":
+		return "m1", nil
+	case "lower_branch", "higher_branch":
+		return "m2", nil
+	default:
+		return "", apperrors.New(apperrors.CodeInvalidAssessment, "SAT module adaptive role `"+adaptiveRole+"` has no cohort timing stage.")
+	}
+}
+
+func saveStageDeadline(startedAt time.Time, plannedMinutes, extensionMinutes, pausedSeconds int64) time.Time {
+	duration := (plannedMinutes + extensionMinutes) * 60
+	if duration < 0 {
+		duration = 0
+	}
+	if pausedSeconds < 0 {
+		pausedSeconds = 0
+	}
+	return startedAt.Add(time.Duration(duration+pausedSeconds) * time.Second)
+}
+
+func pausedInt(v sql.NullInt64) int64 {
+	if !v.Valid {
+		return 0
+	}
+	return v.Int64
+}
+
+// ensureSaveModuleAdmitted mirrors ensure_module_response_admitted: the
+// legacy personal module clock admits only active/review, started, unpaused
+// rows before their deadline.
+func ensureSaveModuleAdmitted(m saveActiveModule, now time.Time) error {
+	if m.state != "active" && m.state != "review" {
+		return assessmentConflict("MODULE_NOT_ACTIVE", "The SAT module is not active.")
+	}
+	if m.startedAt == nil {
+		return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT module has not been started.")
+	}
+	if m.pausedAt != nil {
+		return assessmentConflict("RUNTIME_PAUSED", "The SAT module is paused by the proctor.")
+	}
+	deadline := moduleDeadline(m.availableAt, m.startedAt, m.allocatedSeconds, m.accumulatedPausedSeconds, m.extensionSeconds)
+	if deadline == nil {
+		return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT module deadline is unavailable.")
+	}
+	if now.After(*deadline) {
+		return assessmentConflict("DEADLINE_EXPIRED", "The SAT module timer has expired.")
+	}
+	return nil
+}
+
+// lockResponseTx loads the existing row FOR UPDATE plus its client_write_id.
+func (s *Service) lockResponseTx(ctx context.Context, t tx.Tx, moduleAttemptID, examQuestionID string) (*saveResponseRow, *string, error) {
+	var row saveResponseRow
+	var response, eliminated, annotations sql.NullString
+	if err := t.QueryRowContext(ctx,
+		"SELECT id, module_attempt_id, exam_question_id, response, marked_for_review, eliminated_options, annotations, revision FROM assessment_question_responses WHERE module_attempt_id = ? AND exam_question_id = ? FOR UPDATE",
+		moduleAttemptID, examQuestionID).Scan(&row.id, &row.moduleAttemptID, &row.examQuestionID, &response, &row.markedForReview, &eliminated, &annotations, &row.revision); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	row.response = rawJSON(response)
+	row.eliminatedOptions = saveEliminated(eliminated)
+	row.annotations = rawJSON(annotations)
+	var clientWriteID sql.NullString
+	if err := t.QueryRowContext(ctx,
+		"SELECT client_write_id FROM assessment_question_responses WHERE id = ? FOR UPDATE",
+		row.id).Scan(&clientWriteID); err != nil {
+		return nil, nil, err
+	}
+	if clientWriteID.Valid {
+		v := clientWriteID.String
+		return &row, &v, nil
+	}
+	return &row, nil, nil
+}
+
+// readResponseTx re-reads the written row for the snapshot.
+func (s *Service) readResponseTx(ctx context.Context, t tx.Tx, responseID string) (*ResponseSnapshot, error) {
+	var out ResponseSnapshot
+	var response, eliminated, annotations sql.NullString
+	if err := t.QueryRowContext(ctx,
+		"SELECT id, module_attempt_id, exam_question_id, response, marked_for_review, eliminated_options, annotations, revision FROM assessment_question_responses WHERE id = ?",
+		responseID).Scan(&out.ID, &out.ModuleAttemptID, &out.ExamQuestionID, &response, &out.MarkedForReview, &eliminated, &annotations, &out.Revision); err != nil {
+		return nil, err
+	}
+	out.Response = rawJSON(response)
+	out.EliminatedOptions = rawJSON(eliminated)
+	out.Annotations = rawJSON(annotations)
+	return &out, nil
+}
+
+// ensureTimeoutResponseRecoveryTx mirrors ensure_timeout_response_recovery_tx
+// (Rust lines 1558-1740): locked+time_expired only; submission-exists =>
+// TimeoutRecoveryClosed; downstream-started => TimeoutRecoveryClosed; cohort
+// timing stage identity/deadline gates; legacy module deadline.
+func (s *Service) ensureTimeoutResponseRecoveryTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, module saveActiveModule, now time.Time, req SaveResponseRequest) error {
+	if module.state != "locked" || module.completionReason == nil || *module.completionReason != "time_expired" {
+		return assessmentConflict("MODULE_NOT_ACTIVE", "Only a timeout-finalized SAT module can recover an admitted response.")
+	}
+	var submissionExists int
+	if err := t.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat')",
+		attemptID).Scan(&submissionExists); err != nil {
+		return err
+	}
+	if submissionExists != 0 {
+		return assessmentConflict("TIMEOUT_RECOVERY_CLOSED", "The SAT result is already finalized; timeout recovery is closed.")
+	}
+	var downstreamStarted int
+	if err := t.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM assessment_module_attempts downstream JOIN assessment_modules dm ON dm.id = downstream.module_id JOIN assessment_sections ds ON ds.id = dm.section_id JOIN assessment_modules cm ON cm.id = ? JOIN assessment_sections cs ON cs.id = cm.section_id WHERE downstream.attempt_id = ? AND (ds.display_order > cs.display_order OR (ds.display_order = cs.display_order AND dm.display_order > cm.display_order)) AND downstream.state <> 'not_started')",
+		module.moduleID, attemptID).Scan(&downstreamStarted); err != nil {
+		return err
+	}
+	if downstreamStarted != 0 {
+		return assessmentConflict("TIMEOUT_RECOVERY_CLOSED", "A later SAT module has already started; timeout recovery is closed.")
+	}
+	var timingModel sql.NullString
+	if err := t.QueryRowContext(ctx,
+		"SELECT timing_model FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
+		scheduleID).Scan(&timingModel); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	model := "legacy_section_v1"
+	if timingModel.Valid && timingModel.String != "" {
+		model = timingModel.String
+	}
+	if model == "cohort_stage_v2" || model == "cohort_section_v3" {
+		var sectionKey, adaptiveRole string
+		if err := t.QueryRowContext(ctx,
+			"SELECT s.section_key, m.adaptive_role FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?",
+			module.moduleID).Scan(&sectionKey, &adaptiveRole); err != nil {
+			if err == sql.ErrNoRows {
+				return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+			}
+			return err
+		}
+		expected := sectionKey
+		if model == "cohort_stage_v2" {
+			suffix, err := saveStageSuffix(adaptiveRole)
+			if err != nil {
+				return err
+			}
+			expected = sectionKey + ":" + suffix
+		}
+		if req.StageKey != nil && *req.StageKey != expected {
+			return assessmentConflict("MODULE_MISMATCH", "Response stage identity does not match its SAT section.")
+		}
+		var startedAt sql.NullTime
+		var plannedMinutes, extensionMinutes, pausedSeconds sql.NullInt64
+		if err := t.QueryRowContext(ctx,
+			"SELECT rs.actual_start_at, rs.planned_duration_minutes, rs.extension_minutes, rs.accumulated_paused_seconds FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id WHERE r.schedule_id = ? AND rs.section_key = ? FOR UPDATE",
+			scheduleID, expected).Scan(&startedAt, &plannedMinutes, &extensionMinutes, &pausedSeconds); err != nil {
+			if err == sql.ErrNoRows {
+				return assessmentConflict("MODULE_MISMATCH", "The authoritative SAT cohort clock is unavailable for recovery.")
+			}
+			return err
+		}
+		if !startedAt.Valid {
+			return assessmentConflict("MODULE_MISMATCH", "The authoritative SAT cohort clock is unavailable for recovery.")
+		}
+		if now.After(saveStageDeadline(startedAt.Time.UTC(), pausedInt(plannedMinutes), pausedInt(extensionMinutes), pausedInt(pausedSeconds))) {
+			return assessmentConflict("DEADLINE_EXPIRED", "The SAT response reached the server after the cohort deadline.")
+		}
+		if model == "cohort_section_v3" {
+			if module.startedAt == nil {
+				return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT module never started.")
+			}
+			if now.After(saveModuleDeadline(module)) {
+				return assessmentConflict("DEADLINE_EXPIRED", "The SAT response reached the server after the module ended.")
+			}
+		}
+		return nil
+	}
+	if module.startedAt == nil {
+		return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT module never started.")
+	}
+	if now.After(saveModuleDeadline(module)) {
+		return assessmentConflict("DEADLINE_EXPIRED", "The SAT response reached the server after the module ended.")
+	}
+	return nil
+}
+
+func saveModuleDeadline(m saveActiveModule) time.Time {
+	if m.startedAt == nil {
+		return time.Time{}
+	}
+	deadline := moduleDeadline(m.availableAt, m.startedAt, m.allocatedSeconds, m.accumulatedPausedSeconds, m.extensionSeconds)
+	if deadline == nil {
+		return time.Time{}
+	}
+	return *deadline
+}
+
+// repairTimeoutFinalizedModuleTx mirrors repair_timeout_finalized_module_tx:
+// rescore from the persisted answer definitions/responses, then conditionally
+// update only a locked/time_expired module. A late response can therefore
+// repair an aggregate without reopening the module or changing its terminal
+// reason.
+func (s *Service) repairTimeoutFinalizedModuleTx(ctx context.Context, t tx.Tx, module saveActiveModule) error {
+	rows, err := loadScoringRowsTx(ctx, t, module.id, module.moduleID)
+	if err != nil {
+		return err
+	}
+	rawCorrect, operationalCount := scoreScoringRows(rows)
+	_, err = t.ExecContext(ctx,
+		"UPDATE assessment_module_attempts SET raw_correct = ?, operational_question_count = ?, revision = revision + 1 WHERE id = ? AND state = 'locked' AND completion_reason = 'time_expired'",
+		rawCorrect, operationalCount, module.id)
+	return err
+}
+
+func savePayloadMatches(existing *saveResponseRow, req SaveResponseRequest) bool {
+	if string(existing.response) != string(json.RawMessage(nullableSaveString(req.Response))) {
+		return false
+	}
+	if existing.markedForReview != req.MarkedForReview {
+		return false
+	}
+	if string(jsonRawStrings(existing.eliminatedOptions)) != string(jsonRawStrings(req.EliminatedOptions)) {
+		return false
+	}
+	return string(existing.annotations) == string(json.RawMessage(nullableSaveString(req.Annotations)))
+}
+
+func nullableSaveString(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	return string(raw)
+}
+
+func saveEliminated(v sql.NullString) []string {
+	if !v.Valid || v.String == "" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(v.String), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func jsonRawStrings(in []string) json.RawMessage {
+	if in == nil {
+		return json.RawMessage("null")
+	}
+	b, err := json.Marshal(in)
+	if err != nil {
+		return json.RawMessage("null")
+	}
+	return json.RawMessage(b)
+}
+
+func rawEliminated(in []string) json.RawMessage {
+	if in == nil {
+		return nil
+	}
+	b, err := json.Marshal(in)
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(b)
+}
+
+func nullableSaveRaw(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	if string(raw) == "null" {
+		return nil
+	}
+	return string(raw)
+}
+
+// isDuplicateKeyError reports a MySQL duplicate-key violation (1062) without
+// importing the driver: the assessment_question_responses
+// (module_attempt_id, exam_question_id) unique turns a lost insert race into
+// a revision conflict, not an internal error. No new migration: the unique
+// already exists as uq_module_attempt_question.
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "duplicate") || strings.Contains(s, "1062")
+}
+
+func nullInt(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	n := v.Int64
+	return &n
+}
+
+// EnsureActiveWriter gates a delivery mutation behind the exclusive writer
+// session. It mirrors ensure_active_writer + claim_provider_attempt_writer_in_tx
+// (Rust assessment_delivery.rs ensure_active_writer and delivery/mod.rs
+// claim_provider_attempt_writer_in_tx): in its own tx, claim the writer slot
+// when free, then SELECT active_client_session_id FOR UPDATE and require
+// equality with the bearer client session id. A mismatch surfaces
+// ActiveSessionSuperseded, mapped here to CodeActiveSessionSuperseded (409,
+// Details{reason:ACTIVE_SESSION_SUPERSEDED}). Callers run this in
+// its own tx BEFORE the mutation tx (same as Rust: separate tx, commit, then
+// the work tx). Bootstrap does not use it (schedule-match check only).
+func (s *Service) EnsureActiveWriter(ctx context.Context, attemptID, scheduleID, clientSessionID string) error {
+	return s.runner.WithTx(ctx, func(ctx context.Context, t tx.Tx) error {
+		if _, err := t.ExecContext(ctx,
+			"UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL AND submitted_at IS NULL AND COALESCE(proctor_status, 'active') <> 'terminated' AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
+			clientSessionID, attemptID, scheduleID); err != nil {
+			return err
+		}
+		var active sql.NullString
+		if err := t.QueryRowContext(ctx,
+			"SELECT active_client_session_id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			attemptID, scheduleID).Scan(&active); err != nil {
+			if err == sql.ErrNoRows {
+				return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+			}
+			return err
+		}
+		if !active.Valid || active.String != clientSessionID {
+			err := apperrors.New(apperrors.CodeActiveSessionSuperseded, "A newer student session owns this attempt.")
+			err.Details = map[string]any{"reason": "ACTIVE_SESSION_SUPERSEDED"}
+			return err
+		}
+		return nil
+	})
+}
+
+// enforceWriterSessionTx re-checks the exclusive writer session inside the
+// mutation tx: SELECT active_client_session_id ... FOR UPDATE + equality with
+// the bearer client session id. Empty session ids skip the check so existing
+// callers (and tests) that do not bind a writer keep the legacy behavior;
+// HTTP handlers always pass the bearer session, closing the takeover race
+// between the pre-tx EnsureActiveWriter gate and this write.
+func enforceWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, clientSessionIDs []string) error {
+	if len(clientSessionIDs) == 0 || clientSessionIDs[0] == "" {
+		return nil
+	}
+	var active sql.NullString
+	if err := t.QueryRowContext(ctx,
+		"SELECT active_client_session_id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+		attemptID, scheduleID).Scan(&active); err != nil {
+		if err == sql.ErrNoRows {
+			return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+		}
+		return err
+	}
+	if !active.Valid || active.String != clientSessionIDs[0] {
+		err := apperrors.New(apperrors.CodeActiveSessionSuperseded, "A newer student session owns this attempt.")
+		err.Details = map[string]any{"reason": "ACTIVE_SESSION_SUPERSEDED"}
+		return err
+	}
+	return nil
+}

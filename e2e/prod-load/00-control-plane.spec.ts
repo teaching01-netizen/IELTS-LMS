@@ -52,20 +52,16 @@ async function ensureStaffCreds(): Promise<void> {
 
   // Provision editor + proctors and write e2e/prod-data/prod-creds.json.
   await runCommand(
-    'cargo',
+    'go',
     [
       'run',
-      '-p',
-      'ielts-backend-api',
-      '--bin',
-      'e2e_provision_staff',
-      '--',
+      './cmd/e2e_provision_staff',
       '--target',
-      '../e2e/prod-data/prod-target.json',
+      '../../e2e/prod-data/prod-target.json',
       '--output-creds',
-      '../e2e/prod-data/prod-creds.json',
+      '../../e2e/prod-data/prod-creds.json',
     ],
-    'backend',
+    'backend/go',
   );
 }
 
@@ -78,24 +74,20 @@ async function ensureProctorAssignments(scheduleId: string): Promise<void> {
   }
 
   await runCommand(
-    'cargo',
+    'go',
     [
       'run',
-      '-p',
-      'ielts-backend-api',
-      '--bin',
-      'e2e_provision_staff',
-      '--',
+      './cmd/e2e_provision_staff',
       '--schedule-id',
       scheduleId,
       '--target',
-      '../e2e/prod-data/prod-target.json',
+      '../../e2e/prod-data/prod-target.json',
       '--output-creds',
-      '../e2e/prod-data/prod-creds.json',
+      '../../e2e/prod-data/prod-creds.json',
       '--granted-by',
       'prod-load-bootstrap',
     ],
-    'backend',
+    'backend/go',
   );
 }
 
@@ -105,7 +97,7 @@ async function login(page: Page, email: string, password: string) {
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign In' }).click();
 
-  const configured = process.env['AUTH_SESSION_COOKIE_NAME'];
+  const configured = process.env['SESSION_COOKIE_NAME'] ?? process.env['AUTH_SESSION_COOKIE_NAME'];
   const sessionCookieCandidates = [
     typeof configured === 'string' && configured.length > 0 ? configured : null,
     '__Host-session',

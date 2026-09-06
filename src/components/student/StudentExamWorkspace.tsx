@@ -6,6 +6,7 @@ import { WritingTaskNavigator } from "./WritingTaskNavigator";
 import { StudentFooter } from "./StudentFooter";
 import { StudentListening } from "./StudentListening";
 import { StudentReading } from "./StudentReading";
+import { StudentScience } from "./StudentScience";
 import { StudentSpeaking } from "./StudentSpeaking";
 import { StudentWriting } from "./StudentWriting";
 import type { StudentHighlightColor } from "./highlightPalette";
@@ -16,6 +17,8 @@ import type { StudentPlaybackRate } from "./accessibilityPreferences";
 export interface StudentExamWorkspaceProps {
   currentModule: ModuleType;
   examState: ExamState;
+  /** S1-C3: sessionStorage base key (per exam) for split ratio + tab persistence. */
+  persistenceKeyBase?: string | undefined;
   currentQuestionId: string | null;
   allQuestions: StudentQuestionDescriptor[];
   answers: Record<string, QuestionAnswer>;
@@ -28,6 +31,7 @@ export interface StudentExamWorkspaceProps {
   displayTimeRemaining?: number | undefined;
   highlightEnabled: boolean;
   highlightColor: StudentHighlightColor;
+  choiceEliminationEnabled?: boolean | undefined;
   highlightClassName?: string;
   playbackRate: StudentPlaybackRate;
   showNavigator: boolean;
@@ -55,6 +59,7 @@ export interface StudentExamWorkspaceProps {
 export function StudentExamWorkspace({
   currentModule,
   examState,
+  persistenceKeyBase,
   currentQuestionId,
   allQuestions,
   answers,
@@ -67,6 +72,7 @@ export function StudentExamWorkspace({
   displayTimeRemaining,
   highlightEnabled,
   highlightColor,
+  choiceEliminationEnabled = false,
   highlightClassName,
   playbackRate,
   showNavigator,
@@ -106,6 +112,7 @@ export function StudentExamWorkspace({
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
             registerLiveAnswer={onRegisterLiveObjectiveAnswer}
+            persistenceKeyBase={persistenceKeyBase}
           />
         ) : null}
 
@@ -127,6 +134,7 @@ export function StudentExamWorkspace({
             playbackRate={playbackRate}
             onPlaybackRateChange={onPlaybackRateChange}
             registerLiveAnswer={onRegisterLiveObjectiveAnswer}
+            persistenceKeyBase={persistenceKeyBase}
           />
         ) : null}
 
@@ -145,6 +153,7 @@ export function StudentExamWorkspace({
             tabletMode={tabletMode}
             layoutMode={layoutMode}
             registerLiveWritingAnswer={onRegisterLiveWritingAnswer}
+            persistenceKeyBase={persistenceKeyBase}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
@@ -159,9 +168,31 @@ export function StudentExamWorkspace({
             onNavigate={onNavigate}
           />
         ) : null}
+
+        {currentModule === "science" ? (
+          <StudentScience
+            state={examState}
+            answers={answers}
+            onAnswerChange={onObjectiveAnswerChange}
+            currentQuestionId={currentQuestionId}
+            onNavigate={onNavigate}
+            flags={flags}
+            onToggleFlag={onFlagToggle}
+            highlightEnabled={highlightEnabled}
+            highlightColor={highlightColor}
+            choiceEliminationEnabled={choiceEliminationEnabled}
+            highlightClassName={highlightClassName}
+            tabletMode={tabletMode}
+            layoutMode={layoutMode}
+            contentZoom={contentZoom}
+            registerLiveAnswer={onRegisterLiveObjectiveAnswer}
+            allQuestions={allQuestions}
+            persistenceKeyBase={persistenceKeyBase}
+          />
+        ) : null}
       </main>
 
-      {currentModule === "reading" || currentModule === "listening" ? (
+      {currentModule === "reading" || currentModule === "listening" || currentModule === "science" ? (
         <StudentFooter
           questions={allQuestions}
           currentQuestionId={currentQuestionId}

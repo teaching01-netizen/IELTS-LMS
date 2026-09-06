@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { hashString, type HighlightRangeV2 } from './highlightV2Engine';
+import { hashString, validateHighlightRanges, type HighlightRangeV2 } from './highlightV2Engine';
 import {
   HIGHLIGHT_CLEAR_EVENT_NAME,
   HIGHLIGHT_HTML_STORAGE_PREFIX,
@@ -98,7 +98,9 @@ export function usePersistedHighlightRangesV2(surfaceId: string, canonicalText: 
       return [];
     }
 
-    return persisted.ranges;
+    // S1-C11: never hydrate unchecked ranges — bounds/color/shape re-checked
+    // against the current canonical text (truncate to the MAX cap).
+    return validateHighlightRanges(persisted.ranges, canonicalText);
   });
 
   useEffect(() => {
@@ -113,8 +115,10 @@ export function usePersistedHighlightRangesV2(surfaceId: string, canonicalText: 
       return;
     }
 
-    setRanges(persisted.ranges);
-  }, [namespace, sourceHash, surfaceId]);
+    // S1-C11: same validation as mount so re-reads (namespace/hash changes)
+    // cannot inject out-of-bounds or off-palette ranges.
+    setRanges(validateHighlightRanges(persisted.ranges, canonicalText));
+  }, [canonicalText, namespace, sourceHash, surfaceId]);
 
   useEffect(() => {
     if (!namespace) {

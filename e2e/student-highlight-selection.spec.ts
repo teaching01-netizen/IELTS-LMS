@@ -11,8 +11,8 @@ import {
 
 // Palette values from src/components/student/highlightPalette.ts rendered as rgb().
 const TINT_BY_COLOR: Record<string, string> = {
-  yellow: 'rgb(253, 230, 138)', // #fde68a
-  purple: 'rgb(221, 214, 254)', // #ddd6fe
+  yellow: 'rgb(232, 205, 149)', // #e8cd95
+  purple: 'rgb(213, 199, 226)', // #d5c7e2
 };
 
 interface SelectionSample {
@@ -69,7 +69,7 @@ function expectTinted(sample: SelectionSample, color: string) {
   const tint = TINT_BY_COLOR[color];
   expect(tint, `missing expected rgb for ${color}`).toBeTruthy();
   expect(sample.varValue).toBe(
-    color === 'yellow' ? '#fde68a' : color === 'purple' ? '#ddd6fe' : '',
+    color === 'yellow' ? '#e8cd95' : color === 'purple' ? '#d5c7e2' : '',
   );
   const tinted = sample.surface === tint || sample.inner === tint;
   expect(tinted, `expected selection to be tinted ${tint} but got surface=${sample.surface} inner=${sample.inner}`).toBe(true);

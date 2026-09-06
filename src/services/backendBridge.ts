@@ -1,4 +1,7 @@
 import { del, get, patch, post, put, type ApiRequestConfig } from "../app/api/apiClient";
+import { ApiError } from "../shared/api-client/errors";
+
+export type { ApiRequestConfig };
 import type {
   CohortControlEvent,
   ExamEntity,
@@ -18,6 +21,7 @@ type BackendEnvelope<T> = {
   data?: T | undefined;
   error?:
     | {
+        code?: string | undefined;
         message?: string | undefined;
       }
     | undefined;
@@ -27,7 +31,7 @@ type BackendExamEntity = {
   id: string;
   slug: string;
   title: string;
-  providerKey?: "ielts" | "sat" | null | undefined;
+  providerKey?: "ielts" | "sat" | "act" | null | undefined;
   providerExamType?: string | null | undefined;
   examType: ExamEntity["type"];
   status: ExamEntity["status"];
@@ -109,7 +113,7 @@ type BackendExamEvent = {
 type BackendExamSchedule = {
   id: string;
   examId: string;
-  providerKey: "ielts" | "sat";
+  providerKey: "ielts" | "sat" | "act";
   examTitle: string;
   proctorDisplayName?: string | null | undefined;
   gradingDisplayName?: string | null | undefined;
@@ -156,7 +160,7 @@ type BackendExamSessionRuntime = {
   id: string;
   scheduleId: string;
   examId: string;
-  providerKey: "ielts" | "sat";
+  providerKey: "ielts" | "sat" | "act";
   status: ExamSessionRuntime["status"];
   timingModel?: ExamSessionRuntime["timingModel"];
   revision?: number | null | undefined;
@@ -183,39 +187,6 @@ const attemptSchedules = createTtlLruCache<string, string>({
   ttlMs: 2 * 60 * 60 * 1000,
 });
 
-function envFlag(name: string): boolean {
-  const env = import.meta.env as Record<string, string | boolean | undefined>;
-  return String(env[name] ?? "false") === "true";
-}
-
-function featureFlag(viteName: string, legacyName: string): boolean {
-  return envFlag(viteName) || envFlag(legacyName);
-}
-
-function readCookie(name: string): string | null {
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  const prefix = `${name}=`;
-  const match = document.cookie
-    .split(";")
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(prefix));
-
-  return match ? decodeURIComponent(match.slice(prefix.length)) : null;
-}
-
-function hasAuthenticatedSessionCookie(): boolean {
-  const configuredName = import.meta.env["VITE_AUTH_SESSION_COOKIE_NAME"];
-  const cookieNames = [
-    typeof configuredName === "string" ? configuredName : null,
-    "__Host-session",
-  ].filter((value): value is string => Boolean(value));
-
-  return cookieNames.some((cookieName) => Boolean(readCookie(cookieName)));
-}
-
 function isBackendEnvelope<T>(value: unknown): value is BackendEnvelope<T> {
   return (
     typeof value === "object" &&
@@ -228,10 +199,15 @@ function isBackendEnvelope<T>(value: unknown): value is BackendEnvelope<T> {
 function extractBackendData<T>(value: unknown): T {
   if (isBackendEnvelope<T>(value)) {
     if (!value.success) {
-      throw new Error(value.error?.message ?? "Backend request failed");
+      const message = value.error?.message ?? "Backend request failed";
+      throw new ApiError({ code: value.error?.code ?? "UNKNOWN", message, status: 200 });
     }
     if (!("data" in value) || value.data === undefined) {
-      throw new Error("Backend response missing data payload");
+      throw new ApiError({
+        code: "UNKNOWN",
+        message: "Backend response missing data payload",
+        status: 200,
+      });
     }
     return value.data as T;
   }
@@ -245,31 +221,43 @@ function compactObject<T extends Record<string, unknown>>(value: T): T {
   ) as T;
 }
 
+// REMOVED-BY-REFACTOR: the backend is the only transport; the flags below are
+// deprecated `return true` shims kept only so existing consumers keep compiling
+// while their files are migrated by the owning agent. Do not add new callers.
+/** @deprecated Backend-only transport; always true. */
 export function isBackendBuilderEnabled(): boolean {
   return true;
 }
 
+/** @deprecated Backend-only transport; always true. */
 export function isBackendLibraryEnabled(): boolean {
   return true;
 }
 
+/** @deprecated Backend-only transport; always true. */
 export function isBackendSchedulingEnabled(): boolean {
   return true;
 }
 
+/** @deprecated Backend-only transport; always true. */
 export function isBackendDeliveryEnabled(): boolean {
   return true;
 }
 
+/** @deprecated Backend-only transport; always true. */
 export function isBackendProctoringEnabled(): boolean {
   return true;
 }
 
+/** @deprecated Backend-only transport; always true. */
 export function isBackendGradingEnabled(): boolean {
   return true;
 }
 
 export function hasBackendStatusCode(error: unknown, statusCode: number): boolean {
+  if (error instanceof ApiError) {
+    return error.status === statusCode;
+  }
   return (
     typeof error === "object" &&
     error !== null &&
@@ -383,14 +371,14 @@ export function buildCreateExamPayload(
 export function buildCreateAssessmentExamPayload(input: {
   slug: string;
   title: string;
-  providerKey: "sat";
-  providerExamType: "SAT";
+  providerKey: "sat" | "act";
+  providerExamType: "SAT" | "ACT";
   visibility?: ExamEntity["visibility"];
 }) {
   return {
     slug: input.slug,
     title: input.title,
-    examType: "Academic",
+    examType: input.providerKey === "act" ? "ACT" : "Academic",
     visibility: input.visibility ?? "organization",
     providerKey: input.providerKey,
     providerExamType: input.providerExamType,

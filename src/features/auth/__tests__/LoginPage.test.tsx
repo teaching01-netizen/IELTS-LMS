@@ -95,4 +95,57 @@ describe('LoginPage', () => {
       expect(navigateMock).toHaveBeenCalledWith('/admin/exams', { replace: true });
     });
   });
+
+  it('shows student check-in guidance instead of navigating back to /login', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/v1/auth/login') {
+        return jsonResponse({
+          user: {
+            id: 'student-1',
+            email: 'student@example.com',
+            displayName: 'Student One',
+            role: 'student',
+            state: 'active',
+          },
+          csrfToken: 'csrf-2',
+          expiresAt: '2026-01-01T12:00:00.000Z',
+        });
+      }
+
+      return new Response(JSON.stringify({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Authentication is required.' },
+      }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    render(
+      <MemoryRouter>
+        <AuthSessionProvider>
+          <LoginPage />
+        </AuthSessionProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /sign in/i })).not.toBeDisabled();
+    });
+
+    fireEvent.change(screen.getByLabelText(/email address/i), {
+      target: { value: 'student@example.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: 'Password123!' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /student check-in/i })).toBeInTheDocument();
+    });
+    expect(navigateMock).not.toHaveBeenCalledWith('/login', expect.anything());
+  });
 });

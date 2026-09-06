@@ -3,7 +3,8 @@
  * Configuration is now handled by ExamConfigRoute and publish logic by ExamReviewRoute.
  * This file is kept for backward compatibility during the migration period.
  */
-import React, { useMemo, useRef, useState, memo } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState, memo } from 'react';
+import { ConfirmModal } from '../ConfirmModal';
 import { X, Settings, Layers, Clock, Shield, BarChart3, Info, GripVertical, CheckCircle2, GitCompare, RotateCcw, Upload, FileText, Eye, AlertCircle, Calendar, Lock, Unlock, Save, SlidersHorizontal, Plus, Trash2 } from 'lucide-react';
 import { ExamConfig, ModuleType, QuestionType, WritingTaskConfig, SpeakingPartConfig } from '../../types';
 import {
@@ -62,6 +63,28 @@ function ExamSettingsDrawerComponent({
   const [showSchedule, setShowSchedule] = useState(false);
   const [bandTableImportError, setBandTableImportError] = useState('');
   const bandTableImportRef = useRef<HTMLInputElement>(null);
+  // S5: app-modal replacements for window.confirm / window.prompt.
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showUnpublishDialog, setShowUnpublishDialog] = useState(false);
+  const [unpublishReason, setUnpublishReason] = useState('');
+  const [unpublishError, setUnpublishError] = useState('');
+  const drawerTitleId = useId();
+  const drawerPanelRef = useRef<HTMLDivElement>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+
+  // S5: Escape-to-close + initial focus when the drawer opens.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    drawerCloseRef.current?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        if (showArchiveConfirm || showUnpublishDialog) return;
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [isOpen, onClose, showArchiveConfirm, showUnpublishDialog]);
   const sectionPlan = useMemo(() => examDeliveryService.buildSectionPlan(config), [config]);
   const standardsValidation = useMemo(() => ({
     passageWordCount: validateWordCountRanges(config.standards.passageWordCount),
@@ -356,14 +379,14 @@ function ExamSettingsDrawerComponent({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 animate-in fade-in duration-200" role="dialog" aria-modal="true" aria-labelledby={drawerTitleId}>
+      <div ref={drawerPanelRef} tabIndex={-1} className="w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
         <div className="h-16 px-6 border-b border-gray-100 flex items-center justify-between bg-gray-50 flex-shrink-0">
           <div className="flex items-center gap-2 text-gray-900 font-bold text-lg">
-            <Settings size={20} className="text-blue-600" />
-            <span>Exam Settings</span>
+            <Settings size={20} className="text-blue-600" aria-hidden="true" />
+            <span id={drawerTitleId}>Exam Settings</span>
           </div>
-          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all">
+          <button ref={drawerCloseRef} onClick={onClose} aria-label="Close exam settings" className="min-w-6 min-h-6 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1">
             <X size={20} />
           </button>
         </div>
@@ -1429,7 +1452,7 @@ function ExamSettingsDrawerComponent({
                         <div className="space-y-2">
                           <p className="text-xs font-bold text-red-700 uppercase tracking-wider">What needs attention</p>
                           {publishReadiness.errors.map((error, idx) => (
-                            <div key={idx} className="flex items-start gap-2 rounded border border-red-100 bg-red-50 p-2">
+                            <div key={`${error.field}:${error.message}:${idx}`} className="flex items-start gap-2 rounded border border-red-100 bg-red-50 p-2">
                               <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-red-600" />
                               <div>
                                 <p className="text-xs font-medium text-red-900">{error.message}</p>
@@ -1444,7 +1467,7 @@ function ExamSettingsDrawerComponent({
                         <div className="space-y-2">
                           <p className="text-xs font-bold text-orange-700 uppercase tracking-wider">Review before release</p>
                           {publishReadiness.warnings.map((warning, idx) => (
-                            <div key={idx} className="flex items-start gap-2 rounded border border-orange-100 bg-orange-50 p-2">
+                            <div key={`${warning.field}:${warning.message}:${idx}`} className="flex items-start gap-2 rounded border border-orange-100 bg-orange-50 p-2">
                               <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-orange-600" />
                               <div>
                                 <p className="text-xs font-medium text-orange-900">{warning.message}</p>
@@ -1497,7 +1520,8 @@ function ExamSettingsDrawerComponent({
                   {canShowReleaseActions && onPublish && (
                     <button
                       onClick={() => onPublish(publishNotes)}
-                      disabled={publishReadiness ? !publishReadiness.canPublish : false}
+                      disabled={!publishReadiness?.canPublish}
+                      title={publishReadiness?.canPublish ? undefined : 'Resolve publish readiness issues before publishing.'}
                       className={`w-full px-4 py-3 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                         publishReadiness?.canPublish
                           ? 'bg-green-600 text-white hover:bg-green-700'
@@ -1512,12 +1536,11 @@ function ExamSettingsDrawerComponent({
                   {exam?.status === 'published' && onUnpublish && (
                     <button
                       onClick={() => {
-                        const reason = prompt('Reason for unpublishing (optional):');
-                        if (reason !== null) {
-                          onUnpublish(reason || undefined);
-                        }
+                        setUnpublishReason('');
+                        setUnpublishError('');
+                        setShowUnpublishDialog(true);
                       }}
-                      className="w-full px-4 py-3 bg-orange-600 text-white rounded-lg text-sm font-bold hover:bg-orange-700 transition-all flex items-center justify-center gap-2"
+                      className="w-full px-4 py-3 bg-orange-600 text-white rounded-lg text-sm font-bold hover:bg-orange-700 transition-all flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 focus-visible:ring-offset-2"
                     >
                       <Upload size={16} />
                       Unpublish
@@ -1565,7 +1588,8 @@ function ExamSettingsDrawerComponent({
                                   setShowSchedule(false);
                                   setScheduledTime('');
                                 }}
-                                disabled={publishReadiness ? !publishReadiness.canPublish : false}
+                                disabled={!publishReadiness?.canPublish}
+                                title={publishReadiness?.canPublish ? undefined : 'Resolve publish readiness issues before scheduling.'}
                                 className={`w-full px-4 py-3 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                                   publishReadiness?.canPublish
                                     ? 'bg-blue-600 text-white hover:bg-blue-700'
@@ -1744,12 +1768,8 @@ function ExamSettingsDrawerComponent({
                   <p className="text-xs text-gray-600">Use these lower-frequency actions after the release decision is handled.</p>
                   {onArchive && exam?.status !== 'scheduled' && (
                     <button
-                      onClick={() => {
-                        if (confirm('Are you sure you want to archive this exam? It will no longer be visible in the library.')) {
-                          onArchive();
-                        }
-                      }}
-                      className="w-full px-4 py-3 bg-gray-600 text-white rounded-lg text-sm font-bold hover:bg-gray-700 transition-all flex items-center justify-center gap-2"
+                      onClick={() => setShowArchiveConfirm(true)}
+                      className="w-full px-4 py-3 bg-gray-600 text-white rounded-lg text-sm font-bold hover:bg-gray-700 transition-all flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-600 focus-visible:ring-offset-2"
                     >
                       <Eye size={16} />
                       Archive Exam
@@ -1766,14 +1786,73 @@ function ExamSettingsDrawerComponent({
             <CheckCircle2 size={14} />
             <span>Config Validated</span>
           </div>
-          <button 
+          <button
             onClick={onClose}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-md shadow-blue-200 transition-all"
+            className="px-6 py-2 min-h-11 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-md shadow-blue-200 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
           >
             Save & Close
           </button>
         </div>
       </div>
+      {/* S5: app ConfirmModal replaces window.confirm for archive. */}
+      <ConfirmModal
+        isOpen={showArchiveConfirm}
+        onClose={() => setShowArchiveConfirm(false)}
+        onConfirm={() => { onArchive?.(); }}
+        title="Archive exam"
+        description="Are you sure you want to archive this exam? It will no longer be visible in the library."
+        confirmLabel="Archive exam"
+        tone="warning"
+      />
+      {/* S5: validated input dialog replaces window.prompt for unpublish. */}
+      {showUnpublishDialog ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="exam-unpublish-title">
+          <div className="fixed inset-0 bg-black/50" aria-hidden="true" onClick={() => setShowUnpublishDialog(false)} />
+          <div className="relative w-full max-w-md bg-white rounded-xl shadow-xl p-6 space-y-4">
+            <h2 id="exam-unpublish-title" className="text-lg font-semibold text-gray-900">Unpublish exam</h2>
+            <p className="text-sm text-gray-600">Optionally record why this release is being unpublished. The note is kept with the audit trail.</p>
+            <div>
+              <label htmlFor="exam-unpublish-reason" className="block text-sm font-medium text-gray-700 mb-1">Reason (optional)</label>
+              <textarea
+                id="exam-unpublish-reason"
+                value={unpublishReason}
+                onChange={(event) => {
+                  setUnpublishReason(event.target.value);
+                  if (unpublishError) setUnpublishError('');
+                }}
+                rows={3}
+                maxLength={500}
+                placeholder="e.g. Fixing a scoring error before re-release"
+                className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 focus-visible:border-orange-600"
+                aria-invalid={Boolean(unpublishError)}
+                aria-describedby={unpublishError ? 'exam-unpublish-error' : undefined}
+              />
+              {unpublishError ? <p id="exam-unpublish-error" role="alert" className="mt-1 text-sm text-red-700">{unpublishError}</p> : null}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowUnpublishDialog(false)}
+                className="px-4 py-2 min-h-11 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (unpublishReason.length > 500) {
+                    setUnpublishError('Reason must be 500 characters or fewer.');
+                    return;
+                  }
+                  onUnpublish?.(unpublishReason.trim() || undefined);
+                  setShowUnpublishDialog(false);
+                }}
+                className="px-4 py-2 min-h-11 text-sm font-bold text-white bg-orange-600 hover:bg-orange-700 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-600 focus-visible:ring-offset-2"
+              >
+                Unpublish
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

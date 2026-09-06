@@ -112,7 +112,6 @@ describe('StudentAttemptProvider V2 integration', () => {
         <StudentAttemptProvider
           scheduleId="schedule"
           attemptSnapshot={currentAttempt}
-          useV2DurabilityEngine
         >
           {children}
         </StudentAttemptProvider>
@@ -123,7 +122,6 @@ describe('StudentAttemptProvider V2 integration', () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(mocks.createTransport).toHaveBeenCalled();
     expect(mocks.transport.fetchSnapshot).toHaveBeenCalledTimes(1);
     act(() => {
       hook.result.current.actions.persistAnswer('q1', 'private-A');
@@ -155,7 +153,6 @@ describe('StudentAttemptProvider V2 integration', () => {
         <StudentAttemptProvider
           scheduleId="schedule"
           attemptSnapshot={currentAttempt}
-          useV2DurabilityEngine
         >
           {children}
         </StudentAttemptProvider>
@@ -180,7 +177,7 @@ describe('StudentAttemptProvider V2 integration', () => {
     );
   });
 
-  it('keeps preview attempts on local persistence even when the V2 flag is supplied', async () => {
+  it('keeps preview attempts on local persistence', async () => {
     const currentAttempt = attempt('preview-attempt');
     const state = examState();
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -189,7 +186,6 @@ describe('StudentAttemptProvider V2 integration', () => {
           scheduleId="schedule"
           attemptSnapshot={currentAttempt}
           persistenceEnabled={false}
-          useV2DurabilityEngine
         >
           {children}
         </StudentAttemptProvider>
@@ -203,7 +199,7 @@ describe('StudentAttemptProvider V2 integration', () => {
     });
 
     expect(hook.result.current.state.attempt?.answers.q1).toBe('preview-answer');
-    expect(hook.result.current.state.attempt?.recovery.syncState).toBe('saved');
+    expect(hook.result.current.state.attempt?.recovery.syncState).toBe('idle');
     expect(mocks.transport.fetchSnapshot).not.toHaveBeenCalled();
   });
 });

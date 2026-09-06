@@ -12,16 +12,20 @@ import {
   Minus,
   Plus,
   RefreshCw,
+  TriangleAlert,
   Wifi,
+  X,
 } from 'lucide-react';
 import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
 import { getStudentHighlightPaletteEntry, studentHighlightPalette, type StudentHighlightColor } from './highlightPalette';
 import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
+import type { ExamType } from '../../types';
 
 const pressClassName =
   'transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]';
 
 interface StudentHeaderProps {
+  examType?: ExamType | undefined;
   testTakerId?: string | undefined;
   timeRemaining?: number | undefined;
   autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | 'error' | null | undefined;
@@ -31,6 +35,9 @@ interface StudentHeaderProps {
   onToggleHighlightMode?: (() => void) | undefined;
   onSelectHighlightColor?: ((color: StudentHighlightColor) => void) | undefined;
   onSelectEraseMode?: (() => void) | undefined;
+  choiceEliminationAvailable?: boolean | undefined;
+  choiceEliminationEnabled?: boolean | undefined;
+  onToggleChoiceElimination?: (() => void) | undefined;
   onOpenAccessibility?: (() => void) | undefined;
   onOpenNavigator?: (() => void) | undefined;
   onClearHighlights?: (() => void) | undefined;
@@ -43,6 +50,7 @@ interface StudentHeaderProps {
 }
 
 export function StudentHeader({
+  examType = 'Academic',
   testTakerId,
   timeRemaining,
   autoSaveStatus,
@@ -52,6 +60,9 @@ export function StudentHeader({
   onToggleHighlightMode,
   onSelectHighlightColor,
   onSelectEraseMode,
+  choiceEliminationAvailable = false,
+  choiceEliminationEnabled = false,
+  onToggleChoiceElimination,
   onOpenAccessibility,
   onOpenNavigator,
   onClearHighlights,
@@ -63,6 +74,7 @@ export function StudentHeader({
   isExamActive = false,
 }: StudentHeaderProps) {
   void onClearHighlights;
+  const examLabel = examType === 'ACT' ? 'ACT' : 'IELTS';
   const [showTabletZoomControls, setShowTabletZoomControls] = useState(false);
   const [showHighlightOptions, setShowHighlightOptions] = useState(false);
   const highlightOptionsTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -86,6 +98,13 @@ export function StudentHeader({
   );
   const activePaletteEntry = getStudentHighlightPaletteEntry(highlightColor);
   const highlightButtonLabel = highlightToolMode === 'highlight' ? 'Highlighting' : 'Highlight';
+  const shouldShowChoiceEliminationTool = Boolean(
+    examType === 'ACT' && choiceEliminationAvailable && onToggleChoiceElimination,
+  );
+  const highlightButtonLayoutClassName =
+    examType === 'ACT' ? 'min-w-[9.5rem] justify-center whitespace-nowrap' : '';
+  const highlightButtonLabelClassName =
+    examType === 'ACT' ? 'inline whitespace-nowrap' : 'hidden md:inline';
 
   const closeHighlightOptions = useCallback(() => {
     setShowHighlightOptions(false);
@@ -142,6 +161,27 @@ export function StudentHeader({
     const s = seconds % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  // S1-C14: polite announcements fire ONLY at the 5-min and 1-min thresholds,
+  // never per-second. Tracks the lowest threshold already announced so each
+  // fires once; resets when time moves back above (e.g. section change).
+  const announcedThresholdRef = useRef<number | null>(null);
+  const [timerAnnouncement, setTimerAnnouncement] = useState('');
+  useEffect(() => {
+    if (timeRemaining === undefined) return;
+    if (timeRemaining >= 300) {
+      announcedThresholdRef.current = null;
+      return;
+    }
+    const threshold = timeRemaining < 60 ? 60 : 300;
+    if (announcedThresholdRef.current === threshold) return;
+    announcedThresholdRef.current = threshold;
+    setTimerAnnouncement(
+      threshold === 60
+        ? `Low time: 1 minute remaining (${formatTime(timeRemaining)} left)`
+        : `Low time: 5 minutes remaining (${formatTime(timeRemaining)} left)`,
+    );
+  }, [timeRemaining]);
 
   const updateTabletZoomControlsPosition = useCallback(() => {
     const button = tabletZoomButtonRef.current;
@@ -273,8 +313,25 @@ export function StudentHeader({
     >
       <div className="flex items-center gap-3 md:gap-4 lg:gap-6 min-w-0 justify-self-start">
         <div className="bg-white border border-gray-900 px-1.5 md:px-2 lg:px-3 py-0.5 rounded-sm flex-shrink-0">
-          <div className="text-gray-900 font-bold text-lg md:text-xl lg:text-2xl tracking-tight">IELTS</div>
+          <div className="text-gray-900 font-bold text-lg md:text-xl lg:text-2xl tracking-tight">{examLabel}</div>
         </div>
+        {shouldShowChoiceEliminationTool ? (
+          <button
+            type="button"
+            onClick={onToggleChoiceElimination}
+            className={`${pressClassName} flex min-h-11 min-w-11 shrink-0 items-center gap-1.5 rounded-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
+              choiceEliminationEnabled
+                ? 'border-blue-700 bg-blue-50 text-blue-900'
+                : 'border-gray-300 bg-white text-gray-800'
+            }`}
+            aria-pressed={choiceEliminationEnabled}
+            aria-label="Eliminate choices"
+            title="Eliminate choices"
+          >
+            <X size={16} strokeWidth={2.5} aria-hidden="true" />
+            <span className="hidden md:inline">Eliminate</span>
+          </button>
+        ) : null}
         <div className="flex flex-col min-w-0 hidden sm:flex">
           <div className="font-semibold text-[length:var(--student-meta-font-size)] text-gray-600 uppercase tracking-wide">
             Test taker ID
@@ -291,8 +348,18 @@ export function StudentHeader({
       >
         {timeRemaining !== undefined ? (
           <div className="flex items-center gap-1.5 md:gap-2 lg:gap-3 flex-shrink-0">
-            <div className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-semibold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? 'student-timer-urgent bg-red-100 border-red-700 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-900'}`}>
-              <Clock size={14} className={timeRemaining < 300 ? 'text-red-900' : 'text-gray-700'} />
+            {/* S1-C14: aria-live off — the per-second timer never announces. */}
+            <div
+              aria-live="off"
+              className={`flex items-center gap-1.5 md:gap-2 lg:gap-3 font-semibold text-base md:text-lg lg:text-xl px-2 md:px-3 lg:px-4 py-1 md:py-1.5 border rounded-sm transition-colors flex-shrink-0 ${timeRemaining < 300 ? 'student-timer-urgent bg-red-100 border-red-700 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-900'}`}>
+              {timeRemaining < 300 ? (
+                <TriangleAlert size={14} className="text-red-900" aria-hidden="true" />
+              ) : (
+                <Clock size={14} className="text-gray-700" aria-hidden="true" />
+              )}
+              {timeRemaining < 300 ? (
+                <span className="text-xs md:text-sm font-bold uppercase tracking-wider">Low time</span>
+              ) : null}
               <span
                 className="font-mono"
                 role="timer"
@@ -302,12 +369,18 @@ export function StudentHeader({
                 {formatTime(timeRemaining)}
               </span>
             </div>
+            {/* Polite threshold announcements only (5-min / 1-min). No status role:
+              the header already owns a status node for highlight mode; aria-live
+              alone announces without creating a second status role. */}
+            <span className="sr-only" aria-live="polite" data-testid="student-timer-announcement">
+              {timerAnnouncement}
+            </span>
           </div>
         ) : null}
       </div>
 
       <div
-        className="flex min-w-0 max-w-full items-center justify-end gap-1.5 md:gap-2 lg:gap-4 text-gray-700 flex-shrink-0 overflow-x-auto no-scrollbar justify-self-end"
+        className="flex min-w-0 max-w-full items-center justify-start gap-1.5 md:gap-2 lg:gap-4 text-gray-700 flex-shrink-0 overflow-x-auto no-scrollbar justify-self-end lg:justify-end"
         data-testid="student-header-controls-slot"
       >
         {shouldShowHighlightTool ? (
@@ -315,7 +388,7 @@ export function StudentHeader({
             <button
               type="button"
               onClick={onToggleHighlightMode}
-              className={`${pressClassName} flex min-h-11 items-center gap-1.5 rounded-l-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${
+              className={`${pressClassName} flex min-h-11 items-center gap-1.5 rounded-l-sm border px-2.5 text-[length:var(--student-control-font-size)] font-medium focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${highlightButtonLayoutClassName} ${
                 highlightToolMode === 'highlight'
                   ? 'border-blue-700 bg-blue-50 text-blue-900'
                   : 'border-gray-300 bg-white text-gray-800'
@@ -324,7 +397,7 @@ export function StudentHeader({
               aria-label={highlightButtonLabel}
             >
               <Highlighter size={16} />
-              <span className="hidden md:inline">{highlightButtonLabel}</span>
+              <span className={highlightButtonLabelClassName}>{highlightButtonLabel}</span>
               <span className={`h-3 w-3 rounded-full border border-gray-700 ${activePaletteEntry.swatchClassName}`} aria-hidden="true" />
             </button>
             <button
@@ -396,6 +469,7 @@ export function StudentHeader({
             className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide"
             role="status"
             aria-live="polite"
+            data-testid="student-auto-save-status"
           >
             {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (
               <>

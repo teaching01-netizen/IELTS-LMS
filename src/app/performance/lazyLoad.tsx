@@ -3,9 +3,10 @@
  * Provides React.lazy with loading states and error boundaries
  */
 
-import { Suspense, lazy, type ComponentType, type ReactElement } from 'react';
+import { Suspense, lazy, useCallback, useMemo, useRef, useState, type ComponentType, type ReactElement } from 'react';
 import { ErrorBoundary } from '../error/ErrorBoundary';
 import { SectionLoadingSkeleton } from '@components/ui';
+import { logError } from '../error/errorLogger';
 
 /**
  * Loading fallback component
@@ -49,27 +50,58 @@ function LazyErrorFallback({ error, retry }: LazyErrorFallbackProps): ReactEleme
 }
 
 /**
- * Lazy load a component with loading and error states
- * @param importFn - Function that imports the component
- * @param loadingMessage - Custom loading message
- * @param componentName - Component name for error boundary
+ * Lazy load a component with loading and error states.
+ * Retry is re-callable: each retry bumps a cache-busting attempt counter so
+ * React.lazy re-invokes the importer (React caches per lazy() call, so the
+ * lazy element itself is recreated per attempt via useMemo).
  */
 export function lazyLoad<TProps extends object>(
   importFn: () => Promise<{ default: ComponentType<TProps> }>,
   loadingMessage?: string,
   componentName?: string
 ): ComponentType<TProps> {
-  const LazyComponent = lazy(() => importFn());
+  const WrappedComponent = (props: TProps): ReactElement => {
+    const [attempt, setAttempt] = useState(0);
 
-  const WrappedComponent = (props: TProps): ReactElement => (
-    <ErrorBoundary
-      fallback={({ error, reset }) => <LazyErrorFallback error={error} retry={reset} />}
-    >
-      <Suspense fallback={<LoadingFallback {...(loadingMessage ? { message: loadingMessage } : {})} />}>
-        <LazyComponent {...props} />
-      </Suspense>
-    </ErrorBoundary>
-  );
+    const LazyComponent = useMemo(
+      () =>
+        lazy(() =>
+          importFn().catch((error: unknown) => {
+            logError(error instanceof Error ? error : new Error('Lazy chunk failed to load'), {
+              scope: 'lazyLoad',
+              componentName,
+              attempt,
+            });
+            throw error;
+          }),
+        ),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [attempt],
+    );
+
+    const retry = useCallback(() => {
+      setAttempt((current) => current + 1);
+    }, []);
+
+    return (
+      <ErrorBoundary
+        resetKeys={[attempt]}
+        fallback={({ error, reset }) => (
+          <LazyErrorFallback
+            error={error}
+            retry={() => {
+              retry();
+              reset();
+            }}
+          />
+        )}
+      >
+        <Suspense fallback={<LoadingFallback {...(loadingMessage ? { message: loadingMessage } : {})} />}>
+          <LazyComponent {...props} />
+        </Suspense>
+      </ErrorBoundary>
+    );
+  };
 
   WrappedComponent.displayName = componentName ?? 'LazyLoad(Component)';
 
@@ -91,17 +123,24 @@ export function lazyLoadNoBoundary<TProps extends object>(
     </Suspense>
   );
 
+  WrappedComponent.displayName = 'LazyLoadNoBoundary(Component)';
+
   return WrappedComponent;
 }
 
 /**
- * Preload a lazy component
- * Useful for preloading components before they're needed
+ * Preload a lazy component. The returned promise is caught so idle
+ * preloading never surfaces an unhandled rejection.
  */
 export function preloadLazyComponent<TProps extends object>(
   importFn: () => Promise<{ default: ComponentType<TProps> }>
-): void {
-  importFn();
+): Promise<{ default: ComponentType<TProps> } | undefined> {
+  return importFn().catch((error: unknown) => {
+    logError(error instanceof Error ? error : new Error('Preload failed'), {
+      scope: 'preloadLazyComponent',
+    });
+    return undefined;
+  });
 }
 
 /**

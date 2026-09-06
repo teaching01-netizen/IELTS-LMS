@@ -32,6 +32,7 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
     handleDrag,
     handleKeyboardResize,
     leftWidth,
+    splitBounds,
     workspaceRef,
   } = useSplitPaneResize({
     isTabletMode: false,
@@ -39,20 +40,32 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
     defaultLeftWidth: 50,
   });
 
-  const currentPart = speakingConfig.parts[activePartIndex];
+  const clampedPartIndex = Math.min(Math.max(activePartIndex, 0), Math.max(parts.length - 1, 0));
+  const currentPart = speakingConfig.parts[clampedPartIndex];
   const cueCardDetails = state.speaking.cueCardDetails;
 
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | undefined;
-    if (isPrep && prepTime > 0) {
-      interval = setInterval(() => setPrepTime(p => p - 1), 1000);
-    } else if (isPrep && prepTime === 0) {
+    if (clampedPartIndex !== activePartIndex) {
+      const nextPart = parts[clampedPartIndex] ?? parts[0];
+      setActivePartIndex(clampedPartIndex);
+      setPrepTime(nextPart?.prepTime ?? 0);
+      setIsPrep((nextPart?.prepTime ?? 0) > 0);
+      setSpeakTime(0);
+      setIsSpeaking((nextPart?.prepTime ?? 0) <= 0);
+    }
+  }, [activePartIndex, clampedPartIndex, parts]);
+
+  useEffect(() => {
+    if (!isPrep) {
+      return;
+    }
+    if (prepTime <= 0) {
       setIsPrep(false);
       setIsSpeaking(true);
+      return;
     }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
+    const timer = setTimeout(() => setPrepTime((p) => Math.max(p - 1, 0)), 1000);
+    return () => clearTimeout(timer);
   }, [isPrep, prepTime]);
 
   useEffect(() => {
@@ -92,8 +105,9 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
   };
 
   const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
+    const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+    const m = Math.floor(safeSeconds / 60);
+    const s = safeSeconds % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
@@ -163,6 +177,8 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
         <StudentSplitPaneResizer
           isTabletMode={false}
           leftWidth={leftWidth}
+          minWidth={splitBounds.min}
+          maxWidth={splitBounds.max}
           onDividerPointerDown={handleDrag}
           onDividerKeyDown={handleKeyboardResize}
           ariaLabel="Resize speaking camera and questions panels"
@@ -191,8 +207,8 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
                   <div className="p-4 md:p-8 bg-white border border-gray-200 rounded-xl shadow-md">
                     <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-3 md:mb-4">Current Topic</p>
                     <div className="flex flex-wrap gap-2 md:gap-3">
-                      {state.speaking.part1Topics.map(t => (
-                        <span key={t} className="px-3 md:px-4 py-1.5 md:py-2 bg-blue-50 text-blue-700 rounded-xl font-bold border border-blue-100 text-sm md:text-base">{t}</span>
+                      {state.speaking.part1Topics.map((topic, topicIndex) => (
+                        <span key={`speaking-topic-${topicIndex}-${topic}`} className="px-3 md:px-4 py-1.5 md:py-2 bg-blue-50 text-blue-700 rounded-xl font-bold border border-blue-100 text-sm md:text-base">{topic}</span>
                       ))}
                     </div>
                   </div>
@@ -218,8 +234,8 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
                     </div>
                     {(cueCardDetails?.bullets ?? []).filter(Boolean).length > 0 && (
                       <ul className="mt-5 space-y-3 text-base md:text-lg font-medium text-gray-700">
-                        {cueCardDetails?.bullets.filter(Boolean).map((bullet) => (
-                          <li key={bullet} className="flex gap-3">
+                        {cueCardDetails?.bullets.filter(Boolean).map((bullet, bulletIndex) => (
+                          <li key={`speaking-bullet-${bulletIndex}-${bullet}`} className="flex gap-3">
                             <span>•</span>
                             <span>{bullet}</span>
                           </li>
@@ -239,7 +255,7 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
                     <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4 md:mb-6">Preparation Timer</h3>
                     <div role="timer" aria-label="Preparation time remaining" className="text-5xl md:text-6xl font-bold mb-6 md:mb-8 text-white tracking-tight tabular-nums">{formatTime(prepTime)}</div>
                     <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden mb-6 md:mb-10">
-                      <div className="bg-blue-500 h-full transition-all duration-1000 ease-linear" style={{ width: `${(prepTime / currentPart.prepTime) * 100}%` }}></div>
+                      <div className="bg-blue-500 h-full transition-all duration-1000 ease-linear" style={{ width: `${currentPart.prepTime > 0 ? (prepTime / currentPart.prepTime) * 100 : 0}%` }}></div>
                     </div>
                     <button 
                       onClick={() => { setIsPrep(false); setIsSpeaking(true); }}
@@ -258,7 +274,7 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
                     <h3 className="text-xs font-semibold text-green-100 uppercase tracking-wide mb-4 md:mb-6">Speaking Duration</h3>
                     <div role="timer" aria-label="Speaking time" className="text-5xl md:text-6xl font-bold mb-6 md:mb-8 text-white tracking-tight tabular-nums">{formatTime(speakTime)}</div>
                     <div className="w-full bg-white/20 h-2 rounded-full overflow-hidden mb-6 md:mb-10">
-                      <div className="bg-white h-full transition-all duration-1000 ease-linear" style={{ width: `${Math.min((speakTime / currentPart.speakingTime) * 100, 100)}%` }}></div>
+                      <div className="bg-white h-full transition-all duration-1000 ease-linear" style={{ width: `${currentPart.speakingTime > 0 ? Math.min((speakTime / currentPart.speakingTime) * 100, 100) : 0}%` }}></div>
                     </div>
                     <p className="text-green-100 font-bold mb-6 md:mb-10 text-sm md:text-base">
                       {timeUp
@@ -284,10 +300,10 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
                 <div className="p-6 md:p-10 bg-white border border-gray-200 shadow-xl rounded-xl text-left">
                   <h3 className="text-xs font-semibold text-green-600 uppercase tracking-wide mb-4 md:mb-6">Advanced Discussion Topics</h3>
                   <ul className="space-y-4 md:space-y-6">
-                    {state.speaking.part3Discussion.map((topic, i) => (
-                      <li key={i} className="flex gap-3 md:gap-4 group">
+                    {state.speaking.part3Discussion.map((topic, discussionIndex) => (
+                      <li key={`speaking-discussion-${discussionIndex}`} className="flex gap-3 md:gap-4 group">
                         <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-green-50 text-green-600 flex items-center justify-center font-bold flex-shrink-0 group-hover:bg-green-600 group-hover:text-white transition-all text-sm md:text-base">
-                          {i + 1}
+                          {discussionIndex + 1}
                         </div>
                         <p className="text-base md:text-xl font-bold text-gray-800 leading-snug">{topic}</p>
                       </li>

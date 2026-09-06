@@ -206,6 +206,10 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
   const [scheduleRegrading, setScheduleRegrading] = useState(false);
   const [scheduleRegradeError, setScheduleRegradeError] = useState<string | null>(null);
   const [scheduleRegradeResult, setScheduleRegradeResult] = useState<ObjectiveLatestDraftRegradeResponse | null>(null);
+  // S2-C16: explicit operator consent for the automatic scoring-rule
+  // upgrade proposed when answer variants exceed the current word limit.
+  const [ruleUpgradeConsent, setRuleUpgradeConsent] = useState(false);
+  const [ruleUpgradeProposal, setRuleUpgradeProposal] = useState<{ from: string; to: string; requiredWords: number } | null>(null);
 
   const questionNumberById = useMemo(() => {
     const map = new Map<string, number>();
@@ -237,10 +241,11 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
           gradingService.getObjectiveGradingSource(scheduleId),
           gradingService.getObjectiveOverrides(scheduleId),
         ]);
-        const versionId =
-          sourceResult.success && sourceResult.data?.draftVersionId
-            ? sourceResult.data.draftVersionId
-            : publishedVersionId;
+        // Published-first pinning (S2-C13): default to the immutable published
+        // version. The draft grading source is consulted only as an explicit
+        // override signal when the caller opts in (not implicitly here).
+        void sourceResult;
+        const versionId = publishedVersionId;
         const version = await examRepository.getVersionById(versionId);
         if (isStale()) return;
         if (!version?.contentSnapshot) {
@@ -322,8 +327,20 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
               `Answer key contains a ${required}-word variant, but the scoring rule only supports up to THREE_WORDS. Use a different scoring rule or shorten the variants.`,
             );
           }
+          // S2-C16: never silently rewrite the operator's scoring rule —
+          // block the save and require explicit consent via the checkbox
+          // rendered next to the scoring-rule field (ruleUpgradeConsent).
+          if (!ruleUpgradeConsent) {
+            setRuleUpgradeProposal({ from: scoringRule, to: upgraded, requiredWords: required });
+            throw new Error(
+              `This override needs a ${required}-word scoring rule, but the rule is set to ${scoringRule}. Review the proposed upgrade below and check the consent box to apply it on save.`,
+            );
+          }
           scoringRule = upgraded;
           setForm({ ...form, scoringRule });
+          setRuleUpgradeProposal(null);
+        } else {
+          setRuleUpgradeProposal(null);
         }
       }
 
@@ -570,6 +587,21 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                               className={inputClassName}
                               placeholder="Enter a scoring rule"
                             />
+                          ) : null}
+                          {ruleUpgradeProposal ? (
+                            <div className="rounded-md border border-amber-300 bg-amber-50 p-2" role="status">
+                              <p className="text-xs text-amber-900">
+                                Proposed upgrade: {ruleUpgradeProposal.from} → {ruleUpgradeProposal.to} ({ruleUpgradeProposal.requiredWords}-word variants detected).
+                              </p>
+                              <label className="mt-1 flex items-center gap-2 text-xs font-semibold text-amber-900">
+                                <input
+                                  type="checkbox"
+                                  checked={ruleUpgradeConsent}
+                                  onChange={(e) => setRuleUpgradeConsent(e.target.checked)}
+                                />
+                                I consent to upgrading the scoring rule on save
+                              </label>
+                            </div>
                           ) : null}
                         </div>
                       </label>

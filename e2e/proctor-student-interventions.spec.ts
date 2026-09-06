@@ -1,331 +1,228 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Browser, type Page } from "@playwright/test";
 import {
   ADMIN_STORAGE_STATE_PATH,
   readBackendE2EManifest,
   STUDENT_STORAGE_STATE_PATH,
-} from './support/backendE2e';
+} from "./support/backendE2e";
+import { closeDb, queryDb } from "./support/db";
+import {
+  completePreCheckIfPresent,
+  openStudentSessionWithRetry,
+  studentCheckIn,
+  stubScreenDetails,
+} from "./support/studentUi";
 
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
-test.describe('Individual Student Interventions', () => {
-  test('warns individual student', async ({ browser, page }) => {
-    const manifest = readBackendE2EManifest();
+type ProctorSessionDetail = {
+  sessions: Array<{
+    attemptId: string;
+    studentId: string;
+    status: string;
+    warnings: number;
+    violations: Array<{ type: string; description: string }>;
+  }>;
+  auditLogs: Array<{
+    actionType: string;
+    targetStudentId?: string | null;
+  }>;
+  notes: Array<{
+    id: string;
+    content: string;
+    category: string;
+    isResolved: boolean;
+  }>;
+};
 
-    const studentContext = await browser.newContext({
-      storageState: STUDENT_STORAGE_STATE_PATH,
-    });
-    const studentPage = await studentContext.newPage();
-    await studentPage.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
+async function readDetail(page: Page, scheduleId: string): Promise<ProctorSessionDetail> {
+  const response = await page.request.get(
+    `/api/v1/proctor/sessions/${scheduleId}?mode=dashboard&auditLimit=200&alertLimit=100`,
+  );
+  expect(response.ok()).toBeTruthy();
+  return (await response.json()) as ProctorSessionDetail;
+}
+
+async function readAlice(detail: ProctorSessionDetail, candidateId: string) {
+  const session = detail.sessions.find((entry) => entry.studentId === candidateId);
+  expect(session).toBeTruthy();
+  return session!;
+}
+
+async function openAliceSession(browser: Browser, page: Page) {
+  const manifest = readBackendE2EManifest();
+  const scheduleId = manifest.student.scheduleId;
+  const studentContext = await browser.newContext({
+    storageState: STUDENT_STORAGE_STATE_PATH,
+  });
+  await stubScreenDetails(studentContext);
+  const studentPage = await studentContext.newPage();
+
+  await studentCheckIn(studentPage, scheduleId, {
+    wcode: manifest.student.candidateId,
+    email: "e2e.student@example.com",
+    fullName: "Alice Candidate",
+  });
+  await openStudentSessionWithRetry(studentPage, scheduleId, manifest.student.candidateId);
+  await completePreCheckIfPresent(studentPage);
+
+  await page.goto("/proctor");
+  const cohort = page.getByRole("button", {
+    name: "Monitor Student Backend E2E Delivery for cohort Backend E2E Cohort",
+  });
+  await expect(cohort).toBeVisible();
+  await cohort.click();
+
+  const student = page.getByRole("button", {
+    name: "Open Alice Candidate session details",
+  });
+  await expect(student).toBeVisible({ timeout: 30_000 });
+  await student.click();
+  await expect(page.getByRole("button", { name: "Close student details" })).toBeVisible();
+
+  return { manifest, scheduleId, studentContext, studentPage };
+}
+
+test.describe("Individual student interventions", () => {
+  test.describe.configure({ mode: "serial", timeout: 120_000 });
+
+  test.afterAll(async () => {
+    await closeDb();
+  });
+
+  test("warns, pauses, resumes, annotates, resolves, and terminates one student", async ({
+    browser,
+    page,
+  }) => {
+    const { manifest, scheduleId, studentContext, studentPage } = await openAliceSession(
+      browser,
+      page,
     );
 
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await studentPage.getByRole('button', { name: 'Continue' }).click();
+    try {
+      const initial = await readAlice(await readDetail(page, scheduleId), manifest.student.candidateId);
+      expect(initial.status).toBe("active");
+
+      await page.getByRole("button", { name: "Warn", exact: true }).click();
+      await expect
+        .poll(async () => {
+          const detail = await readDetail(page, scheduleId);
+          const session = await readAlice(detail, manifest.student.candidateId);
+          return {
+            status: session.status,
+            warnings: session.warnings,
+            violationType: session.violations.at(-1)?.type,
+            auditType: detail.auditLogs.find(
+              (log) => log.targetStudentId === session.attemptId,
+            )?.actionType,
+          };
+        }, { timeout: 30_000 })
+        .toEqual({
+          status: "warned",
+          warnings: 1,
+          violationType: "PROCTOR_WARNING",
+          auditType: "STUDENT_WARN",
+        });
+
+      await expect(studentPage.getByRole("dialog")).toContainText("Warning issued by proctor", {
+        timeout: 30_000,
+      });
+      await studentPage.getByRole("button", { name: "I Understand" }).click();
+
+      await page.getByRole("button", { name: "Pause", exact: true }).click();
+      const pauseDialog = page.getByRole("dialog", { name: "Pause this student?" });
+      await expect(pauseDialog).toBeVisible();
+      await pauseDialog.getByRole("button", { name: "Pause student" }).click();
+      await expect(pauseDialog).not.toBeVisible();
+      await expect
+        .poll(
+          async () =>
+            (await readAlice(await readDetail(page, scheduleId), manifest.student.candidateId)).status,
+          { timeout: 30_000 },
+        )
+        .toBe("paused");
+
+      await studentPage.reload();
+      await expect(
+        studentPage.getByRole("heading", { name: "Individual session paused" }),
+      ).toBeVisible({ timeout: 30_000 });
+
+      await page.getByRole("button", { name: "Resume", exact: true }).click();
+      await expect
+        .poll(
+          async () =>
+            (await readAlice(await readDetail(page, scheduleId), manifest.student.candidateId)).status,
+          { timeout: 30_000 },
+        )
+        .toBe("active");
+
+      await page.getByRole("button", { name: "Notes", exact: true }).click();
+      await page.getByLabel("Note category").selectOption("incident");
+      await page.getByLabel("Note content").fill("Candidate resumed after proctor review.");
+      await page.getByRole("button", { name: "Save note", exact: true }).click();
+      await expect(page.getByText("Candidate resumed after proctor review.")).toBeVisible();
+      await page.getByRole("button", { name: "Resolve", exact: true }).click();
+
+      await expect
+        .poll(async () => {
+          const detail = await readDetail(page, scheduleId);
+          const note = detail.notes.find(
+            (entry) => entry.content === "Candidate resumed after proctor review.",
+          );
+          return note ? { category: note.category, isResolved: note.isResolved } : null;
+        }, { timeout: 30_000 })
+        .toEqual({ category: "incident", isResolved: true });
+
+      await page.getByRole("button", { name: "Audit", exact: true }).click();
+      await expect(page.getByText("STUDENT_WARN")).toBeVisible();
+      await expect(page.getByText("STUDENT_PAUSE")).toBeVisible();
+      await expect(page.getByText("STUDENT_RESUME")).toBeVisible();
+
+      await page.getByRole("button", { name: "Terminate", exact: true }).click();
+      const terminateDialog = page.getByRole("dialog", { name: "Terminate this student?" });
+      await expect(terminateDialog).toBeVisible();
+      await terminateDialog.getByRole("button", { name: "Terminate student" }).click();
+      await expect(terminateDialog).not.toBeVisible();
+
+      await expect
+        .poll(
+          async () =>
+            (await readAlice(await readDetail(page, scheduleId), manifest.student.candidateId)).status,
+          { timeout: 30_000 },
+        )
+        .toBe("terminated");
+
+      const attempt = await queryDb<{
+        id: string;
+        proctor_status: string;
+        delivery_status: string | null;
+        submitted_at: string | null;
+      }>(
+        "SELECT id, proctor_status, delivery_status, submitted_at FROM student_attempts WHERE schedule_id = ? AND candidate_id = ? LIMIT 1",
+        [scheduleId, manifest.student.candidateId],
+      );
+      expect(attempt[0]?.proctor_status).toBe("terminated");
+      expect(attempt[0]?.delivery_status).toBe("terminated");
+      expect(attempt[0]?.submitted_at).toBeTruthy();
+
+      const audit = await queryDb<{ action_type: string; target_student_id: string }>(
+        "SELECT action_type, target_student_id FROM session_audit_logs WHERE schedule_id = ? AND target_student_id = ? ORDER BY created_at ASC",
+        [scheduleId, attempt[0]?.id ?? ""],
+      );
+      expect(audit.map((entry) => entry.action_type)).toEqual(
+        expect.arrayContaining([
+          "STUDENT_WARN",
+          "STUDENT_PAUSE",
+          "STUDENT_RESUME",
+          "STUDENT_TERMINATE",
+        ]),
+      );
+
+      await studentPage.reload();
+      await expect(
+        studentPage.getByRole("heading", { name: /Session terminated/i }),
+      ).toBeVisible({ timeout: 30_000 });
+    } finally {
+      await studentContext.close();
     }
-
-    // Proctor warns student
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Warn' }).click();
-    await page.getByLabel('Warning message').fill('Please focus on your exam');
-    await page.getByRole('button', { name: 'Send Warning' }).click();
-    await expect(page.getByText('Warning sent successfully')).toBeVisible();
-
-    // Verify student receives warning overlay
-    await expect(studentPage.getByText(/warning|please focus/i)).toBeVisible();
-
-    await studentContext.close();
-  });
-
-  test('pauses individual student', async ({ browser, page }) => {
-    const manifest = readBackendE2EManifest();
-
-    const studentContext = await browser.newContext({
-      storageState: STUDENT_STORAGE_STATE_PATH,
-    });
-    const studentPage = await studentContext.newPage();
-    await studentPage.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await studentPage.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Proctor pauses student
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Pause' }).click();
-    await page.getByLabel('Pause reason').fill('Suspicious activity detected');
-    await page.getByRole('button', { name: 'Confirm Pause' }).click();
-    await expect(page.getByText('Student paused successfully')).toBeVisible();
-
-    // Verify student exam is paused
-    await expect(studentPage.getByText(/paused|suspended/i)).toBeVisible();
-    await expect(studentPage.getByLabel('Answer for question 1')).toBeDisabled();
-
-    await studentContext.close();
-  });
-
-  test('resumes individual student', async ({ browser, page }) => {
-    const manifest = readBackendE2EManifest();
-
-    const studentContext = await browser.newContext({
-      storageState: STUDENT_STORAGE_STATE_PATH,
-    });
-    const studentPage = await studentContext.newPage();
-    await studentPage.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await studentPage.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Pause student first
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Pause' }).click();
-    await page.getByLabel('Pause reason').fill('Test pause');
-    await page.getByRole('button', { name: 'Confirm Pause' }).click();
-
-    // Resume student
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Resume' }).click();
-    await page.getByRole('button', { name: 'Confirm Resume' }).click();
-    await expect(page.getByText('Student resumed successfully')).toBeVisible();
-
-    // Verify student exam is resumed
-    await expect(studentPage.getByLabel('Answer for question 1')).toBeEnabled();
-
-    await studentContext.close();
-  });
-
-  test('terminates individual student exam', async ({ browser, page }) => {
-    const manifest = readBackendE2EManifest();
-
-    const studentContext = await browser.newContext({
-      storageState: STUDENT_STORAGE_STATE_PATH,
-    });
-    const studentPage = await studentContext.newPage();
-    await studentPage.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await studentPage.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Proctor terminates student
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Terminate' }).click();
-    await page.getByLabel('Termination reason').fill('Severe violation detected');
-    await page.getByRole('button', { name: 'Confirm Termination' }).click();
-    await expect(page.getByText('Student terminated successfully')).toBeVisible();
-
-    // Verify student exam is terminated
-    await expect(studentPage.getByText(/terminated|exam ended/i)).toBeVisible();
-
-    await studentContext.close();
-  });
-
-  test('views student detail with violations', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Click on student card to view details
-    await page.locator('[data-student-card]').first().click();
-    await expect(page.getByRole('heading', { name: /Student Details/i })).toBeVisible();
-
-    // Verify violation history displays
-    const violationHistory = page.locator('[data-violation-history]');
-    const hasViolations = await violationHistory.isVisible().catch(() => false);
-    if (hasViolations) {
-      await expect(violationHistory).toBeVisible();
-    }
-  });
-
-  test('adds session note for student', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Add note to student
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Add Note' }).click();
-    await page.getByLabel('Note content').fill('Student showing good progress');
-    await page.getByRole('combobox', { name: 'Category' }).selectOption('behavior');
-    await page.getByRole('button', { name: 'Save Note' }).click();
-    await expect(page.getByText('Note saved successfully')).toBeVisible();
-
-    // Verify note appears in student details
-    await page.locator('[data-student-card]').first().click();
-    await expect(page.getByText('Student showing good progress')).toBeVisible();
-  });
-
-  test('acknowledges alert for student', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Navigate to alerts tab
-    await page.getByRole('tab', { name: 'Alerts' }).click();
-
-    // Acknowledge an alert
-    const alertItem = page.locator('[data-alert-item]').first();
-    const hasAlerts = await alertItem.isVisible().catch(() => false);
-
-    if (hasAlerts) {
-      await alertItem.getByRole('button', { name: 'Acknowledge' }).click();
-      await page.getByLabel('Acknowledgment note').fill('Alert reviewed');
-      await page.getByRole('button', { name: 'Confirm Acknowledgment' }).click();
-      await expect(page.getByText('Alert acknowledged successfully')).toBeVisible();
-    }
-  });
-
-  test('verifies student status updates in proctor UI', async ({ browser, page }) => {
-    const manifest = readBackendE2EManifest();
-
-    const studentContext = await browser.newContext({
-      storageState: STUDENT_STORAGE_STATE_PATH,
-    });
-    const studentPage = await studentContext.newPage();
-    await studentPage.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await studentPage.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Get initial status
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    const initialStatus = await page.locator('[data-student-card]').first().getAttribute('data-status');
-
-    // Pause student
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Pause' }).click();
-    await page.getByLabel('Pause reason').fill('Test');
-    await page.getByRole('button', { name: 'Confirm Pause' }).click();
-
-    // Verify status updated
-    const updatedStatus = await page.locator('[data-student-card]').first().getAttribute('data-status');
-    expect(updatedStatus).not.toBe(initialStatus);
-
-    await studentContext.close();
-  });
-
-  test('verifies STUDENT_WARN audit log', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Warn student
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Warn' }).click();
-    await page.getByLabel('Warning message').fill('Test warning');
-    await page.getByRole('button', { name: 'Send Warning' }).click();
-
-    // Verify audit log
-    await page.getByRole('tab', { name: 'Audit Logs' }).click();
-    await expect(page.getByText('STUDENT_WARN')).toBeVisible();
-  });
-
-  test('verifies STUDENT_PAUSE audit log', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Pause student
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Pause' }).click();
-    await page.getByLabel('Pause reason').fill('Test pause');
-    await page.getByRole('button', { name: 'Confirm Pause' }).click();
-
-    // Verify audit log
-    await page.getByRole('tab', { name: 'Audit Logs' }).click();
-    await expect(page.getByText('STUDENT_PAUSE')).toBeVisible();
-  });
-
-  test('verifies STUDENT_RESUME audit log', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Pause then resume student
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Pause' }).click();
-    await page.getByLabel('Pause reason').fill('Test');
-    await page.getByRole('button', { name: 'Confirm Pause' }).click();
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Resume' }).click();
-    await page.getByRole('button', { name: 'Confirm Resume' }).click();
-
-    // Verify audit log
-    await page.getByRole('tab', { name: 'Audit Logs' }).click();
-    await expect(page.getByText('STUDENT_RESUME')).toBeVisible();
-  });
-
-  test('verifies STUDENT_TERMINATE audit log', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Terminate student
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Terminate' }).click();
-    await page.getByLabel('Termination reason').fill('Test termination');
-    await page.getByRole('button', { name: 'Confirm Termination' }).click();
-
-    // Verify audit log
-    await page.getByRole('tab', { name: 'Audit Logs' }).click();
-    await expect(page.getByText('STUDENT_TERMINATE')).toBeVisible();
-  });
-
-  test('verifies proctor status field updated in student_attempts', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Pause student
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Pause' }).click();
-    await page.getByLabel('Pause reason').fill('Test pause');
-    await page.getByRole('button', { name: 'Confirm Pause' }).click();
-
-    // Verify proctor status in student details
-    await page.locator('[data-student-card]').first().click();
-    await expect(page.getByText(/Proctor Status:/i)).toBeVisible();
-    await expect(page.getByText(/paused/i)).toBeVisible();
-  });
-
-  test('verifies violation events linked to attempt', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // View student details
-    await page.locator('[data-student-card]').first().click();
-
-    // Navigate to violations section
-    await page.getByRole('tab', { name: 'Violations' }).click();
-
-    // Verify violation events are displayed
-    const violationEvents = page.locator('[data-violation-event]');
-    const hasViolations = await violationEvents.isVisible().catch(() => false);
-    if (hasViolations) {
-      await expect(violationEvents).toBeVisible();
-    }
-  });
-
-  test('verifies notes saved with category', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Add note with category
-    await page.locator('[data-student-card]').first().getByRole('button', { name: 'Add Note' }).click();
-    await page.getByLabel('Note content').fill('Test note with category');
-    await page.getByRole('combobox', { name: 'Category' }).selectOption('academic');
-    await page.getByRole('button', { name: 'Save Note' }).click();
-
-    // Verify note saved with category
-    await page.locator('[data-student-card]').first().click();
-    await expect(page.getByText('Test note with category')).toBeVisible();
-    await expect(page.getByText(/academic/i)).toBeVisible();
   });
 });

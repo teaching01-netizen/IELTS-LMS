@@ -1,9 +1,9 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { useStudentSubmissionOrchestration } from '../useStudentSubmissionOrchestration';
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { useStudentSubmissionOrchestration } from "../useStudentSubmissionOrchestration";
 
-describe('useStudentSubmissionOrchestration', () => {
-  it('flushes and submits current module when pending mutations are persisted', async () => {
+describe("useStudentSubmissionOrchestration", () => {
+  it("flushes and submits current module when pending mutations are persisted", async () => {
     const reconcileLiveAnswerCacheNow = vi.fn();
     const commitWritingDraft = vi.fn();
     const flushPending = vi.fn().mockResolvedValue(true);
@@ -12,8 +12,8 @@ describe('useStudentSubmissionOrchestration', () => {
 
     const runtimeStateRef = {
       current: {
-        phase: 'exam' as const,
-        currentModule: 'reading' as const,
+        phase: "exam" as const,
+        currentModule: "reading" as const,
       },
     };
 
@@ -22,11 +22,10 @@ describe('useStudentSubmissionOrchestration', () => {
         runtimeState: {
           runtimeBacked: false,
           runtimeStatus: null,
-          currentModule: 'reading',
+          currentModule: "reading",
         },
         runtimeStateRef,
         attemptId: null,
-        finalSubmissionPending: false,
         runtimeCompletionVerified: false,
         shouldRenderPostExam: false,
         reconcileLiveAnswerCacheNow,
@@ -39,39 +38,38 @@ describe('useStudentSubmissionOrchestration', () => {
           transitionBlocking,
           submitModule,
         },
-      }),
+      })
     );
 
     await act(async () => {
-      await result.current.flushAndSubmitCurrentModuleWithRetry('manual:reading');
+      await result.current.flushAndSubmitCurrentModuleWithRetry("manual:reading");
     });
 
     expect(reconcileLiveAnswerCacheNow).toHaveBeenCalledTimes(1);
     expect(commitWritingDraft).toHaveBeenCalledTimes(1);
     expect(flushPending).toHaveBeenCalledTimes(1);
-    expect(transitionBlocking).toHaveBeenCalledWith('syncing_reconnect', false);
-    expect(transitionBlocking).toHaveBeenCalledWith('offline', false);
+    expect(transitionBlocking).toHaveBeenCalledWith("syncing_reconnect", false);
+    expect(transitionBlocking).toHaveBeenCalledWith("offline", false);
     expect(submitModule).toHaveBeenCalledTimes(1);
   });
 
-  it('triggers runtime final-submit pipeline when runtime is completed', async () => {
+  it("triggers runtime final-submit pipeline when runtime is completed", async () => {
     const submitAttempt = vi.fn().mockResolvedValue(true);
 
     const { result } = renderHook(() =>
       useStudentSubmissionOrchestration({
         runtimeState: {
           runtimeBacked: true,
-          runtimeStatus: 'completed',
-          currentModule: 'reading',
+          runtimeStatus: "completed",
+          currentModule: "reading",
         },
         runtimeStateRef: {
           current: {
-            phase: 'exam',
-            currentModule: 'reading',
+            phase: "exam",
+            currentModule: "reading",
           },
         },
-        attemptId: 'attempt-1',
-        finalSubmissionPending: false,
+        attemptId: "attempt-1",
         runtimeCompletionVerified: true,
         shouldRenderPostExam: false,
         reconcileLiveAnswerCacheNow: vi.fn(),
@@ -84,7 +82,7 @@ describe('useStudentSubmissionOrchestration', () => {
           transitionBlocking: vi.fn(),
           submitModule: vi.fn(),
         },
-      }),
+      })
     );
 
     await waitFor(() => {
@@ -92,18 +90,118 @@ describe('useStudentSubmissionOrchestration', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.finalSubmitStatus).toBe('idle');
+      expect(result.current.finalSubmitStatus).toBe("idle");
     });
   });
-  it('cancels module retries after unmount', async () => {
+
+  it("does not retry a submission that is already terminal", async () => {
+    const submitAttempt = vi.fn().mockResolvedValue(true);
+
+    const { result } = renderHook(() =>
+      useStudentSubmissionOrchestration({
+        runtimeState: {
+          runtimeBacked: true,
+          runtimeStatus: "completed",
+          currentModule: "reading",
+        },
+        runtimeStateRef: {
+          current: {
+            phase: "post-exam",
+            currentModule: "reading",
+          },
+        },
+        attemptId: "attempt-terminal",
+        runtimeCompletionVerified: true,
+        shouldRenderPostExam: true,
+        reconcileLiveAnswerCacheNow: vi.fn(),
+        commitWritingDraft: vi.fn(),
+        attemptActions: {
+          flushPending: vi.fn().mockResolvedValue(true),
+          submitAttempt,
+        },
+        runtimeActions: {
+          transitionBlocking: vi.fn(),
+          submitModule: vi.fn(),
+        },
+      })
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(submitAttempt).not.toHaveBeenCalled();
+    expect(result.current.finalSubmitStatus).toBe("idle");
+  });
+
+  it("suppresses a stale final-submit loop after terminal state is confirmed", async () => {
+    let resolveSubmit: ((value: boolean) => void) | undefined;
+    const submitAttempt = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSubmit = resolve;
+        })
+    );
+    const runtimeState = {
+      runtimeBacked: true,
+      runtimeStatus: "completed" as const,
+      currentModule: "reading" as const,
+    };
+    const runtimeStateRef = {
+      current: {
+        phase: "exam" as const,
+        currentModule: "reading" as const,
+      },
+    };
+
+    const { result, rerender } = renderHook(
+      ({ shouldRenderPostExam }) =>
+        useStudentSubmissionOrchestration({
+          runtimeState,
+          runtimeStateRef,
+          attemptId: "attempt-race",
+          runtimeCompletionVerified: true,
+          shouldRenderPostExam,
+          reconcileLiveAnswerCacheNow: vi.fn(),
+          commitWritingDraft: vi.fn(),
+          attemptActions: {
+            flushPending: vi.fn().mockResolvedValue(true),
+            submitAttempt,
+          },
+          runtimeActions: {
+            transitionBlocking: vi.fn(),
+            submitModule: vi.fn(),
+          },
+        }),
+      { initialProps: { shouldRenderPostExam: false } }
+    );
+
+    await waitFor(() => {
+      expect(submitAttempt).toHaveBeenCalledTimes(1);
+      expect(result.current.finalSubmitStatus).toBe("submitting");
+    });
+
+    rerender({ shouldRenderPostExam: true });
+    await waitFor(() => {
+      expect(result.current.finalSubmitStatus).toBe("idle");
+    });
+
+    await act(async () => {
+      resolveSubmit?.(false);
+      await Promise.resolve();
+    });
+    expect(result.current.finalSubmitStatus).toBe("idle");
+  });
+
+  it("cancels module retries after unmount", async () => {
     vi.useFakeTimers();
     const flushPending = vi.fn().mockResolvedValue(false);
     const transitionBlocking = vi.fn();
     const submitModule = vi.fn();
     const runtimeStateRef = {
       current: {
-        phase: 'exam' as const,
-        currentModule: 'reading' as const,
+        phase: "exam" as const,
+        currentModule: "reading" as const,
       },
     };
 
@@ -112,11 +210,10 @@ describe('useStudentSubmissionOrchestration', () => {
         runtimeState: {
           runtimeBacked: false,
           runtimeStatus: null,
-          currentModule: 'reading',
+          currentModule: "reading",
         },
         runtimeStateRef,
         attemptId: null,
-        finalSubmissionPending: false,
         runtimeCompletionVerified: false,
         shouldRenderPostExam: false,
         reconcileLiveAnswerCacheNow: vi.fn(),
@@ -129,12 +226,12 @@ describe('useStudentSubmissionOrchestration', () => {
           transitionBlocking,
           submitModule,
         },
-      }),
+      })
     );
 
     let retryPromise: Promise<void> | undefined;
     await act(async () => {
-      retryPromise = result.current.flushAndSubmitCurrentModuleWithRetry('auto:reading');
+      retryPromise = result.current.flushAndSubmitCurrentModuleWithRetry("auto:reading");
       await Promise.resolve();
     });
 

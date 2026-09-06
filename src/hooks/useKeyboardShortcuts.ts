@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 export interface KeyboardShortcut {
   allowInInputs?: boolean;
@@ -39,10 +39,23 @@ const matchesCombo = (event: KeyboardEvent, combo: string) => {
   return expectsMeta && expectsShift && expectsAlt && event.key.toLowerCase() === key;
 };
 
+/**
+ * Subscribes exactly one `keydown` listener per mount. The shortcuts array is
+ * mirrored into a ref (updated every render) so the listener never goes stale
+ * and — critically — call sites that build the array inline (e.g.
+ * `useKeyboardShortcuts([{ combo, handler }])`) do not detach/reattach the
+ * window listener on every render.
+ */
 export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[]) {
+  const shortcutsRef = useRef(shortcuts);
+
+  useEffect(() => {
+    shortcutsRef.current = shortcuts;
+  });
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      shortcuts.forEach((shortcut) => {
+      shortcutsRef.current.forEach((shortcut) => {
         if (shortcut.enabled === false) {
           return;
         }
@@ -60,5 +73,5 @@ export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[]) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [shortcuts]);
+  }, []);
 }

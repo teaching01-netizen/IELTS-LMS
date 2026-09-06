@@ -16,6 +16,8 @@ interface ProtectedInputProps
   sessionId?: string | undefined;
   studentId?: string | undefined;
   onLiveValueChange?: ((value: string) => void) | undefined;
+  /** Direct value commit (preferred over fabricated change events for DOM-rescue paths). */
+  onCommitValue?: ((value: string) => void) | undefined;
 }
 
 export function ProtectedInput({
@@ -23,6 +25,7 @@ export function ProtectedInput({
   sessionId,
   studentId,
   onLiveValueChange,
+  onCommitValue,
   className = '',
   ...inputProps
 }: ProtectedInputProps) {
@@ -39,8 +42,13 @@ export function ProtectedInput({
   const latestDomValueRef = useRef<string>('');
   const deferredRescueTimerRef = useRef<number | null>(null);
   const onChangeRef = useRef<typeof userOnChange>(userOnChange);
+  const onCommitValueRef = useRef<typeof onCommitValue>(onCommitValue);
   const controlledValueRef = useRef(inputProps.value);
   const flushAnswerDurabilityNowRef = useRef(flushAnswerDurabilityNow);
+
+  useEffect(() => {
+    onCommitValueRef.current = onCommitValue;
+  }, [onCommitValue]);
 
   useEffect(() => {
     flushAnswerDurabilityNowRef.current = flushAnswerDurabilityNow;
@@ -76,7 +84,6 @@ export function ProtectedInput({
     const maybeCommitDomValue = () => {
       // Protect against iPad/Safari edge cases where the DOM value has advanced,
       // but React onChange hasn't fired yet before backgrounding/pagehide.
-      if (typeof onChangeRef.current !== 'function') return;
       if (typeof controlledValueRef.current !== 'string') return;
 
       const domValue = latestDomValueRef.current || input.value;
@@ -89,13 +96,22 @@ export function ProtectedInput({
         return;
       }
 
-      // Fire the parent's onChange with a minimal event-like object.
-      // This keeps the controlled value in sync and allows downstream persistence to capture it.
-      (onChangeRef.current as unknown as (event: unknown) => void)({
-        target: input,
-        currentTarget: input,
-        type: 'change',
-      });
+      // Prefer the direct value-commit callback when provided (no fabricated
+      // event, safe for controlled inputs). Fall back to the legacy
+      // event-like onChange invocation for callers that have not migrated.
+      if (typeof onCommitValueRef.current === 'function') {
+        onCommitValueRef.current(domValue);
+      } else if (typeof onChangeRef.current === 'function') {
+        // Legacy fallback: the DOM value already holds domValue here (read-only
+        // access, no write), so passing the live element preserves target shape.
+        (onChangeRef.current as unknown as (event: unknown) => void)({
+          target: input,
+          currentTarget: input,
+          type: 'change',
+        });
+      } else {
+        return;
+      }
       lastRescuedDomValueRef.current = domValue;
       flushAnswerDurabilityNowRef.current?.();
     };
@@ -142,6 +158,10 @@ export function ProtectedInput({
         const requiresSync =
           domValueBeforeRestore !== snapshot || controlledValue !== snapshot;
 
+        // Heal the visible DOM immediately (undo bypasses React's render path),
+        // then notify the parent so the controlled value reconciles on re-render.
+        // Prefer the direct value-commit callback; fall back to the legacy
+        // event-like onChange invocation for callers that have not migrated.
         if (input.value !== snapshot) {
           input.value = snapshot;
         }
@@ -149,12 +169,16 @@ export function ProtectedInput({
         previousValueRef.current = snapshot;
         lastRescuedDomValueRef.current = snapshot;
 
-        if (requiresSync && typeof onChangeRef.current === 'function') {
-          (onChangeRef.current as unknown as (event: unknown) => void)({
-            target: input,
-            currentTarget: input,
-            type: 'change',
-          });
+        if (requiresSync) {
+          if (typeof onCommitValueRef.current === 'function') {
+            onCommitValueRef.current(snapshot);
+          } else if (typeof onChangeRef.current === 'function') {
+            (onChangeRef.current as unknown as (event: unknown) => void)({
+              target: input,
+              currentTarget: input,
+              type: 'change',
+            });
+          }
         }
       },
       flushPersist: () => {

@@ -7,7 +7,7 @@ import { StudentHighlightSelectionManagerProvider } from '../highlightSelectionM
 import type { StudentHighlightColor } from '../highlightPalette';
 import { createInMemoryHighlightSelectionPort, StudentHighlightSelectionPortProvider } from '../highlightSelectionPort';
 import { hashString } from '../highlightV2Engine';
-import { writePersistedSurfaceRanges } from '../highlight/highlightStore';
+import { readPersistedSurfaceRanges, writePersistedSurfaceRanges } from '../highlight/highlightStore';
 
 function firstTextNode(root: Element): ChildNode {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -252,5 +252,73 @@ describe('student highlight persistence v2', () => {
     act(() => otherPort.emit());
     const surfaces = container.querySelectorAll('[data-student-highlightable="true"]');
     expect(surfaces[1]!.querySelectorAll('mark')).toHaveLength(1);
+  });
+
+  it('drops invalid persisted ranges on load and warns (S1-C11)', () => {
+    const text = 'Alpha beta gamma';
+    const namespace = 'attempt:invalid-ranges';
+    writePersistedSurfaceRanges(namespace, 'dirty', {
+      sourceHash: hashString(text),
+      ranges: [
+        { start: 0, end: 5, color: 'yellow' as const },
+        { start: Number.NaN, end: 4, color: 'yellow' as const },
+        { start: 4, end: 4, color: 'yellow' as const },
+        { start: -2, end: 3, color: 'yellow' as const },
+        { start: 0, end: 999, color: 'yellow' as const },
+        { start: 0, end: 3, color: 'nope' as unknown as 'yellow' },
+      ],
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { container } = render(
+      <StudentHighlightPersistenceProvider namespace={namespace}>
+        <FormattedText text={text} highlightEnabled highlightToolMode="off" highlightSurfaceId="dirty" />
+      </StudentHighlightPersistenceProvider>,
+    );
+    expect(container.querySelectorAll('mark')).toHaveLength(1);
+    expect(container.querySelector('mark')).toHaveTextContent('Alpha');
+    // Mount initializer + re-read effect each validate once (5 invalid each).
+    expect(warn.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(warn.mock.calls[0]?.[0]).toContain('Dropped 5 invalid');
+    warn.mockRestore();
+  });
+
+  it('truncates over-cap persisted ranges to the most recent MAX (S1-C11)', () => {
+    const text = 'x'.repeat(10);
+    const namespace = 'attempt:over-cap';
+    writePersistedSurfaceRanges(namespace, 'huge', {
+      sourceHash: hashString(text),
+      ranges: Array.from({ length: 205 }, () => ({
+        start: 0,
+        end: 1,
+        color: 'yellow' as const,
+      })),
+    });
+    const { container } = render(
+      <StudentHighlightPersistenceProvider namespace={namespace}>
+        <FormattedText text={text} highlightEnabled highlightToolMode="off" highlightSurfaceId="huge" />
+      </StudentHighlightPersistenceProvider>,
+    );
+    const persisted = readPersistedSurfaceRanges(namespace, 'huge');
+    // 205 identical ranges validate then truncate to the 200 most recent;
+    // the renderer merges them into a single mark.
+    expect(container.querySelectorAll('mark')).toHaveLength(1);
+    expect(persisted?.ranges).toHaveLength(200);
+  });
+
+  it('announces highlight and erase outcomes via the sr-only status node (S1-C10)', () => {
+    const port = createInMemoryHighlightSelectionPort({
+      selection: { start: 0, end: 5, selectedText: 'Alpha' },
+      selectionText: 'Alpha',
+    });
+    const { container } = render(
+      <StudentHighlightSelectionPortProvider port={port}>
+        <FormattedText text="Alpha beta" highlightEnabled highlightToolMode="highlight" highlightSurfaceId="announce-hl" />
+      </StudentHighlightSelectionPortProvider>,
+    );
+    act(() => port.emit());
+    const announcer = container.querySelector('[role="status"]');
+    expect(announcer).not.toBeNull();
+    expect(announcer).toHaveAttribute('aria-live', 'polite');
+    expect(announcer).toHaveTextContent('Highlighted with yellow.');
   });
 });

@@ -63,12 +63,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   override componentDidUpdate(prevProps: ErrorBoundaryProps): void {
     const { hasError } = this.state;
     const { resetKeys } = this.props;
+    const prevResetKeys = prevProps.resetKeys;
 
-    // Reset error boundary when reset keys change
+    // Reset error boundary when reset keys change (compare by index and
+    // length so reorderings and additions/removals both trigger a reset).
     if (hasError && resetKeys && resetKeys.length > 0) {
-      const hasResetKeyChanged = resetKeys.some(
-        (key) => prevProps.resetKeys?.[prevProps.resetKeys.indexOf(key)] !== key
-      );
+      const prevLength = prevResetKeys?.length ?? 0;
+      const hasResetKeyChanged =
+        prevLength !== resetKeys.length ||
+        resetKeys.some((key, index) => prevResetKeys?.[index] !== key);
 
       if (hasResetKeyChanged) {
         this.reset();

@@ -9,7 +9,7 @@ interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, '
   fullWidth?: boolean;
 }
 
-export function Input({
+export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Input({
   label,
   error,
   helperText,
@@ -19,7 +19,7 @@ export function Input({
   className = '',
   id,
   ...props
-}: InputProps) {
+}: InputProps, ref) {
   const generatedId = useId();
   const inputId = id || generatedId;
   
@@ -54,6 +54,7 @@ export function Input({
         
         <input
           id={inputId}
+          ref={ref}
           className={`${baseStyles} ${stateStyles} ${widthStyle} ${iconPaddingLeft} ${iconPaddingRight} ${className}`}
           {...props}
         />
@@ -78,4 +79,4 @@ export function Input({
       )}
     </div>
   );
-}
+});

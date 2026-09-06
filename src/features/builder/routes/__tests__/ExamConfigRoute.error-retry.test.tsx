@@ -56,6 +56,9 @@ describe('ExamConfigRoute error retry', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockReload.mockClear().mockResolvedValue(undefined);
+    // Restore the default failing-load state mutated by the not-found test.
+    errorController.error = 'Config exploded';
+    errorController.exam = undefined;
   });
 
   it('offers a retry action when loading the config fails', () => {
@@ -64,5 +67,16 @@ describe('ExamConfigRoute error retry', () => {
     expect(screen.getByText('Config exploded')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /retry/i }));
     expect(mockReload).toHaveBeenCalled();
+  });
+
+  it('offers a way back to admin when the exam is not found', () => {
+    errorController.error = null;
+    errorController.exam = undefined;
+
+    render(<ExamConfigRoute />);
+
+    expect(screen.getByText('Exam Not Found')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /back to admin/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('/admin');
   });
 });

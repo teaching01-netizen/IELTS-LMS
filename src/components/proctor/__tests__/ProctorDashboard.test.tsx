@@ -262,7 +262,32 @@ describe('ProctorDashboard runtime controls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
     expect(screen.getByText(/running past the scheduled window/i)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /end section/i })).not.toBeInTheDocument();
+    // S3-C5: End Section is a live cohort control — present in the overrun
+    // state, armed behind its own confirm dialog.
+    expect(screen.getByRole('button', { name: /end section/i })).toBeInTheDocument();
+  });
+
+  it('opens the end-section confirm dialog from the End Section control', () => {
+    render(
+      <DashboardHarness
+        schedules={[{ ...baseSchedule, status: 'live', startTime: '2026-01-01T00:00:00.000Z' }]}
+        runtimeSnapshots={[liveRuntime]}
+        sessions={[]}
+        alerts={[]}
+        onUpdateSessions={vi.fn()}
+        onUpdateAlerts={vi.fn()}
+        onStartScheduledSession={vi.fn()}
+        onPauseCohort={vi.fn()}
+        onResumeCohort={vi.fn()}
+        onEndSectionNow={vi.fn()}
+        onExtendCurrentSection={vi.fn()}
+        onCompleteExam={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^end section$/i }));
+    expect(screen.getByText(/end the current section now/i)).toBeInTheDocument();
   });
 
   it('opens student detail in a full-page split view with roster rail', () => {

@@ -40,7 +40,6 @@ export interface SatStudentSessionRouteProps {
   attemptUpdateToken: number;
   leaseEpoch?: number | null | undefined;
   controlEpoch?: number | null | undefined;
-  useV2DurabilityEngine?: boolean | undefined;
   onExit: () => void | Promise<void>;
 }
 
@@ -58,7 +57,6 @@ export function SatStudentSessionRoute({
   attemptUpdateToken,
   leaseEpoch,
   controlEpoch,
-  useV2DurabilityEngine,
   onExit,
 }: SatStudentSessionRouteProps) {
   const exam = useSatExamController({
@@ -71,7 +69,6 @@ export function SatStudentSessionRoute({
     attemptUpdateToken,
     leaseEpoch,
     controlEpoch,
-    ...(useV2DurabilityEngine !== undefined ? { useV2DurabilityEngine } : {}),
   });
   const reading = useSatReadingPreferences(scheduleId, attemptId);
   const [eliminationMode, setEliminationMode] = useState(false);

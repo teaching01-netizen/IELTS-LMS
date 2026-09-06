@@ -173,6 +173,7 @@ type RuntimeAction =
       runtimeBacked: boolean;
       runtimeSnapshot: ExamSessionRuntime | null;
       runtimeFirstQuestionId: string | null;
+      preserveLocalSyncState?: boolean;
     }
   | { type: 'set_phase'; phase: ExamPhase }
   | { type: 'set_current_module'; module: ModuleType; firstQuestionId: string | null }
@@ -518,6 +519,12 @@ function runtimeReducer(state: RuntimeReducerState, action: RuntimeAction): Runt
         state.blockingMachine,
         action.snapshot.proctorStatus
       );
+      // V2 durability owns this presentation state. A polling snapshot for
+      // the same attempt commonly carries the persisted default (`idle`) and
+      // must not erase a just-acknowledged local `saved` state.
+      const nextAttemptSyncState = action.preserveLocalSyncState
+        ? state.attemptSyncState
+        : action.snapshot.recovery.syncState;
 
       if (
         state.phase === nextPhase &&
@@ -528,7 +535,7 @@ function runtimeReducer(state: RuntimeReducerState, action: RuntimeAction): Runt
         state.proctorNote === action.snapshot.proctorNote &&
         state.submittedAt === nextSubmittedAt &&
         state.blockingReasonOverride === nextBlockingMachine.current &&
-        state.attemptSyncState === action.snapshot.recovery.syncState
+        state.attemptSyncState === nextAttemptSyncState
       ) {
         return state;
       }
@@ -544,7 +551,7 @@ function runtimeReducer(state: RuntimeReducerState, action: RuntimeAction): Runt
         submittedAt: nextSubmittedAt,
         blockingMachine: nextBlockingMachine,
         blockingReasonOverride: nextBlockingMachine.current,
-        attemptSyncState: action.snapshot.recovery.syncState,
+        attemptSyncState: nextAttemptSyncState,
       };
     }
     case 'set_phase':
@@ -802,6 +809,7 @@ export function StudentRuntimeProvider({
       snapshot: attemptSnapshot,
       runtimeBacked,
       runtimeSnapshot,
+      preserveLocalSyncState: sameAttempt,
       runtimeFirstQuestionId: runtimeSnapshot?.currentSectionKey
         ? getFirstQuestionIdForModule(state, runtimeSnapshot.currentSectionKey)
         : null,

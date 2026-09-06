@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { GitCommit, Clock, User, CheckCircle2, GitCompare, RotateCcw, Copy, ChevronDown, ChevronRight, FileText, File } from 'lucide-react';
 import { ExamAuditTimeline } from './ExamAuditTimeline';
 import { VersionCompareView } from './VersionCompareView';
 import { formatTimestamp, getRelativeTime, getVersionStatusColor, getVersionStatusLabel, sortVersionsByNumber } from '../../utils/versionUtils';
 import type { ExamVersionHistoryProps } from '../../features/exam-authoring/contracts/examList';
 import { normalizeWritingTaskContents } from '../../utils/writingTaskUtils';
+import { ConfirmModal } from '../ConfirmModal';
 import { useVersionHistory } from './hooks/useVersionHistory';
 import { examRepository, hydrateExamState } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import type { ExamVersion } from '../../types/domain';
@@ -22,6 +23,19 @@ export function ExamVersionHistory({
   const [loadedVersionsById, setLoadedVersionsById] = useState<Record<string, ExamVersion>>({});
   const [loadingVersionsById, setLoadingVersionsById] = useState<Record<string, boolean>>({});
   const [loadErrorsById, setLoadErrorsById] = useState<Record<string, string | undefined>>({});
+  const loadControllersRef = useRef<Map<string, AbortController>>(new Map());
+
+  // Abort in-flight version detail loads on unmount so late resolves cannot
+  // setState after the component is gone.
+  useEffect(() => {
+    const controllers = loadControllersRef.current;
+    return () => {
+      for (const controller of controllers.values()) {
+        controller.abort();
+      }
+      controllers.clear();
+    };
+  }, []);
 
   // Version label formatting function
   const getVersionLabel = (version: any): string => {
@@ -105,7 +119,10 @@ export function ExamVersionHistory({
     compareDiff,
     setCompareDiff,
     handleCompare,
-    handleRestore
+    handleRestore,
+    restoreError,
+    isRestoring,
+    setRestoreError
   } = useVersionHistory({
     onRestoreVersion,
     onCompareVersions,
@@ -113,34 +130,59 @@ export function ExamVersionHistory({
     examId: exam.id
   });
 
+  const [pendingRestoreVersionId, setPendingRestoreVersionId] = useState<string | null>(null);
+  const pendingRestoreVersion = pendingRestoreVersionId
+    ? versions.find((candidate) => candidate.id === pendingRestoreVersionId) ?? null
+    : null;
+
   const sortedVersions = sortVersionsByNumber(versions);
 
-  const ensureVersionLoaded = async (versionId: string) => {
-    if (loadedVersionsById[versionId] || loadingVersionsById[versionId]) {
+  const ensureVersionLoaded = useCallback(async (versionId: string) => {
+    if (!versionId || loadedVersionsById[versionId] || loadingVersionsById[versionId]) {
       return;
     }
+
+    // Cancel any previous in-flight load for this id, then start a
+    // generation-guarded fetch so races resolve in version order.
+    loadControllersRef.current.get(versionId)?.abort();
+    const controller = new AbortController();
+    loadControllersRef.current.set(versionId, controller);
 
     setLoadingVersionsById((current) => ({ ...current, [versionId]: true }));
     setLoadErrorsById((current) => ({ ...current, [versionId]: undefined }));
 
     try {
       const version = await examRepository.getVersionById(versionId);
+      if (controller.signal.aborted) {
+        return;
+      }
       if (version) {
         setLoadedVersionsById((current) => ({ ...current, [versionId]: version }));
       } else {
         setLoadErrorsById((current) => ({ ...current, [versionId]: 'Version not found' }));
       }
     } catch (error) {
+      if (controller.signal.aborted) {
+        return;
+      }
       setLoadErrorsById((current) => ({
         ...current,
         [versionId]: error instanceof Error ? error.message : 'Failed to load version details',
       }));
     } finally {
-      setLoadingVersionsById((current) => ({ ...current, [versionId]: false }));
+      if (loadControllersRef.current.get(versionId) === controller) {
+        loadControllersRef.current.delete(versionId);
+      }
+      if (!controller.signal.aborted) {
+        setLoadingVersionsById((current) => ({ ...current, [versionId]: false }));
+      }
     }
-  };
+  }, [loadedVersionsById, loadingVersionsById]);
 
   const toggleSelectedVersion = (versionId: string) => {
+    if (!versionId) {
+      return;
+    }
     const nextSelectedId = selectedVersionId === versionId ? null : versionId;
     setSelectedVersionId(nextSelectedId);
     if (nextSelectedId) {
@@ -243,6 +285,12 @@ export function ExamVersionHistory({
           </div>
         </div>
 
+        {restoreError ? (
+          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            Restore failed: {restoreError}
+          </p>
+        ) : null}
+
         <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
           {sortedVersions.map((version, index) => {
             const isCurrentDraft = version.id === exam.currentDraftVersionId;
@@ -335,7 +383,10 @@ export function ExamVersionHistory({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleCompare(compareVersionId, version.id);
+                            setSelectedVersionId(compareVersionId);
+                            void ensureVersionLoaded(compareVersionId);
+                            setCompareVersionId(version.id);
+                            void handleCompare();
                           }}
                           className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"
                           title="Compare with selected version"
@@ -360,7 +411,8 @@ export function ExamVersionHistory({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleRestore(version.id);
+                            setRestoreError(null);
+                            setPendingRestoreVersionId(version.id);
                           }}
                           className="p-1.5 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded transition-all"
                           title="Restore as new draft"
@@ -510,6 +562,30 @@ export function ExamVersionHistory({
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={pendingRestoreVersion !== null}
+        onClose={() => {
+          if (isRestoring) return;
+          setPendingRestoreVersionId(null);
+        }}
+        title="Restore version as new draft?"
+        description={
+          pendingRestoreVersion
+            ? `Restore ${getVersionLabel(pendingRestoreVersion)} as a new draft of "${exam.title}"? This replaces the current draft content. Published versions and live cohorts are unaffected until you republish.`
+            : 'Restore this version as a new draft?'
+        }
+        confirmLabel="Restore as draft"
+        tone="warning"
+        onConfirm={async () => {
+          if (!pendingRestoreVersionId || isRestoring) {
+            return false;
+          }
+          await handleRestore(pendingRestoreVersionId);
+          setPendingRestoreVersionId(null);
+          return undefined;
+        }}
+      />
 
       {/* Version Compare Modal */}
       {showCompareModal && compareDiff && (

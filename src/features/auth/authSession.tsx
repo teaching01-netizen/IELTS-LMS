@@ -18,6 +18,7 @@ import {
   type StudentEntryResult,
   type StudentEntrySuccess,
 } from './api/authGateway';
+import { storeAttemptCredential } from './infrastructure/attemptCredentialStorage';
 
 export type { StudentQueuedAdmission } from './api/authGateway';
 
@@ -84,11 +85,50 @@ export function resolveRoleLandingPath(role: AuthUserRole): string {
   }
 }
 
+/**
+ * Path prefixes each role is allowed to be sent to via `?next=`.
+ * Prevents open redirects and privilege-confused redirects (e.g. a student
+ * login landing on `/admin/exams`).
+ */
+const ROLE_ALLOWED_NEXT_PREFIXES: Record<AuthUserRole, readonly string[]> = {
+  admin: ['/admin', '/sat', '/builder', '/proctor', '/student', '/join'],
+  builder: ['/admin', '/sat', '/builder'],
+  proctor: ['/proctor', '/sat', '/student', '/join'],
+  grader: ['/admin', '/sat'],
+  student: ['/student', '/join'],
+};
+
+function isAllowedNextPath(role: AuthUserRole, nextPath: string): boolean {
+  if (!nextPath.startsWith('/') || nextPath.startsWith('//')) {
+    return false;
+  }
+  // Block encoded slashes, backslashes, schemes, and path traversal.
+  if (
+    nextPath.includes('\\') ||
+    nextPath.includes('://') ||
+    nextPath.split(/[?#]/)[0]?.split('/').includes('..')
+  ) {
+    return false;
+  }
+  const pathname = nextPath.split(/[?#]/)[0] ?? '';
+  // Never redirect back to an auth page (redirect loop).
+  if (pathname === '/login' || pathname.startsWith('/login/')) {
+    return false;
+  }
+  return ROLE_ALLOWED_NEXT_PREFIXES[role].some(
+    (prefix) =>
+      pathname === prefix ||
+      pathname.startsWith(`${prefix}/`) ||
+      nextPath.startsWith(`${prefix}?`) ||
+      nextPath.startsWith(`${prefix}#`),
+  );
+}
+
 export function resolvePostLoginPath(
   role: AuthUserRole,
   nextPath?: string | null | undefined,
 ): string {
-  if (nextPath && nextPath.startsWith('/') && !nextPath.startsWith('//')) {
+  if (nextPath && isAllowedNextPath(role, nextPath)) {
     return nextPath;
   }
 
@@ -131,10 +171,38 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       const nextSession = await authService.getSession();
       return setSessionState(nextSession, setSession, setStatus);
     } catch (error) {
+      // Only clear the session when the refresh proves the session is gone
+      // (401/403 or an explicit expiry/unauthorized backend code). Any other
+      // failure (network, 5xx, transport) keeps the current session so the UI
+      // stays in its retry path instead of bouncing to login.
+      const statusCode =
+        typeof error === 'object' && error !== null && 'statusCode' in error
+          ? (error as { statusCode?: unknown }).statusCode
+          : typeof error === 'object' && error !== null && 'status' in error
+            ? (error as { status?: unknown }).status
+            : undefined;
+      const backendCode =
+        typeof error === 'object' && error !== null && 'backendCode' in error
+          ? String((error as { backendCode?: unknown }).backendCode ?? '')
+          : typeof error === 'object' && error !== null && 'code' in error
+            ? String((error as { code?: unknown }).code ?? '')
+            : '';
+      const sessionIsGone =
+        statusCode === 401 ||
+        statusCode === 403 ||
+        /expired|unauthori[sz]ed|session/i.test(backendCode);
+      if (sessionIsGone) {
+        logError(error instanceof Error ? error : new Error('Session expired'), {
+          scope: 'authSession.refresh',
+        });
+        return setSessionState(null, setSession, setStatus);
+      }
       logError(error instanceof Error ? error : new Error('Failed to refresh session'), {
         scope: 'authSession.refresh',
       });
-      return setSessionState(null, setSession, setStatus);
+      // Keep existing session; caller sees the previous state.
+      setStatus(sessionRef.current ? 'authenticated' : 'unauthenticated');
+      return sessionRef.current;
     }
   }, []);
 
@@ -159,6 +227,12 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     const result = await authService.studentEntry(payload);
     if (!('user' in result)) {
       return result;
+    }
+    if (result.attemptId && result.attemptToken && result.attemptExpiresAt) {
+      storeAttemptCredential(
+        { id: result.attemptId, scheduleId: result.scheduleId },
+        { attemptToken: result.attemptToken, expiresAt: result.attemptExpiresAt },
+      );
     }
     setSessionState(result, setSession, setStatus);
     return result as StudentEntrySuccess;

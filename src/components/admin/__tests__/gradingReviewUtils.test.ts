@@ -12,19 +12,27 @@ import {
   WRITING_EXPORT_COLUMNS,
 } from '../gradingReviewUtils';
 
-test('objective exports prefer the persisted draft grading source over the published version', () => {
+test('objective exports pin to the published version; draft requires explicit opt-in', () => {
   const resolveVersionId = (
     gradingReviewUtils as unknown as {
       resolveObjectiveGradingVersionId?: (
         publishedVersionId: string | undefined,
-        draftVersionId: string | null | undefined,
+        draftVersionId?: string | null | undefined,
+        options?: { allowDraftOverride?: boolean },
       ) => string | undefined;
     }
   ).resolveObjectiveGradingVersionId;
 
+  // Default: immutable published version wins (S2-C13).
   expect(resolveVersionId?.('published-version-1', 'draft-version-2')).toBe(
-    'draft-version-2',
+    'published-version-1',
   );
+  // Explicit operator opt-in still permits draft.
+  expect(
+    resolveVersionId?.('published-version-1', 'draft-version-2', { allowDraftOverride: true }),
+  ).toBe('draft-version-2');
+  // Draft remains the fallback when nothing is published yet.
+  expect(resolveVersionId?.(undefined, 'draft-version-2')).toBe('draft-version-2');
 });
 
 function createStudentSubmission(id: string, studentId: string, studentName: string) {

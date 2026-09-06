@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, ArrowRight, CheckCircle2, Clock3, Link2, LoaderCircle, LockKeyhole } from 'lucide-react';
 import { useAuthSession, type StudentQueuedAdmission } from '../../auth/api/authSession';
@@ -12,6 +12,78 @@ interface AccessForm {
 }
 
 const STUDENT_LINK_PROFILE_PREFIX = 'student-access-link-profile:';
+const STUDENT_LINK_QUEUE_TICKET_PREFIX = 'student-access-link-queue-ticket:';
+const QUEUE_POLL_FLOOR_MS = 500;
+const QUEUE_POLL_DEFAULT_MS = 1500;
+
+interface AccessLinkQueuePollFailure {
+  message: string;
+  ticketId: string;
+  position: number;
+  attempts: number;
+}
+
+interface PersistedAccessLinkQueue {
+  ticket: StudentQueuedAdmission;
+  form: AccessForm;
+}
+
+function accessLinkQueueKey(linkId: string): string {
+  return `${STUDENT_LINK_QUEUE_TICKET_PREFIX}${linkId}`;
+}
+
+function isPersistedAccessLinkQueue(value: unknown): value is PersistedAccessLinkQueue {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as { ticket?: unknown; form?: unknown };
+  if (typeof candidate.ticket !== 'object' || candidate.ticket === null) return false;
+  if (typeof candidate.form !== 'object' || candidate.form === null) return false;
+  const ticket = candidate.ticket as { state?: unknown; ticketId?: unknown; position?: unknown };
+  const form = candidate.form as { studentCode?: unknown; studentName?: unknown; email?: unknown };
+  return (
+    ticket.state === 'queued' &&
+    typeof ticket.ticketId === 'string' &&
+    ticket.ticketId.length > 0 &&
+    typeof ticket.position === 'number' &&
+    typeof form.studentCode === 'string' &&
+    typeof form.studentName === 'string' &&
+    typeof form.email === 'string'
+  );
+}
+
+function loadPersistedAccessLinkQueue(linkId: string): PersistedAccessLinkQueue | null {
+  if (!linkId || typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(accessLinkQueueKey(linkId));
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isPersistedAccessLinkQueue(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistAccessLinkQueue(linkId: string, ticket: StudentQueuedAdmission, form: AccessForm): void {
+  if (!linkId || typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(accessLinkQueueKey(linkId), JSON.stringify({ ticket, form }));
+  } catch {
+    // Queue polling still works in memory when storage is unavailable.
+  }
+}
+
+function clearPersistedAccessLinkQueue(linkId: string): void {
+  if (!linkId || typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(accessLinkQueueKey(linkId));
+  } catch {
+    // Storage cleanup is best-effort.
+  }
+}
+
+function queueEtaSeconds(pollAfterMs: number | undefined): number {
+  const floored = Math.max(QUEUE_POLL_FLOOR_MS, pollAfterMs || QUEUE_POLL_DEFAULT_MS);
+  return Math.max(1, Math.round(floored / 1000));
+}
 
 function normalizeStudentCode(value: string): string {
   const trimmed = value.trim();
@@ -53,11 +125,20 @@ export function StudentAccessLinkEntryRoute() {
   const linkQuery = useStudentAccessLink(accessLinkId);
   const { studentEntry } = useAuthSession();
   const initial = useMemo(() => readProfile(accessLinkId ?? ''), [accessLinkId]);
-  const [form, setForm] = useState<AccessForm>(initial);
+  const [restoredQueue] = useState<PersistedAccessLinkQueue | null>(() =>
+    loadPersistedAccessLinkQueue(accessLinkId ?? ''),
+  );
+  const [form, setForm] = useState<AccessForm>(() => restoredQueue?.form ?? initial);
   const [errors, setErrors] = useState<Partial<Record<keyof AccessForm, string>>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [queued, setQueued] = useState<StudentQueuedAdmission | null>(null);
-  const [queuedForm, setQueuedForm] = useState<AccessForm | null>(null);
+  const [queued, setQueued] = useState<StudentQueuedAdmission | null>(() => restoredQueue?.ticket ?? null);
+  const [queuedForm, setQueuedForm] = useState<AccessForm | null>(() => restoredQueue?.form ?? null);
+  const [queuePollFailure, setQueuePollFailure] = useState<AccessLinkQueuePollFailure | null>(null);
+  const [lastQueuedTicket, setLastQueuedTicket] = useState<StudentQueuedAdmission | null>(
+    () => restoredQueue?.ticket ?? null,
+  );
+  const pollAttemptsRef = useRef(0);
+  const submittingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
 
   const clearFieldError = (field: keyof AccessForm) => {
@@ -69,13 +150,31 @@ export function StudentAccessLinkEntryRoute() {
     });
   };
 
+  const mountSnapshotRef = useRef({
+    accessLinkId,
+    hadRestoredQueue: Boolean(restoredQueue),
+  });
   useEffect(() => {
+    // Skip reset while the mounted link still matches the restored queue
+    // ticket, so a reload resumes polling instead of wiping the recovered
+    // position. Snapshot comparison (not a one-shot flag) keeps this
+    // correct under StrictMode double-effect invocation.
+    const snapshot = mountSnapshotRef.current;
+    if (snapshot.hadRestoredQueue && accessLinkId === snapshot.accessLinkId) {
+      return;
+    }
     setForm(initial);
     setErrors({});
     setSubmitError(null);
     setQueued(null);
     setQueuedForm(null);
-  }, [initial]);
+    setQueuePollFailure(null);
+    setLastQueuedTicket(null);
+    pollAttemptsRef.current = 0;
+    if (accessLinkId) {
+      clearPersistedAccessLinkQueue(accessLinkId);
+    }
+  }, [accessLinkId, initial]);
 
   const link = linkQuery.data ?? null;
   const canEnter = link?.status === 'live';
@@ -104,7 +203,7 @@ export function StudentAccessLinkEntryRoute() {
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!link || !canEnter || !accessLinkId) return;
+    if (!link || !canEnter || !accessLinkId || submitting || submittingRef.current) return;
     const nextErrors: Partial<Record<keyof AccessForm, string>> = {};
     const normalizedName = form.studentName.trim();
     const normalizedEmail = form.email.trim();
@@ -116,43 +215,88 @@ export function StudentAccessLinkEntryRoute() {
       setErrors(nextErrors);
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
     setQueued(null);
+    setQueuePollFailure(null);
     const submitted = { studentCode: normalizedCode, studentName: normalizedName, email: normalizedEmail };
     try {
       const result = await submitEntry(link, submitted);
       if (!('user' in result)) {
+        pollAttemptsRef.current = 0;
         setQueued(result);
         setQueuedForm(submitted);
+        setLastQueuedTicket(result);
+        persistAccessLinkQueue(accessLinkId, result, submitted);
         return;
       }
+      clearPersistedAccessLinkQueue(accessLinkId);
       finishEntry(link, submitted, result);
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : 'Unable to enter this exam.');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
+  const handleRetryQueue = useCallback(() => {
+    if (submitting || !accessLinkId || !queuedForm || !lastQueuedTicket) return;
+    setSubmitError(null);
+    setQueuePollFailure(null);
+    setQueued(lastQueuedTicket);
+    persistAccessLinkQueue(accessLinkId, lastQueuedTicket, queuedForm);
+  }, [accessLinkId, lastQueuedTicket, queuedForm, submitting]);
+
+  const handleLeaveQueue = useCallback(() => {
+    if (accessLinkId) {
+      clearPersistedAccessLinkQueue(accessLinkId);
+    }
+    pollAttemptsRef.current = 0;
+    setQueued(null);
+    setQueuedForm(null);
+    setLastQueuedTicket(null);
+    setQueuePollFailure(null);
+    setSubmitError(null);
+  }, [accessLinkId]);
+
   useEffect(() => {
-    if (!link || !queued || !queuedForm) return;
+    if (!link || !queued || !queuedForm || !accessLinkId || queuePollFailure) return;
     let cancelled = false;
+    const ticketAtPollStart = queued;
     const timeout = window.setTimeout(async () => {
+      pollAttemptsRef.current += 1;
       try {
         const result = await submitEntry(link, queuedForm);
         if (cancelled) return;
         if (!('user' in result)) {
           setQueued(result);
+          setLastQueuedTicket(result);
+          persistAccessLinkQueue(accessLinkId, result, queuedForm);
           return;
         }
+        clearPersistedAccessLinkQueue(accessLinkId);
         finishEntry(link, queuedForm, result);
       } catch (error) {
-        if (!cancelled) setSubmitError(error instanceof Error ? error.message : 'Unable to continue from the admission queue.');
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : 'Unable to continue from the admission queue.';
+          // S3-C2: a failed poll must not dead-lock the form. Clear the
+          // blocking queued state but keep the ticket + payload so Retry can
+          // resume polling and Leave can discard the ticket.
+          setQueued(null);
+          setQueuePollFailure({
+            message,
+            ticketId: ticketAtPollStart.ticketId,
+            position: ticketAtPollStart.position,
+            attempts: pollAttemptsRef.current,
+          });
+          setSubmitError(message);
+        }
       }
-    }, Math.max(500, queued.pollAfterMs || 1500));
+    }, Math.max(QUEUE_POLL_FLOOR_MS, queued.pollAfterMs || QUEUE_POLL_DEFAULT_MS));
     return () => { cancelled = true; window.clearTimeout(timeout); };
-  }, [finishEntry, link, queued, queuedForm, submitEntry]);
+  }, [accessLinkId, finishEntry, link, queuePollFailure, queued, queuedForm, submitEntry]);
 
   if (linkQuery.isLoading) return <EntryShell><div className="flex min-h-72 flex-col items-center justify-center"><LoaderCircle size={24} className="animate-spin text-slate-400"/><p className="mt-3 text-sm font-medium text-slate-500">Opening your exam…</p></div></EntryShell>;
   if (linkQuery.error || !link) return <EntryShell><UnavailableState icon={<AlertCircle size={24}/>} title="This Student Link isn't available" description={linkQuery.error instanceof Error ? linkQuery.error.message : 'Ask your teacher for a current link.'}/></EntryShell>;
@@ -168,7 +312,8 @@ export function StudentAccessLinkEntryRoute() {
         {link.audienceLabel ? <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#f5f5f7] px-2.5 py-1.5 text-[10px] font-semibold text-slate-600"><LockKeyhole size={11}/>{link.audienceLabel}</div> : null}
 
         {submitError ? <div role="alert" className="mt-5 rounded-xl border border-red-100 bg-red-50 px-3 py-2.5 text-[11px] font-medium text-red-700">{submitError}</div> : null}
-        {queued ? <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 px-3 py-3"><p className="text-[11px] font-semibold text-blue-800">You're in the admission queue</p><p className="mt-1 text-[10px] text-blue-600">Position {queued.position}. This page will continue automatically.</p></div> : null}
+        {queued ? <div aria-live="polite" className="mt-5 rounded-xl border border-blue-100 bg-blue-50 px-3 py-3"><p className="text-[11px] font-semibold text-blue-800">You're in the admission queue</p><p className="mt-1 text-[10px] text-blue-600">Position {queued.position} · Ticket ref {queued.ticketId}. Checking again in ~{queueEtaSeconds(queued.pollAfterMs)}s — keep this tab open.</p><button type="button" onClick={handleLeaveQueue} className="mt-2 text-[10px] font-semibold text-blue-700 underline hover:text-blue-900">Leave queue</button></div> : null}
+        {queuePollFailure ? <div aria-live="polite" className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3"><p className="text-[11px] font-semibold text-amber-800">Queue check failed after {queuePollFailure.attempts} {queuePollFailure.attempts === 1 ? 'attempt' : 'attempts'}</p><p className="mt-1 text-[10px] text-amber-700">Ticket ref {queuePollFailure.ticketId} · Position at failure {queuePollFailure.position}. Your details are saved — retry to keep your place or leave the queue to edit the form.</p><div className="mt-2 flex gap-2"><button type="button" onClick={handleRetryQueue} className="rounded-lg bg-[#0071e3] px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-[#0077ed]">Retry</button><button type="button" onClick={handleLeaveQueue} className="rounded-lg border border-black/[0.09] bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600">Leave queue</button></div></div> : null}
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           {link.accessMode === 'student_code' ? <InputField id="student-link-code" label="Student code" value={form.studentCode} error={errors.studentCode} disabled={submitting || Boolean(queued)} onChange={(value) => { setForm((current) => ({ ...current, studentCode: value })); clearFieldError('studentCode'); }} placeholder="Enter your student code" autoComplete="off"/> : null}

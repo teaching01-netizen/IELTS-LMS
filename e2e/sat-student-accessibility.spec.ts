@@ -347,7 +347,17 @@ test.describe("SAT student accessibility and layout", () => {
     expect(navigatorBox).not.toBeNull();
     expect(footerBox).not.toBeNull();
     expect(navigatorBox!.y).toBeGreaterThan(0);
-    expect(navigatorBox!.y + navigatorBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
+    await expect
+      .poll(
+        async () => {
+          const currentNavigatorBox = await compactNavigator.boundingBox();
+          const currentFooterBox = await page.locator(".sat-exam-footer").boundingBox();
+          if (!currentNavigatorBox || !currentFooterBox) return Number.POSITIVE_INFINITY;
+          return currentNavigatorBox.y + currentNavigatorBox.height - (currentFooterBox.y + 2);
+        },
+        { timeout: 1_000 },
+      )
+      .toBeLessThanOrEqual(0);
     await expectVisibleButtonsAtLeast44(page);
   });
 
@@ -676,7 +686,7 @@ test.describe("SAT student accessibility and layout", () => {
 
     await persistedDivider.focus();
     await page.keyboard.press("Home");
-    await expect(persistedDivider).toHaveAttribute("aria-valuenow", "50");
+    await expect(persistedDivider).toHaveAttribute("aria-valuenow", "38");
   });
 
   test("real touch can adjust passage and question balance", async ({

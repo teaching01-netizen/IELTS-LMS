@@ -1,4 +1,4 @@
-export type ExamProviderKey = 'ielts' | 'sat';
+export type ExamProviderKey = 'ielts' | 'sat' | 'act';
 
 export type CreateExamInput =
   | {
@@ -11,8 +11,18 @@ export type CreateExamInput =
       providerKey: 'sat';
       title: string;
       providerExamType: 'SAT';
+    }
+  | {
+      providerKey: 'act';
+      title: string;
+      providerExamType: 'ACT';
+      preset: 'ACT Science';
     };
 
 export function isSatProvider(providerKey: ExamProviderKey | undefined): providerKey is 'sat' {
   return providerKey === 'sat';
+}
+
+export function isActProvider(providerKey: ExamProviderKey | undefined): providerKey is 'act' {
+  return providerKey === 'act';
 }

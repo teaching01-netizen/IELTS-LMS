@@ -17,8 +17,8 @@ function loadEnvFile(filePath: string) {
 }
 
 function runSeedCommand(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn('cargo', args, {
+	return new Promise<void>((resolve, reject) => {
+		const child = spawn('go', args, {
       cwd,
       env,
       stdio: 'inherit',
@@ -31,7 +31,7 @@ function runSeedCommand(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
         return;
       }
 
-      reject(new Error(`e2e seed command failed with exit code ${code ?? 'unknown'}`));
+		reject(new Error(`e2e Go seed command failed with exit code ${code ?? 'unknown'}`));
     });
   });
 }
@@ -66,9 +66,11 @@ export default async function globalSetup(config: FullConfig) {
   loadEnvFile(path.resolve(backendRoot, '.env'));
   loadEnvFile(path.resolve(workspaceRoot, '.env.example'));
 
-  process.env.AUTH_COOKIE_SECURE ??= 'false';
-  process.env.AUTH_SESSION_COOKIE_NAME ??= 'session';
-  process.env.AUTH_CSRF_COOKIE_NAME ??= 'csrf';
+	process.env.COOKIE_SECURE ??= 'false';
+	process.env.SESSION_COOKIE_NAME ??= 'session';
+	process.env.CSRF_COOKIE_NAME ??= 'csrf';
+	process.env.APP_ENV ??= 'test';
+	process.env.MIGRATIONS_DIR ??= 'migrations';
 
   if (!frontendOrigin) {
     throw new Error('E2E remote baseURL is not configured.');
@@ -83,13 +85,9 @@ export default async function globalSetup(config: FullConfig) {
 
   await fs.mkdir(GENERATED_DIR, { recursive: true });
 
-  const cargoArgs = [
-    'run',
-    '-p',
-    'ielts-backend-api',
-    '--bin',
-    'e2e_seed',
-    '--',
+	const seedArgs = [
+		'run',
+		'./cmd/e2e_seed',
     '--manifest',
     MANIFEST_PATH,
     '--builder-storage',
@@ -104,5 +102,5 @@ export default async function globalSetup(config: FullConfig) {
     frontendOrigin,
   ];
 
-  await runSeedCommand(cargoArgs, backendRoot, process.env);
+	await runSeedCommand(seedArgs, path.resolve(backendRoot, 'go'), process.env);
 }

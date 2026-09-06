@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ExamState } from '../../../../types';
 import { applyAnswerKeyEdit, type AnswerKeyRow } from '../answerKeyOverview';
 import { resolveAcceptedAnswers } from '../../../../utils/acceptedAnswers';
+import { toRoman } from '../../../../utils/examUtils';
 
 function baseState(): ExamState {
   return {
@@ -293,5 +294,93 @@ describe('answerKeyOverview.applyAnswerKeyEdit', () => {
     const tree = (next.reading.passages[0]!.blocks[0] as any).answerTree;
     expect(tree[0].children[0].acceptedAnswers).toEqual(['alpha']);
     expect(tree[0].children[1].acceptedAnswers).toEqual(['two']);
+  });
+
+  it('round-trips a MATCHING roman-numeral key through set_matching_heading', () => {
+    const state = baseState();
+    state.reading.passages[0]!.blocks.push({
+      id: 'matching-1',
+      type: 'MATCHING',
+      instruction: 'Choose headings',
+      headings: [
+        { id: 'h-1', text: 'First heading' },
+        { id: 'h-2', text: 'Second heading' },
+      ],
+      questions: [{ id: 'q1', paragraphLabel: 'A', correctHeading: '' }],
+    } as any);
+
+    const row: AnswerKeyRow = {
+      rowId: 'reading:q1',
+      moduleType: 'reading',
+      groupId: 'passage-1',
+      groupLabel: 'Passage 1',
+      blockId: 'matching-1',
+      blockType: 'MATCHING',
+      descriptorId: 'q1',
+      answerKey: 'q1',
+      numberLabel: 'Q1',
+      prompt: 'Paragraph A',
+      sortKey: 'reading:1:1:0',
+      jumpField: 'content.reading.passages[0].blocks[0]',
+    };
+
+    const next = applyAnswerKeyEdit(state, row, {
+      kind: 'set_matching_heading',
+      questionId: 'q1',
+      headingKey: 'ii',
+    });
+
+    const block = next.reading.passages[0]!.blocks[0] as any;
+    expect(block.questions[0].correctHeading).toBe('ii');
+
+    // The stored value must be in the validator's allowed set.
+    const allowed = new Set(block.headings.map((_: unknown, i: number) => toRoman(i)));
+    expect(allowed.has(block.questions[0].correctHeading)).toBe(true);
+
+    // Simulate the renderer read: option value === stored value.
+    const optionValues = block.headings.map((_: unknown, i: number) => toRoman(i));
+    expect(optionValues).toContain(block.questions[0].correctHeading);
+  });
+
+  it('throws on a malformed sub-answer leafId instead of silently returning', () => {
+    const state = baseState();
+    state.reading.passages[0]!.blocks.push({
+      id: 'tree-block',
+      type: 'CLOZE',
+      instruction: '',
+      answerRule: 'ONE_WORD',
+      subAnswerModeEnabled: true,
+      answerTree: [
+        {
+          id: 'root-a',
+          label: 'Root prompt',
+          children: [{ id: 'leaf-a', acceptedAnswers: ['one'] }],
+        },
+      ],
+      questions: [{ id: 'ignored-q', prompt: 'x', correctAnswer: '', acceptedAnswers: [] }],
+    } as any);
+
+    const row: AnswerKeyRow = {
+      rowId: 'reading:tree-block::tree::root-a::leaf-a',
+      moduleType: 'reading',
+      groupId: 'passage-1',
+      groupLabel: 'Passage 1',
+      blockId: 'tree-block',
+      blockType: 'CLOZE',
+      descriptorId: 'tree-block::tree::root-a::leaf-a',
+      answerKey: 'tree-block::tree::root-a::leaf-a',
+      numberLabel: 'Q1.1',
+      prompt: 'Root prompt',
+      sortKey: 'reading:1:1.1:0',
+      jumpField: 'content.reading.passages[0].blocks[0]',
+    };
+
+    expect(() =>
+      applyAnswerKeyEdit(state, row, {
+        kind: 'set_sub_answer_leaf_accepted_answers',
+        leafId: 'garbage-no-marker',
+        acceptedAnswers: ['x'],
+      }),
+    ).toThrow(/invalid|malformed/i);
   });
 });

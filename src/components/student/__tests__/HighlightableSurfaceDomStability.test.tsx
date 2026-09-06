@@ -26,6 +26,29 @@ describe('HighlightableSurface DOM stability', () => {
     expect(afterTextNode).toBe(beforeTextNode);
   });
 
+  it('exposes a keyboard-focusable surface with an Alt+H label (S1-C9)', () => {
+    const { container } = render(
+      <HighlightableSurface as="div" html="<p>Hello</p>" />,
+    );
+
+    const surface = container.querySelector('[data-student-highlightable="true"]') as HTMLElement;
+    expect(surface).not.toBeNull();
+    expect(surface).toHaveAttribute('tabindex', '0');
+    expect(surface.getAttribute('aria-label')).toContain('Alt+H');
+  });
+
+  it('renders a polite sr-only mode announcer (S1-C10, header pattern)', () => {
+    const { container } = render(
+      <HighlightableSurface as="div" html="<p>Hello</p>" announce="Highlighted with yellow." />,
+    );
+
+    const announcer = container.querySelector('[role="status"]');
+    expect(announcer).not.toBeNull();
+    expect(announcer).toHaveAttribute('aria-live', 'polite');
+    expect(announcer).toHaveClass('sr-only');
+    expect(announcer).toHaveTextContent('Highlighted with yellow.');
+  });
+
   it('keeps inner text nodes and HTML intact when the selection tint is toggled', () => {
     const html = '<p>Hello <strong>world</strong></p>';
 

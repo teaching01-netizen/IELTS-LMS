@@ -130,7 +130,7 @@ describe('ExamLifecycleService backend mode', () => {
 
     const fetchMock = vi
       .fn()
-      // initial exam fetch for revision
+      // initial exam fetch to resolve the draft version id
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
@@ -149,6 +149,28 @@ describe('ExamLifecycleService backend mode', () => {
               currentPublishedVersionId: null,
               schemaVersion: 3,
               revision: 0,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      // fresh draft version read for the fence revision
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              id: 'ver-1',
+              examId: '11111111-1111-1111-1111-111111111111',
+              versionNumber: 1,
+              parentVersionId: null,
+              contentSnapshot: state,
+              configSnapshot: state.config,
+              createdBy: 'owner-1',
+              createdAt: '2026-01-01T00:00:01.000Z',
+              isDraft: true,
+              isPublished: false,
+              revision: 7,
             },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
@@ -320,7 +342,7 @@ describe('ExamLifecycleService backend mode', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),
       )
-      // validation enrichment sees revision 5
+      // validation enrichment: exam fetch (revision 5) then version fetch
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
@@ -342,7 +364,33 @@ describe('ExamLifecycleService backend mode', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),
       )
-      // publish must re-check and use this newer revision
+      // publish fence: exam fetch for the draft id, then fresh version read (revision 6)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              ...examPayload,
+              updatedAt: '2026-01-01T00:00:04.000Z',
+              revision: 6,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              ...versionPayload,
+              revision: 6,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      // post-publish exam refresh
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({

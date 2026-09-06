@@ -46,7 +46,7 @@ describe('QuestionBuilderPane', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: /^add question$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^add question to block/i })).toBeTruthy();
   });
 
   it('hides inline add question controls for unsupported block types', () => {
@@ -65,7 +65,7 @@ describe('QuestionBuilderPane', () => {
       />,
     );
 
-    expect(screen.queryByRole('button', { name: /^add question$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^add question to block/i })).toBeNull();
   });
 
   it('keeps rapid add-question clicks in sync with the latest block state', async () => {
@@ -85,7 +85,7 @@ describe('QuestionBuilderPane', () => {
 
     render(<Harness />);
 
-    const addQuestionButton = screen.getByRole('button', { name: /^add question$/i });
+    const addQuestionButton = screen.getByRole('button', { name: /^add question to block/i });
 
     await act(async () => {
       fireEvent.click(addQuestionButton);
@@ -97,51 +97,39 @@ describe('QuestionBuilderPane', () => {
     });
   });
 
-  it('inline add question for SINGLE_MCQ appends a question entry instead of adding options', async () => {
-    function Harness() {
-      const [blocks, setBlocks] = useState([
-        {
-          id: 'single-block-1',
-          type: 'SINGLE_MCQ',
-          instruction: 'Choose one answer for each question.',
-          stem: 'Legacy stem',
-          options: [
-            { id: 'legacy-a', text: 'Legacy A', isCorrect: true },
-            { id: 'legacy-b', text: 'Legacy B', isCorrect: false },
-          ],
-          questions: [
-            {
-              id: 'single-q1',
-              stem: 'Question 1',
-              options: [
-                { id: 'q1-a', text: 'A', isCorrect: true },
-                { id: 'q1-b', text: 'B', isCorrect: false },
-                { id: 'q1-c', text: 'C', isCorrect: false },
-              ],
-            },
-          ],
-        } as any,
-      ]);
+  it('does not render pane-inline add question for SINGLE_MCQ blocks', () => {
+    render(
+      <QuestionBuilderPane
+        title="Reading"
+        blocks={[
+          {
+            id: 'single-block-1',
+            type: 'SINGLE_MCQ',
+            instruction: 'Choose one answer.',
+            stem: 'Question',
+            options: [
+              { id: 'opt-a', text: 'A', isCorrect: true },
+              { id: 'opt-b', text: 'B', isCorrect: false },
+            ],
+            questions: [
+              {
+                id: 'single-q1',
+                stem: 'Question 1',
+                options: [
+                  { id: 'q1-a', text: 'A', isCorrect: true },
+                  { id: 'q1-b', text: 'B', isCorrect: false },
+                ],
+              },
+            ],
+          } as any,
+        ]}
+        updateBlocks={vi.fn()}
+      />,
+    );
 
-      const singleBlock = blocks[0] as any;
-      return (
-        <>
-          <QuestionBuilderPane title="Reading" blocks={blocks} updateBlocks={setBlocks} />
-          <div data-testid="single-question-count">{singleBlock.questions?.length ?? 0}</div>
-          <div data-testid="single-first-option-count">{singleBlock.questions?.[0]?.options?.length ?? 0}</div>
-        </>
-      );
-    }
-
-    render(<Harness />);
-
-    const addQuestionButton = screen.getByRole('button', { name: /^add question$/i });
-    fireEvent.click(addQuestionButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('single-question-count')).toHaveTextContent('2');
-    });
-    expect(screen.getByTestId('single-first-option-count')).toHaveTextContent('3');
+    // SINGLE_MCQ uses block-local add controls only (see SingleMCQBlock.test.tsx);
+    // the generic pane-inline add is hidden for it.
+    expect(screen.queryByRole('button', { name: /^add question to block/i })).toBeNull();
   });
 
   it('clears a deleted selection before saving a block to the bank', async () => {
@@ -164,11 +152,59 @@ describe('QuestionBuilderPane', () => {
     render(<Harness />);
 
     fireEvent.click(screen.getByTestId('tfng-block'));
-    fireEvent.click(screen.getByRole('button', { name: /delete block/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^delete block$/i }));
+
+    // C7: delete is a two-step confirm flow — modal opens, block kept until confirmed.
+    const confirmDialog = screen.getByRole('dialog', { name: /delete question block/i });
+    expect(screen.getByTestId('tfng-block')).toBeInTheDocument();
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: /^delete block$/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('tfng-block')).toBeNull();
+    });
     fireEvent.click(screen.getByRole('button', { name: /save to bank/i }));
 
     expect(alertSpy).toHaveBeenCalledWith('Please select a question block first by clicking on it.');
     alertSpy.mockRestore();
+  });
+
+  it('requires confirmation before deleting a question block', async () => {
+    function Harness() {
+      const [blocks, setBlocks] = useState([
+        {
+          id: 'block-1',
+          type: 'TFNG',
+          mode: 'TFNG',
+          instruction: 'Read and answer',
+          questions: [{ id: 'q-1', statement: 'Statement', correctAnswer: 'T' }],
+        } as any,
+      ]);
+
+      return <QuestionBuilderPane title="Reading" blocks={blocks} updateBlocks={setBlocks} />;
+    }
+
+    render(<Harness />);
+
+    // Requesting delete opens the confirm modal; the block is kept.
+    fireEvent.click(screen.getByRole('button', { name: /^delete block$/i }));
+    const confirmDialog = screen.getByRole('dialog', { name: /delete question block/i });
+    expect(confirmDialog).toHaveTextContent(/questions 1-1/i);
+    expect(screen.getByTestId('tfng-block')).toBeInTheDocument();
+
+    // Cancel keeps the block and closes the modal.
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: /^cancel$/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /delete question block/i })).toBeNull();
+    });
+    expect(screen.getByTestId('tfng-block')).toBeInTheDocument();
+
+    // Confirm removes the block.
+    fireEvent.click(screen.getByRole('button', { name: /^delete block$/i }));
+    const reopenedDialog = screen.getByRole('dialog', { name: /delete question block/i });
+    fireEvent.click(within(reopenedDialog).getByRole('button', { name: /^delete block$/i }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('tfng-block')).toBeNull();
+    });
   });
 
   it('keeps full legacy question range visible after adding a question', async () => {
@@ -202,13 +238,8 @@ describe('QuestionBuilderPane', () => {
 
     render(<Harness />);
 
-    const blockHeader = screen.getByText('Questions 18-23');
-    const blockContainer = blockHeader.closest('.border.border-gray-100');
-    expect(blockContainer).toBeTruthy();
-    const addQuestionButtons = within(blockContainer as HTMLElement).getAllByRole('button', {
-      name: /^add question$/i,
-    });
-    fireEvent.click(addQuestionButtons[0]!);
+    const inlineAddButton = screen.getByRole('button', { name: /^add question to block/i });
+    fireEvent.click(inlineAddButton);
 
     await waitFor(() => {
       expect(screen.getByText('Questions 18-24')).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
 import { ExamConfig, ModuleType, QuestionType, DeepPartial, ModuleConfig } from '../../../types';
 
 type SettingsTab = 'general' | 'sections' | 'timing' | 'scoring' | 'security' | 'publish';
@@ -31,44 +31,87 @@ interface ExamConfigProviderProps {
 export function ExamConfigProvider({ children, initialConfig, onChange }: ExamConfigProviderProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [config, setConfig] = useState<ExamConfig>(initialConfig);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  // Tracks whether the user has unsaved local edits; external syncs must not clobber them.
+  const dirtyRef = useRef(false);
+  const initialRef = useRef(initialConfig);
 
   const updateConfig = useCallback(<K extends keyof ExamConfig>(section: K, value: DeepPartial<ExamConfig[K]>) => {
-    const newConfig = {
-      ...config,
-      [section]: {
-        ...config[section],
-        ...value
-      }
-    };
-    setConfig(newConfig);
-    onChange(newConfig);
-  }, [config, onChange]);
-
-  const updateSection = useCallback((module: ModuleType, value: DeepPartial<ModuleConfig>) => {
-    const newConfig = {
-      ...config,
-      sections: {
-        ...config.sections,
-        [module]: {
-          ...config.sections[module],
+    dirtyRef.current = true;
+    let nextConfig: ExamConfig | null = null;
+    setConfig((previous) => {
+      nextConfig = {
+        ...previous,
+        [section]: {
+          ...previous[section],
           ...value
         }
-      }
-    };
-    setConfig(newConfig);
-    onChange(newConfig);
-  }, [config, onChange]);
+      };
+      return nextConfig;
+    });
+    // setState updater runs synchronously in React for this read-back; fall back to a
+    // functional recompute if it did not (e.g. future concurrent behavior).
+    if (nextConfig) {
+      onChangeRef.current(nextConfig);
+    }
+  }, []);
+
+  const updateSection = useCallback((module: ModuleType, value: DeepPartial<ModuleConfig>) => {
+    dirtyRef.current = true;
+    let nextConfig: ExamConfig | null = null;
+    setConfig((previous) => {
+      nextConfig = {
+        ...previous,
+        sections: {
+          ...previous.sections,
+          [module]: {
+            ...previous.sections[module],
+            ...value
+          }
+        }
+      };
+      return nextConfig;
+    });
+    if (nextConfig) {
+      onChangeRef.current(nextConfig);
+    }
+  }, []);
 
   const toggleQuestionType = useCallback((module: ModuleType, type: QuestionType) => {
-    const currentTypes = config.sections[module].allowedQuestionTypes;
-    const newTypes = currentTypes.includes(type)
-      ? currentTypes.filter(t => t !== type)
-      : [...currentTypes, type];
-    updateSection(module, { allowedQuestionTypes: newTypes });
-  }, [config.sections, updateSection]);
+    dirtyRef.current = true;
+    let nextConfig: ExamConfig | null = null;
+    setConfig((previous) => {
+      const currentTypes = previous.sections[module].allowedQuestionTypes;
+      const newTypes = currentTypes.includes(type)
+        ? currentTypes.filter(t => t !== type)
+        : [...currentTypes, type];
+      nextConfig = {
+        ...previous,
+        sections: {
+          ...previous.sections,
+          [module]: {
+            ...previous.sections[module],
+            allowedQuestionTypes: newTypes
+          }
+        }
+      };
+      return nextConfig;
+    });
+    if (nextConfig) {
+      onChangeRef.current(nextConfig);
+    }
+  }, []);
 
-  // Sync with external config changes
+  // Sync with external config changes, but never clobber unsaved local edits.
   React.useEffect(() => {
+    if (initialRef.current === initialConfig) {
+      return;
+    }
+    initialRef.current = initialConfig;
+    if (dirtyRef.current) {
+      return;
+    }
     setConfig(initialConfig);
   }, [initialConfig]);
 

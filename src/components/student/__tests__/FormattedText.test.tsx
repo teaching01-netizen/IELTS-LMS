@@ -124,7 +124,7 @@ describe('highlight tool selection tint via FormattedText', () => {
     const surface = container.querySelector('[data-student-highlightable="true"]') as HTMLElement;
     expect(surface).not.toBeNull();
     expect(surface).toHaveAttribute('data-student-highlight-selection', 'true');
-    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#d9e9f8');
+    expect(surface.style.getPropertyValue('--student-highlight-selection-color')).toBe('#b3d3f1');
   });
 
   it('leaves plain non-highlightable copy without any tint marker', () => {

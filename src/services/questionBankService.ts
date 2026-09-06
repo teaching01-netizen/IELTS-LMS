@@ -13,6 +13,37 @@ import {
 import { logError } from '../app/error/errorLogger';
 import { queryClient, queryKeys } from '../app/data/queryClient';
 import { createTtlLruCache } from '../utils/ttlLruCache';
+import { assertLibraryContentValid, dedupeRefresh, isConflictError } from './libraryConcurrency';
+import type { QuestionType } from '../types';
+
+function questionContentText(block: QuestionBlock): string {
+  try {
+    return JSON.stringify(block);
+  } catch {
+    return '';
+  }
+}
+
+const KNOWN_QUESTION_TYPES: ReadonlySet<string> = new Set<string>([
+  'TFNG',
+  'CLOZE',
+  'MATCHING',
+  'MAP',
+  'MULTI_MCQ',
+  'SINGLE_MCQ',
+  'SHORT_ANSWER',
+  'SENTENCE_COMPLETION',
+  'DIAGRAM_LABELING',
+  'FLOW_CHART',
+  'TABLE_COMPLETION',
+  'NOTE_COMPLETION',
+  'CLASSIFICATION',
+  'MATCHING_FEATURES',
+]);
+
+function normalizeQuestionType(value: unknown, fallback: QuestionType): QuestionType {
+  return typeof value === 'string' && KNOWN_QUESTION_TYPES.has(value) ? (value as QuestionType) : fallback;
+}
 
 type LegacyBackendQuestionBankItem = {
   id: string;
@@ -75,6 +106,7 @@ class BackendQuestionBank {
   }
 
   async addQuestion(block: QuestionBlock, metadata: Omit<QuestionMetadata, 'id' | 'createdAt' | 'usageCount'>): Promise<QuestionBankItem> {
+    assertLibraryContentValid('question', questionContentText(block));
     const raw = await backendPost<unknown>('/v1/library/questions', {
       questionType: block.type,
       blockSnapshot: block,
@@ -91,10 +123,18 @@ class BackendQuestionBank {
   }
 
   async updateQuestion(id: string, updates: Partial<{ block: QuestionBlock; metadata: Partial<QuestionMetadata> }>): Promise<QuestionBankItem | null> {
+    if (updates.block) {
+      assertLibraryContentValid('question', questionContentText(updates.block));
+    }
+    const refreshRevision = async (): Promise<number | undefined> => {
+      await this.getQuestion(id);
+      return questionRevisions.get(id);
+    };
+    // Per-id in-flight dedupe: concurrent updates for the same question share
+    // one revision-hydrating GET instead of stampeding the backend.
     let revision = questionRevisions.get(id);
     if (revision === undefined) {
-      await this.getQuestion(id);
-      revision = questionRevisions.get(id);
+      revision = await dedupeRefresh(`question:${id}`, refreshRevision);
       if (revision === undefined) return null;
     }
 
@@ -119,10 +159,24 @@ class BackendQuestionBank {
       patchBody['tags'] = updates.metadata.tags;
     }
 
-    const raw = await backendPatch<unknown>(`/v1/library/questions/${id}`, patchBody);
-    const mapped = this.mapBackendItem(raw);
-    invalidateQuestionQueries();
-    return mapped;
+    try {
+      const raw = await backendPatch<unknown>(`/v1/library/questions/${id}`, patchBody);
+      const mapped = this.mapBackendItem(raw);
+      invalidateQuestionQueries();
+      return mapped;
+    } catch (error) {
+      // 409 = stale revision (another writer won the race). Refresh once via
+      // the shared single-flight GET and retry with the fresh revision; a
+      // second 409 (or a vanished record) surfaces to the caller.
+      if (!isConflictError(error)) throw error;
+      const freshRevision = await dedupeRefresh(`question:${id}`, refreshRevision);
+      if (freshRevision === undefined) return null;
+      const retryBody = { ...patchBody, revision: freshRevision };
+      const raw = await backendPatch<unknown>(`/v1/library/questions/${id}`, retryBody);
+      const mapped = this.mapBackendItem(raw);
+      invalidateQuestionQueries();
+      return mapped;
+    }
   }
 
   async deleteQuestion(id: string): Promise<boolean> {
@@ -172,12 +226,8 @@ class BackendQuestionBank {
   }
 
   async incrementUsageCount(id: string): Promise<void> {
-    try {
-      await backendPatch(`/v1/library/questions/${id}/increment-usage`, {});
-      invalidateQuestionQueries();
-    } catch {
-      // Some deployments don't implement this endpoint; usage count is best-effort.
-    }
+    await backendPatch(`/v1/library/questions/${id}/increment-usage`, {});
+    invalidateQuestionQueries();
   }
 
   async getTopics(): Promise<string[]> {
@@ -338,15 +388,17 @@ class BackendQuestionBank {
   }
 
   private coerceQuestionBlock(snapshot: unknown, fallbackType: string): QuestionBlock {
+    // Never trust the backend snapshot blindly: the row is unusable without a
+    // known block type, and an unknown type falls back explicitly (callers can
+    // see the substitution) instead of flowing through as `undefined`.
+    const safeType = normalizeQuestionType(fallbackType, 'TFNG');
     if (typeof snapshot === 'object' && snapshot !== null) {
       const typed = snapshot as Record<string, unknown>;
-      if (typeof typed['type'] !== 'string') {
-        typed['type'] = fallbackType;
-      }
+      typed['type'] = normalizeQuestionType(typed['type'], safeType);
       return typed as unknown as QuestionBlock;
     }
 
-    return { type: fallbackType as QuestionBlock['type'], id: `b${Date.now()}` } as QuestionBlock;
+    return { type: safeType, id: `b${Date.now()}` } as QuestionBlock;
   }
 }
 

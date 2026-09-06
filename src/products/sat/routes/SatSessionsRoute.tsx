@@ -22,8 +22,11 @@ function bucketFor(status: string, runtimeStatus: string): SessionBucket {
   return 'upcoming';
 }
 
-function formatSessionTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
+function formatSessionTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return '—';
+  return new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(time));
 }
 
 function toLocalDateTimeInput(date: Date): string {

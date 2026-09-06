@@ -11,6 +11,7 @@ export interface ExamProviderDefinition {
 const providers: Record<ExamProviderKey, ExamProviderDefinition> = {
   ielts: { key: 'ielts', label: 'IELTS' },
   sat: { key: 'sat', label: 'Digital SAT', blueprint: SAT_BLUEPRINT, validateQuestion: validateSatQuestion },
+  act: { key: 'act', label: 'ACT Science' },
 };
 
 export function getExamProvider(providerKey: ExamProviderKey): ExamProviderDefinition {

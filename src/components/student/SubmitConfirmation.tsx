@@ -13,27 +13,79 @@ interface SubmitConfirmationProps {
   unansweredSubmissionPolicy?: 'allow' | 'confirm' | 'block' | undefined;
 }
 
-export function SubmitConfirmation({ 
-  isOpen, 
-  onClose, 
-  onConfirm, 
-  answeredCount, 
-  totalQuestions, 
+export function SubmitConfirmation({
+  isOpen,
+  onClose,
+  onConfirm,
+  answeredCount,
+  totalQuestions,
   flaggedCount,
   timeRemaining,
   unansweredSubmissionPolicy = 'confirm',
 }: SubmitConfirmationProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  const onConfirmRef = useRef(onConfirm);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    onConfirmRef.current = onConfirm;
+  }, [onConfirm]);
 
   useEffect(() => {
     if (!isOpen) return;
+    previousActiveElementRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     panelRef.current?.focus();
+    const appRoot = document.getElementById('root') ?? document.getElementById('app');
+    const previousInert = appRoot?.getAttribute('inert');
+    appRoot?.setAttribute('inert', '');
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !panelRef.current) {
+        return;
+      }
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) {
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) {
+        return;
+      }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose]);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      if (appRoot) {
+        if (previousInert === null || previousInert === undefined) {
+          appRoot.removeAttribute('inert');
+        } else {
+          appRoot.setAttribute('inert', previousInert);
+        }
+      }
+      previousActiveElementRef.current?.focus?.();
+      previousActiveElementRef.current = null;
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -49,9 +101,16 @@ export function SubmitConfirmation({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  const handleConfirm = () => {
+    onConfirmRef.current();
+  };
+  const handleClose = () => {
+    onCloseRef.current();
+  };
+
   return (
     <div
-      className="student-confirmation-surface absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6"
+      className="student-confirmation-surface fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="submit-confirmation-title"
@@ -76,7 +135,7 @@ export function SubmitConfirmation({
               {hasUnanswered ? 'Confirm Submission' : 'Ready to Submit?'}
             </h2>
           </div>
-          <button onClick={onClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors" aria-label="Close confirmation">
+          <button onClick={handleClose} className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors" aria-label="Close confirmation">
             <X size={18} />
           </button>
         </div>
@@ -158,14 +217,14 @@ export function SubmitConfirmation({
         <div className="p-4 sm:p-6 border-t border-gray-200 bg-gray-50 rounded-b-lg flex gap-2 md:gap-3">
           <Button
             variant="secondary"
-            onClick={onClose}
+            onClick={handleClose}
             className="flex-1 text-sm md:text-base"
           >
             Review Answers
           </Button>
           <Button
             variant={hasUnanswered ? "danger" : "primary"}
-            onClick={onConfirm}
+            onClick={handleConfirm}
             disabled={!canSubmit}
             className="flex-1 text-sm md:text-base"
           >

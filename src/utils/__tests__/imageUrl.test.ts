@@ -25,4 +25,15 @@ describe('imageUrl', () => {
   it('leaves non-drive urls unchanged', () => {
     expect(normalizeImageUrl('https://example.com/image.png')).toBe('https://example.com/image.png');
   });
+
+  it('drops javascript:/vbscript:/data:text/html sources to an empty string', () => {
+    expect(normalizeImageUrl('javascript:alert(1)')).toBe('');
+    expect(normalizeImageUrl('  VbScript:msgbox(1)')).toBe('');
+    expect(normalizeImageUrl('data:text/html,<script>alert(1)</script>')).toBe('');
+    expect(getImageUrlCandidates('javascript:alert(1)')).toEqual([]);
+  });
+
+  it('keeps benign data:image sources', () => {
+    expect(normalizeImageUrl('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
+  });
 });

@@ -93,7 +93,9 @@ export interface SubmitAttemptV2Response {
   status: string;
   attemptRevision: number;
   finalResponseDigest: string;
-  submittedAt: string;
+  // SAT's V2 submit is a provisional receipt until the provider completion
+  // path scores and seals all modules.
+  submittedAt: string | null;
   acknowledgements: ResponseAcknowledgementV2[];
 }
 

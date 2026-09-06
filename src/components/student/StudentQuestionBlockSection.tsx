@@ -35,6 +35,8 @@ export interface StudentQuestionBlockSectionProps {
   renderBlockInstruction: (instruction: string, blockId: string) => React.ReactNode;
   expandedQuestionGapClassName: string;
   hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
+  eliminatedOptionIdsByQuestion?: Readonly<Record<string, readonly string[]>> | undefined;
+  onToggleOptionElimination?: ((questionId: string, optionId: string) => void) | undefined;
 }
 
 function FlagButton({
@@ -114,7 +116,9 @@ function areBlockPropsEqual(
     previous.getBlockStartQuestionNumber !== next.getBlockStartQuestionNumber ||
     previous.renderBlockInstruction !== next.renderBlockInstruction ||
     previous.expandedQuestionGapClassName !== next.expandedQuestionGapClassName ||
-    previous.hideDiagramReferenceForBlock !== next.hideDiagramReferenceForBlock
+    previous.hideDiagramReferenceForBlock !== next.hideDiagramReferenceForBlock ||
+    previous.eliminatedOptionIdsByQuestion !== next.eliminatedOptionIdsByQuestion ||
+    previous.onToggleOptionElimination !== next.onToggleOptionElimination
   ) {
     return false;
   }
@@ -153,6 +157,8 @@ export const StudentQuestionBlockSection = React.memo(
     renderBlockInstruction,
     expandedQuestionGapClassName,
     hideDiagramReferenceForBlock,
+    eliminatedOptionIdsByQuestion,
+    onToggleOptionElimination,
   }: StudentQuestionBlockSectionProps) {
     const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
     const treeQuestions = blockQuestions.filter((question) => question.isSubAnswerTreeLeaf);
@@ -260,6 +266,12 @@ export const StudentQuestionBlockSection = React.memo(
                     highlightEnabled={highlightEnabled}
                     highlightColor={highlightColor}
                     hideDiagramReference={hideDiagramReferenceForBlock?.(block.id)}
+                    eliminatedOptionIds={eliminatedOptionIdsByQuestion?.[question.id]}
+                    onToggleOptionElimination={
+                      onToggleOptionElimination
+                        ? (optionId) => onToggleOptionElimination(question.id, optionId)
+                        : undefined
+                    }
                   />
                 </div>
               );
@@ -299,6 +311,15 @@ export const StudentQuestionBlockSection = React.memo(
                 highlightEnabled={highlightEnabled}
                 highlightColor={highlightColor}
                 hideDiagramReference={hideDiagramReferenceForBlock?.(block.id)}
+                eliminatedOptionIds={
+                  eliminatedOptionIdsByQuestion?.[singleBlockQuestion?.id ?? block.id]
+                }
+                onToggleOptionElimination={
+                  onToggleOptionElimination
+                    ? (optionId) =>
+                        onToggleOptionElimination(singleBlockQuestion?.id ?? block.id, optionId)
+                    : undefined
+                }
               />
             </div>
           )}

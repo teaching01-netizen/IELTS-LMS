@@ -26,12 +26,14 @@ import {
   VersionDiff,
   BulkOperationResult
 } from '../types/domain';
-import { ExamState, ModuleType } from '../types';
+import { ExamState, ExamType, ModuleType } from '../types';
 import {
   validateReadingModule,
   validateListeningModule,
+  validateActScienceModule,
   getReadingTotalQuestions,
-  getListeningTotalQuestions
+  getListeningTotalQuestions,
+  getActScienceTotalQuestions,
 } from '../utils/examUtils';
 import { normalizeExamStateTableCompletionBlocks } from '../utils/tableCompletion';
 import { createInitialExamState, hydrateExamState } from './examAdapterService';
@@ -43,7 +45,6 @@ import {
   backendPatch,
   backendPost,
   getExamRevision,
-  isBackendBuilderEnabled,
   mapBackendExamVersion,
   rememberExamRevision,
   buildCreateAssessmentExamPayload,
@@ -113,6 +114,24 @@ export class ExamLifecycleService {
     return this.repository === examRepository;
   }
 
+  /**
+   * Resolve the current DRAFT VERSION revision for SaveDraft/Publish fencing.
+   * The Go backend fences those endpoints against exam_versions.revision —
+   * not exam_entities.revision — so the exam revision cache must not be used.
+   * Always refetches the exam to find the live draft version, then reads the
+   * version row fresh (bypassing the TTL version cache) for the fence value.
+   */
+  private async ensureBackendDraftVersionRevision(examId: string): Promise<number | null> {
+    const exam = await this.repository.getExamById(examId);
+    const draftVersionId = exam?.currentDraftVersionId ?? null;
+    if (!exam || !draftVersionId) {
+      return null;
+    }
+
+    const current = await backendGet<{ revision?: number | undefined }>(`/v1/versions/${draftVersionId}`);
+    return typeof current?.revision === 'number' ? current.revision : null;
+  }
+
   private async ensureBackendExamRevision(examId: string): Promise<number | null> {
     const cached = getExamRevision(examId);
     if (cached !== undefined) {
@@ -141,7 +160,7 @@ export class ExamLifecycleService {
    */
   async createExam(
     title: string,
-    type: 'Academic' | 'General Training',
+    type: ExamType,
     initialState: ExamState,
     owner: string = 'System'
   ): Promise<TransitionResult> {
@@ -262,7 +281,7 @@ export class ExamLifecycleService {
     }
 
     if (!this.useBackendBuilder()) {
-      return { success: false, error: 'The Digital SAT requires the backend authoring service.' };
+      return { success: false, error: `The ${input.providerKey.toUpperCase()} requires the backend authoring service.` };
     }
 
     try {
@@ -272,10 +291,18 @@ export class ExamLifecycleService {
         buildCreateAssessmentExamPayload({ ...input, slug }),
       );
       rememberExamRevision(createdExam.id, createdExam.revision);
+      if (input.providerKey === 'act') {
+        const initialState = createInitialExamState(input.title, 'ACT', 'ACT Science');
+        await backendPatch(`/v1/exams/${createdExam.id}/draft`, {
+          contentSnapshot: initialState,
+          configSnapshot: initialState.config,
+          revision: createdExam.revision,
+        });
+      }
       const exam = await this.repository.getExamById(createdExam.id);
       return exam
         ? { success: true, exam }
-        : { success: false, error: 'The created SAT exam could not be loaded.' };
+        : { success: false, error: `The ${input.providerKey.toUpperCase()} exam could not be loaded.` };
     } catch (error) {
       return {
         success: false,
@@ -307,9 +334,9 @@ export class ExamLifecycleService {
 
     if (this.useBackendBuilder()) {
       try {
-        const revision = await this.ensureBackendExamRevision(examId);
+        const revision = await this.ensureBackendDraftVersionRevision(examId);
         if (revision === null) {
-          return { success: false, error: 'Exam not found' };
+          return { success: false, error: 'Draft version not found' };
         }
 
         const savedVersion = await backendPatch<any>(`/v1/exams/${examId}/draft`, {
@@ -561,9 +588,9 @@ export class ExamLifecycleService {
       }
 
       try {
-        const revision = await this.refreshBackendExamRevision(examId);
+        const revision = await this.ensureBackendDraftVersionRevision(examId);
         if (revision === null) {
-          return { success: false, error: 'Exam not found' };
+          return { success: false, error: 'Draft version not found' };
         }
 
         const publishedVersion = await backendPost<any>(`/v1/exams/${examId}/publish`, {
@@ -921,7 +948,7 @@ export class ExamLifecycleService {
           warnings: Array<{ field: string; message: string }>;
         }>(`/v1/exams/${examId}/validation`);
 
-        let questionCounts = { reading: 0, listening: 0, total: 0 };
+        let questionCounts: PublishReadiness['questionCounts'] = { reading: 0, listening: 0, total: 0 };
         let integrityIssues: ReturnType<typeof getExamIdCollisionIssues> = [];
         try {
           const exam = await this.repository.getExamById(examId);
@@ -937,11 +964,15 @@ export class ExamLifecycleService {
               const listeningQuestions = config.sections.listening.enabled
                 ? getListeningTotalQuestions(content.listening.parts)
                 : 0;
+              const scienceQuestions = config.sections.science.enabled
+                ? getActScienceTotalQuestions(content.science.stimuli)
+                : 0;
               integrityIssues = getExamIdCollisionIssues(content);
               questionCounts = {
                 reading: readingQuestions,
                 listening: listeningQuestions,
-                total: readingQuestions + listeningQuestions,
+                ...(config.sections.science.enabled ? { science: scienceQuestions } : {}),
+                total: readingQuestions + listeningQuestions + scienceQuestions,
               };
             }
           }
@@ -1143,7 +1174,21 @@ export class ExamLifecycleService {
       }
     }
 
-    // 8. Visibility and permissions check
+    // 8. ACT Science module validation
+    if (config.sections.science.enabled) {
+      const scienceErrors = validateActScienceModule(content.science.stimuli);
+      scienceErrors.forEach((issue) => {
+        const field = issue.field || 'science';
+        if (issue.type === 'warning') {
+          warnings.push({ field, message: issue.message });
+        } else {
+          errors.push({ field, message: issue.message, severity: 'error' });
+          missingFields.push(field);
+        }
+      });
+    }
+
+    // 9. Visibility and permissions check
     if (exam.visibility === 'private') {
       warnings.push({ field: 'visibility', message: 'Exam visibility is set to private - it will not be visible to other users' });
     }
@@ -1166,6 +1211,7 @@ export class ExamLifecycleService {
     // Calculate question counts
     const readingQuestions = config.sections.reading.enabled ? getReadingTotalQuestions(content.reading.passages) : 0;
     const listeningQuestions = config.sections.listening.enabled ? getListeningTotalQuestions(content.listening.parts) : 0;
+    const scienceQuestions = config.sections.science.enabled ? getActScienceTotalQuestions(content.science.stimuli) : 0;
 
     const integrityIssues = getExamIdCollisionIssues(content);
     integrityIssues.forEach((issue) => {
@@ -1189,7 +1235,8 @@ export class ExamLifecycleService {
       questionCounts: {
         reading: readingQuestions,
         listening: listeningQuestions,
-        total: readingQuestions + listeningQuestions
+        ...(config.sections.science.enabled ? { science: scienceQuestions } : {}),
+        total: readingQuestions + listeningQuestions + scienceQuestions,
       }
     };
   }
@@ -1744,9 +1791,9 @@ export class ExamLifecycleService {
       }
 
       try {
-        const revision = await this.refreshBackendExamRevision(examId);
+        const revision = await this.ensureBackendDraftVersionRevision(examId);
         if (revision === null) {
-          return { success: false, error: 'Exam not found' };
+          return { success: false, error: 'Draft version not found' };
         }
 
         const publishedVersion = await backendPost<any>(`/v1/exams/${examId}/publish`, {

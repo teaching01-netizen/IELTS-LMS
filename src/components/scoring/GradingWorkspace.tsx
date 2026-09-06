@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type {
   CriterionBandScore,
   GradeHistoryEntry,
@@ -8,6 +8,7 @@ import { GradingRubricPanel } from './GradingRubricPanel';
 import { calculateWeightedBandScore } from '../../utils/builderEnhancements';
 
 interface GradingWorkspaceProps {
+  assessor?: string;
   deviationThreshold?: number;
   history: GradeHistoryEntry[];
   module: 'writing' | 'speaking';
@@ -21,7 +22,20 @@ interface GradingWorkspaceProps {
   };
 }
 
+const buildEmptyAssessment = (rubric: RubricDefinition): CriterionBandScore[] =>
+  rubric.criteria.map((criterion) => ({
+    criterionId: criterion.id,
+    band: 0,
+    comment: '',
+  }));
+
+const buildGradeId = () =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? `grade-${crypto.randomUUID()}`
+    : `grade-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
 export function GradingWorkspace({
+  assessor = 'Grader',
   deviationThreshold,
   history,
   module,
@@ -29,7 +43,13 @@ export function GradingWorkspace({
   rubric,
   submission,
 }: GradingWorkspaceProps) {
-  const [assessment, setAssessment] = useState<CriterionBandScore[]>([]);
+  const [assessment, setAssessment] = useState<CriterionBandScore[]>(() => buildEmptyAssessment(rubric));
+
+  // Reset the working assessment whenever a different rubric or submission is
+  // graded so bands/comments from the previous item never leak across.
+  useEffect(() => {
+    setAssessment(buildEmptyAssessment(rubric));
+  }, [rubric, submission.text, submission.title]);
 
   const finalBand = useMemo(
     () =>
@@ -93,6 +113,7 @@ export function GradingWorkspace({
 
       <div className="space-y-4">
         <GradingRubricPanel
+          key={rubric.id}
           rubric={rubric}
           assessment={assessment}
           {...(deviationThreshold !== undefined ? { deviationThreshold } : {})}
@@ -103,12 +124,12 @@ export function GradingWorkspace({
         <button
           onClick={() =>
             onSubmitGrade({
-              id: `grade-${Date.now()}`,
-              assessor: 'Builder Preview',
-              createdAt: new Date().toLocaleString(),
+              id: buildGradeId(),
+              assessor,
+              createdAt: new Date().toISOString(),
               criteria: assessment,
               finalBand,
-              note: 'Submitted from grading preview.',
+              note: `Submitted from ${module} grading workspace.`,
             })
           }
           className="w-full rounded-2xl bg-gray-900 px-4 py-3 text-sm font-semibold text-white hover:bg-black transition-colors"

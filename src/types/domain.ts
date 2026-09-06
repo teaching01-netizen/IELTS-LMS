@@ -5,7 +5,7 @@
  * All UI and business logic should work with these types, not the legacy Exam type.
  */
 
-import type { ExamState, ExamConfig, ModuleType } from "../types";
+import type { ExamState, ExamConfig, ExamType, ModuleType } from "../types";
 import type { ExamProviderKey } from "../features/exam-authoring/contracts/provider";
 import type {
   StudentAttempt as StudentAttemptRecord,
@@ -77,7 +77,7 @@ export interface ExamEntity {
   title: string;
   providerKey?: ExamProviderKey | undefined;
   providerExamType?: string | undefined;
-  type: "Academic" | "General Training";
+  type: ExamType;
   status: ExamStatus;
   visibility: ExamVisibility;
   owner: string;
@@ -366,6 +366,7 @@ export interface PublishReadiness {
   questionCounts: {
     reading: number;
     listening: number;
+    science?: number | undefined;
     total: number;
   };
 }

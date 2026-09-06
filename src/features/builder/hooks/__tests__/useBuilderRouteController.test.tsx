@@ -19,6 +19,12 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
 }));
 
+vi.mock('../../../auth/api/authSession', () => ({
+  useOptionalAuthSession: () => ({
+    session: { user: { id: 'builder-1', displayName: 'Builder User', email: 'builder@example.com' } },
+  }),
+}));
+
 vi.mock('@services/examRepository', () => ({
   examRepository: {
     getExamById: (...args: unknown[]) => mockGetExamById(...args),
@@ -125,12 +131,27 @@ describe('useBuilderRouteController', () => {
     });
 
     expect(mockSaveDraft).toHaveBeenCalledTimes(1);
-    expect(mockSaveDraft).toHaveBeenCalledWith('exam-1', updatedState, 'System');
+    expect(mockSaveDraft).toHaveBeenCalledWith('exam-1', updatedState, 'Builder User');
     expect(result.current.state?.title).toBe('Edited Mock IELTS Exam');
     expect(mockGetExamById).toHaveBeenCalledTimes(1);
     expect(mockGetVersionById).toHaveBeenCalledTimes(1);
     expect(mockGetVersionSummaries).not.toHaveBeenCalled();
     expect(mockGetPublishReadiness).not.toHaveBeenCalled();
+  });
+
+  it('leaves the controller in a not-found state when the exam is missing', async () => {
+    mockGetExamById.mockResolvedValue(null);
+
+    const { result } = renderHook(() => useBuilderRouteController('exam-1'));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.exam).toBeUndefined();
+    expect(result.current.state).toBeNull();
+    expect(mockGetVersionById).not.toHaveBeenCalled();
   });
 
   it('reload re-fetches exam and current version', async () => {

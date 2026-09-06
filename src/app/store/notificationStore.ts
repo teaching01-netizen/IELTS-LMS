@@ -20,6 +20,9 @@ export interface Notification {
   };
 }
 
+const DEFAULT_DURATION_MS = 5000;
+const MAX_NOTIFICATIONS = 20;
+
 interface NotificationStore {
   // State
   notifications: Notification[];
@@ -34,36 +37,69 @@ interface NotificationStore {
   addInfo: (message: string, title?: string) => void;
 }
 
+// Timers live outside the store so replacing/clearing the array can never
+// orphan a pending auto-dismiss (which would otherwise remove a newer toast
+// or leak after all subscribers unmount).
+const dismissalTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearDismissalTimer(id: string): void {
+  const timer = dismissalTimers.get(id);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    dismissalTimers.delete(id);
+  }
+}
+
+function scheduleDismissal(
+  id: string,
+  duration: number,
+  remove: (id: string) => void,
+): void {
+  clearDismissalTimer(id);
+  if (duration <= 0) {
+    return;
+  }
+  dismissalTimers.set(
+    id,
+    setTimeout(() => {
+      dismissalTimers.delete(id);
+      remove(id);
+    }, duration),
+  );
+}
+
 export const useNotificationStore = create<NotificationStore>((set, get) => ({
   notifications: [],
   
   addNotification: (notification) => {
-    const id = `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const id = 'notif-' + Date.now() + '-' + Math.random().toString(36).slice(2, 11);
     const newNotification: Notification = {
       ...notification,
+      duration: notification.duration ?? DEFAULT_DURATION_MS,
       id,
       timestamp: Date.now(),
     };
     
     set((state) => ({
-      notifications: [...state.notifications, newNotification],
+      notifications: [...state.notifications, newNotification].slice(-MAX_NOTIFICATIONS),
     }));
     
-    // Auto-remove after duration if specified
-    if (notification.duration && notification.duration > 0) {
-      setTimeout(() => {
-        get().removeNotification(id);
-      }, notification.duration);
-    }
+    // Auto-remove after duration (default 5s); duration <= 0 pins the toast.
+    scheduleDismissal(id, newNotification.duration ?? DEFAULT_DURATION_MS, get().removeNotification);
   },
   
   removeNotification: (id) => {
+    clearDismissalTimer(id);
     set((state) => ({
       notifications: state.notifications.filter((n) => n.id !== id),
     }));
   },
   
   clearNotifications: () => {
+    for (const timer of dismissalTimers.values()) {
+      clearTimeout(timer);
+    }
+    dismissalTimers.clear();
     set({ notifications: [] });
   },
   

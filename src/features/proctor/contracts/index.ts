@@ -5,7 +5,7 @@
  * These define the stable interfaces at proctor product boundaries.
  */
 
-import { ProctorAlert, SessionAuditLog, SessionNote, StudentSession } from '../../../types';
+import { ProctorAlert, SessionAuditLog, SessionNote, StudentSession, ViolationRule } from '../../../types';
 import { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
 
 export interface ProctorScheduleMetrics {
@@ -45,6 +45,7 @@ export interface ProctorData {
   // Durable monitoring evidence
   auditLogs: SessionAuditLog[];
   notes: SessionNote[];
+  violationRules: ViolationRule[];
 }
 
 /**
@@ -63,6 +64,9 @@ export interface ProctorOperationCallbacks {
 
   // Update notes
   onUpdateNotes: (notes: SessionNote[]) => void;
+
+  // Update schedule-scoped automatic violation responses
+  onUpdateRules: (rules: ViolationRule[]) => void;
   
   // Navigate to other surfaces
   onNavigate?: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
@@ -92,9 +96,15 @@ export interface ProctorProps {
   alerts: ProctorAlert[];
   auditLogs: SessionAuditLog[];
   notes: SessionNote[];
+  violationRules: ViolationRule[];
 
   // Optional connection status (non-fatal if stale data exists)
   connectionError?: string | null | undefined;
+
+  // Live-connection detail for the header pill (all optional; pill falls back to Live)
+  degradedLiveMode?: boolean | undefined;
+  wsConnected?: boolean | null | undefined;
+  lastSuccessfulRefreshAt?: string | null | undefined;
 
   // Cohort selection (controlled)
   selectedScheduleId: string | null;
@@ -106,6 +116,7 @@ export interface ProctorProps {
   onUpdateSessions: (sessions: StudentSession[]) => void;
   onUpdateAlerts: (alerts: ProctorAlert[]) => void;
   onUpdateNotes: (notes: SessionNote[]) => void;
+  onUpdateRules: (rules: ViolationRule[]) => void;
   onNavigate?: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
   onStartScheduledSession: (scheduleId: string) => Promise<void>;
   onPauseCohort: (scheduleId: string) => Promise<void>;

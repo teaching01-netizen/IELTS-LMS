@@ -10,11 +10,15 @@ interface PublishConfirmationModalProps {
   requireSchedule?: boolean;
   onConfirm: () => Promise<void>;
   onSetSchedule: () => void;
+  /** contentReviewed may be driven by the caller's checklist state; the modal additionally requires an explicit in-modal confirmation. */
   prerequisites: {
     validationPassed: boolean;
     contentReviewed: boolean;
     isScheduled: boolean;
   };
+  /** Optional controlled confirmation (e.g. shared with the PublishActions checkbox). Uncontrolled when omitted. */
+  contentReviewConfirmed?: boolean;
+  onContentReviewChange?: (confirmed: boolean) => void;
   exam: {
     title: string;
   };
@@ -28,12 +32,17 @@ export function PublishConfirmationModal({
   onConfirm,
   onSetSchedule,
   prerequisites,
+  contentReviewConfirmed: controlledReviewConfirmed,
+  onContentReviewChange,
   exam
 }: PublishConfirmationModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const [isPending, setIsPending] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [uncontrolledReviewConfirmed, setUncontrolledReviewConfirmed] = useState(false);
+  const reviewConfirmed = controlledReviewConfirmed ?? uncontrolledReviewConfirmed;
+  const setReviewConfirmed = onContentReviewChange ?? setUncontrolledReviewConfirmed;
 
   const handleConfirm = async () => {
     if (isPending) {
@@ -120,10 +129,19 @@ export function PublishConfirmationModal({
       previousActiveElementRef.current?.focus();
     };
   }, [isOpen, onClose, isPending]);
+  // BLOCK until every prerequisite is met AND the operator explicitly confirms
+  // content review inside this modal. `prerequisites.contentReviewed` reflects the
+  // caller's checklist state; the in-modal checkbox is the human attestation.
+  const contentReviewAttested = prerequisites.contentReviewed && reviewConfirmed;
   const allPrerequisitesMet =
     prerequisites.validationPassed &&
-    prerequisites.contentReviewed &&
+    contentReviewAttested &&
     (!requireSchedule || prerequisites.isScheduled);
+  const unmetReasons: string[] = [];
+  if (!prerequisites.validationPassed) unmetReasons.push('technical validation must pass');
+  if (!prerequisites.contentReviewed) unmetReasons.push('resolve readiness issues, then confirm content review');
+  else if (!reviewConfirmed) unmetReasons.push('confirm you reviewed content quality below');
+  if (requireSchedule && !prerequisites.isScheduled) unmetReasons.push('a schedule must be set');
 
   const modalTitle = mode === 'republish' ? 'Republish Exam' : 'Publish Exam';
   const confirmLabel = mode === 'republish' ? 'Confirm Republish' : 'Confirm Publish';
@@ -196,16 +214,26 @@ export function PublishConfirmationModal({
                 Technical validation passed
               </span>
             </div>
-            <div className="flex items-center gap-2 text-sm">
-              {prerequisites.contentReviewed ? (
-                <CheckCircle2 size={16} className="text-emerald-600 flex-shrink-0" aria-hidden="true" />
-              ) : (
-                <Circle size={16} className="text-blue-400 flex-shrink-0" aria-hidden="true" />
-              )}
-              <span className={prerequisites.contentReviewed ? 'text-gray-700' : 'text-gray-400'}>
-                You have reviewed content quality
+            <label className="flex items-start gap-2 text-sm cursor-pointer rounded-lg border border-slate-200 p-3 hover:border-slate-300">
+              <input
+                type="checkbox"
+                checked={reviewConfirmed}
+                onChange={(e) => setReviewConfirmed(e.target.checked)}
+                disabled={!prerequisites.contentReviewed}
+                className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Confirm you reviewed content quality"
+              />
+              <span>
+                <span className={contentReviewAttested ? 'text-gray-700 font-medium' : 'text-gray-500'}>
+                  You have reviewed content quality
+                </span>
+                <span className="block text-xs text-gray-500">
+                  {prerequisites.contentReviewed
+                    ? 'Check to attest answer key and content are reviewed.'
+                    : 'Resolve readiness issues first — review cannot count until they pass.'}
+                </span>
               </span>
-            </div>
+            </label>
             <div className="flex items-center gap-2 text-sm">
               {prerequisites.isScheduled ? (
                 <CheckCircle2 size={16} className="text-emerald-600 flex-shrink-0" aria-hidden="true" />
@@ -224,6 +252,12 @@ export function PublishConfirmationModal({
             </div>
           </div>
         </div>
+
+        {!allPrerequisitesMet && (
+          <p role="status" className="text-xs text-slate-600">
+            Confirm is blocked until {unmetReasons.join('; ')}.
+          </p>
+        )}
 
         <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-lg border border-amber-200">
           <AlertTriangle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" aria-hidden="true" />

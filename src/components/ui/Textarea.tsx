@@ -8,7 +8,7 @@ interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement
   resize?: 'none' | 'both' | 'horizontal' | 'vertical';
 }
 
-export function Textarea({
+export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea({
   label,
   error,
   helperText,
@@ -17,7 +17,7 @@ export function Textarea({
   className = '',
   id,
   ...props
-}: TextareaProps) {
+}: TextareaProps, ref) {
   const generatedId = useId();
   const textareaId = id || generatedId;
   
@@ -50,6 +50,7 @@ export function Textarea({
       
       <textarea
         id={textareaId}
+        ref={ref}
         className={`${baseStyles} ${stateStyles} ${resizeStyles[resize]} ${widthStyle} ${className}`}
         {...props}
       />
@@ -67,4 +68,4 @@ export function Textarea({
       )}
     </div>
   );
-}
+});

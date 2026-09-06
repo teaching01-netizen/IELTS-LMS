@@ -46,6 +46,26 @@ describe('useUndoRedo', () => {
     expect(result.current.lastActionLabel).toBe('Branch');
   });
 
+  it('exposes a synchronous post-update snapshot (additive API)', () => {
+    const { result } = renderHook(() => useUndoRedo({ count: 0 }));
+
+    let returned: { count: number } | undefined;
+    act(() => {
+      returned = result.current.setState({ count: 7 }, 'Seven');
+    });
+
+    expect(returned).toEqual({ count: 7 });
+    expect(result.current.getSnapshot()).toEqual({ count: 7 });
+    expect(result.current.state).toEqual({ count: 7 });
+
+    let undone: { count: number } | undefined;
+    act(() => {
+      undone = result.current.undo();
+    });
+    expect(undone).toEqual({ count: 0 });
+    expect(result.current.getSnapshot()).toEqual({ count: 0 });
+  });
+
   it('caps the undo stack at the configured limit', () => {
     const { result } = renderHook(() => useUndoRedo({ count: 0 }, { limit: 2 }));
 

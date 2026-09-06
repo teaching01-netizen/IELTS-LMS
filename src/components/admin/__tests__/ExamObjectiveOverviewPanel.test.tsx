@@ -783,7 +783,11 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(screen.queryByTitle('Case differs from student answer')).not.toBeInTheDocument();
   });
 
-  test('uses the active objective-grading draft after an answer-key update', async () => {
+  test('pins objective grading to the published version by default (draft requires explicit opt-in)', async () => {
+    // Published-first pinning (S2-C13): even when a draft grading source exists,
+    // the overview resolves the immutable published version. The draft answer
+    // key below differs (adds 'Garden hall'), so pinning to published keeps the
+    // student answer grouped as a case-only variant of GARDEN HALL.
     const publishedState = createInitialExamState('IELTS Mock Test', 'Academic');
     publishedState.reading.passages = [{
       id: 'passage-1',
@@ -802,16 +806,6 @@ describe('buildExamObjectiveOverviewRows', () => {
         }],
       }],
     }];
-
-    const draftState = structuredClone(publishedState);
-    const draftQuestion = draftState.reading.passages[0]?.blocks[0];
-    if (draftQuestion?.type !== 'SHORT_ANSWER') {
-      throw new Error('Expected short-answer block');
-    }
-    draftQuestion.questions[0] = {
-      ...draftQuestion.questions[0],
-      acceptedAnswers: ['GARDEN HALL', 'Garden hall'],
-    };
 
     const section = {
       id: 'section-1',
@@ -842,13 +836,12 @@ describe('buildExamObjectiveOverviewRows', () => {
       { id: 'submission-1', studentName: 'Narin Example' } as never,
     ]);
     vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
+    // A draft source exists but must NOT win without an explicit override flag.
     vi.mocked(gradingService.getObjectiveGradingSource).mockResolvedValue({
       success: true,
       data: { draftVersionId: 'draft-version-1' },
     });
-    vi.mocked(examRepository.getVersionById).mockImplementation(async (versionId) => ({
-      contentSnapshot: versionId === 'draft-version-1' ? draftState : publishedState,
-    } as never));
+    vi.mocked(examRepository.getVersionById).mockResolvedValue({ contentSnapshot: publishedState } as never);
 
     render(
       <ExamObjectiveOverviewPanel
@@ -862,25 +855,11 @@ describe('buildExamObjectiveOverviewRows', () => {
     );
 
     await waitFor(() => expect(gradingService.getObjectiveGradingSource).toHaveBeenCalledWith('schedule-1'));
-    fireEvent.click(await screen.findByRole('button', { name: /^Correct/ }));
-    expect(await screen.findByText('Expected', { selector: 'span' })).toBeInTheDocument();
-    expect(screen.getAllByText('Garden hall')).not.toHaveLength(0);
-    expect(screen.queryByText('GARDEN HALL | Garden hall')).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Capitalization differs from answer key')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Garden hall' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'View 1 student and 1 question' }));
-    expect(screen.getByText('1 / 1')).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: 'Garden hall' })).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: 'q-1' })).toBeInTheDocument();
-    expect(examRepository.getVersionById).toHaveBeenCalledWith('draft-version-1');
-
-    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([]);
-    act(() => {
-      notifyObjectiveGradingUpdated('exam-1');
-    });
-
-    await waitFor(() => expect(gradingRepository.getSubmissionsBySession).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText('No typed answers differ from their key only by letter case or whitespace.')).toBeInTheDocument();
+    // Resolver pinning is the assertion: published requested, draft never fetched.
+    await waitFor(() => expect(examRepository.getVersionById).toHaveBeenCalledWith('published-version-1'));
+    expect(examRepository.getVersionById).not.toHaveBeenCalledWith('draft-version-1');
+    // Case-only variant still surfaces against the published key.
+    expect(await screen.findByRole('heading', { name: 'Garden hall' })).toBeInTheDocument();
   });
 
   test('keeps raw casing variants in separate review groups', () => {

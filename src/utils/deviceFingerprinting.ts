@@ -142,8 +142,12 @@ export function clearCachedDeviceFingerprintForTesting() {
 }
 
 export async function getDeviceFingerprint(): Promise<DeviceFingerprint> {
+  // Promise-cache race: concurrent callers share one in-flight generation and
+  // the slot is assigned synchronously, so no two Canvas/WebGL generations run
+  // in parallel. A rejection clears the slot (via the .catch reset) so the
+  // next caller retries instead of receiving a pinned rejected promise.
   if (!cachedDeviceFingerprintPromise) {
-    cachedDeviceFingerprintPromise = (async () => {
+    const pending = (async () => {
       const components = await collectDeviceFingerprintComponents();
       const hash = await hashFingerprint(components);
 
@@ -151,9 +155,12 @@ export async function getDeviceFingerprint(): Promise<DeviceFingerprint> {
         components,
         hash,
       };
-    })().catch((error) => {
-      cachedDeviceFingerprintPromise = null;
-      throw error;
+    })();
+    cachedDeviceFingerprintPromise = pending;
+    pending.catch(() => {
+      if (cachedDeviceFingerprintPromise === pending) {
+        cachedDeviceFingerprintPromise = null;
+      }
     });
   }
 

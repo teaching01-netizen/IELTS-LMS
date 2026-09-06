@@ -225,6 +225,14 @@
   --color-hierarchy-primary: var(--color-blue-600); /* Primary actions, main headings */
   --color-hierarchy-secondary: var(--color-gray-700); /* Secondary text, labels */
   --color-hierarchy-tertiary: var(--color-gray-500); /* Captions, hints */
+  /* S4-C2: AA-passing text variants. gray-500 (#787774) and blue-600 (#2383E2)
+   * fail 4.5:1 on white for small text; use these `-text` tokens for text
+   * runs (fills/borders keep the base tokens). au-warning/au-success text
+   * already use --color-au-warning-text / --color-au-success-text. */
+  --color-gray-500-text: var(--color-gray-600);
+  --color-gray-400-text: var(--color-gray-600);
+  --color-blue-600-text: var(--color-blue-700);
+  --color-muted-foreground-text: var(--color-gray-600);
   --color-hierarchy-disabled: var(--color-gray-300); /* Disabled states */
   --color-hierarchy-border: var(--color-gray-200); /* Borders, dividers */
   --color-hierarchy-background: var(--color-gray-50); /* Section backgrounds */
@@ -2733,6 +2741,47 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 /* System dark appearance: SAT is a distinct product surface, so its semantic
  * tokens invert together instead of leaving light cards stranded in a dark UI. */
 @media (prefers-color-scheme: dark) {
+  :root:not(.sat-ui):not(.sat-product) {
+    color-scheme: dark;
+    /* S4-C1: core dark-mode surfaces/text for main shells. SAT rules below
+     * stay untouched; these :root vars drive the canonical semantic roles
+     * (bg-background, text-foreground, bg-card, borders, inputs) plus the
+     * secondary/tertiary gray ramp in dark appearance. */
+    --color-background: #1c1c1e;
+    --color-foreground: #f5f5f7;
+    --color-card: #1c1c1e;
+    --color-card-foreground: #f5f5f7;
+    --color-popover: #2c2c2e;
+    --color-popover-foreground: #f5f5f7;
+    --color-border: rgba(235, 235, 245, 0.24);
+    --color-border-strong: rgba(235, 235, 245, 0.38);
+    --color-input: rgba(235, 235, 245, 0.38);
+    --color-ring: #8ac2ff;
+    --color-canvas: #111113;
+    --color-surface: #1c1c1e;
+    --color-surface-subtle: #2c2c2e;
+    --color-muted: #2c2c2e;
+    --color-muted-foreground: #c7c7cc;
+    --color-secondary: #2c2c2e;
+    --color-secondary-foreground: #f5f5f7;
+    --color-accent: #2c2c2e;
+    --color-accent-foreground: #f5f5f7;
+    --color-gray-500: #c7c7cc;
+    --color-gray-400: #a1a1a6;
+    --color-hierarchy-tertiary: #c7c7cc;
+    --color-exam-canvas: #111113;
+    --color-exam-surface: #1c1c1e;
+    --color-exam-surface-subtle: #2c2c2e;
+    --color-exam-divider: rgba(235, 235, 245, 0.16);
+    --color-exam-divider-strong: rgba(235, 235, 245, 0.24);
+    --color-exam-control-border: rgba(235, 235, 245, 0.38);
+    --color-exam-control-border-focus: #8ac2ff;
+    --color-exam-input-surface: #1c1c1e;
+  }
+  :root:not(.sat-ui):not(.sat-product) body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
   .sat-ui,
   .sat-product {
     color-scheme: dark;
@@ -2949,5 +2998,16 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     --color-au-danger-text: CanvasText;
     --color-au-warning: Highlight;
     --color-au-warning-text: CanvasText;
+  }
+}
+
+/* S1-M5: student highlight marks stay legible under Windows forced-colors —
+   map fills to system pairs and preserve the mark via forced-color-adjust. */
+@media (forced-colors: active) {
+  [data-highlighted="true"] {
+    forced-color-adjust: auto;
+    background-color: Highlight;
+    color: HighlightText;
+    outline: 1px solid CanvasText;
   }
 }

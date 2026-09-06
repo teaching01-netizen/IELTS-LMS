@@ -3,11 +3,26 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StudentAppWrapper } from "../StudentAppWrapper";
+import { DurableResponseEngine } from "@shared/durability/DurableResponseEngine";
 import { createDefaultConfig } from "../../../constants/examDefaults";
 import { studentAttemptRepository } from "../../../services/studentAttemptRepository";
 import type { ExamState } from "../../../types";
 import type { ExamSessionRuntime } from "../../../types/domain";
 import type { StudentAttempt } from "../../../types/studentAttempt";
+
+const v2TransportMocks = vi.hoisted(() => ({
+  transport: {
+    sendBatch: vi.fn(),
+    submit: vi.fn(),
+    fetchSnapshot: vi.fn(),
+  },
+  createTransport: vi.fn(),
+}));
+
+vi.mock("@student/api/responseDurabilityTransport", () => ({
+  createResponseDurabilityV2Transport: v2TransportMocks.createTransport,
+  takeOverResponseDurabilityLease: vi.fn(),
+}));
 
 function setWritingEditorText(editor: HTMLElement, value: string) {
   if (editor instanceof HTMLTextAreaElement) {
@@ -273,6 +288,37 @@ describe("StudentApp runtime-backed mode", () => {
     vi.spyOn(studentAttemptRepository as any, "savePendingMutations").mockResolvedValue();
     vi.spyOn(studentAttemptRepository as any, "clearPendingMutations").mockResolvedValue();
     vi.spyOn(studentAttemptRepository as any, "getAttemptsByScheduleId").mockResolvedValue([]);
+    v2TransportMocks.createTransport.mockReturnValue(v2TransportMocks.transport);
+    v2TransportMocks.transport.fetchSnapshot.mockResolvedValue([]);
+    let v2ServerRevision = 0;
+    v2TransportMocks.transport.sendBatch.mockImplementation(
+      async (_attemptId: string, request: any) => {
+        v2ServerRevision += 1;
+        const revision = v2ServerRevision;
+        return {
+          attemptRevision: revision,
+          serverTime: "2026-01-01T00:00:00.000Z",
+          acknowledgements: (request?.commands ?? []).map((command: any) => ({
+            writeId: command.writeId,
+            questionId: command.questionId,
+            clientVersion: command.clientVersion,
+            outcome: "applied",
+            serverRevision: revision,
+            canonicalResponse: command.response,
+            contentHash: `hash-${command.writeId}`,
+          })),
+        };
+      }
+    );
+    v2TransportMocks.transport.submit.mockResolvedValue({
+      attemptId: "attempt-1",
+      submissionId: "submission-1",
+      status: "submitted",
+      attemptRevision: 2,
+      finalResponseDigest: "digest-1",
+      submittedAt: "2026-01-01T01:00:01.000Z",
+      acknowledgements: [],
+    });
   });
 
   const state: ExamState = {
@@ -711,17 +757,6 @@ describe("StudentApp runtime-backed mode", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
-    const submittedAttempt: StudentAttempt = {
-      ...attemptSnapshot,
-      phase: "post-exam",
-      submittedAt: "2026-01-01T01:00:01.000Z",
-      recovery: {
-        ...attemptSnapshot.recovery,
-        syncState: "saved",
-      },
-    };
-    vi.spyOn(studentAttemptRepository as any, "submitAttempt").mockResolvedValue(submittedAttempt);
-
     const { rerender } = render(
       <StudentAppWrapper
         state={writingState}
@@ -737,6 +772,22 @@ describe("StudentApp runtime-backed mode", () => {
     })) as HTMLElement;
     setWritingEditorText(editor, "Visible iPad final draft");
 
+    await waitFor(() => {
+      expect(v2TransportMocks.transport.sendBatch).toHaveBeenCalledWith(
+        "attempt-1",
+        expect.objectContaining({
+          commands: expect.arrayContaining([
+            expect.objectContaining({
+              questionId: "task1",
+              response: expect.objectContaining({
+                answer: "Visible iPad final draft",
+              }),
+            }),
+          ]),
+        })
+      );
+    });
+
     rerender(
       <StudentAppWrapper
         state={writingState}
@@ -747,18 +798,14 @@ describe("StudentApp runtime-backed mode", () => {
       />
     );
 
+    // The draft was already delivered via responses:batch above; final submit closes the
+    // attempt (already-acknowledged responses are not re-sent as finalCommands).
     await waitFor(() => {
-      expect(studentAttemptRepository.savePendingMutations).toHaveBeenCalledWith(
+      expect(v2TransportMocks.transport.submit).toHaveBeenCalledWith(
         "attempt-1",
-        expect.arrayContaining([
-          expect.objectContaining({
-            type: "writing_answer",
-            payload: expect.objectContaining({
-              taskId: "task1",
-              value: "Visible iPad final draft",
-            }),
-          }),
-        ])
+        expect.objectContaining({
+          finalCommands: expect.any(Array),
+        })
       );
     });
   });
@@ -1060,26 +1107,22 @@ describe("StudentApp runtime-backed mode", () => {
     await user.click(slotTwo);
     await user.type(slotTwo, "lazy");
 
-    expect(slotOne.value).toBe("quick");
-    expect(slotTwo.value).toBe("lazy");
+    await waitFor(() => {
+      expect(slotOne.value).toBe("quick");
+      expect(slotTwo.value).toBe("lazy");
+    });
 
     await waitFor(() => {
-      const persistedMutations = vi
-        .mocked(studentAttemptRepository.savePendingMutations)
-        .mock.calls.flatMap(([, mutations]) => mutations ?? []);
-      const mergedSlotMutation = persistedMutations.find((mutation) => {
-        if (mutation.type !== "answer") {
-          return false;
-        }
-        const payload = mutation.payload as { questionId?: unknown; value?: unknown };
-        return (
-          payload.questionId === "q-slots" &&
-          Array.isArray(payload.value) &&
-          payload.value[0] === "quick" &&
-          payload.value[1] === "lazy"
-        );
-      });
-      expect(mergedSlotMutation).toBeDefined();
+      const batchedAnswers = v2TransportMocks.transport.sendBatch.mock.calls.flatMap(
+        ([, request]: [unknown, { commands?: Array<{ response?: { answer?: unknown } }> }]) =>
+          (request?.commands ?? []).map((command) => command?.response?.answer)
+      );
+      expect(
+        batchedAnswers.some(
+          (answer) =>
+            Array.isArray(answer) && answer[0] === "quick" && answer[1] === "lazy"
+        )
+      ).toBe(true);
     });
   });
 
@@ -1735,61 +1778,6 @@ describe("StudentApp runtime-backed mode", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
 
-    const submittedAttempt: StudentAttempt = {
-      id: "attempt-1",
-      scheduleId: "sched-1",
-      studentKey: "student-sched-1-alice",
-      examId: "exam-1",
-      examTitle: "Submit Exam",
-      candidateId: "alice",
-      candidateName: "Alice Roe",
-      candidateEmail: "alice@example.com",
-      phase: "post-exam",
-      currentModule: "reading",
-      currentQuestionId: null,
-      answers: { q1: "seeded answer" },
-      writingAnswers: {},
-      flags: {},
-      violations: [],
-      proctorStatus: "active",
-      proctorNote: null,
-      proctorUpdatedAt: null,
-      proctorUpdatedBy: null,
-      lastWarningId: null,
-      lastAcknowledgedWarningId: null,
-      integrity: {
-        preCheck: {
-          completedAt: "2026-01-01T00:00:00.000Z",
-          browserFamily: "chrome",
-          browserVersion: 120,
-          screenDetailsSupported: true,
-          heartbeatReady: true,
-          acknowledgedSafariLimitation: false,
-          checks: [],
-        },
-        deviceFingerprintHash: null,
-        lastDisconnectAt: null,
-        lastReconnectAt: null,
-        lastHeartbeatAt: null,
-        lastHeartbeatStatus: "idle",
-      },
-      recovery: {
-        lastRecoveredAt: null,
-        lastLocalMutationAt: null,
-        lastPersistedAt: "2026-01-01T00:10:00.000Z",
-        lastDroppedMutations: null,
-        pendingMutationCount: 0,
-        serverAcceptedThroughSeq: 0,
-        clientSessionId: null,
-        syncState: "saved",
-      },
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:10:00.000Z",
-    };
-
-    const submitAttempt = vi
-      .spyOn(studentAttemptRepository as any, "submitAttempt")
-      .mockResolvedValue(submittedAttempt);
     vi.spyOn(studentAttemptRepository as any, "saveAttempt").mockResolvedValue();
     vi.spyOn(studentAttemptRepository as any, "clearPendingMutations").mockResolvedValue();
 
@@ -1862,7 +1850,7 @@ describe("StudentApp runtime-backed mode", () => {
       expect(screen.queryByText(/Waiting for cohort advance/i)).not.toBeInTheDocument();
     });
 
-    expect(submitAttempt).not.toHaveBeenCalled();
+    expect(v2TransportMocks.transport.submit).not.toHaveBeenCalled();
     expect(screen.queryByText(/Examination Complete!/i)).not.toBeInTheDocument();
   });
 
@@ -2527,10 +2515,6 @@ describe("StudentApp runtime-backed mode", () => {
         },
       ])
     );
-    const saveAttempt = vi
-      .spyOn(studentAttemptRepository as any, "saveAttempt")
-      .mockResolvedValue();
-
     render(
       <StudentAppWrapper
         state={examState}
@@ -2545,20 +2529,10 @@ describe("StudentApp runtime-backed mode", () => {
       expect(screen.queryByText(/Waiting for cohort advance/i)).not.toBeInTheDocument();
     });
 
+    // V2 auto-submit flushes the response engine and advances the runtime module;
+    // no legacy mutation-queue save is involved.
     await waitFor(() => {
-      expect(saveAttempt).toHaveBeenCalledWith(
-        expect.objectContaining({
-          currentModule: "writing",
-          phase: "exam",
-          recovery: expect.objectContaining({
-            syncState: "saved",
-          }),
-        }),
-        expect.objectContaining({
-          flushCycleId: expect.any(String),
-          sampledSuccessLogs: expect.any(Boolean),
-        })
-      );
+      expect(screen.queryByText(/Task 1 prompt/i)).toBeInTheDocument();
     });
   });
 
@@ -2723,31 +2697,8 @@ describe("StudentApp runtime-backed mode", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
 
-    vi.spyOn(studentAttemptRepository as any, "getPendingMutations").mockResolvedValue([
-      {
-        id: "mutation-1",
-        attemptId: attemptSnapshot.id,
-        scheduleId: attemptSnapshot.scheduleId,
-        timestamp: "2026-01-01T00:00:00.000Z",
-        type: "answer",
-        payload: {
-          questionId: "q1",
-          value: "seeded answer",
-          module: "reading",
-        },
-      },
-    ]);
-
-    let resolveSave: (() => void) | null = null;
-    const saveAttempt = vi
-      .spyOn(studentAttemptRepository as any, "saveAttempt")
-      .mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            resolveSave = resolve;
-          })
-      )
-      .mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const engineFlush = vi.spyOn(DurableResponseEngine.prototype, "flush");
 
     render(
       <StudentAppWrapper
@@ -2768,18 +2719,32 @@ describe("StudentApp runtime-backed mode", () => {
       value: true,
     });
 
+    // Seed a durable V2 response and wait for it to flush so the Finish
+    // barrier below exercises an empty-outbox flush.
+    await user.type(screen.getByLabelText("Answer for question 1"), "seeded answer");
+    await waitFor(() => {
+      expect(v2TransportMocks.transport.sendBatch).toHaveBeenCalled();
+    });
+    engineFlush.mockClear();
+
     const finishButton = screen.getByRole("button", { name: "Finish" });
     fireEvent.click(finishButton);
     fireEvent.click(finishButton);
 
+    // Both clicks share one module-submit flight: a single V2 flush runs, the
+    // module submit is not a final submit, and the seeded answer is preserved.
     await waitFor(() => {
-      expect(saveAttempt).toHaveBeenCalledTimes(1);
+      expect(engineFlush).toHaveBeenCalledTimes(1);
     });
-
     await act(async () => {
-      resolveSave?.();
       await Promise.resolve();
     });
+    expect(engineFlush).toHaveBeenCalledTimes(1);
+    expect(v2TransportMocks.transport.submit).not.toHaveBeenCalled();
+    expect(
+      (screen.getByLabelText("Answer for question 1") as HTMLInputElement).value
+    ).toBe("seeded answer");
+    engineFlush.mockRestore();
   });
 
   it("does not trigger duplicate runtime auto-submit while the first zero-timer flush is still in-flight", async () => {
@@ -2926,31 +2891,8 @@ describe("StudentApp runtime-backed mode", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
 
-    vi.spyOn(studentAttemptRepository as any, "getPendingMutations").mockResolvedValue([
-      {
-        id: "mutation-1",
-        attemptId: attemptSnapshot.id,
-        scheduleId: attemptSnapshot.scheduleId,
-        timestamp: "2026-01-01T00:00:00.000Z",
-        type: "answer",
-        payload: {
-          questionId: "q1",
-          value: "seeded answer",
-          module: "reading",
-        },
-      },
-    ]);
-
-    let resolveSave: (() => void) | null = null;
-    const saveAttempt = vi
-      .spyOn(studentAttemptRepository as any, "saveAttempt")
-      .mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            resolveSave = resolve;
-          })
-      )
-      .mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const engineFlush = vi.spyOn(DurableResponseEngine.prototype, "flush");
 
     const { rerender } = render(
       <StudentAppWrapper
@@ -2970,6 +2912,23 @@ describe("StudentApp runtime-backed mode", () => {
       configurable: true,
       value: true,
     });
+
+    // Seed a durable V2 response and wait for it to flush before the zero-timer
+    // boundary fires, so the auto-submit barrier exercises an empty-outbox flush.
+    await user.type(screen.getByLabelText("Answer for question 1"), "seeded answer");
+    await waitFor(() => {
+      expect(v2TransportMocks.transport.sendBatch).toHaveBeenCalled();
+    });
+    engineFlush.mockClear();
+    // Hold the first auto-submit flush in-flight while the second zero-timer
+    // render arrives, mirroring the legacy held-save deduplication scenario.
+    let resolveFlush: (() => void) | null = null;
+    engineFlush.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFlush = resolve;
+        })
+    );
 
     const atZeroSnapshot = {
       ...runtimeSnapshot,
@@ -2999,18 +2958,22 @@ describe("StudentApp runtime-backed mode", () => {
       />
     );
 
+    // Both zero-timer renders share one auto-submit flight: a single V2 flush
+    // starts while the first is still in-flight, and the seeded answer survives.
     await waitFor(() => {
-      expect(saveAttempt).toHaveBeenCalledTimes(1);
+      expect(engineFlush).toHaveBeenCalledTimes(1);
     });
-
     await act(async () => {
-      resolveSave?.();
+      resolveFlush?.();
       await Promise.resolve();
     });
+    expect(
+      (screen.getByLabelText("Answer for question 1") as HTMLInputElement).value
+    ).toBe("seeded answer");
+    engineFlush.mockRestore();
   });
 
-  it("retries auto-submit when flushing pending mutations fails", async () => {
-    vi.useFakeTimers();
+  it("retries the V2 response batch when batch delivery fails", async () => {
     window.sessionStorage.clear();
     window.sessionStorage.setItem(
       "ielts_student_attempt_credentials_v1",
@@ -3149,28 +3112,11 @@ describe("StudentApp runtime-backed mode", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
 
-    vi.spyOn(studentAttemptRepository as any, "getPendingMutations").mockResolvedValue([
-      {
-        id: "mutation-1",
-        attemptId: attemptSnapshot.id,
-        scheduleId: attemptSnapshot.scheduleId,
-        timestamp: "2026-01-01T00:00:00.000Z",
-        type: "answer",
-        payload: {
-          questionId: "q1",
-          value: "seeded answer",
-          module: "reading",
-        },
-      },
-    ]);
-    const saveAttempt = vi
-      .spyOn(studentAttemptRepository as any, "saveAttempt")
-      .mockRejectedValueOnce(new Error("temporary failure"))
-      .mockResolvedValue(undefined);
-    vi.spyOn(studentAttemptRepository as any, "clearPendingMutations").mockResolvedValue();
-    vi.spyOn(studentAttemptRepository as any, "getAttemptsByScheduleId").mockResolvedValue([]);
+    // The V2 durability engine retries a failed response batch instead of the
+    // legacy mutation-queue flush.
+    v2TransportMocks.transport.sendBatch.mockRejectedValueOnce(new Error("temporary failure"));
 
-    const { rerender } = render(
+    render(
       <StudentAppWrapper
         state={examState}
         onExit={() => {}}
@@ -3180,28 +3126,18 @@ describe("StudentApp runtime-backed mode", () => {
       />
     );
 
-    rerender(
-      <StudentAppWrapper
-        state={examState}
-        onExit={() => {}}
-        scheduleId={attemptSnapshot.scheduleId}
-        attemptSnapshot={attemptSnapshot}
-        runtimeSnapshot={{ ...runtimeSnapshot, currentSectionRemainingSeconds: 0 }}
-      />
-    );
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_500);
+    fireEvent.change(screen.getByLabelText("Answer for question 1"), {
+      target: { value: "seeded answer" },
     });
 
-    expect(saveAttempt).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(v2TransportMocks.transport.sendBatch.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
     expect(screen.queryByText(/Waiting for cohort advance/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Reconnecting session/i)).not.toBeInTheDocument();
     expect(
       screen.queryByText(/Attempt data is being reconciled before the exam can continue/i)
     ).not.toBeInTheDocument();
-
-    vi.useRealTimers();
   });
 
   it("does not show dropped-mutation reconciliation banner to students", () => {

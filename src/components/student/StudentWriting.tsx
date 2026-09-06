@@ -36,6 +36,8 @@ interface StudentWritingProps {
   tabletMode?: boolean | undefined;
   layoutMode?: StudentLayoutMode | undefined;
   registerLiveWritingAnswer?: ((taskId: string, text: string) => void) | undefined;
+  /** S1-C3: sessionStorage base key (per exam). Module suffix is appended. */
+  persistenceKeyBase?: string | undefined;
   highlightEnabled?: boolean | undefined;
   highlightColor?: StudentHighlightColor | undefined;
   highlightClassName?: string | undefined;
@@ -128,6 +130,7 @@ export function StudentWriting({
   tabletMode = false,
   layoutMode = 'wide',
   registerLiveWritingAnswer,
+  persistenceKeyBase,
   highlightEnabled = false,
   highlightColor,
   highlightClassName,
@@ -164,18 +167,33 @@ export function StudentWriting({
   const commitEditorDraftRef = useRef<() => void>(() => undefined);
   const previousResolvedTaskIdRef = useRef<string | null>(resolvedCurrentQuestionTaskId);
   const [showReviewModal, setShowReviewModal] = useState(false);
-  const [activeCompactPane, setActiveCompactPane] = useState<WritingPane>('prompt');
-  const lastFocusedPaneRef = useRef<WritingPane>('prompt');
+  const reviewModalPanelRef = useRef<HTMLDivElement | null>(null);
+  const reviewModalTriggerRef = useRef<HTMLElement | null>(null);
+  const writingTabPersistenceKey = persistenceKeyBase ? `${persistenceKeyBase}:writing:tab` : undefined;
+  // S1-C3: lazy-init the compact tab from sessionStorage so a remount
+  // restores the learner's tab instead of snapping back to "prompt".
+  const [activeCompactPane, setActiveCompactPane] = useState<WritingPane>(() => {
+    if (!writingTabPersistenceKey) {
+      return 'prompt';
+    }
+    try {
+      return sessionStorage.getItem(writingTabPersistenceKey) === 'response' ? 'response' : 'prompt';
+    } catch {
+      return 'prompt';
+    }
+  });
+  const lastFocusedPaneRef = useRef<WritingPane>(activeCompactPane);
   const previousCompactLayoutRef = useRef(isCompactLayout);
   const promptPaneRef = useRef<HTMLDivElement>(null);
   const promptScrollTopRef = useRef(0);
   const responseScrollTopRef = useRef(0);
-  const { handleDrag, handleKeyboardResize, leftWidth, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+  const { handleDrag, handleKeyboardResize, leftWidth, splitBounds, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: '--writing-prompt-pane-width',
     answerPaneWidthProperty: '--writing-editor-pane-width',
     defaultLeftWidth: 50,
     dividerMode: isTabletMode ? 'overlay' : 'consumes-space',
+    persistenceKey: persistenceKeyBase ? `${persistenceKeyBase}:writing:split` : undefined,
   });
 
   const currentTask = writingConfig.tasks.find((t) => t.id === activeTaskId) || writingConfig.tasks[0];
@@ -265,8 +283,16 @@ export function StudentWriting({
 
       commitEditorDraft();
       setActiveCompactPane(nextPane);
+      // S1-C3: persist on change (try/catch; best-effort when storage is off).
+      if (writingTabPersistenceKey) {
+        try {
+          sessionStorage.setItem(writingTabPersistenceKey, nextPane);
+        } catch {
+          // Storage may be unavailable — in-memory state still works.
+        }
+      }
     },
-    [activeCompactPane, commitEditorDraft],
+    [activeCompactPane, commitEditorDraft, writingTabPersistenceKey],
   );
 
   useEffect(() => {
@@ -330,14 +356,38 @@ export function StudentWriting({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (editorHasFocusRef.current) return;
-    writeEditorPlainText(editor, currentText);
-    previousValueRef.current = readEditorPlainText(editor);
-    if (typeof liveDraftsByTaskRef.current[activeTaskId] !== 'string') {
-      lastCommittedDraftByTaskRef.current[activeTaskId] = readEditorPlainText(editor);
-      setDraftPreview({ taskId: activeTaskId, text: currentText });
+    // Hydration-vs-focus race: compare against the SERVER value (writingAnswers
+    // prop), NOT currentText — currentText derives from liveDraftsByTaskRef, so
+    // using it here echoes local typing back as "server" state. That made the
+    // local-wins condition unreachable and poisoned lastCommitted without
+    // onWritingChange ever firing (killed V2 durability + lifecycle commits).
+    const serverText = normalizeWritingPlainText(
+      readWritingAnswerByTaskId(writingAnswers, activeTaskId) ?? '',
+    );
+    if (editorHasFocusRef.current) {
+      const localDraft = liveDraftsByTaskRef.current[activeTaskId];
+      if (typeof localDraft === 'string' && localDraft !== serverText && serverText.length > localDraft.length) {
+        liveDraftsByTaskRef.current = { ...liveDraftsByTaskRef.current, [activeTaskId]: serverText };
+        setDraftPreview({ taskId: activeTaskId, text: serverText });
+      }
+      return;
     }
-  }, [activeTaskId, currentText]);
+    const localDraft = liveDraftsByTaskRef.current[activeTaskId];
+    const mergedText =
+      typeof localDraft === 'string' && localDraft.length > serverText.length ? localDraft : serverText;
+    if (typeof localDraft === 'string' && localDraft.length > serverText.length) {
+      // Local uncommitted typing wins over an older server snapshot, but it is
+      // NOT yet committed (no onWritingChange fired) — leave lastCommitted
+      // alone so the pending debounce / blur / compositionEnd / unmount-flush
+      // commit still fires onWritingChange correctly. Committing here would
+      // fire onWritingChange on every keystroke and defeat the 300ms debounce.
+    } else {
+      writeEditorPlainText(editor, mergedText);
+      previousValueRef.current = readEditorPlainText(editor);
+      lastCommittedDraftByTaskRef.current[activeTaskId] = readEditorPlainText(editor);
+      setDraftPreview({ taskId: activeTaskId, text: mergedText });
+    }
+  }, [activeTaskId, commitDraftText, writingAnswers]);
 
   useEffect(() => {
     return () => {
@@ -345,9 +395,15 @@ export function StudentWriting({
         window.clearTimeout(deferredBlurCommitTimerRef.current);
         deferredBlurCommitTimerRef.current = null;
       }
-      clearScheduledDraftCommit();
+      // Flush (don't discard) any pending debounced draft so the latest
+      // keystrokes survive unmount/navigation instead of being dropped.
+      commitEditorDraftRef.current();
+      if (draftCommitTimerRef.current !== null) {
+        window.clearTimeout(draftCommitTimerRef.current);
+        draftCommitTimerRef.current = null;
+      }
     };
-  }, [clearScheduledDraftCommit]);
+  }, []);
 
   useEffect(() => {
     if (timeRemaining === 0) {
@@ -495,7 +551,6 @@ export function StudentWriting({
       if (!editor) {
         return;
       }
-
       clearScheduledDraftCommit();
       commitDraftText(activeTaskId, readEditorPlainText(editor));
     }, [activeTaskId, clearScheduledDraftCommit, commitDraftText]);
@@ -515,9 +570,10 @@ export function StudentWriting({
       const committed = commitDraftText(activeTaskId, readEditorPlainText(editor));
       writeEditorPlainText(editor, committed);
     }, [activeTaskId, clearScheduledDraftCommit, commitDraftText]);
-  const handleEditorInput = useCallback(() => {
-    if (editorRef.current) {
-      const textContent = readEditorPlainText(editorRef.current);
+  const handleEditorInput = useCallback((event?: React.ChangeEvent<HTMLTextAreaElement> | React.FormEvent<HTMLTextAreaElement>) => {
+    const source = (event?.currentTarget ?? event?.target ?? editorRef.current) as HTMLTextAreaElement | null;
+    if (source) {
+      const textContent = readEditorPlainText(source);
       liveDraftsByTaskRef.current = {
         ...liveDraftsByTaskRef.current,
         [activeTaskId]: textContent,
@@ -553,6 +609,71 @@ export function StudentWriting({
     }
   }, [resolvedSessionId, resolvedStudentId]);
 
+  const handleSubmitClick = () => {
+    commitEditorDraft();
+    reviewModalTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setShowReviewModal(true);
+  };
+
+  const handleConfirmSubmit = () => {
+    commitEditorDraft();
+    setShowReviewModal(false);
+    reviewModalTriggerRef.current?.focus?.();
+    reviewModalTriggerRef.current = null;
+    onSubmit();
+  };
+
+  const handleCancelSubmit = () => {
+    setShowReviewModal(false);
+    reviewModalTriggerRef.current?.focus?.();
+    reviewModalTriggerRef.current = null;
+  };
+
+  // Keep this hook unconditional. An empty writing configuration is a valid
+  // backend response and must not change the hook order on the next render.
+  useEffect(() => {
+    if (!showReviewModal) {
+      return;
+    }
+    const panel = reviewModalPanelRef.current;
+    panel?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        handleCancelSubmit();
+        return;
+      }
+      if (event.key !== 'Tab' || !panel) {
+        return;
+      }
+      const focusable = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) {
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) {
+        return;
+      }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showReviewModal]);
+
   if (!currentTask) {
     return <StudentModuleEmptyState label="Writing" />;
   }
@@ -560,7 +681,10 @@ export function StudentWriting({
   const currentTaskContent = getWritingTaskContent(state.writing, writingConfig.tasks, currentTask.id);
   const currentPrompt = currentTaskContent?.prompt ?? '';
   const currentPromptContainsMarkup = /<[^>]+>/.test(currentPrompt);
-  const minWords = currentTask.minWords || 150;
+  const minWords =
+    Number.isFinite(currentTask.minWords) && (currentTask.minWords as number) > 0
+      ? (currentTask.minWords as number)
+      : 150;
   const currentChart = currentTaskContent?.chart;
 
   const wordCount = previewText.trim() === '' ? 0 : previewText.trim().split(/\s+/).length;
@@ -573,32 +697,25 @@ export function StudentWriting({
   const optimalMax = currentTask.optimalMax || Math.ceil(minWords * 1.5);
   const isOptimal = wordCount >= optimalMin && wordCount <= optimalMax;
   const isOverLength = Boolean(currentTask.maxWords && wordCount > currentTask.maxWords);
-  const resolvedTimeRemaining = timeRemaining ?? (runtimeClock ?? writingConfig.duration * 60);
+  const configuredDurationSeconds = Number.isFinite(writingConfig.duration) && (writingConfig.duration as number) > 0
+    ? (writingConfig.duration as number) * 60
+    : 3600;
+  const resolvedTimeRemaining =
+    Number.isFinite(timeRemaining) && (timeRemaining as number) >= 0
+      ? (timeRemaining as number)
+      : Number.isFinite(runtimeClock) && (runtimeClock as number) >= 0
+        ? (runtimeClock as number)
+        : configuredDurationSeconds;
 
-
-
-  const totalTime = writingConfig.duration * 60;
-  const progressPercent = Math.max(0, Math.min(100, ((totalTime - resolvedTimeRemaining) / totalTime) * 100));
+  const totalTime = configuredDurationSeconds;
+  const progressPercent = totalTime > 0
+    ? Math.max(0, Math.min(100, ((totalTime - resolvedTimeRemaining) / totalTime) * 100))
+    : 0;
 
   const isTimeCritical = resolvedTimeRemaining <= 300;
   const isTimeWarning = resolvedTimeRemaining <= 600;
 
 
-
-  const handleSubmitClick = () => {
-    commitEditorDraft();
-    setShowReviewModal(true);
-  };
-
-  const handleConfirmSubmit = () => {
-    commitEditorDraft();
-    setShowReviewModal(false);
-    onSubmit();
-  };
-
-  const handleCancelSubmit = () => {
-    setShowReviewModal(false);
-  };
 
   return (
     <div className="flex h-full w-full flex-col bg-white">
@@ -656,6 +773,8 @@ export function StudentWriting({
           <StudentSplitPaneResizer
             isTabletMode={isTabletMode}
             leftWidth={leftWidth}
+            minWidth={splitBounds.min}
+            maxWidth={splitBounds.max}
             onDividerPointerDown={handleDrag}
             onDividerKeyDown={handleKeyboardResize}
             ariaLabel="Resize writing prompt and answer panels"
@@ -724,10 +843,19 @@ export function StudentWriting({
       </footer>
       {/* Submission Review Modal */}
       {showReviewModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="writing-review-title"
+        >
+          <div
+            ref={reviewModalPanelRef}
+            tabIndex={-1}
+            className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col focus:outline-none"
+          >
             <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-900">Review Your Responses</h2>
+              <h2 id="writing-review-title" className="text-xl font-bold text-gray-900">Review Your Responses</h2>
               <p className="text-sm text-gray-500 mt-1">Please review your answers before submitting.</p>
             </div>
 

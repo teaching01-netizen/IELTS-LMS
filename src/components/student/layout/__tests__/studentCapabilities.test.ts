@@ -23,8 +23,8 @@ describe('student interaction capabilities', () => {
   it('recognizes a medium touch tablet without treating it as a device identity', () => {
     expect(
       getStudentInteractionCapabilities({
-        width: 820,
-        height: 1180,
+        width: 1024,
+        height: 1366,
         hasCoarsePointer: true,
         hasTouchSupport: true,
         hasHover: false,

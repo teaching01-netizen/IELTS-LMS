@@ -1,9 +1,19 @@
-import type { StudentHighlightColor } from './highlightPalette';
+import { studentHighlightPalette, type StudentHighlightColor } from './highlightPalette';
 import {
   DEFAULT_DISALLOWED_SELECTION_SELECTOR,
   resolveSurfaceRange,
 } from './highlight/surfaceResolver';
 import { normalizeRangeToSurfaceSelection } from './highlight/rangeNormalizer';
+
+// HIGHLIGHT_ENGINE v2 (S1-C15): the legacy single-version engine was removed
+// — no dead first-generation surface/engine modules remain (verified by
+// grepping src for legacy surface-hook, engine, and versioned imports).
+// All surfaces use this V2 range engine plus the live highlight/ helpers
+// (store, commands, render adapter).
+export const HIGHLIGHT_ENGINE = 'v2' as const;
+
+/** Per-surface persisted-range cap (S1-C11 load validation truncates to this). */
+export const MAX_HIGHLIGHT_RANGES = 200;
 
 export interface HighlightRangeV2 {
   start: number;
@@ -370,10 +380,14 @@ function wrapTextNodeSegment(
     fragment.appendChild(doc.createTextNode(beforeText));
   }
 
+  // S1-C10: native <mark> already maps to an SR-recognized highlight role;
+  // the label announces which color was used so color is never the only
+  // channel (WCAG 1.4.1), and erase tooling keys off data-highlighted.
   const wrapper = doc.createElement('mark');
   wrapper.className = highlightClassName;
   wrapper.setAttribute('data-highlighted', 'true');
   wrapper.setAttribute('data-highlight-color', color);
+  wrapper.setAttribute('aria-label', `Highlighted in ${color}: ${selectedText}`);
   wrapper.textContent = selectedText;
   fragment.appendChild(wrapper);
 
@@ -452,4 +466,76 @@ export function selectionIntersectsRanges(
   selection: HighlightSelectionV2,
 ): boolean {
   return ranges.some((range) => range.start < selection.end && range.end > selection.start);
+}
+
+const VALID_HIGHLIGHT_COLORS: ReadonlySet<string> = new Set(
+  studentHighlightPalette.map((entry) => entry.id),
+);
+
+/**
+ * S1-C11: validate persisted ranges on load. Drops anything that is not a
+ * finite, in-bounds, non-empty slice with a palette color (warns once with
+ * the dropped count) and truncates survivors to the most recent `maxRanges`.
+ */
+export function validateHighlightRanges(
+  ranges: unknown,
+  canonicalText: string,
+  maxRanges: number = MAX_HIGHLIGHT_RANGES,
+): HighlightRangeV2[] {
+  if (!Array.isArray(ranges)) {
+    return [];
+  }
+
+  const textLength = canonicalText.length;
+  const valid: HighlightRangeV2[] = [];
+  let dropped = 0;
+
+  for (const candidate of ranges) {
+    if (!candidate || typeof candidate !== 'object') {
+      dropped += 1;
+      continue;
+    }
+
+    const { start: rawStart, end: rawEnd, color } = candidate as {
+      start: unknown;
+      end: unknown;
+      color: unknown;
+    };
+
+    if (typeof rawStart !== 'number' || typeof rawEnd !== 'number') {
+      dropped += 1;
+      continue;
+    }
+
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) {
+      dropped += 1;
+      continue;
+    }
+
+    const start = Math.floor(rawStart);
+    const end = Math.floor(rawEnd);
+
+    if (!(end > start) || start < 0 || end > textLength) {
+      dropped += 1;
+      continue;
+    }
+
+    if (typeof color !== 'string' || !VALID_HIGHLIGHT_COLORS.has(color)) {
+      dropped += 1;
+      continue;
+    }
+
+    if (canonicalText.slice(start, end).length === 0) {
+      dropped += 1;
+      continue;
+    }
+
+    valid.push({ start, end, color: color as StudentHighlightColor });
+  }
+
+  if (dropped > 0) {
+    console.warn(`[highlights] Dropped ${dropped} invalid persisted range(s).`);
+  }
+
+  return valid.length > maxRanges ? valid.slice(valid.length - maxRanges) : valid;
 }

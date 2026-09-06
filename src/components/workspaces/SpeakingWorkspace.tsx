@@ -45,7 +45,7 @@ export function SpeakingWorkspace({
   setState,
 }: {
   state: ExamState;
-  setState: (state: ExamState) => void;
+  setState: (next: ExamState | ((previous: ExamState) => ExamState)) => void | Promise<void>;
 }) {
   const speakingConfig = state.config.sections.speaking;
   const cueCardDetails = state.speaking.cueCardDetails ?? {
@@ -81,16 +81,19 @@ export function SpeakingWorkspace({
                   <div>
                     <h3 className="text-xs font-black text-gray-400 uppercase tracking-[0.2em] mb-4">Topic Areas (Intro)</h3>
                     <div className="grid grid-cols-1 gap-3">
-                      {state.speaking.part1Topics.map((topic, i) => (
-                        <div key={i} className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                          <span className="w-6 h-6 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-[10px] font-black text-gray-400">{i + 1}</span>
+                      {state.speaking.part1Topics.map((topic, topicIndex) => (
+                        <div key={`part1-topic-${topicIndex}`} className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                          <span className="w-6 h-6 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-[10px] font-black text-gray-400">{topicIndex + 1}</span>
                           <input
                             type="text"
                             value={topic}
                             onChange={(e) => {
-                              const newTopics = [...state.speaking.part1Topics];
-                              newTopics[i] = e.target.value;
-                              setState({ ...state, speaking: { ...state.speaking, part1Topics: newTopics } });
+                              const nextValue = e.target.value;
+                              void setState((previous) => {
+                                const nextTopics = [...previous.speaking.part1Topics];
+                                nextTopics[topicIndex] = nextValue;
+                                return { ...previous, speaking: { ...previous.speaking, part1Topics: nextTopics } };
+                              });
                             }}
                             className="bg-transparent font-bold text-gray-700 outline-none flex-1"
                           />
@@ -104,35 +107,44 @@ export function SpeakingWorkspace({
                       <h3 className="text-xs font-black text-gray-400 uppercase tracking-[0.2em]">Cue Card Builder</h3>
                       <input
                         value={cueCardDetails.topic}
-                        onChange={(event) =>
-                          setState({
-                            ...state,
+                        onChange={(event) => {
+                          const nextTopic = event.target.value;
+                          void setState((previous) => ({
+                            ...previous,
                             speaking: {
-                              ...state.speaking,
-                              cueCard: event.target.value,
-                              cueCardDetails: { ...cueCardDetails, topic: event.target.value },
+                              ...previous.speaking,
+                              cueCard: nextTopic,
+                              cueCardDetails: {
+                                ...(previous.speaking.cueCardDetails ?? cueCardDetails),
+                                topic: nextTopic,
+                              },
                             },
-                          })
-                        }
+                          }));
+                        }}
                         placeholder="Cue card topic"
                         className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-red-500"
                       />
                       {cueCardDetails.bullets.map((bullet, bulletIndex) => (
                         <input
-                          key={bulletIndex}
+                          key={`cue-bullet-${bulletIndex}`}
                           value={bullet}
                           onChange={(event) => {
-                            const nextBullets = [...cueCardDetails.bullets];
-                            nextBullets[bulletIndex] = event.target.value;
-                            setState({
-                              ...state,
-                              speaking: {
-                                ...state.speaking,
-                                cueCardDetails: {
-                                  ...cueCardDetails,
-                                  bullets: nextBullets,
+                            const nextBullet = event.target.value;
+                            void setState((previous) => {
+                              const previousBullets =
+                                previous.speaking.cueCardDetails?.bullets ?? cueCardDetails.bullets;
+                              const nextBullets = [...previousBullets];
+                              nextBullets[bulletIndex] = nextBullet;
+                              return {
+                                ...previous,
+                                speaking: {
+                                  ...previous.speaking,
+                                  cueCardDetails: {
+                                    ...(previous.speaking.cueCardDetails ?? cueCardDetails),
+                                    bullets: nextBullets,
+                                  },
                                 },
-                              },
+                              };
                             });
                           }}
                           placeholder={`Bullet point ${bulletIndex + 1}`}
@@ -142,36 +154,38 @@ export function SpeakingWorkspace({
                       <div className="grid gap-3 md:grid-cols-2">
                         <input
                           value={cueCardDetails.timeAllocation}
-                          onChange={(event) =>
-                            setState({
-                              ...state,
+                          onChange={(event) => {
+                            const nextAllocation = event.target.value;
+                            void setState((previous) => ({
+                              ...previous,
                               speaking: {
-                                ...state.speaking,
+                                ...previous.speaking,
                                 cueCardDetails: {
-                                  ...cueCardDetails,
-                                  timeAllocation: event.target.value,
+                                  ...(previous.speaking.cueCardDetails ?? cueCardDetails),
+                                  timeAllocation: nextAllocation,
                                 },
                               },
-                            })
-                          }
+                            }));
+                          }}
                           placeholder="Time allocation"
                           className="rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-red-500"
                         />
                         <input
                           value={cueCardDetails.evaluatorNotes}
-                          onChange={(event) =>
-                            setState({
-                              ...state,
+                          onChange={(event) => {
+                            const nextNotes = event.target.value;
+                            void setState((previous) => ({
+                              ...previous,
                               speaking: {
-                                ...state.speaking,
-                                evaluatorNotes: event.target.value,
+                                ...previous.speaking,
+                                evaluatorNotes: nextNotes,
                                 cueCardDetails: {
-                                  ...cueCardDetails,
-                                  evaluatorNotes: event.target.value,
+                                  ...(previous.speaking.cueCardDetails ?? cueCardDetails),
+                                  evaluatorNotes: nextNotes,
                                 },
                               },
-                            })
-                          }
+                            }));
+                          }}
                           placeholder="Evaluator notes"
                           className="rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-red-500"
                         />
@@ -184,8 +198,8 @@ export function SpeakingWorkspace({
                       </div>
                       <h4 className="text-2xl font-black text-gray-900 leading-tight">{cueCardDetails.topic}</h4>
                       <ul className="mt-5 space-y-3">
-                        {cueCardDetails.bullets.filter(Boolean).map((bullet) => (
-                          <li key={bullet} className="flex gap-3 text-gray-800 font-medium">
+                        {cueCardDetails.bullets.filter(Boolean).map((bullet, bulletPreviewIndex) => (
+                          <li key={`cue-bullet-preview-${bulletPreviewIndex}-${bullet}`} className="flex gap-3 text-gray-800 font-medium">
                             <span>•</span>
                             <span>{bullet}</span>
                           </li>
@@ -200,16 +214,19 @@ export function SpeakingWorkspace({
                   <div>
                     <h3 className="text-xs font-black text-gray-400 uppercase tracking-[0.2em] mb-4">Discussion Prompts</h3>
                     <div className="space-y-3">
-                      {state.speaking.part3Discussion.map((q, i) => (
-                        <div key={i} className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                          <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Q{i + 1}</span>
+                      {state.speaking.part3Discussion.map((q, discussionIndex) => (
+                        <div key={`part3-discussion-${discussionIndex}`} className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                          <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Q{discussionIndex + 1}</span>
                           <input
                             type="text"
                             value={q}
                             onChange={(e) => {
-                              const newQs = [...state.speaking.part3Discussion];
-                              newQs[i] = e.target.value;
-                              setState({ ...state, speaking: { ...state.speaking, part3Discussion: newQs } });
+                              const nextQuestion = e.target.value;
+                              void setState((previous) => {
+                                const nextQs = [...previous.speaking.part3Discussion];
+                                nextQs[discussionIndex] = nextQuestion;
+                                return { ...previous, speaking: { ...previous.speaking, part3Discussion: nextQs } };
+                              });
                             }}
                             className="bg-transparent font-bold text-gray-700 outline-none flex-1"
                           />
@@ -227,18 +244,24 @@ export function SpeakingWorkspace({
                         type="number"
                         value={part.prepTime}
                         onChange={(e) => {
-                          const newParts = [...speakingConfig.parts];
-                          newParts[index] = { ...part, prepTime: Number(e.target.value) };
-                          setState({
-                            ...state,
+                          const parsedPrep = Number(e.target.value);
+                          const nextPrep = Number.isFinite(parsedPrep) && parsedPrep >= 0 ? Math.floor(parsedPrep) : 0;
+                          const partId = part.id;
+                          void setState((previous) => ({
+                            ...previous,
                             config: {
-                              ...state.config,
+                              ...previous.config,
                               sections: {
-                                ...state.config.sections,
-                                speaking: { ...speakingConfig, parts: newParts },
+                                ...previous.config.sections,
+                                speaking: {
+                                  ...previous.config.sections.speaking,
+                                  parts: previous.config.sections.speaking.parts.map((candidate) =>
+                                    candidate.id === partId ? { ...candidate, prepTime: nextPrep } : candidate,
+                                  ),
+                                },
                               },
                             },
-                          });
+                          }));
                         }}
                         className="bg-transparent font-black text-2xl text-gray-900 w-24 outline-none"
                       />
@@ -252,18 +275,25 @@ export function SpeakingWorkspace({
                         type="number"
                         value={part.speakingTime}
                         onChange={(e) => {
-                          const newParts = [...speakingConfig.parts];
-                          newParts[index] = { ...part, speakingTime: Number(e.target.value) };
-                          setState({
-                            ...state,
+                          const parsedSpeaking = Number(e.target.value);
+                          const nextSpeaking =
+                            Number.isFinite(parsedSpeaking) && parsedSpeaking >= 0 ? Math.floor(parsedSpeaking) : 0;
+                          const partId = part.id;
+                          void setState((previous) => ({
+                            ...previous,
                             config: {
-                              ...state.config,
+                              ...previous.config,
                               sections: {
-                                ...state.config.sections,
-                                speaking: { ...speakingConfig, parts: newParts },
+                                ...previous.config.sections,
+                                speaking: {
+                                  ...previous.config.sections.speaking,
+                                  parts: previous.config.sections.speaking.parts.map((candidate) =>
+                                    candidate.id === partId ? { ...candidate, speakingTime: nextSpeaking } : candidate,
+                                  ),
+                                },
                               },
                             },
-                          });
+                          }));
                         }}
                         className="bg-transparent font-black text-2xl text-gray-900 w-24 outline-none"
                       />
@@ -282,7 +312,10 @@ export function SpeakingWorkspace({
               deviationThreshold={state.config.standards.rubricDeviationThreshold}
               onAssessmentChange={() => {}}
               editableWeights
-              onRubricChange={(rubric) => setState(syncSpeakingRubricWeights(state, { ...rubric, custom: true }))}
+              onRubricChange={(rubric) => {
+                const nextRubric = { ...rubric, custom: true };
+                void setState((previous) => syncSpeakingRubricWeights(previous, nextRubric));
+              }}
               title="Speaking Rubric Attachment"
             />
 
@@ -295,33 +328,35 @@ export function SpeakingWorkspace({
               <div className="p-8 space-y-4">
                 <input
                   value={speakingRubric.title}
-                  onChange={(event) =>
-                    setState(
-                      syncSpeakingRubricWeights(state, {
+                  onChange={(event) => {
+                    const nextTitle = event.target.value;
+                    void setState((previous) =>
+                      syncSpeakingRubricWeights(previous, {
                         ...speakingRubric,
                         custom: true,
-                        title: event.target.value,
+                        title: nextTitle,
                       }),
-                    )
-                  }
+                    );
+                  }}
                   className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm text-gray-200 outline-none focus:border-blue-500"
                   placeholder="Institution rubric name"
                 />
                 <textarea
                   value={state.speaking.evaluatorNotes ?? ''}
-                  onChange={(event) =>
-                    setState({
-                      ...state,
+                  onChange={(event) => {
+                    const nextNotes = event.target.value;
+                    void setState((previous) => ({
+                      ...previous,
                       speaking: {
-                        ...state.speaking,
-                        evaluatorNotes: event.target.value,
+                        ...previous.speaking,
+                        evaluatorNotes: nextNotes,
                         cueCardDetails: {
-                          ...cueCardDetails,
-                          evaluatorNotes: event.target.value,
+                          ...(previous.speaking.cueCardDetails ?? cueCardDetails),
+                          evaluatorNotes: nextNotes,
                         },
                       },
-                    })
-                  }
+                    }));
+                  }}
                   className="w-full bg-white/5 border border-white/10 rounded-2xl p-6 text-sm text-gray-200 h-40 outline-none focus:border-blue-500 transition-all placeholder:text-gray-700"
                   placeholder="Candidate strengths, weaknesses, or observations..."
                 />

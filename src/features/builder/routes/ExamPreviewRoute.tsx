@@ -12,7 +12,7 @@ import {
 } from '../services/previewRuntimeSessionService';
 import type { ModuleType } from '../../../types';
 
-const MODULE_KEYS: ModuleType[] = ['listening', 'reading', 'writing', 'speaking'];
+const MODULE_KEYS: ModuleType[] = ['listening', 'reading', 'writing', 'speaking', 'science'];
 
 export function ExamPreviewRoute() {
   const { examId } = useParams<{ examId: string }>();
@@ -41,6 +41,11 @@ export function ExamPreviewRoute() {
     requestedModule && enabledModules.includes(requestedModule)
       ? requestedModule
       : enabledModules[0] ?? 'reading';
+  const rawModuleParam = searchParams.get('module');
+  const unknownModuleNotice =
+    !controller.isLoading && resolvedState && rawModuleParam && !requestedModule
+      ? `Unknown preview section "${rawModuleParam.trim()}" — showing "${previewModule}" instead.`
+      : null;
 
   useEffect(() => {
     if (
@@ -193,6 +198,7 @@ export function ExamPreviewRoute() {
       examId={examId}
       enabledModules={enabledModules}
       previewModule={previewModule}
+      fallbackNotice={unknownModuleNotice}
       onModuleChange={handleModuleChange}
       previewSession={previewSession}
       onExit={() => navigate(`/builder/${examId}/builder`, { replace: true })}
@@ -204,6 +210,7 @@ function RuntimePreviewSurface({
   examId,
   enabledModules,
   previewModule,
+  fallbackNotice,
   onModuleChange,
   previewSession,
   onExit,
@@ -211,6 +218,7 @@ function RuntimePreviewSurface({
   examId: string;
   enabledModules: ModuleType[];
   previewModule: ModuleType;
+  fallbackNotice: string | null;
   onModuleChange: (nextModule: ModuleType) => void;
   previewSession: PreviewRuntimeSession;
   onExit: () => void;
@@ -247,10 +255,15 @@ function RuntimePreviewSurface({
     );
   }
 
+  // Honesty: persistenceEnabled={false} only disables downstream answer sync
+  // inside the wrapper and does NOT make the preview side-effect-free (the
+  // isolated-namespace runtime writes above still happen).
+  const previewAnswerSyncEnabled = false;
+
   return (
     <>
-      <div className="fixed top-20 right-3 md:right-4 lg:right-6 z-[120] rounded-md border border-gray-200 bg-white/95 shadow-sm px-3 py-1.5 backdrop-blur">
-        <label className="text-xs font-semibold text-gray-700">
+      <div className="pointer-events-none fixed top-20 right-3 md:right-4 lg:right-6 z-[120] rounded-md border border-gray-200 bg-white/95 shadow-sm px-3 py-1.5 backdrop-blur">
+        <label className="pointer-events-auto text-xs font-semibold text-gray-700">
           Preview section
           <select
             aria-label="Preview section"
@@ -267,6 +280,15 @@ function RuntimePreviewSurface({
         </label>
       </div>
 
+      {fallbackNotice ? (
+        <div
+          role="status"
+          className="pointer-events-none fixed top-32 right-3 md:right-4 lg:right-6 z-[120] max-w-xs rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 shadow-sm"
+        >
+          {fallbackNotice}
+        </div>
+      ) : null}
+
       <StudentAppWrapper
         allowPreviewStart
         key={`preview-runtime-${examId}-${previewModule}-${previewSession.scheduleId}`}
@@ -279,7 +301,7 @@ function RuntimePreviewSurface({
         answerInvariantRollout={answerInvariantRollout}
         showSubmitControls={false}
         allowExitDuringExam
-        persistenceEnabled={false}
+        persistenceEnabled={previewAnswerSyncEnabled}
         enableMonitoring={false}
       />
     </>

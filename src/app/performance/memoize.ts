@@ -3,7 +3,7 @@
  * Common memoization patterns for React applications
  */
 
-import { useMemo, useCallback, useRef } from 'react';
+import { useMemo, useCallback, useEffect, useRef } from 'react';
 
 /**
  * Memoizes a function result based on dependencies
@@ -62,6 +62,8 @@ export function useMemoDeep<T>(value: T, deps: React.DependencyList): T {
 /**
  * Memoizes a function result with a cache key
  */
+const MAX_CACHED_RESULTS = 50;
+
 export function useCachedResult<T>(
   key: string,
   fn: () => T,
@@ -69,12 +71,29 @@ export function useCachedResult<T>(
 ): T {
   const cacheRef = useRef<Map<string, T>>(new Map());
 
+  // Evict the whole cache on unmount so memoized results cannot leak
+  // across component lifetimes.
+  useEffect(() => {
+    const cache = cacheRef.current;
+    return () => {
+      cache.clear();
+    };
+  }, []);
+
   return useMemo(() => {
-    if (cacheRef.current.has(key)) {
-      return cacheRef.current.get(key)!;
+    const cache = cacheRef.current;
+    if (cache.has(key)) {
+      return cache.get(key)!;
     }
     const result = fn();
-    cacheRef.current.set(key, result);
+    // FIFO eviction keeps the cache bounded.
+    if (cache.size >= MAX_CACHED_RESULTS) {
+      const oldest = cache.keys().next();
+      if (!oldest.done) {
+        cache.delete(oldest.value);
+      }
+    }
+    cache.set(key, result);
     return result;
   }, [key, fn, ...deps]);
 }
@@ -87,16 +106,19 @@ export function useThrottle<T extends (...args: unknown[]) => unknown>(
   delay: number
 ): T {
   const lastRunRef = useRef<number>(0);
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
 
+  // Stable identity across callback changes; latest callback wins.
   return useCallback(
     (...args: Parameters<T>) => {
       const now = Date.now();
       if (now - lastRunRef.current >= delay) {
         lastRunRef.current = now;
-        callback(...args);
+        callbackRef.current(...args);
       }
     },
-    [callback, delay]
+    [delay]
   ) as T;
 }
 
@@ -108,6 +130,18 @@ export function useDebounce<T extends (...args: unknown[]) => unknown>(
   delay: number
 ): T {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
+
+  // Clear the pending invocation on unmount or when the delay changes.
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = undefined;
+      }
+    };
+  }, [delay]);
 
   return useCallback(
     (...args: Parameters<T>) => {
@@ -115,10 +149,11 @@ export function useDebounce<T extends (...args: unknown[]) => unknown>(
         clearTimeout(timeoutRef.current);
       }
       timeoutRef.current = setTimeout(() => {
-        callback(...args);
+        timeoutRef.current = undefined;
+        callbackRef.current(...args);
       }, delay);
     },
-    [callback, delay]
+    [delay]
   ) as T;
 }
 

@@ -17,7 +17,7 @@ import { Scheduling } from '../ui/Scheduling/Scheduling';
 export function SchedulingRoute() {
   const location = useLocation();
   const scheduleQuery = useScheduleListQuery();
-  const examListQuery = useExamListQuery(true, 'ielts');
+  const examListQuery = useExamListQuery();
   const saveScheduleMutation = useSaveScheduleMutation();
   const deleteScheduleMutation = useDeleteScheduleMutation();
   const startScheduleMutation = useStartScheduleMutation();
@@ -34,10 +34,10 @@ export function SchedulingRoute() {
     return <LoadingSurface label="Loading scheduling data..." />;
   }
 
-  const ieltsEntities = (examListQuery.data?.entities ?? []).filter((exam) => exam.providerKey !== 'sat');
-  const ieltsExamIds = new Set(ieltsEntities.map((exam) => exam.id));
-  const ieltsExams = (examListQuery.data?.exams ?? []).filter((exam) => ieltsExamIds.has(exam.id));
-  const ieltsSchedules = (scheduleQuery.data ?? []).filter((schedule) => ieltsExamIds.has(schedule.examId));
+  const examEntities = examListQuery.data?.entities ?? [];
+  const examIds = new Set(examEntities.map((exam) => exam.id));
+  const exams = examListQuery.data?.exams ?? [];
+  const schedules = (scheduleQuery.data ?? []).filter((schedule) => examIds.has(schedule.examId));
 
   if (scheduleQuery.error || examListQuery.error) {
     const error = scheduleQuery.error ?? examListQuery.error;
@@ -56,9 +56,9 @@ export function SchedulingRoute() {
 
   return (
     <Scheduling
-      schedules={ieltsSchedules}
-      exams={ieltsExams}
-      examEntities={ieltsEntities}
+      schedules={schedules}
+      exams={exams}
+      examEntities={examEntities}
       onCreateSchedule={(schedule) => saveScheduleMutation.mutateAsync(schedule)}
       onUpdateSchedule={(schedule) => saveScheduleMutation.mutateAsync(schedule)}
       onDeleteSchedule={(scheduleId) => deleteScheduleMutation.mutateAsync(scheduleId).then(() => undefined)}

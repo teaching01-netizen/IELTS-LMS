@@ -33,12 +33,27 @@ export function VirtualizedList<T>({
   loadingComponent,
   emptyComponent,
 }: VirtualizedListProps<T>): React.ReactElement {
-  if (loading && loadingComponent) {
-    return <>{loadingComponent}</>;
+  void itemHeight;
+  if (loading) {
+    if (loadingComponent) {
+      return <>{loadingComponent}</>;
+    }
+    return (
+      <div role="status" aria-live="polite" aria-busy="true">
+        <span className="sr-only">Loading…</span>
+      </div>
+    );
   }
 
-  if (data.length === 0 && emptyComponent) {
-    return <>{emptyComponent}</>;
+  if (data.length === 0) {
+    if (emptyComponent) {
+      return <>{emptyComponent}</>;
+    }
+    return (
+      <div role="status" aria-live="polite" className="flex items-center justify-center p-8 text-sm text-gray-500">
+        No items to display
+      </div>
+    );
   }
 
   return (
@@ -80,12 +95,26 @@ export function VirtualizedGrid<T>({
   loadingComponent,
   emptyComponent,
 }: VirtualizedGridProps<T>): React.ReactElement {
-  if (loading && loadingComponent) {
-    return <>{loadingComponent}</>;
+  if (loading) {
+    if (loadingComponent) {
+      return <>{loadingComponent}</>;
+    }
+    return (
+      <div role="status" aria-live="polite" aria-busy="true">
+        <span className="sr-only">Loading…</span>
+      </div>
+    );
   }
 
-  if (data.length === 0 && emptyComponent) {
-    return <>{emptyComponent}</>;
+  if (data.length === 0) {
+    if (emptyComponent) {
+      return <>{emptyComponent}</>;
+    }
+    return (
+      <div role="status" aria-live="polite" className="flex items-center justify-center p-8 text-sm text-gray-500">
+        No items to display
+      </div>
+    );
   }
 
   return (

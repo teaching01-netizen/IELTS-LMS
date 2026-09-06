@@ -5,6 +5,7 @@ import {
   getStudentHighlightClassName,
   type StudentHighlightColor,
 } from './highlightPalette';
+import { MAX_HIGHLIGHT_RANGES } from './highlightV2Engine';
 import { usePersistedHighlightRangesV2 } from './highlightV2Persistence';
 import { useHighlightSelectionManager } from './highlightSelectionManager';
 import { useHighlightSelectionPort } from './highlightSelectionPort';
@@ -12,7 +13,6 @@ import { createHighlight, eraseHighlight } from './highlight/highlightCommandSer
 import { renderSurfaceHighlights } from './highlight/renderAdapter';
 import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 
-const MAX_SURFACE_RANGES = 200;
 
 function extractCanonicalTextFromHtml(baseHtml: string): string {
   const container = document.createElement('div');
@@ -33,6 +33,7 @@ interface UseHighlightSurfaceV2Result {
   containerRef: RefObject<HTMLElement | null>;
   renderedHtml: string;
   hint: string | null;
+  announce: string;
 }
 
 export function useHighlightSurfaceV2({
@@ -44,7 +45,8 @@ export function useHighlightSurfaceV2({
   toolMode = 'off',
 }: UseHighlightSurfaceV2Options): UseHighlightSurfaceV2Result {
   const containerRef = useRef<HTMLElement | null>(null);
-  const instanceIdRef = useRef(`surface:${useId()}`);
+  const surfaceInstanceId = useId();
+  const instanceIdRef = useRef(`surface:${surfaceInstanceId}`);
   const manager = useHighlightSelectionManager();
   const selectionPort = useHighlightSelectionPort();
   const activeSurfaceId = manager?.activeSurfaceId ?? null;
@@ -52,6 +54,9 @@ export function useHighlightSurfaceV2({
   const canonicalText = useMemo(() => extractCanonicalTextFromHtml(baseHtml), [baseHtml]);
   const { ranges, setRanges } = usePersistedHighlightRangesV2(surfaceId, canonicalText);
   const [hint, setHint] = useState<string | null>(null);
+  // S1-C10: SR announcements for highlight/erase/limit outcomes; rendered by
+  // HighlightableSurface in an sr-only role=status node (header pattern).
+  const [announce, setAnnounce] = useState('');
   const resolvedHighlightColor = highlightColor ?? defaultStudentHighlightColor;
   const resolvedClassForColor = useCallback(
     (color: StudentHighlightColor) =>
@@ -75,19 +80,58 @@ export function useHighlightSurfaceV2({
     setHint(null);
     if (toolMode === 'erase') {
       setRanges(eraseHighlight(ranges, snapshot.selection));
+      setAnnounce('Highlight erased.');
     } else {
-      const next = createHighlight(ranges, snapshot.selection, resolvedHighlightColor, MAX_SURFACE_RANGES);
+      const next = createHighlight(ranges, snapshot.selection, resolvedHighlightColor, MAX_HIGHLIGHT_RANGES);
       if (next.limitReached) {
         setHint('You reached the highlight limit for this text section.');
+        setAnnounce('Highlight limit reached for this text section.');
         manager?.releaseSurface(instanceIdRef.current);
         return true;
       }
       setRanges(next.ranges);
+      setAnnounce(`Highlighted with ${resolvedHighlightColor}.`);
     }
     selectionPort.clearSelection();
     manager?.releaseSurface(instanceIdRef.current);
     return true;
   }, [enabled, manager, ownsGlobalSelection, ranges, resolvedHighlightColor, selectionPort, setRanges, toolMode]);
+
+  // S1-C9: Alt+H applies the highlight tool to the OS text selection inside
+  // this surface (keyboard path for users who cannot drag-select). The
+  // container itself is tabIndex=0 (see HighlightableSurface) so the keydown
+  // is reachable; window.getSelection() supplies the completed selection.
+  // Document-level binding (filtered by activeElement containment) so the
+  // shortcut works even if the ref was not yet attached when the effect ran.
+  useEffect(() => {
+    if (!enabled || toolMode === 'off') return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || event.metaKey || event.ctrlKey) return;
+      if (typeof event.key !== 'string' || event.key.toLowerCase() !== 'h') return;
+      const container = containerRef.current;
+      if (!container) return;
+      const active = document.activeElement;
+      if (!active || (active !== container && !container.contains(active))) return;
+      const selection = typeof window === 'undefined' ? null : window.getSelection();
+      if (!selection || selection.isCollapsed) return;
+      // Only handle selections anchored in this surface.
+      const anchor = selection.anchorNode instanceof Element
+        ? selection.anchorNode
+        : selection.anchorNode?.parentElement ?? null;
+      const focus = selection.focusNode instanceof Element
+        ? selection.focusNode
+        : selection.focusNode?.parentElement ?? null;
+      if ((anchor && !container.contains(anchor)) || (focus && !container.contains(focus))) return;
+      event.preventDefault();
+      processCompletedSelection();
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [enabled, processCompletedSelection, toolMode]);
 
   useEffect(() => {
     if (!enabled) {
@@ -110,5 +154,6 @@ export function useHighlightSurfaceV2({
     containerRef,
     renderedHtml,
     hint,
+    announce,
   };
 }

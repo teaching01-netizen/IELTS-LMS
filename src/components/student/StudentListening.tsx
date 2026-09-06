@@ -40,6 +40,8 @@ interface StudentListeningProps {
   playbackRate?: StudentPlaybackRate | undefined;
   onPlaybackRateChange?: ((rate: StudentPlaybackRate) => void) | undefined;
   registerLiveAnswer?: ((answerKey: string, value: QuestionAnswer) => void) | undefined;
+  /** S1-C3: sessionStorage base key (per exam). Module suffix is appended. */
+  persistenceKeyBase?: string | undefined;
 }
 
 function getDiagramSlotIds(block: DiagramLabelingBlock): string[] {
@@ -74,6 +76,7 @@ export function StudentListening({
   playbackRate = 1,
   onPlaybackRateChange,
   registerLiveAnswer,
+  persistenceKeyBase,
 }: StudentListeningProps) {
   const isTabletMode = Boolean(tabletMode);
   const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
@@ -101,6 +104,7 @@ export function StudentListening({
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(70);
+  const [audioDuration, setAudioDuration] = useState(0);
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const {
@@ -109,12 +113,14 @@ export function StudentListening({
     handleKeyboardResize,
     leftWidth,
     materialCompact,
+    splitBounds,
     splitPaneStyle,
     workspaceRef,
   } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: "--listening-pane-width",
     dividerMode: isTabletMode ? "overlay" : "consumes-space",
+    persistenceKey: persistenceKeyBase ? `${persistenceKeyBase}:listening:split` : undefined,
   });
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, "listening"), [state]);
   const currentQ =
@@ -228,7 +234,34 @@ export function StudentListening({
   useEffect(() => {
     setIsPlaying(false);
     setProgress(0);
+    setAudioDuration(0);
   }, [activePart?.audioUrl, audioPlaybackEnabled]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    const handleLoadedMetadata = () => {
+      const duration = audio.duration;
+      setAudioDuration(Number.isFinite(duration) && duration > 0 ? duration : 0);
+      syncProgressFromAudio();
+      applyPlaybackRate();
+    };
+    const handleDurationChange = () => {
+      const duration = audio.duration;
+      setAudioDuration(Number.isFinite(duration) && duration > 0 ? duration : 0);
+    };
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('durationchange', handleDurationChange);
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+      setAudioDuration(audio.duration);
+    }
+    return () => {
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('durationchange', handleDurationChange);
+    };
+  }, [activePart?.audioUrl, applyPlaybackRate, canPlayAudio]);
 
   const syncProgressFromAudio = () => {
     const audio = audioRef.current;
@@ -268,13 +301,27 @@ export function StudentListening({
     }
 
     if (!isPlaying) {
-      await audio.play();
-      setIsPlaying(true);
+      try {
+        await audio.play();
+        if (audioRef.current === audio) {
+          setIsPlaying(true);
+        }
+      } catch {
+        if (audioRef.current === audio) {
+          setIsPlaying(false);
+        }
+      }
       return;
     }
 
-    audio.pause();
-    setIsPlaying(false);
+    try {
+      audio.pause();
+    } catch {
+      // pause() is sync but guard media-state errors.
+    }
+    if (audioRef.current === audio) {
+      setIsPlaying(false);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -283,10 +330,15 @@ export function StudentListening({
     const s = bounded % 60;
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
+  // Fall back to a live read of the element: test doubles and late metadata
+  // can set duration without firing an event the subscribed handlers observe.
+  const liveDuration = audioRef.current?.duration;
   const totalSeconds =
-    audioRef.current && Number.isFinite(audioRef.current.duration) && audioRef.current.duration > 0
-      ? audioRef.current.duration
-      : 0;
+    audioDuration > 0
+      ? audioDuration
+      : typeof liveDuration === 'number' && Number.isFinite(liveDuration) && liveDuration > 0
+        ? liveDuration
+        : 0;
   const currentSeconds = totalSeconds > 0 ? (progress / 100) * totalSeconds : 0;
   const renderBlockInstruction = useCallback(
     (instruction: string, blockId: string) => {
@@ -322,11 +374,14 @@ export function StudentListening({
       workspaceRef={workspaceRef}
       splitPaneStyle={splitPaneStyle}
       leftWidth={leftWidth}
+      splitMinWidth={splitBounds.min}
+      splitMaxWidth={splitBounds.max}
       onDividerPointerDown={handleDrag}
       onDividerKeyDown={handleKeyboardResize}
       workspaceTestId="listening-split-workspace"
       dividerAriaLabel="Resize listening material and answer panels"
       dividerTestId="listening-pane-resizer"
+      persistenceKey={persistenceKeyBase ? `${persistenceKeyBase}:listening:tab` : undefined}
       materialPane={
         <div
           className={`h-full overflow-y-auto font-sans leading-relaxed text-gray-900 ${
@@ -361,7 +416,15 @@ export function StudentListening({
               onPause={() => setIsPlaying(false)}
               onEnded={() => setIsPlaying(false)}
               onTimeUpdate={syncProgressFromAudio}
-              onLoadedMetadata={() => {
+              onLoadedMetadata={(event) => {
+                // Prefer the event target: jsdom/test doubles define duration
+                // on the element without firing real media loading, and the
+                // listener-effect capture may predate the mocked property.
+                const target = (event.currentTarget ?? audioRef.current) as HTMLAudioElement | null;
+                const duration = target?.duration;
+                if (typeof duration === 'number' && Number.isFinite(duration) && duration > 0) {
+                  setAudioDuration(duration);
+                }
                 syncProgressFromAudio();
                 applyPlaybackRate();
               }}

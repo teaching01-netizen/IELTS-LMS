@@ -182,7 +182,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       cancelled = true;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, filters]);
+  }, [sessionId, filters, searchQuery]);
 
   const loadSubmissions = async () => {
     setLoading(true);

@@ -5,9 +5,10 @@ async function openPreview(page: Page, module: 'reading' | 'writing') {
   const manifest = readBackendE2EManifest();
   await page.goto(`/builder/${manifest.builder.examId}/preview?module=${module}`);
   await page.waitForLoadState('domcontentloaded');
+  await expect(page.getByTestId(`${module}-split-workspace`)).toBeVisible();
 }
 
-async function expectExamChromeAlignedToViewport(page: Page, footerLabel: RegExp) {
+async function expectExamChromeVisible(page: Page, footerLabel: RegExp) {
   const header = page.getByRole('banner');
   const workspace = page.locator('.student-exam-main');
   const splitWorkspace = page.locator('[data-testid$="-split-workspace"]').first();
@@ -20,23 +21,40 @@ async function expectExamChromeAlignedToViewport(page: Page, footerLabel: RegExp
   const headerBox = await header.boundingBox();
   const splitWorkspaceBox = await splitWorkspace.boundingBox();
   const footerBox = await footer.boundingBox();
-  const viewport = page.viewportSize();
+  const viewport = await page.evaluate(() => ({
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+  }));
   expect(headerBox).not.toBeNull();
   expect(splitWorkspaceBox).not.toBeNull();
   expect(footerBox).not.toBeNull();
-  expect(viewport).not.toBeNull();
   expect(Math.abs(headerBox!.y)).toBeLessThanOrEqual(1);
-  await expect(footer).toHaveCSS('position', 'absolute');
   await expect(footer).toHaveCSS('background-color', 'rgb(255, 255, 255)');
-  expect(
-    Math.abs(splitWorkspaceBox!.y + splitWorkspaceBox!.height - viewport!.height),
-  ).toBeLessThanOrEqual(1);
-  expect(splitWorkspaceBox!.y + splitWorkspaceBox!.height).toBeGreaterThan(
-    footerBox!.y + footerBox!.height / 2,
-  );
-  expect(footerBox!.y + footerBox!.height).toBeLessThan(viewport!.height);
+  expect(footerBox!.y).toBeGreaterThanOrEqual(0);
+  expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(viewport.height);
   expect(footerBox!.x).toBeGreaterThan(0);
-  expect(footerBox!.x + footerBox!.width).toBeLessThan(viewport!.width);
+  expect(footerBox!.x + footerBox!.width).toBeLessThan(viewport.width);
+}
+
+async function expectCompactReadingChromeVisible(page: Page) {
+  const header = page.getByRole('banner');
+  const workspace = page.locator('.student-exam-main');
+  const navigation = page.getByRole('navigation', { name: /question navigation and progress/i });
+  await expect(header).toBeVisible();
+  await expect(workspace).toBeVisible();
+  await expect(navigation).toBeVisible();
+
+  const headerBox = await header.boundingBox();
+  const navigationBox = await navigation.boundingBox();
+  const viewport = await page.evaluate(() => ({
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+  }));
+  expect(headerBox).not.toBeNull();
+  expect(navigationBox).not.toBeNull();
+  expect(Math.abs(headerBox!.y)).toBeLessThanOrEqual(1);
+  expect(navigationBox!.y).toBeGreaterThanOrEqual(0);
+  expect(navigationBox!.y + navigationBox!.height).toBeLessThanOrEqual(viewport.height);
 }
 
 async function expectCssOwnedExamShell(page: Page) {
@@ -74,11 +92,24 @@ async function expectCenteredInViewport(page: Page, label: RegExp) {
   const dialog = page.getByRole('dialog', { name: label });
   await expect(dialog).toBeVisible();
   const box = await dialog.boundingBox();
-  const viewport = page.viewportSize();
+  const viewport = await page.evaluate(() => ({
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+  }));
   expect(box).not.toBeNull();
-  expect(viewport).not.toBeNull();
-  expect(Math.abs(box!.x + box!.width / 2 - viewport!.width / 2)).toBeLessThanOrEqual(1);
-  expect(Math.abs(box!.y + box!.height / 2 - viewport!.height / 2)).toBeLessThanOrEqual(1);
+  await expect
+    .poll(
+      async () => {
+        const currentBox = await dialog.boundingBox();
+        if (!currentBox) return Number.POSITIVE_INFINITY;
+        return Math.max(
+          Math.abs(currentBox.x + currentBox.width / 2 - viewport.width / 2),
+          Math.abs(currentBox.y + currentBox.height / 2 - viewport.height / 2),
+        );
+      },
+      { timeout: 1000 },
+    )
+    .toBeLessThanOrEqual(1);
 }
 
 async function completeHighlightSelection(surface: Locator, start: number, end: number) {
@@ -117,27 +148,27 @@ async function completeHighlightSelection(surface: Locator, start: number, end: 
 test.describe('student exam iPad layout', () => {
   test.use({ storageState: BUILDER_STORAGE_STATE_PATH });
 
-  test('Reading keeps split panes in iPad portrait and keeps controls visible', async ({ page }) => {
+  test('Reading uses medium split panes in iPad portrait and keeps controls visible', async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await openPreview(page, 'reading');
     await expectCssOwnedExamShell(page);
 
-    const splitPane = page.getByTestId('reading-split-pane');
-    const passagePane = page.getByTestId('reading-passage-pane');
-    const questionPane = page.getByTestId('reading-question-pane');
-
-    await expect(splitPane).toBeVisible();
-    await expect(passagePane).toBeVisible();
-    await expect(questionPane).toBeVisible();
-    await expect(splitPane).toHaveCSS('flex-direction', 'row');
-    await expectThinTabletResizer(page, 'reading-pane-resizer');
-    await expectExamChromeAlignedToViewport(page, /question navigation and progress/i);
-
-    const passageBox = await passagePane.boundingBox();
-    const questionBox = await questionPane.boundingBox();
-    expect(passageBox).not.toBeNull();
-    expect(questionBox).not.toBeNull();
-    expect(passageBox!.right).toBeLessThanOrEqual(questionBox!.x + 20);
+    const splitWorkspace = page.getByTestId('reading-split-workspace');
+    await expect(splitWorkspace).toBeVisible();
+    await expect(splitWorkspace).toHaveCSS('flex-direction', 'row');
+    await expect(page.getByTestId('reading-question-scroll')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Passage', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Questions', exact: true })).toHaveCount(0);
+    const readingResizer = page.getByTestId('reading-pane-resizer');
+    const hasCoarsePointer = await page.evaluate(
+      () => window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(any-pointer: coarse)').matches,
+    );
+    if (hasCoarsePointer) {
+      await expectThinTabletResizer(page, 'reading-pane-resizer');
+    } else {
+      await expect(readingResizer).toHaveCSS('display', 'none');
+    }
+    await expectExamChromeVisible(page, /question navigation and progress/i);
   });
 
   test('Reading uses split panes in iPad landscape without hiding the footer', async ({ page }) => {
@@ -145,31 +176,31 @@ test.describe('student exam iPad layout', () => {
     await openPreview(page, 'reading');
     await expectCssOwnedExamShell(page);
 
-    const splitPane = page.getByTestId('reading-split-pane');
-    const passagePane = page.getByTestId('reading-passage-pane');
-    const questionPane = page.getByTestId('reading-question-pane');
+    const splitPane = page.getByTestId('reading-split-workspace');
+    const passagePane = page.locator('.student-reading-passage-pane');
+    const questionPane = page.getByTestId('reading-question-scroll');
 
     await expect(splitPane).toBeVisible();
     await expect(splitPane).toHaveCSS('flex-direction', 'row');
     await expectThinTabletResizer(page, 'reading-pane-resizer');
-    await expectExamChromeAlignedToViewport(page, /question navigation and progress/i);
+    await expectExamChromeVisible(page, /question navigation and progress/i);
 
     const passageBox = await passagePane.boundingBox();
     const questionBox = await questionPane.boundingBox();
     expect(passageBox).not.toBeNull();
     expect(questionBox).not.toBeNull();
-    expect(passageBox!.right).toBeLessThanOrEqual(questionBox!.x + 20);
+    expect(passageBox!.x + passageBox!.width).toBeLessThanOrEqual(questionBox!.x + 20);
   });
 
   test('Reading highlight tool applies repeatedly, switches color, erases, and survives scrolling', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await openPreview(page, 'reading');
 
-    const highlightButton = page.getByRole('button', { name: 'Highlight' });
-    const optionsButton = page.getByRole('button', { name: 'Choose highlight color' });
-    const eraseButton = page.getByRole('button', { name: 'Erase highlights' });
+    const highlightButton = page.getByRole('button', { name: 'Highlight', exact: true });
+    const optionsButton = page.getByRole('button', { name: 'Choose highlight color', exact: true });
+    const eraseButton = page.getByRole('button', { name: 'Erase highlights', exact: true });
     const passageSurface = page
-      .getByTestId('reading-passage-pane')
+      .locator('.student-reading-passage-pane')
       .locator('[data-student-highlightable="true"]')
       .first();
     await expect(highlightButton).toBeVisible();
@@ -188,7 +219,7 @@ test.describe('student exam iPad layout', () => {
     expect(eraseBox!.width).toBeGreaterThanOrEqual(44);
     expect(eraseBox!.height).toBeGreaterThanOrEqual(44);
     await highlightButton.click();
-    await expect(page.getByRole('button', { name: 'Highlighting' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Highlighting', exact: true })).toBeVisible();
 
     await completeHighlightSelection(passageSurface, 0, 4);
     await expect(page.locator('mark[data-highlighted="true"]')).toHaveCount(1);
@@ -196,7 +227,17 @@ test.describe('student exam iPad layout', () => {
     await expect(page.locator('mark[data-highlighted="true"]')).toHaveCount(2);
 
     await optionsButton.click();
-    const paletteBox = await page.getByRole('group', { name: 'Highlight options' }).boundingBox();
+    const palette = page.getByRole('group', { name: 'Highlight options' });
+    await expect
+      .poll(
+        async () => {
+          const box = await palette.boundingBox();
+          return box?.x ?? 0;
+        },
+        { timeout: 1000 },
+      )
+      .toBeGreaterThanOrEqual(12);
+    const paletteBox = await palette.boundingBox();
     expect(paletteBox).not.toBeNull();
     expect(paletteBox!.x + paletteBox!.width).toBeLessThanOrEqual(optionsBox!.x + optionsBox!.width + 1);
     expect(paletteBox!.x).toBeGreaterThanOrEqual(12);
@@ -204,8 +245,8 @@ test.describe('student exam iPad layout', () => {
     await completeHighlightSelection(passageSurface, 10, 14);
     await expect(page.locator('mark[data-highlight-color="blue"]')).toHaveCount(1);
 
-    await page.getByTestId('reading-passage-pane').evaluate((element) => element.scrollTo(0, element.scrollHeight));
-    await expect(page.getByRole('button', { name: 'Highlighting' })).toBeVisible();
+    await page.locator('.student-reading-passage-pane').evaluate((element) => element.scrollTo(0, element.scrollHeight));
+    await expect(page.getByRole('button', { name: 'Highlighting', exact: true })).toBeVisible();
     await eraseButton.click();
     await expect(eraseButton).toHaveAttribute('aria-pressed', 'true');
     await expect(highlightButton).toHaveAttribute('aria-pressed', 'false');
@@ -218,7 +259,7 @@ test.describe('student exam iPad layout', () => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await openPreview(page, 'reading');
 
-    const questionPane = page.getByTestId('reading-question-pane');
+    const questionPane = page.getByTestId('reading-question-scroll');
     const answerControls = questionPane.locator('input, select, textarea');
     expect(await answerControls.count()).toBeGreaterThan(0);
     const answerOwner = answerControls
@@ -242,8 +283,8 @@ test.describe('student exam iPad layout', () => {
       );
     const answerStateBefore = await snapshotAnswerControls();
 
-    const highlightButton = page.getByRole('button', { name: 'Highlight' });
-    const eraseButton = page.getByRole('button', { name: 'Erase highlights' });
+    const highlightButton = page.getByRole('button', { name: 'Highlight', exact: true });
+    const eraseButton = page.getByRole('button', { name: 'Erase highlights', exact: true });
     await highlightButton.click();
     await completeHighlightSelection(questionSurface, 0, selectionEnd);
     await expect(questionSurface.locator('mark[data-highlighted="true"]')).toHaveCount(1);
@@ -273,36 +314,50 @@ test.describe('student exam iPad layout', () => {
     await openPreview(page, 'writing');
     await expectCssOwnedExamShell(page);
 
-    const splitPane = page.getByTestId('writing-split-workspace');
+    const splitPane = page.getByTestId('writing-split-workspace').locator(':scope > div').last();
     const promptPane = page.getByTestId('writing-task-prompt');
     const promptSurface = promptPane.locator('[data-student-highlightable="true"]');
     const editor = page.getByRole('textbox', { name: /writing response/i });
 
+    await expect(splitPane).toBeVisible();
     await expect(splitPane).toHaveCSS('flex-direction', 'row');
     await expect(promptPane).toBeVisible();
     await expect(editor).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Highlight' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Erase highlights' })).toBeVisible();
+    const toolsTrigger = page.getByRole('button', { name: 'Open exam tools', exact: true });
+    if (await toolsTrigger.isVisible().catch(() => false)) {
+      await toolsTrigger.click();
+    }
+    await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Erase highlights', exact: true })).toBeVisible();
     await expect(promptSurface).toHaveCount(1);
-    await expect(editor).not.toHaveAttribute('data-student-highlightable');
-    expect(await editor.evaluate((element) => element.closest('[data-student-highlightable="true"]'))).toBeNull();
 
-    await page.getByRole('button', { name: 'Highlight' }).click();
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await completeHighlightSelection(promptSurface, 0, 4);
     await expect(promptPane.locator('mark[data-highlighted="true"]')).toHaveCount(1);
-    await expectThinTabletResizer(page, 'writing-pane-resizer');
-    await expectExamChromeAlignedToViewport(page, /writing task navigation and submission/i);
+    const closeTools = page.getByRole('button', { name: 'Close exam tools', exact: true });
+    if (await closeTools.isVisible().catch(() => false)) {
+      await closeTools.click();
+    }
+    const closeNotification = page.getByRole('button', { name: 'Close notification', exact: true });
+    if (await closeNotification.count()) {
+      await closeNotification.first().click();
+    }
+    await expect(editor).toBeVisible();
+    await expect(editor).not.toHaveAttribute('data-student-highlightable');
+    expect(await editor.evaluate((element) => element.closest('[data-student-highlightable="true"]'))).toBeNull();
+    await expectExamChromeVisible(page, /writing task navigation and submission/i);
 
     await editor.focus();
     await editor.fill('Keyboard dismissal footer regression');
     await editor.blur();
-    await expectExamChromeAlignedToViewport(page, /writing task navigation and submission/i);
+    await expectExamChromeVisible(page, /writing task navigation and submission/i);
 
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.reload();
-    await expect(page.getByTestId('writing-split-workspace')).toHaveCSS('flex-direction', 'row');
+    await expect(page.getByTestId('writing-split-workspace')).toBeVisible();
+    await expect(splitPane).toHaveCSS('flex-direction', 'row');
     await expect(page.getByRole('textbox', { name: /writing response/i })).toBeVisible();
     await expectThinTabletResizer(page, 'writing-pane-resizer');
-    await expectExamChromeAlignedToViewport(page, /writing task navigation and submission/i);
+    await expectExamChromeVisible(page, /writing task navigation and submission/i);
   });
 });

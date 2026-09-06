@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useOptionalAuthSession } from '../../auth/api/authSession';
 import { examAuthoringFacade } from '../../exam-authoring/api/examAuthoringFacade';
 import type { ExamConfig } from '../../../types';
 import type { ExamEntity, ExamVersion } from '../../../types/domain';
@@ -18,10 +19,19 @@ export interface ConfigRouteController {
   reload: () => Promise<void>;
 }
 
+function resolveStaffActor(session: { user: { id: string; displayName?: string | null | undefined; email?: string } } | null | undefined): string | null {
+  const user = session?.user;
+  if (!user) return null;
+  const candidate = user.displayName?.trim() || user.id?.trim() || user.email?.trim() || '';
+  return candidate === '' ? null : candidate;
+}
+
 export function useConfigRouteController(
   examId?: string,
 ): ConfigRouteController {
   const navigate = useNavigate();
+  const authSession = useOptionalAuthSession();
+  const staffActor = resolveStaffActor(authSession?.session ?? null);
 
   const [exam, setExam] = useState<ExamEntity | undefined>(undefined);
   const [config, setConfig] = useState<ExamConfig | undefined>(undefined);
@@ -46,7 +56,10 @@ export function useConfigRouteController(
     try {
       const entity = await examAuthoringFacade.repository.getExamById(examId);
       if (!entity) {
-        throw new Error('Exam not found');
+        // Exam was deleted or never existed: leave exam/config unset and error
+        // null so the route renders an "Exam Not Found" surface with a way
+        // back to Admin, instead of a Retry that can never succeed.
+        return;
       }
 
       setExam(entity);
@@ -60,7 +73,7 @@ export function useConfigRouteController(
       }
 
       const currentVersion = await examAuthoringFacade.repository.getVersionById(versionId);
-      if (currentVersion) {
+      if (currentVersion?.configSnapshot) {
         versionRef.current = currentVersion;
         setConfig(currentVersion.configSnapshot);
         setIsDirty(false);
@@ -115,7 +128,11 @@ export function useConfigRouteController(
         config,
       });
 
-      const result = await examAuthoringFacade.lifecycle.saveDraft(examId, nextContent, 'System');
+      if (!staffActor) {
+        setError('Sign in required: saving config is blocked without an authenticated staff user.');
+        return false;
+      }
+      const result = await examAuthoringFacade.lifecycle.saveDraft(examId, nextContent, staffActor);
       if (!result.success) {
         setError(result.error ?? 'Failed to save draft');
         return false;
@@ -128,7 +145,7 @@ export function useConfigRouteController(
       isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [config, examId, loadExam]);
+  }, [config, examId, loadExam, staffActor]);
 
   const handleNavigateToBuilder = useCallback(async () => {
     if (!examId) {

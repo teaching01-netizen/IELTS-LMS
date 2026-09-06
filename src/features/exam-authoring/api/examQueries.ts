@@ -15,11 +15,11 @@ const examListQueryPolicy = {
 
 export const examKeys = {
   all: ['exam-authoring'] as const,
-  list: (providerKey?: 'sat' | 'ielts') => [...examKeys.all, 'list', providerKey ?? 'all'] as const,
+  list: (providerKey?: 'sat' | 'ielts' | 'act') => [...examKeys.all, 'list', providerKey ?? 'all'] as const,
   detail: (examId: string) => [...examKeys.all, 'detail', examId] as const,
 };
 
-export async function fetchExamList(providerKey?: 'sat' | 'ielts'): Promise<ExamListData> {
+export async function fetchExamList(providerKey?: 'sat' | 'ielts' | 'act'): Promise<ExamListData> {
   const entities = await examAuthoringFacade.repository.getAllExamsWithLegacyMigration(providerKey);
   const exams = await examAuthoringFacade.adaptExamEntitiesToLegacyExams(
     entities,
@@ -29,7 +29,7 @@ export async function fetchExamList(providerKey?: 'sat' | 'ielts'): Promise<Exam
   return { entities, exams };
 }
 
-export function useExamListQuery(enabled = true, providerKey?: 'sat' | 'ielts') {
+export function useExamListQuery(enabled = true, providerKey?: 'sat' | 'ielts' | 'act') {
   return useQuery({
     queryKey: examKeys.list(providerKey),
     queryFn: () => fetchExamList(providerKey),

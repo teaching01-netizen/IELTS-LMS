@@ -13,6 +13,12 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
 }));
 
+vi.mock('../../../auth/api/authSession', () => ({
+  useOptionalAuthSession: () => ({
+    session: { user: { id: 'builder-1', displayName: 'Builder User', email: 'builder@example.com' } },
+  }),
+}));
+
 vi.mock('@services/examRepository', () => ({
   examRepository: {
     getExamById: (...args: unknown[]) => mockGetExamById(...args),
@@ -118,8 +124,23 @@ describe('useConfigRouteController', () => {
           }),
         }),
       }),
-      'System',
+      'Builder User',
     );
+  });
+
+  it('leaves the controller in a not-found state when the exam is missing', async () => {
+    mockGetExamById.mockResolvedValue(null);
+
+    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.exam).toBeUndefined();
+    expect(result.current.config).toBeUndefined();
+    expect(mockGetVersionById).not.toHaveBeenCalled();
   });
 
   it('surfaces save errors when draft persistence fails', async () => {

@@ -19,10 +19,9 @@ interface GlobalToastProps {
 }
 
 export function GlobalToast({ onDismiss, toasts }: GlobalToastProps) {
-  if (toasts.length === 0) {
-    return null;
-  }
-
+  // S5: the live region stays mounted even when empty so AT keeps its
+  // subscription; per-toast role=alert announces each item (never both on
+  // the same node — Toast itself carries role=alert with no aria-live).
   return (
     <ToastContainer position="top-right">
       <AnimatePresence initial={false}>

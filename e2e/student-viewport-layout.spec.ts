@@ -81,8 +81,7 @@ async function selectStudentQuestion(page: Page, questionNumber: number) {
 
   const footer = page.getByRole('contentinfo', { name: 'Question navigation and progress' });
   const questionButton = footer.getByRole('button', {
-    name: String(questionNumber),
-    exact: true,
+    name: new RegExp(`^Question ${questionNumber}(?:,|$)`),
   });
   await expect(questionButton).toBeVisible();
   await questionButton.click();

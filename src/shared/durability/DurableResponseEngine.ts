@@ -44,6 +44,7 @@ export interface DurableResponseEngineOptions {
 
 const CHECKPOINT_PREFIX = "response-checkpoint:v2:";
 const DURABLE_DRAFT_PREFIX = "v2_attempt_";
+const QUARANTINE_PREFIX = "v2_quarantine:";
 const MAX_RETRY_ATTEMPTS_PER_DRAIN = 8;
 
 type CommandEpoch = {
@@ -59,6 +60,10 @@ function checkpointKey(attemptId: string, questionId: string): string {
 
 function durableDraftKey(attemptId: string, questionId: string): string {
   return `${DURABLE_DRAFT_PREFIX}${attemptId}_${questionId}`;
+}
+
+function quarantineDraftKey(attemptId: string, writeId: string): string {
+  return `${QUARANTINE_PREFIX}${attemptId}:${writeId}`;
 }
 
 function randomWriteId(): string {
@@ -1134,14 +1139,23 @@ export class DurableResponseEngine {
 
   private quarantineEntry(command: ResponseCommandV2, reason: string): void {
     if (this.quarantined.some((entry) => entry.writeId === command.writeId)) return;
-    this.quarantined.push({
+    const entry: QuarantinedWrite = {
       writeId: command.writeId,
       questionId: command.questionId,
       clientVersion: command.clientVersion,
       payload: clonePayload(command.response),
       reason,
       quarantinedAt: new Date().toISOString(),
-    });
+    };
+    this.quarantined.push(entry);
+
+    // A fenced/terminal response must stop retrying, but it must not vanish
+    // when the in-flight request loses the race with the server boundary.
+    // Keep a separate durable audit record rather than leaving the command in
+    // the active outbox, where recovery could incorrectly replay it.
+    void saveDurableDraft(quarantineDraftKey(this.attemptId, command.writeId), entry).catch(
+      () => undefined
+    );
 
     const existing = this.states.get(command.questionId);
     if (existing?.pending?.writeId === command.writeId) {

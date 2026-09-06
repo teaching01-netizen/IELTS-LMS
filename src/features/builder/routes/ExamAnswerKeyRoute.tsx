@@ -12,6 +12,7 @@ import { applyAnswerKeyEdit, buildAnswerKeyRows, type AnswerKeyRow } from '../ut
 import { getStudentQuestionsForModule, type StudentQuestionDescriptor } from '../../exam-authoring/api/examAuthoringGateway';
 import { useOptionalAuthSession } from '../../auth/api/authSession';
 import { buildStaffDraftKey } from '../../../utils/staffDraftKey';
+import { toRoman } from '../../../utils/examUtils';
 
 type SaveStatus = 'unsaved' | 'saving' | 'saved' | 'error';
 
@@ -512,13 +513,13 @@ function AnswerControl({
           <label className="text-xs font-semibold text-slate-600">Correct</label>
           <select
             value={current}
-            onChange={(e) => onEdit({ kind: 'set_matching_heading', questionId: descriptor.answerKey, headingId: e.target.value })}
+            onChange={(e) => onEdit({ kind: 'set_matching_heading', questionId: descriptor.answerKey, headingKey: e.target.value })}
             className="min-w-[220px] rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-medium text-slate-800"
           >
             <option value="">(none)</option>
-            {headings.map((h: any) => (
-              <option key={h.id} value={h.id}>
-                {h.text}
+            {headings.map((h: any, index: number) => (
+              <option key={h.id} value={toRoman(index)}>
+                {toRoman(index)}. {h.text}
               </option>
             ))}
           </select>

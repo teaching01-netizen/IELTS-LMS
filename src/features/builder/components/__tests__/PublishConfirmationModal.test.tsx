@@ -37,13 +37,18 @@ describe('PublishConfirmationModal', () => {
     expect(screen.getByText(/exam is scheduled/i)).toBeTruthy();
   });
 
-  it('calls onConfirm when Confirm button clicked', () => {
+  it('calls onConfirm when Confirm button clicked after review attestation', () => {
     const onConfirm = vi.fn().mockResolvedValue(undefined);
     render(<PublishConfirmationModal {...defaultProps} onConfirm={onConfirm} />);
-    
+
+    // S2-C3: confirm is blocked until the operator attests content review.
     const confirmButton = screen.getByRole('button', { name: /confirm publish/i });
+    expect(confirmButton).toBeDisabled();
+    const attestation = screen.getByRole('checkbox');
+    fireEvent.click(attestation);
+    expect(confirmButton).not.toBeDisabled();
     fireEvent.click(confirmButton);
-    
+
     expect(onConfirm).toHaveBeenCalled();
   });
 

@@ -50,25 +50,47 @@ const DEFAULT_FILTERS: SavedFilter[] = [
 
 export function useStudentFilters(sessions: StudentSession[]) {
   const [filterCriteria, setFilterCriteria] = useState<StudentFilterCriteria>(() => {
-    const saved = sessionStorage.getItem('studentFilterCriteria');
-    return saved ? JSON.parse(saved) : {};
+    try {
+      const saved = sessionStorage.getItem('studentFilterCriteria');
+      if (!saved) {
+        return {};
+      }
+      const parsed: unknown = JSON.parse(saved);
+      return typeof parsed === 'object' && parsed !== null
+        ? (parsed as StudentFilterCriteria)
+        : {};
+    } catch {
+      return {};
+    }
   });
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>(DEFAULT_FILTERS);
   const [activeFilterId, setActiveFilterId] = useState<string | null>(() => {
-    return sessionStorage.getItem('activeFilterId') || null;
+    try {
+      return sessionStorage.getItem('activeFilterId') || null;
+    } catch {
+      return null;
+    }
   });
 
   // Persist filter criteria to session storage
   useEffect(() => {
-    sessionStorage.setItem('studentFilterCriteria', JSON.stringify(filterCriteria));
+    try {
+      sessionStorage.setItem('studentFilterCriteria', JSON.stringify(filterCriteria));
+    } catch {
+      // Storage unavailable; filters stay in memory.
+    }
   }, [filterCriteria]);
 
   // Persist active filter ID to session storage
   useEffect(() => {
-    if (activeFilterId) {
-      sessionStorage.setItem('activeFilterId', activeFilterId);
-    } else {
-      sessionStorage.removeItem('activeFilterId');
+    try {
+      if (activeFilterId) {
+        sessionStorage.setItem('activeFilterId', activeFilterId);
+      } else {
+        sessionStorage.removeItem('activeFilterId');
+      }
+    } catch {
+      // Storage unavailable; filters stay in memory.
     }
   }, [activeFilterId]);
 
@@ -171,15 +193,22 @@ export function useStudentFilters(sessions: StudentSession[]) {
     setActiveFilterId(null);
   }, []);
 
+  const [filterCriteriaVersion, setFilterCriteriaVersion] = useState(0);
+  // Clearing the active filter lives OUTSIDE the criteria updater (updaters
+  // must be pure): a version bump observed by the effect below clears it
+  // when the post-removal criteria are empty.
+  useEffect(() => {
+    if (filterCriteriaVersion > 0 && Object.keys(filterCriteria).length === 0 && activeFilterId) {
+      setActiveFilterId(null);
+    }
+  }, [filterCriteriaVersion, filterCriteria, activeFilterId]);
   const removeFilter = useCallback((key: keyof StudentFilterCriteria) => {
-    setFilterCriteria(prev => {
+    setFilterCriteria((prev) => {
       const newCriteria = { ...prev };
       delete newCriteria[key];
-      if (Object.keys(newCriteria).length === 0) {
-        setActiveFilterId(null);
-      }
       return newCriteria;
     });
+    setFilterCriteriaVersion((version) => version + 1);
   }, []);
 
   const saveCustomFilter = useCallback((name: string) => {

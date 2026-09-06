@@ -1,213 +1,212 @@
-import React from 'react';
-import { useLocation, useParams } from 'react-router-dom';
-import { ScheduleSessionModal } from '@components/admin/ScheduleSessionModal';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { CheckCircle2, XCircle, Clock, GitCompare } from 'lucide-react';
+import { PublishActions } from '@builder/components/PublishActions';
 import { ExamVersionHistory } from '@components/admin/ExamVersionHistory';
-import { PublishActions } from '../components/PublishActions';
-import { ValidationSummary } from '../components/ValidationSummary';
-import { useReviewRouteController } from '../hooks/useReviewRouteController';
-import { Exam } from '../../../types';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
+import { useReviewRouteController } from '@builder/hooks/useReviewRouteController';
+import type { ExamEvent, ExamSchedule, ExamVersionSummary, VersionDiff } from '../../../types/domain';
 
 export function ExamReviewRoute() {
   const { examId } = useParams<{ examId: string }>();
-  const location = useLocation();
+  const navigate = useNavigate();
   const controller = useReviewRouteController(examId);
-  const [showScheduleModal, setShowScheduleModal] = React.useState(false);
-  const publishCandidateCreated = (location.state as { publishCandidateCreated?: { sourceExamTitle?: string; schedulesCopied?: boolean } } | null)?.publishCandidateCreated;
+  const [events, setEvents] = useState<ExamEvent[]>([]);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
+
+  // Real audit events from the repository (not a placeholder empty list).
+  useEffect(() => {
+    let cancelled = false;
+    if (!examId) {
+      setEvents([]);
+      return;
+    }
+    void (async () => {
+      try {
+        const loaded = await controller.loadEvents();
+        if (!cancelled) {
+          setEvents(loaded);
+          setEventsError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setEvents([]);
+          setEventsError(error instanceof Error ? error.message : 'Failed to load audit events.');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [examId]);
+
+  // Real version diff via the lifecycle compare — no fabricated "no changes" copy.
+  const handleCompareVersions = useCallback(async (versionIdA: string, versionIdB: string): Promise<VersionDiff | null> => {
+    setCompareError(null);
+    try {
+      return await controller.compareVersions(versionIdA, versionIdB);
+    } catch (error) {
+      setCompareError(error instanceof Error ? error.message : 'Failed to compare versions.');
+      return null;
+    }
+  }, [controller]);
+
+  const handleRestoreVersion = useCallback(async (versionId: string) => {
+    await controller.handleRestoreVersion(versionId);
+  }, [controller]);
+
+  const handleRepublishVersion = useCallback(async (versionId: string) => {
+    await controller.handleRepublishVersion(versionId);
+  }, [controller]);
+
+  if (!examId) {
+    return <ErrorSurface title="Missing exam id" description="Return to Admin and reopen this exam." actionLabel="Back to Admin" onAction={() => navigate('/admin')} />;
+  }
 
   if (controller.isLoading) {
-    return <LoadingSurface label="Loading exam review…" />;
+    return <LoadingSurface label="Loading review…" />;
   }
 
   if (controller.error) {
     return (
       <ErrorSurface
-        title="Review load failed"
+        title="Could not load review"
         description={controller.error}
         actionLabel="Retry"
-        onAction={() => {
-          void controller.reload();
-        }}
+        onAction={() => void controller.reload()}
       />
     );
   }
 
-  const currentDraftVersion = controller.versions.find(
-    (version) => version.id === controller.exam?.currentDraftVersionId,
-  );
-  const currentPublishedVersion = controller.versions.find(
-    (version) => version.id === controller.exam?.currentPublishedVersionId,
-  );
-  const hasUnpublishedDraftChanges = (() => {
-    const draftId = controller.exam?.currentDraftVersionId ?? null;
-    if (!draftId || !currentPublishedVersion) {
-      return false;
-    }
+  if (!controller.exam) {
+    return (
+      <ErrorSurface
+        title="Exam Not Found"
+        description="The requested exam could not be loaded."
+        actionLabel="Back to Admin"
+        onAction={controller.handleBackToAdmin}
+      />
+    );
+  }
 
-    // Preferred signal: published version should reference the draft it was created from.
-    if (currentPublishedVersion.parentVersionId) {
-      return currentPublishedVersion.parentVersionId !== draftId;
-    }
-
-    // Legacy safety: if we can't trust parent linkage, fall back to version number mismatch.
-    if (currentDraftVersion) {
-      return currentDraftVersion.versionNumber !== currentPublishedVersion.versionNumber;
-    }
-
-    return false;
-  })();
-  const latestSchedule = [...controller.schedules]
-    .sort((left, right) => new Date(right.startTime).getTime() - new Date(left.startTime).getTime())
-    .find((schedule) => schedule.status === 'scheduled' || schedule.status === 'live' || schedule.status === 'completed');
-  const scheduledTime = latestSchedule ? new Date(latestSchedule.startTime).toLocaleString() : '';
-  const publishedLink =
-    latestSchedule && typeof window !== 'undefined'
-      ? `${window.location.origin}/student/${latestSchedule.id}/register`
-      : latestSchedule
-        ? `/student/${latestSchedule.id}/register`
-        : undefined;
-  const publishSuccess =
-    controller.exam?.status === 'published' && currentPublishedVersion
-      ? {
-          draftVersion: currentDraftVersion?.versionNumber ?? currentPublishedVersion.versionNumber,
-          publishedVersion: currentPublishedVersion.versionNumber,
-          ...(scheduledTime ? { scheduledDate: scheduledTime } : {}),
-          ...(publishedLink ? { publishedLink } : {}),
-        }
-      : null;
+  const versions: ExamVersionSummary[] = controller.versions;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      <div className="max-w-7xl mx-auto">
-        <div className="bg-white/80 backdrop-blur-sm border-b border-slate-200 px-8 py-5 sticky top-0 z-10">
-          <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">Review & Publish</h1>
-          <p className="text-sm text-slate-500 mt-1">{controller.exam?.title || 'Untitled Exam'}</p>
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Review &amp; Publish</h1>
+          <p className="text-sm text-gray-500">{controller.exam.title}</p>
         </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => controller.handleNavigateToBuilder()}
+            className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+          >
+            Back to Builder
+          </button>
+          <button
+            onClick={controller.handleBackToAdmin}
+            className="px-4 py-2 text-sm bg-gray-900 text-white rounded-md hover:bg-black"
+          >
+            Admin
+          </button>
+        </div>
+      </header>
 
-        <div className="p-8 space-y-6">
-          {publishCandidateCreated && (
-            <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200">
-              <p className="text-sm font-semibold text-emerald-900">
-                New exam copy created{publishCandidateCreated.sourceExamTitle ? ` from "${publishCandidateCreated.sourceExamTitle}"` : ''}.
+      <main className="max-w-6xl mx-auto px-6 py-6 space-y-6">
+        {controller.publishReadiness && (
+          <section className="bg-white border border-gray-200 rounded-xl p-5" aria-label="Publish readiness">
+            <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3">Readiness</h2>
+            {controller.publishReadiness.canPublish ? (
+              <p className="flex items-center gap-2 text-sm text-emerald-700">
+                <CheckCircle2 size={16} /> Ready to publish.
               </p>
-              <p className="text-xs text-emerald-800 mt-1">Original published exam remains unchanged.</p>
-              {!publishCandidateCreated.schedulesCopied && (
-                <p className="text-xs text-emerald-800">No schedules were copied.</p>
-              )}
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm ring-1 ring-slate-900/5 p-6">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">Validation Summary</h2>
-              {controller.publishReadiness ? (
-                <ValidationSummary
-                  publishReadiness={controller.publishReadiness}
-                  onNavigateToBuilder={controller.handleNavigateToBuilder}
-                />
-              ) : (
-                <div className="space-y-3" role="status" aria-live="polite" aria-busy="true">
-                  <span className="sr-only">Loading validation…</span>
-                  <div className="h-4 w-40 rounded bg-slate-100 animate-pulse" />
-                  <div className="h-3 w-full rounded bg-slate-50 animate-pulse" />
-                  <div className="h-3 w-5/6 rounded bg-slate-50 animate-pulse" />
-                  <div className="h-9 w-32 rounded bg-slate-100 animate-pulse" />
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm ring-1 ring-slate-900/5 p-6">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">Publish Actions</h2>
-              {controller.publishReadiness ? (
-                <PublishActions
-                  canPublish={controller.exam?.canPublish ?? false}
-                  publishReadiness={controller.publishReadiness}
-                  onPublish={controller.handlePublish}
-                  onRepublishLatestDraft={controller.handleRepublishLatestDraft}
-                  onSchedulePublish={controller.handleSchedulePublish}
-                  scheduledTime={scheduledTime}
-                  onOpenSchedulingWorkflow={() => {
-                    setShowScheduleModal(true);
-                    void controller.loadScheduleContent();
-                  }}
-                  onUnpublish={controller.handleUnpublish}
-                  publishSuccess={publishSuccess}
-                  hasUnpublishedDraftChanges={hasUnpublishedDraftChanges}
-                  draftVersionNumber={currentDraftVersion?.versionNumber}
-                  publishedVersionNumber={currentPublishedVersion?.versionNumber}
-                  exam={{ title: controller.exam?.title || 'Untitled Exam' }}
-                />
-              ) : (
-                <div className="space-y-3" role="status" aria-live="polite" aria-busy="true">
-                  <span className="sr-only">Loading actions…</span>
-                  <div className="h-4 w-48 rounded bg-slate-100 animate-pulse" />
-                  <div className="h-3 w-full rounded bg-slate-50 animate-pulse" />
-                  <div className="flex gap-3 pt-2">
-                    <div className="h-10 w-32 rounded bg-slate-100 animate-pulse" />
-                    <div className="h-10 w-36 rounded bg-slate-100 animate-pulse" />
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm ring-1 ring-slate-900/5 p-6">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Version History</h2>
-            {controller.exam && (
-              <ExamVersionHistory
-                exam={controller.exam}
-                versions={controller.versions}
-                events={[]}
-                onRestoreVersion={controller.handleRestoreVersion}
-                onCompareVersions={async () => null}
-              />
+            ) : (
+              <div className="text-sm text-amber-800">
+                <p className="flex items-center gap-2 font-medium">
+                  <XCircle size={16} /> Resolve before publishing:
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {controller.publishReadiness.errors.map((issue) => (
+                    <li key={`${issue.field}:${issue.message}`}>
+                      <button
+                        type="button"
+                        onClick={() => controller.handleNavigateToBuilder(issue.field)}
+                        className="text-left underline decoration-amber-600/50 underline-offset-2 hover:text-amber-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded"
+                        title={`Go to ${issue.field}`}
+                        aria-label={`Go to failing section: ${issue.field} — ${issue.message}`}
+                      >
+                        {issue.message}
+                        <span className="ml-1 text-[11px] text-amber-700">({issue.field} →)</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
-          </div>
-        </div>
-
-        {controller.exam && (
-          <ScheduleSessionModal
-            isOpen={showScheduleModal}
-            exams={
-              [
-                {
-                  id: controller.exam.id,
-                  title: controller.exam.title,
-                  type: controller.exam.type,
-                  status: controller.exam.status === 'published' ? 'Published' : controller.exam.status === 'archived' ? 'Archived' : 'Draft',
-                  author: controller.exam.owner,
-                  lastModified: controller.exam.updatedAt,
-                  createdAt: controller.exam.createdAt,
-                  content: controller.state as Exam['content'],
-                },
-              ] satisfies Exam[]
-            }
-            examEntities={[controller.exam]}
-            initialExamId={controller.exam.id}
-            onClose={() => setShowScheduleModal(false)}
-            onCreateSchedule={async (schedule) => {
-              await controller.handleCreateSchedule(schedule);
-            }}
-          />
+            <p className="mt-4 text-xs text-gray-500">
+              Publishing is gated below: readiness must pass, then confirm in the Publish
+              panel. Select a readiness issue to jump to the failing section.
+            </p>
+          </section>
         )}
 
-        <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-sm border-t border-slate-200 px-8 py-4">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
-            <button
-              onClick={() => controller.handleNavigateToBuilder()}
-              className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
-            >
-              ← Back to Builder
-            </button>
-            <button
-              onClick={controller.handleBackToAdmin}
-              className="px-5 py-2.5 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-200 transition-all duration-200"
-            >
-              Return to Admin
-            </button>
+        {eventsError && (
+          <div role="alert" className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+            {eventsError}
           </div>
-        </div>
-      </div>
+        )}
+        {compareError && (
+          <div role="alert" className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+            {compareError}
+          </div>
+        )}
+
+        <section className="bg-white border border-gray-200 rounded-xl p-5" aria-label="Schedules">
+          <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <Clock size={16} /> Schedules ({controller.schedules.length})
+          </h2>
+          {controller.schedules.length === 0 ? (
+            <p className="text-sm text-gray-500">No schedules yet. Publishing creates an immutable version; schedules pin to it.</p>
+          ) : (
+            <ul className="text-sm text-gray-700 space-y-1">
+              {controller.schedules.map((schedule: ExamSchedule) => (
+                <li key={schedule.id}>
+                  {schedule.examTitle} · {schedule.cohortName} · opens {schedule.startTime}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <PublishActions
+          canPublish={controller.exam.canPublish}
+          {...(controller.publishReadiness ? { publishReadiness: controller.publishReadiness } : {})}
+          onPublish={(notes) => controller.handlePublish(notes)}
+          onRepublishLatestDraft={() => controller.handleRepublishLatestDraft()}
+          onSchedulePublish={(scheduledTime) => controller.handleSchedulePublish(scheduledTime)}
+          onUnpublish={(reason) => controller.handleUnpublish(reason)}
+          onNavigateToBuilder={() => controller.handleNavigateToBuilder()}
+          exam={{ title: controller.exam.title }}
+        />
+
+        <section aria-label="Version history">
+          <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <GitCompare size={16} /> Versions
+          </h2>
+          <ExamVersionHistory
+            exam={controller.exam}
+            versions={versions}
+            events={events}
+            onRestoreVersion={handleRestoreVersion}
+            onRepublishVersion={handleRepublishVersion}
+            onCompareVersions={handleCompareVersions}
+          />
+        </section>
+      </main>
     </div>
   );
 }

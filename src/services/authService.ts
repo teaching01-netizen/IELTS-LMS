@@ -40,6 +40,14 @@ export interface StudentQueuedAdmission {
 export interface StudentEntrySuccess extends AuthSession {
   scheduleId: string;
   studentCode: string;
+  /**
+   * The student-entry response also grants the bearer used by V2 response
+   * durability. Keep these optional for queued/legacy adapters that only
+   * return the authentication session fields.
+   */
+  attemptId?: string | undefined;
+  attemptToken?: string | undefined;
+  attemptExpiresAt?: string | undefined;
 }
 
 export type StudentEntryResult = StudentEntrySuccess | StudentQueuedAdmission;
@@ -75,15 +83,21 @@ interface StudentEntryPayload {
 }
 
 function extractEnvelopeData<T>(response: { data?: BackendEnvelope<T> | T | undefined }): T {
-  const payload = response.data;
+  const payload = response?.data;
+  if (payload === null || payload === undefined) {
+    throw new Error('Authentication request failed: empty response');
+  }
 
-  if (payload && typeof payload === 'object' && 'success' in payload) {
+  if (typeof payload === 'object' && 'success' in payload) {
     const envelope = payload as BackendEnvelope<T>;
     if (!envelope.success) {
       throw new Error(envelope.error?.message ?? 'Authentication request failed');
     }
+    if (envelope.data === null || envelope.data === undefined) {
+      throw new Error('Authentication request failed: empty response');
+    }
 
-    return envelope.data as T;
+    return envelope.data;
   }
 
   return payload as T;
@@ -92,9 +106,13 @@ function extractEnvelopeData<T>(response: { data?: BackendEnvelope<T> | T | unde
 class AuthService {
   async getSession(): Promise<AuthSession | null> {
     try {
-      const response = await get<BackendEnvelope<AuthSession>>('/v1/auth/session', {
+      const response = await get<BackendEnvelope<AuthSession> | AuthSession>('/v1/auth/session', {
         retries: 0,
       });
+      // A 204/empty body means "no session" rather than an error.
+      if (response?.data === null || response?.data === undefined) {
+        return null;
+      }
       return extractEnvelopeData<AuthSession>(response);
     } catch (error) {
       if (

@@ -1,5 +1,5 @@
-import { expect, type BrowserContext, type Page } from '@playwright/test';
-import { ADMIN_STORAGE_STATE_PATH } from './backendE2e';
+import { expect, type BrowserContext, type Page } from "@playwright/test";
+import { ADMIN_STORAGE_STATE_PATH } from "./backendE2e";
 
 export function deterministicWcode(seed: string): string {
   let hash = 0;
@@ -8,7 +8,7 @@ export function deterministicWcode(seed: string): string {
   }
 
   const sixDigits = 100000 + (hash % 900000);
-  return `W${sixDigits.toString().padStart(6, '0')}`;
+  return `W${sixDigits.toString().padStart(6, "0")}`;
 }
 
 export async function stubScreenDetails(context: BrowserContext) {
@@ -19,19 +19,16 @@ export async function stubScreenDetails(context: BrowserContext) {
   });
 }
 
-export async function grantStrictProctoringPermissions(
-  context: BrowserContext,
-  origin: string,
-) {
-  await context.grantPermissions(['camera', 'microphone'], { origin });
+export async function grantStrictProctoringPermissions(context: BrowserContext, origin: string) {
+  await context.grantPermissions(["camera", "microphone"], { origin });
 }
 
 function sessionCookieCandidates() {
-  const configured = process.env['AUTH_SESSION_COOKIE_NAME'];
+  const configured = process.env["SESSION_COOKIE_NAME"] ?? process.env["AUTH_SESSION_COOKIE_NAME"];
   return [
-    typeof configured === 'string' && configured.length > 0 ? configured : null,
-    '__Host-session',
-    'session',
+    typeof configured === "string" && configured.length > 0 ? configured : null,
+    "__Host-session",
+    "session",
   ].filter((value): value is string => Boolean(value));
 }
 
@@ -45,17 +42,22 @@ export async function waitForStudentSessionCookie(page: Page, opts?: { timeoutMs
     if (hasSession) return;
     await page.waitForTimeout(250);
   }
-  throw new Error(`Student session cookie not found (candidates: ${candidates.join(', ')}) after ${timeoutMs}ms`);
+  throw new Error(
+    `Student session cookie not found (candidates: ${candidates.join(", ")}) after ${timeoutMs}ms`
+  );
 }
 
-export async function assertAuthSession(page: Page, expectedRole: 'student' | 'admin' | 'proctor' | 'builder' | 'grader') {
-  const resp = await page.request.get('/api/v1/auth/session');
+export async function assertAuthSession(
+  page: Page,
+  expectedRole: "student" | "admin" | "proctor" | "builder" | "grader"
+) {
+  const resp = await page.request.get("/api/v1/auth/session");
   if (!resp.ok()) {
-    const body = await resp.text().catch(() => '');
+    const body = await resp.text().catch(() => "");
     throw new Error(`GET /api/v1/auth/session failed: ${resp.status()} ${body.slice(0, 200)}`);
   }
   const json = (await resp.json()) as any;
-  const role = String(json?.data?.user?.role ?? '');
+  const role = String(json?.data?.user?.role ?? "");
   if (role !== expectedRole) {
     throw new Error(`Expected auth role=${expectedRole} but got ${role}`);
   }
@@ -64,7 +66,7 @@ export async function assertAuthSession(page: Page, expectedRole: 'student' | 'a
 export async function triggerTabSwitchViolation(page: Page) {
   await page.evaluate(() => {
     try {
-      window.dispatchEvent(new Event('blur', { bubbles: true, cancelable: true }));
+      window.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
     } catch {
       // Ignore
     }
@@ -76,7 +78,7 @@ export async function triggerClipboardBlockedViolation(page: Page) {
     const target = document.activeElement;
     if (!target) return;
     try {
-      const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+      const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
       target.dispatchEvent(event);
     } catch {
       // Ignore
@@ -85,11 +87,11 @@ export async function triggerClipboardBlockedViolation(page: Page) {
 }
 
 export async function triggerContextMenuBlockedViolation(page: Page) {
-  await page.keyboard.press('Shift+F10').catch(() => {});
+  await page.keyboard.press("Shift+F10").catch(() => {});
   await page.evaluate(() => {
     try {
       document.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }),
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 })
       );
     } catch {
       // Ignore
@@ -100,63 +102,76 @@ export async function triggerContextMenuBlockedViolation(page: Page) {
 export async function studentCheckIn(
   page: Page,
   scheduleId: string,
-  payload: { wcode: string; email: string; fullName: string },
+  payload: { wcode: string; email: string; fullName: string }
 ) {
   await openStudentCheckIn(page, scheduleId);
 
   await page.waitForTimeout(250);
-  const wcodeField = page.getByLabel('Wcode');
-  const emailField = page.getByLabel('Email');
-  const nameField = page.getByLabel('Full Name');
-  const nicknameField = page.getByLabel('Nickname');
-  const ieltsCourseField = page.getByLabel('IELTS Course');
+  const wcodeField = page.getByLabel("Wcode");
+  const emailField = page.getByLabel("Email");
+  const nameField = page.getByLabel("Full Name");
+  const nicknameField = page.getByLabel("Nickname");
+  const ieltsCourseField = page.getByLabel("IELTS Course");
 
   // Prefer typing over a single `fill()` call to avoid hydration races in slower browsers.
   await wcodeField.click();
-  await wcodeField.fill('');
+  await wcodeField.fill("");
   await wcodeField.type(payload.wcode, { delay: 25 });
   await emailField.click();
-  await emailField.fill('');
+  await emailField.fill("");
   await emailField.type(payload.email, { delay: 10 });
   await nameField.click();
-  await nameField.fill('');
+  await nameField.fill("");
   await nameField.type(payload.fullName, { delay: 10 });
   await nicknameField.click();
-  await nicknameField.fill('');
+  await nicknameField.fill("");
   await nicknameField.type(payload.fullName, { delay: 10 });
   await ieltsCourseField.click();
-  await ieltsCourseField.fill('Academic IELTS');
+  await ieltsCourseField.fill("Academic IELTS");
 
   await page.waitForTimeout(100);
-  const continueButton = page.getByRole('button', { name: 'Continue' });
+  const continueButton = page.getByRole("button", { name: "Continue" });
   await continueButton.click();
-  const wcode = payload.wcode.trim().toUpperCase();
+  const trimmedWcode = payload.wcode.trim();
+  const wcode = /^w\d{6}$/i.test(trimmedWcode) ? trimmedWcode.toUpperCase() : trimmedWcode;
   const targetRoute = new RegExp(`/student/${scheduleId}/${wcode}(?:$|[?#/])`);
-  let navigated = await page
-    .waitForURL(targetRoute, { timeout: 45_000 })
-    .then(() => true)
-    .catch(() => false);
-
+  // React navigation can complete between the click and waitForURL's
+  // subscription. Treat the already-visible canonical route as success.
+  let navigated = targetRoute.test(page.url());
   if (!navigated) {
-    await continueButton.click({ timeout: 5_000 }).catch(() => {});
     navigated = await page
-      .waitForURL(targetRoute, { timeout: 20_000 })
+      .waitForURL(targetRoute, { timeout: 45_000 })
       .then(() => true)
       .catch(() => false);
   }
 
   if (!navigated) {
-    const submitError = await page.locator('.text-red-600').first().textContent().catch(() => null);
+    await continueButton.click({ timeout: 5_000 }).catch(() => {});
+    navigated = targetRoute.test(page.url());
+    if (!navigated) {
+      navigated = await page
+        .waitForURL(targetRoute, { timeout: 20_000 })
+        .then(() => true)
+        .catch(() => false);
+    }
+  }
+
+  if (!navigated) {
+    const submitError = await page
+      .locator(".text-red-600")
+      .first()
+      .textContent()
+      .catch(() => null);
     throw new Error(
-      `Student check-in did not navigate to the session route.${submitError ? ` ${submitError}` : ''}`,
+      `Student check-in did not navigate to the session route (current URL: ${page.url()}).${submitError ? ` ${submitError}` : ""}`
     );
   }
 }
 
 export async function openStudentCheckIn(page: Page, scheduleId: string) {
-  const loadingError = page.getByRole('heading', { name: 'Loading Error' });
-  const retryButton = page.getByRole('button', { name: 'Retry' });
-  const checkInHeading = page.getByRole('heading', { name: 'Exam Check-in' });
+  const loadingError = page.getByRole("heading", { name: "Loading Error" });
+  const retryButton = page.getByRole("button", { name: "Retry" });
+  const checkInHeading = page.getByRole("heading", { name: "Exam Check-in" });
 
   // Production variants: some deployments mount check-in at `/student/:scheduleId/register`.
   // Also handle transient "Loading Error" screens with retry.
@@ -176,7 +191,7 @@ export async function openStudentCheckIn(page: Page, scheduleId: string) {
         }
       }
 
-      await page.waitForLoadState('domcontentloaded');
+      await page.waitForLoadState("domcontentloaded");
 
       const startedAt = Date.now();
       while (Date.now() - startedAt < 20_000) {
@@ -199,11 +214,14 @@ export async function openStudentCheckIn(page: Page, scheduleId: string) {
   }
 
   if (!loaded) {
-    const errorCopy = await page.locator('body').innerText().catch(() => '');
+    const errorCopy = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
     throw new Error(
       `Student check-in screen did not load for scheduleId=${scheduleId}. ` +
         `Last page URL=${page.url()}. ` +
-        (errorCopy ? `Body=${errorCopy.slice(0, 200)}` : ''),
+        (errorCopy ? `Body=${errorCopy.slice(0, 200)}` : "")
     );
   }
 }
@@ -213,68 +231,117 @@ export async function completePreCheckIfPresent(page: Page) {
   // student lands directly in the waiting room while compatibility checks are run
   // and persisted silently. This helper now only settles on the resulting state
   // (waiting room, lobby preview, or an already-started exam) without any click.
-  const waitingForStart = page.getByRole('heading', { name: 'Waiting for the exam to start' });
-  const startExam = page.getByRole('button', { name: 'Start Exam' });
-  const examShell = page.getByTestId('student-exam-shell');
+  const waitingForStart = page.getByRole("heading", { name: "Waiting for the exam to start" });
+  const startExam = page.getByRole("button", { name: "Start Exam" });
+  const examShell = page.getByTestId("student-exam-shell");
   const answerField = page.getByLabel(/Answer for question/i).first();
   const writingEditor = page.locator('[contenteditable="true"]').first();
 
-  const timeoutMs = Number(process.env['E2E_PROD_PRECHECK_SAVE_TIMEOUT_MS'] ?? '120000');
+  const timeoutMs = Number(process.env["E2E_PROD_PRECHECK_SAVE_TIMEOUT_MS"] ?? "120000");
 
   await expect
     .poll(
       async () => {
-        if (await waitingForStart.isVisible().catch(() => false)) return 'waiting';
-        if (await startExam.isVisible().catch(() => false)) return 'lobby';
-        if (await examShell.isVisible().catch(() => false)) return 'exam';
-        if (await answerField.isVisible().catch(() => false)) return 'answer';
-        if (await writingEditor.isVisible().catch(() => false)) return 'writing';
-        return 'pending';
+        if (await waitingForStart.isVisible().catch(() => false)) return "waiting";
+        if (await startExam.isVisible().catch(() => false)) return "lobby";
+        if (await examShell.isVisible().catch(() => false)) return "exam";
+        if (await answerField.isVisible().catch(() => false)) return "answer";
+        if (await writingEditor.isVisible().catch(() => false)) return "writing";
+        return "pending";
       },
-      { timeout: Math.max(30_000, timeoutMs) },
+      { timeout: Math.max(30_000, timeoutMs) }
     )
-    .not.toBe('pending');
+    .not.toBe("pending");
 }
 
 export async function startLobbyIfPresent(page: Page) {
-  const waiting = page.getByRole('heading', { name: 'Waiting for the exam to start' });
+  const waiting = page.getByRole("heading", { name: "Waiting for the exam to start" });
+  const examShell = page.getByTestId("student-exam-shell");
+  const answerField = page.getByLabel(/Answer for question/i).first();
+  await expect
+    .poll(
+      async () => {
+        if (await examShell.isVisible().catch(() => false)) return "exam";
+        if (await answerField.isVisible().catch(() => false)) return "exam";
+        if (await waiting.isVisible().catch(() => false)) return "waiting";
+        return "pending";
+      },
+      { timeout: 30_000 },
+    )
+    .toMatch(/waiting|exam/);
   if (!(await waiting.isVisible().catch(() => false))) return;
-  await expect(page.getByRole('button', { name: 'Start Exam' })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Start Exam" })).not.toBeVisible();
 
   const scheduleId = page.url().match(/\/student\/([^/]+)/)?.[1];
   const browser = page.context().browser();
-  if (!scheduleId || !browser) throw new Error('Cannot authoritatively start runtime without schedule and browser context.');
+  if (!scheduleId || !browser)
+    throw new Error("Cannot authoritatively start runtime without schedule and browser context.");
   const controlContext = await browser.newContext({
-    storageState: process.env['ADMIN_STORAGE_STATE'] || ADMIN_STORAGE_STATE_PATH,
+    storageState: process.env["ADMIN_STORAGE_STATE"] || ADMIN_STORAGE_STATE_PATH,
   });
   try {
     const cookies = await controlContext.cookies();
-    const csrfNames = [process.env['AUTH_CSRF_COOKIE_NAME'], '__Host-csrf', 'csrf'].filter((value): value is string => Boolean(value));
+    const csrfNames = [
+      process.env["CSRF_COOKIE_NAME"],
+      process.env["AUTH_CSRF_COOKIE_NAME"],
+      "__Host-csrf",
+      "csrf",
+    ].filter((value): value is string => Boolean(value));
     const csrfToken = cookies.find((cookie) => csrfNames.includes(cookie.name))?.value;
-    if (!csrfToken) throw new Error('Admin E2E storage state is missing its CSRF cookie.');
-    const response = await controlContext.request.post(`/api/v1/schedules/${scheduleId}/runtime/commands`, {
-      headers: { 'x-csrf-token': csrfToken },
-      data: { action: 'start_runtime' },
-    });
+    if (!csrfToken) throw new Error("Admin E2E storage state is missing its CSRF cookie.");
+    const response = await controlContext.request.post(
+      `/api/v1/schedules/${scheduleId}/runtime/commands`,
+      {
+        headers: { "x-csrf-token": csrfToken },
+        data: { action: "start_runtime" },
+      }
+    );
     const responseText = await response.text();
     const runtimeAlreadyExists =
       response.status() === 409 ||
       /duplicate entry.*exam_session_runtimes\.schedule_id/i.test(responseText);
     if (!response.ok() && !runtimeAlreadyExists) {
-      throw new Error(`Authoritative runtime start failed: ${response.status()} ${responseText.slice(0, 200)}`);
+      throw new Error(
+        `Authoritative runtime start failed: ${response.status()} ${responseText.slice(0, 200)}`
+      );
     }
   } finally {
     await controlContext.close();
   }
 
-  await expect.poll(async () => {
-    if (await page.getByTestId('student-exam-shell').isVisible().catch(() => false)) return 'exam';
-    if (await page.getByLabel(/Answer for question/i).first().isVisible().catch(() => false)) return 'exam';
-    if (await page.locator('[contenteditable="true"]').first().isVisible().catch(() => false)) return 'exam';
-    return 'waiting';
-  }, { timeout: 60_000 }).toBe('exam');
+  await expect
+    .poll(
+      async () => {
+        if (
+          await page
+            .getByTestId("student-exam-shell")
+            .isVisible()
+            .catch(() => false)
+        )
+          return "exam";
+        if (
+          await page
+            .getByLabel(/Answer for question/i)
+            .first()
+            .isVisible()
+            .catch(() => false)
+        )
+          return "exam";
+        if (
+          await page
+            .locator('[contenteditable="true"]')
+            .first()
+            .isVisible()
+            .catch(() => false)
+        )
+          return "exam";
+        return "waiting";
+      },
+      { timeout: 60_000 }
+    )
+    .toBe("exam");
   const overlay = page.getByText(/Tab switching detected/i);
-  const understand = page.getByRole('button', { name: /I Understand/i });
+  const understand = page.getByRole("button", { name: /I Understand/i });
   const visible = await overlay.isVisible().catch(() => false);
   if (!visible) return;
   const canClick = await understand.isVisible().catch(() => false);
@@ -283,18 +350,27 @@ export async function startLobbyIfPresent(page: Page) {
   }
 }
 
+export async function acknowledgeWarningOverlayIfPresent(page: Page) {
+  const acknowledge = page.getByRole("button", { name: /^(I Understand|Continue Exam)$/i }).first();
+  if (!(await acknowledge.isVisible().catch(() => false))) return;
+  await acknowledge.click();
+  await expect(acknowledge)
+    .not.toBeVisible({ timeout: 5_000 })
+    .catch(() => {});
+}
+
 export async function openStudentSessionWithRetry(
   page: Page,
   scheduleId: string,
-  candidateId: string,
+  candidateId: string
 ) {
   const targetUrl = `/student/${scheduleId}/${candidateId}`;
-  const loadingError = page.getByRole('heading', { name: 'Loading Error' });
-  const retryButton = page.getByRole('button', { name: 'Retry' });
-  const waitingRoomHeading = page.getByRole('heading', { name: 'Waiting for the exam to start' });
-  const answerField = page.getByLabel('Answer for question 1');
-  const finishButton = page.getByRole('button', { name: 'Finish' });
-  const reviewButton = page.getByRole('button', { name: 'Review & Submit' });
+  const loadingError = page.getByRole("heading", { name: "Loading Error" });
+  const retryButton = page.getByRole("button", { name: "Retry" });
+  const waitingRoomHeading = page.getByRole("heading", { name: "Waiting for the exam to start" });
+  const answerField = page.getByLabel("Answer for question 1");
+  const finishButton = page.getByRole("button", { name: "Finish" });
+  const reviewButton = page.getByRole("button", { name: "Review & Submit" });
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (attempt === 0) {
@@ -308,7 +384,7 @@ export async function openStudentSessionWithRetry(
       }
     }
 
-    await page.waitForLoadState('domcontentloaded');
+    await page.waitForLoadState("domcontentloaded");
     let shouldRetry = false;
 
     for (let tick = 0; tick < 20; tick += 1) {
@@ -357,7 +433,7 @@ export interface StudentTouchTargetFailure {
 
 export async function scanStudentTouchTargets(
   page: Page,
-  options: { allowedSelectors?: string[]; minimumSize?: number } = {},
+  options: { allowedSelectors?: string[]; minimumSize?: number } = {}
 ): Promise<StudentTouchTargetFailure[]> {
   const allowedSelectors = options.allowedSelectors ?? [];
   const minimumSize = options.minimumSize ?? 44;
@@ -370,7 +446,7 @@ export async function scanStudentTouchTargets(
       return Array.from(document.querySelectorAll<HTMLElement>(interactiveSelector))
         .filter((element) => {
           const isDisabled =
-            element.getAttribute('aria-disabled') === 'true' ||
+            element.getAttribute("aria-disabled") === "true" ||
             (element instanceof HTMLButtonElement && element.disabled) ||
             (element instanceof HTMLInputElement && element.disabled) ||
             (element instanceof HTMLSelectElement && element.disabled) ||
@@ -382,28 +458,29 @@ export async function scanStudentTouchTargets(
             rect.top < window.innerHeight &&
             rect.right > 0 &&
             rect.left < window.innerWidth;
-        return (
-          !isDisabled &&
-          !element.hidden &&
-          style.display !== 'none' &&
-          style.visibility !== 'hidden' &&
-          intersectsViewport &&
-          rect.width > 0 &&
-          rect.height > 0
-        );
-      })
-      .filter((element) => !selectors.some((selector) => element.matches(selector)))
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          selector: element.tagName.toLowerCase(),
-          name: element.getAttribute('aria-label') || element.textContent?.trim() || element.tagName,
-          width: rect.width,
-          height: rect.height,
-        };
-      })
-      .filter(({ width, height }) => width < requiredSize || height < requiredSize);
+          return (
+            !isDisabled &&
+            !element.hidden &&
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            intersectsViewport &&
+            rect.width > 0 &&
+            rect.height > 0
+          );
+        })
+        .filter((element) => !selectors.some((selector) => element.matches(selector)))
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            selector: element.tagName.toLowerCase(),
+            name:
+              element.getAttribute("aria-label") || element.textContent?.trim() || element.tagName,
+            width: rect.width,
+            height: rect.height,
+          };
+        })
+        .filter(({ width, height }) => width < requiredSize || height < requiredSize);
     },
-    { allowedSelectors, minimumSize },
+    { allowedSelectors, minimumSize }
   );
 }

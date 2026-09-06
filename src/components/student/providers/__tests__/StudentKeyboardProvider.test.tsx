@@ -253,8 +253,8 @@ describe('StudentKeyboardProvider', () => {
     expect(harness.runtime.state.violations).toHaveLength(0);
   });
 
-  it('allows context menu interactions during exam phase', () => {
-    renderHarness();
+  it('blocks context menu interactions during exam phase', () => {
+    const harness = renderHarness();
     const event = new MouseEvent('contextmenu', {
       bubbles: true,
       cancelable: true,
@@ -264,7 +264,8 @@ describe('StudentKeyboardProvider', () => {
       document.dispatchEvent(event);
     });
 
-    expect(event.defaultPrevented).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(harness.runtime.state.violations.at(-1)?.type).toBe('CONTEXT_MENU_BLOCKED');
   });
 
   it('prevents context menus on protected question copy without recording a violation', () => {
@@ -284,7 +285,7 @@ describe('StudentKeyboardProvider', () => {
   });
 
   it.each(['editor', 'objectiveInput'] as const)(
-    'allows context menus on the %s answer control',
+    'blocks context menus on the %s answer control',
     (targetKey) => {
       const harness = renderHarness();
       const event = new MouseEvent('contextmenu', {
@@ -296,8 +297,8 @@ describe('StudentKeyboardProvider', () => {
         harness[targetKey].dispatchEvent(event);
       });
 
-      expect(event.defaultPrevented).toBe(false);
-      expect(harness.runtime.state.violations).toHaveLength(0);
+      expect(event.defaultPrevented).toBe(true);
+      expect(harness.runtime.state.violations.at(-1)?.type).toBe('CONTEXT_MENU_BLOCKED');
     },
   );
 

@@ -1,6 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { z } from 'zod';
+import fs from "node:fs";
+import path from "node:path";
+import { z } from "zod";
 
 const wcodeSchema = z.string().min(1);
 
@@ -53,7 +53,7 @@ const prodTargetSchema = z.object({
   examId: z.string().min(1),
   editor: staffSchema,
   proctors: z.array(staffSchema).length(10),
-  students: z.array(studentSchema).length(100),
+  students: z.array(studentSchema).length(200),
   scenario: prodScenarioSchema,
 });
 
@@ -69,7 +69,7 @@ const prodCredSchema = z.object({
       z.object({
         email: z.string().email(),
         password: z.string().min(1),
-      }),
+      })
     )
     .length(10),
 });
@@ -77,7 +77,7 @@ const prodCredSchema = z.object({
 export type ProdCreds = z.infer<typeof prodCredSchema>;
 
 function readJsonFile(filePath: string): unknown {
-  const raw = fs.readFileSync(filePath, 'utf8');
+  const raw = fs.readFileSync(filePath, "utf8");
   return JSON.parse(raw) as unknown;
 }
 
@@ -93,21 +93,21 @@ const prodRuntimeSchema = z
 export type ProdRuntimeOverride = z.infer<typeof prodRuntimeSchema>;
 
 export function resolveProdTargetPath(): string {
-  const override = process.env['E2E_PROD_TARGET_PATH'];
+  const override = process.env["E2E_PROD_TARGET_PATH"];
   if (override) return path.resolve(process.cwd(), override);
-  return path.resolve(process.cwd(), 'e2e/prod-data/prod-target.json');
+  return path.resolve(process.cwd(), "e2e/prod-data/prod-target.json");
 }
 
 export function resolveProdCredsPath(): string {
-  const override = process.env['E2E_PROD_CREDS_PATH'];
+  const override = process.env["E2E_PROD_CREDS_PATH"];
   if (override) return path.resolve(process.cwd(), override);
-  return path.resolve(process.cwd(), 'e2e/prod-data/prod-creds.json');
+  return path.resolve(process.cwd(), "e2e/prod-data/prod-creds.json");
 }
 
 export function resolveProdRuntimePath(): string {
-  const override = process.env['E2E_PROD_RUNTIME_PATH'];
+  const override = process.env["E2E_PROD_RUNTIME_PATH"];
   if (override) return path.resolve(process.cwd(), override);
-  return path.resolve(process.cwd(), 'e2e/.generated/prod-runtime.json');
+  return path.resolve(process.cwd(), "e2e/.generated/prod-runtime.json");
 }
 
 export function readProdTarget(): ProdTarget {
@@ -130,7 +130,7 @@ export function readProdRuntimeOverride(): ProdRuntimeOverride | null {
     return prodRuntimeSchema.parse(readJsonFile(runtimePath));
   } catch (error) {
     throw new Error(
-      `Invalid prod runtime override file at ${runtimePath}: ${error instanceof Error ? error.message : String(error)}`,
+      `Invalid prod runtime override file at ${runtimePath}: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
@@ -138,7 +138,7 @@ export function readProdRuntimeOverride(): ProdRuntimeOverride | null {
 export function readEffectiveProdTarget(): ProdTarget {
   const target = readProdTarget();
   const runtime = readProdRuntimeOverride();
-  const bootstrapping = process.env['E2E_PROD_BOOTSTRAP'] === 'true';
+  const bootstrapping = process.env["E2E_PROD_BOOTSTRAP"] === "true";
   // In bootstrap mode, shard 0 is allowed to start from placeholder ids, since it will
   // create a fresh exam + schedule and write a runtime override file.
   if (!runtime && bootstrapping) {
@@ -157,14 +157,14 @@ export function readEffectiveProdTarget(): ProdTarget {
   if (looksLikePlaceholder(effective.scheduleId) || looksLikePlaceholder(effective.examId)) {
     throw new Error(
       [
-        'prod-target.json still contains placeholder ids.',
+        "prod-target.json still contains placeholder ids.",
         `scheduleId=${effective.scheduleId}`,
         `examId=${effective.examId}`,
-        '',
-        'Fix by either:',
-        '- Updating e2e/prod-data/prod-target.json with real scheduleId + examId, or',
-        '- Running shard 0 with E2E_PROD_BOOTSTRAP=true E2E_PROD_ALLOW_BOOTSTRAP=true to auto-create them.',
-      ].join('\n'),
+        "",
+        "Fix by either:",
+        "- Updating e2e/prod-data/prod-target.json with real scheduleId + examId, or",
+        "- Running shard 0 with E2E_PROD_BOOTSTRAP=true E2E_PROD_ALLOW_BOOTSTRAP=true to auto-create them.",
+      ].join("\n")
     );
   }
 

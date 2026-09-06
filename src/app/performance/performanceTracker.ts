@@ -184,17 +184,40 @@ export const performanceTracker = new PerformanceTracker();
  * React hook for performance tracking
  */
 export function usePerformanceTracker() {
-  return {
-    startMarker: (name: string, metadata?: Record<string, unknown>) =>
+  // Stable callbacks so consumers can safely list them in effect deps.
+  const startMarker = React.useCallback(
+    (name: string, metadata?: Record<string, unknown>) =>
       performanceTracker.startMarker(name, metadata),
-    endMarker: (id: string, metadata?: Record<string, unknown>) =>
+    [],
+  );
+  const endMarker = React.useCallback(
+    (id: string, metadata?: Record<string, unknown>) =>
       performanceTracker.endMarker(id, metadata),
-    recordMetric: (name: string, duration: number, metadata?: Record<string, unknown>) =>
+    [],
+  );
+  const recordMetric = React.useCallback(
+    (name: string, duration: number, metadata?: Record<string, unknown>) =>
       performanceTracker.recordMetric(name, duration, metadata),
-    getMetrics: () => performanceTracker.getMetrics(),
-    getMetricStats: (name: string) => performanceTracker.getMetricStats(name),
-    clearMetrics: () => performanceTracker.clearMetrics(),
-  };
+    [],
+  );
+  const getMetrics = React.useCallback(() => performanceTracker.getMetrics(), []);
+  const getMetricStats = React.useCallback(
+    (name: string) => performanceTracker.getMetricStats(name),
+    [],
+  );
+  const clearMetrics = React.useCallback(() => performanceTracker.clearMetrics(), []);
+
+  return React.useMemo(
+    () => ({
+      startMarker,
+      endMarker,
+      recordMetric,
+      getMetrics,
+      getMetricStats,
+      clearMetrics,
+    }),
+    [startMarker, endMarker, recordMetric, getMetrics, getMetricStats, clearMetrics],
+  );
 }
 
 /**
@@ -204,16 +227,18 @@ export function withPerformanceTracking<P extends object>(
   WrappedComponent: React.ComponentType<P>,
   componentName: string
 ) {
-  return function WithPerformanceTracking(props: P) {
+  function WithPerformanceTracking(props: P) {
     const tracker = usePerformanceTracker();
-    
+
     React.useEffect(() => {
       const markerId = tracker.startMarker(`render-${componentName}`);
       return () => {
         tracker.endMarker(markerId);
       };
-    });
-    
+    }, [tracker, componentName]);
+
     return React.createElement(WrappedComponent, props);
-  };
+  }
+  WithPerformanceTracking.displayName = `withPerformanceTracking(${WrappedComponent.displayName ?? WrappedComponent.name ?? 'Component'})`;
+  return WithPerformanceTracking;
 }

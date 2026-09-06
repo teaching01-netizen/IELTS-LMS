@@ -12,12 +12,20 @@ async function readServerPrompt(page: Page, examId: string): Promise<string | nu
       fetch(`/api/v1/exams/${id}`, { credentials: 'include' }),
       fetch(`/api/v1/exams/${id}/versions`, { credentials: 'include' }),
     ]);
-    const examPayload = await examResponse.json() as { data?: { currentDraftVersionId?: unknown } };
-    const versionsPayload = await versionsResponse.json() as { data?: unknown };
-    const versions = Array.isArray(versionsPayload.data) ? versionsPayload.data : [];
-    const currentDraftVersionId = typeof examPayload.data?.currentDraftVersionId === 'string'
-      ? examPayload.data.currentDraftVersionId
-      : null;
+    // The migrated Go read routes return the resource directly. Keep this
+    // helper aligned with the browser repository instead of the old Rust
+    // envelope shape.
+    const examPayload = await examResponse.json() as {
+      currentDraftVersionId?: unknown;
+      currentPublishedVersionId?: unknown;
+    };
+    const versionsPayload = await versionsResponse.json() as unknown;
+    const versions = Array.isArray(versionsPayload) ? versionsPayload : [];
+    const currentDraftVersionId = typeof examPayload.currentDraftVersionId === 'string'
+      ? examPayload.currentDraftVersionId
+      : typeof examPayload.currentPublishedVersionId === 'string'
+        ? examPayload.currentPublishedVersionId
+        : null;
     const draft = versions.find((value: unknown) => {
       if (!value || typeof value !== 'object') return false;
       return (value as { id?: unknown }).id === currentDraftVersionId;
@@ -130,50 +138,51 @@ test.describe('Staff draft browser durability', () => {
     page,
   }) => {
     const manifest = readBackendE2EManifest();
-    await page.goto(`/builder/${manifest.builder.examId}/builder`);
-    const initialServerPrompt = await readServerPrompt(page, manifest.builder.examId);
+    const examId = manifest.builder.draftDurabilityExamId;
+    await page.goto(`/builder/${examId}/builder`);
+    const initialServerPrompt = await readServerPrompt(page, examId);
     expect(initialServerPrompt).not.toBeNull();
     const prompt = await promptFieldWithValue(page, initialServerPrompt as string);
     await expect(prompt).toBeVisible({ timeout: 30_000 });
 
     const recoveredPrompt = `staff-recovery-${Date.now()}-no-loss`;
-    await page.route(`**/api/v1/exams/${manifest.builder.examId}/draft`, async (route) => {
+    await page.route(`**/api/v1/exams/${examId}/draft`, async (route) => {
       await route.abort('failed');
     });
 
     await prompt.fill(recoveredPrompt);
     await expect
-      .poll(() => readRecoveredPrompt(page, manifest.builder.examId), {
+      .poll(() => readRecoveredPrompt(page, examId), {
         timeout: 10_000,
         message: 'edited builder state is committed to browser durable storage',
       })
       .toBe(recoveredPrompt);
 
-    expect(await readServerPrompt(page, manifest.builder.examId)).toBe(initialServerPrompt);
+    expect(await readServerPrompt(page, examId)).toBe(initialServerPrompt);
 
     // Closing the page without beforeunload is a crash-like interruption: the
     // React autosave queue disappears, while IndexedDB/localStorage survives.
     await page.close({ runBeforeUnload: false });
     const reopened = await context.newPage();
-    await reopened.goto(`/builder/${manifest.builder.examId}/builder`);
+    await reopened.goto(`/builder/${examId}/builder`);
 
     const reopenedPrompt = await promptFieldWithValue(reopened, recoveredPrompt);
     await expect(reopenedPrompt).toBeVisible({ timeout: 30_000 });
     await expect(reopened.getByText('Recovered unsaved changes')).toBeVisible({ timeout: 10_000 });
     await expect(reopenedPrompt).toHaveValue(recoveredPrompt);
-    expect(await readServerPrompt(reopened, manifest.builder.examId)).toBe(initialServerPrompt);
+    expect(await readServerPrompt(reopened, examId)).toBe(initialServerPrompt);
     const saveResponse = reopened.waitForResponse((response) =>
-      response.url().includes(`/api/v1/exams/${manifest.builder.examId}/draft`)
+      response.url().includes(`/api/v1/exams/${examId}/draft`)
       && response.request().method() === 'PATCH',
     );
     await reopened.getByLabel('Save draft').click();
     expect((await saveResponse).ok()).toBe(true);
 
     await expect
-      .poll(() => readServerPrompt(reopened, manifest.builder.examId), { timeout: 20_000 })
+      .poll(() => readServerPrompt(reopened, examId), { timeout: 20_000 })
       .toBe(recoveredPrompt);
     await expect
-      .poll(() => readRecoveredPrompt(reopened, manifest.builder.examId), {
+      .poll(() => readRecoveredPrompt(reopened, examId), {
         timeout: 10_000,
         message: 'durable recovery record clears only after successful server save',
       })

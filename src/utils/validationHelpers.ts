@@ -2,6 +2,13 @@ import type { BandScoreTable, PassageWordCountStandards } from '../types';
 
 const isFiniteNumber = (value: number) => Number.isFinite(value);
 
+/**
+ * Relative tolerance for rubric-weight totals. IEEE-754 decimal fractions
+ * (e.g. 33.3 + 33.3 + 33.4) rarely sum to exactly 100, so strict `!== 100`
+ * rejects valid author input; values within EPSILON_OF_100 still display as 100.
+ */
+export const RUBRIC_WEIGHT_EPSILON = 0.01;
+
 export function validateWordCountRanges(ranges: PassageWordCountStandards): string[] {
   const errors: string[] = [];
 
@@ -44,7 +51,7 @@ export function validateRubricWeights<T extends object>(weights: T): string[] {
     errors.push('Rubric weights must be non-negative numbers.');
   }
 
-  if (total !== 100) {
+  if (Math.abs(total - 100) > RUBRIC_WEIGHT_EPSILON) {
     errors.push('Rubric weights must sum to 100.');
   }
 

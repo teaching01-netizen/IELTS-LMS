@@ -40,6 +40,8 @@ interface StudentReadingProps {
   layoutMode?: StudentLayoutMode | undefined;
   contentZoom?: number | undefined;
   registerLiveAnswer?: ((answerKey: string, value: QuestionAnswer) => void) | undefined;
+  /** S1-C3: sessionStorage base key (per exam). Module suffix is appended. */
+  persistenceKeyBase?: string | undefined;
 }
 
 interface ReadingPassagePaneProps {
@@ -153,6 +155,7 @@ export function StudentReading({
   layoutMode = "wide",
   contentZoom = 1,
   registerLiveAnswer,
+  persistenceKeyBase,
 }: StudentReadingProps) {
   const isTabletMode = Boolean(tabletMode);
   const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
@@ -184,12 +187,14 @@ export function StudentReading({
     handleKeyboardResize,
     leftWidth,
     materialCompact,
+    splitBounds,
     splitPaneStyle,
     workspaceRef,
   } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: "--reading-pane-width",
     dividerMode: isTabletMode ? "overlay" : "consumes-space",
+    persistenceKey: persistenceKeyBase ? `${persistenceKeyBase}:reading:split` : undefined,
   });
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, "reading"), [state]);
   const currentQ =
@@ -337,11 +342,14 @@ export function StudentReading({
       workspaceRef={workspaceRef}
       splitPaneStyle={splitPaneStyle}
       leftWidth={leftWidth}
+      splitMinWidth={splitBounds.min}
+      splitMaxWidth={splitBounds.max}
       onDividerPointerDown={handleDrag}
       onDividerKeyDown={handleKeyboardResize}
       workspaceTestId="reading-split-workspace"
       dividerAriaLabel="Resize reading passage and answer panels"
       dividerTestId="reading-pane-resizer"
+      persistenceKey={persistenceKeyBase ? `${persistenceKeyBase}:reading:tab` : undefined}
       materialPane={
         <ReadingPassagePane
           key={activePassage.id}

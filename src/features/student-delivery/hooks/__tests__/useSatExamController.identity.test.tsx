@@ -200,7 +200,6 @@ describe("useSatExamController attempt identity", () => {
         scheduleId: "schedule",
         attemptId: "attempt-a",
         candidateId: "candidate",
-        useV2DurabilityEngine: true,
       })
     );
 

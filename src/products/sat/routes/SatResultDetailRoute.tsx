@@ -19,8 +19,11 @@ function rawTotals(sections: SatSectionResult[]) {
   }), { correct: 0, questions: 0 });
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return '—';
+  return new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(time));
 }
 
 function outcomeLabel(outcomeStatus: string): string {

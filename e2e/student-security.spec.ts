@@ -38,7 +38,7 @@ async function hasViolation(
         return false;
       }
       const json = (await response.json()) as any;
-      const violations = json?.data?.attempt?.violationsSnapshot;
+      const violations = json?.attempt?.violationsSnapshot;
       if (!Array.isArray(violations)) {
         return false;
       }
@@ -140,8 +140,13 @@ test.describe('Student security guardrails (LRW)', () => {
     await page.waitForTimeout(1_500);
 
     // Headless browsers don't always emit real tab-switch signals consistently.
-    // Dispatch a `blur` event directly to trigger the proctoring rule.
+    // The runtime intentionally ignores blur-only browser/UI transitions, so
+    // model the hidden-document signal that represents an actual tab switch.
     await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', {
+        configurable: true,
+        value: true,
+      });
       const safeDispatch = (target: EventTarget, type: string) => {
         try {
           target.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
@@ -150,6 +155,7 @@ test.describe('Student security guardrails (LRW)', () => {
         }
       };
 
+      safeDispatch(document, 'visibilitychange');
       safeDispatch(window, 'blur');
     });
 

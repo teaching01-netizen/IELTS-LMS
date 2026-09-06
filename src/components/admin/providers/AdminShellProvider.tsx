@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, ReactNode, useEffect } from 'react';
 
 export type AdminView = 'dashboard' | 'exams' | 'people' | 'scheduling' | 'cohorts' | 'grading' | 'results' | 'settings';
 
@@ -82,16 +82,18 @@ export function AdminShellProvider({ children, initialView = 'dashboard' }: Admi
     }
   }, [currentView, handleGradingExit]);
 
-  const state: AdminShellState = {
+  // Memoize state/actions/value so every shell consumer does not re-render on
+  // unrelated provider renders (e.g. grading navigation re-rendering the list).
+  const state = useMemo<AdminShellState>(() => ({
     currentView,
     sidebarOpen,
     notificationCount,
     gradingLevel,
     selectedSessionId,
     selectedSubmissionId,
-  };
+  }), [currentView, sidebarOpen, notificationCount, gradingLevel, selectedSessionId, selectedSubmissionId]);
 
-  const actions: AdminShellActions = {
+  const actions = useMemo<AdminShellActions>(() => ({
     setCurrentView,
     toggleSidebar,
     setSidebarOpen,
@@ -101,10 +103,12 @@ export function AdminShellProvider({ children, initialView = 'dashboard' }: Admi
     selectSubmission,
     handleGradingBack,
     handleGradingExit,
-  };
+  }), [handleGradingBack, handleGradingExit, selectSession, selectSubmission, toggleSidebar]);
+
+  const value = useMemo<AdminShellContextValue>(() => ({ state, actions }), [actions, state]);
 
   return (
-    <AdminShellContext.Provider value={{ state, actions }}>
+    <AdminShellContext.Provider value={value}>
       {children}
     </AdminShellContext.Provider>
   );

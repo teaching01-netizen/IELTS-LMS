@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
+import { useOptionalAuthSession } from '../../features/auth/authSession';
 import { Exam } from '../../types';
 import { ExamEntity, ExamSchedule, ExamVersion } from '../../types/domain';
 import { examRepository, examDeliveryService } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
@@ -29,6 +30,8 @@ export function ScheduleSessionModal({
   onClose,
   onCreateSchedule,
 }: ScheduleSessionModalProps) {
+  const authSession = useOptionalAuthSession();
+  const schedulerName = authSession?.session?.user.displayName?.trim() || authSession?.session?.user.email?.trim() || 'Staff';
   const defaultScheduleName = examEntities[0]?.title || exams[0]?.title || '';
   const defaultExamId = initialExamId || examEntities[0]?.id || exams[0]?.id || '';
   const [draft, setDraft] = useState<ScheduleDraft>({
@@ -120,7 +123,7 @@ export function ScheduleSessionModal({
     });
 
     const schedule: ExamSchedule = {
-      id: `sched-${Date.now()}`,
+      id: `sched-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       examId: draft.examId,
       providerKey: selectedExamEntity?.providerKey ?? 'ielts',
       examTitle: selectedExamEntity?.title || selectedVersion.contentSnapshot.title,
@@ -136,7 +139,7 @@ export function ScheduleSessionModal({
       autoStop: false,
       status: 'scheduled',
       createdAt: now,
-      createdBy: 'System',
+      createdBy: schedulerName,
       updatedAt: now,
     };
 

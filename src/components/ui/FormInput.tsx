@@ -16,9 +16,10 @@ interface FormInputProps {
   error?: string;
   helperText?: string;
   className?: string;
+  inputRef?: React.Ref<HTMLInputElement>;
 }
 
-export function FormInput({
+export const FormInput = React.forwardRef<HTMLInputElement, FormInputProps>(function FormInput({
   label,
   type = 'text',
   placeholder,
@@ -28,8 +29,18 @@ export function FormInput({
   error,
   helperText,
   className = '',
-}: FormInputProps): React.ReactElement {
-  const { field: { onChange, onBlur, value, ref } } = field;
+  inputRef,
+}: FormInputProps, outerRef): React.ReactElement {
+  const { field: { onChange, onBlur, value, ref: rhfRef } } = field;
+
+  const setRefs = (node: HTMLInputElement | null) => {
+    // S4-C7: forward to react-hook-form registration plus any outer refs.
+    rhfRef(node);
+    for (const target of [outerRef, inputRef] as Array<React.Ref<HTMLInputElement> | undefined>) {
+      if (typeof target === 'function') target(node);
+      else if (target && typeof target === 'object') (target as React.MutableRefObject<HTMLInputElement | null>).current = node;
+    }
+  };
 
   return (
     <div className={`form-group ${className}`}>
@@ -40,7 +51,7 @@ export function FormInput({
         </label>
       )}
       <input
-        ref={ref}
+        ref={setRefs}
         type={type}
         id={field.field.name}
         value={value as string}
@@ -66,4 +77,4 @@ export function FormInput({
       )}
     </div>
   );
-}
+});

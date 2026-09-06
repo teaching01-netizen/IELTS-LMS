@@ -26,7 +26,7 @@ export async function postProctorApi(
   data: Record<string, unknown>,
 ): Promise<{ status: number; body: string }> {
   const cookies = await adminContext.cookies();
-  const csrfNames = [process.env['AUTH_CSRF_COOKIE_NAME'], '__Host-csrf', 'csrf'].filter(
+  const csrfNames = [process.env['CSRF_COOKIE_NAME'], process.env['AUTH_CSRF_COOKIE_NAME'], '__Host-csrf', 'csrf'].filter(
     (value): value is string => Boolean(value),
   );
   const csrfToken = cookies.find((cookie) => csrfNames.includes(cookie.name))?.value;

@@ -1,5 +1,6 @@
 import React from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { Virtuoso } from "react-virtuoso";
 import type { StudentQuestionDescriptor } from "@student/application/studentExamContentFacade";
 import type { QuestionAnswer, QuestionBlock } from "../../types";
 import type { StudentHighlightColor } from "./highlightPalette";
@@ -33,9 +34,11 @@ interface StudentQuestionPanelProps {
   hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
   hideStepper?: boolean | undefined;
   shouldFocusQuestion?: (() => boolean) | undefined;
+  eliminatedOptionIdsByQuestion?: Readonly<Record<string, readonly string[]>> | undefined;
+  onToggleOptionElimination?: ((questionId: string, optionId: string) => void) | undefined;
 }
 
-export function StudentQuestionPanel({
+export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
   blocks,
   allQuestions,
   answers,
@@ -58,6 +61,8 @@ export function StudentQuestionPanel({
   hideDiagramReferenceForBlock,
   hideStepper = false,
   shouldFocusQuestion,
+  eliminatedOptionIdsByQuestion,
+  onToggleOptionElimination,
 }: StudentQuestionPanelProps) {
   const currentIndex = allQuestions.findIndex((question) => question.id === currentQuestionId);
   const hasPrev = currentIndex > 0;
@@ -66,10 +71,20 @@ export function StudentQuestionPanel({
   const nextQuestion = hasNext ? allQuestions[currentIndex + 1] : undefined;
 
   const shouldFocusQuestionRef = React.useRef(shouldFocusQuestion);
-  shouldFocusQuestionRef.current = shouldFocusQuestion;
+  React.useEffect(() => {
+    shouldFocusQuestionRef.current = shouldFocusQuestion;
+  }, [shouldFocusQuestion]);
+  const userGestureRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (!currentQuestionId || shouldFocusQuestionRef.current?.() === false) {
+    // Only steal focus on explicit user navigation: requires the caller's
+    // shouldFocusQuestion opt-in AND a user gesture (pointer/key) so programmatic
+    // question changes (restore, sync, auto-advance) never yank focus.
+    if (!currentQuestionId || !userGestureRef.current) {
+      return;
+    }
+    userGestureRef.current = false;
+    if (shouldFocusQuestionRef.current?.() === false) {
       return;
     }
 
@@ -83,6 +98,14 @@ export function StudentQuestionPanel({
     target.scrollIntoView({ block: "start", behavior: "auto" });
   }, [currentQuestionId]);
 
+  const handleUserNavigate = React.useCallback(
+    (id: string) => {
+      userGestureRef.current = true;
+      onNavigate(id);
+    },
+    [onNavigate],
+  );
+
   const questionsByBlockId = React.useMemo(() => {
     const map = new Map<string, StudentQuestionDescriptor[]>();
     for (const question of allQuestions) {
@@ -95,6 +118,64 @@ export function StudentQuestionPanel({
     }
     return map;
   }, [allQuestions]);
+
+  // Long exams can mount hundreds of question cards; virtualize the block list
+  // so only visible blocks mount. Below the threshold the plain map preserves
+  // exact scroll/anchor behavior.
+  const useVirtualizedBlocks = blocks.length > 40;
+
+  const renderQuestionBlock = React.useCallback(
+    (block: QuestionBlock) => {
+      const activeQuestionId = (questionsByBlockId.get(block.id) ?? []).some(
+        (question) => question.id === currentQuestionId,
+      )
+        ? currentQuestionId
+        : null;
+
+      return (
+        <StudentQuestionBlockSection
+          key={block.id}
+          block={block}
+          blockQuestions={questionsByBlockId.get(block.id) ?? []}
+          allQuestions={allQuestions}
+          answers={answers}
+          activeQuestionId={activeQuestionId}
+          flags={flags}
+          onAnswerChange={onAnswerChange}
+          onToggleFlag={onToggleFlag}
+          tabletMode={tabletMode}
+          answerCompact={answerCompact}
+          highlightEnabled={highlightEnabled}
+          highlightColor={highlightColor}
+          registerLiveAnswer={registerLiveAnswer}
+          getBlockStartQuestionNumber={getBlockStartQuestionNumber}
+          renderBlockInstruction={renderBlockInstruction}
+              expandedQuestionGapClassName={expandedQuestionGapClassName}
+              hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
+              eliminatedOptionIdsByQuestion={eliminatedOptionIdsByQuestion}
+              onToggleOptionElimination={onToggleOptionElimination}
+        />
+      );
+    },
+    [
+      allQuestions,
+      answers,
+      answerCompact,
+      currentQuestionId,
+      expandedQuestionGapClassName,
+      flags,
+      getBlockStartQuestionNumber,
+      hideDiagramReferenceForBlock,
+      highlightColor,
+      highlightEnabled,
+      onAnswerChange,
+      onToggleFlag,
+      questionsByBlockId,
+      registerLiveAnswer,
+      renderBlockInstruction,
+      tabletMode,
+    ],
+  );
 
   return (
     <div
@@ -113,36 +194,16 @@ export function StudentQuestionPanel({
           ...(contentZoomStyle ?? {}),
         }}
       >
-        {blocks.map((block) => {
-          const activeQuestionId = (questionsByBlockId.get(block.id) ?? []).some(
-            (question) => question.id === currentQuestionId
-          )
-            ? currentQuestionId
-            : null;
-
-          return (
-            <StudentQuestionBlockSection
-              key={block.id}
-              block={block}
-              blockQuestions={questionsByBlockId.get(block.id) ?? []}
-              allQuestions={allQuestions}
-              answers={answers}
-              activeQuestionId={activeQuestionId}
-              flags={flags}
-              onAnswerChange={onAnswerChange}
-              onToggleFlag={onToggleFlag}
-              tabletMode={tabletMode}
-              answerCompact={answerCompact}
-              highlightEnabled={highlightEnabled}
-              highlightColor={highlightColor}
-              registerLiveAnswer={registerLiveAnswer}
-              getBlockStartQuestionNumber={getBlockStartQuestionNumber}
-              renderBlockInstruction={renderBlockInstruction}
-              expandedQuestionGapClassName={expandedQuestionGapClassName}
-              hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
-            />
-          );
-        })}
+        {useVirtualizedBlocks ? (
+          <Virtuoso
+            data={blocks}
+            overscan={600}
+            itemContent={(_index, block) => renderQuestionBlock(block)}
+            computeItemKey={(_index, block) => block.id}
+          />
+        ) : (
+          blocks.map((block) => renderQuestionBlock(block))
+        )}
       </div>
       {!hideStepper ? (
         <div
@@ -150,7 +211,7 @@ export function StudentQuestionPanel({
         >
           <button
             type="button"
-            onClick={() => previousQuestion && onNavigate(previousQuestion.id)}
+            onClick={() => previousQuestion && handleUserNavigate(previousQuestion.id)}
             className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasPrev ? "bg-gray-900 hover:bg-gray-800 text-white" : "bg-gray-100 text-gray-300 cursor-not-allowed"}`}
             aria-label="Previous question"
             disabled={!hasPrev}
@@ -159,7 +220,7 @@ export function StudentQuestionPanel({
           </button>
           <button
             type="button"
-            onClick={() => nextQuestion && onNavigate(nextQuestion.id)}
+            onClick={() => nextQuestion && handleUserNavigate(nextQuestion.id)}
             className={`w-10 h-10 md:w-11 md:h-11 lg:w-12 lg:h-12 flex items-center justify-center transition-colors ${hasNext ? "bg-gray-900 hover:bg-gray-800 text-white" : "bg-gray-100 text-gray-300 cursor-not-allowed"}`}
             aria-label="Next question"
             disabled={!hasNext}
@@ -170,4 +231,4 @@ export function StudentQuestionPanel({
       ) : null}
     </div>
   );
-}
+});

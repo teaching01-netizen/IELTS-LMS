@@ -5,8 +5,11 @@ import { ErrorSurface } from '../../../components/ui/ErrorSurface';
 import { LoadingSurface } from '../../../components/ui/LoadingSurface';
 import { useSatResultsQuery } from '../../../features/results/api/satResultsQueries';
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value));
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return '—';
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(time));
 }
 
 function outcomeLabel(outcomeStatus: string): string {

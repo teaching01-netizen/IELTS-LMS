@@ -27,7 +27,7 @@ const variantStyles = {
   info: 'bg-blue-50 border-blue-700 text-blue-900',
 };
 
-export function Banner({
+export const Banner = React.forwardRef<HTMLDivElement, BannerProps>(function Banner({
   id,
   variant = 'info',
   title,
@@ -35,7 +35,7 @@ export function Banner({
   onDismiss,
   showIcon = true,
   className = '',
-}: BannerProps) {
+}: BannerProps, ref) {
   const bannerId = useId();
   const uniqueId = id || bannerId;
 
@@ -44,8 +44,10 @@ export function Banner({
   return (
     <div
       id={uniqueId}
+      ref={ref}
+      // S5: ONE alert mechanism per banner — role=alert (assertive) XOR a
+      // live region, never both on the same node.
       role="alert"
-      aria-live="polite"
       className={`flex items-start gap-3 px-4 py-3 border ${variantStyles[variant]} ${className}`}
     >
       {showIcon && (
@@ -59,13 +61,14 @@ export function Banner({
       </div>
       {onDismiss && (
         <button
+          type="button"
           onClick={onDismiss}
-          className="flex-shrink-0 p-1 hover:bg-black/10 rounded transition-colors"
+          className="flex-shrink-0 min-w-6 min-h-6 p-1 hover:bg-black/10 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-current focus-visible:ring-offset-1"
           aria-label="Dismiss notification"
         >
-          <X size={16} />
+          <X size={16} aria-hidden="true" />
         </button>
       )}
     </div>
   );
-}
+});

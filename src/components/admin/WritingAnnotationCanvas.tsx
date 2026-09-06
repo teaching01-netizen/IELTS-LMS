@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   Highlighter,
   Underline,
@@ -7,7 +7,9 @@ import {
   Eye,
   EyeOff,
   Type,
-  Minus
+  Minus,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import {
   WritingAnnotation,
@@ -30,6 +32,51 @@ interface WritingAnnotationCanvasProps {
   onDrawingDelete: (drawingId: string) => void;
 }
 
+interface HistorySnapshot {
+  annotations: WritingAnnotation[];
+  drawings: DrawingAnnotation[];
+}
+
+const buildAnnotationId = () =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? `anno-${crypto.randomUUID()}`
+    : `anno-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+/**
+ * Renders annotated student text with overlap-safe segmentation.
+ * Overlapping ranges are split at every boundary so nested/partial overlaps
+ * each render their own combined span instead of dropping covered ranges.
+ */
+function segmentAnnotatedText(
+  studentText: string,
+  annotations: WritingAnnotation[],
+): Array<{ text: string; covering: WritingAnnotation[] }> {
+  if (annotations.length === 0) {
+    return [{ text: studentText, covering: [] }];
+  }
+
+  const boundaries = new Set<number>([0, studentText.length]);
+  for (const annotation of annotations) {
+    const start = Math.max(0, Math.min(annotation.startOffset, studentText.length));
+    const end = Math.max(0, Math.min(annotation.endOffset, studentText.length));
+    if (end > start) {
+      boundaries.add(start);
+      boundaries.add(end);
+    }
+  }
+  const sorted = [...boundaries].sort((a, b) => a - b);
+
+  const segments: Array<{ text: string; covering: WritingAnnotation[] }> = [];
+  for (let index = 0; index < sorted.length - 1; index += 1) {
+    const start = sorted[index] as number;
+    const end = sorted[index + 1] as number;
+    if (end <= start) continue;
+    const covering = annotations.filter((annotation) => annotation.startOffset < end && annotation.endOffset > start);
+    segments.push({ text: studentText.slice(start, end), covering });
+  }
+  return segments;
+}
+
 export function WritingAnnotationCanvas({
   taskId,
   studentText,
@@ -43,49 +90,120 @@ export function WritingAnnotationCanvas({
   onDrawingAdd,
   onDrawingDelete
 }: WritingAnnotationCanvasProps) {
-  void onAnnotationUpdate;
-  void onDrawingAdd;
-  void onDrawingDelete;
-
   const [toolState, setToolState] = useState<AnnotationToolState>({
     activeTool: 'select',
     color: 'rgba(255, 255, 0, 0.5)', // Yellow highlighter with 50% opacity
     strokeWidth: 2,
     visibility: 'student_visible'
   });
-  
+
   const [selectedText, setSelectedText] = useState<{ start: number; end: number; text: string } | null>(null);
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [commentInput, setCommentInput] = useState('');
-  const [, setHistory] = useState<{ annotations: WritingAnnotation[]; drawings: DrawingAnnotation[] }[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  
-  const textRef = useRef<HTMLDivElement>(null);
-  
-  // Save history for undo/redo
-  useEffect(() => {
-    if (historyIndex === -1) {
-      setHistory([{ annotations, drawings }]);
-      setHistoryIndex(0);
-    }
+  // Working undo/redo: snapshots of the prop-driven lists. Snapshots are
+  // computed locally at mutation time (prev props + mutation) so undo/redo
+  // restore via the wired add/update/delete props. Index points at the
+  // currently-applied snapshot; index 0 is the initial prop state.
+  const [historyState, setHistoryState] = useState<{ snapshots: HistorySnapshot[]; index: number }>(() => ({
+    snapshots: [{ annotations, drawings }],
+    index: 0,
+  }));
+  // Latest prop values, mirrored for use inside undo/redo callbacks without
+  // going stale between renders.
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
+  const drawingsRef = useRef(drawings);
+  drawingsRef.current = drawings;
+
+  // Reset the stack when the canvas switches to a different writing task.
+  const taskIdRef = useRef(taskId);
+  if (taskIdRef.current !== taskId) {
+    taskIdRef.current = taskId;
+    setHistoryState({ snapshots: [{ annotations, drawings }], index: 0 });
+  }
+
+  const pushNextSnapshot = useCallback((snapshot: HistorySnapshot) => {
+    setHistoryState((previous) => {
+      const snapshots = [...previous.snapshots.slice(0, previous.index + 1), snapshot];
+      // Cap the stack so long grading sessions stay bounded.
+      const capped = snapshots.length > 50 ? snapshots.slice(snapshots.length - 50) : snapshots;
+      return { snapshots: capped, index: capped.length - 1 };
+    });
   }, []);
-  
+
+  const currentSnapshot = useCallback((): HistorySnapshot => ({
+    annotations: annotationsRef.current,
+    drawings: drawingsRef.current,
+  }), []);
+
+  const restoreSnapshot = useCallback((snapshot: HistorySnapshot) => {
+    const currentAnnotations = annotationsRef.current;
+    const currentDrawings = drawingsRef.current;
+    const snapshotIds = new Set(snapshot.annotations.map((annotation) => annotation.id));
+    const snapshotDrawingIds = new Set(snapshot.drawings.map((drawing) => drawing.id));
+
+    // Delete annotations that did not exist in the snapshot.
+    for (const annotation of currentAnnotations) {
+      if (!snapshotIds.has(annotation.id)) {
+        onAnnotationDelete(annotation.id);
+      }
+    }
+    // Re-add missing snapshot annotations; update ones whose content changed.
+    for (const annotation of snapshot.annotations) {
+      const current = currentAnnotations.find((candidate) => candidate.id === annotation.id);
+      if (!current) {
+        onAnnotationAdd(annotation);
+      } else if (JSON.stringify(current) !== JSON.stringify(annotation)) {
+        onAnnotationUpdate(annotation);
+      }
+    }
+    for (const drawing of currentDrawings) {
+      if (!snapshotDrawingIds.has(drawing.id)) {
+        onDrawingDelete(drawing.id);
+      }
+    }
+    for (const drawing of snapshot.drawings) {
+      if (!currentDrawings.some((candidate) => candidate.id === drawing.id)) {
+        onDrawingAdd(drawing);
+      }
+    }
+  }, [onAnnotationAdd, onAnnotationDelete, onAnnotationUpdate, onDrawingAdd, onDrawingDelete]);
+
+  const canUndo = historyState.index > 0;
+  const canRedo = historyState.index + 1 < historyState.snapshots.length;
+
+  const handleUndo = useCallback(() => {
+    const target = historyState.snapshots[historyState.index - 1];
+    if (!target) return;
+    setHistoryState((previous) => ({ snapshots: previous.snapshots, index: previous.index - 1 }));
+    restoreSnapshot(target);
+  }, [historyState.index, historyState.snapshots, restoreSnapshot]);
+
+  const handleRedo = useCallback(() => {
+    const target = historyState.snapshots[historyState.index + 1];
+    if (!target) return;
+    setHistoryState((previous) => ({ snapshots: previous.snapshots, index: previous.index + 1 }));
+    restoreSnapshot(target);
+  }, [historyState.index, historyState.snapshots, restoreSnapshot]);
+
+  const textRef = useRef<HTMLDivElement>(null);
+
   const handleTextSelection = () => {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
-    
+
     const range = selection.getRangeAt(0);
     const text = range.toString();
-    
+
     if (text.length > 0 && textRef.current) {
       const preCaretRange = range.cloneRange();
       preCaretRange.selectNodeContents(textRef.current);
       preCaretRange.setEnd(range.startContainer, range.startOffset);
       const start = preCaretRange.toString().length;
       const end = start + text.length;
-      
+
       setSelectedText({ start, end, text });
-      
+
       // Google Docs style: if highlight/underline/strike tool is active, apply immediately
       if (toolState.activeTool === 'highlight') {
         addHighlight();
@@ -98,196 +216,143 @@ export function WritingAnnotationCanvas({
       }
     }
   };
-  
-  const addInlineComment = () => {
-    if (!selectedText || !commentInput.trim()) return;
-    
-    const annotation: WritingAnnotation = {
-      id: `anno-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+
+  const buildBaseAnnotation = (type: WritingAnnotation['type'], comment: string): WritingAnnotation | null => {
+    if (!selectedText) return null;
+    return {
+      id: buildAnnotationId(),
       taskId,
-      type: 'inline_comment',
+      type,
       startOffset: selectedText.start,
       endOffset: selectedText.end,
       selectedText: selectedText.text,
-      comment: commentInput,
+      comment,
       visibility: toolState.visibility,
       color: toolState.color,
       createdBy: currentTeacherId,
       createdAt: new Date().toISOString()
     };
-    
+  };
+
+  const commitAnnotation = (annotation: WritingAnnotation | null) => {
+    if (!annotation) return;
+    pushNextSnapshot({ annotations: [...currentSnapshot().annotations, annotation], drawings: currentSnapshot().drawings });
     onAnnotationAdd(annotation);
-    
+    setSelectedText(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const addInlineComment = () => {
+    if (!selectedText || !commentInput.trim()) return;
+
+    const annotation = buildBaseAnnotation('inline_comment', commentInput);
+    if (!annotation) return;
+    pushNextSnapshot({ annotations: [...currentSnapshot().annotations, annotation], drawings: currentSnapshot().drawings });
+    onAnnotationAdd(annotation);
+
     // Reset
     setSelectedText(null);
     setCommentInput('');
     setShowCommentInput(false);
     window.getSelection()?.removeAllRanges();
   };
-  
+
   const addHighlight = () => {
-    if (!selectedText) return;
-    
-    const annotation: WritingAnnotation = {
-      id: `anno-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      taskId,
-      type: 'highlight',
-      startOffset: selectedText.start,
-      endOffset: selectedText.end,
-      selectedText: selectedText.text,
-      comment: '',
-      visibility: toolState.visibility,
-      color: toolState.color,
-      createdBy: currentTeacherId,
-      createdAt: new Date().toISOString()
-    };
-    
-    onAnnotationAdd(annotation);
-    setSelectedText(null);
-    window.getSelection()?.removeAllRanges();
+    commitAnnotation(buildBaseAnnotation('highlight', ''));
   };
-  
+
   const addUnderline = () => {
-    if (!selectedText) return;
-    
-    const annotation: WritingAnnotation = {
-      id: `anno-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      taskId,
-      type: 'underline',
-      startOffset: selectedText.start,
-      endOffset: selectedText.end,
-      selectedText: selectedText.text,
-      comment: '',
-      visibility: toolState.visibility,
-      color: toolState.color,
-      createdBy: currentTeacherId,
-      createdAt: new Date().toISOString()
-    };
-    
-    onAnnotationAdd(annotation);
-    setSelectedText(null);
-    window.getSelection()?.removeAllRanges();
+    commitAnnotation(buildBaseAnnotation('underline', ''));
   };
-  
+
   const addStrikeThrough = () => {
-    if (!selectedText) return;
-    
-    const annotation: WritingAnnotation = {
-      id: `anno-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      taskId,
-      type: 'strike_through',
-      startOffset: selectedText.start,
-      endOffset: selectedText.end,
-      selectedText: selectedText.text,
-      comment: '',
-      visibility: toolState.visibility,
-      color: toolState.color,
-      createdBy: currentTeacherId,
-      createdAt: new Date().toISOString()
-    };
-    
-    onAnnotationAdd(annotation);
-    setSelectedText(null);
-    window.getSelection()?.removeAllRanges();
+    commitAnnotation(buildBaseAnnotation('strike_through', ''));
   };
-  
+
   const applyCommentBankItem = (item: CommentBankItem) => {
     if (!selectedText) {
       setCommentInput(item.text);
       setShowCommentInput(true);
       return;
     }
-    
-    const annotation: WritingAnnotation = {
-      id: `anno-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      taskId,
-      type: 'inline_comment',
-      startOffset: selectedText.start,
-      endOffset: selectedText.end,
-      selectedText: selectedText.text,
-      comment: item.text,
-      visibility: item.isStudentVisible ? 'student_visible' : 'internal_only',
-      color: toolState.color,
-      createdBy: currentTeacherId,
-      createdAt: new Date().toISOString()
-    };
-    
+
+    const annotation = buildBaseAnnotation('inline_comment', item.text);
+    if (!annotation) return;
+    annotation.visibility = item.isStudentVisible ? 'student_visible' : 'internal_only';
+    pushNextSnapshot({ annotations: [...currentSnapshot().annotations, annotation], drawings: currentSnapshot().drawings });
     onAnnotationAdd(annotation);
     setSelectedText(null);
     window.getSelection()?.removeAllRanges();
   };
-  
+
+  const handleDeleteAnnotation = (annotationId: string) => {
+    const next = currentSnapshot();
+    pushNextSnapshot({
+      annotations: next.annotations.filter((candidate) => candidate.id !== annotationId),
+      drawings: next.drawings,
+    });
+    onAnnotationDelete(annotationId);
+  };
+
   const renderAnnotatedText = () => {
-    if (annotations.length === 0) {
+    const segments = segmentAnnotatedText(studentText, annotations);
+    if (segments.length === 1 && segments[0]?.covering.length === 0) {
       return <div className="prose prose-lg max-w-none text-gray-800 whitespace-pre-wrap font-serif leading-relaxed">{studentText}</div>;
     }
-    
-    // Sort annotations by start offset
-    const sortedAnnotations = [...annotations].sort((a, b) => a.startOffset - b.startOffset);
-    
-    const parts: Array<{ text: string; annotation?: WritingAnnotation }> = [];
-    let lastIndex = 0;
-    
-    for (const annotation of sortedAnnotations) {
-      if (annotation.startOffset > lastIndex) {
-        parts.push({ text: studentText.slice(lastIndex, annotation.startOffset) });
-      }
-      
-      parts.push({
-        text: studentText.slice(annotation.startOffset, annotation.endOffset),
-        annotation
-      });
-      
-      lastIndex = annotation.endOffset;
-    }
-    
-    if (lastIndex < studentText.length) {
-      parts.push({ text: studentText.slice(lastIndex) });
-    }
-    
+
     return (
       <div className="prose prose-lg max-w-none text-gray-800 whitespace-pre-wrap font-serif leading-relaxed">
-        {parts.map((part, index) => {
-          if (!part.annotation) {
-            return <span key={index}>{part.text}</span>;
+        {segments.map((segment, index) => {
+          if (segment.covering.length === 0) {
+            return <span key={index}>{segment.text}</span>;
           }
-          
-          const annotation = part.annotation;
+
+          const [primary, ...overlapping] = segment.covering;
+          if (!primary) {
+            return <span key={index}>{segment.text}</span>;
+          }
           let className = '';
           let style: React.CSSProperties = {};
-          
-          switch (annotation.type) {
+
+          switch (primary.type) {
             case 'inline_comment':
               // Comments can also have highlight color
-              if (annotation.color) {
-                style = { backgroundColor: annotation.color };
+              if (primary.color) {
+                style = { backgroundColor: primary.color };
               }
               break;
             case 'highlight':
               // Use inline style with RGBA color (Google Docs highlighter style)
-              style = { backgroundColor: annotation.color || 'rgba(255, 255, 0, 0.5)' };
+              style = { backgroundColor: primary.color || 'rgba(255, 255, 0, 0.5)' };
               break;
             case 'underline':
-              style = { textDecoration: 'underline', textDecorationColor: annotation.color };
+              style = { textDecoration: 'underline', textDecorationColor: primary.color };
               break;
             case 'strike_through':
-              style = { textDecoration: 'line-through', textDecorationColor: annotation.color };
+              style = { textDecoration: 'line-through', textDecorationColor: primary.color };
               break;
             default:
               className = 'bg-blue-100';
           }
-          
+          // Extra underline marker when additional ranges overlap this segment.
+          if (overlapping.length > 0 && primary.type !== 'underline' && primary.type !== 'strike_through') {
+            style = { ...style, textDecoration: style.textDecoration ?? 'underline dotted' };
+          }
+          const tooltip = [primary.comment || primary.type, ...overlapping.map((extra) => extra.comment || extra.type)]
+            .filter(Boolean)
+            .join(' · ');
+
           return (
             <span
               key={index}
               className={`relative cursor-pointer ${className}`}
               style={style}
-              title={annotation.comment || annotation.type}
+              title={tooltip}
             >
-              {part.text}
-              {annotation.comment && annotation.type === 'inline_comment' && (
+              {segment.text}
+              {primary.comment && primary.type === 'inline_comment' && (
                 <span className="absolute -top-6 left-0 bg-gray-800 text-white text-xs px-2 py-1 rounded whitespace-nowrap z-10">
-                  {annotation.comment}
+                  {primary.comment}
                 </span>
               )}
             </span>
@@ -296,11 +361,11 @@ export function WritingAnnotationCanvas({
       </div>
     );
   };
-  
+
   const ToolButton = ({ tool, icon: Icon, label }: { tool: AnnotationToolState['activeTool']; icon: React.ComponentType<{ size?: number }>; label: string }) => {
     const handleClick = () => {
       setToolState({ ...toolState, activeTool: tool });
-      
+
       // If text is already selected, immediately apply the annotation (Google Docs style)
       if (selectedText && tool !== 'select' && tool !== 'comment') {
         if (tool === 'highlight') {
@@ -312,7 +377,7 @@ export function WritingAnnotationCanvas({
         }
       }
     };
-    
+
     return (
       <button
         onClick={handleClick}
@@ -327,7 +392,7 @@ export function WritingAnnotationCanvas({
       </button>
     );
   };
-  
+
   return (
     <div className="space-y-4">
       {/* Toolbar */}
@@ -338,11 +403,11 @@ export function WritingAnnotationCanvas({
           <ToolButton tool="underline" icon={Underline} label="Underline" />
           <ToolButton tool="strike_through" icon={Strikethrough} label="Strike Through" />
         </div>
-        
+
         <div className="flex items-center gap-1 border-r border-gray-200 pr-2">
           <ToolButton tool="comment" icon={MessageSquare} label="Add Comment" />
         </div>
-        
+
         <div className="flex items-center gap-1 border-r border-gray-200 pr-2">
           <button
             onClick={() => setToolState({
@@ -359,7 +424,28 @@ export function WritingAnnotationCanvas({
             {toolState.visibility === 'student_visible' ? <Eye size={18} /> : <EyeOff size={18} />}
           </button>
         </div>
-        
+
+        <div className="flex items-center gap-1 border-r border-gray-200 pr-2">
+          <button
+            onClick={handleUndo}
+            disabled={!canUndo}
+            className="p-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Undo annotation change"
+            aria-label="Undo annotation change"
+          >
+            <Undo2 size={18} />
+          </button>
+          <button
+            onClick={handleRedo}
+            disabled={!canRedo}
+            className="p-2 rounded-lg transition-colors text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Redo annotation change"
+            aria-label="Redo annotation change"
+          >
+            <Redo2 size={18} />
+          </button>
+        </div>
+
         <div className="flex items-center gap-1">
           <button
             onClick={() => setToolState({ ...toolState, color: 'rgba(255, 255, 0, 0.5)' })}
@@ -387,7 +473,7 @@ export function WritingAnnotationCanvas({
           />
         </div>
       </div>
-      
+
       {/* Comment Bank */}
       {commentBank.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-lg p-3">
@@ -406,7 +492,7 @@ export function WritingAnnotationCanvas({
           </div>
         </div>
       )}
-      
+
       {/* Text Canvas */}
       <div
         ref={textRef}
@@ -414,7 +500,7 @@ export function WritingAnnotationCanvas({
         onMouseUp={handleTextSelection}
       >
         {renderAnnotatedText()}
-        
+
         {/* Comment Input Popup */}
         {showCommentInput && selectedText && (
           <div className="absolute bg-white border border-gray-300 rounded-lg shadow-lg p-3 z-20" style={{
@@ -452,7 +538,7 @@ export function WritingAnnotationCanvas({
           </div>
         )}
       </div>
-      
+
       {/* Annotations List */}
       {annotations.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-lg p-4">
@@ -478,8 +564,9 @@ export function WritingAnnotationCanvas({
                   )}
                 </div>
                 <button
-                  onClick={() => onAnnotationDelete(annotation.id)}
+                  onClick={() => handleDeleteAnnotation(annotation.id)}
                   className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                  aria-label={`Delete ${annotation.type} annotation`}
                 >
                   <Minus size={16} />
                 </button>

@@ -3,6 +3,11 @@ import {
   ADMIN_STORAGE_STATE_PATH,
 } from './support/backendE2e';
 
+const BACKEND_METRICS_URL = new URL(
+  '/metrics',
+  process.env['VITE_BACKEND_API_URL'] ?? 'http://localhost:4000',
+).toString();
+
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
 test.describe('Backend Performance Metrics Verification', () => {
@@ -116,18 +121,16 @@ test.describe('Backend Performance Metrics Verification', () => {
 
   test('verifies metrics registered in Prometheus registry', async ({ page, request }) => {
     // Try to access Prometheus metrics endpoint directly
-    const response = await request.get('/metrics');
-    
-    if (response.ok()) {
-      const metricsText = await response.text();
-      
-      // Verify metrics are present
-      expect(metricsText).toContain('# HELP');
-      expect(metricsText).toContain('# TYPE');
-      
-      // Verify specific metrics exist
-      expect(metricsText.length).toBeGreaterThan(0);
-    }
+    const response = await request.get(BACKEND_METRICS_URL);
+    expect(response.ok()).toBeTruthy();
+    const metricsText = await response.text();
+
+    // Verify metrics are present
+    expect(metricsText).toContain('# HELP');
+    expect(metricsText).toContain('# TYPE');
+
+    // Verify specific metrics exist
+    expect(metricsText.length).toBeGreaterThan(0);
   });
 
   test('verifies latency histograms are populated', async ({ page }) => {
@@ -187,7 +190,7 @@ test.describe('Backend Performance Metrics Verification', () => {
   });
 
   test('verifies metrics accessible via /metrics endpoint', async ({ request }) => {
-    const response = await request.get('/metrics');
+    const response = await request.get(BACKEND_METRICS_URL);
     
     expect(response.status()).toBe(200);
     
@@ -196,7 +199,7 @@ test.describe('Backend Performance Metrics Verification', () => {
   });
 
   test('verifies metric labels are present', async ({ page, request }) => {
-    const response = await request.get('/metrics');
+    const response = await request.get(BACKEND_METRICS_URL);
     
     if (response.ok()) {
       const metricsText = await response.text();

@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { acquireBodyScrollLock, releaseBodyScrollLock } from './bodyScrollLock';
 
 interface DrawerProps {
   isOpen: boolean;
@@ -16,7 +17,7 @@ interface DrawerProps {
   className?: string;
 }
 
-export function Drawer({
+export const Drawer = React.forwardRef<HTMLDivElement, DrawerProps>(function Drawer({
   isOpen,
   onClose,
   title,
@@ -28,21 +29,23 @@ export function Drawer({
   preventCloseOnOverlayClick = false,
   closeOnEscape = true,
   className = '',
-}: DrawerProps) {
+}: DrawerProps, forwardedRef) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  React.useImperativeHandle(forwardedRef, () => panelRef.current as HTMLDivElement);
+  // Shares the single-owner scroll lock with Dialog so nested overlays restore
+  // scrolling only when the last one closes.
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
+    if (!isOpen) return undefined;
+    acquireBodyScrollLock();
     return () => {
-      document.body.style.overflow = 'unset';
+      releaseBodyScrollLock();
     };
   }, [isOpen]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && closeOnEscape && isOpen) {
+      if (e.key === 'Escape' && !e.defaultPrevented && closeOnEscape && isOpen) {
         onClose();
       }
     };
@@ -70,7 +73,7 @@ export function Drawer({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined} aria-label={title ? undefined : "Drawer dialog"}>
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -84,16 +87,18 @@ export function Drawer({
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, ...slideDirection.exit }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            ref={panelRef}
             className={`relative h-full ${sizes[size]} bg-white shadow-2xl flex flex-col ${position === 'right' ? 'ml-auto' : 'mr-auto'} ${className}`}
             role="document"
+            tabIndex={-1}
           >
             {title && (
               <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-                <h2 className="text-lg font-semibold text-gray-900 leading-tight tracking-tight">{title}</h2>
+                <h2 id={titleId} className="text-lg font-semibold text-gray-900 leading-tight tracking-tight">{title}</h2>
                 {showCloseButton && (
                   <button
                     onClick={onClose}
-                    className="p-1 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="min-w-6 min-h-6 p-1 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
                     aria-label="Close drawer"
                   >
                     <X size={20} />
@@ -116,4 +121,4 @@ export function Drawer({
       )}
     </AnimatePresence>
   );
-}
+});

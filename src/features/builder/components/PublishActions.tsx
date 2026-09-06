@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Archive, ArrowRight, Calendar, CheckCircle2, Circle, Edit, LoaderCircle, Unlock } from 'lucide-react';
 import type { PublishReadiness } from '../../../types/domain';
 import { PublishConfirmationModal } from './PublishConfirmationModal';
@@ -58,6 +58,11 @@ export function PublishActions({
   const [showSchedule, setShowSchedule] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const copyTimerRef = useRef<number | undefined>(undefined);
+
+  // Clear the "Copied" indicator timer on unmount so it never fires after unmount.
+  useEffect(() => () => window.clearTimeout(copyTimerRef.current), []);
   const [isRepublishing, setIsRepublishing] = useState(false);
   const [republishError, setRepublishError] = useState<string | null>(null);
   const [isScheduling, setIsScheduling] = useState(false);
@@ -98,7 +103,13 @@ export function PublishActions({
   };
 
   const isValidationPassed = publishReadiness?.canPublish ?? false;
-  const isContentReviewed = true;
+  // Real checklist state (S2-C3): content counts as reviewed only when the
+  // readiness payload reports no blocking issues. The previous `= true` stub
+  // let the confirm path enable without any signal. Explicit human attestation
+  // happens via the confirmation-modal checkbox, which blocks confirm until
+  // checked (modal also disables its checkbox while this is false).
+  const hasBlockingReadinessIssues = (publishReadiness?.errors.length ?? 1) > 0 || !isValidationPassed;
+  const isContentReviewed = !hasBlockingReadinessIssues;
   const usesSchedulingWorkflow = Boolean(onOpenSchedulingWorkflow);
   const effectiveScheduledTime = usesSchedulingWorkflow ? scheduledTimeProp ?? '' : scheduledTime;
   const isScheduled = effectiveScheduledTime.length > 0;
@@ -336,17 +347,37 @@ export function PublishActions({
                 aria-label="Published exam link"
               />
               <button
-                onClick={async () => {
-                  await navigator.clipboard.writeText(publishSuccess.publishedLink!);
-                  setLinkCopied(true);
-                  window.setTimeout(() => setLinkCopied(false), 1500);
+                onClick={() => {
+                  const link = publishSuccess.publishedLink;
+                  if (!link) {
+                    return;
+                  }
+                  if (!navigator.clipboard?.writeText) {
+                    setCopyError('Copy is not available in this browser. Select the link manually.');
+                    return;
+                  }
+                  void (async () => {
+                    try {
+                      await navigator.clipboard.writeText(link);
+                      setCopyError(null);
+                      setLinkCopied(true);
+                      window.clearTimeout(copyTimerRef.current);
+                      copyTimerRef.current = window.setTimeout(() => setLinkCopied(false), 1500);
+                    } catch {
+                      setCopyError('Could not copy the link. Select it manually.');
+                    }
+                  })();
                 }}
                 className="px-4 py-2.5 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition-all duration-200"
                 aria-label="Copy student link"
+                aria-live="polite"
               >
                 {linkCopied ? 'Copied' : 'Copy Link'}
               </button>
             </div>
+            {copyError ? (
+              <p role="alert" className="text-xs text-red-700">{copyError}</p>
+            ) : null}
           </div>
         )}
 
@@ -451,6 +482,12 @@ export function PublishActions({
         </div>
 
         {renderStepper('Publish', canPublishNow)}
+
+        {!isContentReviewed && (
+          <p role="status" className="text-[11px] text-slate-500">
+            Content review is blocked until readiness issues above are resolved; the confirm dialog will also require an explicit review attestation.
+          </p>
+        )}
 
         <div>
           <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Publish Notes</label>

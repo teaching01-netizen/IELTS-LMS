@@ -1,0 +1,3802 @@
+openapi: 3.0.3
+info:
+  title: IELTS Proctoring API (Go port)
+  version: 1.0.0
+  description: |-
+    Wire contract for the Go backend (module example.com/ielts-proctoring).
+    Error envelope is uniform: {code, message, details?, requestId}.
+    Every response carries the X-Request-Id header (client may supply one;
+    the server mints a UUID when absent). Timestamps are UTC RFC3339 with
+    microseconds; money-free integer scores only.
+servers:
+  - url: /api/v1
+security:
+  - cookieAuth: []
+tags:
+  - name: auth
+  - name: student-v2
+  - name: terminalization
+  - name: proctor
+  - name: grading
+  - name: results
+  - name: sat
+  - name: act
+paths:
+  /auth/login:
+    post:
+      security: []
+      tags: [auth]
+      summary: Staff login
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Session issued
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/Actor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/student/entry:
+    post:
+      security: []
+      tags: [auth]
+      summary: Student entry by access code
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [wcode, email]
+              properties:
+                wcode: { type: string, example: W123456 }
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Attempt token issued
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attemptToken: { type: string }
+                  attemptId: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/student/schedules/{id}:
+    get:
+      security: []
+      tags: [auth]
+      summary: Read schedule metadata for public student entry
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Schedule metadata
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /auth/session:
+    get:
+      tags: [auth]
+      summary: Current session
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Session
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/Actor" }
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the current session
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Logged out
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/v2/student/attempts/{attemptId}/responses:batch:
+    servers:
+      - url: /
+    post:
+      security:
+        - attemptBearer: []
+      tags: [student-v2]
+      summary: V2 batch save (also mounted at /v2/student/attempts/{attemptId}/responses:batch)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/AttemptId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/V2BatchRequest" }
+      responses:
+        "200":
+          description: Accepted or exact replay
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/V2BatchResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v2/student/attempts/{attemptId}/submit:
+    servers:
+      - url: /
+    post:
+      security:
+        - attemptBearer: []
+      tags: [student-v2]
+      summary: V2 submit (also mounted at /v2/student/attempts/{attemptId}/submit)
+      description: |-
+        Lock attempt, identity/session, receipt replay, global submission
+        ownership, epochs, active session, expected_revision==response_revision
+        else VERSION_COLLISION, runtime gate + writability, final commands,
+        digest, submitted_at=now (DB clock). SAT parks a provisional receipt;
+        IELTS/ACT seal submitted/student_submit first, then digest UPDATE.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/AttemptId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/V2SubmitRequest" }
+      responses:
+        "200":
+          description: Submitted (provisional for SAT) or replayed receipt
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/V2SubmitResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v2/student/attempts/{attemptId}/takeover:
+    servers:
+      - url: /
+    post:
+      security:
+        - attemptBearer: []
+      tags: [student-v2]
+      summary: Writer-lease takeover to a new client session
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/AttemptId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientSessionId, reason]
+              properties:
+                clientSessionId: { type: string, maxLength: 36 }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Lease moved
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attemptId: { type: string }
+                  clientSessionId: { type: string }
+                  leaseEpoch: { type: integer, format: int64, minimum: 1 }
+                  expiresAt: { type: string, format: date-time }
+                  token: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v2/student/attempts/{attemptId}/responses:
+    servers:
+      - url: /
+    get:
+      security:
+        - attemptBearer: []
+      tags: [student-v2]
+      summary: V2 snapshot recovery
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/AttemptId"
+      responses:
+        "200":
+          description: Snapshot
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/V2Snapshot" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-delivery/schedules/{scheduleId}/bootstrap:
+    post:
+      security:
+        - attemptBearer: []
+      tags: [delivery]
+      summary: SAT delivery bootstrap (sections, modules, questions, attempt snapshot)
+      description: |-
+        Attempt-bearer route. The bearer schedule claim must match the URL
+        scheduleId else 403. Provider must be sat else 422. Returns the
+        content tree plus attempt snapshot, control, timing, and result.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Bootstrap payload
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeliveryBootstrap" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-delivery/schedules/{scheduleId}/responses/{examQuestionId}:
+    patch:
+      security:
+        - attemptBearer: []
+      tags: [delivery]
+      summary: SAT delivery save response (writer-claim fenced)
+      description: |-
+        Attempt-bearer route. Revision CAS: exact-replay of the stored
+        row returns 200; stale revision returns 409
+        RESPONSE_REVISION_MISMATCH; superseded writer session returns
+        409 ACTIVE_SESSION_SUPERSEDED.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: examQuestionId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeliveryResponseRequest" }
+      responses:
+        "200":
+          description: Saved snapshot
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeliveryResponseSnapshot" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-delivery/schedules/{scheduleId}/modules/start:
+    post:
+      security:
+        - attemptBearer: []
+      tags: [delivery]
+      summary: SAT delivery start module (idempotent active-restart)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeliveryModuleStartRequest" }
+      responses:
+        "200":
+          description: Started module
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-delivery/schedules/{scheduleId}/modules/submit:
+    post:
+      security:
+        - attemptBearer: []
+      tags: [delivery]
+      summary: SAT delivery submit module
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeliveryModuleSubmitRequest" }
+      responses:
+        "200":
+          description: Submitted module
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-delivery/schedules/{scheduleId}/submit:
+    post:
+      tags: [terminalization]
+      summary: SAT complete_assessment (true terminal seal)
+      description: |-
+        Proctor/receipt terminated => ATTEMPT_PROCTOR_BLOCKED; submission
+        idempotency re-seals submitted/sat_complete; all modules must be
+        submitted|locked else 409; scores and seals sat_complete.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attemptId, submissionId]
+              properties:
+                attemptId: { type: string }
+                submissionId: { type: string, maxLength: 36 }
+      responses:
+        "200":
+          description: Assessment result
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssessmentResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /proctor/sessions:
+    get:
+      tags: [proctor]
+      summary: List proctor session summaries
+      description: |-
+        Admin/Observer see all schedules; Proctor sees assigned schedules
+        only. ?providerKey= filters to sat|ielts|act (422 otherwise).
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: providerKey
+          in: query
+          required: false
+          schema: { type: string, enum: [sat, ielts, act] }
+      responses:
+        "200":
+          description: Session summaries
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}:
+    get:
+      tags: [proctor]
+      summary: Proctor session detail
+      description: |-
+        Schedule + runtime + student sessions + audit/alert logs + notes +
+        presence + violation rules + degraded flag. ?mode=dashboard switches
+        audit/alert limits (defaults 200/100). Proctors outside the schedule
+        assignment get 404.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: mode
+          in: query
+          required: false
+          schema: { type: string }
+        - name: auditLimit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+        - name: alertLimit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Session detail
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proctor/notes:
+    get:
+      tags: [proctor]
+      summary: List all proctor session notes
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Notes
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /proctor/notes/{noteId}:
+    delete:
+      tags: [proctor]
+      summary: Delete a proctor note by id
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: noteId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/notes:
+    get:
+      tags: [proctor]
+      summary: List notes for a proctor session
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Notes
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [proctor]
+      summary: Create a proctor session note
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, content]
+              properties:
+                category: { type: string }
+                content: { type: string }
+                isResolved: { type: boolean }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/notes/{noteId}:
+    put:
+      tags: [proctor]
+      summary: Replace a proctor session note
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: noteId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          {
+            description: Saved,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [proctor]
+      summary: Update a proctor session note
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: noteId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          {
+            description: Saved,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [proctor]
+      summary: Delete a proctor session note
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: noteId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/violation-rules:
+    get:
+      tags: [proctor]
+      summary: List violation rules for a proctor session
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Violation rules
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [proctor]
+      summary: Create a violation rule
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ViolationRuleMutation" }
+      responses:
+        "201":
+          {
+            description: Created,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/violation-rules/{ruleId}:
+    put:
+      tags: [proctor]
+      summary: Replace a violation rule
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: ruleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ViolationRuleMutation" }
+      responses:
+        "200":
+          {
+            description: Saved,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [proctor]
+      summary: Update a violation rule
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: ruleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ViolationRuleMutation" }
+      responses:
+        "200":
+          {
+            description: Saved,
+            content: { application/json: { schema: { type: object, additionalProperties: true } } },
+          }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [proctor]
+      summary: Delete a violation rule
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: ruleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proctor/violation-rules/{ruleId}:
+    delete:
+      tags: [proctor]
+      summary: Delete a violation rule by id
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: ruleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-release/exams/{examId}:
+    get:
+      tags: [sat]
+      summary: SAT assessment release state
+      description: |-
+        Published/draft pointers + content/access summaries. SAT-only
+        (422 otherwise). Lifecycle: never_published | published_current |
+        unpublished_changes.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Release state
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/attempts/{attemptId}/terminate:
+    post:
+      tags: [proctor]
+      summary: Proctor terminate attempt
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  { type: string, enum: [proctor_terminate, proctor_end, time_expired, auto_stop] }
+                note: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Terminated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attemptId: { type: string }
+                  outcome: { type: string, example: terminated }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/attempts/{attemptId}/pause:
+    post:
+      tags: [proctor]
+      summary: Proctor pause attempt
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Paused
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object, properties: { attemptId: { type: string } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/presence:
+    post:
+      tags: [proctor]
+      summary: Proctor refresh presence
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Presence
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/control/end-section-now:
+    post:
+      tags: [proctor]
+      summary: Proctor end section now
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Ended
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/control/extend-section:
+    post:
+      tags: [proctor]
+      summary: Proctor extend section
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                extensionSeconds: { type: integer }
+      responses:
+        "200":
+          description: Extended
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/control/complete-exam:
+    post:
+      tags: [proctor]
+      summary: Proctor complete exam
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Completed
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/attempts/{attemptId}/warn:
+    post:
+      tags: [proctor]
+      summary: Proctor warn attempt
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Warned
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object, properties: { attemptId: { type: string } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/attempts/{attemptId}/resume:
+    post:
+      tags: [proctor]
+      summary: Proctor resume attempt
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Resumed
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object, properties: { attemptId: { type: string } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/attempts/{attemptId}/extend:
+    post:
+      tags: [proctor]
+      summary: Proctor extend attempt
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                extensionSeconds: { type: integer }
+      responses:
+        "200":
+          description: Extended
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object, properties: { attemptId: { type: string } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /proctor/alerts/{alertId}/ack:
+    post:
+      tags: [proctor]
+      summary: Proctor acknowledge alert
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: alertId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Acknowledged
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proctor/live-mode:
+    get:
+      tags: [proctor]
+      summary: Proctor live mode
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Live mode
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /grading/sessions:
+    get:
+      tags: [grading]
+      summary: List grading sessions
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Sessions
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /grading/sessions/{sessionId}:
+    get:
+      tags: [grading]
+      summary: Get grading session
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Session
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /grading/schedules/{scheduleId}/objective-overrides:
+    get:
+      tags: [grading]
+      summary: List objective overrides
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Overrides
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /grading/schedules/{scheduleId}/objective-grading-source:
+    get:
+      tags: [grading]
+      summary: Objective grading source
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Source
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /grading/schedules/{scheduleId}/objective-integrity:
+    get:
+      tags: [grading]
+      summary: Objective integrity overview
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Integrity
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /grading/schedules/{scheduleId}/objective-overrides/{questionId}:
+    put:
+      tags: [grading]
+      summary: Upsert objective override
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: questionId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                points: { type: number }
+      responses:
+        "200":
+          description: Overridden
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GradingTransition" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [grading]
+      summary: Delete objective override
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: questionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GradingTransition" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /grading/schedules/{scheduleId}/objective-regrade-latest-draft:
+    post:
+      tags: [grading]
+      summary: Regrade objective latest draft
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Regraded
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}:
+    get:
+      tags: [grading]
+      summary: Get grading submission
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Submission
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}/sections:
+    get:
+      tags: [grading]
+      summary: Get submission sections
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Sections
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}/writing-tasks:
+    get:
+      tags: [grading]
+      summary: Get submission writing tasks
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Writing tasks
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}/start-review:
+    post:
+      tags: [grading]
+      summary: Start review
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Started
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GradingTransition" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}/schedule-release:
+    post:
+      tags: [grading]
+      summary: Schedule release
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Scheduled
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GradingTransition" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}/mark-grading-complete:
+    post:
+      tags: [grading]
+      summary: Mark grading complete
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Transitioned
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GradingTransition" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}/mark-ready-to-release:
+    post:
+      tags: [grading]
+      summary: Mark ready to release
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Transitioned
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GradingTransition" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}/release-now:
+    post:
+      tags: [grading]
+      summary: Release now
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Released
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GradingTransition" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}/reopen-review:
+    post:
+      tags: [grading]
+      summary: Reopen review
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200":
+          description: Reopened
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GradingTransition" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}/review-draft:
+    put:
+      tags: [grading]
+      summary: Save review draft checkpoint
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sectionDrafts: { type: object }
+      responses:
+        "200":
+          description: Draft saved
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GradingTransition" }
+        "404": { $ref: "#/components/responses/Error" }
+  /grading/submissions/{submissionId}/sections/{section}/questions/{questionId}/override:
+    put:
+      tags: [grading]
+      summary: Override one objective question
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+        - name: section
+          in: path
+          required: true
+          schema: { type: string, enum: [listening, reading, science] }
+        - name: questionId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [points]
+              properties:
+                points: { type: number }
+      responses:
+        "200":
+          description: Overridden
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GradingTransition" }
+        "404": { $ref: "#/components/responses/Error" }
+  /results/analytics:
+    get:
+      tags: [results]
+      summary: Results analytics
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Analytics
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Error" }
+  /results/export:
+    post:
+      tags: [results]
+      summary: Export results
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Export
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Error" }
+  /results/{resultId}/events:
+    get:
+      tags: [results]
+      summary: Result events
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: resultId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Events
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /grading/results/{resultId}/events:
+    get:
+      tags: [grading]
+      summary: Grading result events
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: resultId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Events
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /results:
+    get:
+      tags: [results]
+      summary: List IELTS results
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Results
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results: { type: array, items: { $ref: "#/components/schemas/ResultSummary" } }
+        "401": { $ref: "#/components/responses/Error" }
+  /results/dashboard:
+    get:
+      tags: [results]
+      summary: List provider-neutral admin result rows
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: provider
+          in: query
+          required: false
+          schema: { type: string, enum: [ielts, sat, act] }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: Results from sealed attempts and released IELTS snapshots
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DashboardResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /results/act-science:
+    get:
+      tags: [act, results]
+      summary: List ACT science reports (server-authoritative scores)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: ACT science reports
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reports:
+                    type: array
+                    items: { $ref: "#/components/schemas/ACTScienceReport" }
+        "401": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/shell:
+    get:
+      tags: [authoring]
+      summary: Get authoring shell (current draft)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Shell
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [authoring]
+      summary: Open authoring shell (clone published to draft when needed)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Shell
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/preview:
+    get:
+      tags: [authoring]
+      summary: Get preview projection
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Preview
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/load-sample:
+    post:
+      tags: [authoring]
+      summary: Load sample exam
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Loaded
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-workbook-template:
+    get:
+      tags: [authoring]
+      summary: Download the SAT workbook template
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: XLSX workbook template
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+            Content-Disposition: { schema: { type: string } }
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-workbook-preview:
+    post:
+      tags: [authoring]
+      summary: Preview SAT workbook import
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Preview
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-workbook-commit:
+    post:
+      tags: [authoring]
+      summary: Commit SAT workbook import
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Committed
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-workbook-undo:
+    get:
+      tags: [authoring]
+      summary: Workbook undo state
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: State
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-workbook-imports/{importId}/undo:
+    post:
+      tags: [authoring]
+      summary: Undo workbook import
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: importId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Undone
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/modules/{moduleId}/questions:
+    get:
+      tags: [authoring]
+      summary: List module questions
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: moduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Questions
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [authoring]
+      summary: Create module question
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: moduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: Created
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/modules/{moduleId}/questions/batch:
+    post:
+      tags: [authoring]
+      summary: Batch create questions (max 200)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: moduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Created
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/modules/{moduleId}/question-order:
+    patch:
+      tags: [authoring]
+      summary: Reorder module questions
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: moduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Reordered
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exam-questions/{examQuestionId}:
+    get:
+      tags: [authoring]
+      summary: Get exam question
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examQuestionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Question
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [authoring]
+      summary: Update exam question (save revision)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examQuestionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [authoring]
+      summary: Delete exam question
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examQuestionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exam-questions/{examQuestionId}/duplicate:
+    post:
+      tags: [authoring]
+      summary: Duplicate exam question
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examQuestionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Duplicated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/questions/bulk:
+    post:
+      tags: [authoring]
+      summary: Bulk question operations
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Applied
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/question-revisions/{revisionId}:
+    patch:
+      tags: [authoring]
+      summary: Save question revision
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: revisionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Saved
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sections/{sectionId}/delivery-settings:
+    patch:
+      tags: [authoring]
+      summary: Update section delivery settings
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sectionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/validate:
+    post:
+      tags: [authoring]
+      summary: Validate exam
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Validation
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /library/passages:
+    get:
+      tags: [library]
+      summary: List passages
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Passages
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [library]
+      summary: Create passage
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Created
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /library/passages/{id}:
+    get:
+      tags: [library]
+      summary: Get passage
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Passage
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [library]
+      summary: Update passage
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [library]
+      summary: Delete passage
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /library/passages/{id}/increment-usage:
+    post:
+      tags: [library]
+      summary: Increment passage library usage
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated usage count
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [library]
+      summary: Increment passage library usage (compatibility method)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated usage count
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /library/questions:
+    get:
+      tags: [library]
+      summary: List questions
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Questions
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [library]
+      summary: Create question
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Created
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /library/questions/{id}:
+    get:
+      tags: [library]
+      summary: Get question
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Question
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [library]
+      summary: Update question
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [library]
+      summary: Delete question
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /library/questions/{id}/increment-usage:
+    post:
+      tags: [library]
+      summary: Increment question library usage
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated usage count
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [library]
+      summary: Increment question library usage (compatibility method)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated usage count
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /settings/exam-defaults:
+    get:
+      tags: [settings]
+      summary: Get exam defaults
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Defaults
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [settings]
+      summary: Update exam defaults
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Updated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /settings/export-profiles:
+    get:
+      tags: [settings]
+      summary: List grading export profiles
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Profiles
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [settings]
+      summary: Create grading export profile
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Created
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}:
+    get:
+      tags: [student-v1]
+      summary: V1 student session (drain-counted read)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Session
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/static:
+    get:
+      tags: [student-v1]
+      summary: V1 static session snapshot
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Snapshot
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/live:
+    get:
+      tags: [student-v1]
+      summary: V1 live session snapshot
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Snapshot
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/precheck:
+    post:
+      tags: [student-v1]
+      summary: V1 save precheck
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Saved
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/bootstrap:
+    post:
+      tags: [student-v1]
+      summary: V1 bootstrap session
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Bootstrapped
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/heartbeat:
+    post:
+      tags: [student-v1]
+      summary: V1 record heartbeat
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Recorded
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/audit:
+    post:
+      tags: [student-v1]
+      summary: V1 record audit event
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Recorded
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/mutations:batch:
+    post:
+      tags: [student-v1]
+      summary: V1 batch mutation compatibility route
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Mutations applied
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /student/sessions/{scheduleId}/submit:
+    post:
+      tags: [student-v1]
+      summary: V1 final submit compatibility route
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Submitted
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /answer-history/submissions/{submissionId}/overview:
+    get:
+      tags: [answer-history]
+      summary: Answer-history overview by submission
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Overview
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /answer-history/submissions/{submissionId}/targets/{targetId}:
+    get:
+      tags: [answer-history]
+      summary: Answer-history target detail by submission
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+        - name: targetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Detail
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /answer-history/submissions/{submissionId}/export:
+    get:
+      tags: [answer-history]
+      summary: Export answer-history by submission
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/SubmissionId"
+      responses:
+        "200":
+          description: Export
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /answer-history/attempts/{attemptId}/overview:
+    get:
+      tags: [answer-history]
+      summary: Answer-history overview by attempt
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/AttemptId"
+      responses:
+        "200":
+          description: Overview
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /answer-history/attempts/{attemptId}/targets/{targetId}:
+    get:
+      tags: [answer-history]
+      summary: Answer-history target detail by attempt
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/AttemptId"
+        - name: targetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Detail
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /ws/live:
+    get:
+      tags: [live]
+      summary: Open the authenticated live-update websocket
+      description: |-
+        The HTTP GET performs the websocket upgrade. The optional
+        `scheduleId` and `topic` query parameters are authorized against the
+        authenticated user's schedule assignments or student registration;
+        topic names never grant access by themselves.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: topic
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "101": { description: Websocket protocol upgrade }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /schedules:
+    get:
+      tags: [schedules]
+      summary: List schedules
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Schedules
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [schedules]
+      summary: Create schedule
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Created
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /schedules/{id}:
+    get:
+      tags: [schedules]
+      summary: Get schedule
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Schedule
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [schedules]
+      summary: Update schedule
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [schedules]
+      summary: Delete schedule
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /schedules/{id}/runtime:
+    get:
+      tags: [schedules]
+      summary: Get schedule runtime
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Runtime
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /schedules/{id}/runtime/commands:
+    post:
+      tags: [schedules]
+      summary: Apply runtime command
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Applied
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /schedules/{id}/register:
+    post:
+      tags: [schedules]
+      summary: Register student
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Registered
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /exams:
+    get:
+      tags: [exams]
+      summary: List exams
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Exams
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [exams]
+      summary: Create exam
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Created
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /exams/{id}:
+    get:
+      tags: [exams]
+      summary: Get exam
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Exam
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [exams]
+      summary: Update exam
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [exams]
+      summary: Delete exam
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deleted
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /exams/{id}/draft:
+    patch:
+      tags: [exams]
+      summary: Save exam draft
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Draft
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /exams/{id}/publish:
+    post:
+      tags: [exams]
+      summary: Publish exam
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Published
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /exams/{id}/events:
+    get:
+      tags: [exams]
+      summary: List exam events
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Events
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /exams/{id}/validation:
+    get:
+      tags: [exams]
+      summary: Get exam validation
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Validation
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /exams/{id}/versions:
+    get:
+      tags: [exams]
+      summary: List exam versions
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Versions
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /exams/{id}/versions/summary:
+    get:
+      tags: [exams]
+      summary: List version summaries
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Summaries
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /auth/logout-all:
+    post:
+      tags: [auth]
+      summary: Logout all sessions
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Logged out
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/activate:
+    post:
+      tags: [auth]
+      summary: Activate account
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Activated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/Error" }
+  /auth/password/reset-request:
+    post:
+      tags: [auth]
+      summary: Request password reset
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Requested
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/Error" }
+  /auth/password/reset-complete:
+    post:
+      tags: [auth]
+      summary: Complete password reset
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Completed
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { $ref: "#/components/responses/Error" }
+  /assessment-access/exams/{examId}/overview:
+    get:
+      tags: [access-links]
+      summary: Exam access overview
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Overview
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-access/exams/{examId}/links:
+    get:
+      tags: [access-links]
+      summary: List exam links
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Links
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [access-links]
+      summary: Create exam link
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Created
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-access/links/{linkId}:
+    get:
+      tags: [access-links]
+      summary: Get link
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: linkId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Link
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [access-links]
+      summary: Update link
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: linkId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-access/links/{linkId}/lifecycle:
+    post:
+      tags: [access-links]
+      summary: Set link lifecycle
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: linkId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Lifecycle
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-access/links/{linkId}/duplicate:
+    post:
+      tags: [access-links]
+      summary: Duplicate link
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: linkId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Duplicated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-access/links/{linkId}/members:
+    get:
+      tags: [access-links]
+      summary: List link members
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: linkId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Members
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-access/links/{linkId}/activity:
+    get:
+      tags: [access-links]
+      summary: List link activity
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: linkId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Activity
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /public/access-links/{linkId}:
+    get:
+      tags: [access-links]
+      summary: Get public link
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: linkId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Public link
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/Error" }
+  /public/access-links/{linkId}/resolve-entry:
+    post:
+      security: []
+      tags: [access-links]
+      summary: Resolve a public link into a student attempt credential
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: linkId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Attempt credential issued
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /media/uploads:
+    post:
+      tags: [media]
+      summary: Create media upload
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Upload
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+  /media/uploads/{assetId}:
+    put:
+      tags: [media]
+      summary: Upload media bytes (16MiB tier)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Uploaded
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /media/uploads/{assetId}/complete:
+    post:
+      tags: [media]
+      summary: Complete media upload
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Completed
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /media/assets/{assetId}:
+    get:
+      tags: [media]
+      summary: Download media asset bytes
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Bytes
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /media/{assetId}:
+    get:
+      tags: [media]
+      summary: Get media asset metadata
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Metadata
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /versions/{versionId}:
+    get:
+      tags: [exams]
+      summary: Get version with projection
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Version
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { $ref: "#/components/responses/Error" }
+  /results/sat:
+    get:
+      tags: [sat, results]
+      summary: List SAT results
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: SAT results
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results: { type: array, items: { $ref: "#/components/schemas/ResultSummary" } }
+        "401": { $ref: "#/components/responses/Error" }
+  /results/sat/{resultId}:
+    get:
+      tags: [sat, results]
+      summary: SAT result detail with adaptive/scaled sections
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: resultId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Detail
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SATResultDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+  /results/{resultId}:
+    get:
+      tags: [results]
+      summary: Result detail (re-materialized from snapshot once released)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: resultId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Detail
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResultSummary" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-session
+      description: Staff session cookie (Secure HttpOnly SameSite Strict). Mutating routes additionally require the X-Csrf-Token header.
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-Csrf-Token
+      description: CSRF token bound to the session, required on cookie-authenticated mutations.
+    attemptBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: attempt-token
+      description: |-
+        V2 student attempt token binding user schedule attempt and
+        session claims. Delivery mutations (responses/start/submit)
+        additionally gate on the exclusive writer claim: a superseded
+        writer session receives 409 ACTIVE_SESSION_SUPERSEDED with
+        details.reason.
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: Client-supplied request id; server mints a UUID when absent and always echoes it.
+      schema: { type: string }
+    AttemptId:
+      name: attemptId
+      in: path
+      required: true
+      schema: { type: string, maxLength: 64 }
+    SubmissionId:
+      name: submissionId
+      in: path
+      required: true
+      schema: { type: string }
+  headers:
+    RequestId:
+      description: Echoed request id for every response.
+      schema: { type: string }
+  responses:
+    Error:
+      description: Stable error envelope
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code:
+          type: string
+          example: VERSION_COLLISION
+          enum:
+            [
+              BAD_REQUEST,
+              VALIDATION_ERROR,
+              UNAUTHORIZED,
+              FORBIDDEN,
+              NOT_FOUND,
+              CONFLICT,
+              RATE_LIMITED,
+              RATE_LIMIT_EXCEEDED,
+              PAYLOAD_TOO_LARGE,
+              SERVICE_UNAVAILABLE,
+              INTERNAL,
+              CSRF_FAILED,
+              CSRF_REJECTED,
+              SESSION_EXPIRED,
+              ATTEMPT_TOKEN_INVALID,
+              ATTEMPT_TOKEN_EXPIRED,
+              LEASE_FENCED,
+              CONTROL_EPOCH_STALE,
+              VERSION_COLLISION,
+              WRITE_ID_CONFLICT,
+              DEADLINE_EXPIRED,
+              ATTEMPT_NOT_WRITABLE,
+              ATTEMPT_PROCTOR_BLOCKED,
+              TERMINALIZATION_CONFLICT,
+              TERMINAL_INVARIANT_VIOLATION,
+              SUBMISSION_ID_MISUSE,
+              RESPONSE_REVISION_MISMATCH,
+              RUNTIME_REVISION_STALE,
+              LEASE_ACQUIRE_FAILED,
+              ASSESSMENT_CONFLICT,
+              ACTIVE_SESSION_SUPERSEDED,
+              UNSUPPORTED_PROVIDER,
+              INVALID_ASSESSMENT,
+              ASSESSMENT_RELEASE_INVARIANT,
+              SERVICE_RECOVERY_FAILED,
+            ]
+        message: { type: string }
+        details: { type: object, additionalProperties: true }
+        requestId: { type: string }
+    Actor:
+      type: object
+      properties:
+        id: { type: string }
+        role: { type: string, enum: [student, proctor, admin, admin_observer, builder, grader] }
+    ViolationRuleMutation:
+      type: object
+      required: [triggerType, threshold, action, isEnabled]
+      properties:
+        triggerType: { type: string }
+        threshold: { type: integer, minimum: 0 }
+        specificViolationType: { type: string, nullable: true }
+        specificSeverity: { type: string, nullable: true }
+        action: { type: string }
+        isEnabled: { type: boolean }
+    V2Command:
+      type: object
+      required: [writeId, questionId, clientVersion, response]
+      properties:
+        writeId: { type: string, maxLength: 64 }
+        questionId: { type: string, maxLength: 255 }
+        clientVersion: { type: integer, format: int64, minimum: 1 }
+        response: { type: object, additionalProperties: true }
+    V2BatchRequest:
+      type: object
+      required: [leaseEpoch, controlEpoch, commands]
+      properties:
+        leaseEpoch: { type: integer, format: int64, minimum: 1 }
+        controlEpoch: { type: integer, format: int64, minimum: 1 }
+        commands:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/V2Command" }
+    V2BatchResponse:
+      type: object
+      required: [attemptRevision, serverTime, acknowledgements]
+      properties:
+        acknowledgements:
+          type: array
+          items:
+            type: object
+            properties:
+              writeId: { type: string }
+              questionId: { type: string }
+              clientVersion: { type: integer, format: int64 }
+              outcome: { type: string, enum: [applied, duplicate, superseded] }
+              serverRevision: { type: integer, format: int64 }
+              replayed: { type: boolean }
+              canonicalResponse: { type: object, additionalProperties: true }
+              contentHash: { type: string }
+        attemptRevision: { type: integer, format: int64 }
+        serverTime: { type: string, format: date-time }
+    V2SubmitRequest:
+      type: object
+      required: [leaseEpoch, controlEpoch, submissionId, expectedAttemptRevision]
+      properties:
+        leaseEpoch: { type: integer, format: int64, minimum: 1 }
+        controlEpoch: { type: integer, format: int64, minimum: 1 }
+        submissionId: { type: string, maxLength: 64 }
+        expectedAttemptRevision: { type: integer, format: int64, minimum: 0 }
+        finalCommands:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/V2Command" }
+    V2SubmitResponse:
+      type: object
+      required:
+        [attemptId, submissionId, status, attemptRevision, finalResponseDigest, acknowledgements]
+      properties:
+        attemptId: { type: string }
+        submissionId: { type: string }
+        status: { type: string }
+        attemptRevision: { type: integer, format: int64 }
+        finalResponseDigest: { type: string }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        acknowledgements:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    V2Snapshot:
+      type: object
+      properties:
+        attemptId: { type: string }
+        protocolVersion: { type: integer }
+        deliveryStatus: { type: string }
+        leaseEpoch: { type: integer, format: int64 }
+        controlEpoch: { type: integer, format: int64 }
+        attemptRevision: { type: integer, format: int64 }
+        deadlineAt: { type: string, format: date-time, nullable: true }
+        closingGraceUntil: { type: string, format: date-time, nullable: true }
+        responses:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    DeliveryBootstrap:
+      type: object
+      properties:
+        scheduleId: { type: string }
+        examId: { type: string }
+        providerKey: { type: string, example: sat }
+        versionId: { type: string }
+        serverNow: { type: string, format: date-time }
+        candidateName: { type: string }
+        scheduleRuntimeStatus: { type: string }
+        timing: { type: object, additionalProperties: true }
+        proctorStatus: { type: string }
+        proctorNote: { type: string, nullable: true }
+        deviceFingerprintHash: { type: string, nullable: true }
+        sections: { type: array, items: { type: object } }
+        attempt: { type: object, additionalProperties: true }
+        result: { type: object, nullable: true }
+    DeliveryResponseRequest:
+      type: object
+      required: [revision, markedForReview, eliminatedOptions, annotations]
+      properties:
+        revision: { type: integer, minimum: 0 }
+        response: { type: object, nullable: true, additionalProperties: true }
+        markedForReview: { type: boolean }
+        eliminatedOptions: { type: array, items: { type: string } }
+        annotations: { type: object, additionalProperties: true }
+        moduleAttemptId: { type: string }
+        stageKey: { type: string, nullable: true }
+        runtimeRevision: { type: integer, nullable: true }
+        clientWriteId: { type: string }
+    DeliveryResponseSnapshot:
+      type: object
+      properties:
+        id: { type: string }
+        moduleAttemptId: { type: string }
+        examQuestionId: { type: string }
+        response: { type: object, nullable: true, additionalProperties: true }
+        markedForReview: { type: boolean }
+        eliminatedOptions: { type: array, items: { type: string } }
+        annotations: { type: object, additionalProperties: true }
+        revision: { type: integer }
+    DeliveryModuleStartRequest:
+      type: object
+      required: [moduleId]
+      properties:
+        moduleId: { type: string }
+    DeliveryModuleSubmitRequest:
+      type: object
+      required: [moduleId]
+      properties:
+        moduleId: { type: string }
+    AssessmentResult:
+      type: object
+      properties:
+        id: { type: string }
+        submissionId: { type: string }
+        providerKey: { type: string, example: sat }
+        scoreKind: { type: string, enum: [practice] }
+        totalScore: { type: integer, nullable: true }
+        scorePayload: { type: object, additionalProperties: true }
+        sections:
+          type: array
+          items: { $ref: "#/components/schemas/SATSection" }
+    SATSection:
+      type: object
+      properties:
+        sectionKey: { type: string, enum: [reading-writing, math] }
+        route: { type: string, enum: [lower, higher], nullable: true }
+        rawCorrect: { type: integer }
+        operationalQuestionCount: { type: integer }
+        scaledScore: { type: integer, nullable: true }
+        details: { type: object, additionalProperties: true }
+    SATResultDetail:
+      type: object
+      properties:
+        summary: { $ref: "#/components/schemas/ResultSummary" }
+        scorePayload: { type: object, additionalProperties: true }
+        sections: { type: array, items: { $ref: "#/components/schemas/SATSection" } }
+    ACTScienceReport:
+      type: object
+      properties:
+        attemptId: { type: string }
+        totalScore: { type: integer }
+        maxScore: { type: integer }
+        percentage: { type: number }
+        outcomeStatus:
+          { type: string, enum: [scored, pending, invalidated_proctor, invalidated_timeout] }
+        releaseStatus: { type: string }
+    GradingTransition:
+      type: object
+      properties:
+        submissionId: { type: string }
+        from: { type: string }
+        to: { type: string }
+    ResultSummary:
+      type: object
+      properties:
+        id: { type: string }
+        submissionId: { type: string, nullable: true }
+        attemptId: { type: string }
+        providerKey: { type: string }
+        scoreKind: { type: string, enum: [practice] }
+        outcomeStatus: { type: string }
+        totalScore: { type: integer, nullable: true }
+        releaseStatus: { type: string }
+        scheduleId: { type: string }
+        examId: { type: string }
+        examTitle: { type: string }
+        versionNumber: { type: integer }
+        studentId: { type: string }
+        studentName: { type: string }
+        studentEmail: { type: string, nullable: true }
+        cohortName: { type: string }
+        submittedAt: { type: string, format: date-time, nullable: true }
+    DashboardResult:
+      type: object
+      required:
+        [
+          id,
+          attemptId,
+          providerKey,
+          outcomeStatus,
+          releaseStatus,
+          studentId,
+          studentName,
+          scheduleId,
+          examId,
+          examTitle,
+          cohortName,
+          versionNumber,
+        ]
+      properties:
+        id: { type: string }
+        submissionId: { type: string, nullable: true }
+        attemptId: { type: string }
+        providerKey: { type: string, enum: [ielts, sat, act] }
+        outcomeStatus:
+          { type: string, enum: [scored, pending, invalidated_proctor, invalidated_timeout] }
+        releaseStatus: { type: string }
+        totalScore: { type: integer, nullable: true }
+        maxScore: { type: integer, nullable: true }
+        percentage: { type: number, nullable: true }
+        overallBand: { type: number, nullable: true }
+        sectionBands: { type: object, additionalProperties: { type: number }, nullable: true }
+        studentId: { type: string }
+        studentName: { type: string }
+        studentEmail: { type: string, nullable: true }
+        scheduleId: { type: string }
+        examId: { type: string }
+        examTitle: { type: string }
+        cohortName: { type: string }
+        institution: { type: string, nullable: true }
+        versionNumber: { type: integer }
+        submittedAt: { type: string, format: date-time, nullable: true }

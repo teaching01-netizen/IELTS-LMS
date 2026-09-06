@@ -46,8 +46,8 @@ import {
  */
 export interface IExamRepository {
   // Exam Entity operations
-  getAllExamsWithLegacyMigration(providerKey?: 'sat' | 'ielts'): Promise<ExamEntity[]>;
-  getAllExams(providerKey?: 'sat' | 'ielts'): Promise<ExamEntity[]>;
+  getAllExamsWithLegacyMigration(providerKey?: 'sat' | 'ielts' | 'act'): Promise<ExamEntity[]>;
+  getAllExams(providerKey?: 'sat' | 'ielts' | 'act'): Promise<ExamEntity[]>;
   getExamById(id: string): Promise<ExamEntity | null>;
   saveExam(exam: ExamEntity): Promise<void>;
   deleteExam(id: string): Promise<void>;
@@ -102,8 +102,20 @@ export interface IExamRepository {
 }
 
 
+function isConflictError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const record = error as { statusCode?: unknown; status?: unknown };
+  return record.statusCode === 409 || record.status === 409;
+}
+
 export class BackendExamRepository implements IExamRepository {
   private static readonly ALL_SCHEDULES_CACHE_KEY = '__all_schedules__';
+  /** Per-exam single-flight GET dedupe for save-path revision hydration. */
+  private readonly examRefreshInFlight = new Map<string, Promise<unknown>>();
+  /** Per-schedule single-flight GET dedupe for save-path revision hydration. */
+  private readonly scheduleRefreshInFlight = new Map<string, Promise<unknown>>();
 
   /**
    * Version payloads are append-only (saveVersion is unsupported), so a
@@ -120,11 +132,11 @@ export class BackendExamRepository implements IExamRepository {
     ttlMs: 60 * 1000,
   });
 
-  async getAllExamsWithLegacyMigration(providerKey?: 'sat' | 'ielts'): Promise<ExamEntity[]> {
+  async getAllExamsWithLegacyMigration(providerKey?: 'sat' | 'ielts' | 'act'): Promise<ExamEntity[]> {
     return this.getAllExams(providerKey);
   }
 
-  async getAllExams(providerKey?: 'sat' | 'ielts'): Promise<ExamEntity[]> {
+  async getAllExams(providerKey?: 'sat' | 'ielts' | 'act'): Promise<ExamEntity[]> {
     const query = providerKey ? `?providerKey=${encodeURIComponent(providerKey)}` : '';
     const exams = await backendGet<any[]>(`/v1/exams${query}`);
     return exams.map(mapBackendExamEntity);
@@ -132,7 +144,7 @@ export class BackendExamRepository implements IExamRepository {
 
   async getExamById(id: string): Promise<ExamEntity | null> {
     try {
-      const exam = await backendGet<any>(`/v1/exams/${id}`);
+      const exam = await backendGet<any>(`/v1/exams/${encodeURIComponent(id)}`);
       return mapBackendExamEntity(exam);
     } catch (error) {
       if (isBackendNotFound(error)) {
@@ -146,11 +158,73 @@ export class BackendExamRepository implements IExamRepository {
   async saveExam(exam: ExamEntity): Promise<void> {
     const revision = getExamRevision(exam.id);
     if (revision === undefined) {
+      // Cold revision cache: this id was never read, so it is a create.
+      // No hydration GET here — the create path must stay a single POST.
       await backendPost('/v1/exams', buildCreateExamPayload(exam));
       return;
     }
 
-    await backendPatch(`/v1/exams/${exam.id}`, buildUpdateExamPayload(exam, revision));
+    try {
+      await backendPatch(`/v1/exams/${exam.id}`, buildUpdateExamPayload(exam, revision));
+    } catch (error) {
+      // 409 = stale revision (another writer won the race). Re-read once to
+      // refresh the cached revision and retry the PATCH a single time; a
+      // second conflict surfaces to the caller instead of looping.
+      if (!isConflictError(error)) throw error;
+      await this.refreshExamRevision(exam.id, true);
+      const freshRevision = getExamRevision(exam.id);
+      if (freshRevision === undefined) {
+        await backendPost('/v1/exams', buildCreateExamPayload(exam));
+        return;
+      }
+      await backendPatch(`/v1/exams/${exam.id}`, buildUpdateExamPayload(exam, freshRevision));
+    }
+  }
+
+  /**
+   * Re-reads one exam to refresh its cached revision. Concurrent callers for
+   * the same id share the in-flight GET; `force` bypasses the share after a
+   * 409 so the retry provably observes post-conflict server state.
+   */
+  private refreshExamRevision(id: string, force = false): Promise<unknown> {
+    if (!force) {
+      const existing = this.examRefreshInFlight.get(id);
+      if (existing) return existing;
+    }
+    const pending = this.getExamById(id).finally(() => {
+      if (this.examRefreshInFlight.get(id) === pending) {
+        this.examRefreshInFlight.delete(id);
+      }
+    });
+    this.examRefreshInFlight.set(id, pending);
+    return pending;
+  }
+
+  private refreshScheduleRevision(id: string, force = false): Promise<unknown> {
+    if (!force) {
+      const existing = this.scheduleRefreshInFlight.get(id);
+      if (existing) return existing;
+    }
+    // Map through mapBackendSchedule so rememberScheduleRevision runs;
+    // a 404 means the schedule is gone (treat as no revision, let the
+    // caller fall back to create) instead of throwing.
+    const pending = backendGet<unknown>(`/v1/schedules/${id}`)
+      .then((payload) => {
+        mapBackendSchedule(payload as Parameters<typeof mapBackendSchedule>[0]);
+      })
+      .catch((error: unknown) => {
+        if (isBackendNotFound(error)) {
+          return null;
+        }
+        throw error;
+      })
+      .finally(() => {
+        if (this.scheduleRefreshInFlight.get(id) === pending) {
+          this.scheduleRefreshInFlight.delete(id);
+        }
+      });
+    this.scheduleRefreshInFlight.set(id, pending);
+    return pending;
   }
 
   async deleteExam(id: string): Promise<void> {
@@ -249,12 +323,33 @@ export class BackendExamRepository implements IExamRepository {
     const revision = getScheduleRevision(schedule.id);
 
     if (revision === undefined) {
+      // Cold revision cache: this id was never read, so it is a create.
+      // No hydration GET here — the create path must stay a single POST
+      // (callers/tests queue exactly one response for it).
       await backendPost('/v1/schedules', buildCreateSchedulePayload(schedule));
-    } else {
+      this.schedulesCache.delete(BackendExamRepository.ALL_SCHEDULES_CACHE_KEY);
+      return;
+    }
+
+    try {
       await backendPatch(
         `/v1/schedules/${schedule.id}`,
         buildUpdateSchedulePayload(schedule, revision),
       );
+    } catch (error) {
+      // 409 = stale revision. Refresh once (bypassing the share so the retry
+      // provably observes post-conflict state) and retry a single time.
+      if (!isConflictError(error)) throw error;
+      await this.refreshScheduleRevision(schedule.id, true).catch(() => undefined);
+      const freshRevision = getScheduleRevision(schedule.id);
+      if (freshRevision === undefined) {
+        await backendPost('/v1/schedules', buildCreateSchedulePayload(schedule));
+      } else {
+        await backendPatch(
+          `/v1/schedules/${schedule.id}`,
+          buildUpdateSchedulePayload(schedule, freshRevision),
+        );
+      }
     }
 
     this.schedulesCache.delete(BackendExamRepository.ALL_SCHEDULES_CACHE_KEY);
@@ -310,27 +405,72 @@ export class BackendExamRepository implements IExamRepository {
   async saveAuditLog(_log: SessionAuditLog): Promise<void> {}
 
   async getSessionNotesByScheduleId(_scheduleId: string): Promise<SessionNote[]> {
-    return [];
+    const payload = await backendGet<any[]>(`/v1/proctor/sessions/${encodeURIComponent(_scheduleId)}/notes`);
+    return (payload ?? []).map((note) => ({
+      id: note.id,
+      scheduleId: note.scheduleId,
+      author: note.author,
+      timestamp: note.createdAt,
+      content: note.content,
+      category: note.category === 'incident' || note.category === 'handover' ? note.category : 'general',
+      isResolved: note.isResolved ?? false,
+    }));
   }
 
   async getAllSessionNotes(): Promise<SessionNote[]> {
-    return [];
+    const payload = await backendGet<any[]>('/v1/proctor/notes');
+    return (payload ?? []).map((note) => ({
+      id: note.id,
+      scheduleId: note.scheduleId,
+      author: note.author,
+      timestamp: note.createdAt,
+      content: note.content,
+      category: note.category === 'incident' || note.category === 'handover' ? note.category : 'general',
+      isResolved: note.isResolved ?? false,
+    }));
   }
 
-  async saveSessionNote(_note: SessionNote): Promise<void> {}
-
-  async deleteSessionNote(_noteId: string): Promise<void> {}
-
-  async getViolationRulesByScheduleId(_scheduleId: string): Promise<ViolationRule[]> {
-    throw new Error('Violation-rule reads through BackendExamRepository are not supported.');
+  async saveSessionNote(note: SessionNote): Promise<void> {
+    await backendPatch(`/v1/proctor/sessions/${encodeURIComponent(note.scheduleId)}/notes/${encodeURIComponent(note.id)}`, {
+      category: note.category,
+      content: note.content,
+      isResolved: note.isResolved ?? false,
+    });
   }
 
-  async saveViolationRule(_rule: ViolationRule): Promise<void> {
-    throw new Error('Violation-rule persistence through BackendExamRepository is not supported.');
+  async deleteSessionNote(noteId: string): Promise<void> {
+    await backendDelete(`/v1/proctor/notes/${encodeURIComponent(noteId)}`);
   }
 
-  async deleteViolationRule(_ruleId: string): Promise<void> {
-    throw new Error('Violation-rule deletion through BackendExamRepository is not supported.');
+  async getViolationRulesByScheduleId(scheduleId: string): Promise<ViolationRule[]> {
+    const payload = await backendGet<any[]>(`/v1/proctor/sessions/${encodeURIComponent(scheduleId)}/violation-rules`);
+    return (payload ?? []).map((rule) => ({
+      id: rule.id,
+      scheduleId: rule.scheduleId,
+      triggerType: rule.triggerType,
+      threshold: rule.threshold,
+      specificViolationType: rule.specificViolationType ?? undefined,
+      specificSeverity: rule.specificSeverity ?? undefined,
+      action: rule.action,
+      isEnabled: rule.isEnabled,
+      createdAt: rule.createdAt,
+      createdBy: rule.createdBy,
+    }));
+  }
+
+  async saveViolationRule(rule: ViolationRule): Promise<void> {
+    await backendPatch(`/v1/proctor/sessions/${encodeURIComponent(rule.scheduleId)}/violation-rules/${encodeURIComponent(rule.id)}`, {
+      triggerType: rule.triggerType,
+      threshold: rule.threshold,
+      specificViolationType: rule.specificViolationType ?? null,
+      specificSeverity: rule.specificSeverity ?? null,
+      action: rule.action,
+      isEnabled: rule.isEnabled,
+    });
+  }
+
+  async deleteViolationRule(ruleId: string): Promise<void> {
+    await backendDelete(`/v1/proctor/violation-rules/${encodeURIComponent(ruleId)}`);
   }
 
   async migrateFromLegacy(_legacyExams: Exam[]): Promise<ExamEntity[]> {

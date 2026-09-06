@@ -130,17 +130,29 @@ export const performanceMonitor = new PerformanceMonitor();
 /**
  * Hook for measuring component render performance
  */
-export function usePerformanceMonitor(componentName: string) {
+export function usePerformanceMonitor(componentName: string, options?: { sampleRate?: number | undefined }) {
   const renderCount = React.useRef(0);
   const renderTimes = React.useRef<number[]>([]);
+  const optionsRef = React.useRef(options);
+  optionsRef.current = options;
 
   React.useEffect(() => {
+    // Unsampled renders skip timing work entirely.
+    const sampleRate = optionsRef.current?.sampleRate ?? 1;
+    if (sampleRate < 1 && Math.random() > sampleRate) {
+      return;
+    }
     renderCount.current += 1;
-    const startTime = performance.now();
+    const mountDuration = performance.now();
 
     return () => {
-      const duration = performance.now() - startTime;
+      // Duration of the commit lifetime (mount -> unmount/update cleanup).
+      const duration = performance.now() - mountDuration;
       renderTimes.current.push(duration);
+      // Bound retained samples so long-lived components cannot grow memory.
+      if (renderTimes.current.length > 100) {
+        renderTimes.current.shift();
+      }
 
       if (duration > 16) { // Log renders over 16ms (one frame at 60fps)
         logWarn(`Slow render in ${componentName}`, {
@@ -149,13 +161,16 @@ export function usePerformanceMonitor(componentName: string) {
         });
       }
     };
-  });
+  // componentName is the only input that changes the logged label.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [componentName]);
 
   return {
     renderCount: renderCount.current,
-    averageRenderTime: renderTimes.current.length > 0
-      ? renderTimes.current.reduce((a, b) => a + b, 0) / renderTimes.current.length
-      : 0,
+    averageRenderTime:
+      renderTimes.current.length > 0
+        ? renderTimes.current.reduce((a, b) => a + b, 0) / renderTimes.current.length
+        : 0,
   };
 }
 
@@ -166,10 +181,12 @@ export function withPerformanceMonitor<P extends object>(
   WrappedComponent: React.ComponentType<P>,
   componentName: string
 ): React.ComponentType<P> {
-  return function PerformanceMonitoredComponent(props: P) {
+  function PerformanceMonitoredComponent(props: P) {
     usePerformanceMonitor(componentName);
     return React.createElement(WrappedComponent, props);
-  };
+  }
+  PerformanceMonitoredComponent.displayName = `withPerformanceMonitor(${WrappedComponent.displayName ?? WrappedComponent.name ?? 'Component'})`;
+  return PerformanceMonitoredComponent;
 }
 
 /**

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { CriterionBandScore, RubricDefinition } from '../../types';
 import {
   calculateWeightedBandScore,
@@ -29,29 +29,29 @@ export function GradingRubricPanel({
   rubric,
   title,
 }: GradingRubricPanelProps) {
-  useEffect(() => {
-    if (assessment.length > 0) {
-      return;
-    }
-
-    onAssessmentChange(
-      rubric.criteria.map((criterion) => ({
-        criterionId: criterion.id,
-        band: 0,
-        comment: '',
-      })),
-    );
-  }, [assessment.length, onAssessmentChange, rubric.criteria]);
+  // Seed the assessment via the useState initializer (parents pass a `key` when
+  // the rubric identity changes so the seed recomputes) instead of an effect
+  // that calls onAssessmentChange during commit and loops under StrictMode.
+  const [seededAssessment] = useState<CriterionBandScore[]>(() =>
+    assessment.length > 0
+      ? assessment
+      : rubric.criteria.map((criterion) => ({
+          criterionId: criterion.id,
+          band: 0,
+          comment: '',
+        })),
+  );
+  const effectiveAssessment = assessment.length > 0 ? assessment : seededAssessment;
 
   const assessmentMap = useMemo(
     () =>
       new Map(
-        assessment.map((item) => [
+        effectiveAssessment.map((item) => [
           item.criterionId,
           item,
         ]),
       ),
-    [assessment],
+    [effectiveAssessment],
   );
 
   const finalBand = calculateWeightedBandScore(

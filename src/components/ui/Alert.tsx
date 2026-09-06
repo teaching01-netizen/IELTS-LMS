@@ -46,7 +46,8 @@ export function Alert({
   const style = variants[variant];
 
   return (
-    <div className={`flex gap-3 p-4 rounded-sm border-l-4 shadow-sm ${style.bg} ${style.border} ${style.text} ${className}`}>
+    // S5: ONE alert mechanism — role=alert alone (assertive); no dual aria-live.
+    <div role="alert" className={`flex gap-3 p-4 rounded-sm border-l-4 shadow-sm ${style.bg} ${style.border} ${style.text} ${className}`}>
       <div className="flex-shrink-0 mt-0.5">{style.icon}</div>
       <div className="flex-1">
         {title && <h4 className="font-semibold mb-1">{title}</h4>}
@@ -54,10 +55,12 @@ export function Alert({
       </div>
       {onClose && (
         <button
+          type="button"
           onClick={onClose}
-          className="flex-shrink-0 p-1 hover:bg-black/5 rounded-full transition-colors h-fit"
+          aria-label="Dismiss alert"
+          className="flex-shrink-0 min-w-6 min-h-6 p-1 hover:bg-black/5 rounded-full transition-colors h-fit focus:outline-none focus-visible:ring-2 focus-visible:ring-current focus-visible:ring-offset-1"
         >
-          <X size={16} />
+          <X size={16} aria-hidden="true" />
         </button>
       )}
     </div>

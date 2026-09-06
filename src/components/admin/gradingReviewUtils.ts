@@ -40,11 +40,20 @@ export interface ExportSessionContext {
   examTitle: string;
 }
 
+/**
+ * Grading must pin to the immutable published version (S2-C13). A draft is a
+ * moving target: grading against it silently re-scores operators' work when
+ * the author edits. Draft is used only via explicit opt-in override.
+ */
 export function resolveObjectiveGradingVersionId(
   publishedVersionId: string | undefined,
-  draftVersionId: string | null | undefined,
+  draftVersionId?: string | null | undefined,
+  options?: { allowDraftOverride?: boolean },
 ): string | undefined {
-  return draftVersionId || publishedVersionId;
+  if (options?.allowDraftOverride && draftVersionId) {
+    return draftVersionId;
+  }
+  return publishedVersionId ?? draftVersionId ?? undefined;
 }
 
 export interface ObjectiveTracebackItem {

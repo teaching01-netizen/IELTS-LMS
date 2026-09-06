@@ -483,6 +483,23 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
     const handleContextMenu = (event: MouseEvent) => {
       if (isWithinQuestionCalloutProtectedText(event.target)) {
         event.preventDefault();
+        return;
+      }
+
+      // Highlightable reading/listening text keeps the native context menu so
+      // students can select text without turning it into a security event.
+      if (isWithinHighlightableContainer(event.target)) {
+        return;
+      }
+
+      if (runtimeStateRef.current.phase === 'exam') {
+        event.preventDefault();
+        event.stopPropagation();
+        handleViolationRef.current(
+          'CONTEXT_MENU_BLOCKED',
+          'Context menus are blocked during the exam.',
+          'medium',
+        );
       }
     };
 

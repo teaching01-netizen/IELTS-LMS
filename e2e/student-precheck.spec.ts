@@ -7,14 +7,13 @@ test.describe('Student exam briefing and waiting room', () => {
 
   test('goes straight to the waiting room and silently persists checks, then waits for the proctor', async ({ browser }, testInfo) => {
     const manifest = readBackendE2EManifest();
+    const scheduleId = manifest.student.precheckScheduleId;
     const wcode = deterministicWcode(`${testInfo.project.name}:${testInfo.title}`);
     const context = await browser.newContext();
     await stubScreenDetails(context);
     const page = await context.newPage();
 
-    const persisted = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().includes(`/student/sessions/${manifest.student.scheduleId}/precheck`) && response.ok());
-
-    await studentCheckIn(page, manifest.student.scheduleId, {
+    await studentCheckIn(page, scheduleId, {
       wcode,
       email: `e2e+${wcode.toLowerCase()}@example.com`,
       fullName: 'E2E Candidate',
@@ -28,9 +27,16 @@ test.describe('Student exam briefing and waiting room', () => {
     await expect(page.getByText(/Your exam timer will not begin while you are waiting/)).toBeVisible();
     await expect(page.getByText('Browser compatibility')).not.toBeVisible();
 
-    await persisted;
+    const sessionResponse = await page.request.get(
+      `/api/v1/student/sessions/${scheduleId}`
+    );
+    expect(sessionResponse.ok()).toBeTruthy();
+    const session = (await sessionResponse.json()) as {
+      attempt?: { integrity?: { preCheck?: { completedAt?: string } } };
+    };
+    expect(session.attempt?.integrity?.preCheck?.completedAt).toBeTruthy();
 
-    await expect(page.getByText('Waiting for proctor')).toBeVisible();
+    await expect(page.getByText('Waiting for the proctor to start the exam')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Start Exam' })).not.toBeVisible();
     await expect(page.getByLabel('Answer for question 1')).not.toBeVisible();
     await context.close();

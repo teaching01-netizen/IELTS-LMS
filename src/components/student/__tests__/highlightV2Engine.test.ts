@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   addHighlightRange,
   captureSurfaceSelection,
   eraseHighlightRange,
+  HIGHLIGHT_ENGINE,
+  MAX_HIGHLIGHT_RANGES,
+  validateHighlightRanges,
   type HighlightSelectionV2,
 } from '../highlightV2Engine';
 import type { StudentHighlightColor } from '../highlightPalette';
@@ -163,6 +166,52 @@ describe('highlight v2 engine', () => {
       end: 16,
       selectedText: 'beta.Gamma',
     });
+  });
+
+  it('exposes the v2 engine flag (S1-C15: no dead V1 remains)', () => {
+    expect(HIGHLIGHT_ENGINE).toBe('v2');
+    expect(MAX_HIGHLIGHT_RANGES).toBe(200);
+  });
+
+  it('validates persisted ranges on load (S1-C11)', () => {
+    const text = 'Alpha beta gamma';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const validated = validateHighlightRanges(
+      [
+        { start: 0, end: 5, color: 'yellow' },
+        { start: 6, end: 10, color: 'amber' },
+        { start: Number.NaN, end: 4, color: 'yellow' },
+        { start: 4, end: 4, color: 'yellow' },
+        { start: -1, end: 3, color: 'yellow' },
+        { start: 0, end: 999, color: 'yellow' },
+        { start: 0, end: 3, color: 'pink' },
+        { start: 0, end: 3 },
+        null,
+        'nope',
+      ],
+      text,
+    );
+    expect(validated).toEqual([
+      { start: 0, end: 5, color: 'yellow' },
+      { start: 6, end: 10, color: 'amber' },
+    ]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain('Dropped 8 invalid');
+    warn.mockRestore();
+  });
+
+  it('truncates validated ranges to the most recent MAX entries (S1-C11)', () => {
+    const text = 'x'.repeat(10);
+    const ranges = Array.from({ length: 205 }, (_, index) => ({
+      start: 0,
+      end: 1,
+      color: 'yellow' as const,
+      seq: index,
+    }));
+    const validated = validateHighlightRanges(ranges, text, 200);
+    expect(validated).toHaveLength(200);
+    expect(validated[0]).toEqual({ start: 0, end: 1, color: 'yellow' });
+    expect(validated[199]).toEqual({ start: 0, end: 1, color: 'yellow' });
   });
 
   it('rejects selections that touch excluded answer controls', () => {

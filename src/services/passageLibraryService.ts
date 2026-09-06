@@ -13,6 +13,7 @@ import {
 import { logError } from '../app/error/errorLogger';
 import { queryClient, queryKeys } from '../app/data/queryClient';
 import { createTtlLruCache } from '../utils/ttlLruCache';
+import { assertLibraryContentValid, dedupeRefresh, isConflictError } from './libraryConcurrency';
 
 type LegacyBackendPassageItem = {
   id: string;
@@ -79,6 +80,7 @@ class BackendPassageLibrary {
   }
 
   async addPassage(passage: Passage, metadata: Omit<PassageMetadata, 'id' | 'createdAt' | 'usageCount'>): Promise<PassageLibraryItem> {
+    assertLibraryContentValid('passage', passage.content);
     const raw = await backendPost<unknown>('/v1/library/passages', {
       title: passage.title,
       passageSnapshot: passage,
@@ -97,21 +99,34 @@ class BackendPassageLibrary {
   }
 
   async updatePassage(id: string, updates: Partial<{ passage: Passage; metadata: Partial<PassageMetadata> }>): Promise<PassageLibraryItem | null> {
+    if (updates.passage) {
+      assertLibraryContentValid('passage', updates.passage.content);
+    }
+    const refreshRevision = async (): Promise<number | undefined> => {
+      await this.getPassage(id);
+      return passageRevisions.get(id);
+    };
+    // Per-id in-flight dedupe: concurrent updates for the same passage share
+    // one revision-hydrating GET instead of stampeding the backend.
     let revision = passageRevisions.get(id);
     if (revision === undefined) {
-      await this.getPassage(id);
-      revision = passageRevisions.get(id);
+      revision = await dedupeRefresh(`passage:${id}`, refreshRevision);
       if (revision === undefined) return null;
     }
 
-    const patchBody: Record<string, unknown> = {
-      revision,
+    const buildPatchBody = (currentRevision: number): Record<string, unknown> => {
+      const patchBody: Record<string, unknown> = {
+        revision: currentRevision,
+      };
+
+      if (updates.passage) {
+        patchBody['title'] = updates.passage.title;
+        patchBody['passageSnapshot'] = updates.passage;
+      }
+      return patchBody;
     };
 
-    if (updates.passage) {
-      patchBody['title'] = updates.passage.title;
-      patchBody['passageSnapshot'] = updates.passage;
-    }
+    const patchBody: Record<string, unknown> = buildPatchBody(revision);
 
     if (updates.metadata?.difficulty !== undefined) {
       patchBody['difficulty'] = updates.metadata.difficulty;
@@ -133,10 +148,24 @@ class BackendPassageLibrary {
       patchBody['estimatedTimeMinutes'] = updates.metadata.estimatedTimeMinutes;
     }
 
-    const raw = await backendPatch<unknown>(`/v1/library/passages/${id}`, patchBody);
-    const mapped = this.mapBackendItem(raw);
-    invalidatePassageQueries();
-    return mapped;
+    try {
+      const raw = await backendPatch<unknown>(`/v1/library/passages/${id}`, patchBody);
+      const mapped = this.mapBackendItem(raw);
+      invalidatePassageQueries();
+      return mapped;
+    } catch (error) {
+      // 409 = stale revision (another writer won the race). Refresh once via
+      // the shared single-flight GET and retry with the fresh revision; a
+      // second 409 (or a vanished record) surfaces to the caller.
+      if (!isConflictError(error)) throw error;
+      const freshRevision = await dedupeRefresh(`passage:${id}`, refreshRevision);
+      if (freshRevision === undefined) return null;
+      const retryBody = { ...patchBody, revision: freshRevision };
+      const raw = await backendPatch<unknown>(`/v1/library/passages/${id}`, retryBody);
+      const mapped = this.mapBackendItem(raw);
+      invalidatePassageQueries();
+      return mapped;
+    }
   }
 
   async deletePassage(id: string): Promise<boolean> {
@@ -192,12 +221,8 @@ class BackendPassageLibrary {
   }
 
   async incrementUsageCount(id: string): Promise<void> {
-    try {
-      await backendPatch(`/v1/library/passages/${id}/increment-usage`, {});
-      invalidatePassageQueries();
-    } catch {
-      // Some deployments don't implement this endpoint; usage count is best-effort.
-    }
+    await backendPatch(`/v1/library/passages/${id}/increment-usage`, {});
+    invalidatePassageQueries();
   }
 
   async getTopics(): Promise<string[]> {

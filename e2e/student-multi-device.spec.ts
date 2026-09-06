@@ -100,11 +100,11 @@ test.describe('Student multi-device fingerprint mismatch', () => {
       .toBe(true);
 
     await context.setOffline(true);
-    await expect(page.getByRole('heading', { name: 'Connection lost' })).toBeVisible();
+    await expect(page.getByTestId('student-auto-save-status')).toHaveText('Offline');
 
     await context.setOffline(false);
 
-    await expect(page.getByRole('heading', { name: 'Connection lost' })).not.toBeVisible();
+    await expect(page.getByTestId('student-auto-save-status')).toHaveText(/Saved|Syncing/);
     await expect(page.getByLabel('Answer for question 1')).toBeVisible({ timeout: 30_000 });
 
     const deviceWarning = page.getByText(/device mismatch|different device/i);

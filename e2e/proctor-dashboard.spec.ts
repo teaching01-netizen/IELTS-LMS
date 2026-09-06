@@ -1,260 +1,132 @@
 import { expect, test } from '@playwright/test';
 import {
   ADMIN_STORAGE_STATE_PATH,
+  readBackendE2EManifest,
+  STUDENT_STORAGE_STATE_PATH,
 } from './support/backendE2e';
+import {
+  completePreCheckIfPresent,
+  openStudentSessionWithRetry,
+  studentCheckIn,
+  stubScreenDetails,
+} from './support/studentUi';
 
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
-test.describe('Proctor Dashboard and Session Monitoring', () => {
-  test('views all scheduled sessions', async ({ page }) => {
+test.describe('Proctor dashboard and session monitoring', () => {
+  test.describe.configure({ timeout: 60_000 });
+
+  async function openSeededCohort(page: import('@playwright/test').Page) {
     await page.goto('/proctor');
-    await expect(page.getByRole('heading', { name: /Proctor Dashboard/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Cohorts and students' })).toBeVisible();
 
-    // Verify session list loads
-    await expect(page.locator('[data-session-card]')).toBeVisible();
+    const cohort = page.getByRole('button', {
+      name: 'Monitor Student Backend E2E Delivery for cohort Backend E2E Cohort',
+    });
+    await expect(cohort).toBeVisible();
+    await cohort.click();
+    await expect(page.getByRole('heading', { name: /Student Backend E2E Delivery · Backend E2E Cohort/ })).toBeVisible();
+  }
 
-    // Verify session count
-    const sessionCards = page.locator('[data-session-card]');
-    const count = await sessionCards.count();
-    expect(count).toBeGreaterThan(0);
+  test('loads the active cohort overview', async ({ page }) => {
+    await page.goto('/proctor');
+
+    await expect(page.getByRole('heading', { name: 'Cohorts and students' })).toBeVisible();
+    await expect(page.getByRole('tablist', { name: 'Overview sessions' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /Active sessions \(\d+\)/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('button', { name: /Monitor .* for cohort .*$/ }).first()).toBeVisible();
+    await expect(page.getByText('Monitor Session').first()).toBeVisible();
   });
 
-  test('filters sessions by status', async ({ page }) => {
+  test('separates past cohorts and exposes the past status filter', async ({ page }) => {
     await page.goto('/proctor');
-    await expect(page.getByRole('heading', { name: /Proctor Dashboard/i })).toBeVisible();
 
-    // Filter by scheduled status
-    await page.getByRole('combobox', { name: 'Filter by status' }).selectOption('scheduled');
-    await expect(page.getByText('Scheduled')).toBeVisible();
+    const pastTab = page.getByRole('tab', { name: /Past sessions \(\d+\)/ });
+    await pastTab.click();
+    await expect(pastTab).toHaveAttribute('aria-selected', 'true');
 
-    // Filter by live status
-    await page.getByRole('combobox', { name: 'Filter by status' }).selectOption('live');
-    await expect(page.getByText('Live')).toBeVisible();
+    const statusFilter = page.getByRole('combobox', { name: 'Past status' });
+    await expect(statusFilter).toBeVisible();
+    await expect(statusFilter.locator('option')).toHaveText(['All past', 'Completed', 'Cancelled']);
+    await statusFilter.selectOption('completed');
+    await expect(statusFilter).toHaveValue('completed');
 
-    // Filter by completed status
-    await page.getByRole('combobox', { name: 'Filter by status' }).selectOption('completed');
-    await expect(page.getByText('Completed')).toBeVisible();
+    await page.getByRole('tab', { name: /Active sessions \(\d+\)/ }).click();
+    await expect(page.getByRole('tab', { name: /Active sessions \(\d+\)/ })).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('views session detail with student roster', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
+  test('opens a cohort roster with monitoring controls', async ({ page }) => {
+    await openSeededCohort(page);
 
-    // Verify session detail page loads
-    await expect(page.getByRole('heading', { name: /Session Details/i })).toBeVisible();
-
-    // Verify student roster displays
-    await expect(page.locator('[data-student-card]')).toBeVisible();
-
-    // Verify student count
-    const studentCards = page.locator('[data-student-card]');
-    const count = await studentCards.count();
-    expect(count).toBeGreaterThan(0);
-  });
-
-  test('receives real-time student status updates', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Get initial student status
-    const initialStatus = await page.locator('[data-student-card]').first().getAttribute('data-status');
-
-    // Wait for potential update (WebSocket)
-    await page.waitForTimeout(2000);
-
-    // Verify status can update
-    const updatedStatus = await page.locator('[data-student-card]').first().getAttribute('data-status');
-    expect(updatedStatus).toBeTruthy();
-  });
-
-  test('displays alert panel with unacknowledged alerts', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Navigate to alerts tab
-    await page.getByRole('tab', { name: 'Alerts' }).click();
-
-    // Verify alert panel displays
-    await expect(page.getByRole('heading', { name: /Alerts/i })).toBeVisible();
-
-    // Verify alert items
-    const alertItems = page.locator('[data-alert-item]');
-    const count = await alertItems.count();
-    if (count > 0) {
-      expect(count).toBeGreaterThan(0);
+    await expect(page.getByText(/visible students · join progress/)).toBeVisible();
+    for (const name of ['Start Exam', 'Pause Cohort', 'Resume Cohort', 'Extend +5', 'Extend +10', 'End Section', 'Complete']) {
+      await expect(page.getByRole('button', { name })).toBeVisible();
     }
+    await expect(page.getByRole('status', { name: 'Proctor presence' })).toBeVisible();
   });
 
-  test('displays audit log panel with timeline', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
+  test('filters the roster and switches list density', async ({ page }) => {
+    await openSeededCohort(page);
 
-    // Navigate to audit logs tab
-    await page.getByRole('tab', { name: 'Audit Logs' }).click();
+    await page.getByRole('button', { name: 'Filters' }).click();
+    const filters = page.locator('select');
+    await expect(filters).toHaveCount(2);
+    await filters.nth(0).selectOption('active');
+    await filters.nth(1).selectOption('listening');
+    await page.getByLabel('Minimum violations').fill('1');
+    await page.getByLabel('Maximum time remaining in minutes').fill('30');
 
-    // Verify audit log panel displays
-    await expect(page.getByRole('heading', { name: /Audit Logs/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Remove status filter' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Remove section filter' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Remove minimum violations filter' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Remove maximum time filter' })).toBeVisible();
 
-    // Verify log entries
-    await expect(page.locator('[data-audit-log-entry]')).toBeVisible();
+    await page.getByRole('button', { name: 'Comfortable' }).click();
+    await expect(page.getByRole('button', { name: 'Compact' })).toBeVisible();
+    await page.getByRole('button', { name: 'Compact' }).click();
+    await expect(page.getByRole('button', { name: 'Comfortable' })).toBeVisible();
   });
 
-  test('shows presence indicator for active proctors', async ({ page }) => {
-    await page.goto('/proctor');
+  test('opens student activity tabs from the roster', async ({ browser, page }) => {
+    const manifest = readBackendE2EManifest();
+    const studentContext = await browser.newContext({ storageState: STUDENT_STORAGE_STATE_PATH });
+    await stubScreenDetails(studentContext);
+    const studentPage = await studentContext.newPage();
 
-    // Verify presence indicator displays
-    await expect(page.locator('[data-presence-indicator]')).toBeVisible();
+    try {
+      await studentCheckIn(studentPage, manifest.student.scheduleId, {
+        wcode: manifest.student.candidateId,
+        email: 'e2e.student@example.com',
+        fullName: 'Alice Candidate',
+      });
+      await openStudentSessionWithRetry(studentPage, manifest.student.scheduleId, manifest.student.candidateId);
+      await completePreCheckIfPresent(studentPage);
 
-    // Verify current proctor is shown as active
-    await expect(page.getByText(/You are online/i)).toBeVisible();
-  });
+      await openSeededCohort(page);
 
-  test('creates session notes and resolutions', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
+      const student = page.getByRole('button', { name: 'Open Alice Candidate session details' });
+      await expect(student).toBeVisible();
+      await student.click();
 
-    // Add session note
-    await page.getByRole('button', { name: 'Add Session Note' }).click();
-    await page.getByLabel('Note content').fill('Test session note');
-    await page.getByRole('combobox', { name: 'Category' }).selectOption('general');
-    await page.getByRole('button', { name: 'Save Note' }).click();
-    await expect(page.getByText('Note saved successfully')).toBeVisible();
-
-    // Resolve note
-    await page.getByRole('button', { name: 'View Notes' }).click();
-    await page.locator('[data-note-item]').first().getByRole('button', { name: 'Resolve' }).click();
-    await expect(page.getByText('Note resolved')).toBeVisible();
-  });
-
-  test('verifies WebSocket updates propagate in real-time', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Get initial student count
-    const initialCount = await page.locator('[data-student-card]').count();
-
-    // Wait for WebSocket update
-    await page.waitForTimeout(3000);
-
-    // Verify count can change (or stay same if no changes)
-    const updatedCount = await page.locator('[data-student-card]').count();
-    expect(updatedCount).toBeGreaterThanOrEqual(0);
-  });
-
-  test('verifies student cards show current status', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Verify each student card has status
-    const studentCards = page.locator('[data-student-card]');
-    const count = await studentCards.count();
-
-    for (let i = 0; i < count; i++) {
-      const card = studentCards.nth(i);
-      const status = await card.getAttribute('data-status');
-      expect(status).toBeTruthy();
-    }
-  });
-
-  test('verifies alert counts are accurate', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Check alert badge count
-    const alertBadge = page.locator('[data-alert-count]');
-    const badgeCount = await alertBadge.getAttribute('data-alert-count');
-
-    // Navigate to alerts and verify actual count
-    await page.getByRole('tab', { name: 'Alerts' }).click();
-    const alertItems = page.locator('[data-alert-item]');
-    const actualCount = await alertItems.count();
-
-    // Verify counts match (or badge is null if no alerts)
-    if (badgeCount) {
-      expect(parseInt(badgeCount)).toBe(actualCount);
-    }
-  });
-
-  test('verifies audit logs are ordered by timestamp', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Audit Logs' }).click();
-
-    // Get timestamps of first and last log entries
-    const firstTimestamp = await page.locator('[data-audit-log-entry]').first().getAttribute('data-timestamp');
-    const lastTimestamp = await page.locator('[data-audit-log-entry]').last().getAttribute('data-timestamp');
-
-    // Verify timestamps are different (ordered)
-    expect(firstTimestamp).not.toBe(lastTimestamp);
-  });
-
-  test('verifies presence tracking works', async ({ page }) => {
-    await page.goto('/proctor');
-
-    // Verify presence indicator shows online
-    await expect(page.locator('[data-presence-indicator="online"]')).toBeVisible();
-
-    // Simulate going offline
-    await page.setOffline(true);
-    await page.waitForTimeout(1000);
-
-    // Verify presence indicator updates
-    const offlineIndicator = page.locator('[data-presence-indicator="offline"]');
-    const isOfflineVisible = await offlineIndicator.isVisible().catch(() => false);
-    if (isOfflineVisible) {
-      await expect(offlineIndicator).toBeVisible();
-    }
-
-    // Restore online
-    await page.setOffline(false);
-  });
-
-  test('filters audit logs by action type', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Audit Logs' }).click();
-
-    // Filter by specific action type
-    await page.getByRole('combobox', { name: 'Filter by action' }).selectOption('VIOLATION_DETECTED');
-
-    // Verify filtered results
-    const logEntries = page.locator('[data-audit-log-entry]');
-    const count = await logEntries.count();
-
-    // If entries exist, verify they match filter
-    if (count > 0) {
-      for (let i = 0; i < count; i++) {
-        const actionType = await logEntries.nth(i).getAttribute('data-action-type');
-        expect(actionType).toBe('VIOLATION_DETECTED');
+      await expect(page.getByRole('button', { name: 'Close student details' })).toBeVisible();
+      for (const tab of ['Timeline', 'Violations', 'Notes', 'Audit']) {
+        await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
       }
+
+      await page.getByRole('button', { name: 'Notes', exact: true }).click();
+      await expect(page.getByLabel('Note category')).toBeVisible();
+      await expect(page.getByLabel('Note content')).toBeVisible();
+    } finally {
+      await studentContext.close();
     }
   });
 
-  test('searches for specific student in roster', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
+  test('searches the selected cohort roster', async ({ page }) => {
+    await openSeededCohort(page);
 
-    // Search for student
-    await page.getByPlaceholder('Search students...').fill('Test');
-
-    // Verify search results
-    const studentCards = page.locator('[data-student-card]');
-    const count = await studentCards.count();
-
-    // Clear search
-    await page.getByPlaceholder('Search students...').fill('');
-  });
-
-  test('exports session report', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-
-    // Click export button
-    const downloadPromise = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Export Report' }).click();
-    const download = await downloadPromise;
-
-    // Verify download started
-    expect(download.suggestedFilename()).toBeTruthy();
+    const search = page.getByPlaceholder('Search students...');
+    await search.fill('does-not-exist');
+    await expect(page.getByText('No students match the current cohort filters.')).toBeVisible();
+    await expect(search).toHaveValue('does-not-exist');
   });
 });

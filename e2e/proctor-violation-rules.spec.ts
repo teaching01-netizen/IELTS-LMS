@@ -1,292 +1,148 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
   ADMIN_STORAGE_STATE_PATH,
   readBackendE2EManifest,
-  STUDENT_STORAGE_STATE_PATH,
 } from './support/backendE2e';
 
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
-test.describe('Proctor Violation Rules Configuration', () => {
-  test('creates violation count rule', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
+type Rule = {
+  id: string;
+  scheduleId: string;
+  triggerType: string;
+  threshold: number;
+  specificViolationType?: string | null;
+  specificSeverity?: string | null;
+  action: string;
+  isEnabled: boolean;
+};
 
-    // Navigate to violation rules section
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
-    await expect(page.getByRole('heading', { name: /Violation Rules/i })).toBeVisible();
+async function listRules(page: Page, scheduleId: string): Promise<Rule[]> {
+  const response = await page.request.get(
+    `/api/v1/proctor/sessions/${encodeURIComponent(scheduleId)}/violation-rules`,
+  );
+  expect(response.ok()).toBeTruthy();
+  return (await response.json()) as Rule[];
+}
 
-    // Create new rule
-    await page.getByRole('button', { name: 'Create Rule' }).click();
-    await expect(page.getByRole('dialog', { name: /Create Violation Rule/i })).toBeVisible();
+async function openSeededRules(page: Page): Promise<Locator> {
+  await page.goto('/proctor');
+  await expect(page.getByRole('heading', { name: 'Cohorts and students' })).toBeVisible();
+  await page.getByRole('button', {
+    name: 'Monitor Student Backend E2E Delivery for cohort Backend E2E Cohort',
+  }).click();
+  await expect(
+    page.getByRole('heading', { name: /Student Backend E2E Delivery · Backend E2E Cohort/ }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Auto-Response Rules' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Auto-Response Rules' });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
 
-    // Configure violation count rule
-    await page.getByLabel('Rule type').selectOption('violation_count');
-    await page.getByLabel('Violation count threshold').fill('5');
-    await page.getByLabel('Auto action').selectOption('warn');
-    await page.getByLabel('Severity').selectOption('low');
+async function createRule(
+  dialog: Locator,
+  options: {
+    triggerType: 'violation_count' | 'specific_violation_type' | 'severity_threshold';
+    threshold: number;
+    action: 'warn' | 'pause' | 'notify_proctor' | 'terminate';
+    specificViolationType?: string;
+    specificSeverity?: 'low' | 'medium' | 'high' | 'critical';
+  },
+) {
+  await dialog.getByRole('button', { name: 'New Rule' }).click();
+  await dialog.getByLabel('Rule trigger type').selectOption(options.triggerType);
+  if (options.specificViolationType) {
+    await dialog.getByLabel('Specific violation type').fill(options.specificViolationType);
+  }
+  if (options.specificSeverity) {
+    await dialog.getByLabel('Specific severity').selectOption(options.specificSeverity);
+  }
+  await dialog.getByLabel('Rule threshold').fill(String(options.threshold));
+  await dialog.getByLabel('Rule action').selectOption(options.action);
+  await dialog.getByRole('button', { name: 'Save Rule' }).click();
+}
 
-    // Save rule
-    await page.getByRole('button', { name: 'Save Rule' }).click();
-    await expect(page.getByText('Rule created successfully')).toBeVisible();
+test.describe('Proctor automatic violation-response rules', () => {
+  test.describe.configure({ timeout: 60_000 });
 
-    // Verify rule appears in list
-    await expect(page.getByText('5 violations → warn')).toBeVisible();
-  });
-
-  test('creates specific violation type rule', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
-
-    // Create new rule
-    await page.getByRole('button', { name: 'Create Rule' }).click();
-
-    // Configure specific violation type rule
-    await page.getByLabel('Rule type').selectOption('violation_type');
-    await page.getByLabel('Violation type').selectOption('TAB_SWITCH');
-    await page.getByLabel('Auto action').selectOption('pause');
-    await page.getByLabel('Severity').selectOption('high');
-
-    // Save rule
-    await page.getByRole('button', { name: 'Save Rule' }).click();
-    await expect(page.getByText('Rule created successfully')).toBeVisible();
-
-    // Verify rule appears in list
-    await expect(page.getByText('TAB_SWITCH → pause')).toBeVisible();
-  });
-
-  test('creates severity threshold rule', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
-
-    // Create new rule
-    await page.getByRole('button', { name: 'Create Rule' }).click();
-
-    // Configure severity threshold rule
-    await page.getByLabel('Rule type').selectOption('severity_threshold');
-    await page.getByLabel('Severity level').selectOption('high');
-    await page.getByLabel('Severity count threshold').fill('3');
-    await page.getByLabel('Auto action').selectOption('terminate');
-
-    // Save rule
-    await page.getByRole('button', { name: 'Save Rule' }).click();
-    await expect(page.getByText('Rule created successfully')).toBeVisible();
-
-    // Verify rule appears in list
-    await expect(page.getByText('3 high → terminate')).toBeVisible();
-  });
-
-  test('enables and disables rules', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
-
-    // Find first rule
-    const ruleItem = page.locator('[data-rule-item]').first();
-    const hasRules = await ruleItem.count() > 0;
-
-    if (hasRules) {
-      // Disable rule
-      await ruleItem.getByRole('switch').click();
-      await expect(page.getByText('Rule disabled')).toBeVisible();
-
-      // Verify rule is disabled
-      await expect(ruleItem).toHaveAttribute('data-enabled', 'false');
-
-      // Enable rule
-      await ruleItem.getByRole('switch').click();
-      await expect(page.getByText('Rule enabled')).toBeVisible();
-
-      // Verify rule is enabled
-      await expect(ruleItem).toHaveAttribute('data-enabled', 'true');
-    }
-  });
-
-  test('tests rule triggers during exam', async ({ browser, page }) => {
+  test('creates, persists, toggles, and deletes every rule trigger shape', async ({ page }) => {
     const manifest = readBackendE2EManifest();
+    const scheduleId = manifest.student.scheduleId;
+    const dialog = await openSeededRules(page);
+    const created: Array<{ id: string; description: RegExp }> = [];
 
-    // Create a test rule
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
-    await page.getByRole('button', { name: 'Create Rule' }).click();
-    await page.getByLabel('Rule type').selectOption('violation_count');
-    await page.getByLabel('Violation count threshold').fill('2');
-    await page.getByLabel('Auto action').selectOption('warn');
-    await page.getByRole('button', { name: 'Save Rule' }).click();
-    await expect(page.getByText('Rule created successfully')).toBeVisible();
-
-    // Start student session
-    const studentContext = await browser.newContext({
-      storageState: STUDENT_STORAGE_STATE_PATH,
+    await createRule(dialog, {
+      triggerType: 'violation_count',
+      threshold: 17,
+      action: 'warn',
     });
-    const studentPage = await studentContext.newPage();
-    await studentPage.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
-
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await studentPage.getByRole('button', { name: 'Continue' }).click();
-    }
-
-    // Simulate violations (in a real scenario, this would trigger actual violations)
-    // For now, we'll verify the rule is saved and can be triggered
-    
-    // Navigate to audit logs to verify rule evaluation
-    await page.getByRole('tab', { name: 'Audit Logs' }).click();
-    
-    // Check for AUTO_ACTION entries (if any violations occurred)
-    const autoActionLogs = page.getByText('AUTO_ACTION');
-    const hasAutoActions = await autoActionLogs.count() > 0;
-    
-    if (hasAutoActions) {
-      await expect(autoActionLogs.first()).toBeVisible();
-    }
-
-    await studentContext.close();
-  });
-
-  test('deletes rules', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
-
-    // Find a rule to delete
-    const ruleItem = page.locator('[data-rule-item]').first();
-    const hasRules = await ruleItem.count() > 0;
-
-    if (hasRules) {
-      const ruleCountBefore = await page.locator('[data-rule-item]').count();
-
-      // Delete rule
-      await ruleItem.getByRole('button', { name: 'Delete' }).click();
-      await expect(page.getByRole('dialog', { name: /Confirm Delete/i })).toBeVisible();
-      await page.getByRole('button', { name: 'Confirm' }).click();
-      await expect(page.getByText('Rule deleted successfully')).toBeVisible();
-
-      // Verify rule is removed
-      const ruleCountAfter = await page.locator('[data-rule-item]').count();
-      expect(ruleCountAfter).toBe(ruleCountBefore - 1);
-    }
-  });
-
-  test('verifies multiple rules can coexist', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
-
-    // Get initial rule count
-    const initialRuleCount = await page.locator('[data-rule-item]').count();
-
-    // Create first rule
-    await page.getByRole('button', { name: 'Create Rule' }).click();
-    await page.getByLabel('Rule type').selectOption('violation_count');
-    await page.getByLabel('Violation count threshold').fill('3');
-    await page.getByLabel('Auto action').selectOption('warn');
-    await page.getByRole('button', { name: 'Save Rule' }).click();
-    await expect(page.getByText('Rule created successfully')).toBeVisible();
-
-    // Create second rule
-    await page.getByRole('button', { name: 'Create Rule' }).click();
-    await page.getByLabel('Rule type').selectOption('violation_type');
-    await page.getByLabel('Violation type').selectOption('TAB_SWITCH');
-    await page.getByLabel('Auto action').selectOption('pause');
-    await page.getByRole('button', { name: 'Save Rule' }).click();
-    await expect(page.getByText('Rule created successfully')).toBeVisible();
-
-    // Verify both rules exist
-    const finalRuleCount = await page.locator('[data-rule-item]').count();
-    expect(finalRuleCount).toBe(initialRuleCount + 2);
-  });
-
-  test('verifies rule evaluation happens in real-time', async ({ browser, page }) => {
-    const manifest = readBackendE2EManifest();
-
-    // Create a real-time rule
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
-    await page.getByRole('button', { name: 'Create Rule' }).click();
-    await page.getByLabel('Rule type').selectOption('violation_count');
-    await page.getByLabel('Violation count threshold').fill('1');
-    await page.getByLabel('Auto action').selectOption('notify_proctor');
-    await page.getByRole('button', { name: 'Save Rule' }).click();
-
-    // Start student session
-    const studentContext = await browser.newContext({
-      storageState: STUDENT_STORAGE_STATE_PATH,
+    await createRule(dialog, {
+      triggerType: 'specific_violation_type',
+      threshold: 18,
+      specificViolationType: 'TAB_SWITCH',
+      action: 'pause',
     });
-    const studentPage = await studentContext.newPage();
-    await studentPage.goto(
-      `/student/${manifest.student.scheduleId}/${manifest.student.candidateId}`,
-    );
+    await createRule(dialog, {
+      triggerType: 'severity_threshold',
+      threshold: 19,
+      specificSeverity: 'high',
+      action: 'notify_proctor',
+    });
 
-    const compatibilityCheck = studentPage.getByRole('heading', { name: 'System checking' });
-    const isCompatibilityCheckVisible = await compatibilityCheck.isVisible().catch(() => false);
-    if (isCompatibilityCheckVisible) {
-      await studentPage.getByRole('button', { name: 'Continue' }).click();
+    await expect(dialog.getByText('When violations reach 17')).toBeVisible();
+    await expect(dialog.getByText('When TAB_SWITCH occurs 18 times')).toBeVisible();
+    await expect(dialog.getByText('When high violations reach 19')).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const rules = await listRules(page, scheduleId);
+        return rules.filter((rule) => [17, 18, 19].includes(rule.threshold));
+      })
+      .toHaveLength(3);
+
+    const persisted = await listRules(page, scheduleId);
+    for (const rule of persisted.filter((candidate) => [17, 18, 19].includes(candidate.threshold))) {
+      created.push({
+        id: rule.id,
+        description:
+          rule.threshold === 17
+            ? /When violations reach 17/
+            : rule.threshold === 18
+              ? /When TAB_SWITCH occurs 18 times/
+              : /When high violations reach 19/,
+      });
     }
+    expect(created).toHaveLength(3);
 
-    // Monitor alerts in real-time
-    await page.getByRole('tab', { name: 'Alerts' }).click();
+    const countRule = created.find((rule) => rule.description.source.includes('17'))!;
+    const countRow = dialog.locator(`[data-rule-id="${countRule.id}"]`);
+    await countRow.getByRole('button', { name: 'Disable rule' }).click();
+    await expect(countRow).toHaveAttribute('data-enabled', 'false');
+    await expect
+      .poll(async () => (await listRules(page, scheduleId)).find((rule) => rule.id === countRule.id)?.isEnabled)
+      .toBe(false);
 
-    // Wait a moment for any real-time updates
-    await page.waitForTimeout(2000);
+    await countRow.getByRole('button', { name: 'Enable rule' }).click();
+    await expect(countRow).toHaveAttribute('data-enabled', 'true');
+    await expect
+      .poll(async () => (await listRules(page, scheduleId)).find((rule) => rule.id === countRule.id)?.isEnabled)
+      .toBe(true);
 
-    // Verify alerts panel is active and monitoring
-    await expect(page.getByRole('heading', { name: /Alerts/i })).toBeVisible();
-
-    await studentContext.close();
-  });
-
-  test('edits existing rule', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
-
-    // Find a rule to edit
-    const ruleItem = page.locator('[data-rule-item]').first();
-    const hasRules = await ruleItem.count() > 0;
-
-    if (hasRules) {
-      // Edit rule
-      await ruleItem.getByRole('button', { name: 'Edit' }).click();
-      await expect(page.getByRole('dialog', { name: /Edit Violation Rule/i })).toBeVisible();
-
-      // Modify rule settings
-      await page.getByLabel('Violation count threshold').fill('10');
-      await page.getByLabel('Auto action').selectOption('pause');
-
-      // Save changes
-      await page.getByRole('button', { name: 'Save Rule' }).click();
-      await expect(page.getByText('Rule updated successfully')).toBeVisible();
-
-      // Verify changes are reflected
-      await expect(page.getByText('10 violations → pause')).toBeVisible();
-    }
-  });
-
-  test('verifies rules saved to database', async ({ page }) => {
-    await page.goto('/proctor');
-    await page.getByRole('button', { name: /Monitor/i }).first().click();
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
-
-    // Create a rule
-    await page.getByRole('button', { name: 'Create Rule' }).click();
-    await page.getByLabel('Rule type').selectOption('violation_count');
-    await page.getByLabel('Violation count threshold').fill('5');
-    await page.getByLabel('Auto action').selectOption('warn');
-    await page.getByRole('button', { name: 'Save Rule' }).click();
-
-    // Refresh page to verify persistence
+    await page.getByRole('button', { name: 'Close auto-response rules' }).last().click();
     await page.reload();
-    await page.getByRole('tab', { name: 'Violation Rules' }).click();
+    const reloadedDialog = await openSeededRules(page);
+    for (const rule of created) {
+      await expect(reloadedDialog.locator(`[data-rule-id="${rule.id}"]`)).toBeVisible();
+    }
 
-    // Verify rule still exists after refresh
-    await expect(page.getByText('5 violations → warn')).toBeVisible();
+    for (const rule of created) {
+      const row = reloadedDialog.locator(`[data-rule-id="${rule.id}"]`);
+      await row.getByRole('button', { name: `Delete rule ${rule.id}` }).click();
+      await expect(row).toHaveCount(0);
+      await expect
+        .poll(async () => (await listRules(page, scheduleId)).some((candidate) => candidate.id === rule.id))
+        .toBe(false);
+    }
   });
 });

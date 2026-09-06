@@ -89,6 +89,7 @@ export function FormattedText({
     containerRef,
     renderedHtml,
     hint,
+    announce,
   } = useHighlightSurfaceV2({
     enabled: highlightEnabled,
     surfaceId: highlightSurfaceId ?? defaultSurfaceId,
@@ -105,6 +106,7 @@ export function FormattedText({
         className={classes}
         html={renderedHtml}
         hint={hint}
+        announce={announce}
         suppressTouchCallout={suppressTouchCallout}
         highlightSelectionColor={selectionTintColor}
       />

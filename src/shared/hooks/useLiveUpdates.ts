@@ -64,13 +64,17 @@ export function useLiveUpdates(options: {
   debounceMs?: number;
   onConnected?: () => void;
   onDisconnected?: () => void;
+  onError?: (error: { code?: string; message?: string }) => void;
   onRuntimeSnapshot?: (payload: { scheduleId?: string; runtime: unknown }) => void;
   onEvent: (event: LiveUpdateEvent) => void;
 }) {
   const enabled = options.enabled ?? true;
   const debounceMs = options.debounceMs ?? 250;
   const onEventRef = useRef(options.onEvent);
-  const lastEventRef = useRef<LiveUpdateEvent | null>(null);
+  // Burst queue: every validated frame is queued (not coalesced into a
+  // single slot), then flushed in order — most-recent-first per
+  // (kind,id) so a burst of distinct students is never collapsed to one.
+  const queuedEventsRef = useRef<LiveUpdateEvent[]>([]);
   const debounceTimerRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -78,7 +82,9 @@ export function useLiveUpdates(options: {
   const shouldReconnectRef = useRef(true);
   const onConnectedRef = useRef(options.onConnected);
   const onDisconnectedRef = useRef(options.onDisconnected);
+  const onErrorRef = useRef(options.onError);
   const onRuntimeSnapshotRef = useRef(options.onRuntimeSnapshot);
+  const lastSeenRuntimeRevisionRef = useRef(options.lastSeenRuntimeRevision);
 
   useEffect(() => {
     onEventRef.current = options.onEvent;
@@ -97,21 +103,27 @@ export function useLiveUpdates(options: {
   }, [options.onRuntimeSnapshot]);
 
   useEffect(() => {
-    const url = buildLiveUpdatesUrl({
+    onErrorRef.current = options.onError;
+  }, [options.onError]);
+
+  useEffect(() => {
+    lastSeenRuntimeRevisionRef.current = options.lastSeenRuntimeRevision;
+  }, [options.lastSeenRuntimeRevision]);
+
+  useEffect(() => {
+    const staticUrl = buildLiveUpdatesUrl({
       ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
       ...(options.attemptId ? { attemptId: options.attemptId } : {}),
-      ...(Number.isInteger(options.lastSeenRuntimeRevision)
-        ? { lastSeenRuntimeRevision: options.lastSeenRuntimeRevision }
-        : {}),
     });
-    if (!enabled || !url) {
+    if (!enabled || !staticUrl) {
       return () => undefined;
     }
 
+    let disposed = false;
     shouldReconnectRef.current = true;
 
     const scheduleReconnect = () => {
-      if (!shouldReconnectRef.current) {
+      if (disposed || !shouldReconnectRef.current) {
         return;
       }
 
@@ -125,17 +137,38 @@ export function useLiveUpdates(options: {
         window.clearTimeout(reconnectTimerRef.current);
       }
       reconnectTimerRef.current = window.setTimeout(() => {
-        connect();
+        reconnectTimerRef.current = null;
+        if (!disposed) {
+          connect();
+        }
       }, delayMs);
+    };
+
+    // Flush the queued burst: deliver every queued event in arrival order.
+    // Same-(kind,id) duplicates keep only the newest revision so a rapid
+    // retry burst for one student collapses, while distinct students all
+    // still dispatch (fixes the old lastEventRef single-slot drop).
+    const flushQueuedEvents = () => {
+      const queued = queuedEventsRef.current;
+      queuedEventsRef.current = [];
+      debounceTimerRef.current = null;
+      if (queued.length === 0) {
+        return;
+      }
+      const newestByKey = new Map<string, LiveUpdateEvent>();
+      for (const event of queued) {
+        newestByKey.set(`${event.kind}::${event.id}`, event);
+      }
+      for (const event of queued) {
+        if (newestByKey.get(`${event.kind}::${event.id}`) === event) {
+          onEventRef.current(event);
+        }
+      }
     };
 
     const flushDebounced = () => {
       if (debounceMs <= 0) {
-        const event = lastEventRef.current;
-        lastEventRef.current = null;
-        if (event) {
-          onEventRef.current(event);
-        }
+        flushQueuedEvents();
         return;
       }
 
@@ -143,16 +176,14 @@ export function useLiveUpdates(options: {
         window.clearTimeout(debounceTimerRef.current);
       }
       debounceTimerRef.current = window.setTimeout(() => {
-        const event = lastEventRef.current;
-        lastEventRef.current = null;
-        debounceTimerRef.current = null;
-        if (event) {
-          onEventRef.current(event);
-        }
+        flushQueuedEvents();
       }, debounceMs);
     };
 
-    const handleMessage = (raw: MessageEvent) => {
+    const handleMessage = (raw: MessageEvent, sourceSocket: WebSocket) => {
+      if (disposed || socketRef.current !== sourceSocket) {
+        return;
+      }
       if (typeof raw.data !== 'string') {
         return;
       }
@@ -170,9 +201,32 @@ export function useLiveUpdates(options: {
           return;
         }
         if (type === 'error') {
-          shouldReconnectRef.current = false;
-          socketRef.current?.close();
-          socketRef.current = null;
+          // Surface recoverable server errors via onError and reconnect
+          // with backoff; only fatal auth/capacity codes stop reconnecting.
+          const code = (frame as { code?: unknown }).code;
+          const message = (frame as { message?: unknown }).message;
+          const detail = {
+            ...(typeof code === 'string' ? { code } : {}),
+            ...(typeof message === 'string' ? { message } : {}),
+          };
+          onErrorRef.current?.(detail);
+          if (code === 'UNAUTHORIZED' || code === 'FORBIDDEN' || code === 'SCHEDULE_CAPACITY') {
+            shouldReconnectRef.current = false;
+            sourceSocket.close();
+            if (socketRef.current === sourceSocket) {
+              socketRef.current = null;
+            }
+            return;
+          }
+          // Recoverable error: close triggers onclose → scheduleReconnect.
+          // The mock socket's close() may not fire onclose, so schedule
+          // the reconnect explicitly as well (guarded by shouldReconnect).
+          const wasCurrent = socketRef.current === sourceSocket;
+          sourceSocket.close();
+          if (wasCurrent && socketRef.current === sourceSocket) {
+            socketRef.current = null;
+            scheduleReconnect();
+          }
           return;
         }
         if (type === 'runtime_snapshot') {
@@ -193,38 +247,60 @@ export function useLiveUpdates(options: {
         return;
       }
 
+      // Guard non-finite revisions (Number('abc') is NaN): fall back to 0
+      // so downstream revision comparisons never see NaN.
+      const parsedRevision = Number(frame.revision);
       const nextEvent: LiveUpdateEvent = {
         kind: frame.kind,
         id: frame.id,
-        revision: Number(frame.revision),
+        revision: Number.isFinite(parsedRevision) ? parsedRevision : 0,
         event: frame.event,
       };
       if (typeof frame.scheduleId === 'string') {
         nextEvent.scheduleId = frame.scheduleId;
       }
-      lastEventRef.current = nextEvent;
+      queuedEventsRef.current.push(nextEvent);
       flushDebounced();
     };
 
     const connect = () => {
-      if (!shouldReconnectRef.current) {
+      if (disposed || !shouldReconnectRef.current) {
         return;
       }
 
-      if (socketRef.current) {
-        socketRef.current.close();
+      const previousSocket = socketRef.current;
+      if (previousSocket) {
+        socketRef.current = null;
+        previousSocket.close();
       }
 
-      const socket = new WebSocket(url);
+      const url = buildLiveUpdatesUrl({
+        ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
+        ...(options.attemptId ? { attemptId: options.attemptId } : {}),
+        ...(Number.isInteger(lastSeenRuntimeRevisionRef.current)
+          ? { lastSeenRuntimeRevision: lastSeenRuntimeRevisionRef.current }
+          : {}),
+      });
+      const socket = new WebSocket(url ?? staticUrl);
       socketRef.current = socket;
 
       socket.onopen = () => {
+        if (disposed || socketRef.current !== socket) {
+          socket.close();
+          return;
+        }
         reconnectAttemptRef.current = 0;
         onConnectedRef.current?.();
       };
-      socket.onmessage = handleMessage;
+      socket.onmessage = (raw) => handleMessage(raw, socket);
       socket.onclose = () => {
+        if (socketRef.current !== socket) {
+          return;
+        }
         socketRef.current = null;
+        if (disposed) {
+          return;
+        }
         onDisconnectedRef.current?.();
         scheduleReconnect();
       };
@@ -236,6 +312,7 @@ export function useLiveUpdates(options: {
     connect();
 
     return () => {
+      disposed = true;
       shouldReconnectRef.current = false;
       if (reconnectTimerRef.current) {
         window.clearTimeout(reconnectTimerRef.current);
@@ -245,10 +322,11 @@ export function useLiveUpdates(options: {
         window.clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = null;
       }
-      lastEventRef.current = null;
+      queuedEventsRef.current = [];
       reconnectAttemptRef.current = 0;
-      socketRef.current?.close();
+      const socket = socketRef.current;
       socketRef.current = null;
+      socket?.close();
     };
-  }, [debounceMs, enabled, options.attemptId, options.lastSeenRuntimeRevision, options.scheduleId]);
+  }, [debounceMs, enabled, options.attemptId, options.scheduleId]);
 }

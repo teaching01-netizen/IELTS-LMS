@@ -146,18 +146,29 @@ export function StandardsTab({ config, onChange }: StandardsTabProps) {
       type: 'application/json',
     });
     const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `${(config.general.title || 'exam').trim().toLowerCase().replace(/\s+/g, '-') || 'exam'}-band-tables.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    try {
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${(config.general.title || 'exam').trim().toLowerCase().replace(/\s+/g, '-') || 'exam'}-band-tables.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   };
 
   const handleBandTableImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    // Reset the input so selecting the same file again still fires onChange.
     event.target.value = '';
 
     if (!file) {
+      setBandTableImportError('Select a band table JSON file to import.');
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      setBandTableImportError('Band table import must be a .json file.');
       return;
     }
 

@@ -16,7 +16,7 @@ interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>
   fullWidth?: boolean;
 }
 
-export function Select({
+export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(function Select({
   label,
   error,
   helperText,
@@ -26,7 +26,7 @@ export function Select({
   className = '',
   id,
   ...props
-}: SelectProps) {
+}: SelectProps, ref) {
   const generatedId = useId();
   const selectId = id || generatedId;
   
@@ -53,6 +53,7 @@ export function Select({
       <div className="relative">
         <select
           id={selectId}
+          ref={ref}
           className={`${baseStyles} ${stateStyles} ${widthStyle} ${className} pr-10`}
           {...props}
         >
@@ -102,4 +103,4 @@ export function Select({
       )}
     </div>
   );
-}
+});

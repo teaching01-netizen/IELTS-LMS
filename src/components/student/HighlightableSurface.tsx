@@ -9,6 +9,7 @@ interface HighlightableSurfaceProps {
   hint?: string | null | undefined;
   suppressTouchCallout?: boolean | undefined;
   highlightSelectionColor?: string | undefined;
+  announce?: string | null | undefined;
 }
 
 export function HighlightableSurface({
@@ -19,6 +20,7 @@ export function HighlightableSurface({
   hint = null,
   suppressTouchCallout = false,
   highlightSelectionColor,
+  announce = null,
 }: HighlightableSurfaceProps) {
   const Tag = as as any;
   // If this object identity changes on every render, React may re-apply innerHTML
@@ -43,8 +45,18 @@ export function HighlightableSurface({
         data-student-highlight-selection={highlightSelectionColor ? 'true' : undefined}
         data-student-question-callout-protected={suppressTouchCallout ? 'true' : undefined}
         style={surfaceStyle}
+        // S1-C9: highlightable copy is keyboard-focusable so the Alt+H
+        // shortcut (see useHighlightSurfaceV2) and SR users can reach it.
+        tabIndex={0}
+        aria-label="Highlightable text. Select text to highlight, or press Alt+H to highlight the current selection."
         dangerouslySetInnerHTML={innerHtml}
       />
+      {/* S1-C10: polite mode announcer, mirroring the StudentHeader highlight
+        mode status node — aria-live alone with role=status announces tool
+        results (highlight/erase/limit) without a second status role. */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {announce ?? ''}
+      </span>
       {hint ? (
         <div
           role="status"

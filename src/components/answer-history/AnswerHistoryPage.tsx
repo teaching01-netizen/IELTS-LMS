@@ -294,21 +294,21 @@ export function AnswerHistoryPage({
     }
 
     const intervalMs = Math.max(250, Math.floor(1000 / Math.max(0.25, playbackSpeed)));
+    const lastIndex = checkpoints.length - 1;
     const timer = window.setInterval(() => {
-      setReplayIndex((current) => {
-        if (current >= checkpoints.length - 1) {
-          window.clearInterval(timer);
-          setIsPlaying(false);
-          return current;
-        }
-        return current + 1;
-      });
+      setReplayIndex((current) => Math.min(current + 1, lastIndex));
     }, intervalMs);
 
     return () => {
       window.clearInterval(timer);
     };
   }, [isPlaying, checkpoints.length, playbackSpeed]);
+
+  useEffect(() => {
+    if (isPlaying && checkpoints.length > 0 && replayIndex >= checkpoints.length - 1) {
+      setIsPlaying(false);
+    }
+  }, [isPlaying, replayIndex, checkpoints.length]);
 
   const groupedTargets = useMemo(() => {
     const groups = new Map<string, AnswerHistoryQuestionSummary[]>();

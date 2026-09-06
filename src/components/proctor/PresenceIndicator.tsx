@@ -62,8 +62,45 @@ export function PresenceIndicator({ proctorPresence, currentProctorId, currentPr
   });
 
   const isCurrentUserPresent = activeProctors.some(p => p.proctorId === currentProctorId);
+  const otherActiveProctors = activeProctors.filter((p) => p.proctorId !== currentProctorId);
 
-  return null;
+  return (
+    <div className="flex items-center gap-2" role="status" aria-label="Proctor presence">
+      <div className="flex -space-x-2" aria-hidden={otherActiveProctors.length === 0}>
+        {activeProctors.slice(0, 5).map((entry) => (
+          <span
+            key={entry.proctorId}
+            title={`${entry.proctorName} · ${formatTime(entry.lastHeartbeat)}`}
+            className={`grid h-7 w-7 place-items-center rounded-full border-2 border-white text-[10px] font-semibold ${
+              entry.proctorId === currentProctorId
+                ? 'bg-slate-900 text-white'
+                : 'bg-slate-200 text-slate-700'
+            }`}
+          >
+            {getInitials(entry.proctorName)}
+          </span>
+        ))}
+      </div>
+      <span className="text-xs text-slate-500">
+        {activeProctors.length === 0
+          ? 'No proctors online'
+          : otherActiveProctors.length === 0
+            ? isCurrentUserPresent
+              ? 'Only you are here'
+              : `${activeProctors.length} proctor${activeProctors.length === 1 ? '' : 's'} here`
+            : `${otherActiveProctors[0]?.proctorName ?? 'Another proctor'}${otherActiveProctors.length > 1 ? ` +${otherActiveProctors.length - 1}` : ''} also here`}
+      </span>
+      {!isCurrentUserPresent && onJoin ? (
+        <button
+          type="button"
+          onClick={onJoin}
+          className="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700"
+        >
+          Join as {currentProctorName}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 interface CollisionWarningProps {

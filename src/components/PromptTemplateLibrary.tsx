@@ -57,10 +57,12 @@ export function PromptTemplateLibrary({
     setCustomCategory(template.category);
   };
 
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
   const handleDeleteTemplate = (templateId: string) => {
-    if (confirm('Are you sure you want to delete this template?')) {
-      onDeleteCustom(templateId);
-    }
+    // Inline Dialog confirmation instead of window.confirm so the flow stays
+    // inside React and remains keyboard-accessible/testable.
+    setPendingDeleteId(templateId);
   };
 
   const handleSaveOrUpdateCustom = () => {
@@ -76,22 +78,39 @@ export function PromptTemplateLibrary({
         category: customCategory,
         prompt: currentPrompt,
       });
-      setEditingTemplate(null);
+      resetCustomForm();
     } else {
       onSaveCustom({
-        id: `custom-template-${Date.now()}`,
+        id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? `custom-template-${crypto.randomUUID()}`
+          : `custom-template-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         title: customTitle.trim(),
         topic: customTopic,
         category: customCategory,
         prompt: currentPrompt,
         source: 'custom',
       });
+      resetCustomForm();
     }
+  };
+
+  // Cancelling (or closing the Dialog) resets the draft fields so a stale
+  // title/topic never leaks into the next custom template.
+  const resetCustomForm = () => {
+    setEditingTemplate(null);
     setCustomTitle('');
+    setCustomTopic('Education');
+    setCustomCategory('Task 2 Essay');
+  };
+
+  const handleDialogClose = () => {
+    resetCustomForm();
+    setPendingDeleteId(null);
+    onClose();
   };
 
   return (
-    <Dialog isOpen={isOpen} onClose={onClose} title="Prompt Templates" size="xl" className="rounded-3xl">
+    <Dialog isOpen={isOpen} onClose={handleDialogClose} title="Prompt Templates" size="xl" className="rounded-3xl">
       <div className="space-y-5">
         <div className="grid gap-3 md:grid-cols-[1fr_220px]">
           <input
@@ -210,10 +229,7 @@ export function PromptTemplateLibrary({
               </button>
               {editingTemplate && (
                 <button
-                  onClick={() => {
-                    setEditingTemplate(null);
-                    setCustomTitle('');
-                  }}
+                  onClick={resetCustomForm}
                   className="px-4 py-3 rounded-2xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-white transition-colors"
                 >
                   Cancel
@@ -223,6 +239,35 @@ export function PromptTemplateLibrary({
           </div>
         </div>
       </div>
+      <Dialog
+        isOpen={pendingDeleteId !== null}
+        onClose={() => setPendingDeleteId(null)}
+        title="Delete template?"
+        size="sm"
+        footer={
+          <>
+            <button
+              onClick={() => setPendingDeleteId(null)}
+              className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (pendingDeleteId) {
+                  onDeleteCustom(pendingDeleteId);
+                }
+                setPendingDeleteId(null);
+              }}
+              className="px-4 py-2 rounded-xl bg-red-600 text-sm font-semibold text-white hover:bg-red-700"
+            >
+              Delete
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600">This custom template will be permanently removed.</p>
+      </Dialog>
     </Dialog>
   );
 }

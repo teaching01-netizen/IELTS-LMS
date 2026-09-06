@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useId, useRef, useState, useCallback } from 'react';
 import { QuestionBlock, QuestionType, TFNGBlock as TFNGBlockType, ClozeBlock as ClozeBlockType, MatchingBlock as MatchingBlockType, MapBlock as MapBlockType, MultiMCQBlock as MultiMCQBlockType, SingleMCQBlock as SingleMCQBlockType, ShortAnswerBlock as ShortAnswerBlockType, SentenceCompletionBlock as SentenceCompletionBlockType, DiagramLabelingBlock as DiagramLabelingBlockType, FlowChartBlock as FlowChartBlockType, TableCompletionBlock as TableCompletionBlockType, NoteCompletionBlock as NoteCompletionBlockType, ClassificationBlock as ClassificationBlockType, MatchingFeaturesBlock as MatchingFeaturesBlockType, QuestionBankItem } from '../types';
 import { Plus, X, Search, Library } from 'lucide-react';
 import { TFNGBlock } from './blocks/TFNGBlock';
@@ -21,6 +21,7 @@ import { QuestionDetailModal } from './builder/QuestionDetailModal';
 import { questionBankService } from '../features/content-library/infrastructure/libraryGateway';
 import { cloneQuestionBlockWithNewIds } from '../utils/cloneExamContent';
 import { createId } from '../utils/idUtils';
+import { ConfirmModal } from './ConfirmModal';
 
 interface BlockWithNumbers {
   block: QuestionBlock;
@@ -104,6 +105,27 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
   const [selectedQuestionItem, setSelectedQuestionItem] = useState<QuestionBankItem | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [pendingDeleteBlockId, setPendingDeleteBlockId] = useState<string | null>(null);
+  const addModalTitleId = useId();
+  const bankModalTitleId = useId();
+  const addModalCloseRef = useRef<HTMLButtonElement>(null);
+
+  // S4-C5: Escape closes the QB overlays.
+  useEffect(() => {
+    if (!showAddModal && !showQuestionBank) return undefined;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        setShowAddModal(false);
+        setShowQuestionBank(false);
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [showAddModal, showQuestionBank]);
+
+  useEffect(() => {
+    if (showAddModal) addModalCloseRef.current?.focus();
+  }, [showAddModal]);
 
   useEffect(() => {
     const openModal = () => setShowAddModal(true);
@@ -137,13 +159,19 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
     [updateBlocks],
   );
 
-  const deleteBlock = useCallback(
-    (blockId: string) => {
-      setSelectedBlockId((current) => (current === blockId ? null : current));
-      updateBlocks((currentBlocks) => currentBlocks.filter((block) => block.id !== blockId));
-    },
-    [updateBlocks],
-  );
+  // C7: deleteBlock prop is a request that opens the confirm modal; the modal
+  // Confirm performs the actual removal. Stable identity preserves memo boundaries.
+  const requestDeleteBlock = useCallback((blockId: string) => {
+    setPendingDeleteBlockId(blockId);
+  }, []);
+
+  const confirmPendingDeleteBlock = useCallback(() => {
+    if (!pendingDeleteBlockId) return;
+    const targetId = pendingDeleteBlockId;
+    setPendingDeleteBlockId(null);
+    setSelectedBlockId((current) => (current === targetId ? null : current));
+    updateBlocks((currentBlocks) => currentBlocks.filter((block) => block.id !== targetId));
+  }, [updateBlocks, pendingDeleteBlockId]);
 
   const moveBlock = useCallback(
     (blockId: string, direction: 'up' | 'down') => {
@@ -175,7 +203,9 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
   const handleAddQuestionFromBank = (item: QuestionBankItem) => {
     const newBlock = cloneQuestionBlockWithNewIds(item.block);
     updateBlocks((currentBlocks) => [...currentBlocks, newBlock]);
-    questionBankService.incrementUsageCount(item.id);
+    void questionBankService.incrementUsageCount(item.id).catch((error) => {
+      console.error('[question-bank] usage tracking failed', error);
+    });
     setSelectedQuestionItem(null);
     setShowQuestionBank(false);
   };
@@ -183,7 +213,9 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
   const handleAddQuestionFromDetail = (item: QuestionBankItem) => {
     const newBlock = cloneQuestionBlockWithNewIds(item.block);
     updateBlocks((currentBlocks) => [...currentBlocks, newBlock]);
-    questionBankService.incrementUsageCount(item.id);
+    void questionBankService.incrementUsageCount(item.id).catch((error) => {
+      console.error('[question-bank] usage tracking failed', error);
+    });
     setSelectedQuestionItem(null);
   };
 
@@ -234,6 +266,11 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
   const selectedBlockHasSubAnswerData = selectedBlock
     ? blockHasSubAnswerData(selectedBlock)
     : false;
+
+  // C7: derive modal text from the pending block (type + question range).
+  const pendingDeleteEntry = pendingDeleteBlockId
+    ? blocksWithNumbers.find((entry) => entry.block.id === pendingDeleteBlockId) ?? null
+    : null;
 
   const handleAddQuestionToBlock = (blockId: string) => {
     updateBlocks((currentBlocks) => {
@@ -508,7 +545,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -522,7 +559,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -536,7 +573,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -550,7 +587,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -564,7 +601,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -578,7 +615,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -592,7 +629,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -606,7 +643,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -620,7 +657,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -634,7 +671,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -648,7 +685,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -662,7 +699,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -676,7 +713,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -690,7 +727,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             startNum={startNum}
             endNum={endNum}
             updateBlock={updateBlock}
-            deleteBlock={deleteBlock}
+            deleteBlock={requestDeleteBlock}
             moveBlock={moveBlock}
             errors={blockErrors}
           />
@@ -702,19 +739,25 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
 
     return (
       <div
-        onClick={() => setSelectedBlockId(block.id)}
-        className={`cursor-pointer transition-all ${isSelected ? 'ring-2 ring-green-500 ring-offset-2' : 'hover:ring-2 hover:ring-gray-300 hover:ring-offset-1'}`}
+        className={`transition-all rounded-sm ${isSelected ? 'ring-2 ring-green-500 ring-offset-2' : 'hover:ring-2 hover:ring-gray-300 hover:ring-offset-1'}`}
       >
-        {blockContent}
+        <button
+          type="button"
+          onClick={() => setSelectedBlockId(block.id)}
+          aria-pressed={isSelected}
+          aria-label={`Select question block ${startNum} to ${endNum}`}
+          className="block w-full text-left cursor-pointer rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2"
+        >
+          {blockContent}
+        </button>
         {INLINE_ADD_SUPPORTED_BLOCK_TYPES.has(block.type) ? (
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleAddQuestionToBlock(block.id);
-            }}
-            className="mt-3 w-full bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-2 rounded-sm text-xs font-medium flex items-center justify-center gap-1 transition-colors"
+            type="button"
+            onClick={() => handleAddQuestionToBlock(block.id)}
+            aria-label={`Add question to block ${startNum} to ${endNum}`}
+            className="mt-3 w-full min-h-6 bg-gray-100 text-gray-700 hover:bg-gray-200 px-3 py-2 rounded-sm text-xs font-medium flex items-center justify-center gap-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-1"
           >
-            <Plus size={12} /> Add Question
+            <Plus size={12} aria-hidden="true" /> Add Question
           </button>
         ) : null}
       </div>
@@ -779,13 +822,14 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
       </div>
 
       {showAddModal && (
-        <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-[1px] flex items-center justify-center z-50 p-4">
+        <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-[1px] flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby={addModalTitleId}>
           <div className="bg-white rounded-sm shadow-[0_8px_16px_-4px_rgba(9,30,66,0.25),0_0_1px_rgba(9,30,66,0.31)] w-full max-w-md flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between px-6 py-4">
-              <h3 className="font-semibold text-gray-900 text-lg">Add question block</h3>
+              <h3 id={addModalTitleId} className="font-semibold text-gray-900 text-lg">Add question block</h3>
               <button
+                ref={addModalCloseRef}
                 onClick={() => setShowAddModal(false)}
-                className="text-gray-500 hover:text-gray-700 transition-colors p-1 hover:bg-gray-100 rounded-sm"
+                className="text-gray-500 hover:text-gray-700 transition-colors p-1 min-w-6 min-h-6 hover:bg-gray-100 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1"
                 aria-label="Close add question block dialog"
               >
                 <X size={20} />
@@ -827,7 +871,7 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 bg-white">
               <button
                 onClick={() => setShowAddModal(false)}
-                className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-sm transition-colors"
+                className="px-3 py-1.5 min-h-6 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1"
               >
                 Cancel
               </button>
@@ -837,7 +881,8 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
       )}
 
       {showQuestionBank && (
-        <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-[1px] flex items-center justify-center z-50 p-4">
+        <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-[1px] flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby={bankModalTitleId}>
+          <span id={bankModalTitleId} className="sr-only">Question bank library</span>
           <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl h-[80vh] flex flex-col">
             <QuestionBankLibrary
               onSelectQuestion={handleSelectQuestion}
@@ -855,6 +900,20 @@ export const QuestionBuilderPane = React.memo(function QuestionBuilderPane({
           onClose={() => setSelectedQuestionItem(null)}
         />
       )}
+
+      <ConfirmModal
+        isOpen={pendingDeleteEntry !== null}
+        onClose={() => setPendingDeleteBlockId(null)}
+        onConfirm={confirmPendingDeleteBlock}
+        title="Delete question block?"
+        description={
+          pendingDeleteEntry
+            ? `This removes the ${pendingDeleteEntry.block.type} block (questions ${pendingDeleteEntry.startNum}-${pendingDeleteEntry.endNum}). This cannot be undone.`
+            : 'This removes the question block. This cannot be undone.'
+        }
+        confirmLabel="Delete block"
+        tone="danger"
+      />
     </div>
   );
 });

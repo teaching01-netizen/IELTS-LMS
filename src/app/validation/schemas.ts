@@ -15,9 +15,9 @@ export const examSchemas = {
     id: commonSchemas.id,
     slug: commonSchemas.nonEmptyString,
     title: commonSchemas.nonEmptyString,
-    type: z.enum(['Academic', 'General Training']),
-    status: z.enum(['draft', 'in_review', 'approved', 'rejected', 'scheduled', 'published', 'archived', 'unpublished']),
-    visibility: z.enum(['private', 'organization', 'public']),
+    type: z.enum(['Academic', 'General Training']).catch('Academic'),
+    status: z.enum(['draft', 'in_review', 'approved', 'rejected', 'scheduled', 'published', 'archived', 'unpublished']).catch('draft'),
+    visibility: z.enum(['private', 'organization', 'public']).catch('private'),
     owner: commonSchemas.nonEmptyString,
     createdAt: commonSchemas.isoDate,
     updatedAt: commonSchemas.isoDate,
@@ -68,9 +68,9 @@ export const examSchemas = {
       'version_created',
       'version_restored',
       'permissions_updated',
-    ]),
-    fromState: z.enum(['draft', 'in_review', 'approved', 'rejected', 'scheduled', 'published', 'archived', 'unpublished']).optional(),
-    toState: z.enum(['draft', 'in_review', 'approved', 'rejected', 'scheduled', 'published', 'archived', 'unpublished']).optional(),
+    ]).catch('created'),
+    fromState: z.enum(['draft', 'in_review', 'approved', 'rejected', 'scheduled', 'published', 'archived', 'unpublished']).optional().catch(undefined),
+    toState: z.enum(['draft', 'in_review', 'approved', 'rejected', 'scheduled', 'published', 'archived', 'unpublished']).optional().catch(undefined),
     timestamp: commonSchemas.isoDate,
     payload: z.record(z.string(), z.unknown()).optional(),
   }),
@@ -86,13 +86,13 @@ export const sessionSchemas = {
     name: commonSchemas.nonEmptyString,
     email: commonSchemas.email,
     scheduleId: commonSchemas.id,
-    status: z.enum(['active', 'warned', 'paused', 'terminated', 'idle', 'connecting']),
-    currentSection: z.enum(['listening', 'reading', 'writing', 'speaking']),
+    status: z.enum(['active', 'warned', 'paused', 'terminated', 'idle', 'connecting']).catch('active'),
+    currentSection: z.enum(['listening', 'reading', 'writing', 'speaking']).catch('reading'),
     timeRemaining: z.number().nonnegative(),
     violations: z.array(z.object({
       id: commonSchemas.id,
       type: z.string(),
-      severity: z.enum(['low', 'medium', 'high', 'critical']),
+      severity: z.enum(['low', 'medium', 'high', 'critical']).catch('medium'),
       timestamp: commonSchemas.isoDate,
       description: z.string(),
     })),
@@ -114,8 +114,8 @@ export const sessionSchemas = {
     startTime: commonSchemas.isoDate,
     endTime: commonSchemas.isoDate,
     plannedDurationMinutes: z.number().positive(),
-    deliveryMode: z.enum(['proctor_start']),
-    status: z.enum(['scheduled', 'live', 'completed', 'cancelled']),
+    deliveryMode: z.enum(['proctor_start']).catch('proctor_start'),
+    status: z.enum(['scheduled', 'live', 'completed', 'cancelled']).catch('scheduled'),
     createdAt: commonSchemas.isoDate,
     createdBy: commonSchemas.nonEmptyString,
     updatedAt: commonSchemas.isoDate,
@@ -138,17 +138,17 @@ export const gradingSchemas = {
     cohortName: commonSchemas.nonEmptyString,
     submittedAt: commonSchemas.isoDate,
     timeSpentSeconds: z.number().nonnegative(),
-    gradingStatus: z.enum(['not_submitted', 'submitted', 'in_progress', 'grading_complete', 'ready_to_release', 'released', 'reopened']),
+    gradingStatus: z.enum(['not_submitted', 'submitted', 'in_progress', 'grading_complete', 'ready_to_release', 'released', 'reopened']).catch('submitted'),
     assignedTeacherId: commonSchemas.id.optional(),
     assignedTeacherName: z.string().optional(),
     isFlagged: z.boolean(),
     isOverdue: z.boolean(),
     dueDate: commonSchemas.isoDate.optional(),
     sectionStatuses: z.object({
-      listening: z.enum(['pending', 'auto_graded', 'needs_review', 'in_review', 'finalized', 'reopened']),
-      reading: z.enum(['pending', 'auto_graded', 'needs_review', 'in_review', 'finalized', 'reopened']),
-      writing: z.enum(['pending', 'auto_graded', 'needs_review', 'in_review', 'finalized', 'reopened']),
-      speaking: z.enum(['pending', 'auto_graded', 'needs_review', 'in_review', 'finalized', 'reopened']),
+      listening: z.enum(['pending', 'auto_graded', 'needs_review', 'in_review', 'finalized', 'reopened']).catch('pending'),
+      reading: z.enum(['pending', 'auto_graded', 'needs_review', 'in_review', 'finalized', 'reopened']).catch('pending'),
+      writing: z.enum(['pending', 'auto_graded', 'needs_review', 'in_review', 'finalized', 'reopened']).catch('pending'),
+      speaking: z.enum(['pending', 'auto_graded', 'needs_review', 'in_review', 'finalized', 'reopened']).catch('pending'),
     }),
     createdAt: commonSchemas.isoDate,
     updatedAt: commonSchemas.isoDate,
@@ -165,7 +165,7 @@ export const gradingSchemas = {
     grammarNotes: z.string().optional(),
     overallBand: z.number().min(0).max(9),
     wordCount: z.number().nonnegative(),
-    gradingStatus: z.enum(['pending', 'auto_graded', 'needs_review', 'in_review', 'finalized', 'reopened']),
+    gradingStatus: z.enum(['pending', 'auto_graded', 'needs_review', 'in_review', 'finalized', 'reopened']).catch('pending'),
     internalNotes: z.string().optional(),
   }),
 };
@@ -174,10 +174,37 @@ export const gradingSchemas = {
  * Form validation schemas
  */
 export const formSchemas = {
-  // Login form
+  // Login form — mirrors LoginPage fields (email + password).
   loginForm: z.object({
     email: commonSchemas.email,
+    password: z.string().min(1, 'Password is required'),
+  }),
+
+  // Account activation form — mirrors ActivateAccountPage (token + password
+  // + confirm password).
+  activationForm: z.object({
+    token: commonSchemas.nonEmptyString,
     password: z.string().min(8, 'Password must be at least 8 characters'),
+    confirmPassword: z.string().min(1, 'Please confirm your password'),
+    displayName: z.string().optional(),
+  }).refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  }),
+
+  // Password reset request form — mirrors PasswordResetRequestPage.
+  passwordResetRequestForm: z.object({
+    email: commonSchemas.email,
+  }),
+
+  // Password reset completion form — mirrors PasswordResetCompletePage.
+  passwordResetCompleteForm: z.object({
+    token: commonSchemas.nonEmptyString,
+    password: z.string().min(8, 'Password must be at least 8 characters'),
+    confirmPassword: z.string().min(1, 'Please confirm your password'),
+  }).refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
   }),
 
   // Exam creation form
@@ -202,12 +229,14 @@ export const formSchemas = {
     autoStop: z.boolean(),
   }),
 
-  // Student registration form
+  // Student registration form — mirrors StudentEntryRoute check-in fields
+  // (wcode + email + student name + nickname + IELTS course).
   studentRegistration: z.object({
-    name: commonSchemas.nonEmptyString.min(2, 'Name must be at least 2 characters'),
+    wcode: z.string().regex(/^W\d{6}$/i, 'Wcode must look like W123456').transform((value) => value.trim().toUpperCase()),
     email: commonSchemas.email,
-    studentId: commonSchemas.nonEmptyString,
-    cohortName: commonSchemas.nonEmptyString,
+    studentName: commonSchemas.nonEmptyString.min(2, 'Name must be at least 2 characters'),
+    nickname: commonSchemas.nonEmptyString.max(50, 'Nickname must be 50 characters or less'),
+    ieltsCourse: commonSchemas.nonEmptyString,
   }),
 };
 
@@ -222,7 +251,7 @@ export const querySchemas = {
 
   sorting: z.object({
     sortBy: z.string().optional(),
-    sortOrder: z.enum(['asc', 'desc']).default('asc'),
+    sortOrder: z.enum(['asc', 'desc']).catch('asc').default('asc'),
   }),
 
   filtering: z.object({

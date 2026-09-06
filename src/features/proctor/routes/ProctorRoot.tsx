@@ -7,17 +7,20 @@ import { useProctorRouteController } from '@proctor/hooks/useProctorRouteControl
 /**
  * ProctorRoot Route
  *
- * Active proctor delivery is a single monitoring route. In-progress settings
- * are intentionally excluded from the active route tree until they own real UI.
+ * Active proctor delivery owns both monitoring and schedule-scoped automatic
+ * violation-response configuration.
  */
 export function ProctorRoot() {
   const navigate = useNavigate();
   const {
     alerts,
     auditLogs,
+    degradedLiveMode,
     error,
     isLoading,
+    lastSuccessfulRefreshAt,
     notes,
+    wsConnected,
     runtimeSnapshots,
     schedules,
     scheduleMetrics,
@@ -33,8 +36,10 @@ export function ProctorRoot() {
     reload,
     setAlerts,
     setNotes,
+    setViolationRules,
     setSessions,
-  } = useProctorRouteController({ providerKey: 'ielts' });
+    violationRules,
+  } = useProctorRouteController();
 
   if (isLoading) {
     return <LoadingSurface label="Loading Proctor..." />;
@@ -62,7 +67,11 @@ export function ProctorRoot() {
       alerts={alerts}
       auditLogs={auditLogs}
       notes={notes}
+      violationRules={violationRules}
       connectionError={error}
+      degradedLiveMode={degradedLiveMode}
+      wsConnected={wsConnected}
+      lastSuccessfulRefreshAt={lastSuccessfulRefreshAt}
       selectedScheduleId={selectedScheduleId}
       onSelectScheduleId={setSelectedScheduleId}
       onExit={() => navigate('/admin')}
@@ -70,6 +79,7 @@ export function ProctorRoot() {
       onUpdateSessions={setSessions}
       onUpdateAlerts={setAlerts}
       onUpdateNotes={setNotes}
+      onUpdateRules={setViolationRules}
       onStartScheduledSession={handleStartScheduledSession}
       onPauseCohort={handlePauseCohort}
       onResumeCohort={handleResumeCohort}

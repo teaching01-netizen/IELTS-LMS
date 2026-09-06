@@ -69,6 +69,22 @@ describe('useReviewRouteController', () => {
     expect(mockGetVersionById).not.toHaveBeenCalled();
   });
 
+  it('leaves the controller in a not-found state when the exam is missing', async () => {
+    mockGetExamById.mockReset().mockResolvedValue(null);
+
+    const { result } = renderHook(() => useReviewRouteController('exam-1'));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.exam).toBeUndefined();
+    expect(mockGetVersionSummaries).not.toHaveBeenCalled();
+    expect(mockGetSchedulesByExam).not.toHaveBeenCalled();
+    expect(mockGetPublishReadiness).not.toHaveBeenCalled();
+  });
+
   it('loads the draft content lazily when scheduling opens', async () => {
     const { result } = renderHook(() => useReviewRouteController('exam-1'));
 

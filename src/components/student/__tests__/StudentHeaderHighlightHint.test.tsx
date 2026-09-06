@@ -53,7 +53,7 @@ describe('StudentHeader highlight tool', () => {
 
     const trigger = screen.getByRole('button', { name: 'Choose highlight color' });
     fireEvent.click(trigger);
-    for (const name of ['Yellow', 'Pink', 'Green', 'Blue', 'Purple']) {
+    for (const name of ['Yellow', 'Amber', 'Green', 'Blue', 'Purple']) {
       expect(screen.getByRole('button', { name })).toHaveClass('min-h-11');
     }
     fireEvent.click(screen.getByRole('button', { name: 'Blue' }));

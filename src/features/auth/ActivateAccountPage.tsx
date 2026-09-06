@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { LoadingSurface } from '@components/ui';
 import { resolvePostLoginPath, resolveRoleLandingPath, useAuthSession } from './authSession';
+import { activationFormSchema } from './validation/authForms';
 
 function readToken(searchParams: URLSearchParams) {
   return searchParams.get('token') ?? '';
@@ -13,9 +14,11 @@ export function ActivateAccountPage() {
   const { activateAccount, session, status } = useAuthSession();
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const token = useMemo(() => readToken(searchParams), [searchParams]);
+  const inFlightRef = useRef(false);
 
   if (status === 'loading') {
     return <LoadingSurface label="Loading Session..." />;
@@ -27,22 +30,33 @@ export function ActivateAccountPage() {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!token) {
-      setError('Account activation token is missing.');
+    if (isSubmitting || inFlightRef.current) {
+      return;
+    }
+    const parsed = activationFormSchema.safeParse({
+      token,
+      password,
+      confirmPassword,
+      displayName,
+    });
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Check the form and try again.');
       return;
     }
 
+    inFlightRef.current = true;
     setIsSubmitting(true);
     setError(null);
 
     try {
-      const session = await activateAccount(token, password, displayName || undefined);
-      navigate(resolvePostLoginPath(session.user.role), { replace: true });
+      const nextSession = await activateAccount(parsed.data.token, parsed.data.password, parsed.data.displayName || undefined);
+      navigate(resolvePostLoginPath(nextSession.user.role), { replace: true });
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : 'Account activation failed.',
       );
     } finally {
+      inFlightRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -83,6 +97,21 @@ export function ActivateAccountPage() {
               onChange={(event) => setPassword(event.target.value)}
               required
               placeholder="Create a password"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 shadow-sm outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="activation-confirm-password" className="mb-2 block text-sm font-medium text-slate-700">
+              Confirm Password
+            </label>
+            <input
+              id="activation-confirm-password"
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              required
+              placeholder="Confirm your password"
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 shadow-sm outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
             />
           </div>

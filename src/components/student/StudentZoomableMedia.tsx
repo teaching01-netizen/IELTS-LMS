@@ -32,9 +32,13 @@ export function StudentZoomableMedia({
   zoomStep = 0.2,
   renderOverlay,
 }: StudentZoomableMediaProps) {
+  // Memoize on contents, not array identity: callers typically pass a freshly
+  // built array each render, which would defeat the memo and retrigger effects.
+  const sourcesKey = sources.join('\u0000');
   const normalizedSources = useMemo(
     () => sources.map((source) => source.trim()).filter(Boolean),
-    [sources],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sourcesKey],
   );
   const [sourceIndex, setSourceIndex] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
@@ -45,13 +49,24 @@ export function StudentZoomableMedia({
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const triggerButtonRef = useRef<HTMLButtonElement | null>(null);
+  const focusRestoreTimerRef = useRef<number | null>(null);
 
-  const currentSource = normalizedSources[sourceIndex] ?? '';
+  const safeSourceIndex = Math.min(sourceIndex, Math.max(0, normalizedSources.length - 1));
+  const currentSource = normalizedSources[safeSourceIndex] ?? '';
   const hasMultipleSources = normalizedSources.length > 1;
 
   useEffect(() => {
     setSourceIndex(0);
   }, [normalizedSources]);
+
+  useEffect(() => {
+    return () => {
+      if (focusRestoreTimerRef.current !== null) {
+        window.clearTimeout(focusRestoreTimerRef.current);
+        focusRestoreTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setIntrinsicSize(null);
@@ -95,6 +110,7 @@ export function StudentZoomableMedia({
     };
 
     document.addEventListener('keydown', handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
     const timer = window.setTimeout(() => {
@@ -103,7 +119,7 @@ export function StudentZoomableMedia({
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = '';
+      document.body.style.overflow = previousOverflow;
       window.clearTimeout(timer);
     };
   }, [isOpen]);
@@ -156,7 +172,13 @@ export function StudentZoomableMedia({
 
   const handleClose = () => {
     setIsOpen(false);
-    window.setTimeout(() => triggerButtonRef.current?.focus(), 0);
+    if (focusRestoreTimerRef.current !== null) {
+      window.clearTimeout(focusRestoreTimerRef.current);
+    }
+    focusRestoreTimerRef.current = window.setTimeout(() => {
+      focusRestoreTimerRef.current = null;
+      triggerButtonRef.current?.focus();
+    }, 0);
   };
 
   const handleImageError = () => {

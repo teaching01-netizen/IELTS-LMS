@@ -1,381 +1,252 @@
 import { expect, test, type Page } from '@playwright/test';
-import {
-  BUILDER_STORAGE_STATE_PATH,
-  readBackendE2EManifest,
-} from './support/backendE2e';
+import { BUILDER_STORAGE_STATE_PATH } from './support/backendE2e';
 
 test.use({ storageState: BUILDER_STORAGE_STATE_PATH });
 
-// Helper function to create exam via API
-async function createExamViaAPI(page: Page, title: string): Promise<string> {
-  const response = await page.request.post('/api/v1/exams', {
-    data: {
-      title: title,
-      type: 'Academic',
-      config: {
-        general: {
-          preset: 'Academic',
-          summary: 'Test exam for MySQL validation',
-          instructions: 'Follow instructions',
-        },
-        modules: {
-          reading: { enabled: true, label: 'Reading', passageCount: 1, order: 1, gapAfter: 0 },
-          listening: { enabled: false, label: 'Listening', partCount: 0, order: 0, gapAfter: 0 },
-          writing: { enabled: true, label: 'Writing', order: 2, gapAfter: 0 },
-          speaking: { enabled: false, label: 'Speaking', order: 3, gapAfter: 0 },
-        },
-        standards: {
-          passageWordCount: { optimalMin: 700, optimalMax: 1000, warningMin: 500, warningMax: 1200 },
-          writingTasks: {
-            task1: { minWords: 150, recommendedTime: 20 },
-            task2: { minWords: 250, recommendedTime: 40 },
-          },
-          rubricDeviationThreshold: 10,
-          rubricWeights: {
-            writing: { taskResponse: 25, coherence: 25, lexical: 25, grammar: 25 },
-            speaking: { fluency: 25, lexical: 25, grammar: 25, pronunciation: 25 },
-          },
-          bandScoreTables: {
-            listening: { 39: 9.0, 37: 8.5, 35: 8.0, 32: 7.5, 30: 7.0, 26: 6.5, 23: 6.0, 18: 5.5, 16: 5.0, 13: 4.5, 10: 4.0, 6: 3.5, 4: 3.0, 2: 2.5 },
-            readingAcademic: { 39: 9.0, 37: 8.5, 35: 8.0, 33: 7.5, 30: 7.0, 27: 6.5, 23: 6.0, 19: 5.5, 15: 5.0, 13: 4.5, 10: 4.0, 8: 3.5, 6: 3.0, 4: 2.5 },
-            readingGeneralTraining: { 40: 9.0, 39: 8.5, 37: 8.0, 36: 7.5, 34: 7.0, 32: 6.5, 30: 6.0, 27: 5.5, 23: 5.0, 19: 4.5, 15: 4.0, 12: 3.5, 9: 3.0, 6: 2.5 },
-          },
-        },
-        timing: {
-          sectionDurations: { listening: 30, reading: 60, writing: 60, speaking: 15 },
-          gapsAfterSections: { listening: 0, reading: 0, writing: 0, speaking: 0 },
-          sectionOrder: ['listening', 'reading', 'writing', 'speaking'],
-          runtimePolicies: {
-            autoSubmit: true,
-            lockAfterSubmit: true,
-            allowPause: false,
-            showWarnings: true,
-            warningThreshold: 3,
-          },
-        },
-        security: {
-          proctoringControls: { webcam: true, audio: true, screen: true },
-          screenDetection: {
-            detectSecondaryScreen: true,
-          },
-          inputProtection: { preventAutofill: true, preventAutocorrect: true },
-          tabSwitchRule: 'warn',
-          heartbeat: {
-            interval: 15,
-            missThreshold: 3,
-            warningThreshold: 2,
-            hardBlockThreshold: 4,
-          },
-          offlineBehavior: {
-            pauseOnOffline: true,
-            bufferAnswersOffline: true,
-            requireDeviceContinuity: true,
-          },
-          severityThresholds: { low: 5, medium: 3, high: 2 },
-          criticalAction: 'terminate',
-        },
+type ApiPayload<T> = T | { data: T };
+
+interface ExamSnapshot {
+  id: string;
+  title: string;
+  status: string;
+  revision: number;
+  currentDraftVersionId?: string | null;
+  currentPublishedVersionId?: string | null;
+}
+
+interface VersionSnapshot {
+  id: string;
+  examId: string;
+  revision: number;
+  isDraft: boolean;
+  isPublished: boolean;
+  contentSnapshot?: unknown;
+}
+
+interface ValidationSnapshot {
+  canPublish: boolean;
+  errors: Array<{ field: string; message: string }>;
+}
+
+interface ApiResponse {
+  status: number;
+  payload: unknown;
+}
+
+function unwrap<T>(payload: ApiPayload<T>): T {
+  if (typeof payload === 'object' && payload !== null && 'data' in payload) {
+    return payload.data;
+  }
+  return payload as T;
+}
+
+async function writeApi(
+  page: Page,
+  method: 'DELETE' | 'PATCH' | 'POST',
+  endpoint: string,
+  body?: Record<string, unknown>,
+): Promise<ApiResponse> {
+  const cookies = await page.context().cookies();
+  const csrfCookieNames = [
+    process.env['CSRF_COOKIE_NAME'],
+    process.env['AUTH_CSRF_COOKIE_NAME'],
+    '__Host-csrf',
+    'csrf',
+  ].filter((name): name is string => Boolean(name));
+  const csrf = cookies.find((cookie) => csrfCookieNames.includes(cookie.name))?.value;
+  if (!csrf) {
+    throw new Error('Builder storage state did not contain a CSRF cookie.');
+  }
+
+  return page.evaluate(async ({ endpoint: requestEndpoint, method: requestMethod, body: requestBody, csrf: token }) => {
+    const response = await fetch(requestEndpoint, {
+      method: requestMethod,
+      credentials: 'include',
+      headers: {
+        'content-type': 'application/json',
+        'x-csrf-token': token,
       },
-      author: 'E2E MySQL Test',
-    },
+      body: requestBody === undefined ? undefined : JSON.stringify(requestBody),
+    });
+    const text = await response.text();
+    let payload: unknown = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text) as unknown;
+      } catch {
+        payload = text;
+      }
+    }
+    return { status: response.status, payload };
+  }, { endpoint, method, body, csrf });
+}
+
+async function readApi(page: Page, endpoint: string): Promise<ApiResponse> {
+  return page.evaluate(async (requestEndpoint) => {
+    const response = await fetch(requestEndpoint, { credentials: 'include' });
+    return { status: response.status, payload: await response.json() as unknown };
+  }, endpoint);
+}
+
+async function createExam(page: Page, title: string): Promise<ExamSnapshot> {
+  const response = await writeApi(page, 'POST', '/api/v1/exams', {
+    slug: `e2e-mysql-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    title,
+    examType: 'Academic',
+    visibility: 'organization',
+    providerKey: 'ielts',
   });
-
-  if (!response.ok()) {
-    throw new Error(`Failed to create exam: ${response.status()} ${await response.text()}`);
-  }
-
-  const data = await response.json();
-  return data.data.id;
+  expect(response.status, JSON.stringify(response.payload)).toBe(201);
+  return unwrap<ExamSnapshot>(response.payload as ApiPayload<ExamSnapshot>);
 }
 
-// Helper function to update exam draft
-async function updateExamDraft(page: Page, examId: string, updates: any): Promise<void> {
-  const response = await page.request.patch(`/api/v1/exams/${examId}/draft`, {
-    data: updates,
-  });
-
-  if (!response.ok()) {
-    throw new Error(`Failed to update exam draft: ${response.status()} ${await response.text()}`);
-  }
+async function getExam(page: Page, examId: string): Promise<ExamSnapshot> {
+  const response = await readApi(page, `/api/v1/exams/${examId}`);
+  expect(response.status, JSON.stringify(response.payload)).toBe(200);
+  return unwrap<ExamSnapshot>(response.payload as ApiPayload<ExamSnapshot>);
 }
 
-// Helper function to publish exam
-async function publishExam(page: Page, examId: string): Promise<void> {
-  const response = await page.request.post(`/api/v1/exams/${examId}/publish`, {
-    data: {
-      publishNotes: 'Published via E2E MySQL test',
-    },
-  });
-
-  if (!response.ok()) {
-    throw new Error(`Failed to publish exam: ${response.status()} ${await response.text()}`);
-  }
-}
-
-// Helper function to get exam from DB
-async function getExamFromDB(page: Page, examId: string): Promise<any> {
-  const response = await page.request.get(`/api/v1/exams/${examId}`);
-
-  if (!response.ok()) {
-    throw new Error(`Failed to get exam: ${response.status()} ${await response.text()}`);
-  }
-
-  const data = await response.json();
-  return data.data;
-}
-
-test.describe('Exam Lifecycle with Real MySQL Database', () => {
+test.describe('Exam lifecycle against the Go/MySQL API', () => {
   test.skip(({ browserName }) => browserName === 'webkit', 'Skipping webkit due to storage state auth issue');
 
-  test('complete flow: create -> edit -> validate -> publish -> re-edit', async ({ page }) => {
-    console.log('=== Starting Complete Exam Lifecycle Test with MySQL ===');
-
-    // Step 1: Create exam via API
-    console.log('Step 1: Creating exam via API...');
-    const examTitle = `MySQL Test Exam ${Date.now()}`;
-    const examId = await createExamViaAPI(page, examTitle);
-    console.log(`Created exam with ID: ${examId}`);
-
-    // Verify exam was created in DB
-    const examFromDB = await getExamFromDB(page, examId);
-    expect(examFromDB.id).toBe(examId);
-    expect(examFromDB.title).toBe(examTitle);
-    expect(examFromDB.status).toBe('draft');
-    console.log('✓ Exam verified in MySQL database');
-
-    // Step 2: Edit exam - update basic info
-    console.log('Step 2: Editing exam...');
-    await updateExamDraft(page, examId, {
-      title: `${examTitle} (Edited)`,
-      config: {
-        ...examFromDB.config,
-        general: {
-          ...examFromDB.config.general,
-          summary: 'Updated summary for MySQL validation',
-          instructions: 'Updated instructions for MySQL validation',
-        },
-      },
-    });
-
-    // Verify edit was persisted to DB
-    const editedExam = await getExamFromDB(page, examId);
-    expect(editedExam.title).toBe(`${examTitle} (Edited)`);
-    expect(editedExam.config.general.summary).toBe('Updated summary for MySQL validation');
-    console.log('✓ Edit verified in MySQL database');
-
-    // Step 3: Add content - reading passage with questions
-    console.log('Step 3: Adding reading passage content...');
-    const passageUpdate = {
-      reading_passages: [
-        {
-          id: `passage-${Date.now()}`,
-          title: 'Test Passage',
-          content: 'This is a test passage for MySQL validation. ' + 'The study of database systems has evolved significantly. '.repeat(30),
-          blocks: [
-            {
-              id: `block-${Date.now()}`,
-              type: 'SINGLE_MCQ',
-              instruction: 'Choose the correct answer',
-              questions: [
-                {
-                  id: `q1-${Date.now()}`,
-                  prompt: 'What is the main topic?',
-                  options: [
-                    { id: 'opt1', text: 'Database systems', correct: true },
-                    { id: 'opt2', text: 'Web development', correct: false },
-                    { id: 'opt3', text: 'Mobile apps', correct: false },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    };
-
-    await updateExamDraft(page, examId, passageUpdate);
-    const examWithContent = await getExamFromDB(page, examId);
-    expect(examWithContent.reading_passages).toBeDefined();
-    expect(examWithContent.reading_passages.length).toBeGreaterThan(0);
-    console.log('✓ Content added and verified in MySQL database');
-
-    // Step 4: Add writing tasks
-    console.log('Step 4: Adding writing tasks...');
-    const writingUpdate = {
-      writing_tasks: [
-        {
-          id: `task1-${Date.now()}`,
-          taskNumber: 1,
-          prompt: 'Describe the graph showing database usage trends',
-          minWords: 150,
-          recommendedTime: 20,
-        },
-        {
-          id: `task2-${Date.now()}`,
-          taskNumber: 2,
-          prompt: 'Discuss the advantages of MySQL for IELTS testing',
-          minWords: 250,
-          recommendedTime: 40,
-        },
-      ],
-    };
-
-    await updateExamDraft(page, examId, writingUpdate);
-    const examWithWriting = await getExamFromDB(page, examId);
-    expect(examWithWriting.writing_tasks).toBeDefined();
-    expect(examWithWriting.writing_tasks.length).toBe(2);
-    console.log('✓ Writing tasks added and verified in MySQL database');
-
-    // Step 5: Validate exam - check validation logic
-    console.log('Step 5: Validating exam...');
-    await page.goto(`/builder/${examId}/review`);
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(2000);
-
-    // Check if validation status is displayed
-    const validationText = page.getByText(/validation/i);
-    const validationVisible = await validationText.isVisible().catch(() => false);
-
-    if (validationVisible) {
-      const passedText = page.getByText('Technical Validation Passed');
-      const passedVisible = await passedText.isVisible().catch(() => false);
-
-      if (passedVisible) {
-        console.log('✓ Validation passed - content meets requirements');
-      } else {
-        // Check for issues
-        const issuesText = page.getByText('Technical Validation Issues');
-        const issuesVisible = await issuesText.isVisible().catch(() => false);
-        if (issuesVisible) {
-          console.log('⚠ Validation has issues - checking details...');
-          const errorSection = page.getByText(/error|warning/i);
-          const errorVisible = await errorSection.isVisible().catch(() => false);
-          if (!errorVisible) {
-            console.log('✓ Validation issues are informational (not blocking)');
-          }
-        }
-      }
-    } else {
-      console.log('⚠ Validation section not visible - may need more content');
-    }
-
-    // Step 6: Publish exam
-    console.log('Step 6: Publishing exam...');
-    await publishExam(page, examId);
-
-    // Verify exam status changed to published in DB
-    const publishedExam = await getExamFromDB(page, examId);
-    expect(publishedExam.status).toBe('published');
-    expect(publishedExam.currentPublishedVersionId).toBeDefined();
-    console.log('✓ Exam published and status verified in MySQL database');
-
-    // Step 7: Verify exam can still be edited after publish (should create new version)
-    console.log('Step 7: Re-editing published exam...');
-    await updateExamDraft(page, examId, {
-      config: {
-        ...publishedExam.config,
-        general: {
-          ...publishedExam.config.general,
-          summary: 'Summary after publish - should create new version',
-        },
-      },
-    });
-
-    const reEditedExam = await getExamFromDB(page, examId);
-    expect(reEditedExam.config.general.summary).toBe('Summary after publish - should create new version');
-    console.log('✓ Exam re-edited and verified in MySQL database');
-
-    // Step 8: Check versions
-    console.log('Step 8: Checking exam versions...');
-    const versionsResponse = await page.request.get(`/api/v1/exams/${examId}/versions`);
-    if (versionsResponse.ok()) {
-      const versionsData = await versionsResponse.json();
-      const versions = versionsData.data;
-      expect(versions.length).toBeGreaterThan(0);
-      console.log(`✓ Found ${versions.length} version(s) in MySQL database`);
-    }
-
-    console.log('=== Complete Exam Lifecycle Test with MySQL PASSED ===');
+  test.beforeEach(async ({ page }) => {
+    // API helpers use same-origin fetch; establish the authenticated app
+    // origin before the first mutation instead of evaluating from about:blank.
+    await page.goto('/admin/exams');
   });
 
-  test('validation checks database constraints', async ({ page }) => {
-    console.log('=== Testing Database Constraints in Validation ===');
+  test('creates, saves, validates, publishes, and records the audit trail', async ({ page }) => {
+    const examTitle = `Go lifecycle exam ${Date.now()}`;
+    let examId: string | undefined;
 
-    // Create exam with invalid config to test validation
-    const examTitle = `Validation Test ${Date.now()}`;
-    const examId = await createExamViaAPI(page, examTitle);
-
-    // Try to set invalid values (e.g., negative durations)
     try {
-      await updateExamDraft(page, examId, {
-        config: {
-          general: {
-            preset: 'Academic',
-            summary: 'Test',
-            instructions: 'Test',
-          },
-          modules: {
-            reading: { enabled: true, label: 'Reading', passageCount: 1, order: 1, gapAfter: 0 },
-            listening: { enabled: false, label: 'Listening', partCount: 0, order: 0, gapAfter: 0 },
-            writing: { enabled: false, label: 'Writing', order: 2, gapAfter: 0 },
-            speaking: { enabled: false, label: 'Speaking', order: 3, gapAfter: 0 },
-          },
-          standards: {
-            passageWordCount: { optimalMin: 700, optimalMax: 1000, warningMin: 500, warningMax: 1200 },
-            writingTasks: {
-              task1: { minWords: 150, recommendedTime: 20 },
-              task2: { minWords: 250, recommendedTime: 40 },
-            },
-            rubricDeviationThreshold: 10,
-            rubricWeights: {
-              writing: { taskResponse: 25, coherence: 25, lexical: 25, grammar: 25 },
-              speaking: { fluency: 25, lexical: 25, grammar: 25, pronunciation: 25 },
-            },
-            bandScoreTables: {
-              listening: { 39: 9.0, 37: 8.5, 35: 8.0, 32: 7.5, 30: 7.0, 26: 6.5, 23: 6.0, 18: 5.5, 16: 5.0, 13: 4.5, 10: 4.0, 6: 3.5, 4: 3.0, 2: 2.5 },
-              readingAcademic: { 39: 9.0, 37: 8.5, 35: 8.0, 33: 7.5, 30: 7.0, 27: 6.5, 23: 6.0, 19: 5.5, 15: 5.0, 13: 4.5, 10: 4.0, 8: 3.5, 6: 3.0, 4: 2.5 },
-              readingGeneralTraining: { 40: 9.0, 39: 8.5, 37: 8.0, 36: 7.5, 34: 7.0, 32: 6.5, 30: 6.0, 27: 5.5, 23: 5.0, 19: 4.5, 15: 4.0, 12: 3.5, 9: 3.0, 6: 2.5 },
-            },
-          },
-          timing: {
-            sectionDurations: { listening: -1, reading: -1, writing: -1, speaking: -1 }, // Invalid
-            gapsAfterSections: { listening: 0, reading: 0, writing: 0, speaking: 0 },
-            sectionOrder: ['listening', 'reading', 'writing', 'speaking'],
-            runtimePolicies: {
-              autoSubmit: true,
-              lockAfterSubmit: true,
-              allowPause: false,
-              showWarnings: true,
-              warningThreshold: 3,
-            },
-          },
-          security: {
-            proctoringControls: { webcam: true, audio: true, screen: true },
-            screenDetection: {
-              detectSecondaryScreen: true,
-            },
-            inputProtection: { preventAutofill: true, preventAutocorrect: true },
-            tabSwitchRule: 'warn',
-            heartbeat: {
-              interval: 15,
-              missThreshold: 3,
-              warningThreshold: 2,
-              hardBlockThreshold: 4,
-            },
-            offlineBehavior: {
-              pauseOnOffline: true,
-              bufferAnswersOffline: true,
-              requireDeviceContinuity: true,
-            },
-            severityThresholds: { low: 5, medium: 3, high: 2 },
-            criticalAction: 'terminate',
-          },
-        },
-      });
-      console.log('⚠ Backend accepted negative durations - validation may be at UI level');
-    } catch (error) {
-      console.log('✓ Backend rejected invalid config:', error instanceof Error ? error.message : String(error));
-    }
+      const created = await createExam(page, examTitle);
+      examId = created.id;
+      expect(created.title).toBe(examTitle);
+      expect(created.status).toBe('draft');
+      expect(created.revision).toBe(0);
+      expect(created.currentDraftVersionId).toBeTruthy();
 
-    console.log('=== Database Constraints Validation Test Complete ===');
+      const initial = await getExam(page, examId);
+      expect(initial.currentDraftVersionId).toBe(created.currentDraftVersionId);
+
+      const initialVersionResponse = await readApi(page, `/api/v1/versions/${created.currentDraftVersionId}`);
+      expect(initialVersionResponse.status).toBe(200);
+      const initialVersion = initialVersionResponse.payload as VersionSnapshot;
+      expect(initialVersion.examId).toBe(examId);
+      expect(initialVersion.isDraft).toBe(true);
+
+      const contentSnapshot = {
+        sections: [
+          {
+            key: 'reading',
+            title: 'Reading',
+            questions: [{ id: 'lifecycle-question-1', prompt: 'What is being tested?' }],
+          },
+        ],
+      };
+      const configSnapshot = {
+        modules: { reading: { enabled: true } },
+        timing: { readingSeconds: 60 },
+      };
+
+      const savedResponse = await writeApi(page, 'PATCH', `/api/v1/exams/${examId}/draft`, {
+        contentSnapshot,
+        configSnapshot,
+        revision: initialVersion.revision,
+      });
+      expect(savedResponse.status, JSON.stringify(savedResponse.payload)).toBe(200);
+      const savedVersion = unwrap<VersionSnapshot>(savedResponse.payload as ApiPayload<VersionSnapshot>);
+      expect(savedVersion.id).toBe(created.currentDraftVersionId);
+      expect(savedVersion.revision).toBe(initialVersion.revision + 1);
+      expect(JSON.stringify(savedVersion.contentSnapshot)).toContain('What is being tested?');
+
+      const savedExam = await getExam(page, examId);
+      expect(savedExam.revision).toBeGreaterThan(initial.revision);
+
+      const validationResponse = await readApi(page, `/api/v1/exams/${examId}/validation`);
+      expect(validationResponse.status).toBe(200);
+      const validation = unwrap<ValidationSnapshot>(validationResponse.payload as ApiPayload<ValidationSnapshot>);
+      expect(validation.canPublish).toBe(true);
+      expect(validation.errors).toHaveLength(0);
+
+      const publishResponse = await writeApi(page, 'POST', `/api/v1/exams/${examId}/publish`, {
+        publishNotes: 'Published by the Go lifecycle E2E test',
+        revision: savedVersion.revision,
+        expectedDraftVersionId: savedVersion.id,
+        expectedDraftRevision: savedVersion.revision,
+      });
+      expect(publishResponse.status, JSON.stringify(publishResponse.payload)).toBe(200);
+      const publishedVersion = unwrap<VersionSnapshot>(publishResponse.payload as ApiPayload<VersionSnapshot>);
+      expect(publishedVersion.isDraft).toBe(false);
+      expect(publishedVersion.isPublished).toBe(true);
+
+      const publishedExam = await getExam(page, examId);
+      expect(publishedExam.status).toBe('published');
+      expect(publishedExam.currentDraftVersionId).toBeFalsy();
+      expect(publishedExam.currentPublishedVersionId).toBe(publishedVersion.id);
+
+      const versionsResponse = await readApi(page, `/api/v1/exams/${examId}/versions`);
+      expect(versionsResponse.status).toBe(200);
+      const versions = unwrap<VersionSnapshot[]>(versionsResponse.payload as ApiPayload<VersionSnapshot[]>);
+      expect(versions).toHaveLength(1);
+      expect(versions[0]?.isPublished).toBe(true);
+
+      const eventsResponse = await readApi(page, `/api/v1/exams/${examId}/events`);
+      expect(eventsResponse.status).toBe(200);
+      const events = unwrap<Array<{ action: string }>>(eventsResponse.payload as ApiPayload<Array<{ action: string }>>);
+      expect(events.map((event) => event.action)).toEqual(expect.arrayContaining(['created', 'draft_saved', 'published']));
+    } finally {
+      if (examId) {
+        const deleted = await writeApi(page, 'DELETE', `/api/v1/exams/${examId}`);
+        expect(deleted.status, JSON.stringify(deleted.payload)).toBe(200);
+      }
+    }
+  });
+
+  test('keeps invalid drafts unpublished and rejects stale revisions', async ({ page }) => {
+    const examTitle = `Go validation exam ${Date.now()}`;
+    let examId: string | undefined;
+
+    try {
+      const created = await createExam(page, examTitle);
+      examId = created.id;
+      const draftVersionId = created.currentDraftVersionId;
+      expect(draftVersionId).toBeTruthy();
+
+      const savedInvalidResponse = await writeApi(page, 'PATCH', `/api/v1/exams/${examId}/draft`, {
+        contentSnapshot: { sections: [{ key: 'not-an-ielts-section' }] },
+        configSnapshot: { timing: { readingSeconds: 60 } },
+        revision: 0,
+      });
+      expect(savedInvalidResponse.status).toBe(200);
+      const savedInvalid = unwrap<VersionSnapshot>(savedInvalidResponse.payload as ApiPayload<VersionSnapshot>);
+
+      const validationResponse = await readApi(page, `/api/v1/exams/${examId}/validation`);
+      expect(validationResponse.status).toBe(200);
+      const validation = unwrap<ValidationSnapshot>(validationResponse.payload as ApiPayload<ValidationSnapshot>);
+      expect(validation.canPublish).toBe(false);
+      expect(validation.errors.some((error) => error.field.includes('contentSnapshot.sections'))).toBe(true);
+
+      const publishResponse = await writeApi(page, 'POST', `/api/v1/exams/${examId}/publish`, {
+        revision: savedInvalid.revision,
+        expectedDraftVersionId: draftVersionId,
+        expectedDraftRevision: savedInvalid.revision,
+      });
+      expect(publishResponse.status).toBe(422);
+
+      const staleSaveResponse = await writeApi(page, 'PATCH', `/api/v1/exams/${examId}/draft`, {
+        contentSnapshot: { sections: [{ key: 'reading' }] },
+        configSnapshot: { timing: { readingSeconds: 90 } },
+        revision: 0,
+      });
+      expect(staleSaveResponse.status).toBe(409);
+      expect((await getExam(page, examId)).status).toBe('draft');
+    } finally {
+      if (examId) {
+        const deleted = await writeApi(page, 'DELETE', `/api/v1/exams/${examId}`);
+        expect(deleted.status, JSON.stringify(deleted.payload)).toBe(200);
+      }
+    }
   });
 });

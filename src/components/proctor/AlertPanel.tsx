@@ -44,28 +44,34 @@ export function AlertPanel({ alerts, onUpdateAlerts, onClose }: AlertPanelProps)
   const [selectedAlertIds, setSelectedAlertIds] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
 
+  // Null guards: malformed alert rows (missing type/message/studentName,
+  // bad timestamps) render as 'Unknown' instead of crashing the panel.
+  const safeAlertText = (alert: ProctorAlert): string =>
+    `${alert.type ?? 'unknown'} ${alert.message ?? ''} ${alert.studentName ?? ''}`.toLowerCase();
   const filteredAlerts = useMemo(() => {
     return alerts
       .filter(alert => {
+        if (!alert || typeof alert !== 'object') return false;
         if (filter.severity !== 'all' && alert.severity !== filter.severity) return false;
         if (filter.acknowledged !== 'all' && alert.isAcknowledged !== filter.acknowledged) return false;
         if (filter.type) {
           const normalized = filter.type.toLowerCase();
-          const combined = `${alert.type} ${alert.message} ${alert.studentName}`.toLowerCase();
-          if (!combined.includes(normalized)) return false;
+          if (!safeAlertText(alert).includes(normalized)) return false;
         }
-        if (filter.student && !alert.studentName.toLowerCase().includes(filter.student.toLowerCase())) return false;
+        if (filter.student && !(alert.studentName ?? '').toLowerCase().includes(filter.student.toLowerCase())) return false;
         return true;
       })
       .sort((a, b) => {
         let comparison = 0;
         if (sortBy === 'timestamp') {
-          comparison = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+          const aMs = new Date(a.timestamp ?? '').getTime();
+          const bMs = new Date(b.timestamp ?? '').getTime();
+          comparison = (Number.isFinite(aMs) ? aMs : 0) - (Number.isFinite(bMs) ? bMs : 0);
         } else if (sortBy === 'severity') {
           const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
-          comparison = severityOrder[a.severity] - severityOrder[b.severity];
+          comparison = (severityOrder[a.severity] ?? 0) - (severityOrder[b.severity] ?? 0);
         } else if (sortBy === 'student') {
-          comparison = a.studentName.localeCompare(b.studentName);
+          comparison = (a.studentName ?? '').localeCompare(b.studentName ?? '');
         }
         return sortOrder === 'asc' ? comparison : -comparison;
       });
@@ -87,16 +93,21 @@ export function AlertPanel({ alerts, onUpdateAlerts, onClose }: AlertPanelProps)
     }
   };
 
+  // S3-C4: stamp updatedAt on local ack so mergeById treats the local edit as
+  // newer than the last server snapshot (server rows carry no updatedAt and
+  // would otherwise overwrite the ack on the next detail poll).
   const handleToggleAcknowledge = (alertId: string) => {
+    const now = new Date().toISOString();
     const updatedAlerts = alerts.map(alert =>
-      alert.id === alertId ? { ...alert, isAcknowledged: !alert.isAcknowledged } : alert
+      alert.id === alertId ? { ...alert, isAcknowledged: !alert.isAcknowledged, updatedAt: now } : alert
     );
     onUpdateAlerts(updatedAlerts);
   };
 
   const handleBulkAcknowledge = (acknowledge: boolean) => {
+    const now = new Date().toISOString();
     const updatedAlerts = alerts.map(alert =>
-      selectedAlertIds.has(alert.id) ? { ...alert, isAcknowledged: acknowledge } : alert
+      selectedAlertIds.has(alert.id) ? { ...alert, isAcknowledged: acknowledge, updatedAt: now } : alert
     );
     onUpdateAlerts(updatedAlerts);
     setSelectedAlertIds(new Set());

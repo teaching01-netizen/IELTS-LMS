@@ -1,24 +1,15 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-export const GENERATED_DIR = path.resolve(process.cwd(), 'e2e/.generated');
-export const MANIFEST_PATH = path.join(GENERATED_DIR, 'backend-e2e-manifest.json');
-export const BUILDER_STORAGE_STATE_PATH = path.join(
-  GENERATED_DIR,
-  'builder.storage-state.json',
-);
-export const STUDENT_STORAGE_STATE_PATH = path.join(
-  GENERATED_DIR,
-  'student.storage-state.json',
-);
+export const GENERATED_DIR = path.resolve(process.cwd(), "e2e/.generated");
+export const MANIFEST_PATH = path.join(GENERATED_DIR, "backend-e2e-manifest.json");
+export const BUILDER_STORAGE_STATE_PATH = path.join(GENERATED_DIR, "builder.storage-state.json");
+export const STUDENT_STORAGE_STATE_PATH = path.join(GENERATED_DIR, "student.storage-state.json");
 export const UNREGISTERED_STUDENT_STORAGE_STATE_PATH = path.join(
   GENERATED_DIR,
-  'unregistered-student.storage-state.json',
+  "unregistered-student.storage-state.json"
 );
-export const ADMIN_STORAGE_STATE_PATH = path.join(
-  GENERATED_DIR,
-  'admin.storage-state.json',
-);
+export const ADMIN_STORAGE_STATE_PATH = path.join(GENERATED_DIR, "admin.storage-state.json");
 
 export interface BackendE2EManifest {
   frontendOrigin: string;
@@ -26,6 +17,7 @@ export interface BackendE2EManifest {
   builder: {
     examId: string;
     examSlug: string;
+    draftDurabilityExamId: string;
     draftVersionId: string;
     initialRevision: number;
     initialVersionCount: number;
@@ -36,10 +28,24 @@ export interface BackendE2EManifest {
     examSlug: string;
     publishedVersionId: string;
     scheduleId: string;
+    precheckScheduleId: string;
+    proctorWorkflowScheduleId: string;
+    flushScheduleId: string;
+    submissionScheduleId: string;
+    lifecycleScheduleId: string;
     candidateId: string;
     questionId: string;
     expectedAnswer: string;
     storageStatePath: string;
+  };
+  act: {
+    examId: string;
+    examSlug: string;
+    publishedVersionId: string;
+    scheduleId: string;
+    candidateId: string;
+    questionId: string;
+    expectedAnswer: string;
   };
   studentSelfPaced: {
     examId: string;
@@ -65,6 +71,6 @@ export interface BackendE2EManifest {
 }
 
 export function readBackendE2EManifest(): BackendE2EManifest {
-  const raw = fs.readFileSync(MANIFEST_PATH, 'utf8');
+  const raw = fs.readFileSync(MANIFEST_PATH, "utf8");
   return JSON.parse(raw) as BackendE2EManifest;
 }

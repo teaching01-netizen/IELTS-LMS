@@ -30,15 +30,9 @@ test.describe('Student queue admission flow', () => {
     await page.goto(`/student/${manifest.studentSelfPaced.scheduleId}/${wcode}`);
     await page.waitForLoadState('domcontentloaded');
 
-    await expect
-      .poll(async () => {
-        const waitingRoom = page.getByText(/waiting|lobby|not yet started|queue/i);
-        const examContent = page.getByLabel(/Answer for question/i);
-        if (await waitingRoom.isVisible().catch(() => false)) return 'waiting';
-        if (await examContent.isVisible().catch(() => false)) return 'exam';
-        return 'pending';
-      }, { timeout: 30_000 })
-      .not.toBe('pending');
+    await expect(page.getByRole('heading', { name: 'Waiting for the exam to start' })).toBeVisible({
+      timeout: 30_000,
+    });
 
     await context.close();
   });
@@ -107,7 +101,7 @@ test.describe('Student queue admission flow', () => {
     await completePreCheckIfPresent(page);
 
     await expect(page.getByRole('heading', { name: 'Waiting for the exam to start' })).toBeVisible();
-    await expect(page.getByText('Waiting for proctor')).toBeVisible();
+    await expect(page.getByText('Waiting for the proctor to start the exam')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Start Exam' })).not.toBeVisible();
     await expect(page.getByLabel('Answer for question 1')).not.toBeVisible();
 

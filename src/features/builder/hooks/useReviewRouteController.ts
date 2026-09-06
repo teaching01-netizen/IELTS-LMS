@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useOptionalAuthSession } from '../../auth/api/authSession';
 import { examAuthoringFacade } from '../../exam-authoring/api/examAuthoringFacade';
 import type { ExamState } from '../../../types';
 import type {
   ExamEntity,
+  ExamEvent,
   ExamSchedule,
   ExamVersionSummary,
   PublishReadiness,
+  VersionDiff,
 } from '../../../types/domain';
 
 export interface ReviewRouteController {
@@ -22,6 +25,9 @@ export interface ReviewRouteController {
   handleSchedulePublish: (scheduledTime: string) => Promise<void>;
   handleUnpublish: (reason?: string) => Promise<void>;
   handleRestoreVersion: (versionId: string) => Promise<void>;
+  handleRepublishVersion: (versionId: string) => Promise<{ success: boolean; error?: string }>;
+  loadEvents: () => Promise<ExamEvent[]>;
+  compareVersions: (versionIdA: string, versionIdB: string) => Promise<VersionDiff | null>;
   handleNavigateToBuilder: (field?: string) => void;
   handleOpenScheduling: () => void;
   /** Loads the draft content snapshot only when scheduling UI opens. */
@@ -31,10 +37,19 @@ export interface ReviewRouteController {
   reload: () => Promise<void>;
 }
 
+function resolveStaffActor(session: { user: { id: string; displayName?: string | null | undefined; email?: string } } | null | undefined): string | null {
+  const user = session?.user;
+  if (!user) return null;
+  const candidate = user.displayName?.trim() || user.id?.trim() || user.email?.trim() || '';
+  return candidate === '' ? null : candidate;
+}
+
 export function useReviewRouteController(
   examId?: string,
 ): ReviewRouteController {
   const navigate = useNavigate();
+  const authSession = useOptionalAuthSession();
+  const staffActor = resolveStaffActor(authSession?.session ?? null);
 
   const [state, setState] = useState<ExamState | null>(null);
   const [exam, setExam] = useState<ExamEntity | undefined>(undefined);
@@ -61,7 +76,10 @@ export function useReviewRouteController(
     try {
       const entity = await examAuthoringFacade.repository.getExamById(examId);
       if (!entity) {
-        throw new Error('Exam not found');
+        // Exam was deleted or never existed: leave exam/state unset and error
+        // null so the route renders an "Exam Not Found" surface with a way
+        // back to Admin, instead of a Retry that can never succeed.
+        return;
       }
 
       const [allVersions, allSchedules, readiness] = await Promise.all([
@@ -104,19 +122,25 @@ export function useReviewRouteController(
       if (!examId) {
         return;
       }
+      if (!staffActor) {
+        throw new Error('Sign in required: publish is blocked without an authenticated staff user.');
+      }
 
-      const result = await examAuthoringFacade.lifecycle.publishExam(examId, 'System', notes);
+      const result = await examAuthoringFacade.lifecycle.publishExam(examId, staffActor, notes);
       if (!result.success) {
         throw new Error(result.error ?? 'Could not publish the exam. Please try again.');
       }
       await loadExam();
     },
-    [examId, loadExam],
+    [examId, loadExam, staffActor],
   );
 
   const handleRepublishLatestDraft = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
     if (!examId) {
       return { success: false, error: 'Exam ID not found' };
+    }
+    if (!staffActor) {
+      return { success: false, error: 'Sign in required: republish is blocked without an authenticated staff user.' };
     }
 
     const sourceExam = await examAuthoringFacade.repository.getExamById(examId);
@@ -128,7 +152,13 @@ export function useReviewRouteController(
       return { success: false, error: 'You do not have permission to republish this exam.' };
     }
 
-    const result = await examAuthoringFacade.lifecycle.republishVersion(examId, sourceExam.currentDraftVersionId ?? 'latest', 'System');
+    // No literal 'latest' fallback: republish requires an actual draft version id,
+    // otherwise the result would be ambiguous about what was republished.
+    const draftVersionId = sourceExam.currentDraftVersionId;
+    if (!draftVersionId) {
+      return { success: false, error: 'No draft version available to republish.' };
+    }
+    const result = await examAuthoringFacade.lifecycle.republishVersion(examId, draftVersionId, staffActor);
     if (!result.success) {
       return {
         success: false,
@@ -138,7 +168,7 @@ export function useReviewRouteController(
 
     await loadExam();
     return { success: true };
-  }, [examId, loadExam]);
+  }, [examId, loadExam, staffActor]);
 
   const handleSchedulePublish = useCallback(
     async (scheduledTime: string) => {
@@ -146,13 +176,17 @@ export function useReviewRouteController(
         return;
       }
 
-      const result = await examAuthoringFacade.lifecycle.schedulePublish(examId, 'System', scheduledTime);
+      if (!staffActor) {
+        throw new Error('Sign in required: scheduling is blocked without an authenticated staff user.');
+      }
+
+      const result = await examAuthoringFacade.lifecycle.schedulePublish(examId, staffActor, scheduledTime);
       if (!result.success) {
         throw new Error(result.error ?? 'Could not schedule the exam. Please try again.');
       }
       await loadExam();
     },
-    [examId, loadExam],
+    [examId, loadExam, staffActor],
   );
 
   const handleUnpublish = useCallback(
@@ -161,13 +195,17 @@ export function useReviewRouteController(
         return;
       }
 
-      const result = await examAuthoringFacade.lifecycle.unpublishExam(examId, 'System', reason);
+      if (!staffActor) {
+        throw new Error('Sign in required: unpublish is blocked without an authenticated staff user.');
+      }
+
+      const result = await examAuthoringFacade.lifecycle.unpublishExam(examId, staffActor, reason);
       if (!result.success) {
         throw new Error(result.error ?? 'Could not unpublish the exam. Please try again.');
       }
       await loadExam();
     },
-    [examId, loadExam],
+    [examId, loadExam, staffActor],
   );
 
   const handleRestoreVersion = useCallback(
@@ -175,12 +213,58 @@ export function useReviewRouteController(
       if (!examId) {
         return;
       }
-
-      await examAuthoringFacade.lifecycle.restoreVersionAsDraft(examId, versionId, 'System');
+      if (!staffActor) {
+        throw new Error('Sign in required: restore is blocked without an authenticated staff user.');
+      }
+      if (!versionId) {
+        throw new Error('Select a version to restore.');
+      }
+      await examAuthoringFacade.lifecycle.restoreVersionAsDraft(examId, versionId, staffActor);
       await loadExam();
     },
-    [examId, loadExam],
+    [examId, loadExam, staffActor],
   );
+
+  const handleRepublishVersion = useCallback(
+    async (versionId: string): Promise<{ success: boolean; error?: string }> => {
+      if (!examId) {
+        return { success: false, error: 'Exam ID not found' };
+      }
+      if (!staffActor) {
+        return { success: false, error: 'Sign in required: republish is blocked without an authenticated staff user.' };
+      }
+      if (!versionId) {
+        return { success: false, error: 'Select a version to republish.' };
+      }
+      const result = await examAuthoringFacade.lifecycle.republishVersion(examId, versionId, staffActor);
+      if (!result.success) {
+        return { success: false, error: result.error ?? 'Could not republish this version.' };
+      }
+      await loadExam();
+      return { success: true };
+    },
+    [examId, loadExam, staffActor],
+  );
+
+  const loadEvents = useCallback(async (): Promise<ExamEvent[]> => {
+    if (!examId) {
+      return [];
+    }
+    return examAuthoringFacade.repository.getEvents(examId);
+  }, [examId]);
+
+  const compareVersions = useCallback(async (versionIdA: string, versionIdB: string): Promise<VersionDiff | null> => {
+    if (!examId) {
+      return null;
+    }
+    if (!versionIdA || !versionIdB) {
+      throw new Error('Select two versions to compare.');
+    }
+    if (versionIdA === versionIdB) {
+      throw new Error('Select two different versions to compare.');
+    }
+    return examAuthoringFacade.lifecycle.compareVersions(examId, versionIdA, versionIdB);
+  }, [examId]);
 
   const handleNavigateToBuilder = useCallback((field?: string) => {
     if (!examId) {
@@ -230,6 +314,9 @@ export function useReviewRouteController(
     handleSchedulePublish,
     handleUnpublish,
     handleRestoreVersion,
+    handleRepublishVersion,
+    loadEvents,
+    compareVersions,
     handleNavigateToBuilder,
     handleOpenScheduling,
     loadScheduleContent,

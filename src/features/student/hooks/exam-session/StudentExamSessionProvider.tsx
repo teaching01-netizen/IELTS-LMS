@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import {
   createStudentExamStore,
@@ -25,6 +25,33 @@ export function StudentExamSessionProvider({
   // wrapper via key={sessionScopeKey} (StudentAppWrapper.tsx:132). This effect only syncs
   // live slices (phase/runtime/persistence/blocking) without remount — do NOT duplicate wrapper key.
   // The effect intentionally does not sync identity/navigation/attempt (seed-of-truth at mount).
+  const blockingActive = seed.blocking?.active ?? false;
+  const blockingReason = seed.blocking?.reason ?? null;
+  const blockingTimeRemaining = seed.blocking?.timeRemaining ?? 0;
+  const seedSync = useMemo(
+    () => ({
+      phase: seed.phase,
+      runtimeSnapshot: seed.runtimeSnapshot,
+      displayTimeRemaining: seed.displayTimeRemaining,
+      syncState: seed.syncState,
+      pendingMutationCount: seed.pendingMutationCount,
+      acceptedThroughSeq: seed.acceptedThroughSeq,
+      blockingActive,
+      blockingReason,
+      blockingTimeRemaining,
+    }),
+    [
+      blockingActive,
+      blockingReason,
+      blockingTimeRemaining,
+      seed.displayTimeRemaining,
+      seed.phase,
+      seed.runtimeSnapshot,
+      seed.syncState,
+      seed.pendingMutationCount,
+      seed.acceptedThroughSeq,
+    ],
+  );
   useEffect(() => {
     if (import.meta.env.DEV) {
       const expected = getStudentExamScopeKey(seed);
@@ -37,30 +64,19 @@ export function StudentExamSessionProvider({
       }
     }
     const actions = store.getState().actions;
-    actions.setPhase(seed.phase);
-    actions.setRuntimeSnapshot(seed.runtimeSnapshot, seed.displayTimeRemaining);
+    actions.setPhase(seedSync.phase);
+    actions.setRuntimeSnapshot(seedSync.runtimeSnapshot, seedSync.displayTimeRemaining);
     actions.setPersistence({
-      syncState: seed.syncState,
-      pendingMutationCount: seed.pendingMutationCount,
-      acceptedThroughSeq: seed.acceptedThroughSeq,
+      syncState: seedSync.syncState,
+      pendingMutationCount: seedSync.pendingMutationCount,
+      acceptedThroughSeq: seedSync.acceptedThroughSeq,
     });
     actions.setBlocking({
-      active: seed.blocking?.active ?? false,
-      reason: seed.blocking?.reason ?? null,
-      timeRemaining: seed.blocking?.timeRemaining ?? 0,
+      active: seedSync.blockingActive,
+      reason: seedSync.blockingReason,
+      timeRemaining: seedSync.blockingTimeRemaining,
     });
-  }, [
-    seed.blocking?.active,
-    seed.blocking?.reason,
-    seed.blocking?.timeRemaining,
-    seed.displayTimeRemaining,
-    seed.phase,
-    seed.runtimeSnapshot,
-    seed.syncState,
-    seed.pendingMutationCount,
-    seed.acceptedThroughSeq,
-    store,
-  ]);
+  }, [seedSync, store]);
 
   return (
     <StudentExamSessionStoreContext.Provider value={store}>

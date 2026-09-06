@@ -9,6 +9,23 @@ describe('Dialog module', () => {
     expect(Dialog).toBeTruthy();
   });
 
+  it('traps Tab focus using live focusable elements', () => {
+    const onClose = vi.fn();
+    const { getByRole } = render(
+      <Dialog isOpen onClose={onClose}>
+        <button type="button">First</button>
+        <button type="button">Second</button>
+      </Dialog>,
+    );
+
+    const second = getByRole('button', { name: 'Second' });
+    second.focus();
+    expect(document.activeElement).toBe(second);
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(getByRole('button', { name: 'First' }));
+  });
+
   it('does not close when nested content prevents Escape', () => {
     const onClose = vi.fn();
     const { getByRole } = render(
