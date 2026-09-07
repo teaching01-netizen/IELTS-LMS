@@ -87,6 +87,16 @@ const projection: AssessmentPreviewProjection = {
 };
 
 describe("useSatPreviewController", () => {
+  it("keeps general notes in the v2 aggregate across question navigation", async () => {
+    const { result } = renderHook(() => useSatPreviewController("exam-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => result.current.commands.setNote("Compare the evidence"));
+    act(() => result.current.commands.nextQuestion());
+    act(() => result.current.commands.previousQuestion());
+    expect(result.current.response?.annotations).toEqual({
+      version: 2, annotations: [], legacyQuestionNote: "Compare the evidence",
+    });
+  });
   beforeEach(() => {
     getPreviewMock.mockReset();
     getPreviewMock.mockResolvedValue(projection);
@@ -126,5 +136,14 @@ describe("useSatPreviewController", () => {
 
     act(() => result.current.commands.applyPendingRefresh());
     expect(result.current.projection?.versionRevision).toBe(5);
+  });
+
+  it("forbids Math tools in a Reading and Writing draft even when its module advertises them", async () => {
+    const draft = structuredClone(projection);
+    draft.sections[0]!.modules[0]!.toolPolicy = ["calculator", "reference_sheet"];
+    getPreviewMock.mockResolvedValue(draft);
+    const { result } = renderHook(() => useSatPreviewController("exam-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.tools).toEqual({ calculator: false, referenceSheet: false });
   });
 });

@@ -104,7 +104,7 @@ export function SatAccessibilityDebugRoute() {
     answer: "",
     markedForReview: false,
     eliminatedOptionIds: [],
-    annotations: { version: 1, note: "" },
+    annotations: { version: 2, annotations: [], legacyQuestionNote: "" },
   });
   const question = math ? mathQuestion : readingQuestion;
   const navigationItems = [0, 1, 2].map((index) => ({
@@ -126,6 +126,7 @@ export function SatAccessibilityDebugRoute() {
           "Answer every question. You may return to questions in this module before submitting it."
         )}
         remainingLabel="27:14"
+        remainingSeconds={1634}
         candidateName="Accessibility Candidate"
         questionIndex={questionIndex}
         questionCount={3}
@@ -134,9 +135,10 @@ export function SatAccessibilityDebugRoute() {
         calculatorOpen={activeTool === "calculator"}
         referenceAvailable={math}
         referenceOpen={activeTool === "reference"}
+        notesAvailable={!math}
         blocked={paused}
         saveState="idle"
-        questionNote={response.annotations.note}
+        questionNote={response.annotations.legacyQuestionNote}
         readingPreferences={reading.preferences}
         onReadingPreferencesChange={reading.setPreferences}
         onSelectQuestion={setQuestionIndex}
@@ -150,7 +152,7 @@ export function SatAccessibilityDebugRoute() {
         onNext={() => setQuestionIndex((current) => Math.min(2, current + 1))}
         onReviewModule={() => undefined}
         onSaveNote={(note) =>
-          setResponse((current) => ({ ...current, annotations: { version: 1, note } }))
+          setResponse((current) => ({ ...current, annotations: { ...current.annotations, legacyQuestionNote: note } }))
         }
       >
         <SatQuestionRenderer
@@ -165,6 +167,7 @@ export function SatAccessibilityDebugRoute() {
             reading.setPreferences((current) => ({ ...current, splitRatio }))
           }
           onAnswerChange={(answer) => setResponse((current) => ({ ...current, answer }))}
+          onAnnotationsChange={(annotations) => setResponse((current) => ({ ...current, annotations }))}
           onToggleReview={() =>
             setResponse((current) => ({ ...current, markedForReview: !current.markedForReview }))
           }

@@ -1152,6 +1152,49 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-accent-core: #0071e3;
 }
 
+.sat-ui[data-sat-contrast="high-contrast"],
+.sat-ui[data-sat-contrast="high-contrast"] .sat-ui {
+  --sat-background: #fff;
+  --sat-surface: #fff;
+  --sat-surface-subtle: #f2f2f2;
+  --sat-surface-hover: #e2e2e2;
+  --sat-text: #000;
+  --sat-text-secondary: #202020;
+  --sat-divider: #000;
+  --sat-divider-soft: #444;
+  --sat-accent: #003f87;
+  --sat-accent-strong: #003f87;
+  --sat-accent-soft: #dceaff;
+  --sat-accent-text: #fff;
+  --sat-focus: #003f87;
+  --sat-review: #850033;
+  --sat-danger: #8b0000;
+  --sat-danger-soft: #fff0f0;
+  --sat-warning: #603300;
+  --sat-warning-soft: #fff4cc;
+  --sat-disabled-background: #eee;
+  --sat-disabled-text: #444;
+  --sat-highlight-background: #ffeb3b;
+  --sat-highlight-text: #000;
+  --sat-underline: #000;
+  --sat-reader-dim: rgba(0, 0, 0, 0.4);
+}
+
+.sat-ui[data-sat-contrast="high-contrast"] ::selection {
+  background: #003f87;
+  color: #fff;
+}
+
+[data-sat-content-zoom] .sat-reading-surface {
+  overflow-wrap: anywhere;
+}
+
+.sat-ui[data-sat-contrast="high-contrast"] .structured-content-renderer :is(th, td, pre) {
+  border-color: var(--sat-divider);
+  background-color: var(--sat-surface);
+  color: var(--sat-text);
+}
+
 .sat-ui {
   color-scheme: light;
   --sat-background: #ffffff;
@@ -1189,6 +1232,10 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-type-reference: 1rem;
   --sat-reading-scale: 1;
   --sat-reading-line-height: 1.6;
+  --sat-highlight-background: #fff1a8;
+  --sat-highlight-text: #1d1d1f;
+  --sat-underline: #1d1d1f;
+  --sat-reader-dim: rgba(0, 0, 0, 0.32);
   font-family:
     system-ui,
     -apple-system,
@@ -1657,7 +1704,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 /* Dialogs: one scrim, one centered card. Radix renders overlay and
  * content as portal siblings, so the card positions itself. On compact
  * widths it docks to the bottom edge as a sheet. */
-.sat-product .sat-dialog-overlay {
+.sat-product .sat-dialog-overlay,
+.sat-dialog-overlay.sat-product {
   position: fixed;
   inset: 0;
   z-index: 110;
@@ -1665,14 +1713,16 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   -webkit-backdrop-filter: blur(3px) saturate(1.2);
   backdrop-filter: blur(3px) saturate(1.2);
 }
-.sat-product .sat-dialog {
+.sat-product .sat-dialog,
+.sat-dialog.sat-product {
   border-radius: 22px;
   border: 1px solid rgba(0, 0, 0, 0.08);
   background: #ffffff;
   box-shadow: var(--sat-dialog-elevation);
   font-family: inherit;
 }
-.sat-product .sat-dialog-center {
+.sat-product .sat-dialog-center,
+.sat-dialog-center.sat-product {
   position: fixed;
   left: 50%;
   top: 50%;
@@ -1680,7 +1730,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   z-index: 111;
 }
 @media (max-width: 640px) {
-  .sat-product .sat-dialog-center {
+  .sat-product .sat-dialog-center,
+  .sat-dialog-center.sat-product {
     left: 0;
     right: 0;
     top: auto;
@@ -1694,7 +1745,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     padding-bottom: max(env(safe-area-inset-bottom), 12px);
   }
 }
-.sat-product .sat-quiet-button {
+.sat-product .sat-quiet-button,
+.sat-dialog.sat-product .sat-quiet-button {
   background: transparent;
 }
 
@@ -1748,13 +1800,15 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 /* Transparency and motion are preferences, not decorations. */
 @media (prefers-reduced-transparency: reduce) {
-  .sat-product .sat-dialog-overlay {
+  .sat-product .sat-dialog-overlay,
+  .sat-dialog-overlay.sat-product {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
     background: rgba(22, 22, 23, 0.55) !important;
   }
   .sat-menu,
-  .sat-product .sat-dialog {
+  .sat-product .sat-dialog,
+  .sat-dialog.sat-product {
     background: #ffffff !important;
   }
 }

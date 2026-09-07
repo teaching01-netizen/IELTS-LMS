@@ -8,6 +8,10 @@ export interface SatReadingPreferences {
   textScale: SatReadingTextScale;
   lineSpacing: SatReadingLineSpacing;
   splitRatio: number;
+  lineReaderEnabled?: boolean;
+  lineReaderPosition?: number;
+  examZoom?: number;
+  contrastMode?: 'default' | 'high-contrast';
 }
 
 export const SAT_READING_SPLIT_MIN = 0.38;
@@ -37,7 +41,14 @@ export function normalizeSatReadingPreferences(value: unknown): SatReadingPrefer
   const splitRatio = clampSatReadingSplitRatio(
     typeof candidate.splitRatio === "number" ? candidate.splitRatio : 0.5
   );
-  return { version: 1, textScale, lineSpacing, splitRatio };
+  return { version: 1, textScale, lineSpacing, splitRatio,
+    ...(typeof candidate.examZoom === 'number' && Number.isFinite(candidate.examZoom)
+      ? { examZoom: Math.max(1, Math.min(2, Math.round(candidate.examZoom * 4) / 4)) } : {}),
+    ...(candidate.contrastMode === 'default' || candidate.contrastMode === 'high-contrast' ? { contrastMode: candidate.contrastMode } : {}),
+    ...(typeof candidate.lineReaderEnabled === 'boolean' ? { lineReaderEnabled: candidate.lineReaderEnabled } : {}),
+    ...(typeof candidate.lineReaderPosition === 'number' && Number.isFinite(candidate.lineReaderPosition)
+      ? { lineReaderPosition: Math.max(0.05, Math.min(0.95, candidate.lineReaderPosition)) } : {}),
+  };
 }
 
 export function previousSatReadingTextScale(current: SatReadingTextScale): SatReadingTextScale {
@@ -53,6 +64,8 @@ export function nextSatReadingTextScale(current: SatReadingTextScale): SatReadin
 export function isDefaultSatReadingPreferences(preferences: SatReadingPreferences): boolean {
   return (
     preferences.textScale === 1 &&
+    (preferences.examZoom ?? 1) === 1 &&
+    (preferences.contrastMode ?? 'default') === 'default' &&
     preferences.lineSpacing === "standard" &&
     Math.abs(preferences.splitRatio - 0.5) < 0.001
   );

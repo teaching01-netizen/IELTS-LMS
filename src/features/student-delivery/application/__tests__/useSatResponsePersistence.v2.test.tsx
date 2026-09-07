@@ -43,6 +43,45 @@ describe('SAT V2 response persistence integration', () => {
     mocks.createTransport.mockReturnValue(mocks.transport);
   });
 
+  it('surfaces terminal failure and never a false saved state when all browser storage fails', async () => {
+    // T2.3 SAT mirror of the engine storage-fault contract: quota on every
+    // localStorage write (checkpoint + IndexedDB fallback) must surface
+    // failureKind terminal — never synced/cleared — so the route blocks
+    // interaction and the shell can only show save-failed, never a false
+    // saved confirmation.
+    mocks.transport.fetchSnapshot.mockResolvedValue([]);
+    const hook = renderHook(() =>
+      useSatResponsePersistence({
+        scheduleId: 'schedule',
+        attemptId: 'attempt-fault',
+        gateway: gateway(),
+        onSavedRevision: vi.fn(),
+      })
+    );
+    await waitFor(() => expect(mocks.transport.fetchSnapshot).toHaveBeenCalled());
+    const setItem = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('quota exceeded');
+    });
+    try {
+      act(() => {
+        hook.result.current.save({
+          questionId: 'q1',
+          answer: 'private-A',
+          markedForReview: false,
+          eliminatedOptionIds: [],
+          annotations: { version: 2, annotations: [], legacyQuestionNote: '' },
+        });
+      });
+      await waitFor(() => expect(hook.result.current.failureKind).toBe('terminal'));
+    } finally {
+      setItem.mockRestore();
+    }
+    expect(hook.result.current.failureKind).toBe('terminal');
+    expect(hook.result.current.failure).toMatch(/storage|unavailable|persist/i);
+    expect(hook.result.current.visibleDrafts.q1?.answer).toBe('private-A');
+    hook.unmount();
+  });
+
   it('does not publish a save into a replacement attempt after recovery switches identity', async () => {
     const firstRecovery = deferred<[]>();
     const secondRecovery = deferred<[]>();
@@ -67,7 +106,7 @@ describe('SAT V2 response persistence integration', () => {
         answer: 'private-A',
         markedForReview: false,
         eliminatedOptionIds: [],
-        annotations: { version: 1, note: '' },
+        annotations: { version: 2, annotations: [], legacyQuestionNote: '' },
       });
     });
     hook.rerender({ attemptId: 'attempt-b' });

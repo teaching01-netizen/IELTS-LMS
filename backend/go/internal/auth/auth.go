@@ -29,6 +29,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -107,24 +108,104 @@ func RequireOneOf(actor ActorContext, roles ...string) *apperrors.Error {
 	return actor.RequireOneOf(roles...)
 }
 
-// ---- password hashing (bcrypt) ----
+// ---- password hashing (argon2id primary, bcrypt legacy) ----
 
-// HashPassword hashes a password with bcrypt. Cost is bcrypt.DefaultCost to
-// match the Argon2id-strength default posture of the Rust backend while using
-// the standard Go password-hashing primitive.
+// HashPassword hashes a password with Argon2id, matching the Rust backend
+// (argon2::Argon2::default(), PHC string format). New hashes are Argon2id so
+// both backends verify them; bcrypt hashes minted by earlier Go builds remain
+// verifiable via VerifyPassword.
 func HashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
+	salt := make([]byte, argon2idSaltLen)
+	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("auth: hash password: %w", err)
 	}
-	return string(hash), nil
+	h := argon2.IDKey([]byte(password), salt, argon2idIterations, argon2idMemoryKiB, argon2idParallelism, argon2idKeyLen)
+	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		argon2.Version,
+		argon2idMemoryKiB, argon2idIterations, argon2idParallelism,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(h),
+	), nil
 }
 
-// VerifyPassword reports whether password matches the stored bcrypt hash.
-// Unknown hash formats fail closed (false, nil): callers map that to
-// invalid credentials, never to an internal error.
+// Argon2id parameters mirror argon2::Argon2::default() (RFC 9106 first
+// recommendation): m=19456 KiB, t=2, p=1, 32-byte output.
+const (
+	argon2idIterations  = 2
+	argon2idMemoryKiB   = 19456
+	argon2idParallelism = 1
+	argon2idKeyLen      = 32
+	argon2idSaltLen     = 16
+)
+
+// VerifyPassword reports whether password matches the stored hash. Argon2id
+// PHC strings (the Rust backend format, and everything HashPassword mints)
+// verify via x/crypto/argon2 with a constant-time comparison; $2a$/$2b$
+// bcrypt strings (earlier Go builds) verify via bcrypt. Unknown hash formats
+// fail closed (false): callers map that to invalid credentials, never to an
+// internal error.
 func VerifyPassword(password, hash string) bool {
+	if strings.HasPrefix(hash, "$argon2id$") {
+		return verifyArgon2id(password, hash)
+	}
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
+// verifyArgon2id parses a $argon2id$v=19$m=...,t=...,p=...$salt$hash PHC
+// string and compares in constant time. Anything malformed returns false.
+func verifyArgon2id(password, hash string) bool {
+	parts := strings.Split(hash, "$")
+	// ["", "argon2id", "v=19", "m=19456,t=2,p=1", salt, hash]
+	if len(parts) != 6 || parts[1] != "argon2id" {
+		return false
+	}
+	if parts[2] != fmt.Sprintf("v=%d", argon2.Version) {
+		return false
+	}
+	var memory uint32
+	var iterations uint32
+	var parallelism uint8
+	for _, kv := range strings.Split(parts[3], ",") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			return false
+		}
+		switch k {
+		case "m":
+			var n uint64
+			if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n == 0 || n > 1<<22 {
+				return false
+			}
+			memory = uint32(n)
+		case "t":
+			var n uint64
+			if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n == 0 || n > 255 {
+				return false
+			}
+			iterations = uint32(n)
+		case "p":
+			var n uint64
+			if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n == 0 || n > 255 {
+				return false
+			}
+			parallelism = uint8(n)
+		default:
+			return false
+		}
+	}
+	if memory == 0 || iterations == 0 || parallelism == 0 {
+		return false
+	}
+	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
+	if err != nil {
+		return false
+	}
+	want, err := base64.RawStdEncoding.DecodeString(parts[5])
+	if err != nil || len(want) == 0 {
+		return false
+	}
+	got := argon2.IDKey([]byte(password), salt, iterations, memory, parallelism, uint32(len(want)))
+	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
 // ---- token helpers ----

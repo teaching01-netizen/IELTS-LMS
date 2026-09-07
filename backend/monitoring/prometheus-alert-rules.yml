@@ -21,6 +21,26 @@ groups:
           summary: "Replay incomplete at submit detected"
           description: "Client final seq exceeded server accepted seq at seal time. Investigate mutation flush lag and grace merges."
 
+      - alert: RateLimitAuthCriticalDenials
+        expr: increase(http_ratelimit_denied_total{tier="auth-critical"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: page
+          slo: auth-availability
+        annotations:
+          summary: "Auth-critical rate-limit denials detected"
+          description: "Session/logout reads are being denied. This is a misconfiguration or attack — never fix by raising only this tier without checking the tier table. See docs/runbooks/rate-limit-tiers.md."
+
+      - alert: RateLimitTierBurnRate
+        expr: increase(http_ratelimit_denied_total[10m]) >= 50
+        for: 5m
+        labels:
+          severity: warning
+          slo: api-availability
+        annotations:
+          summary: "Rate-limit denials elevated"
+          description: "Check http_ratelimit_denied_total by tier/key_class to find the hot tier, then tune that tier's RATE_LIMIT_*_PER_MIN knob. Do not raise RATE_LIMIT_GLOBAL (single-global mode is removed)."
+
       - alert: PostSubmitGraceRejectedSpike
         expr: increase(backend_post_submit_grace_rejected_total[10m]) >= 20
         for: 5m

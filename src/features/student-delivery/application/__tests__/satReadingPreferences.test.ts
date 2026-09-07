@@ -44,6 +44,10 @@ describe("SAT reading preferences", () => {
       textScale: 1.5 as const,
       lineSpacing: "relaxed" as const,
       splitRatio: 0.55,
+      lineReaderEnabled: true,
+      lineReaderPosition: 0.65,
+      examZoom: 1.5,
+      contrastMode: 'high-contrast' as const,
     };
     expect(saveSatReadingPreferences("schedule-1", "attempt-1", preferred)).toBe(true);
     expect(loadSatReadingPreferences("schedule-1", "attempt-1")).toEqual(preferred);

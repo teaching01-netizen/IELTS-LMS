@@ -24,6 +24,22 @@ describe('CompactStudentHeader', () => {
     expect(screen.getByRole('button', { name: 'Accessibility settings' })).toBeInTheDocument();
   });
 
+  it('announces the 1-minute warning once and never per tick (T2.5)', () => {
+    // timeRemaining drives the shared threshold announcer: 59s crosses the
+    // 1-minute threshold exactly once; a re-render at 58s must not change
+    // the announcement, and the per-tick timer carries no live region.
+    const { rerender } = render(
+      <CompactStudentHeader moduleLabel="Reading" timeRemaining={59} />,
+    );
+    const announcement = screen.getByTestId('student-timer-announcement');
+    expect(announcement).toHaveAttribute('aria-live', 'polite');
+    expect(announcement).toHaveTextContent('Low time: 1 minute remaining');
+    rerender(<CompactStudentHeader moduleLabel="Reading" timeRemaining={58} />);
+    expect(screen.getByTestId('student-timer-announcement')).toHaveTextContent(
+      'Low time: 1 minute remaining',
+    );
+  });
+
   it('closes the tools sheet after opening the navigator', () => {
     const onOpenNavigator = vi.fn();
 

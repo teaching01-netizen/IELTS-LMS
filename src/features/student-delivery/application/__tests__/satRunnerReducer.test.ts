@@ -37,14 +37,14 @@ describe('satRunnerReducer', () => {
     const answered = satRunnerReducer(module, { type: 'setAnswer', questionId: 'q1', value: 'B' });
     const reviewed = satRunnerReducer(answered, { type: 'setReviewFlag', questionId: 'q1', flagged: true });
     const eliminated = satRunnerReducer(reviewed, { type: 'toggleEliminatedOption', questionId: 'q1', optionId: 'A' });
-    const annotated = satRunnerReducer(eliminated, { type: 'setAnnotations', questionId: 'q1', annotations: { version: 1, note: 'Check this step' } });
+    const annotated = satRunnerReducer(eliminated, { type: 'setAnnotations', questionId: 'q1', annotations: { version: 2, annotations: [], legacyQuestionNote: 'Check this step' } });
 
     expect(annotated.phase === 'module' ? annotated.responses.q1 : undefined).toEqual({
       questionId: 'q1',
       answer: 'B',
       markedForReview: true,
       eliminatedOptionIds: ['A'],
-      annotations: { version: 1, note: 'Check this step' },
+      annotations: { version: 2, annotations: [], legacyQuestionNote: 'Check this step' },
     });
   });
 

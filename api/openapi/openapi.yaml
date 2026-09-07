@@ -56,7 +56,7 @@ paths:
     post:
       security: []
       tags: [auth]
-      summary: Student entry by access code
+      summary: Student entry by access code (free by default; any active account, any non-empty code)
       parameters:
         - $ref: "#/components/parameters/RequestId"
       requestBody:
@@ -67,7 +67,7 @@ paths:
               type: object
               required: [wcode, email]
               properties:
-                wcode: { type: string, example: W123456 }
+                wcode: { type: string, description: 'Free-form access code (still required): W123456, alice, guest-alpha_01, ...', example: alice }
                 email: { type: string, format: email }
       responses:
         "200":
@@ -2894,6 +2894,27 @@ paths:
               schema: { type: object }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /exams/{id}/draft/reopen:
+    post:
+      tags: [exams]
+      summary: Reopen exam draft (heals clone-database exams that lost their editable draft)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: Reopened draft (existing draft when already healthy; fresh draft seeded from the latest surviving version otherwise)
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /exams/{id}/publish:
     post:
       tags: [exams]

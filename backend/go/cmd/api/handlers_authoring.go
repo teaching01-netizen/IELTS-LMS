@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -355,6 +356,32 @@ type draftPayload struct {
 	IsPretest     bool            `json:"isPretest"`
 }
 
+// decodeDraftOptional decodes a question draft, accepting an empty body as
+// the zero draft (the service fills in the section-aware blank editor
+// draft). Non-empty bodies stay strict.
+func decodeDraftOptional(r *http.Request) (authoring.QuestionDraft, error) {
+	var req draftPayload
+	if err := httpx.DecodeLimitedOptional(r, httpx.MaxAdminBodyBytes, &req); err != nil {
+		return authoring.QuestionDraft{}, err
+	}
+	return authoring.QuestionDraft{
+		QuestionType:  req.QuestionType,
+		Stimulus:      req.Stimulus,
+		Prompt:        req.Prompt,
+		Answer:        req.Answer,
+		Rationale:     req.Rationale,
+		Metadata:      req.Metadata,
+		Accessibility: req.Accessibility,
+		IsPretest:     req.IsPretest,
+	}, nil
+}
+
+// bytesTrimSpace is bytes.TrimSpace without pulling bytes into every file
+// scope comment; the handler only needs the empty check.
+func bytesTrimSpace(b json.RawMessage) []byte {
+	return bytes.TrimSpace(b)
+}
+
 // decodeDraft decodes a question draft from the request body.
 func decodeDraft(r *http.Request) (authoring.QuestionDraft, error) {
 	var req draftPayload
@@ -374,6 +401,8 @@ func decodeDraft(r *http.Request) (authoring.QuestionDraft, error) {
 }
 
 // authorCreateQuestionHandler creates one question in a module.
+// The frontend POSTs with no body; an explicit draft is also accepted for
+// API clients. Either way the service synthesizes a section-aware default.
 func authorCreateQuestionHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess := requireAuthoringModuleWrite(app, w, r, chi.URLParam(r, "moduleID"))
@@ -384,7 +413,7 @@ func authorCreateQuestionHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring service is unavailable."))
 			return
 		}
-		draft, err := decodeDraft(r)
+		draft, err := decodeDraftOptional(r)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -410,33 +439,43 @@ func authorBatchQuestionsHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			Drafts []draftPayload `json:"drafts"`
+			Drafts    []draftPayload `json:"drafts"`
+			Questions []draftPayload `json:"questions"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		drafts := make([]authoring.QuestionDraft, 0, len(req.Drafts))
-		for _, d := range req.Drafts {
+		payloads := req.Drafts
+		if len(payloads) == 0 {
+			payloads = req.Questions
+		}
+		drafts := make([]authoring.QuestionDraft, 0, len(payloads))
+		for _, d := range payloads {
 			drafts = append(drafts, authoring.QuestionDraft{
-				QuestionType: d.QuestionType,
-				Stimulus:     d.Stimulus,
-				Prompt:       d.Prompt,
-				Answer:       d.Answer,
-				Rationale:    d.Rationale,
-				Metadata:     d.Metadata,
-				IsPretest:    d.IsPretest,
+				QuestionType:  d.QuestionType,
+				Stimulus:      d.Stimulus,
+				Prompt:        d.Prompt,
+				Answer:        d.Answer,
+				Rationale:     d.Rationale,
+				Metadata:      d.Metadata,
+				Accessibility: d.Accessibility,
+				IsPretest:     d.IsPretest,
 			})
 		}
 		out, err := app.Authoring.BatchCreateQuestions(r.Context(), chi.URLParam(r, "moduleID"), sess.UserID, drafts)
-		if out == nil {
-			out = []authoring.QuestionSummary{}
-		}
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		httpx.WriteJSON(w, http.StatusCreated, out)
+		if out == nil {
+			out = []authoring.QuestionSummary{}
+		}
+		created := make([]string, 0, len(out))
+		for _, summary := range out {
+			created = append(created, summary.ExamQuestionID)
+		}
+		httpx.WriteJSON(w, http.StatusCreated, map[string]any{"createdQuestionIds": created, "questions": out})
 	}
 }
 
@@ -479,13 +518,14 @@ func authorUpdateQuestionHandler(app *App) http.HandlerFunc {
 			return
 		}
 		out, err := app.Authoring.UpdateQuestion(r.Context(), chi.URLParam(r, "examQuestionID"), sess.UserID, req.ExpectedRevision, authoring.QuestionDraft{
-			QuestionType: req.QuestionType,
-			Stimulus:     req.Stimulus,
-			Prompt:       req.Prompt,
-			Answer:       req.Answer,
-			Rationale:    req.Rationale,
-			Metadata:     req.Metadata,
-			IsPretest:    req.IsPretest,
+			QuestionType:  req.QuestionType,
+			Stimulus:      req.Stimulus,
+			Prompt:        req.Prompt,
+			Answer:        req.Answer,
+			Rationale:     req.Rationale,
+			Metadata:      req.Metadata,
+			Accessibility: req.Accessibility,
+			IsPretest:     req.IsPretest,
 		})
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -524,22 +564,40 @@ func authorReorderHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			ExpectedIDs []string `json:"expectedIds"`
-			OrderedIDs  []string `json:"orderedIds"`
+			ExpectedIDs         []string `json:"expectedIds"`
+			OrderedIDs          []string `json:"orderedIds"`
+			ExpectedQuestionIDs []string `json:"expectedQuestionIds"`
+			QuestionIDs         []string `json:"questionIds"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if req.ExpectedIDs == nil || req.OrderedIDs == nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "expectedIds and orderedIds are required."))
+		expected := req.ExpectedIDs
+		if expected == nil {
+			expected = req.ExpectedQuestionIDs
+		}
+		ordered := req.OrderedIDs
+		if ordered == nil {
+			ordered = req.QuestionIDs
+		}
+		if ordered == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "orderedIds and questionIds are required."))
 			return
 		}
-		if err := app.Authoring.ReorderQuestions(r.Context(), chi.URLParam(r, "moduleID"), req.ExpectedIDs, req.OrderedIDs); err != nil {
+		if err := app.Authoring.ReorderQuestions(r.Context(), chi.URLParam(r, "moduleID"), expected, ordered); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+		summaries, err := app.Authoring.ListQuestions(r.Context(), chi.URLParam(r, "moduleID"))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if summaries == nil {
+			summaries = []authoring.QuestionSummary{}
+		}
+		httpx.WriteJSON(w, http.StatusOK, summaries)
 	}
 }
 
@@ -555,13 +613,17 @@ func authorDuplicateHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			DestinationModuleID *string `json:"destinationModuleId"`
+			DestinationModuleID       *string `json:"destinationModuleId"`
+			InsertAfterExamQuestionID *string `json:"insertAfterExamQuestionId"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		out, err := app.Authoring.DuplicateQuestion(r.Context(), chi.URLParam(r, "examQuestionID"), req.DestinationModuleID, sess.UserID)
+		if req.DestinationModuleID != nil && requireAuthoringModuleWrite(app, w, r, *req.DestinationModuleID) == nil {
+			return
+		}
+		out, err := app.Authoring.DuplicateQuestion(r.Context(), chi.URLParam(r, "examQuestionID"), req.DestinationModuleID, sess.UserID, req.InsertAfterExamQuestionID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -587,8 +649,10 @@ func authorBulkHandler(app *App) http.HandlerFunc {
 				Type                string         `json:"type"`
 				DestinationModuleID *string        `json:"destinationModuleId"`
 				PretestValue        *bool          `json:"pretestValue"`
+				Value               *bool          `json:"value"`
 				Patch               map[string]any `json:"patch"`
 			} `json:"action"`
+			ExpectedRevisions map[string]int `json:"expectedRevisions"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -606,19 +670,35 @@ func authorBulkHandler(app *App) http.HandlerFunc {
 		if req.Action.DestinationModuleID != nil {
 			action.DestinationModuleID = *req.Action.DestinationModuleID
 		}
-		if req.Action.PretestValue != nil {
-			action.PretestValue = *req.Action.PretestValue
+		pretest := req.Action.PretestValue
+		if pretest == nil {
+			pretest = req.Action.Value
 		}
-		n, err := app.Authoring.BulkQuestions(r.Context(), req.QuestionIDs, action, sess.UserID)
+		if pretest != nil {
+			action.PretestValue = *pretest
+		}
+		result, err := app.Authoring.BulkQuestions(r.Context(), req.QuestionIDs, action, sess.UserID, req.ExpectedRevisions)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"count": n})
+		if result.AffectedQuestionIDs == nil {
+			result.AffectedQuestionIDs = []string{}
+		}
+		if result.CreatedQuestionIDs == nil {
+			result.CreatedQuestionIDs = []string{}
+		}
+		if result.UpdatedQuestions == nil {
+			result.UpdatedQuestions = []authoring.QuestionSummary{}
+		}
+		httpx.WriteJSON(w, http.StatusOK, result)
 	}
 }
 
-// authorSaveRevisionHandler seals the draft revision for a question.
+// authorSaveRevisionHandler persists the edited draft for a question.
+// The frontend PATCHes the revision id with { revision, questionType,
+// stimulus, prompt, answer, rationale, metadata, accessibility }; the payload
+// field is `answer` (the DB column stays `answer_definition`).
 func authorSaveRevisionHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess := requireAuthoringRevisionWrite(app, w, r, chi.URLParam(r, "revisionID"))
@@ -629,7 +709,33 @@ func authorSaveRevisionHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring service is unavailable."))
 			return
 		}
-		out, err := app.Authoring.SaveRevision(r.Context(), chi.URLParam(r, "revisionID"), sess.UserID)
+		var req struct {
+			Revision int `json:"revision"`
+			draftPayload
+			AnswerCompat json.RawMessage `json:"answerDefinition"`
+		}
+		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		answer := req.Answer
+		if len(bytesTrimSpace(answer)) == 0 && len(bytesTrimSpace(req.AnswerCompat)) != 0 {
+			answer = req.AnswerCompat
+		}
+		examQuestionID, err := app.Authoring.ExamQuestionIDForRevision(r.Context(), chi.URLParam(r, "revisionID"))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out, err := app.Authoring.SaveRevision(r.Context(), examQuestionID, chi.URLParam(r, "revisionID"), req.Revision, authoring.QuestionDraft{
+			QuestionType:  req.QuestionType,
+			Stimulus:      req.Stimulus,
+			Prompt:        req.Prompt,
+			Answer:        answer,
+			Rationale:     req.Rationale,
+			Metadata:      req.Metadata,
+			Accessibility: req.Accessibility,
+		}, sess.UserID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

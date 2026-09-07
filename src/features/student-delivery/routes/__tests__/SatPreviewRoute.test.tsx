@@ -222,4 +222,62 @@ describe("SatPreviewRoute", () => {
     expect(screen.getByRole("button", { name: /calculator/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /reference/i })).toBeInTheDocument();
   });
+
+  it("performs zero delivery writes while answering in SAT staff preview", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("SAT preview must not fetch"));
+    const beaconSpy = vi.fn().mockReturnValue(true);
+    const hadBeacon = typeof navigator.sendBeacon === "function";
+    const originalBeacon = hadBeacon ? navigator.sendBeacon.bind(navigator) : undefined;
+    Object.defineProperty(navigator, "sendBeacon", {
+      configurable: true,
+      writable: true,
+      value: beaconSpy,
+    });
+    const wsSpy = vi.fn();
+    const OriginalWebSocket = globalThis.WebSocket;
+    (globalThis as unknown as Record<string, unknown>).WebSocket = wsSpy;
+    try {
+      render(
+        <MemoryRouter>
+          <SatPreviewRoute examId="exam-1" />
+        </MemoryRouter>
+      );
+      expect(await screen.findByText("Preview question")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("radio", { name: /option a/i }));
+      expect(screen.getByRole("radio", { name: /option a/i })).toBeChecked();
+      fireEvent.click(screen.getByRole("radio", { name: /option b/i }));
+      expect(screen.getByRole("radio", { name: /option b/i })).toBeChecked();
+
+      // The draft projection resolves via the mocked module API (authoring
+      // read, not delivery). Flush microtasks/timers on real timers so any
+      // debounced delivery write would surface through the network traps.
+      vi.useFakeTimers();
+      await vi.advanceTimersByTimeAsync(60_000);
+      vi.useRealTimers();
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(beaconSpy).not.toHaveBeenCalled();
+      expect(wsSpy).not.toHaveBeenCalled();
+      // Draft fetch is authoring-read, not delivery: the only fetch-shaped
+      // dependency is mocked at the module boundary, so global fetch stays idle.
+      expect(getPreviewMock).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      fetchSpy.mockRestore();
+      vi.restoreAllMocks();
+      if (originalBeacon) {
+        Object.defineProperty(navigator, "sendBeacon", {
+          configurable: true,
+          writable: true,
+          value: originalBeacon,
+        });
+      } else {
+        Reflect.deleteProperty(navigator, "sendBeacon");
+      }
+      (globalThis as unknown as Record<string, unknown>).WebSocket = OriginalWebSocket;
+    }
+  });
 });

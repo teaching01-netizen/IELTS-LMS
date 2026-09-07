@@ -99,8 +99,12 @@ func normalizeMySQLDSN(raw string) (string, error) {
 		config.Net = "tcp"
 		config.Addr = net.JoinHostPort(u.Hostname(), port)
 		config.DBName = dbName
+		config.ParseTime = true
 		config.Params = make(map[string]string, len(params))
 		for key, values := range params {
+			if key == "parseTime" || key == "loc" || key == "time_zone" {
+				continue
+			}
 			if len(values) > 0 {
 				config.Params[key] = values[0]
 			}
@@ -118,7 +122,7 @@ func normalizeMySQLDSN(raw string) (string, error) {
 	// the generic DSN parameter applies SET time_zone on every new pooled
 	// connection (setting it once after Ping is insufficient for a pool).
 	// Use a distinct UTC location value so FormatDSN emits loc=UTC even on
-	// hosts whose Go process-local location already happens to be UTC.
+	// hosts whose Go process-local location already happens to be UTC. parseTime is forced on: without it DATETIME arrives as bytes and time scans fail.
 	config.Loc = time.FixedZone("UTC", 0)
 	if config.Params == nil {
 		config.Params = map[string]string{}

@@ -16,14 +16,17 @@
 package authoring
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
@@ -80,7 +83,7 @@ type Section struct {
 	DurationSeconds int            `json:"durationSeconds"`
 	BreakAfterSecs  int            `json:"breakAfterSeconds"`
 	Revision        int            `json:"revision"`
-	RoutingPolicy   *RoutingPolicy `json:"routingPolicy,omitempty"`
+	RoutingPolicy   *RoutingPolicy `json:"routingPolicy"`
 	Modules         []Module       `json:"modules"`
 }
 
@@ -139,20 +142,35 @@ type QuestionReadinessSummary struct {
 	WarningCount       int    `json:"warningCount"`
 }
 
-// QuestionDetail mirrors AssessmentQuestionDetail (trimmed JSON payloads).
+// QuestionRevisionDetail mirrors the frontend QuestionRevision nested inside
+// AssessmentQuestionDetail. The frontend never consumes flat detail fields;
+// it reads `detail.question` (revision id, question id, fencing revision,
+// state) and binds `revision` to the server fencing counter on every save.
+type QuestionRevisionDetail struct {
+	ID               string          `json:"id"`
+	QuestionID       string          `json:"questionId"`
+	SemanticRevision int             `json:"semanticRevision"`
+	Revision         int             `json:"revision"`
+	State            string          `json:"state"`
+	QuestionType     string          `json:"questionType"`
+	Stimulus         json.RawMessage `json:"stimulus"`
+	Prompt           json.RawMessage `json:"prompt"`
+	Answer           json.RawMessage `json:"answer"`
+	Rationale        json.RawMessage `json:"rationale"`
+	Metadata         json.RawMessage `json:"metadata"`
+	Accessibility    json.RawMessage `json:"accessibility"`
+}
+
+// QuestionDetail mirrors AssessmentQuestionDetail: placement fields plus the
+// nested `question` revision payload.
 type QuestionDetail struct {
-	ExamQuestionID string          `json:"examQuestionId"`
-	ModuleID       string          `json:"moduleId"`
-	ModuleKey      string          `json:"moduleKey"`
-	SectionKey     string          `json:"sectionKey"`
-	DisplayOrder   int             `json:"displayOrder"`
-	IsPretest      bool            `json:"isPretest"`
-	QuestionType   string          `json:"questionType"`
-	Stimulus       json.RawMessage `json:"stimulus"`
-	Prompt         json.RawMessage `json:"prompt"`
-	Answer         json.RawMessage `json:"answerDefinition"`
-	Rationale      json.RawMessage `json:"rationale"`
-	Metadata       json.RawMessage `json:"metadata"`
+	ExamQuestionID string                 `json:"examQuestionId"`
+	ModuleID       string                 `json:"moduleId"`
+	ModuleKey      string                 `json:"moduleKey"`
+	SectionKey     string                 `json:"sectionKey"`
+	DisplayOrder   int                    `json:"displayOrder"`
+	IsPretest      bool                   `json:"isPretest"`
+	Question       QuestionRevisionDetail `json:"question"`
 }
 
 // ValidationIssue is one blocking/warning finding.
@@ -526,30 +544,38 @@ func (s *Service) clonePublishedSATToDraftTx(ctx context.Context, q tx.Tx, examI
 	return draftVersionID, nil
 }
 
-// Preview returns the delivery projection for SAT drafts (mirrors preview();
-// non-SAT providers are rejected as unsupported).
-func (s *Service) Preview(ctx context.Context, examID string) (Shell, error) {
-	var providerKey string
-	if err := s.db.QueryRowContext(ctx, "SELECT provider_key FROM exam_entities WHERE id = ?", examID).Scan(&providerKey); err != nil {
-		if err == sql.ErrNoRows {
-			return Shell{}, notFoundError("Exam not found.")
-		}
-		return Shell{}, err
+// Preview contains renderable candidate content, not authoring summaries.
+type Preview struct {
+	ExamID          string                     `json:"examId"`
+	ProviderKey     string                     `json:"providerKey"`
+	VersionID       string                     `json:"versionId"`
+	VersionRevision int                        `json:"versionRevision"`
+	Sections        []delivery.DeliverySection `json:"sections"`
+}
+
+func (s *Service) Preview(ctx context.Context, examID string) (Preview, error) {
+	shell, err := s.Shell(ctx, examID)
+	if err != nil {
+		return Preview{}, err
 	}
-	if providerKey != "sat" {
-		return Shell{}, validationError("Assessment provider is not supported.")
+	if shell.ProviderKey != "sat" {
+		return Preview{}, validationError("Assessment provider is not supported.")
 	}
-	return s.Shell(ctx, examID)
+	sections, err := delivery.NewService(s.db, s.runner).LoadSections(ctx, shell.VersionID)
+	if err != nil {
+		return Preview{}, err
+	}
+	return Preview{ExamID: shell.ExamID, ProviderKey: shell.ProviderKey, VersionID: shell.VersionID, VersionRevision: shell.VersionRevision, Sections: sections}, nil
 }
 
 // CreateQuestion appends one question to a module under draft locks (mirrors
 // create_question: locks current draft for module, appends display_order).
 func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, draft QuestionDraft) (QuestionDetail, error) {
-	if strings.TrimSpace(draft.QuestionType) == "" {
-		return QuestionDetail{}, validationError("Question type is required.")
-	}
 	var out QuestionDetail
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if err := touchModuleDraft(ctx, q, moduleID); err != nil {
+			return err
+		}
 		// SELECT ... FOR UPDATE on the module serializes appends.
 		var sectionKey, moduleKey string
 		if err := q.QueryRowContext(ctx, "SELECT s.section_key, m.module_key FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ? FOR UPDATE", moduleID).Scan(&sectionKey, &moduleKey); err != nil {
@@ -557,6 +583,12 @@ func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, 
 				return notFoundError("Module not found.")
 			}
 			return err
+		}
+		if isEmptyQuestionDraft(draft) {
+			draft = defaultSATQuestionDraft(sectionKey)
+		}
+		if strings.TrimSpace(draft.QuestionType) == "" {
+			return validationError("Question type is required.")
 		}
 		var nextOrder sql.NullInt64
 		if err := q.QueryRowContext(ctx, "SELECT COALESCE(MAX(display_order), -1) + 1 FROM assessment_exam_questions WHERE module_id = ?", moduleID).Scan(&nextOrder); err != nil {
@@ -579,10 +611,60 @@ func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, 
 		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(6), NOW(6))", examQuestionID, moduleID, questionID, revisionID, order, draft.IsPretest); err != nil {
 			return err
 		}
-		out = QuestionDetail{ExamQuestionID: examQuestionID, ModuleID: moduleID, ModuleKey: moduleKey, SectionKey: sectionKey, DisplayOrder: order, IsPretest: draft.IsPretest, QuestionType: draft.QuestionType, Stimulus: nonEmptyJSON(draft.Stimulus), Prompt: nonEmptyJSON(draft.Prompt), Answer: nonEmptyJSON(draft.Answer), Rationale: nonEmptyJSON(draft.Rationale), Metadata: nonEmptyJSON(draft.Metadata)}
+		// Re-read the row so the response carries the server revision ids,
+		// state, and accessibility the flat literal could never provide.
+		detail, err := scanQuestionDetail(q.QueryRowContext(ctx, questionDetailQuery, examQuestionID))
+		if err != nil {
+			return err
+		}
+		out = detail
 		return nil
 	})
 	return out, err
+}
+
+// isEmptyQuestionDraft reports whether the client sent no draft content at
+// all (the empty-body POST .../questions path). A draft that names a
+// question type but leaves payloads blank is an explicit (still valid) draft.
+func isEmptyQuestionDraft(draft QuestionDraft) bool {
+	return strings.TrimSpace(draft.QuestionType) == "" &&
+		len(bytes.TrimSpace(draft.Stimulus)) == 0 &&
+		len(bytes.TrimSpace(draft.Prompt)) == 0 &&
+		len(bytes.TrimSpace(draft.Answer)) == 0 &&
+		len(bytes.TrimSpace(draft.Rationale)) == 0 &&
+		len(bytes.TrimSpace(draft.Metadata)) == 0 &&
+		len(bytes.TrimSpace(draft.Accessibility)) == 0 &&
+		!draft.IsPretest
+}
+
+// defaultSATQuestionDraft synthesizes the blank editor draft for a section.
+// Reading & Writing only supports single_choice; math defaults to
+// single_choice as well (SPR stays an explicit author choice), so the authored
+// question opens incomplete-but-valid-shaped and the readiness gate
+// (validateSATQuestion) reports what is still missing.
+func defaultSATQuestionDraft(sectionKey string) QuestionDraft {
+	questionType := "single_choice"
+	if sectionKey != SectionReadingWriting && sectionKey != SectionMath {
+		sectionKey = SectionReadingWriting
+	}
+	answer := json.RawMessage(`{"kind":"single_choice","options":[{"id":"A","content":{"version":2,"nodes":[],"document":{"type":"doc","content":[{"type":"paragraph"}]}}},{"id":"B","content":{"version":2,"nodes":[],"document":{"type":"doc","content":[{"type":"paragraph"}]}}},{"id":"C","content":{"version":2,"nodes":[],"document":{"type":"doc","content":[{"type":"paragraph"}]}}},{"id":"D","content":{"version":2,"nodes":[],"document":{"type":"doc","content":[{"type":"paragraph"}]}}}],"correctOptionId":null}`)
+	metadata, _ := json.Marshal(map[string]any{
+		"sectionKey": sectionKey,
+		"domain":     nil,
+		"skill":      nil,
+		"difficulty": "medium",
+		"tags":       []string{},
+	})
+	emptyDoc := json.RawMessage(`{"version":2,"nodes":[],"document":{"type":"doc","content":[{"type":"paragraph"}]}}`)
+	return QuestionDraft{
+		QuestionType:  questionType,
+		Stimulus:      emptyDoc,
+		Prompt:        emptyDoc,
+		Answer:        answer,
+		Rationale:     emptyDoc,
+		Metadata:      metadata,
+		Accessibility: json.RawMessage(`{"longDescription":null}`),
+	}
 }
 
 // BatchCreateQuestions inserts many questions into one module (mirrors
@@ -604,6 +686,9 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 	}
 	out := make([]QuestionSummary, 0, len(drafts))
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if err := touchModuleDraft(ctx, q, moduleID); err != nil {
+			return err
+		}
 		// SELECT ... FOR UPDATE on the module serializes concurrent batches.
 		var sectionKey, moduleKey string
 		if err := q.QueryRowContext(ctx, "SELECT s.section_key, m.module_key FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ? FOR UPDATE", moduleID).Scan(&sectionKey, &moduleKey); err != nil {
@@ -636,7 +721,13 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 			}
 			_ = sectionKey
 			_ = moduleKey
-			out = append(out, QuestionSummary{ExamQuestionID: examQuestionID, QuestionID: questionID, QuestionRevision: revisionID, DisplayOrder: order, IsPretest: d.IsPretest, QuestionType: d.QuestionType})
+			out = append(out, (questionValidationRow{
+				examQuestionID: examQuestionID, questionID: questionID, revisionID: revisionID,
+				sectionKey: sectionKey, displayOrder: order, isPretest: d.IsPretest,
+				semanticRevision: 1, questionType: d.QuestionType,
+				stimulus: string(nonEmptyJSON(d.Stimulus)), prompt: string(nonEmptyJSON(d.Prompt)), answer: string(nonEmptyJSON(d.Answer)),
+				rationale: string(nonEmptyJSON(d.Rationale)), metadata: string(nonEmptyJSON(d.Metadata)),
+			}).summary())
 			order++
 		}
 		return nil
@@ -647,7 +738,7 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 	return out, nil
 }
 
-const questionDetailQuery = "SELECT eq.id, eq.module_id, m.module_key, s.section_key, eq.display_order, eq.is_pretest, r.question_type, CAST(r.stimulus AS CHAR), CAST(r.prompt AS CHAR), CAST(r.answer_definition AS CHAR), CAST(r.rationale AS CHAR), CAST(r.metadata AS CHAR) FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id JOIN assessment_question_revisions r ON r.id = eq.question_revision_id WHERE eq.id = ?"
+const questionDetailQuery = "SELECT eq.id, eq.module_id, m.module_key, s.section_key, eq.display_order, eq.is_pretest, eq.question_revision_id, eq.question_id, r.semantic_revision, r.revision, r.state, r.question_type, CAST(r.stimulus AS CHAR), CAST(r.prompt AS CHAR), CAST(r.answer_definition AS CHAR), CAST(r.rationale AS CHAR), CAST(r.metadata AS CHAR), CAST(r.accessibility AS CHAR) FROM assessment_exam_questions eq JOIN assessment_modules m ON m.id = eq.module_id JOIN assessment_sections s ON s.id = m.section_id JOIN assessment_question_revisions r ON r.id = eq.question_revision_id WHERE eq.id = ?"
 
 // ListQuestions returns one provider-validated summary per question in a
 // module (mirrors the Rust summaries() projection).
@@ -678,7 +769,7 @@ func (s *Service) GetQuestion(ctx context.Context, examQuestionID string) (Quest
 func scanQuestionDetail(row *sql.Row) (QuestionDetail, error) {
 	var d QuestionDetail
 	var isPretest bool
-	err := row.Scan(&d.ExamQuestionID, &d.ModuleID, &d.ModuleKey, &d.SectionKey, &d.DisplayOrder, &isPretest, &d.QuestionType, rawScanner(&d.Stimulus), rawScanner(&d.Prompt), rawScanner(&d.Answer), rawScanner(&d.Rationale), rawScanner(&d.Metadata))
+	err := row.Scan(&d.ExamQuestionID, &d.ModuleID, &d.ModuleKey, &d.SectionKey, &d.DisplayOrder, &isPretest, &d.Question.ID, &d.Question.QuestionID, &d.Question.SemanticRevision, &d.Question.Revision, &d.Question.State, &d.Question.QuestionType, rawScanner(&d.Question.Stimulus), rawScanner(&d.Question.Prompt), rawScanner(&d.Question.Answer), rawScanner(&d.Question.Rationale), rawScanner(&d.Question.Metadata), rawScanner(&d.Question.Accessibility))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return QuestionDetail{}, notFoundError("Question not found.")
@@ -694,6 +785,9 @@ func scanQuestionDetail(row *sql.Row) (QuestionDetail, error) {
 func (s *Service) UpdateQuestion(ctx context.Context, examQuestionID, actorID string, expectedRevision int, draft QuestionDraft) (QuestionDetail, error) {
 	var out QuestionDetail
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if err := touchQuestionDraft(ctx, q, examQuestionID); err != nil {
+			return err
+		}
 		// SELECT ... FOR UPDATE on assessment_exam_questions serializes edits.
 		var questionID, revisionID string
 		var semanticRev, rev int
@@ -707,7 +801,7 @@ func (s *Service) UpdateQuestion(ctx context.Context, examQuestionID, actorID st
 			return conflictError("Question changed while you were editing; refresh before retrying.")
 		}
 		newRevisionID := uuid.NewString()
-		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_question_revisions (id, question_id, semantic_revision, state, question_type, stimulus, prompt, answer_definition, rationale, metadata, accessibility, revision, created_by, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, 0, ?, NOW(6), NOW(6))", newRevisionID, questionID, semanticRev+1, orDefault(draft.QuestionType, "multiple_choice"), nonEmptyJSON(draft.Stimulus), nonEmptyJSON(draft.Prompt), nonEmptyJSON(draft.Answer), nonEmptyJSON(draft.Rationale), nonEmptyJSON(draft.Metadata), nonEmptyJSON(draft.Accessibility), actorID); err != nil {
+		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_question_revisions (id, question_id, semantic_revision, state, question_type, stimulus, prompt, answer_definition, rationale, metadata, accessibility, revision, created_by, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, 0, ?, NOW(6), NOW(6))", newRevisionID, questionID, semanticRev+1, orDefault(draft.QuestionType, "single_choice"), nonEmptyJSON(draft.Stimulus), nonEmptyJSON(draft.Prompt), nonEmptyJSON(draft.Answer), nonEmptyJSON(draft.Rationale), nonEmptyJSON(draft.Metadata), nonEmptyJSON(draft.Accessibility), actorID); err != nil {
 			return err
 		}
 		if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions SET question_revision_id = ?, is_pretest = ?, updated_at = NOW(6) WHERE id = ?", newRevisionID, draft.IsPretest, examQuestionID); err != nil {
@@ -727,6 +821,9 @@ func (s *Service) UpdateQuestion(ctx context.Context, examQuestionID, actorID st
 // DeleteQuestion removes one exam question (mirrors delete_question).
 func (s *Service) DeleteQuestion(ctx context.Context, examQuestionID string) error {
 	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if err := touchQuestionDraft(ctx, q, examQuestionID); err != nil {
+			return err
+		}
 		// SELECT ... FOR UPDATE serializes delete vs reorder/duplicate.
 		var moduleID string
 		if err := q.QueryRowContext(ctx, "SELECT module_id FROM assessment_exam_questions WHERE id = ? FOR UPDATE", examQuestionID).Scan(&moduleID); err != nil {
@@ -750,6 +847,9 @@ func (s *Service) ReorderQuestions(ctx context.Context, moduleID string, expecte
 		return validationError("At least one question id is required.")
 	}
 	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if err := touchModuleDraft(ctx, q, moduleID); err != nil {
+			return err
+		}
 		// SELECT ... FOR UPDATE on the module row serializes reorder vs edits.
 		var exists string
 		if err := q.QueryRowContext(ctx, "SELECT id FROM assessment_modules WHERE id = ? FOR UPDATE", moduleID).Scan(&exists); err != nil {
@@ -758,25 +858,38 @@ func (s *Service) ReorderQuestions(ctx context.Context, moduleID string, expecte
 			}
 			return err
 		}
-		rows, err := q.QueryContext(ctx, "SELECT id FROM assessment_exam_questions WHERE module_id = ? ORDER BY display_order ASC FOR UPDATE", moduleID)
+		rows, err := q.QueryContext(ctx, "SELECT id, display_order FROM assessment_exam_questions WHERE module_id = ? ORDER BY display_order ASC FOR UPDATE", moduleID)
 		if err != nil {
 			return err
 		}
 		current := []string{}
+		maxOrder := -1
 		for rows.Next() {
 			var id string
-			if err := rows.Scan(&id); err != nil {
+			var order int
+			if err := rows.Scan(&id, &order); err != nil {
 				rows.Close()
 				return err
 			}
 			current = append(current, id)
+			if order > maxOrder {
+				maxOrder = order
+			}
 		}
 		rows.Close()
-		if len(expectedIDs) > 0 && !sameSet(current, expectedIDs) {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if expectedIDs != nil && !slices.Equal(current, expectedIDs) {
 			return conflictError("Questions changed while you were editing; refresh before retrying.")
 		}
 		if !sameSet(current, orderedIDs) {
 			return validationError("Reorder list must contain exactly the module questions.")
+		}
+		for i, id := range current {
+			if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions SET display_order = ? WHERE id = ? AND module_id = ?", maxOrder+1+i, id, moduleID); err != nil {
+				return err
+			}
 		}
 		for i, id := range orderedIDs {
 			if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions SET display_order = ?, updated_at = NOW(6) WHERE id = ? AND module_id = ?", i, id, moduleID); err != nil {
@@ -789,9 +902,12 @@ func (s *Service) ReorderQuestions(ctx context.Context, moduleID string, expecte
 
 // DuplicateQuestion copies one exam question into a module (mirrors
 // duplicate_question).
-func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, destModuleID *string, actorID string) (QuestionDetail, error) {
+func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, destModuleID *string, actorID string, insertAfter *string) (QuestionDetail, error) {
 	var out QuestionDetail
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if err := touchQuestionDraft(ctx, q, examQuestionID); err != nil {
+			return err
+		}
 		// SELECT ... FOR UPDATE on the source row serializes duplicate vs edit.
 		var srcModule, questionID, revisionID string
 		var order int
@@ -806,6 +922,11 @@ func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, 
 		if destModuleID != nil && strings.TrimSpace(*destModuleID) != "" {
 			dest = strings.TrimSpace(*destModuleID)
 		}
+		if dest != srcModule {
+			if err := touchModuleDraft(ctx, q, dest); err != nil {
+				return err
+			}
+		}
 		var nextOrder sql.NullInt64
 		if err := q.QueryRowContext(ctx, "SELECT COALESCE(MAX(display_order), -1) + 1 FROM assessment_exam_questions WHERE module_id = ?", dest).Scan(&nextOrder); err != nil {
 			return err
@@ -813,6 +934,24 @@ func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, 
 		newOrder := 0
 		if nextOrder.Valid {
 			newOrder = int(nextOrder.Int64)
+		}
+		if insertAfter != nil {
+			var anchorOrder int
+			err := q.QueryRowContext(ctx, "SELECT display_order FROM assessment_exam_questions WHERE id = ? AND module_id = ? FOR UPDATE", *insertAfter, dest).Scan(&anchorOrder)
+			if err == sql.ErrNoRows {
+				return validationError("Insertion anchor must belong to the destination module.")
+			}
+			if err != nil {
+				return err
+			}
+			newOrder = anchorOrder + 1
+			if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions SET display_order = display_order + 1 WHERE module_id = ? AND display_order >= ? ORDER BY display_order DESC", dest, newOrder); err != nil {
+				return err
+			}
+		}
+		questionID, revisionID, err := cloneQuestionContent(ctx, q, revisionID, actorID)
+		if err != nil {
+			return err
 		}
 		newID := uuid.NewString()
 		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(6), NOW(6))", newID, dest, questionID, revisionID, newOrder, pretest); err != nil {
@@ -830,19 +969,74 @@ func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, 
 	return out, err
 }
 
+// BulkResult mirrors the frontend BulkQuestionResult: affected + created ids
+// plus the re-projected summaries the list pane re-renders.
+type BulkResult struct {
+	AffectedQuestionIDs []string          `json:"affectedQuestionIds"`
+	CreatedQuestionIDs  []string          `json:"createdQuestionIds"`
+	UpdatedQuestions    []QuestionSummary `json:"updatedQuestions"`
+}
+
+// ExamQuestionIDForRevision resolves the exam-question placement that
+// currently points at a revision id (the save-revision route is addressed by
+// revision id while fencing + reads are placement-scoped).
+func (s *Service) ExamQuestionIDForRevision(ctx context.Context, revisionID string) (string, error) {
+	var examQuestionID string
+	if err := s.db.QueryRowContext(ctx, "SELECT eq.id FROM assessment_exam_questions eq WHERE eq.question_revision_id = ?", revisionID).Scan(&examQuestionID); err != nil {
+		if err == sql.ErrNoRows {
+			return "", notFoundError("Question not found.")
+		}
+		return "", err
+	}
+	return examQuestionID, nil
+}
+
 // BulkQuestions applies one move|duplicate|set_pretest|patch_metadata|delete
 // action to many questions under module locks (mirrors bulk_questions).
-func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, action BulkAction, actorID string) (int, error) {
+func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, action BulkAction, actorID string, expectedRevisions map[string]int) (BulkResult, error) {
 	if len(questionIDs) == 0 {
-		return 0, validationError("At least one question id is required.")
+		return BulkResult{}, validationError("At least one question id is required.")
 	}
 	switch action.Type {
 	case "move", "duplicate", "set_pretest", "patch_metadata", "delete":
 	default:
-		return 0, validationError(fmt.Sprintf("Unknown bulk action %q.", action.Type))
+		return BulkResult{}, validationError(fmt.Sprintf("Unknown bulk action %q.", action.Type))
 	}
-	affected := 0
+	seen := make(map[string]bool, len(questionIDs))
+	for _, id := range questionIDs {
+		if seen[id] {
+			return BulkResult{}, validationError("Question ids must be unique.")
+		}
+		seen[id] = true
+		if expectedRevisions != nil {
+			if _, ok := expectedRevisions[id]; !ok {
+				return BulkResult{}, validationError("Expected revisions must include every selected question.")
+			}
+		}
+	}
+	result := BulkResult{AffectedQuestionIDs: []string{}, CreatedQuestionIDs: []string{}, UpdatedQuestions: []QuestionSummary{}}
+	affectedModules := map[string]bool{}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		// Validate every optimistic revision before applying any of the batch.
+		for _, id := range questionIDs {
+			if err := touchQuestionDraft(ctx, q, id); err != nil {
+				return err
+			}
+			if expectedRevisions != nil {
+				var revision int
+				if err := q.QueryRowContext(ctx, "SELECT r.revision FROM assessment_exam_questions eq JOIN assessment_question_revisions r ON r.id = eq.question_revision_id WHERE eq.id = ? FOR UPDATE", id).Scan(&revision); err != nil {
+					return err
+				}
+				if revision != expectedRevisions[id] {
+					return conflictError("Question changed while you were editing; refresh before retrying.")
+				}
+			}
+		}
+		if action.DestinationModuleID != "" {
+			if err := touchModuleDraft(ctx, q, action.DestinationModuleID); err != nil {
+				return err
+			}
+		}
 		for _, id := range questionIDs {
 			// SELECT ... FOR UPDATE per row serializes bulk vs single edits.
 			var moduleID string
@@ -874,9 +1068,16 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 				if err := q.QueryRowContext(ctx, "SELECT question_id, question_revision_id, is_pretest FROM assessment_exam_questions WHERE id = ?", id).Scan(&questionID, &revisionID, &pretest); err != nil {
 					return err
 				}
-				if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest, created_at, updated_at) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(display_order), -1) + 1 FROM (SELECT display_order FROM assessment_exam_questions WHERE module_id = ?) AS m), ?, NOW(6), NOW(6))", uuid.NewString(), dest, questionID, revisionID, dest, pretest); err != nil {
+				questionID, revisionID, err := cloneQuestionContent(ctx, q, revisionID, actorID)
+				if err != nil {
 					return err
 				}
+				newID := uuid.NewString()
+				if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest, created_at, updated_at) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(display_order), -1) + 1 FROM (SELECT display_order FROM assessment_exam_questions WHERE module_id = ?) AS m), ?, NOW(6), NOW(6))", newID, dest, questionID, revisionID, dest, pretest); err != nil {
+					return err
+				}
+				result.CreatedQuestionIDs = append(result.CreatedQuestionIDs, newID)
+				affectedModules[dest] = true
 			case "set_pretest":
 				if _, err := q.ExecContext(ctx, "UPDATE assessment_exam_questions SET is_pretest = ?, updated_at = NOW(6) WHERE id = ?", action.PretestValue, id); err != nil {
 					return err
@@ -909,7 +1110,11 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 				if err != nil {
 					return err
 				}
-				res, err := q.ExecContext(ctx, "UPDATE assessment_question_revisions SET metadata = ?, updated_at = NOW(6) WHERE id = ?", string(patched), revisionID)
+				patched, err = normalizeSATQuestionMetadata(patched)
+				if err != nil {
+					return err
+				}
+				res, err := q.ExecContext(ctx, "UPDATE assessment_question_revisions SET metadata = ?, revision = revision + 1, updated_at = NOW(6) WHERE id = ?", string(patched), revisionID)
 				if err != nil {
 					return err
 				}
@@ -920,31 +1125,77 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 					return err
 				}
 			}
+			if action.Type == "set_pretest" || action.Type == "move" {
+				if _, err := q.ExecContext(ctx, "UPDATE assessment_question_revisions r JOIN assessment_exam_questions eq ON eq.question_revision_id = r.id SET r.revision = r.revision + 1 WHERE eq.id = ?", id); err != nil {
+					return err
+				}
+			}
 			_ = actorID
-			affected++
+			result.AffectedQuestionIDs = append(result.AffectedQuestionIDs, id)
+			affectedModules[moduleID] = true
+			if action.Type == "move" && strings.TrimSpace(action.DestinationModuleID) != "" {
+				affectedModules[action.DestinationModuleID] = true
+			}
+		}
+		if action.Type != "delete" {
+			for moduleID := range affectedModules {
+				rows, err := loadQuestionValidationRows(ctx, q, moduleID)
+				if err != nil {
+					return err
+				}
+				for _, row := range rows {
+					result.UpdatedQuestions = append(result.UpdatedQuestions, row.summary())
+				}
+			}
 		}
 		return nil
 	})
-	return affected, err
+	if err != nil {
+		return BulkResult{}, err
+	}
+	return result, nil
 }
 
-// SaveRevision creates a new sealed revision pointer for a question (mirrors
-// save_question_revision; draft->sealed flip under locks).
-func (s *Service) SaveRevision(ctx context.Context, examQuestionID, actorID string) (QuestionDetail, error) {
+// SaveRevision updates a question in the current draft and advances its fencing
+// counter. The response is the QuestionRevision the editor installs in its cache.
+func (s *Service) SaveRevision(ctx context.Context, examQuestionID, revisionID string, expectedRevision int, draft QuestionDraft, actorID string) (QuestionRevisionDetail, error) {
 	var out QuestionDetail
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		// SELECT ... FOR UPDATE on the revision row serializes seal vs edit.
-		var revisionID string
-		if err := q.QueryRowContext(ctx, "SELECT question_revision_id FROM assessment_exam_questions WHERE id = ? FOR UPDATE", examQuestionID).Scan(&revisionID); err != nil {
+		if err := touchQuestionDraft(ctx, q, examQuestionID); err != nil {
+			return err
+		}
+		// SELECT ... FOR UPDATE on the exam-question row serializes seal vs edit.
+		var currentRevisionID string
+		if err := q.QueryRowContext(ctx, "SELECT question_revision_id FROM assessment_exam_questions WHERE id = ? FOR UPDATE", examQuestionID).Scan(&currentRevisionID); err != nil {
 			if err == sql.ErrNoRows {
 				return notFoundError("Question not found.")
 			}
 			return err
 		}
-		if _, err := q.ExecContext(ctx, "UPDATE assessment_question_revisions SET state = 'sealed', sealed_at = NOW(6), updated_at = NOW(6) WHERE id = ? AND state = 'draft'", revisionID); err != nil {
+		if currentRevisionID != revisionID {
+			return conflictError("Question changed while you were editing; refresh before retrying.")
+		}
+		var rev int
+		var state string
+		if err := q.QueryRowContext(ctx, "SELECT revision, state FROM assessment_question_revisions WHERE id = ? FOR UPDATE", revisionID).Scan(&rev, &state); err != nil {
+			if err == sql.ErrNoRows {
+				return notFoundError("Question not found.")
+			}
 			return err
 		}
-		_ = actorID
+		if rev != expectedRevision {
+			return conflictError("Question changed while you were editing; refresh before retrying.")
+		}
+		questionType := orDefault(draft.QuestionType, "single_choice")
+		metadata := nonEmptyJSON(draft.Metadata)
+		if normalized, err := normalizeSATQuestionMetadata(metadata); err != nil {
+			return err
+		} else {
+			metadata = normalized
+		}
+		if _, err := q.ExecContext(ctx, "UPDATE assessment_question_revisions SET question_type = ?, stimulus = ?, prompt = ?, answer_definition = ?, rationale = ?, metadata = ?, accessibility = ?, revision = revision + 1, state = 'draft', sealed_at = NULL, updated_by = ?, updated_at = NOW(6) WHERE id = ?", questionType, nonEmptyJSON(draft.Stimulus), nonEmptyJSON(draft.Prompt), nonEmptyJSON(draft.Answer), nonEmptyJSON(draft.Rationale), metadata, nonEmptyJSON(draft.Accessibility), actorID, revisionID); err != nil {
+			return err
+		}
 		detail, err := scanQuestionDetail(q.QueryRowContext(ctx, questionDetailQuery, examQuestionID))
 		if err != nil {
 			return err
@@ -952,7 +1203,7 @@ func (s *Service) SaveRevision(ctx context.Context, examQuestionID, actorID stri
 		out = detail
 		return nil
 	})
-	return out, err
+	return out.Question, err
 }
 
 // UpdateDeliverySettings rewrites section break + module timings + routing

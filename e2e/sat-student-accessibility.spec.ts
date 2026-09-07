@@ -62,6 +62,58 @@ async function expectButtonsDoNotOverlap(page: Page, scopeSelector: string) {
 }
 
 test.describe("SAT student accessibility and layout", () => {
+  test('combined text size, exam zoom, and contrast reflow without clipping', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openSatHarness(page);
+    await page.getByRole('button', { name: 'Reading', exact: true }).click();
+    for (let step = 0; step < 5; step += 1) await page.getByRole('button', { name: 'Increase text size' }).click();
+    for (let step = 0; step < 4; step += 1) await page.getByRole('button', { name: 'Increase exam zoom' }).click();
+    await page.getByRole('button', { name: 'High contrast', exact: true }).click();
+    await page.getByRole('button', { name: 'Close reading options' }).click();
+    await expect(page.locator('[data-sat-content-zoom]')).toHaveAttribute('data-sat-content-zoom', '2');
+    await expect(page.getByTestId('sat-exam-shell')).toHaveCSS('color', 'rgb(0, 0, 0)');
+    const passage = page.locator('[data-sat-passage-scroll]');
+    const geometry = await passage.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+    expect(geometry.scroll).toBeLessThanOrEqual(geometry.width + 1);
+    await page.getByRole('button', { name: 'Question', exact: true }).click();
+    const question = page.locator('[data-sat-question-scroll]');
+    const questionGeometry = await question.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+    expect(questionGeometry.scroll).toBeLessThanOrEqual(questionGeometry.width + 1);
+    await page.reload();
+    await expect(page.locator('[data-sat-content-zoom]')).toHaveAttribute('data-sat-content-zoom', '2');
+    await expect(page.getByTestId('sat-exam-shell')).toHaveAttribute('data-sat-contrast', 'high-contrast');
+  });
+  test('mobile reading switches panes without losing passage scroll', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await openSatHarness(page);
+    await page.getByRole('button', { name: 'Reading', exact: true }).click();
+    for (let step = 0; step < 5; step += 1) await page.getByRole('button', { name: 'Increase text size' }).click();
+    await page.getByRole('button', { name: 'Close reading options' }).click();
+    const passage = page.locator('[data-sat-passage-scroll]');
+    const question = page.locator('[data-sat-question-scroll]');
+    await expect(passage).toBeVisible();
+    await expect(question).toBeHidden();
+    const scrollTop = await passage.evaluate((element) => { element.scrollTop = 60; return element.scrollTop; });
+    expect(scrollTop).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Question', exact: true }).click();
+    await expect(question).toBeVisible();
+    await expect(passage).toBeHidden();
+    await page.getByRole('button', { name: 'Passage', exact: true }).click();
+    await expect(passage).toBeVisible();
+    await expect.poll(() => passage.evaluate((element) => element.scrollTop)).toBe(scrollTop);
+  });
+
+  test('desktop passage expansion restores the chosen split ratio', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openSatHarness(page);
+    const divider = page.getByRole('slider', { name: 'Passage and question width' });
+    await divider.focus(); await page.keyboard.press('ArrowRight');
+    await page.getByRole('button', { name: 'Expand passage' }).click();
+    await expect(page.locator('[data-sat-question-scroll]')).toBeHidden();
+    await page.getByRole('button', { name: 'Return to split' }).click();
+    await expect(divider).toHaveAttribute('aria-valuenow', '55');
+    await expect(page.locator('[data-sat-question-scroll]')).toBeVisible();
+  });
   test("regular iPad geometry preserves 44px controls and visible radio focus", async ({
     page,
   }) => {

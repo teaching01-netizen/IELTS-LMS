@@ -659,16 +659,15 @@ func loadSessionRuntime(ctx context.Context, q sessionQuerier, schedule SessionS
 		return SessionRuntime{}, err
 	}
 	sections := []SessionRuntimeSection{}
-	func() {
-		defer srows.Close()
-		for srows.Next() {
-			sec, err := scanSessionRuntimeSection(srows)
-			if err != nil {
-				return
-			}
-			sections = append(sections, sec)
+	defer srows.Close()
+	for srows.Next() {
+		sec, err := scanSessionRuntimeSection(srows)
+		if err != nil {
+			return SessionRuntime{}, err
 		}
-	}()
+		sections = append(sections, sec)
+	}
+
 	if err := srows.Err(); err != nil {
 		return SessionRuntime{}, err
 	}

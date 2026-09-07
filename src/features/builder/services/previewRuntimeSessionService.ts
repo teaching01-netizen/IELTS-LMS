@@ -29,6 +29,13 @@ export interface PreviewRuntimeSession {
   module: ModuleType;
   scheduleId: string;
   studentId: string;
+  /**
+   * Set when the requested section is not part of the live backend plan
+   * (e.g. a legacy ACT row whose plan was derived under the wrong
+   * provider): the resolver falls back to the runtime's actual live section
+   * instead of hard-failing, and the route surfaces this as a notice.
+   */
+  planFallbackNotice?: string | undefined;
 }
 
 interface ResolvePreviewRuntimeSessionOptions {
@@ -167,26 +174,114 @@ async function createPreviewSchedule(
   return mapBackendSchedule(created);
 }
 
-async function ensureRuntimeAtSection(scheduleId: string, targetModule: ModuleType): Promise<void> {
-  const started = await examDeliveryService.startRuntime(scheduleId, PREVIEW_ACTOR);
-  if (!started.success) {
-    throw new Error(started.error ?? 'Failed to start preview runtime.');
+export class PreviewRuntimeTerminalError extends Error {
+  readonly scheduleId: string;
+  constructor(scheduleId: string) {
+    super('Preview runtime completed before reaching the selected section.');
+    this.name = 'PreviewRuntimeTerminalError';
+    this.scheduleId = scheduleId;
   }
+}
+
+export function isPreviewRuntimeTerminalError(error: unknown): error is PreviewRuntimeTerminalError {
+  return error instanceof PreviewRuntimeTerminalError;
+}
+
+function isRuntimeAlreadyExistsError(error: unknown): boolean {
+  if (error instanceof Error) {
+    return isRuntimeAlreadyExistsError(error.message);
+  }
+  if (typeof error !== 'string') {
+    return false;
+  }
+  return error.toLowerCase().includes('runtime already exists');
+}
+
+function isTerminalRuntimeStatus(status: string | null | undefined): boolean {
+  return status === 'completed' || status === 'cancelled';
+}
+
+/**
+ * Start is idempotent only for live/paused runtimes: any other existing row
+ * (completed/cancelled) is a stable backend 409. Reuse the already-usable
+ * runtime when it exists, and surface terminal rows explicitly so the caller
+ * can abandon the poisoned schedule instead of retrying start forever.
+ */
+async function startPreviewRuntime(scheduleId: string): Promise<void> {
+  const snapshot = await examDeliveryService.getRuntimeSnapshot(scheduleId);
+  if (snapshot && !isTerminalRuntimeStatus(snapshot.status) && snapshot.status !== 'not_started') {
+    return;
+  }
+
+  const started = await examDeliveryService.startRuntime(scheduleId, PREVIEW_ACTOR);
+  if (started.success) {
+    return;
+  }
+
+  if (isRuntimeAlreadyExistsError(started.error)) {
+    const raced = await examDeliveryService.getRuntimeSnapshot(scheduleId);
+    if (raced && !isTerminalRuntimeStatus(raced.status)) {
+      // A concurrent start won the race; the existing runtime is usable.
+      return;
+    }
+    throw new PreviewRuntimeTerminalError(scheduleId);
+  }
+
+  throw new Error(started.error ?? 'Failed to start preview runtime.');
+}
+
+export class PreviewSectionNotPlannedError extends Error {
+  readonly scheduleId: string;
+  readonly requestedModule: ModuleType;
+  readonly liveSectionKey: ModuleType | null;
+  constructor(scheduleId: string, requestedModule: ModuleType, liveSectionKey: ModuleType | null) {
+    super(
+      `Preview section "${requestedModule}" is not part of the live runtime plan.`,
+    );
+    this.name = 'PreviewSectionNotPlannedError';
+    this.scheduleId = scheduleId;
+    this.requestedModule = requestedModule;
+    this.liveSectionKey = liveSectionKey;
+  }
+}
+
+export function isPreviewSectionNotPlannedError(error: unknown): error is PreviewSectionNotPlannedError {
+  return error instanceof PreviewSectionNotPlannedError;
+}
+
+async function ensureRuntimeAtSection(scheduleId: string, targetModule: ModuleType): Promise<void> {
+  await startPreviewRuntime(scheduleId);
 
   const maxTransitions = 6;
   let transitions = 0;
+  let planChecked = false;
   while (transitions < maxTransitions) {
     const runtime = await examDeliveryService.getRuntimeSnapshot(scheduleId);
     if (!runtime) {
       throw new Error('Preview runtime snapshot unavailable.');
     }
 
-    if (runtime.currentSectionKey === targetModule && runtime.status === 'live') {
-      return;
+    if (isTerminalRuntimeStatus(runtime.status)) {
+      throw new PreviewRuntimeTerminalError(scheduleId);
     }
 
-    if (runtime.status === 'completed' || runtime.status === 'cancelled') {
-      throw new Error('Preview runtime completed before reaching the selected section.');
+    // Fail fast before ending any section: walking past a plan that never
+    // contains the target completes the runtime and poisons this schedule
+    // slot for every later preview visit. The caller converts this into a
+    // fallback onto the runtime's actual live section.
+    if (!planChecked) {
+      planChecked = true;
+      if (!runtime.sections.some((section) => section.sectionKey === targetModule)) {
+        throw new PreviewSectionNotPlannedError(
+          scheduleId,
+          targetModule,
+          runtime.currentSectionKey,
+        );
+      }
+    }
+
+    if (runtime.currentSectionKey === targetModule && runtime.status === 'live') {
+      return;
     }
 
     const endSectionResult = await examDeliveryService.endCurrentSectionNow(
@@ -267,7 +362,11 @@ async function resolvePreviewRuntimeSessionUncached(
   );
 
   const sectionSchedules = new Map<ModuleType, ExamSchedule>();
-  for (const schedule of previewSchedules) {
+  const terminalPreviewSchedules: ExamSchedule[] = [];
+  const orderedPreviewSchedules = [...previewSchedules].sort(
+    (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+  );
+  for (const schedule of orderedPreviewSchedules) {
     const section = parsePreviewRuntimeSection(schedule);
     if (!section) {
       continue;
@@ -293,7 +392,38 @@ async function resolvePreviewRuntimeSessionUncached(
       continue;
     }
 
-    sectionSchedules.set(section, schedule);
+    // A terminal runtime (completed/cancelled) can never be restarted: the
+    // backend Start() only reuses live/paused rows, and completed schedules
+    // cannot be deleted either. Quarantine the slot now so a poisoned schedule
+    // can no longer shadow a healthy duplicate or force a 409 on reuse.
+    if (schedule.status === 'completed' || schedule.status === 'cancelled') {
+      terminalPreviewSchedules.push(schedule);
+      continue;
+    }
+
+    try {
+      const runtime = await examDeliveryService.getRuntimeSnapshot(schedule.id);
+      if (runtime && isTerminalRuntimeStatus(runtime.status)) {
+        terminalPreviewSchedules.push(schedule);
+        continue;
+      }
+    } catch {
+      // A missing/unreadable runtime means the schedule was never started;
+      // keep it as a startable candidate.
+    }
+
+    const incumbent = sectionSchedules.get(section);
+    if (!incumbent) {
+      sectionSchedules.set(section, schedule);
+    }
+  }
+  for (const terminal of terminalPreviewSchedules) {
+    try {
+      await examRepository.deleteSchedule(terminal.id);
+    } catch {
+      // Completed schedules reject DELETE; replacement below still unblocks
+      // preview, and the terminal row stays quarantined out of the map.
+    }
   }
 
   let resolvedModule: ModuleType;
@@ -309,7 +439,7 @@ async function resolvePreviewRuntimeSessionUncached(
     resolvedModule = mostRecentSection ?? enabledModules[0] ?? 'reading';
   }
 
-  let schedule = sectionSchedules.get(resolvedModule);
+  let schedule: ExamSchedule | undefined = sectionSchedules.get(resolvedModule);
   if (!schedule) {
     schedule = await createPreviewSchedule(
       options.exam,
@@ -320,19 +450,70 @@ async function resolvePreviewRuntimeSessionUncached(
     );
   }
 
-  await ensureRuntimeAtSection(schedule.id, resolvedModule);
-  const { studentId } = await ensurePreviewAttemptWithPrecheck(
-    schedule,
-    options.exam,
-    resolvedModule,
-    options.authorUserId,
-  );
+  const finishWithAttempt = async (
+    activeSchedule: ExamSchedule,
+    activeModule: ModuleType,
+    notice: string | undefined,
+  ): Promise<PreviewRuntimeSession> => {
+    const { studentId } = await ensurePreviewAttemptWithPrecheck(
+      activeSchedule,
+      options.exam,
+      activeModule,
+      options.authorUserId,
+    );
 
-  return {
-    module: resolvedModule,
-    scheduleId: schedule.id,
-    studentId,
+    return {
+      module: activeModule,
+      scheduleId: activeSchedule.id,
+      studentId,
+      ...(notice ? { planFallbackNotice: notice } : {}),
+    };
   };
+
+  try {
+    await ensureRuntimeAtSection(schedule.id, resolvedModule);
+  } catch (error) {
+    if (isPreviewSectionNotPlannedError(error)) {
+      // The live backend plan does not contain the requested section (e.g.
+      // a legacy ACT row planned under the wrong provider, or a stale
+      // pinned version). Never end sections toward an unreachable target:
+      // fall back to the runtime's actual live section so preview stays
+      // usable, and let the route surface the mismatch as a notice.
+      const fallback = error.liveSectionKey;
+      if (!fallback || !enabledModules.includes(fallback)) {
+        throw error;
+      }
+      resolvedModule = fallback;
+      return finishWithAttempt(
+        schedule,
+        resolvedModule,
+        `Preview section "${error.requestedModule}" is not part of the live runtime plan — showing "${fallback}" instead.`,
+      );
+    }
+    if (!isPreviewRuntimeTerminalError(error)) {
+      throw error;
+    }
+    // The reused schedule's runtime was already terminal (a previous walk
+    // completed it, or the row was terminal before start). Mint a replacement
+    // instead of surfacing the backend 409: the poisoned row can never be
+    // restarted and completed schedules cannot be deleted.
+    try {
+      await examRepository.deleteSchedule(schedule.id);
+    } catch {
+      // Best effort: completed schedules reject DELETE; the replacement
+      // below still unblocks preview.
+    }
+    schedule = await createPreviewSchedule(
+      options.exam,
+      draftVersionId,
+      resolvedModule,
+      options.authorUserId,
+      now,
+    );
+    await ensureRuntimeAtSection(schedule.id, resolvedModule);
+  }
+
+  return finishWithAttempt(schedule, resolvedModule, undefined);
 }
 
 export function resolvePreviewRuntimeSession(

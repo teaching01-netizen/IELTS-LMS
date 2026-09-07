@@ -35,8 +35,10 @@ import { EditableBlockMath, EditableInlineMath } from "./EditableMathExtension";
 import { uploadAssessmentAsset } from "../api/assessmentMediaApi";
 import { AuthoringDialog } from "../ui/authoringPrimitives";
 import { authoringMotion } from "../ui/authoringMotion";
+import { RichContentIdentity } from './RichContentIdentityExtension';
 
 const baseExtensions = [
+  RichContentIdentity,
   StarterKit.configure({
     blockquote: false,
     heading: { levels: [2, 3] },

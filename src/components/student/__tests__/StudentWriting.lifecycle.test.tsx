@@ -368,4 +368,30 @@ describe('StudentWriting lifecycle durability', () => {
     expect(promptScrollOwner).not.toBeNull();
     expect(promptScrollOwner).toHaveClass('flex-1', 'min-h-0', 'overflow-y-auto');
   });
+
+  it('keeps the countdown visible without a runtime-clock provider (T2.5 isolation)', () => {
+    // StudentWriting no longer subscribes to useStudentRuntimeClock itself; the
+    // prompt-pane countdown leaves own the ticking subscription, so rendering
+    // outside any RuntimeClockContext must still show a timer with the same
+    // accessible label and must leave the typed draft untouched.
+    render(
+      <StudentWriting
+        state={createExamState()}
+        writingAnswers={{}}
+        onWritingChange={() => undefined}
+        onSubmit={() => undefined}
+        currentQuestionId="task1"
+        onNavigate={() => undefined}
+        showSubmitButton={false}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+    setWritingEditorText(editor, 'Isolated draft');
+
+    const timer = screen.getByRole('timer', { name: /time remaining in writing section/i });
+    expect(timer).toBeInTheDocument();
+    expect(timer).toHaveTextContent('60:00');
+    expect(editor).toHaveValue('Isolated draft');
+  });
 });

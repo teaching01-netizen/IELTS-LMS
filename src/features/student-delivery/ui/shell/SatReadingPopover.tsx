@@ -88,6 +88,7 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
       role="dialog"
       aria-modal={compact ? true : undefined}
       aria-labelledby="sat-reading-options-title"
+      style={{ maxHeight: compact ? 'calc(100dvh - 16px)' : 'calc(100dvh - 140px)', overflowY: 'auto' }}
       className={
         compact
           ? "sat-ui w-full max-w-[520px] overflow-hidden rounded-t-[14px] border border-b-0 border-[var(--sat-divider)] bg-[var(--sat-surface)] shadow-[0_-18px_60px_rgba(0,0,0,0.22)]"
@@ -195,6 +196,29 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
                 {spacing === "standard" ? "Standard" : "Relaxed"}
               </button>
             ))}
+          </div>
+        </section>
+
+        <section aria-label="Exam zoom">
+          <h3 className="text-sm font-semibold">Exam Zoom</h3>
+          <div className="mt-2 flex items-center justify-between gap-3 rounded border border-[var(--sat-divider)]">
+            <button type="button" aria-label="Decrease exam zoom" disabled={disabled || (preferences.examZoom ?? 1) <= 1}
+              onClick={() => update({ examZoom: Math.max(1, (preferences.examZoom ?? 1) - 0.25) })}
+              className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">−</button>
+            <output aria-live="polite">{Math.round((preferences.examZoom ?? 1) * 100)}%</output>
+            <button type="button" aria-label="Increase exam zoom" disabled={disabled || (preferences.examZoom ?? 1) >= 2}
+              onClick={() => update({ examZoom: Math.min(2, (preferences.examZoom ?? 1) + 0.25) })}
+              className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">+</button>
+          </div>
+        </section>
+        <section aria-label="Contrast">
+          <h3 className="text-sm font-semibold">Contrast</h3>
+          <div className="mt-2 flex gap-2">
+            {(['default', 'high-contrast'] as const).map((contrastMode) => <button key={contrastMode} type="button" disabled={disabled}
+              aria-pressed={(preferences.contrastMode ?? 'default') === contrastMode} onClick={() => update({ contrastMode })}
+              className="sat-touch-target flex-1 rounded border border-[var(--sat-divider)] px-3 aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2">
+              {contrastMode === 'default' ? 'Default contrast' : 'High contrast'}
+            </button>)}
           </div>
         </section>
 

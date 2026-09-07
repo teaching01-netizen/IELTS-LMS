@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -95,6 +97,11 @@ func ValidatePayload(p ResponsePayload) error {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Too many annotations.", HTTPStatus: 400}
 	}
 	for _, a := range p.Annotations {
+		if a.Kind == "sat_annotations" {
+			if err := validateSATAnnotations(a); err != nil {
+				return err
+			}
+		}
 		if a.ID == "" || len(a.ID) > MaxAnnotationIDLen {
 			return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Annotation id is required.", HTTPStatus: 400}
 		}
@@ -108,6 +115,34 @@ func ValidatePayload(p ResponsePayload) error {
 	if p.Answer != nil {
 		if err := checkValue(p.Answer, 0); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateSATAnnotations(a Annotation) error {
+	invalid := func() error {
+		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Invalid SAT annotations.", HTTPStatus: 400}
+	}
+	units := func(s string) int { return len(utf16.Encode([]rune(s))) }
+	if a.ID != "sat-annotations" || a.Version != 2 || len(a.Annotations) > 200 || units(a.LegacyQuestionNote) > 2000 {
+		return invalid()
+	}
+	seen := map[string]bool{}
+	for _, item := range a.Annotations {
+		anchor := item.Anchor
+		if item.ID == "" || len(item.ID) > 80 || seen[item.ID] || (item.Kind != "highlight" && item.Kind != "underline") {
+			return invalid()
+		}
+		seen[item.ID] = true
+		if strings.TrimSpace(anchor.NodeID) == "" || len(anchor.NodeID) > 1024 || anchor.StartOffset < 0 || anchor.EndOffset <= anchor.StartOffset || anchor.Exact == "" || units(anchor.Exact) > 2000 || units(anchor.Prefix) > 64 || units(anchor.Suffix) > 64 || units(item.Note) > 2000 {
+			return invalid()
+		}
+		if _, err := time.Parse(time.RFC3339Nano, item.CreatedAt); err != nil {
+			return invalid()
+		}
+		if _, err := time.Parse(time.RFC3339Nano, item.UpdatedAt); err != nil {
+			return invalid()
 		}
 	}
 	return nil

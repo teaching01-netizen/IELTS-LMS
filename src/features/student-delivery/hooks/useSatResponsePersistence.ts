@@ -65,21 +65,21 @@ function failureMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Response save failed.';
 }
 
-function satDraftToDurablePayload(draft: SatQuestionResponseDraft): ResponsePayload {
+export function satDraftToDurablePayload(draft: SatQuestionResponseDraft): ResponsePayload {
   return {
     answer: draft.answer || null,
     markedForReview: draft.markedForReview,
     eliminatedOptions: [...draft.eliminatedOptionIds],
-    annotations: [{ id: 'sat-annotations', ...draft.annotations }],
+    annotations: [{ id: 'sat-annotations', kind: 'sat_annotations', ...draft.annotations }],
   };
 }
 
-function durablePayloadToSatDraft(
+export function durablePayloadToSatDraft(
   questionId: string,
   payload: ResponsePayload
 ): SatQuestionResponseDraft {
   const annotation = payload.annotations.find(
-    (value) => typeof value === 'object' && value !== null && 'note' in value
+    (value) => typeof value === 'object' && value !== null && value.id === 'sat-annotations'
   );
   const annotationRecord =
     annotation && typeof annotation === 'object' ? (annotation as Record<string, unknown>) : {};
@@ -178,6 +178,7 @@ export function useSatResponsePersistence({
     const engine = new DurableResponseEngine({
       scheduleId,
       attemptId,
+      drainDebounceMs: 400,
       leaseEpoch: initialLeaseEpoch,
       controlEpoch: initialControlEpoch,
       transport,

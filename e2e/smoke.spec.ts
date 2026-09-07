@@ -113,7 +113,7 @@ test.describe('Application smoke tests', () => {
     const manifest = readBackendE2EManifest();
     await page.goto(`/student/${manifest.studentSelfPaced.scheduleId}`);
 
-    await expect(page.getByLabel('Wcode')).toBeVisible();
+    await expect(page.getByLabel('Access code')).toBeVisible();
     await expect(page.getByLabel('Email')).toBeVisible();
     await expect(page.getByLabel('Full Name')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();

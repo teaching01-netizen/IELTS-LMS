@@ -61,13 +61,35 @@ export function useBuilderRouteController(
         return;
       }
 
-      const examState = await examAuthoringFacade.getExamStateFromEntity(
-        entity,
-        examAuthoringFacade.repository,
-      );
+      try {
+        const examState = await examAuthoringFacade.getExamStateFromEntity(
+          entity,
+          examAuthoringFacade.repository,
+        );
 
-      setExam(entity);
-      setState(examState);
+        setExam(entity);
+        setState(examState);
+        return;
+      } catch (versionError) {
+        // Clone-database exams can lose their draft pointer (orphan NULL/NULL
+        // rows). Heal once via the draft-reopen endpoint, then retry the load
+        // so Retry is not the only path back into the builder.
+        const healed = await examAuthoringFacade.lifecycle.reopenDraftVersion(examId);
+        if (!healed) {
+          throw versionError;
+        }
+        const healedEntity = await examAuthoringFacade.repository.getExamById(examId);
+        if (!healedEntity) {
+          throw versionError;
+        }
+        const examState = await examAuthoringFacade.getExamStateFromEntity(
+          healedEntity,
+          examAuthoringFacade.repository,
+        );
+        setExam(healedEntity);
+        setState(examState);
+        return;
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load exam');
     } finally {

@@ -6,10 +6,23 @@ ALTER TABLE student_attempts
     MODIFY COLUMN submitted_at TIMESTAMP(6) NULL,
     ADD COLUMN answer_revision INT NOT NULL DEFAULT 0 AFTER revision;
 
-CREATE INDEX idx_student_attempts_schedule_answer_revision
-    ON student_attempts(schedule_id, answer_revision, id);
+SET @index_idx_student_attempts_schedule_answer_revision_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'student_attempts'
+      AND index_name = 'idx_student_attempts_schedule_answer_revision'
+);
+SET @index_idx_student_attempts_schedule_answer_revision_sql := IF(
+    @index_idx_student_attempts_schedule_answer_revision_exists = 0,
+    'CREATE INDEX idx_student_attempts_schedule_answer_revision ON student_attempts(schedule_id, answer_revision, id)',
+    'SELECT 1'
+);
+PREPARE index_idx_student_attempts_schedule_answer_revision_stmt FROM @index_idx_student_attempts_schedule_answer_revision_sql;
+EXECUTE index_idx_student_attempts_schedule_answer_revision_stmt;
+DEALLOCATE PREPARE index_idx_student_attempts_schedule_answer_revision_stmt;
 
-CREATE TABLE attempt_terminalizations (
+CREATE TABLE IF NOT EXISTS attempt_terminalizations (
     attempt_id VARCHAR(36) NOT NULL,
     organization_id VARCHAR(255),
     terminalization_id VARCHAR(36) NOT NULL,
@@ -48,8 +61,21 @@ CREATE TABLE attempt_terminalizations (
         FOREIGN KEY (schedule_id) REFERENCES exam_schedules(id)
 );
 
-CREATE INDEX idx_attempt_terminalizations_schedule_recorded
-    ON attempt_terminalizations(schedule_id, recorded_at, attempt_id);
+SET @index_idx_attempt_terminalizations_schedule_recorded_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'attempt_terminalizations'
+      AND index_name = 'idx_attempt_terminalizations_schedule_recorded'
+);
+SET @index_idx_attempt_terminalizations_schedule_recorded_sql := IF(
+    @index_idx_attempt_terminalizations_schedule_recorded_exists = 0,
+    'CREATE INDEX idx_attempt_terminalizations_schedule_recorded ON attempt_terminalizations(schedule_id, recorded_at, attempt_id)',
+    'SELECT 1'
+);
+PREPARE index_idx_attempt_terminalizations_schedule_recorded_stmt FROM @index_idx_attempt_terminalizations_schedule_recorded_sql;
+EXECUTE index_idx_attempt_terminalizations_schedule_recorded_stmt;
+DEALLOCATE PREPARE index_idx_attempt_terminalizations_schedule_recorded_stmt;
 
 -- During rolling deployment, old application versions may still write the
 -- compatibility projection directly. Materialize a conservative receipt for

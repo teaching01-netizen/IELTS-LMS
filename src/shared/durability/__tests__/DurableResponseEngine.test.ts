@@ -646,4 +646,45 @@ describe("DurableResponseEngine", () => {
     expect(localStorage.getItem("response-checkpoint:v2:att-1:q-1")).toBeNull();
     expect(engine.getQuarantined()).toHaveLength(0);
   });
+
+  it("reports durability_fault and never a false saved state when all browser storage fails", async () => {
+    // T2.3 storage-failure contract: when both the localStorage checkpoint
+    // and the IndexedDB draft write fail, acceptResponse must surface
+    // durability_fault (never saved_locally/synced) and reject, so the
+    // provider bridge maps to syncState error + storage blocking and the save
+    // UI can only show Needs attention — never a false saved confirmation.
+    const statuses: string[] = [];
+    const engine = new DurableResponseEngine({
+      scheduleId: "sched-1",
+      attemptId: "att-fault",
+      leaseEpoch: 1,
+      controlEpoch: 1,
+      transport,
+      onStatusChange: (status) => statuses.push(status),
+    });
+    // Fail every browser-storage write. The engine touches window.localStorage
+    // directly (not Storage.prototype), and jsdom has no IndexedDB so the
+    // draft store falls back to the same localStorage — failing both together.
+    const storage = window.localStorage;
+    const setItem = vi.spyOn(storage, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+    try {
+      await expect(
+        engine.acceptResponse("q-1", {
+          answer: "A",
+          markedForReview: false,
+          eliminatedOptions: [],
+          annotations: [],
+        })
+      ).rejects.toThrow("All browser durable storage failed");
+    } finally {
+      setItem.mockRestore();
+    }
+    expect(engine.getStatus()).toBe("durability_fault");
+    expect(statuses).toContain("durability_fault");
+    expect(statuses).not.toContain("saved_locally");
+    expect(statuses).not.toContain("synced");
+    engine.destroy();
+  });
 });

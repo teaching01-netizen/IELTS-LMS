@@ -59,22 +59,22 @@ func NewService(db *sql.DB) *Service { return &Service{db: db} }
 // ResultSummary is the list row shared by providers.
 type ResultSummary struct {
 	ID            string     `json:"id"`
-	SubmissionID  *string    `json:"submissionId,omitempty"`
+	SubmissionID  *string    `json:"submissionId"`
 	AttemptID     string     `json:"attemptId"`
 	ProviderKey   string     `json:"providerKey"`
 	Outcome       string     `json:"outcomeStatus"`
-	ScoreKind     string     `json:"scoreKind,omitempty"`
-	TotalScore    *int       `json:"totalScore,omitempty"`
+	ScoreKind     string     `json:"scoreKind"`
+	TotalScore    *int       `json:"totalScore"`
 	ReleaseState  string     `json:"releaseStatus"`
-	ScheduleID    string     `json:"scheduleId,omitempty"`
-	ExamID        string     `json:"examId,omitempty"`
-	ExamTitle     string     `json:"examTitle,omitempty"`
-	VersionNumber int        `json:"versionNumber,omitempty"`
-	StudentID     string     `json:"studentId,omitempty"`
-	StudentName   string     `json:"studentName,omitempty"`
-	StudentEmail  *string    `json:"studentEmail,omitempty"`
-	CohortName    string     `json:"cohortName,omitempty"`
-	SubmittedAt   *time.Time `json:"submittedAt,omitempty"`
+	ScheduleID    string     `json:"scheduleId"`
+	ExamID        string     `json:"examId"`
+	ExamTitle     string     `json:"examTitle"`
+	VersionNumber int        `json:"versionNumber"`
+	StudentID     string     `json:"studentId"`
+	StudentName   string     `json:"studentName"`
+	StudentEmail  *string    `json:"studentEmail"`
+	CohortName    string     `json:"cohortName"`
+	SubmittedAt   *time.Time `json:"submittedAt"`
 }
 
 // DashboardResult is the provider-neutral result row used by the admin
@@ -107,11 +107,11 @@ type DashboardResult struct {
 // SATSection mirrors one adaptive/scaled SAT section outcome.
 type SATSection struct {
 	SectionKey  string  `json:"sectionKey"`
-	Route       *string `json:"route,omitempty"`
+	Route       *string `json:"route"`
 	RawCorrect  int64   `json:"rawCorrect"`
 	Operational int64   `json:"operationalQuestionCount"`
-	Scaled      *int    `json:"scaledScore,omitempty"`
-	Details     any     `json:"details,omitempty"`
+	Scaled      *int    `json:"scaledScore"`
+	Details     any     `json:"details"`
 }
 
 // SATDetail is the full SAT result with adaptive/scaled sections.

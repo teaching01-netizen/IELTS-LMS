@@ -8,6 +8,16 @@ type GradingServiceResult<T> = Readonly<{
   error?: string;
 }>;
 
+// Polling cadence for live grading views. Kept at 30s + jitter so a fleet
+// of open grading tabs cannot burn through the polling-tier quota that
+// protects auth session reads (see backend rate-limit tiers).
+const POLLING_INTERVAL_MS = 30 * 1000;
+const POLLING_JITTER_MS = 5 * 1000;
+
+export function pollingIntervalWithJitter(): number {
+  return POLLING_INTERVAL_MS + Math.floor(Math.random() * POLLING_JITTER_MS);
+}
+
 const liveQueryPolicy = {
   staleTime: 15 * 1000,
   gcTime: 2 * 60 * 1000,
@@ -55,7 +65,7 @@ export function useSessionSubmissions(sessionId: string, filters?: SessionDetail
       ),
     enabled: sessionId.length > 0,
     ...liveQueryPolicy,
-    refetchInterval: 15 * 1000,
+    refetchInterval: pollingIntervalWithJitter,
   });
 }
 

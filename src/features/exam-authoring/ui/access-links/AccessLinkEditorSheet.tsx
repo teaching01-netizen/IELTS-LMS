@@ -36,8 +36,11 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const [name, setName] = useState("");
   const [audienceType, setAudienceType] = useState<AccessLinkAudienceType>("anyone");
   const [audienceLabel, setAudienceLabel] = useState("");
+  // Free by default: new links admit anyone, anytime, with any access code
+  // (no preset roster, no scheduled window). The code field stays required
+  // at check-in — any non-empty format is accepted.
   const [accessMode, setAccessMode] = useState<AccessLinkMode>("student_code");
-  const [availabilityType, setAvailabilityType] = useState<AccessLinkAvailabilityType>("scheduled");
+  const [availabilityType, setAvailabilityType] = useState<AccessLinkAvailabilityType>("anytime");
   const [opensAt, setOpensAt] = useState(defaults.opensAt);
   const [closesAt, setClosesAt] = useState(defaults.closesAt);
   const [membersSource, setMembersSource] = useState("");
@@ -59,7 +62,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     const nextAudienceType = link?.audienceType ?? "anyone";
     const nextAudienceLabel = link?.audienceLabel ?? "";
     const nextAccessMode = link?.accessMode ?? "student_code";
-    const nextAvailabilityType = link?.availabilityType ?? "scheduled";
+    const nextAvailabilityType = link?.availabilityType ?? "anytime";
     const nextOpensAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.opensAt) : defaults.opensAt;
     const nextClosesAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.closesAt) : defaults.closesAt;
     const nextMembersSource = serializeAccessLinkMembers(props.members);

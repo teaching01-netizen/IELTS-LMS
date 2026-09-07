@@ -18,5 +18,33 @@ CREATE TABLE IF NOT EXISTS sat_workbook_imports (
     FOREIGN KEY (checkpoint_version_id) REFERENCES exam_versions(id),
     FOREIGN KEY (imported_version_id) REFERENCES exam_versions(id)
 );
-CREATE INDEX idx_sat_workbook_imports_exam_created ON sat_workbook_imports(exam_id, created_at DESC);
-CREATE INDEX idx_sat_workbook_imports_state_expires ON sat_workbook_imports(state, expires_at);
+SET @index_idx_sat_workbook_imports_exam_created_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'sat_workbook_imports'
+      AND index_name = 'idx_sat_workbook_imports_exam_created'
+);
+SET @index_idx_sat_workbook_imports_exam_created_sql := IF(
+    @index_idx_sat_workbook_imports_exam_created_exists = 0,
+    'CREATE INDEX idx_sat_workbook_imports_exam_created ON sat_workbook_imports(exam_id, created_at DESC)',
+    'SELECT 1'
+);
+PREPARE index_idx_sat_workbook_imports_exam_created_stmt FROM @index_idx_sat_workbook_imports_exam_created_sql;
+EXECUTE index_idx_sat_workbook_imports_exam_created_stmt;
+DEALLOCATE PREPARE index_idx_sat_workbook_imports_exam_created_stmt;
+SET @index_idx_sat_workbook_imports_state_expires_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'sat_workbook_imports'
+      AND index_name = 'idx_sat_workbook_imports_state_expires'
+);
+SET @index_idx_sat_workbook_imports_state_expires_sql := IF(
+    @index_idx_sat_workbook_imports_state_expires_exists = 0,
+    'CREATE INDEX idx_sat_workbook_imports_state_expires ON sat_workbook_imports(state, expires_at)',
+    'SELECT 1'
+);
+PREPARE index_idx_sat_workbook_imports_state_expires_stmt FROM @index_idx_sat_workbook_imports_state_expires_sql;
+EXECUTE index_idx_sat_workbook_imports_state_expires_stmt;
+DEALLOCATE PREPARE index_idx_sat_workbook_imports_state_expires_stmt;

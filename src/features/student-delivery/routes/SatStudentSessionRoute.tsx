@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { SatErrorSurface, SatLoadingSurface } from "../ui/feedback/SatStateSurfaces";
 import { hasStructuredContent } from "../../exam-authoring/api/renderingPublic";
 import type { ExamSessionRuntime } from "../../../types/domain";
@@ -14,6 +14,7 @@ import { responseForQuestion } from "../domain/satResponses";
 import { answeredSatQuestionCount, buildSatQuestionNavigationItems } from "../domain/satSelectors";
 import { formatSatTime } from "../domain/satTiming";
 import { resolveSatToolCapabilities } from "../domain/satTools";
+import { resolveSatExamToolPolicy } from "../domain/satToolPolicy";
 import { ensureDesmosPreconnect } from "../infrastructure/desmos/desmosPreconnect";
 import { SatExamShell } from "../ui/SatExamShell";
 import { SatQuestionRenderer } from "../ui/question/SatQuestionRenderer";
@@ -74,6 +75,10 @@ export function SatStudentSessionRoute({
   const [eliminationMode, setEliminationMode] = useState(false);
 
   const { state, data, result, error, commands, persistence } = exam;
+  const flushAnnotations = useCallback(() => {
+    // The durability engine publishes offline/failure status to the shell; local edits remain recoverable.
+    void persistence.flush().catch(() => undefined);
+  }, [persistence.flush]);
   const activeQuestionIndex =
     state.phase === "module" || state.phase === "review" ? state.questionIndex : -1;
   useEffect(() => {
@@ -315,9 +320,11 @@ export function SatStudentSessionRoute({
       {exam.blocked ? <SatBlockingOverlay note={data.proctorNote} /> : null}
       {exam.isSubmitting ? <SatSubmissionOverlay /> : null}
       <SatExamShell
+        moduleIdentity={exam.stateModule.id}
         sectionLabel={activeSectionLabel}
         directions={directions}
         remainingLabel={formatSatTime(exam.remainingSeconds)}
+        remainingSeconds={exam.remainingSeconds}
         candidateName={data.candidateName}
         questionIndex={state.questionIndex}
         questionCount={state.questionIds.length}
@@ -326,10 +333,11 @@ export function SatStudentSessionRoute({
         calculatorOpen={state.activeTool === "calculator"}
         referenceAvailable={state.toolCapabilities.referenceSheet}
         referenceOpen={state.activeTool === "reference_sheet"}
+        notesAvailable={resolveSatExamToolPolicy(state.sectionKey, exam.stateModule.toolPolicy).notes}
         blocked={interactionBlocked}
         saveState={saveState}
         saveFailure={persistence.failure}
-        questionNote={response.annotations.note}
+        questionNote={response.annotations.legacyQuestionNote}
         readingPreferences={reading.preferences}
         onReadingPreferencesChange={reading.setPreferences}
         onSelectQuestion={commands.selectQuestion}
@@ -355,6 +363,8 @@ export function SatStudentSessionRoute({
             reading.setPreferences((current) => ({ ...current, splitRatio }))
           }
           onAnswerChange={(answer) => commands.setAnswer(questionId, answer)}
+          onAnnotationsChange={(annotations) => commands.setAnnotations(questionId, annotations)}
+          onFlushAnnotations={flushAnnotations}
           onToggleReview={() => commands.toggleReview(questionId)}
           onToggleEliminationMode={() => setEliminationMode((enabled) => !enabled)}
           onToggleEliminatedOption={(optionId) =>

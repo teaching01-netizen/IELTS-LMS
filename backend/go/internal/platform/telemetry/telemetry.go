@@ -31,7 +31,8 @@ var metricHelpText = map[string]string{
 	MJobFailures:       "Total worker job failures.",
 	MSATPendingAge:     "Age in seconds of the oldest provisional SAT result.",
 	MProjectionLag:     "Grading projection lag in seconds.",
-	MWSConnections:     "Current number of WebSocket connections.",
+	MRatelimitDeniedTotal: "Total rate-limit denials by tier and key class.",
+	MWSConnections:        "Current number of WebSocket connections.",
 	MWSLeaseFailures:   "Total WebSocket lease acquisition failures.",
 	MWSSlowDisconnect:  "Total WebSocket disconnects caused by slow clients.",
 }
@@ -74,6 +75,8 @@ const (
 	MWSConnections    = "websocket_connections"
 	MWSLeaseFailures  = "websocket_lease_acquire_failures_total"
 	MWSSlowDisconnect = "websocket_slow_client_disconnects_total"
+
+	MRatelimitDeniedTotal = "http_ratelimit_denied_total"
 )
 
 // V2 batch outcome label values.

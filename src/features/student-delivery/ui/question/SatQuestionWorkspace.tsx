@@ -1,7 +1,8 @@
-import { useRef, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
 import { satReadingStyle } from "../reading/satReadingStyle";
 import { SatReadingSplitHandle } from "./SatReadingSplitHandle";
+import { useSatMediaQuery } from '../useSatMediaQuery';
 
 export interface SatQuestionWorkspaceProps {
   split: boolean;
@@ -19,6 +20,25 @@ export function SatQuestionWorkspace({
   onSplitRatioChange,
 }: SatQuestionWorkspaceProps) {
   const splitContainerRef = useRef<HTMLDivElement>(null);
+  const passageRef = useRef<HTMLElement>(null);
+  const questionRef = useRef<HTMLElement>(null);
+  const scroll = useRef({ passage: 0, question: 0 });
+  const previousRatio = useRef(readingPreferences.splitRatio);
+  const [focus, setFocus] = useState<'split' | 'passage' | 'question'>('split');
+  const [mobilePane, setMobilePane] = useState<'passage' | 'question'>('passage');
+  const compact = useSatMediaQuery('(max-width: 767px)');
+  const passageId = useId();
+  const questionId = useId();
+  const showPassage = compact ? mobilePane === 'passage' : focus !== 'question';
+  const showQuestion = compact ? mobilePane === 'question' : focus !== 'passage';
+  useLayoutEffect(() => {
+    if (showPassage && passageRef.current) passageRef.current.scrollTop = scroll.current.passage;
+    if (showQuestion && questionRef.current) questionRef.current.scrollTop = scroll.current.question;
+  }, [showPassage, showQuestion]);
+  const expand = (pane: 'passage' | 'question') => {
+    if (focus === 'split') previousRatio.current = readingPreferences.splitRatio;
+    setFocus(pane);
+  };
   const readingStyle = satReadingStyle(readingPreferences);
 
   if (!split) {
@@ -35,17 +55,33 @@ export function SatQuestionWorkspace({
 
   const questionRatio = 1 - readingPreferences.splitRatio;
   return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div role="group" aria-label="Reading layout" className="flex shrink-0 items-center gap-2 border-b border-[var(--sat-divider)] bg-[var(--sat-surface)] px-3 py-1">
+        {compact ? <>
+          <button type="button" aria-pressed={mobilePane === 'passage'} aria-controls={passageId} onClick={() => setMobilePane('passage')}
+            className="sat-touch-target flex-1 rounded px-3 aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2">Passage</button>
+          <button type="button" aria-pressed={mobilePane === 'question'} aria-controls={questionId} onClick={() => setMobilePane('question')}
+            className="sat-touch-target flex-1 rounded px-3 aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2">Question</button>
+        </> : <>
+          <button type="button" onClick={() => expand('passage')} className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">Expand passage</button>
+          <button type="button" onClick={() => expand('question')} className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">Expand question</button>
+          {focus !== 'split' ? <button type="button" onClick={() => { onSplitRatioChange(previousRatio.current); setFocus('split'); }}
+            className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">Return to split</button> : null}
+        </>}
+      </div>
     <div
       ref={splitContainerRef}
-      className="sat-reading-surface h-full min-h-0 overflow-y-auto bg-[var(--sat-background)] md:grid md:overflow-hidden"
+      className="sat-reading-surface grid min-h-0 flex-1 overflow-hidden bg-[var(--sat-background)]"
       data-sat-reading-split
       style={{
         ...readingStyle,
-        gridTemplateColumns: `minmax(0, ${readingPreferences.splitRatio}fr) 1px minmax(0, ${questionRatio}fr)`,
+        gridTemplateColumns: !compact && focus === 'split' ? `minmax(0, ${readingPreferences.splitRatio}fr) 1px minmax(0, ${questionRatio}fr)` : 'minmax(0, 1fr)',
       }}
     >
       <section
-        className="border-b border-[var(--sat-divider)] px-5 py-6 md:min-h-0 md:overflow-y-auto md:border-b-0 md:px-8 md:py-8"
+        ref={passageRef} id={passageId} hidden={!showPassage}
+        onScroll={(event) => { if (showPassage) scroll.current.passage = event.currentTarget.scrollTop; }}
+        className="min-h-0 overflow-y-auto px-5 py-6 md:px-8 md:py-8"
         aria-label="Passage or source"
         data-sat-passage-scroll
       >
@@ -53,18 +89,21 @@ export function SatQuestionWorkspace({
           {stimulus}
         </div>
       </section>
-      <SatReadingSplitHandle
+      {!compact && focus === 'split' ? <SatReadingSplitHandle
         containerRef={splitContainerRef}
         ratio={readingPreferences.splitRatio}
         onChange={onSplitRatioChange}
-      />
+      /> : null}
       <section
-        className="px-5 py-5 md:min-h-0 md:overflow-y-auto md:px-8 md:py-8"
+        ref={questionRef} id={questionId} hidden={!showQuestion}
+        onScroll={(event) => { if (showQuestion) scroll.current.question = event.currentTarget.scrollTop; }}
+        className="min-h-0 overflow-y-auto px-5 py-5 md:px-8 md:py-8"
         aria-label="Question"
         data-sat-question-scroll
       >
         <div className="mx-auto max-w-[650px]">{question}</div>
       </section>
+    </div>
     </div>
   );
 }

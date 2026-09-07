@@ -121,15 +121,64 @@ export class ExamLifecycleService {
    * Always refetches the exam to find the live draft version, then reads the
    * version row fresh (bypassing the TTL version cache) for the fence value.
    */
+  /**
+   * Heal a clone-database exam that lost its editable draft (orphan NULL/NULL
+   * pointers or a sealed published row) by reopening a fresh draft from the
+   * latest surviving version. Returns the healed version, or null when the
+   * exam itself is missing. Idempotent: a live draft pointer shortcuts to the
+   * existing draft so Retry/concurrent callers converge.
+   */
+  /**
+   * Public heal entry for builder route controllers: reopen the editable
+   * draft for a clone-database exam that lost it. Resolves true when a live
+   * draft exists afterwards (healed or already healthy), false otherwise.
+   * Backend-only; mock repositories (unit tests) resolve false without I/O.
+   */
+  async reopenDraftVersion(examId: string): Promise<boolean> {
+    if (!this.useBackendBuilder()) {
+      return false;
+    }
+    try {
+      const healed = await this.ensureBackendDraftVersion(examId);
+      return healed !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  private async ensureBackendDraftVersion(examId: string): Promise<{ versionId: string; revision: number } | null> {
+    const reopened = await backendPost<any>(`/v1/exams/${examId}/draft/reopen`);
+    const healed = reopened ? mapBackendExamVersion(reopened) : null;
+    if (!healed) {
+      return null;
+    }
+    const current = await backendGet<{ revision?: number | undefined }>(`/v1/versions/${healed.id}`);
+    const revision = typeof current?.revision === 'number' ? current.revision : null;
+    if (revision === null) {
+      return null;
+    }
+    return { versionId: healed.id, revision };
+  }
+
   private async ensureBackendDraftVersionRevision(examId: string): Promise<number | null> {
     const exam = await this.repository.getExamById(examId);
     const draftVersionId = exam?.currentDraftVersionId ?? null;
     if (!exam || !draftVersionId) {
-      return null;
+      const healed = await this.ensureBackendDraftVersion(examId);
+      return healed?.revision ?? null;
     }
 
-    const current = await backendGet<{ revision?: number | undefined }>(`/v1/versions/${draftVersionId}`);
-    return typeof current?.revision === 'number' ? current.revision : null;
+    try {
+      const current = await backendGet<{ revision?: number | undefined }>(`/v1/versions/${draftVersionId}`);
+      if (typeof current?.revision === 'number') {
+        return current.revision;
+      }
+    } catch {
+      // The pointer survived but the row is gone (stale clone reference):
+      // fall through to the reopen heal below instead of hard-failing.
+    }
+    const healed = await this.ensureBackendDraftVersion(examId);
+    return healed?.revision ?? null;
   }
 
   private async ensureBackendExamRevision(examId: string): Promise<number | null> {
@@ -1471,12 +1520,21 @@ export class ExamLifecycleService {
           return { success: false, error: 'Source exam not found' };
         }
 
-        const versionId = sourceExam.currentDraftVersionId || sourceExam.currentPublishedVersionId;
-        if (!versionId) {
+        // Stale draft pointers (clone-database rows) fall back to the published
+        // seal so cloning a healed exam keeps working.
+        const candidateVersionIds = [
+          sourceExam.currentDraftVersionId ?? null,
+          sourceExam.currentPublishedVersionId ?? null,
+        ].filter((candidate): candidate is string => Boolean(candidate));
+        if (candidateVersionIds.length === 0) {
           return { success: false, error: 'No version to clone from' };
         }
 
-        const sourceVersion = await this.repository.getVersionById(versionId);
+        let sourceVersion = null;
+        for (const candidateId of candidateVersionIds) {
+          sourceVersion = await this.repository.getVersionById(candidateId);
+          if (sourceVersion) break;
+        }
         if (!sourceVersion) {
           return { success: false, error: 'Source version not found' };
         }

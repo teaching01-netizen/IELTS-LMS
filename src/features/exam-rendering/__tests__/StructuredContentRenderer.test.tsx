@@ -52,6 +52,20 @@ const content: StructuredContent = {
 };
 
 describe("StructuredContentRenderer", () => {
+  it("decorates text with stable block offsets while retaining authored marks", () => {
+    const source: StructuredContent = { version: 2, nodes: [], document: { type: 'doc', content: [
+      { type: 'paragraph', attrs: { id: 'evidence' }, content: [
+        { type: 'text', text: 'A ' },
+        { type: 'text', text: 'tree', marks: [{ type: 'bold' }] },
+      ] },
+    ] } };
+    const { container } = render(<StructuredContentRenderer content={source} renderText={({ text, nodeId, startOffset }) =>
+      <span data-node={nodeId} data-offset={startOffset}>{text}</span>
+    } />);
+    expect(container.querySelector('strong span')).toHaveAttribute('data-node', 'evidence');
+    expect(container.querySelector('strong span')).toHaveAttribute('data-offset', '2');
+    expect(container.querySelector('[data-content-text-node="evidence"]')).toHaveTextContent('A tree');
+  });
   it("renders rich content as semantic static markup without an editor instance", () => {
     const { container } = render(
       <StructuredContentRenderer content={content} className="content-surface" />

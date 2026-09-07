@@ -3,6 +3,7 @@ import { ExamState, Passage, PassageMetadata, QuestionBlock } from '../types';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { StimulusPane } from './StimulusPane';
 import { QuestionBuilderPane } from './QuestionBuilderPane';
+import { ActScienceWorkspace } from './ActScienceWorkspace';
 import { ListeningWorkspace } from './workspaces/ListeningWorkspace';
 import { WritingWorkspace } from './workspaces/WritingWorkspace';
 import { SpeakingWorkspace } from './workspaces/SpeakingWorkspace';
@@ -121,6 +122,9 @@ export function Workspace({
   }
   if (state.activeModule === 'speaking') {
     return <SpeakingWorkspace state={state} setState={stableSetState} />;
+  }
+  if (state.activeModule === 'science') {
+    return <ActScienceWorkspace state={state} setState={stableSetState} />;
   }
 
   const handlePassageAdd = () => {

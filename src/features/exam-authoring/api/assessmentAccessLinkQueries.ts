@@ -22,9 +22,11 @@ export function useAccessDistributionOverview(examId: string, enabled = true) {
     queryKey: accessLinkKeys.overview(examId),
     queryFn: () => assessmentAccessLinksApi.overview(examId),
     enabled: Boolean(examId) && enabled,
-    staleTime: 10_000,
-    refetchOnWindowFocus: true,
-    refetchInterval: 15_000,
+    staleTime: 30_000,
+    // Window-focus refetch caused request storms when switching back to a
+    // tab farm; the interval poll already keeps this view fresh.
+    refetchOnWindowFocus: false,
+    refetchInterval: () => 30_000 + Math.floor(Math.random() * 5_000),
   });
 }
 
@@ -42,8 +44,8 @@ export function useAccessLinkActivity(linkId: string | null) {
     queryKey: accessLinkKeys.activity(linkId ?? "missing"),
     queryFn: () => assessmentAccessLinksApi.activity(linkId ?? ""),
     enabled: Boolean(linkId),
-    staleTime: 5_000,
-    refetchInterval: linkId ? 15_000 : false,
+    staleTime: 15_000,
+    refetchInterval: linkId ? () => 30_000 + Math.floor(Math.random() * 5_000) : false,
   });
 }
 

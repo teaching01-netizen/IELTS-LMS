@@ -193,12 +193,15 @@ export function ExamPreviewRoute() {
     return <LoadingSurface label="Preparing preview session…" />;
   }
 
+  const planFallbackNotice = previewSession.planFallbackNotice ?? null;
+  const combinedNotice = planFallbackNotice ?? unknownModuleNotice;
+
   return (
     <RuntimePreviewSurface
       examId={examId}
       enabledModules={enabledModules}
       previewModule={previewModule}
-      fallbackNotice={unknownModuleNotice}
+      fallbackNotice={combinedNotice}
       onModuleChange={handleModuleChange}
       previewSession={previewSession}
       onExit={() => navigate(`/builder/${examId}/builder`, { replace: true })}

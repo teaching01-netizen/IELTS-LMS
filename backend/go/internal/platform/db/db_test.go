@@ -17,7 +17,7 @@ func TestNormalizeMySQLDSNConvertsURI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "user:p@ss@tcp(db.example.test:4000)/ielts?loc=UTC&multiStatements=true&parseTime=true&time_zone=%27%2B00%3A00%27" {
+	if got != "user:p@ss@tcp(db.example.test:4000)/ielts?loc=UTC&parseTime=true&multiStatements=true&time_zone=%27%2B00%3A00%27" {
 		t.Fatalf("unexpected normalized DSN: %q", got)
 	}
 }

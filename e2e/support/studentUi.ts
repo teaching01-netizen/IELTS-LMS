@@ -107,7 +107,7 @@ export async function studentCheckIn(
   await openStudentCheckIn(page, scheduleId);
 
   await page.waitForTimeout(250);
-  const wcodeField = page.getByLabel("Wcode");
+  const wcodeField = page.getByLabel("Access code");
   const emailField = page.getByLabel("Email");
   const nameField = page.getByLabel("Full Name");
   const nicknameField = page.getByLabel("Nickname");

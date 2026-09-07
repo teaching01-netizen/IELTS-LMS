@@ -10,6 +10,31 @@ import {
 } from "../richContent";
 
 describe("rich SAT question content", () => {
+  it("assigns identities to plain-text content before it is saved", () => {
+    expect(plainContentFromText('A prompt').document?.content?.[0]?.attrs?.['id']).toEqual(expect.any(String));
+  });
+  it("persists new rich block identities across reload, edits, and insertion before the block", () => {
+    const original = structuredContentFromDocument({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'A tree grows.' }] }] });
+    const reloaded = JSON.parse(JSON.stringify(original)) as StructuredContent;
+    const block = documentFromStructuredContent(reloaded).content![0]!;
+    const id = block.attrs?.['id'];
+    expect(typeof id).toBe('string');
+    expect(id).toBeTruthy();
+    const edited = structuredContentFromDocument({ type: 'doc', content: [
+      { type: 'paragraph', content: [{ type: 'text', text: 'Introduction' }] },
+      { ...block, content: [{ type: 'text', text: 'A tall tree grows.' }] },
+    ] });
+    expect(edited.document?.content?.[1]?.attrs?.['id']).toBe(id);
+    expect(edited.document?.content?.[0]?.attrs?.['id']).not.toBe(id);
+  });
+  it("preserves legacy block identities through conversion and JSON reload", () => {
+    const content: StructuredContent = { version: 1, nodes: [
+      { type: "paragraph", id: "passage-intro", text: "The tree grows." },
+      { type: "heading", id: "passage-title", text: "Trees", level: 2 },
+    ] };
+    const reloaded = JSON.parse(JSON.stringify(structuredContentFromDocument(documentFromStructuredContent(content)))) as StructuredContent;
+    expect(documentFromStructuredContent(reloaded).content?.map((node) => node.attrs?.["id"])).toEqual(['passage-intro', 'passage-title']);
+  });
   it("migrates legacy nodes without flattening equations and tables", () => {
     const legacy: StructuredContent = {
       version: 1,
@@ -48,7 +73,8 @@ describe("rich SAT question content", () => {
     const content = structuredContentFromDocument(document);
     expect(content.version).toBe(2);
     expect(content.nodes).toEqual([]);
-    expect(content.document).toEqual(document);
+    expect(content.document?.content?.[0]?.content).toEqual(document.content[0]?.content);
+    expect(content.document?.content?.[0]?.attrs?.['id']).toEqual(expect.any(String));
     expect(plainTextFromContent(content)).toBe("x2");
   });
 

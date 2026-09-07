@@ -289,7 +289,18 @@ export function AdminExams({
   // Phase 4: Filter and sort logic
   const filteredAndSortedExams = useMemo(() => {
     let filtered = [...exams];
-    
+
+    // Provider scoping: the IELTS library shows IELTS + ACT only.
+    // SAT lives in /sat/exams; legacy rows without a provider entity default to IELTS.
+    if (providerScope === 'ielts') {
+      const entityProviderById = new Map((examEntities ?? []).map((entity) => [entity.id, entity.providerKey]));
+      filtered = filtered.filter((exam) => {
+        const scoped = entityProviderById.get(exam.id);
+        if (scoped !== undefined) return scoped === 'ielts' || scoped === 'act';
+        return exam.type === 'Academic' || exam.type === 'General Training' || exam.type === 'ACT';
+      });
+    }
+
     // Apply search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -375,7 +386,7 @@ export function AdminExams({
     });
     
     return filtered;
-  }, [exams, searchQuery, filters, sort]);
+  }, [exams, examEntities, providerScope, searchQuery, filters, sort]);
   
   // Phase 4: Selection handlers
   const toggleSelectAll = () => {
@@ -548,7 +559,12 @@ export function AdminExams({
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const title = newExamTitle || 'Untitled Exam';
-    const resolvedProviderKey = providerScope === 'all' ? newProviderKey : providerScope;
+    const resolvedProviderKey =
+      providerScope === 'all'
+        ? newProviderKey
+        : providerScope === 'ielts'
+          ? (newProviderKey === 'sat' ? 'ielts' : newProviderKey)
+          : providerScope;
     const input: CreateExamInput = resolvedProviderKey === 'sat'
       ? { providerKey: 'sat', title, providerExamType: 'SAT' }
       : resolvedProviderKey === 'act'
@@ -875,25 +891,21 @@ export function AdminExams({
                 />
               </div>
 
-              {providerScope === 'all' ? (
+              {(providerScope === 'all' || providerScope === 'ielts') ? (
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Assessment provider</label>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
-                      onClick={() => setNewProviderKey('ielts')}
+                      onClick={() => {
+                        setNewProviderKey('ielts');
+                        setNewExamType('Academic');
+                        setNewExamPreset('Academic');
+                      }}
                       className={`rounded-md border px-3 py-2 text-left text-sm ${newProviderKey === 'ielts' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
                     >
                       <span className="block font-semibold">IELTS</span>
                       <span className="text-xs text-gray-500">Academic or General Training</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNewProviderKey('sat')}
-                      className={`rounded-md border px-3 py-2 text-left text-sm ${newProviderKey === 'sat' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
-                    >
-                      <span className="block font-semibold">Digital SAT</span>
-                      <span className="text-xs text-gray-500">Reading & Writing and Math</span>
                     </button>
                     <button
                       type="button"

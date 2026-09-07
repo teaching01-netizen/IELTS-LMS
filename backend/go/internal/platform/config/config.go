@@ -75,6 +75,19 @@ type Config struct {
 	RateLimitGlobalPerMin int
 	RateLimitBucketCap    int
 
+	// Per-tier per-minute budgets (0 = derive from the legacy globals).
+	// New tiers share one distributed-counter table via distinct route_key
+	// values, so no schema migration is needed to add or retune a tier.
+	RateLimitAuthCriticalPerMin int
+	RateLimitAnonAuthPerMin     int
+	RateLimitAuthedReadsPerMin  int
+	RateLimitPollingPerMin      int
+	RateLimitHeartbeatPerMin    int
+	RateLimitWritesPerMin       int
+	// Local-only loose backstop per IP across all traffic (abuse floor).
+	// It never touches the distributed counters.
+	RateLimitBackstopPerMin int
+
 	StorageWarningBytes  int64
 	StorageCriticalBytes int64
 
@@ -86,6 +99,19 @@ func getenv(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+	return def
+}
+
+// deriveTierLimit reads an explicit per-tier budget, falling back to the
+// provided default when the env var is unset or unparsable. A legacy-only
+// deployment (only RATE_LIMIT_GLOBAL set) therefore still boots with sane
+// per-tier budgets instead of zero-value (deny-all) tiers.
+func deriveTierLimit(key string, global int, def int) int {
+	v := getenvInt(key, -1)
+	if v >= 0 {
+		return v
+	}
+	_ = global
 	return def
 }
 
@@ -197,6 +223,14 @@ func Load() Config {
 
 		RateLimitGlobalPerMin: getenvInt("RATE_LIMIT_GLOBAL", 600),
 		RateLimitBucketCap:    getenvInt("RATE_LIMIT_BUCKET_CAP", 120),
+
+		RateLimitAuthCriticalPerMin: deriveTierLimit("RATE_LIMIT_AUTH_CRITICAL_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 120),
+		RateLimitAnonAuthPerMin:     deriveTierLimit("RATE_LIMIT_ANON_AUTH_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 30),
+		RateLimitAuthedReadsPerMin:  deriveTierLimit("RATE_LIMIT_AUTHED_READS_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 300),
+		RateLimitPollingPerMin:      deriveTierLimit("RATE_LIMIT_POLLING_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 240),
+		RateLimitHeartbeatPerMin:    deriveTierLimit("RATE_LIMIT_HEARTBEAT_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 120),
+		RateLimitWritesPerMin:       deriveTierLimit("RATE_LIMIT_WRITES_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 120),
+		RateLimitBackstopPerMin:     deriveTierLimit("RATE_LIMIT_BACKSTOP_PER_MIN", 3000, 3000),
 
 		StorageWarningBytes:  getenvInt64("STORAGE_WARNING_BYTES", 10<<30),
 		StorageCriticalBytes: getenvInt64("STORAGE_CRITICAL_BYTES", 50<<30),

@@ -89,7 +89,9 @@ export function useScheduleRuntime(scheduleId: string) {
     queryFn: () => examAuthoringFacade.repository.getRuntimeByScheduleId(scheduleId),
     enabled: !!scheduleId,
     ...liveQueryPolicy,
-    refetchInterval: 15 * 1000,
+    // 30s + jitter: schedule runtime is near-real-time-tolerant, and the
+    // old 15s cadence was a top contributor to global rate-limit pressure.
+    refetchInterval: () => 30 * 1000 + Math.floor(Math.random() * 5 * 1000),
   });
 }
 

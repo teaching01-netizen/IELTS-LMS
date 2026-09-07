@@ -323,7 +323,7 @@ func (s *Service) publishHubEvents(events []liveupdates.Event) {
 // nests).
 func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, providerKey, versionID, attemptID string) (*Bootstrap, error) {
 	now := time.Now().UTC()
-	sections, err := s.loadSections(ctx, versionID)
+	sections, err := s.LoadSections(ctx, versionID)
 	if err != nil {
 		return nil, err
 	}

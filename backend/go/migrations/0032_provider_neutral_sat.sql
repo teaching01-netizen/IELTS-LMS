@@ -1,16 +1,63 @@
-ALTER TABLE exam_entities
-    ADD COLUMN provider_key VARCHAR(32) NOT NULL DEFAULT 'ielts' AFTER title,
-    ADD COLUMN provider_exam_type VARCHAR(64) NULL AFTER provider_key;
+-- Prod safety (verified 2026-09-06 against a prod clone): out-of-band SAT DDL
+-- left exam_entities.provider_key present (VARCHAR(50)) while provider_exam_type
+-- and every assessment_* table were missing and 0032 was never recorded.
+-- Guard each ADD COLUMN so a re-run converges instead of aborting with
+-- Error 1060 Duplicate column name. Same information_schema guard idiom as
+-- 0035/0049 (PREPARE/EXECUTE dynamic DDL, skipped on TiDB trigger paths only).
+SET @exam_entities_provider_key_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'exam_entities'
+      AND column_name = 'provider_key'
+);
+SET @exam_entities_provider_key_sql := IF(
+    @exam_entities_provider_key_exists = 0,
+    'ALTER TABLE exam_entities ADD COLUMN provider_key VARCHAR(32) NOT NULL DEFAULT \'ielts\' AFTER title',
+    'SELECT 1'
+);
+PREPARE exam_entities_provider_key_stmt FROM @exam_entities_provider_key_sql;
+EXECUTE exam_entities_provider_key_stmt;
+DEALLOCATE PREPARE exam_entities_provider_key_stmt;
+
+SET @exam_entities_provider_exam_type_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'exam_entities'
+      AND column_name = 'provider_exam_type'
+);
+SET @exam_entities_provider_exam_type_sql := IF(
+    @exam_entities_provider_exam_type_exists = 0,
+    'ALTER TABLE exam_entities ADD COLUMN provider_exam_type VARCHAR(64) NULL AFTER provider_key',
+    'SELECT 1'
+);
+PREPARE exam_entities_provider_exam_type_stmt FROM @exam_entities_provider_exam_type_sql;
+EXECUTE exam_entities_provider_exam_type_stmt;
+DEALLOCATE PREPARE exam_entities_provider_exam_type_stmt;
 
 UPDATE exam_entities
 SET provider_exam_type = exam_type
 WHERE provider_key = 'ielts'
   AND provider_exam_type IS NULL;
 
-CREATE INDEX idx_exam_entities_provider_status_updated
-    ON exam_entities(provider_key, status, updated_at DESC);
+SET @exam_entities_provider_idx_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'exam_entities'
+      AND index_name = 'idx_exam_entities_provider_status_updated'
+);
+SET @exam_entities_provider_idx_sql := IF(
+    @exam_entities_provider_idx_exists = 0,
+    'CREATE INDEX idx_exam_entities_provider_status_updated ON exam_entities(provider_key, status, updated_at DESC)',
+    'SELECT 1'
+);
+PREPARE exam_entities_provider_idx_stmt FROM @exam_entities_provider_idx_sql;
+EXECUTE exam_entities_provider_idx_stmt;
+DEALLOCATE PREPARE exam_entities_provider_idx_stmt;
 
-CREATE TABLE assessment_sections (
+CREATE TABLE IF NOT EXISTS assessment_sections (
     id VARCHAR(36) PRIMARY KEY,
     exam_version_id VARCHAR(36) NOT NULL,
     section_key VARCHAR(64) NOT NULL,
@@ -27,10 +74,23 @@ CREATE TABLE assessment_sections (
     CONSTRAINT uq_assessment_section_key UNIQUE (exam_version_id, section_key)
 );
 
-CREATE INDEX idx_assessment_sections_version_order
-    ON assessment_sections(exam_version_id, display_order);
+SET @index_idx_assessment_sections_version_order_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+    AND table_name = 'assessment_sections'
+    AND index_name = 'idx_assessment_sections_version_order'
+);
+SET @index_idx_assessment_sections_version_order_sql := IF(
+    @index_idx_assessment_sections_version_order_exists = 0,
+    'CREATE INDEX idx_assessment_sections_version_order ON assessment_sections(exam_version_id, display_order)',
+    'SELECT 1'
+);
+PREPARE index_idx_assessment_sections_version_order_stmt FROM @index_idx_assessment_sections_version_order_sql;
+EXECUTE index_idx_assessment_sections_version_order_stmt;
+DEALLOCATE PREPARE index_idx_assessment_sections_version_order_stmt;
 
-CREATE TABLE assessment_modules (
+CREATE TABLE IF NOT EXISTS assessment_modules (
     id VARCHAR(36) PRIMARY KEY,
     section_id VARCHAR(36) NOT NULL,
     module_key VARCHAR(64) NOT NULL,
@@ -51,10 +111,23 @@ CREATE TABLE assessment_modules (
     )
 );
 
-CREATE INDEX idx_assessment_modules_section_order
-    ON assessment_modules(section_id, display_order);
+SET @index_idx_assessment_modules_section_order_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+    AND table_name = 'assessment_modules'
+    AND index_name = 'idx_assessment_modules_section_order'
+);
+SET @index_idx_assessment_modules_section_order_sql := IF(
+    @index_idx_assessment_modules_section_order_exists = 0,
+    'CREATE INDEX idx_assessment_modules_section_order ON assessment_modules(section_id, display_order)',
+    'SELECT 1'
+);
+PREPARE index_idx_assessment_modules_section_order_stmt FROM @index_idx_assessment_modules_section_order_sql;
+EXECUTE index_idx_assessment_modules_section_order_stmt;
+DEALLOCATE PREPARE index_idx_assessment_modules_section_order_stmt;
 
-CREATE TABLE assessment_questions (
+CREATE TABLE IF NOT EXISTS assessment_questions (
     id VARCHAR(36) PRIMARY KEY,
     provider_key VARCHAR(32) NOT NULL,
     created_by VARCHAR(255) NOT NULL,
@@ -63,10 +136,23 @@ CREATE TABLE assessment_questions (
     archived_at TIMESTAMP(6) NULL
 );
 
-CREATE INDEX idx_assessment_questions_provider_updated
-    ON assessment_questions(provider_key, updated_at DESC);
+SET @index_idx_assessment_questions_provider_updated_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+    AND table_name = 'assessment_questions'
+    AND index_name = 'idx_assessment_questions_provider_updated'
+);
+SET @index_idx_assessment_questions_provider_updated_sql := IF(
+    @index_idx_assessment_questions_provider_updated_exists = 0,
+    'CREATE INDEX idx_assessment_questions_provider_updated ON assessment_questions(provider_key, updated_at DESC)',
+    'SELECT 1'
+);
+PREPARE index_idx_assessment_questions_provider_updated_stmt FROM @index_idx_assessment_questions_provider_updated_sql;
+EXECUTE index_idx_assessment_questions_provider_updated_stmt;
+DEALLOCATE PREPARE index_idx_assessment_questions_provider_updated_stmt;
 
-CREATE TABLE assessment_question_revisions (
+CREATE TABLE IF NOT EXISTS assessment_question_revisions (
     id VARCHAR(36) PRIMARY KEY,
     question_id VARCHAR(36) NOT NULL,
     semantic_revision INT NOT NULL,
@@ -89,10 +175,23 @@ CREATE TABLE assessment_question_revisions (
     CONSTRAINT chk_question_revision_state CHECK (state IN ('draft', 'sealed'))
 );
 
-CREATE INDEX idx_question_revision_question_state
-    ON assessment_question_revisions(question_id, state);
+SET @index_idx_question_revision_question_state_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+    AND table_name = 'assessment_question_revisions'
+    AND index_name = 'idx_question_revision_question_state'
+);
+SET @index_idx_question_revision_question_state_sql := IF(
+    @index_idx_question_revision_question_state_exists = 0,
+    'CREATE INDEX idx_question_revision_question_state ON assessment_question_revisions(question_id, state)',
+    'SELECT 1'
+);
+PREPARE index_idx_question_revision_question_state_stmt FROM @index_idx_question_revision_question_state_sql;
+EXECUTE index_idx_question_revision_question_state_stmt;
+DEALLOCATE PREPARE index_idx_question_revision_question_state_stmt;
 
-CREATE TABLE assessment_exam_questions (
+CREATE TABLE IF NOT EXISTS assessment_exam_questions (
     id VARCHAR(36) PRIMARY KEY,
     module_id VARCHAR(36) NOT NULL,
     question_id VARCHAR(36) NOT NULL,
@@ -110,10 +209,23 @@ CREATE TABLE assessment_exam_questions (
     CONSTRAINT uq_exam_question_order UNIQUE (module_id, display_order)
 );
 
-CREATE INDEX idx_exam_questions_module_order
-    ON assessment_exam_questions(module_id, display_order);
+SET @index_idx_exam_questions_module_order_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+    AND table_name = 'assessment_exam_questions'
+    AND index_name = 'idx_exam_questions_module_order'
+);
+SET @index_idx_exam_questions_module_order_sql := IF(
+    @index_idx_exam_questions_module_order_exists = 0,
+    'CREATE INDEX idx_exam_questions_module_order ON assessment_exam_questions(module_id, display_order)',
+    'SELECT 1'
+);
+PREPARE index_idx_exam_questions_module_order_stmt FROM @index_idx_exam_questions_module_order_sql;
+EXECUTE index_idx_exam_questions_module_order_stmt;
+DEALLOCATE PREPARE index_idx_exam_questions_module_order_stmt;
 
-CREATE TABLE assessment_routing_policies (
+CREATE TABLE IF NOT EXISTS assessment_routing_policies (
     id VARCHAR(36) PRIMARY KEY,
     section_id VARCHAR(36) NOT NULL,
     base_module_id VARCHAR(36) NOT NULL,
@@ -129,7 +241,7 @@ CREATE TABLE assessment_routing_policies (
     FOREIGN KEY (higher_module_id) REFERENCES assessment_modules(id)
 );
 
-CREATE TABLE assessment_scoring_policies (
+CREATE TABLE IF NOT EXISTS assessment_scoring_policies (
     id VARCHAR(36) PRIMARY KEY,
     exam_version_id VARCHAR(36) NOT NULL,
     policy_key VARCHAR(64) NOT NULL,
@@ -139,7 +251,7 @@ CREATE TABLE assessment_scoring_policies (
     FOREIGN KEY (exam_version_id) REFERENCES exam_versions(id) ON DELETE CASCADE
 );
 
-CREATE TABLE assessment_module_attempts (
+CREATE TABLE IF NOT EXISTS assessment_module_attempts (
     id VARCHAR(36) PRIMARY KEY,
     attempt_id VARCHAR(36) NOT NULL,
     module_id VARCHAR(36) NOT NULL,
@@ -163,7 +275,7 @@ CREATE TABLE assessment_module_attempts (
     )
 );
 
-CREATE TABLE assessment_question_responses (
+CREATE TABLE IF NOT EXISTS assessment_question_responses (
     id VARCHAR(36) PRIMARY KEY,
     module_attempt_id VARCHAR(36) NOT NULL,
     exam_question_id VARCHAR(36) NOT NULL,
@@ -179,13 +291,40 @@ CREATE TABLE assessment_question_responses (
     FOREIGN KEY (exam_question_id) REFERENCES assessment_exam_questions(id)
 );
 
-CREATE INDEX idx_assessment_response_module
-    ON assessment_question_responses(module_attempt_id, updated_at DESC);
+SET @index_idx_assessment_response_module_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+    AND table_name = 'assessment_question_responses'
+    AND index_name = 'idx_assessment_response_module'
+);
+SET @index_idx_assessment_response_module_sql := IF(
+    @index_idx_assessment_response_module_exists = 0,
+    'CREATE INDEX idx_assessment_response_module ON assessment_question_responses(module_attempt_id, updated_at DESC)',
+    'SELECT 1'
+);
+PREPARE index_idx_assessment_response_module_stmt FROM @index_idx_assessment_response_module_sql;
+EXECUTE index_idx_assessment_response_module_stmt;
+DEALLOCATE PREPARE index_idx_assessment_response_module_stmt;
 
-ALTER TABLE student_submissions
-    ADD COLUMN provider_key VARCHAR(32) NOT NULL DEFAULT 'ielts' AFTER published_version_id;
+-- Same prod-shape guard: student_submissions.provider_key may pre-exist.
+SET @student_submissions_provider_key_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'student_submissions'
+      AND column_name = 'provider_key'
+);
+SET @student_submissions_provider_key_sql := IF(
+    @student_submissions_provider_key_exists = 0,
+    'ALTER TABLE student_submissions ADD COLUMN provider_key VARCHAR(32) NOT NULL DEFAULT \'ielts\' AFTER published_version_id',
+    'SELECT 1'
+);
+PREPARE student_submissions_provider_key_stmt FROM @student_submissions_provider_key_sql;
+EXECUTE student_submissions_provider_key_stmt;
+DEALLOCATE PREPARE student_submissions_provider_key_stmt;
 
-CREATE TABLE assessment_results (
+CREATE TABLE IF NOT EXISTS assessment_results (
     id VARCHAR(36) PRIMARY KEY,
     submission_id VARCHAR(36) NOT NULL,
     provider_key VARCHAR(32) NOT NULL,
@@ -201,7 +340,7 @@ CREATE TABLE assessment_results (
     FOREIGN KEY (submission_id) REFERENCES student_submissions(id) ON DELETE CASCADE
 );
 
-CREATE TABLE assessment_section_results (
+CREATE TABLE IF NOT EXISTS assessment_section_results (
     id VARCHAR(36) PRIMARY KEY,
     assessment_result_id VARCHAR(36) NOT NULL,
     section_key VARCHAR(64) NOT NULL,

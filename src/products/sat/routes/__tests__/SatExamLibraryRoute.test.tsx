@@ -55,4 +55,19 @@ describe('SatExamLibraryRoute', () => {
       { providerKey: 'sat', providerExamType: 'SAT', title: 'October Practice' }, 'Admin',
     ));
   });
+
+  it('keeps Create disabled for the placeholder alone and enables it once a name is typed', () => {
+    // "Practice Test 06" is a placeholder, not a value: an untouched field
+    // must not submit. This pins the reported disabled-Create observation
+    // to correct behavior instead of a form-state defect.
+    createProviderExamMock.mockResolvedValue({ success: true, exam: satExam });
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'New SAT' }));
+    const name = screen.getByLabelText('SAT exam name');
+    expect(name).toHaveAttribute('placeholder', 'Practice Test 06');
+    expect(name).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+    fireEvent.change(name, { target: { value: 'Practice Test 06' } });
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
+  });
 });

@@ -3,6 +3,7 @@ import type { WritingChartData } from '../../types';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
 import { StudentZoomableMedia } from './StudentZoomableMedia';
 import { RichTextHighlighter } from './RichTextHighlighter';
+import { StudentWritingCountdownBadge, StudentWritingCountdownBar } from './StudentWritingCountdown';
 
 interface WritingPromptPaneProps {
   isTabletMode: boolean;
@@ -11,10 +12,8 @@ currentTaskLabel: string;
   currentChart: WritingChartData | undefined;
   currentPrompt: string;
   currentPromptContainsMarkup: boolean;
-  resolvedTimeRemaining: number;
-  isTimeCritical: boolean;
-  isTimeWarning: boolean;
-  progressPercent: number;
+  durationSeconds: number;
+  timeRemaining?: number | undefined;
   highlightEnabled: boolean;
   highlightColor?: React.ComponentProps<typeof RichTextHighlighter>['highlightColor'];
   highlightClassName?: string | undefined;
@@ -28,10 +27,8 @@ export const WritingPromptPane = React.memo(function WritingPromptPane({
   currentChart,
   currentPrompt,
   currentPromptContainsMarkup,
-  resolvedTimeRemaining,
-  isTimeCritical,
-  isTimeWarning,
-  progressPercent,
+  durationSeconds,
+  timeRemaining,
   highlightEnabled,
   highlightColor,
   highlightClassName,
@@ -41,12 +38,6 @@ export const WritingPromptPane = React.memo(function WritingPromptPane({
   const blockMediaSaveInteraction = (event: React.SyntheticEvent) => {
     event.preventDefault();
     event.stopPropagation();
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -60,12 +51,7 @@ export const WritingPromptPane = React.memo(function WritingPromptPane({
         lastFocusedPaneRef.current = 'prompt';
       }}
     >
-      <div
-        className={`h-1.5 flex-shrink-0 transition-all ${
-          isTimeCritical ? 'bg-red-600' : isTimeWarning ? 'bg-amber-700' : 'bg-blue-800'
-        }`}
-        style={{ width: `${progressPercent}%` }}
-      />
+      <StudentWritingCountdownBar durationSeconds={durationSeconds} timeRemaining={timeRemaining} />
       <div
         ref={promptPaneRef}
         data-student-zoom-scroll
@@ -79,19 +65,7 @@ export const WritingPromptPane = React.memo(function WritingPromptPane({
           <h2 className="font-bold" style={{ fontSize: 'var(--student-passage-title-font-size)' }}>
             {currentTaskLabel}
           </h2>
-          <div
-            role="timer"
-            aria-label="Time remaining in writing section"
-            className={`px-3 py-1 rounded-md text-sm font-semibold tabular-nums ${
-              isTimeCritical
-                ? 'bg-red-100 text-red-700'
-                : isTimeWarning
-                  ? 'bg-amber-100 text-amber-700'
-                  : 'bg-blue-100 text-blue-700'
-            }`}
-          >
-            {formatTime(resolvedTimeRemaining)}
-          </div>
+          <StudentWritingCountdownBadge durationSeconds={durationSeconds} timeRemaining={timeRemaining} />
         </div>
         {currentChart ? (
           <div
@@ -158,10 +132,8 @@ function areWritingPromptPanePropsEqual(
     previous.currentTaskLabel !== next.currentTaskLabel ||
     previous.currentPrompt !== next.currentPrompt ||
     previous.currentPromptContainsMarkup !== next.currentPromptContainsMarkup ||
-    previous.resolvedTimeRemaining !== next.resolvedTimeRemaining ||
-    previous.isTimeCritical !== next.isTimeCritical ||
-    previous.isTimeWarning !== next.isTimeWarning ||
-    previous.progressPercent !== next.progressPercent ||
+    previous.durationSeconds !== next.durationSeconds ||
+    previous.timeRemaining !== next.timeRemaining ||
     previous.highlightEnabled !== next.highlightEnabled ||
     previous.highlightColor !== next.highlightColor ||
     previous.highlightClassName !== next.highlightClassName ||

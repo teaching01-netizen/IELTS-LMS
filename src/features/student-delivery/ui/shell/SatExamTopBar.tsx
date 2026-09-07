@@ -2,19 +2,28 @@ import { useId, useRef, type Ref } from "react";
 import { BookOpen, Calculator, ChevronDown, Pencil } from "lucide-react";
 import type { StructuredContent } from "../../../exam-authoring/api/assessmentContracts";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
+import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
 import { SatDirectionsPopover } from "./SatDirectionsPopover";
 import { SatReadingPopover } from "./SatReadingPopover";
+import type { SatAnnotationMode } from '../annotations/SatAnnotationModeContext';
 
 export interface SatExamTopBarProps {
   sectionLabel: string;
   directions: StructuredContent | null;
   directionsOpen: boolean;
   remainingLabel: string;
+  remainingSeconds?: number | undefined;
   timerVisible: boolean;
   calculatorAvailable: boolean;
   calculatorOpen: boolean;
   referenceAvailable: boolean;
   referenceOpen: boolean;
+  /** R&W-only. When false the Notes tool is hidden instead of disabled. */
+  notesAvailable: boolean;
+  annotationMode?: SatAnnotationMode;
+  lineReaderEnabled?: boolean;
+  onToggleLineReader?: () => void;
+  onToggleAnnotationMode?: (mode: 'highlight' | 'underline') => void;
   notesOpen: boolean;
   notesButtonId: string;
   readingOpen: boolean;
@@ -35,6 +44,9 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
   const directionsId = useId();
   const directionsButtonRef = useRef<HTMLButtonElement>(null);
   const readingButtonRef = useRef<HTMLButtonElement>(null);
+  // T2.5: shared threshold announcer (5-min / 1-min, never per-second),
+  // mirroring the IELTS headers. Per-tick label keeps no live region.
+  const timerAnnouncement = useStudentTimerAnnouncement(props.remainingSeconds);
 
   return (
     <header
@@ -78,6 +90,10 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
           >
             {props.timerVisible ? props.remainingLabel : "—:—"}
           </span>
+          {/* T2.5: polite threshold announcements only (5-min / 1-min). */}
+          <span className="sr-only" aria-live="polite" data-testid="sat-timer-announcement">
+            {timerAnnouncement}
+          </span>
           <button
             type="button"
             onClick={props.onToggleTimer}
@@ -91,6 +107,18 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
         </div>
 
         <div className="relative col-span-2 row-start-2 flex min-w-0 items-center justify-end gap-1 self-stretch sm:col-span-1 sm:col-start-auto sm:row-start-auto">
+          {props.notesAvailable ? (['highlight', 'underline'] as const).map((mode) => (
+            <button key={mode} type="button" aria-label={mode === 'highlight' ? 'Highlight' : 'Underline'}
+              aria-pressed={props.annotationMode === mode} disabled={props.blocked}
+              onClick={() => props.onToggleAnnotationMode?.(mode)}
+              className="sat-touch-target min-w-0 rounded px-2 text-sm font-medium aria-pressed:bg-[var(--sat-accent-soft)] aria-pressed:text-[var(--sat-accent-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--sat-focus)]"
+            >{mode === 'highlight' ? 'Highlight' : 'Underline'}</button>
+          )) : null}
+          {props.notesAvailable ? (
+            <button type="button" aria-label="Line Reader" aria-pressed={props.lineReaderEnabled ?? false} disabled={props.blocked}
+              onClick={props.onToggleLineReader}
+              className="sat-touch-target rounded px-2 text-sm font-medium aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--sat-focus)]">Line Reader</button>
+          ) : null}
           <div className="relative shrink-0">
             <TopToolButton
               buttonRef={readingButtonRef}
@@ -113,14 +141,16 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
               onClose={props.onCloseReading}
             />
           </div>
-          <TopToolButton
-            id={props.notesButtonId}
-            label="Notes"
-            pressed={props.notesOpen}
-            disabled={props.blocked}
-            onClick={props.onToggleNotes}
-            icon={<Pencil className="h-[18px] w-[18px]" aria-hidden="true" />}
-          />
+          {props.notesAvailable ? (
+            <TopToolButton
+              id={props.notesButtonId}
+              label="Notes"
+              pressed={props.notesOpen}
+              disabled={props.blocked}
+              onClick={props.onToggleNotes}
+              icon={<Pencil className="h-[18px] w-[18px]" aria-hidden="true" />}
+            />
+          ) : null}
           {props.calculatorAvailable ? (
             <TopToolButton
               label="Calculator"

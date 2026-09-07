@@ -361,7 +361,7 @@ test.describe("Full browser lifecycle", () => {
     const studentContext = await browser.newContext();
     const studentPage = await studentContext.newPage();
     await studentPage.goto(`/student/${manifest.studentSelfPaced.scheduleId}`);
-    await expect(studentPage.getByLabel("Wcode")).toBeVisible();
+    await expect(studentPage.getByLabel("Access code")).toBeVisible();
 
     await studentContext.close();
     await proctorContext.close();

@@ -21,12 +21,51 @@ CREATE TABLE IF NOT EXISTS assessment_access_links (
     FOREIGN KEY (schedule_id) REFERENCES exam_schedules(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_assessment_access_links_exam_updated
-    ON assessment_access_links(exam_id, updated_at DESC, id);
-CREATE INDEX idx_assessment_access_links_version_updated
-    ON assessment_access_links(published_version_id, updated_at DESC, id);
-CREATE INDEX idx_assessment_access_links_lifecycle_window
-    ON assessment_access_links(lifecycle_state, opens_at, closes_at);
+SET @index_idx_assessment_access_links_exam_updated_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'assessment_access_links'
+      AND index_name = 'idx_assessment_access_links_exam_updated'
+);
+SET @index_idx_assessment_access_links_exam_updated_sql := IF(
+    @index_idx_assessment_access_links_exam_updated_exists = 0,
+    'CREATE INDEX idx_assessment_access_links_exam_updated ON assessment_access_links(exam_id, updated_at DESC, id)',
+    'SELECT 1'
+);
+PREPARE index_idx_assessment_access_links_exam_updated_stmt FROM @index_idx_assessment_access_links_exam_updated_sql;
+EXECUTE index_idx_assessment_access_links_exam_updated_stmt;
+DEALLOCATE PREPARE index_idx_assessment_access_links_exam_updated_stmt;
+SET @index_idx_assessment_access_links_version_updated_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'assessment_access_links'
+      AND index_name = 'idx_assessment_access_links_version_updated'
+);
+SET @index_idx_assessment_access_links_version_updated_sql := IF(
+    @index_idx_assessment_access_links_version_updated_exists = 0,
+    'CREATE INDEX idx_assessment_access_links_version_updated ON assessment_access_links(published_version_id, updated_at DESC)',
+    'SELECT 1'
+);
+PREPARE index_idx_assessment_access_links_version_updated_stmt FROM @index_idx_assessment_access_links_version_updated_sql;
+EXECUTE index_idx_assessment_access_links_version_updated_stmt;
+DEALLOCATE PREPARE index_idx_assessment_access_links_version_updated_stmt;
+SET @index_idx_assessment_access_links_lifecycle_window_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'assessment_access_links'
+      AND index_name = 'idx_assessment_access_links_lifecycle_window'
+);
+SET @index_idx_assessment_access_links_lifecycle_window_sql := IF(
+    @index_idx_assessment_access_links_lifecycle_window_exists = 0,
+    'CREATE INDEX idx_assessment_access_links_lifecycle_window ON assessment_access_links(lifecycle_state, opens_at, closes_at)',
+    'SELECT 1'
+);
+PREPARE index_idx_assessment_access_links_lifecycle_window_stmt FROM @index_idx_assessment_access_links_lifecycle_window_sql;
+EXECUTE index_idx_assessment_access_links_lifecycle_window_stmt;
+DEALLOCATE PREPARE index_idx_assessment_access_links_lifecycle_window_stmt;
 
 CREATE TABLE IF NOT EXISTS assessment_access_link_members (
     link_id VARCHAR(36) NOT NULL,
@@ -38,5 +77,18 @@ CREATE TABLE IF NOT EXISTS assessment_access_link_members (
     FOREIGN KEY (link_id) REFERENCES assessment_access_links(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_assessment_access_link_members_email
-    ON assessment_access_link_members(link_id, student_email);
+SET @index_idx_assessment_access_link_members_email_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'assessment_access_link_members'
+      AND index_name = 'idx_assessment_access_link_members_email'
+);
+SET @index_idx_assessment_access_link_members_email_sql := IF(
+    @index_idx_assessment_access_link_members_email_exists = 0,
+    'CREATE INDEX idx_assessment_access_link_members_email ON assessment_access_link_members(link_id, student_email)',
+    'SELECT 1'
+);
+PREPARE index_idx_assessment_access_link_members_email_stmt FROM @index_idx_assessment_access_link_members_email_sql;
+EXECUTE index_idx_assessment_access_link_members_email_stmt;
+DEALLOCATE PREPARE index_idx_assessment_access_link_members_email_stmt;

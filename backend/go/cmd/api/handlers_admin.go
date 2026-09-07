@@ -172,6 +172,24 @@ func examsDraftHandler(app *App) http.HandlerFunc {
 	}
 }
 
+// examsDraftReopenHandler heals clone-database exams that lost their editable
+// draft (orphan NULL/NULL pointers or sealed published rows): it reopens a
+// fresh draft from the latest surviving version and returns it (201).
+func examsDraftReopenHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleBuilder) == nil {
+			return
+		}
+		id := chi.URLParam(r, "id")
+		out, err := app.Exams.ReopenDraftForActor(r.Context(), actorOf(r.Context()), id)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusCreated, out)
+	}
+}
+
 // examsPublishHandler seals the current draft as published.
 func examsPublishHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -289,10 +307,12 @@ func versionSummaryHandler(app *App) http.HandlerFunc {
 		var versionNumber, revision int
 		var parentVersionID, contentSnapshot, configSnapshot, validationSnapshot sql.NullString
 		var createdBy string
+		var createdAt time.Time
+		var publishNotes sql.NullString
 		var isDraft, isPublished bool
 		err := app.DB.QueryRowContext(r.Context(),
-			`SELECT id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision FROM exam_versions WHERE id = ?`,
-			versionID).Scan(&id, &examID, &versionNumber, &parentVersionID, &contentSnapshot, &configSnapshot, &validationSnapshot, &createdBy, &isDraft, &isPublished, &revision)
+			`SELECT id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision, created_at, publish_notes FROM exam_versions WHERE id = ?`,
+			versionID).Scan(&id, &examID, &versionNumber, &parentVersionID, &contentSnapshot, &configSnapshot, &validationSnapshot, &createdBy, &isDraft, &isPublished, &revision, &createdAt, &publishNotes)
 		if err == sql.ErrNoRows {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Version not found."))
 			return
@@ -310,9 +330,14 @@ func versionSummaryHandler(app *App) http.HandlerFunc {
 			"examId":        examID,
 			"versionNumber": versionNumber,
 			"createdBy":     createdBy,
+			"createdAt":     createdAt,
+			"publishNotes":  nil,
 			"isDraft":       isDraft,
 			"isPublished":   isPublished,
 			"revision":      revision,
+		}
+		if publishNotes.Valid {
+			out["publishNotes"] = publishNotes.String
 		}
 		if parentVersionID.Valid {
 			out["parentVersionId"] = parentVersionID.String

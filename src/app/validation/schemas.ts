@@ -230,9 +230,15 @@ export const formSchemas = {
   }),
 
   // Student registration form — mirrors StudentEntryRoute check-in fields
-  // (wcode + email + student name + nickname + IELTS course).
+  // (access code + email + student name + nickname + IELTS course).
+  // Entry is free by default: any non-empty code is accepted (W-codes are
+  // uppercased for backward compatibility, everything else is trimmed).
   studentRegistration: z.object({
-    wcode: z.string().regex(/^W\d{6}$/i, 'Wcode must look like W123456').transform((value) => value.trim().toUpperCase()),
+    wcode: z
+      .string()
+      .trim()
+      .min(1, 'Access code is required')
+      .transform((value) => (/^W\d{6}$/i.test(value) ? value.toUpperCase() : value)),
     email: commonSchemas.email,
     studentName: commonSchemas.nonEmptyString.min(2, 'Name must be at least 2 characters'),
     nickname: commonSchemas.nonEmptyString.max(50, 'Nickname must be 50 characters or less'),

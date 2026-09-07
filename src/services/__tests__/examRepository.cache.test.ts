@@ -58,8 +58,8 @@ describe('examRepository payload caches', () => {
     examRepository.clearScheduleCache();
   });
 
-  it('serves repeated version lookups from the payload cache', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(versionPayload('cache-ver-1')));
+  it('serves repeated published version lookups from the payload cache', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ...versionPayload('cache-ver-1'), isDraft: false, isPublished: true }));
     global.fetch = fetchMock as typeof fetch;
 
     const first = await examRepository.getVersionById('cache-ver-1');

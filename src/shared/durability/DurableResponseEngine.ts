@@ -38,6 +38,8 @@ export interface DurableResponseEngineOptions {
   leaseEpoch: number;
   controlEpoch: number;
   transport: TransportClient;
+  /** Delay network draining only; accepted edits are still checkpointed immediately. */
+  drainDebounceMs?: number;
   onStatusChange?: (status: DurabilitySyncStatus, error?: string | null) => void;
   onStateChange?: (states: ReadonlyMap<string, import("./types").QuestionResponseState>) => void;
 }
@@ -158,7 +160,8 @@ export class DurableResponseEngine {
   private readonly quarantined: QuarantinedWrite[] = [];
 
   private isDraining = false;
-  private drainScheduled = false;
+  private drainTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly drainDebounceMs: number;
   private drainPromise: Promise<void> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private submissionPromise: Promise<SubmitAttemptV2Response> | null = null;
@@ -181,6 +184,7 @@ export class DurableResponseEngine {
     this.leaseEpoch = options.leaseEpoch;
     this.controlEpoch = options.controlEpoch;
     this.transport = options.transport;
+    this.drainDebounceMs = Number.isFinite(options.drainDebounceMs) ? Math.max(0, options.drainDebounceMs ?? 0) : 0;
     this.onStatusChange = options.onStatusChange;
     this.onStateChange = options.onStateChange;
 
@@ -542,6 +546,7 @@ export class DurableResponseEngine {
   /** Flush pending outbox entries. A missing acknowledgement is not treated as success. */
   public async flush(): Promise<void> {
     if (this.isDestroyed) return;
+    if (this.drainTimer) { clearTimeout(this.drainTimer); this.drainTimer = null; }
 
     // A durable acceptance may begin while an earlier drain is awaiting the
     // network. Re-check both queues after that drain so the flush barrier never
@@ -585,6 +590,7 @@ export class DurableResponseEngine {
 
   public destroy(): void {
     this.isDestroyed = true;
+    if (this.drainTimer) { clearTimeout(this.drainTimer); this.drainTimer = null; }
     // In-flight network promises cannot be cancelled by every transport. Drop
     // callbacks immediately so a response from an unmounted/replaced engine
     // cannot publish into the next attempt instance.
@@ -797,14 +803,17 @@ export class DurableResponseEngine {
   }
 
   private scheduleDrain(): void {
-    if (this.drainScheduled || this.isDraining || this.isDestroyed || this.retryTimer) return;
-    this.drainScheduled = true;
-    setTimeout(() => {
-      this.drainScheduled = false;
+    if (this.isDraining || this.isDestroyed || this.retryTimer) return;
+    if (this.drainTimer) {
+      if (!this.drainDebounceMs) return;
+      clearTimeout(this.drainTimer);
+    }
+    this.drainTimer = setTimeout(() => {
+      this.drainTimer = null;
       if (!this.isDraining && !this.isDestroyed && !this.submissionPromise) {
         this.drainPromise = this.drainOutbox();
       }
-    }, 0);
+    }, this.drainDebounceMs);
   }
 
   private scheduleRetry(delayMs: number): void {

@@ -8,14 +8,14 @@ import type {
   AssessmentTimingSnapshot,
 } from "../contracts/assessmentDelivery";
 import type { StudentAttempt } from "../../../types/studentAttempt";
-import { normalizeSatAnnotations, responseForQuestion } from "../domain/satResponses";
+import { normalizeSatAnnotations, responseForQuestion, type SatQuestionAnnotations } from "../domain/satResponses";
 import {
   breakRemainingSeconds,
   mergeAuthoritativeTiming,
   snapshotRemainingSeconds,
   timingForAttempt,
 } from "../domain/satTiming";
-import { resolveSatToolCapabilities } from "../domain/satTools";
+import { resolveSatExamToolPolicy, toSatToolCapabilities } from "../domain/satToolPolicy";
 import {
   configureSatDeliveryAttempt,
   satDeliveryGateway,
@@ -275,7 +275,7 @@ export function useSatExamController({
         questionIds: module.questions.map((question) => question.examQuestionId),
         startedAt: timing.startedAt,
         endsAt: timing.endsAt,
-        toolCapabilities: resolveSatToolCapabilities(module.toolPolicy),
+        toolCapabilities: toSatToolCapabilities(resolveSatExamToolPolicy(section.sectionKey === "math" ? "math" : "reading-writing", module.toolPolicy)),
       });
       hydrateModuleResponses(payload, module);
     },
@@ -827,13 +827,20 @@ export function useSatExamController({
     (questionId: string, note: string) => {
       const current = currentResponse(questionId);
       if (!current) return;
-      const annotations = { version: 1 as const, note: note.slice(0, 2_000) };
+      const annotations = { ...current.annotations, legacyQuestionNote: note.slice(0, 2_000) };
       const next = { ...current, annotations };
       dispatch({ type: "setAnnotations", questionId, annotations });
       persistence.save(next, saveContext("typing"));
     },
     [currentResponse, persistence, saveContext]
   );
+
+  const setAnnotations = useCallback((questionId: string, annotations: SatQuestionAnnotations) => {
+    const current = currentResponse(questionId);
+    if (!current || (state.phase !== 'module' && state.phase !== 'review') || !resolveSatExamToolPolicy(state.sectionKey, []).highlight) return;
+    dispatch({ type: 'setAnnotations', questionId, annotations });
+    persistence.save({ ...current, annotations }, saveContext('discrete'));
+  }, [currentResponse, persistence, saveContext, state]);
 
   const returnToQuestion = useCallback((questionIndex: number) => {
     dispatch({ type: "selectQuestion", questionIndex });
@@ -873,6 +880,7 @@ export function useSatExamController({
       toggleReview,
       toggleEliminatedOption,
       setAnnotationNote,
+      setAnnotations,
       selectQuestion: (questionIndex: number) =>
         dispatch({ type: "selectQuestion", questionIndex }),
       returnToQuestion,

@@ -60,6 +60,23 @@ function applySessionHeaders(session: AuthSession | null): void {
   apiClient.clearCsrfToken();
 }
 
+function isRateLimitedError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const record = error as Record<string, unknown>;
+  return record['statusCode'] === 429 || record['status'] === 429;
+}
+
+function rateLimitWaitMs(error: unknown): number {
+  const record = error as Record<string, unknown>;
+  const details = record['details'] as Record<string, unknown> | undefined;
+  const retryAfter =
+    record['retryAfter'] ?? details?.['retryAfterSeconds'] ?? details?.['retryAfter'];
+  const secs = typeof retryAfter === 'number' && retryAfter > 0 ? retryAfter : 1;
+  return Math.min(secs, 30) * 1000;
+}
+
 function setSessionState(
   nextSession: AuthSession | null,
   setSession: React.Dispatch<React.SetStateAction<AuthSession | null>>,
@@ -171,6 +188,23 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       const nextSession = await authService.getSession();
       return setSessionState(nextSession, setSession, setStatus);
     } catch (error) {
+      // 429 (rate limited) is transient pressure, not a session verdict:
+      // retry once after the server's Retry-After, then keep the current
+      // session either way. Never sign out or bounce to login on 429.
+      if (isRateLimitedError(error)) {
+        const waitMs = rateLimitWaitMs(error);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        try {
+          const nextSession = await authService.getSession();
+          return setSessionState(nextSession, setSession, setStatus);
+        } catch (retryError) {
+          if (import.meta.env.DEV) {
+            console.warn('[authSession] session refresh rate-limited; keeping current session');
+          }
+          setStatus(sessionRef.current ? 'authenticated' : 'unauthenticated');
+          return sessionRef.current;
+        }
+      }
       // Only clear the session when the refresh proves the session is gone
       // (401/403 or an explicit expiry/unauthorized backend code). Any other
       // failure (network, 5xx, transport) keeps the current session so the UI

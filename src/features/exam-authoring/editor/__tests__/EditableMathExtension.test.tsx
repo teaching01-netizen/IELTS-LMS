@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import StarterKit from "@tiptap/starter-kit";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { EditableInlineMath } from "../EditableMathExtension";
 
 vi.mock("mathlive", () => {
@@ -32,6 +32,13 @@ vi.mock("mathlive", () => {
   }
 
   return { MathfieldElement: FakeMathfieldElement };
+});
+
+beforeAll(() => {
+  if (!Range.prototype.getClientRects) {
+    Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+    Range.prototype.getBoundingClientRect = () => new DOMRect();
+  }
 });
 
 type TestMathfield = HTMLElement & {

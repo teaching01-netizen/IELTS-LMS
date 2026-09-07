@@ -12,11 +12,32 @@ type ResponsePayload struct {
 
 // Annotation is a highlight/note owned by the response.
 type Annotation struct {
-	ID    string `json:"id"`
-	Kind  string `json:"kind"`
-	Start *int   `json:"start,omitempty"`
-	End   *int   `json:"end,omitempty"`
-	Text  string `json:"text,omitempty"`
+	ID                 string              `json:"id"`
+	Kind               string              `json:"kind"`
+	Start              *int                `json:"start,omitempty"`
+	End                *int                `json:"end,omitempty"`
+	Text               string              `json:"text,omitempty"`
+	Version            int                 `json:"version,omitempty"`
+	Annotations        []SATTextAnnotation `json:"annotations,omitempty"`
+	LegacyQuestionNote string              `json:"legacyQuestionNote,omitempty"`
+}
+
+type SATTextAnchor struct {
+	NodeID      string `json:"nodeId"`
+	StartOffset int    `json:"startOffset"`
+	EndOffset   int    `json:"endOffset"`
+	Exact       string `json:"exact"`
+	Prefix      string `json:"prefix,omitempty"`
+	Suffix      string `json:"suffix,omitempty"`
+}
+
+type SATTextAnnotation struct {
+	ID        string        `json:"id"`
+	Kind      string        `json:"kind"`
+	Anchor    SATTextAnchor `json:"anchor"`
+	Note      string        `json:"note,omitempty"`
+	CreatedAt string        `json:"createdAt"`
+	UpdatedAt string        `json:"updatedAt"`
 }
 
 // ResponseCommand is one question write inside a batch (plan 18).

@@ -65,14 +65,24 @@ export function useConfigRouteController(
       setExam(entity);
       examRef.current = entity;
 
-      const versionId = entity.currentDraftVersionId ?? entity.currentPublishedVersionId;
-      if (!versionId) {
+      // Clone-database exams can keep a stale draft pointer (draft row deleted
+      // by a failed clone write). Prefer the draft, but fall back to the
+      // published seal so entry keeps working instead of failing load.
+      const candidateVersionIds = [
+        entity.currentDraftVersionId,
+        entity.currentPublishedVersionId,
+      ].filter((candidate): candidate is string => Boolean(candidate));
+      if (candidateVersionIds.length === 0) {
         setError('No version exists for this exam');
         setIsLoading(false);
         return;
       }
 
-      const currentVersion = await examAuthoringFacade.repository.getVersionById(versionId);
+      let currentVersion: ExamVersion | null = null;
+      for (const candidateId of candidateVersionIds) {
+        currentVersion = await examAuthoringFacade.repository.getVersionById(candidateId);
+        if (currentVersion?.configSnapshot) break;
+      }
       if (currentVersion?.configSnapshot) {
         versionRef.current = currentVersion;
         setConfig(currentVersion.configSnapshot);

@@ -37,6 +37,28 @@ const DEFAULT_RETRY_CONFIG = {
   retryDelay: (attemptIndex: number) => Math.min(1000 * 2 ** attemptIndex, 30000),
 };
 
+/** HTTP status that must never be blind-retried (server names its tier and
+ * backoff via the 429 envelope / Retry-After header). Retrying 429s with
+ * exponential backoff amplifies the exact pressure the limiter sheds. */
+export const DO_NOT_RETRY_STATUS = 429;
+
+/** Retry predicate: fail fast on 429, keep default retries otherwise. */
+export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
+  if (isRateLimitedError(error)) {
+    return false;
+  }
+  return failureCount < DEFAULT_RETRY_CONFIG.retry;
+}
+
+function isRateLimitedError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const status = (error as { status?: unknown; statusCode?: unknown }).status;
+  const legacy = (error as { statusCode?: unknown }).statusCode;
+  return status === DO_NOT_RETRY_STATUS || legacy === DO_NOT_RETRY_STATUS;
+}
+
 /**
  * Query keys for different data types
  * Using a structured approach for cache key management
@@ -140,7 +162,7 @@ export function createQueryClient(): QueryClient {
       queries: {
         staleTime: DEFAULT_STALE_TIME,
         gcTime: DEFAULT_CACHE_TIME,
-        retry: DEFAULT_RETRY_CONFIG.retry,
+        retry: shouldRetryQuery,
         retryDelay: DEFAULT_RETRY_CONFIG.retryDelay,
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,

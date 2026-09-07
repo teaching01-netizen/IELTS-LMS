@@ -33,14 +33,14 @@ type ReleasePublishedVersion struct {
 	ID            string    `json:"id"`
 	VersionNumber int       `json:"versionNumber"`
 	Revision      int       `json:"revision"`
-	PublishNotes  *string   `json:"publishNotes,omitempty"`
+	PublishNotes  *string   `json:"publishNotes"`
 	PublishedAt   time.Time `json:"publishedAt"`
 }
 
 // ReleaseWorkingDraft mirrors ReleaseWorkingDraft (camelCase wire shape).
 type ReleaseWorkingDraft struct {
 	ID              string  `json:"id"`
-	ParentVersionID *string `json:"parentVersionId,omitempty"`
+	ParentVersionID *string `json:"parentVersionId"`
 	VersionNumber   int     `json:"versionNumber"`
 	Revision        int     `json:"revision"`
 }
@@ -66,8 +66,8 @@ type ReleaseState struct {
 	ExamID                  string                   `json:"examId"`
 	ProviderKey             string                   `json:"providerKey"`
 	State                   LifecycleState           `json:"state"`
-	CurrentPublishedVersion *ReleasePublishedVersion `json:"currentPublishedVersion,omitempty"`
-	WorkingDraft            *ReleaseWorkingDraft     `json:"workingDraft,omitempty"`
+	CurrentPublishedVersion *ReleasePublishedVersion `json:"currentPublishedVersion"`
+	WorkingDraft            *ReleaseWorkingDraft     `json:"workingDraft"`
 	Summary                 ReleaseContentSummary    `json:"summary"`
 	Access                  ReleaseAccessSummary     `json:"access"`
 }

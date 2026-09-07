@@ -220,4 +220,82 @@ describe("student exam acceptance contracts", () => {
       })
     ).toEqual({ kind: "ready" });
   });
+
+  it("gives expiry precedence over typing: expired clock blocks even with a live runtime", () => {
+    // Typing-while-time-expires: the candidate may still have keystrokes in
+    // flight, but the pure blocking decision must already report time_expired
+    // so effects (auto-submit, edit-stop) trigger from one authoritative value.
+    const base = {
+      runtimeBacked: true,
+      runtime: buildRuntime({ status: "live" }),
+      waitingForCohortAdvance: false,
+      proctorStatus: "active" as const,
+      blockingReasonOverride: null,
+      timeRemaining: 0,
+    };
+    expect(deriveBlockingState(base)).toMatchObject({ active: true, reason: "time_expired" });
+  });
+
+  it("gives proctor pause precedence over submission readiness (pause-vs-submit)", () => {
+    // Proctor-pause-arriving-during-submission: blocking reports proctor_paused
+    // regardless of barrier readiness, so the coordinator must observe the
+    // blocking state before treating a ready barrier as permission to submit.
+    const blocked = deriveBlockingState({
+      runtimeBacked: true,
+      runtime: buildRuntime({ status: "live" }),
+      waitingForCohortAdvance: false,
+      proctorStatus: "paused" as const,
+      blockingReasonOverride: null,
+      timeRemaining: 600,
+    });
+    expect(blocked).toMatchObject({ active: true, reason: "proctor_paused" });
+    expect(
+      evaluateSubmissionBarrier({
+        phase: "exam",
+        pendingMutationCount: 0,
+        durabilityReady: true,
+        runtimeBacked: true,
+        runtimeStatus: "live",
+        runtimeCompletionVerified: false,
+      })
+    ).toEqual({ kind: "ready" });
+  });
+
+  it("gives verified-terminal precedence over stale resume (stale-resume-after-complete)", () => {
+    // A stale resume arriving after completion: attempt carries submittedAt /
+    // deliveryStatus submitted while the runtime snapshot is still live.
+    // Verified-terminal wins, so phase resolves to post-exam, never back to exam.
+    const attempt = buildAttempt({ submittedAt: "2026-08-16T00:05:00.000Z" });
+    const liveRuntime = buildRuntime({ status: "live" });
+    expect(deriveStudentPhase({ attempt, runtime: liveRuntime, runtimeBacked: true })).toBe(
+      "post-exam"
+    );
+  });
+
+  it("rejects submission from a stale post-exam snapshot while runtime is live", () => {
+    // Duplicate-submit / stale-resume guard at the barrier layer: phase derived
+    // from a stale post-exam attempt under a live runtime resolves to exam, but
+    // a genuinely completed attempt (submittedAt) stays post-exam, so the
+    // barrier reports not_exam and no second submit can proceed.
+    const completedAttempt = buildAttempt({
+      phase: "post-exam",
+      submittedAt: "2026-08-16T00:05:00.000Z",
+    });
+    const phase = deriveStudentPhase({
+      attempt: completedAttempt,
+      runtime: buildRuntime({ status: "live" }),
+      runtimeBacked: true,
+    });
+    expect(phase).toBe("post-exam");
+    expect(
+      evaluateSubmissionBarrier({
+        phase,
+        pendingMutationCount: 0,
+        durabilityReady: true,
+        runtimeBacked: true,
+        runtimeStatus: "live",
+        runtimeCompletionVerified: true,
+      })
+    ).toEqual({ kind: "blocked", reason: "not_exam" });
+  });
 });

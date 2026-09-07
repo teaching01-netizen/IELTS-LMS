@@ -237,6 +237,22 @@ describe('coalescePendingMutations', () => {
     expect(result).toHaveLength(2);
   });
 
+  it('keeps only the latest coalesced value so a contiguous ack cannot confirm a dropped edit (T2.3)', () => {
+    // Coalescing replaces same-key pending mutations: the transport batch
+    // contains exactly one entry per key (the latest value). The backend
+    // assigns serverAcceptedThroughSeq = existingMaxSeq + len(newMutations)
+    // (backend/go/internal/student/v1_write.go), so the ack covers the batch
+    // as sent — never an intermediate value the client already discarded.
+    // Acceptance of the required contiguous batch prefix is what the ack
+    // means; the visible answer stays pending-first until that ack arrives.
+    const first = makeAnswerMutation({ id: 'm1', payload: { questionId: 'q1', value: 'A', module: 'reading' } });
+    const second = makeAnswerMutation({ id: 'm2', payload: { questionId: 'q1', value: 'B', module: 'reading' } });
+    const result = coalescePendingMutations([first], second);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('m2');
+    expect(result[0].payload.value).toBe('B');
+  });
+
   it('preserves order of non-coalesced mutations', () => {
     const v1: StudentAttemptMutation = {
       id: 'v1', attemptId: 'a', scheduleId: 's', timestamp: '2026-01-01T00:00:00.000Z',

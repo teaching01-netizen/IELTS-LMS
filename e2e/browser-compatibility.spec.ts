@@ -63,7 +63,7 @@ test.describe("Browser compatibility", () => {
     for (const viewport of viewports) {
       await page.setViewportSize(viewport);
       await openRegistration(page);
-      await expect(page.getByLabel("Wcode")).toBeVisible();
+      await expect(page.getByLabel("Access code")).toBeVisible();
       await expect(page.getByLabel("Email")).toBeVisible();
       await expect(page.getByLabel("Full Name")).toBeVisible();
       await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
@@ -73,7 +73,7 @@ test.describe("Browser compatibility", () => {
   test("student check-in exposes keyboard and screen-reader labels", async ({ page }) => {
     await openRegistration(page);
 
-    const wcode = page.getByLabel("Wcode");
+    const wcode = page.getByLabel("Access code");
     await wcode.focus();
     await expect(wcode).toBeFocused();
     await expect(page.getByLabel("Nickname")).toHaveAttribute("aria-label", "Nickname");

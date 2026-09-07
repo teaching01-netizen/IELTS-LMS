@@ -5,11 +5,12 @@ import type {
   DeliveredAssessmentModule,
   DeliveredAssessmentSection,
 } from "../../exam-authoring/api/assessmentContracts";
-import { resolveSatToolCapabilities } from "../domain/satTools";
+import { resolveSatExamToolPolicy, toSatToolCapabilities } from "../domain/satToolPolicy";
 import {
   emptySatQuestionResponse,
   responseForQuestion,
   type SatQuestionResponseDraft,
+  type SatQuestionAnnotations,
 } from "../domain/satResponses";
 import { buildSatQuestionNavigationItems } from "../domain/satSelectors";
 
@@ -128,7 +129,8 @@ export function useSatPreviewController(examId: string) {
   );
   const response = question ? responseForQuestion(responses, question.examQuestionId) : null;
   const navigationItems = buildSatQuestionNavigationItems(questionIds, questionIndex, responses);
-  const tools = resolveSatToolCapabilities(module?.toolPolicy ?? []);
+  const toolPolicy = resolveSatExamToolPolicy(section?.sectionKey === "math" ? "math" : "reading-writing", module?.toolPolicy ?? []);
+  const tools = toSatToolCapabilities(toolPolicy);
 
   const setResponse = useCallback(
     (
@@ -230,6 +232,7 @@ export function useSatPreviewController(examId: string) {
     responses,
     navigationItems,
     tools,
+    toolPolicy,
     view,
     calculatorOpen,
     referenceOpen,
@@ -296,10 +299,12 @@ export function useSatPreviewController(examId: string) {
         question &&
         setResponse(question.examQuestionId, (current) => ({
           ...current,
-          annotations: { version: 1, note: note.slice(0, 2_000) },
+          annotations: { ...current.annotations, legacyQuestionNote: note.slice(0, 2_000) },
         })),
-      toggleCalculator: () => setCalculatorOpen((open) => !open),
-      toggleReference: () => setReferenceOpen((open) => !open),
+      setAnnotations: (annotations: SatQuestionAnnotations) =>
+        question && toolPolicy.highlight && setResponse(question.examQuestionId, (current) => ({ ...current, annotations })),
+      toggleCalculator: () => setCalculatorOpen((open) => tools.calculator && !open),
+      toggleReference: () => setReferenceOpen((open) => tools.referenceSheet && !open),
       closeCalculator: () => setCalculatorOpen(false),
       closeReference: () => setReferenceOpen(false),
     },

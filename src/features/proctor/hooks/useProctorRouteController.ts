@@ -259,8 +259,11 @@ export function useProctorRouteController(
   const [error, setError] = useState<string | null>(null);
   const [degradedLiveMode, setDegradedLiveMode] = useState(false);
   const [wsConnected, setWsConnected] = useState<boolean | null>(null);
-  const [summaryPollIntervalMs, setSummaryPollIntervalMs] = useState(4_000);
-  const [detailPollIntervalMs, setDetailPollIntervalMs] = useState(6_000);
+  // Poll floors: summary 10s, detail 15s. Tighter cadences burned through
+  // the shared global rate-limit bucket that also guards auth session
+  // reads; the dedicated polling/heartbeat tiers now bound each class.
+  const [summaryPollIntervalMs, setSummaryPollIntervalMs] = useState(10_000);
+  const [detailPollIntervalMs, setDetailPollIntervalMs] = useState(15_000);
   const scheduleStudentIdsRef = useRef<Map<string, Set<string>>>(new Map());
 
   const summariesQuery = useProctorSessionSummaries(summaryPollIntervalMs, options.providerKey);
@@ -331,8 +334,8 @@ export function useProctorRouteController(
         setAuditLogs([]);
         setNotes([]);
         setViolationRules([]);
-        setSummaryPollIntervalMs(4_000);
-        setDetailPollIntervalMs(6_000);
+        setSummaryPollIntervalMs(10_000);
+        setDetailPollIntervalMs(15_000);
         return;
       }
 
@@ -354,8 +357,10 @@ export function useProctorRouteController(
 
       const degradedMode = filteredSummaries.some((summary) => summary.degradedLiveMode);
       setDegradedLiveMode(degradedMode);
-      setSummaryPollIntervalMs(degradedMode ? 2_000 : 4_000);
-      setDetailPollIntervalMs(degradedMode ? 3_000 : 6_000);
+      // Degraded live mode polls faster to recover, but never below the
+      // floors that protect the shared rate-limit budget.
+      setSummaryPollIntervalMs(degradedMode ? 5_000 : 10_000);
+      setDetailPollIntervalMs(degradedMode ? 8_000 : 15_000);
       setScheduleMetrics(metrics);
       setSchedules(filteredSummaries.map((summary) => proctorFacade.mapSchedule(summary.schedule)));
       setRuntimeSnapshots(

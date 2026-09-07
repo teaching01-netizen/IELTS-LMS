@@ -118,9 +118,8 @@ export class BackendExamRepository implements IExamRepository {
   private readonly scheduleRefreshInFlight = new Map<string, Promise<unknown>>();
 
   /**
-   * Version payloads are append-only (saveVersion is unsupported), so a
-   * bounded TTL cache is safe and dedupes the same draft being fetched by
-   * the builder, review, and publish-readiness paths within one flow.
+   * Only published snapshots are immutable. Draft autosave updates the same
+   * version ID, so builder and review reads must fetch drafts fresh.
    */
   private readonly versionCache = createTtlLruCache<string, ExamVersion | null>({
     maxEntries: 50,
@@ -251,7 +250,9 @@ export class BackendExamRepository implements IExamRepository {
     try {
       const version = await backendGet<any>(`/v1/versions/${id}`);
       const mapped = mapBackendExamVersion(version);
-      this.versionCache.set(id, mapped);
+      if (mapped.isPublished && !mapped.isDraft) {
+        this.versionCache.set(id, mapped);
+      }
       return mapped;
     } catch (error) {
       if (isBackendNotFound(error)) {

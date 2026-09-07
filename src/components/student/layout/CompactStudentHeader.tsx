@@ -15,6 +15,7 @@ import {
 } from "../highlightPalette";
 import type { StudentHighlightToolMode } from "../providers/StudentUIProvider";
 import type { ExamType } from "../../../types";
+import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
 import { StudentToolsSheet } from "./StudentToolsSheet";
 
 interface CompactStudentHeaderProps {
@@ -68,6 +69,10 @@ export function CompactStudentHeader({
     setToolsOpen(false);
     queueMicrotask(() => toolsTriggerRef.current?.focus());
   }, []);
+  // T2.5: shared threshold announcer (5-min / 1-min, never per-second),
+  // mirroring StudentHeader. Per-tick timer keeps no live region so only
+  // threshold crossings announce.
+  const timerAnnouncement = useStudentTimerAnnouncement(timeRemaining);
   const activePaletteEntry = getStudentHighlightPaletteEntry(highlightColor);
   const hasHighlightTools = highlightEnabled && onToggleHighlightMode && onSelectEraseMode;
   const shouldShowChoiceEliminationTool = Boolean(
@@ -107,6 +112,10 @@ export function CompactStudentHeader({
             data-testid="student-time-remaining"
           >
             {formatTime(timeRemaining)}
+          </span>
+          {/* T2.5: polite threshold announcements only (5-min / 1-min). */}
+          <span className="sr-only" aria-live="polite" data-testid="student-timer-announcement">
+            {timerAnnouncement}
           </span>
         </div>
       ) : null}

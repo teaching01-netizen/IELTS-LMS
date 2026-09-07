@@ -28,9 +28,9 @@ export function snapshotRemainingSeconds(
   now: number,
 ): number {
   if (!attempt) return 0;
-  if (attempt.pausedAt || !attempt.startedAt) return Math.max(0, attempt.remainingSeconds);
+  if (attempt.pausedAt || !attempt.startedAt) return Math.max(0, attempt.remainingSeconds ?? 0);
   const elapsedSinceSnapshot = Math.max(0, Math.floor((now - snapshotReceivedAt) / 1_000));
-  return Math.max(0, attempt.remainingSeconds - elapsedSinceSnapshot);
+  return Math.max(0, (attempt.remainingSeconds ?? 0) - elapsedSinceSnapshot);
 }
 
 export function breakRemainingSeconds(
@@ -57,13 +57,28 @@ export function timingForAttempt(
 ): { startedAt: string; endsAt: string } {
   const startedAt = attempt.startedAt ?? data.serverNow;
   const fallbackEndsAt = attempt.deadlineAt
-    ?? new Date(Date.parse(data.serverNow) + Math.max(0, attempt.remainingSeconds) * 1_000).toISOString();
+    ?? new Date(Date.parse(data.serverNow) + Math.max(0, attempt.remainingSeconds ?? 0) * 1_000).toISOString();
   const endsAt = data.timing.timingModel === 'cohort_stage_v2' && data.timing.deadlineAt
     ? data.timing.deadlineAt
     : data.timing.timingModel === 'cohort_section_v3' && data.timing.deadlineAt
       ? new Date(Math.min(Date.parse(fallbackEndsAt), Date.parse(data.timing.deadlineAt))).toISOString()
       : fallbackEndsAt;
   return { startedAt, endsAt };
+}
+
+export const SAT_TIMER_AUTO_REVEAL_SECONDS = 300;
+
+export function shouldAutoRevealTimer(args: {
+  previousSeconds: number | null | undefined;
+  remainingSeconds: number | null | undefined;
+  alreadyRevealed: boolean;
+}): boolean {
+  const { previousSeconds, remainingSeconds, alreadyRevealed } = args;
+  if (alreadyRevealed) return false;
+  if (remainingSeconds == null || remainingSeconds > SAT_TIMER_AUTO_REVEAL_SECONDS) return false;
+  // Hydration: the exam loaded already at or below five minutes.
+  if (previousSeconds == null) return true;
+  return previousSeconds > SAT_TIMER_AUTO_REVEAL_SECONDS;
 }
 
 export function formatSatTime(seconds: number): string {

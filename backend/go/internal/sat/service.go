@@ -173,10 +173,10 @@ type CompleteRequest struct {
 // SectionResult is one persisted section outcome.
 type SectionResult struct {
 	SectionKey               string         `json:"sectionKey"`
-	Route                    *string        `json:"route,omitempty"`
+	Route                    *string        `json:"route"`
 	RawCorrect               int64          `json:"rawCorrect"`
 	OperationalQuestionCount int64          `json:"operationalQuestionCount"`
-	ScaledScore              *int           `json:"scaledScore,omitempty"`
+	ScaledScore              *int           `json:"scaledScore"`
 	Details                  map[string]any `json:"details"`
 }
 
@@ -188,7 +188,7 @@ type AssessmentResult struct {
 	ProviderKey   string          `json:"providerKey"`
 	OutcomeStatus string          `json:"outcomeStatus"`
 	ScoreKind     string          `json:"scoreKind"`
-	TotalScore    *int            `json:"totalScore,omitempty"`
+	TotalScore    *int            `json:"totalScore"`
 	ScorePayload  map[string]any  `json:"scorePayload"`
 	ReleaseStatus string          `json:"releaseStatus"`
 	Sections      []SectionResult `json:"sections"`

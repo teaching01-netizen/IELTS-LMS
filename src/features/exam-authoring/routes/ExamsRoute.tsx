@@ -147,7 +147,7 @@ export function ExamsRoute() {
 
   return (
     <ExamList
-      providerScope="all"
+      providerScope="ielts"
       onNavigate={(mode) => navigate(`/${mode}`)}
       exams={examList.exams}
       onEditExam={(id) => navigate(`/builder/${id}`)}

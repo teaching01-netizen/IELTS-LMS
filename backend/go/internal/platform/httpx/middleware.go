@@ -568,14 +568,28 @@ func (s *BucketStore) RateLimit(cfg RateLimitConfig, keyFn KeyFunc, dbLimited fu
 }
 
 func denyRateLimit(w http.ResponseWriter, r *http.Request, retryAfter time.Duration) {
+	denyRateLimitWithTier(w, r, "", retryAfter)
+}
+
+// denyRateLimitWithTier renders the stable 429 envelope. The core fields
+// (code, retryAfterSeconds, Retry-After header) are unchanged; a non-empty
+// tier is purely additive so existing envelope consumers keep passing.
+func denyRateLimitWithTier(w http.ResponseWriter, r *http.Request, tier string, retryAfter time.Duration) {
 	secs := int(retryAfter.Seconds())
 	if secs < 1 {
 		secs = 1
 	}
 	w.Header().Set("Retry-After", itoa(secs))
+	if tier != "" {
+		w.Header().Set("X-RateLimit-Tier", tier)
+	}
 	err := apperrors.New(apperrors.CodeRateLimitExceeded, "Rate limit exceeded.")
 	err.HTTPStatus = http.StatusTooManyRequests
-	err.Details = map[string]any{"retryAfterSeconds": secs}
+	details := map[string]any{"retryAfterSeconds": secs}
+	if tier != "" {
+		details["tier"] = tier
+	}
+	err.Details = details
 	WriteError(w, r, err)
 }
 

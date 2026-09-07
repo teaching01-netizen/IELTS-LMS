@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
+import { useStudentTimerAnnouncement } from '@shared/hooks/useStudentTimerAnnouncement';
 import { getStudentHighlightPaletteEntry, studentHighlightPalette, type StudentHighlightColor } from './highlightPalette';
 import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 import type { ExamType } from '../../types';
@@ -162,26 +163,8 @@ export function StudentHeader({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // S1-C14: polite announcements fire ONLY at the 5-min and 1-min thresholds,
-  // never per-second. Tracks the lowest threshold already announced so each
-  // fires once; resets when time moves back above (e.g. section change).
-  const announcedThresholdRef = useRef<number | null>(null);
-  const [timerAnnouncement, setTimerAnnouncement] = useState('');
-  useEffect(() => {
-    if (timeRemaining === undefined) return;
-    if (timeRemaining >= 300) {
-      announcedThresholdRef.current = null;
-      return;
-    }
-    const threshold = timeRemaining < 60 ? 60 : 300;
-    if (announcedThresholdRef.current === threshold) return;
-    announcedThresholdRef.current = threshold;
-    setTimerAnnouncement(
-      threshold === 60
-        ? `Low time: 1 minute remaining (${formatTime(timeRemaining)} left)`
-        : `Low time: 5 minutes remaining (${formatTime(timeRemaining)} left)`,
-    );
-  }, [timeRemaining]);
+  // T2.5: shared threshold announcer (5-min / 1-min, never per-second).
+  const timerAnnouncement = useStudentTimerAnnouncement(timeRemaining);
 
   const updateTabletZoomControlsPosition = useCallback(() => {
     const button = tabletZoomButtonRef.current;

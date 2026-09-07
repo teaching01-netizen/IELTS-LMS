@@ -22,6 +22,7 @@ import (
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/proctor"
 	"example.com/ielts-proctoring/internal/sat"
 )
 
@@ -149,8 +150,8 @@ type TimingSnapshot struct {
 	StageStatus      string     `json:"stageStatus"`
 	ServerNow        time.Time  `json:"serverNow"`
 	DeadlineAt       *time.Time `json:"deadlineAt"`
-	RemainingSeconds *int64     `json:"remainingSeconds"`
-	RuntimeRevision  *int64     `json:"runtimeRevision"`
+	RemainingSeconds int64      `json:"remainingSeconds"`
+	RuntimeRevision  int64      `json:"runtimeRevision"`
 }
 
 // Bootstrap is the assessment-delivery bootstrap payload.
@@ -212,7 +213,7 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if _, err := s.ReconcileAttemptTimeout(ctx, bearerScheduleID, bearerAttemptID, now); err != nil {
 		return nil, err
 	}
-	sections, err := s.loadSections(ctx, versionID)
+	sections, err := s.LoadSections(ctx, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -278,9 +279,9 @@ func (s *Service) loadBootstrapResult(ctx context.Context, providerKey, attemptI
 	}
 }
 
-// loadSections loads the published-version content tree: sections, then
-// per-section modules, then per-module questions.
-func (s *Service) loadSections(ctx context.Context, versionID string) ([]DeliverySection, error) {
+// LoadSections projects a version into candidate content without grading keys.
+// Authoring preview uses the same projection for its draft version.
+func (s *Service) LoadSections(ctx context.Context, versionID string) ([]DeliverySection, error) {
 	sections := []DeliverySection{}
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, section_key, title, display_order, duration_seconds, break_after_seconds, instructions FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order",
@@ -381,7 +382,10 @@ func (s *Service) loadQuestions(ctx context.Context, moduleID string) ([]Deliver
 		}
 		q.Stimulus = rawJSON(stimulus)
 		q.Prompt = rawJSON(prompt)
-		q.Answer = rawJSON(answer)
+		q.Answer, err = deliveredAnswer(rawJSON(answer))
+		if err != nil {
+			return nil, err
+		}
 		q.Metadata = rawJSON(metadata)
 		q.Accessibility = rawJSON(accessibility)
 		questions = append(questions, q)
@@ -526,21 +530,35 @@ func (s *Service) loadAttemptControl(ctx context.Context, attemptID string) (att
 // row fall back to the legacy attempt-level timing projection.
 func (s *Service) loadTiming(ctx context.Context, scheduleID string, now time.Time) (TimingSnapshot, string, error) {
 	var status string
-	err := s.db.QueryRowContext(ctx,
-		"SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&status)
-	authority := "cohort"
+	err := s.db.QueryRowContext(ctx, "SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&status)
 	if err == sql.ErrNoRows {
-		status = "live"
-		authority = "legacy_attempt"
-	} else if err != nil {
+		return TimingSnapshot{Authority: "legacy_attempt", TimingModel: "legacy_section_v1", StageStatus: "live", ServerNow: now}, "live", nil
+	}
+	if err != nil {
 		return TimingSnapshot{}, "", err
 	}
-	return TimingSnapshot{
-		Authority:   authority,
-		TimingModel: "legacy_section_v1",
-		StageStatus: status,
-		ServerNow:   now,
-	}, status, nil
+	runtime, err := proctor.LoadSessionRuntimeBySchedule(ctx, s.db, scheduleID)
+	if err != nil {
+		return TimingSnapshot{}, "", err
+	}
+	return timingFromRuntime(runtime), runtime.Status, nil
+}
+
+func timingFromRuntime(runtime proctor.SessionRuntime) TimingSnapshot {
+	key := runtime.ActiveSectionKey
+	if key == nil {
+		key = runtime.CurrentSectionKey
+	}
+	status := runtime.Status
+	for _, section := range runtime.Sections {
+		if key != nil && section.SectionKey == *key {
+			status = section.Status
+			break
+		}
+	}
+	return TimingSnapshot{Authority: "cohort_runtime", TimingModel: runtime.TimingModel,
+		StageKey: key, StageStatus: status, ServerNow: runtime.ServerNow,
+		DeadlineAt: runtime.CurrentSectionDeadlineAt, RemainingSeconds: int64(runtime.CurrentSectionRemainingSeconds), RuntimeRevision: runtime.Revision}
 }
 
 // moduleDeadline is the single pause-aware deadline anchor shared by the
@@ -1482,4 +1500,32 @@ func enforceWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID 
 		return err
 	}
 	return nil
+}
+
+// Only fields in DeliveredAnswerDefinition may cross the candidate boundary.
+func deliveredAnswer(raw json.RawMessage) (json.RawMessage, error) {
+	var source map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &source); err != nil {
+		return nil, err
+	}
+	var kind string
+	if err := json.Unmarshal(source["kind"], &kind); err != nil {
+		return nil, err
+	}
+	keys := []string{"kind"}
+	switch kind {
+	case "single_choice":
+		keys = append(keys, "options")
+	case "student_produced_response":
+		keys = append(keys, "normalizeFraction", "normalizeDecimal", "numericTolerance")
+	default:
+		return nil, apperrors.New(apperrors.CodeValidation, "Unsupported delivered answer kind.")
+	}
+	out := make(map[string]json.RawMessage, len(keys))
+	for _, key := range keys {
+		if value, ok := source[key]; ok {
+			out[key] = value
+		}
+	}
+	return json.Marshal(out)
 }

@@ -510,6 +510,19 @@ func payloadToAny(p ResponsePayload) any {
 	ann := make([]any, 0, len(p.Annotations))
 	for _, a := range p.Annotations {
 		m := map[string]any{"id": a.ID, "kind": a.Kind}
+		if a.Kind == "sat_annotations" {
+			m["version"] = a.Version
+			m["legacyQuestionNote"] = a.LegacyQuestionNote
+			items := a.Annotations
+			if items == nil {
+				items = []SATTextAnnotation{}
+			}
+			// CanonicalJSON accepts JSON values, so convert typed anchors before hashing.
+			raw, _ := json.Marshal(items)
+			var values any
+			_ = json.Unmarshal(raw, &values)
+			m["annotations"] = values
+		}
 		if a.Start != nil {
 			m["start"] = *a.Start
 		}

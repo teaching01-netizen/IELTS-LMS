@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   BookOpen,
+  FlaskConical,
   Headphones,
   PenTool,
   MessageCircle,
@@ -44,6 +45,13 @@ export function Sidebar({
       label: state.config.sections.speaking.label, 
       color: 'text-red-500',
       shortcut: '4'
+    },
+    {
+      id: 'science' as ModuleType,
+      icon: FlaskConical,
+      label: state.config.sections.science.label,
+      color: 'text-violet-500',
+      shortcut: '5'
     },
   ].filter(m => state.config.sections[m.id].enabled)
    .sort((a, b) => state.config.sections[a.id].order - state.config.sections[b.id].order);

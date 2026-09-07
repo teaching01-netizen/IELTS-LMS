@@ -4,6 +4,7 @@ import type {
   RichTextNode,
   StructuredContent,
 } from "../contracts/assessment";
+import { withRichContentIdentities } from './richContentIdentity';
 
 const textNode = (text: string): RichTextNode => ({ type: "text", text });
 const paragraph = (text: string): RichTextNode => ({
@@ -55,12 +56,15 @@ export function assetSource(assetId: string): string {
 }
 
 export function documentFromStructuredContent(content: StructuredContent): RichTextDocument {
-  if (content.version === 2 && content.document?.type === "doc") return content.document;
-  return { type: "doc", content: content.nodes.map(legacyNodeToRich) };
+  if (content.version === 2 && content.document?.type === "doc") return withRichContentIdentities(content.document);
+  return withRichContentIdentities({ type: "doc", content: content.nodes.map((node) => {
+    const rich = legacyNodeToRich(node);
+    return { ...rich, attrs: { ...rich.attrs, id: node.id } };
+  }) });
 }
 
 export function structuredContentFromDocument(document: unknown): StructuredContent {
-  return { version: 2, nodes: [], document: document as RichTextDocument };
+  return { version: 2, nodes: [], document: withRichContentIdentities(document as RichTextDocument) };
 }
 
 function richNodeText(node: RichTextNode): string {
@@ -111,7 +115,7 @@ export function plainContentFromText(text: string): StructuredContent {
   const paragraphNode: RichTextNode = text.length
     ? { type: "paragraph", content: [{ type: "text", text }] }
     : { type: "paragraph" };
-  return { version: 2, nodes: [], document: { type: "doc", content: [paragraphNode] } };
+  return structuredContentFromDocument({ type: "doc", content: [paragraphNode] });
 }
 
 export function supportsFastPlainEditing(content: StructuredContent): boolean {

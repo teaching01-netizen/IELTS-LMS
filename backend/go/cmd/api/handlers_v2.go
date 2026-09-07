@@ -622,13 +622,25 @@ func v2SnapshotHandler(app *App) http.HandlerFunc {
 
 // studentEntryRateLimiter bounds anonymous entry creation per email+IP
 // (unauthenticated minting of users/registrations/attempts+tokens must not
-// be unbounded). Keyed per handler instance; the DB fallback in the global
-// chain adds the distributed verdict on top.
+// be unbounded). Local-only inner gate: the anon-auth tier middleware adds
+// the single distributed verdict on top, so entry still produces exactly
+// one distributed-counter write per request.
 var studentEntryRateLimiter = httpx.NewBucketStore(10000)
 
 // studentEntryBucket allows 30 entry attempts per minute per email+IP key.
 func studentEntryBucket(key string) httpx.RateLimitResult {
 	return studentEntryRateLimiter.Allow(httpx.RateLimitConfig{MaxRequests: 30, Window: time.Minute}, key)
+}
+
+// isStudentEntryAccountAllowed keeps student entry free by default: any ACTIVE
+// account may check in to any exam with any non-empty access code. Only the
+// account state gates entry (disabled / locked / pending_activation stay
+// blocked); the role never does. The passwordless entry flow only ever mints
+// a student-scoped session (see studentEntryHandler), so allowing staff
+// emails here grants exam access, never staff privileges.
+func isStudentEntryAccountAllowed(role, state string) bool {
+	_ = role
+	return state == "active"
 }
 
 func studentEntryHandler(app *App) http.HandlerFunc {
@@ -651,7 +663,7 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			return
 		}
 		if (strings.TrimSpace(body.Wcode) == "" && strings.TrimSpace(body.AccessLinkID) == "") || strings.TrimSpace(body.Email) == "" || strings.TrimSpace(body.StudentName) == "" {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Wcode, email and student name are required."))
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Access code, email and student name are required."))
 			return
 		}
 		// Direct schedule entry uses the non-empty Wcode as its access
@@ -712,7 +724,7 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if role != auth.RoleStudent || state != "active" {
+		if !isStudentEntryAccountAllowed(role, state) {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Student account is not available."))
 			return
 		}

@@ -106,13 +106,24 @@ export function useReviewRouteController(
 
   const loadScheduleContent = useCallback(async () => {
     const entity = examRef.current;
-    const versionId = entity?.currentDraftVersionId ?? entity?.currentPublishedVersionId ?? null;
+    const candidateVersionIds = [
+      entity?.currentDraftVersionId ?? null,
+      entity?.currentPublishedVersionId ?? null,
+    ].filter((candidate): candidate is string => Boolean(candidate));
+    const versionId = candidateVersionIds[0] ?? null;
     if (!versionId || loadedDraftVersionIdRef.current === versionId) {
       return;
     }
 
-    const version = await examAuthoringFacade.repository.getVersionById(versionId);
-    const snapshot = version?.contentSnapshot ?? null;
+    // Stale draft pointers (clone-database rows) fall back to the published seal.
+    let snapshot: Parameters<typeof examAuthoringFacade.hydrateExamState>[0] | null = null;
+    for (const candidateId of candidateVersionIds) {
+      const version = await examAuthoringFacade.repository.getVersionById(candidateId);
+      if (version?.contentSnapshot) {
+        snapshot = version.contentSnapshot;
+        break;
+      }
+    }
     setState(snapshot ? examAuthoringFacade.hydrateExamState(snapshot) : null);
     loadedDraftVersionIdRef.current = versionId;
   }, []);

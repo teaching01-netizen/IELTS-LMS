@@ -16,7 +16,7 @@ export interface SatResultSummary {
   studentName: string;
   studentEmail: string | null;
   cohortName: string;
-  submittedAt: string;
+  submittedAt: string | null;
   totalScore: number | null;
   scoreKind: 'practice';
   releaseStatus: string;

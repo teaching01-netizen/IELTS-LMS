@@ -149,6 +149,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
     <>
       {controls}
       <SatExamShell
+        moduleIdentity={preview.module.id}
         sectionLabel={label}
         directions={directions}
         remainingLabel={remainingLabel}
@@ -160,9 +161,10 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
         calculatorOpen={preview.calculatorOpen}
         referenceAvailable={preview.tools.referenceSheet}
         referenceOpen={preview.referenceOpen}
+        notesAvailable={preview.toolPolicy.notes}
         blocked={false}
         saveState="idle"
-        questionNote={preview.response.annotations.note}
+        questionNote={preview.response.annotations.legacyQuestionNote}
         readingPreferences={readingPreferences}
         onReadingPreferencesChange={setReadingPreferences}
         onSelectQuestion={preview.commands.selectQuestion}
@@ -185,6 +187,7 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
             setReadingPreferences((current) => ({ ...current, splitRatio }))
           }
           onAnswerChange={preview.commands.setAnswer}
+          onAnnotationsChange={preview.commands.setAnnotations}
           onToggleReview={preview.commands.toggleReview}
           onToggleEliminationMode={() => setEliminationMode((enabled) => !enabled)}
           onToggleEliminatedOption={preview.commands.toggleEliminatedOption}

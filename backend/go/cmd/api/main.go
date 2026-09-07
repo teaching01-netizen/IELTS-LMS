@@ -56,6 +56,7 @@ type App struct {
 	DB              *sql.DB
 	Tx              *tx.Runner
 	Limiter         *httpx.BucketStore
+	Tiers           *httpx.TierSet
 	Attempts        *attempts.Service
 	Exams           *exams.Service
 	Schedules       *schedules.Service
@@ -199,27 +200,26 @@ func main() {
 // spec middleware order:
 //
 //	panic recovery > request id > trace > security headers > body limit >
-//	auth > CSRF > rate limit > authorization > handler > access log
+//	auth > CSRF > rate limit (tiers) > authorization > handler > access log
+//
+// Rate limiting is tiered: auth-critical, anon-auth, authed-reads, polling,
+// heartbeat, writes, each with an independent per-minute quota keyed by user
+// (cookie session), attempt hash (student/V2 bearer), or IP (anonymous).
+// A loose local-only backstop runs globally as an abuse floor. Tier denials
+// render 429 RATE_LIMIT_EXCEEDED with an additive tier detail and are
+// observable via the http_ratelimit_denied_total counter plus a deny log
+// line (AccessLog never sees 429s: it is innermost by design).
 //
 // AccessLog is registered last (innermost) so its JSON line emits after
 // the handler returns, satisfying the trailing "handler > access log"
 // step. Denials from outer layers (body-limit 413, rate-limit 429,
 // CSRF 403, recovery 500) render the stable error envelope but bypass
-// the access line; observability for those denials comes from the
-// status code + request id in the envelope, scraped via /metrics
-// counters once the metrics endpoint lands.
+// the access line.
 func BuildRouter(app *App) http.Handler {
 	r := chi.NewRouter()
 	startLiveBusForwarder(app)
 
-	globalLimit := app.Config.RateLimitGlobalPerMin
-	if globalLimit <= 0 {
-		globalLimit = 600
-	}
-	globalBurst := app.Config.RateLimitBucketCap
-	if globalBurst <= 0 {
-		globalBurst = 120
-	}
+	buildTierSet(app)
 
 	r.Use(httpx.Recovery)
 	r.Use(httpx.RequestID)
@@ -230,18 +230,10 @@ func BuildRouter(app *App) http.Handler {
 	r.Use(httpx.BodyLimit(httpx.MaxWorkbookBodyBytes))
 	r.Use(authMiddleware(app))
 	r.Use(csrfMiddleware(app))
-	// Distributed fallback shares one ceiling across instances (round 75):
-	// local buckets stay the fast path; the DB verdict only adds denials.
-	var dbLimited func(ctx context.Context, key string) (bool, time.Duration, error)
-	if app.DB != nil {
-		fallback := httpx.NewDBRateLimiter(app.DB, "global", globalLimit, time.Minute)
-		dbLimited = fallback.Check
-	}
-	r.Use(app.Limiter.RateLimit(
-		httpx.RateLimitConfig{MaxRequests: globalLimit, Window: time.Minute, Burst: globalBurst},
-		httpx.ClientIPKey,
-		dbLimited,
-	))
+	// Loose local-only backstop across all traffic (abuse floor). It never
+	// touches the distributed counters, so it cannot couple tiers together;
+	// per-tier quotas below are each independently authoritative.
+	r.Use(app.Tiers.Middleware(httpx.TierBackstop, httpx.ClientIPKey))
 	r.Use(authorizationPlaceholder)
 	r.Use(httpx.AccessLog)
 
@@ -253,31 +245,43 @@ func BuildRouter(app *App) http.Handler {
 	adminLimit := httpx.BodyLimit(httpx.MaxAdminBodyBytes)     // 2MiB
 
 	r.Route("/api/v1", func(r chi.Router) {
+		// Auth routes split by cost class: session/logout reads get a generous
+		// per-user quota isolated from bulk traffic (unrelated polling can
+		// never starve session bootstrap), while credential-bearing attempts
+		// stay on a strict per-IP quota (abuse surface).
 		r.With(adminLimit).Route("/auth", func(r chi.Router) {
-			route(r, "POST", "/login", loginHandler(app))
-			route(r, "POST", "/student/entry", studentEntryHandler(app))
-			route(r, "GET", "/student/schedules/{id}", studentEntryScheduleHandler(app))
-			route(r, "GET", "/session", sessionHandler(app))
-			route(r, "POST", "/logout", logoutHandler(app))
-			route(r, "POST", "/logout-all", logoutAllHandler(app))
-			route(r, "POST", "/activate", activateHandler(app))
-			route(r, "POST", "/password/reset-request", passwordResetRequestHandler(app))
-			route(r, "POST", "/password/reset-complete", passwordResetCompleteHandler(app))
+			r.With(limitTier(app, httpx.TierAuthCritical, userKey())).Group(func(r chi.Router) {
+				route(r, "GET", "/session", sessionHandler(app))
+				route(r, "POST", "/logout", logoutHandler(app))
+				route(r, "POST", "/logout-all", logoutAllHandler(app))
+			})
+			r.With(limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
+				route(r, "POST", "/login", loginHandler(app))
+				route(r, "POST", "/student/entry", studentEntryHandler(app))
+				route(r, "GET", "/student/schedules/{id}", studentEntryScheduleHandler(app))
+				route(r, "POST", "/activate", activateHandler(app))
+				route(r, "POST", "/password/reset-request", passwordResetRequestHandler(app))
+				route(r, "POST", "/password/reset-complete", passwordResetCompleteHandler(app))
+			})
 		})
-		r.With(adminLimit).Route("/exams", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
+			route(r, "POST", "/public/access-links/{linkID}/resolve-entry", publicLinkResolveEntry(app))
+		})
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/exams", func(r chi.Router) {
 			route(r, "GET", "/", examsListHandler(app))
 			route(r, "POST", "/", examsCreateHandler(app))
 			route(r, "GET", "/{id}", examsGetHandler(app))
 			route(r, "PATCH", "/{id}", examsUpdateHandler(app))
 			route(r, "DELETE", "/{id}", examsDeleteHandler(app))
 			route(r, "PATCH", "/{id}/draft", examsDraftHandler(app))
+			route(r, "POST", "/{id}/draft/reopen", examsDraftReopenHandler(app))
 			route(r, "POST", "/{id}/publish", examsPublishHandler(app))
 			route(r, "GET", "/{id}/events", examsEventsHandler(app))
 			route(r, "GET", "/{id}/validation", examsValidationHandler(app))
 			route(r, "GET", "/{id}/versions", examsVersionsHandler(app))
 			route(r, "GET", "/{id}/versions/summary", examsVersionSummariesHandler(app))
 		})
-		r.With(adminLimit).Route("/assessment-access", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/assessment-access", func(r chi.Router) {
 			route(r, "GET", "/exams/{examID}/overview", accessLinkOverview(app))
 			route(r, "GET", "/exams/{examID}/links", examLinksList(app))
 			route(r, "POST", "/exams/{examID}/links", examLinkCreate(app))
@@ -288,10 +292,11 @@ func BuildRouter(app *App) http.Handler {
 			route(r, "GET", "/links/{linkID}/members", linkMembers(app))
 			route(r, "GET", "/links/{linkID}/activity", linkActivity(app))
 		})
-		route(r, "GET", "/public/access-links/{linkID}", publicLinkGet(app))
-		route(r, "POST", "/public/access-links/{linkID}/resolve-entry", publicLinkResolveEntry(app))
-		r.With(adminLimit).Get("/assessment-release/exams/{examID}", releaseStateHandler(app))
-		r.Route("/assessment-authoring", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
+			route(r, "GET", "/public/access-links/{linkID}", publicLinkGet(app))
+		})
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Get("/assessment-release/exams/{examID}", releaseStateHandler(app))
+		r.With(limitTier(app, httpx.TierWrites, userKey())).Route("/assessment-authoring", func(r chi.Router) {
 			r.With(adminLimit).Get("/exams/{examID}/shell", authorShellHandler(app))
 			r.With(adminLimit).Post("/exams/{examID}/shell", authorOpenShellHandler(app))
 			r.With(adminLimit).Get("/exams/{examID}/preview", authorPreviewHandler(app))
@@ -315,15 +320,17 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Patch("/exams/{examID}/sections/{sectionID}/delivery-settings", authorDeliverySettingsHandler(app))
 			r.With(adminLimit).Post("/exams/{examID}/validate", authorValidateHandler(app))
 		})
-		r.With(studentLimit).Route("/assessment-delivery", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierWrites, attemptKey())).With(studentLimit).Route("/assessment-delivery", func(r chi.Router) {
 			route(r, "POST", "/schedules/{scheduleID}/bootstrap", deliveryBootstrapHandler(app))
 			route(r, "PATCH", "/schedules/{scheduleID}/responses/{examQuestionID}", deliverySaveResponseHandler(app))
 			route(r, "POST", "/schedules/{scheduleID}/modules/start", deliveryStartModuleHandler(app))
 			route(r, "POST", "/schedules/{scheduleID}/modules/submit", deliverySubmitModuleHandler(app))
 			route(r, "POST", "/schedules/{scheduleID}/submit", deliverySubmitAssessmentHandler(app))
 		})
-		route(r, "GET", "/versions/{versionID}", versionSummaryHandler(app))
-		r.With(adminLimit).Route("/schedules", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Group(func(r chi.Router) {
+			route(r, "GET", "/versions/{versionID}", versionSummaryHandler(app))
+		})
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/schedules", func(r chi.Router) {
 			route(r, "GET", "/", schedulesListHandler(app))
 			route(r, "POST", "/", schedulesCreateHandler(app))
 			route(r, "GET", "/{id}", schedulesGetHandler(app))
@@ -333,19 +340,30 @@ func BuildRouter(app *App) http.Handler {
 			route(r, "POST", "/{id}/runtime/commands", schedulesRuntimeCommandHandler(app))
 			route(r, "POST", "/{id}/register", schedulesRegisterHandler(app))
 		})
-		// Tight student tier: mutations, heartbeats, audits, submits.
+		// Student sessions split by cost class: session/static reads stay in
+		// authed-reads, the polled live view gets its own polling budget,
+		// heartbeats get a cheap high-frequency budget, and mutations/submits
+		// are writes — so no student traffic class can starve the others.
 		r.With(studentLimit).Route("/student/sessions", func(r chi.Router) {
-			route(r, "GET", "/{scheduleID}", v1SessionHandler(app))
-			route(r, "GET", "/{scheduleID}/static", v1StaticHandler(app))
-			route(r, "GET", "/{scheduleID}/live", v1LiveHandler(app))
-			route(r, "POST", "/{scheduleID}/precheck", v1PrecheckHandler(app))
-			route(r, "POST", "/{scheduleID}/bootstrap", v1BootstrapHandler(app))
-			r.Method("POST", "/{scheduleID}/mutations:batch", httpx.WithRoute(v1MutationHandler(app), "POST /{scheduleID}/mutations:batch"))
-			route(r, "POST", "/{scheduleID}/heartbeat", v1HeartbeatHandler(app))
-			route(r, "POST", "/{scheduleID}/audit", v1AuditHandler(app))
-			r.Method("POST", "/{scheduleID}/submit", httpx.WithRoute(v1SubmitHandler(app), "POST /{scheduleID}/submit"))
+			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
+				route(r, "GET", "/{scheduleID}", v1SessionHandler(app))
+				route(r, "GET", "/{scheduleID}/static", v1StaticHandler(app))
+				route(r, "POST", "/{scheduleID}/precheck", v1PrecheckHandler(app))
+				route(r, "POST", "/{scheduleID}/bootstrap", v1BootstrapHandler(app))
+			})
+			r.With(limitTier(app, httpx.TierPolling, attemptKey())).Group(func(r chi.Router) {
+				route(r, "GET", "/{scheduleID}/live", v1LiveHandler(app))
+			})
+			r.With(limitTier(app, httpx.TierHeartbeat, attemptKey())).Group(func(r chi.Router) {
+				route(r, "POST", "/{scheduleID}/heartbeat", v1HeartbeatHandler(app))
+			})
+			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Group(func(r chi.Router) {
+				r.Method("POST", "/{scheduleID}/mutations:batch", httpx.WithRoute(v1MutationHandler(app), "POST /{scheduleID}/mutations:batch"))
+				route(r, "POST", "/{scheduleID}/audit", v1AuditHandler(app))
+				r.Method("POST", "/{scheduleID}/submit", httpx.WithRoute(v1SubmitHandler(app), "POST /{scheduleID}/submit"))
+			})
 		})
-		r.With(adminLimit).Route("/proctor", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/proctor", func(r chi.Router) {
 			route(r, "GET", "/sessions", proctorSessionsHandler(app))
 			route(r, "GET", "/sessions/{scheduleID}", proctorSessionHandler(app))
 			route(r, "GET", "/notes", proctorAllSessionNotesHandler(app))
@@ -361,7 +379,7 @@ func BuildRouter(app *App) http.Handler {
 			route(r, "PUT", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleSaveHandler(app))
 			route(r, "PATCH", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleSaveHandler(app))
 			route(r, "DELETE", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleDeleteHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/presence", proctorPresenceHandler(app))
+			route(r, "POST", "/sessions/{scheduleID}/presence", withHeartbeatTier(app, proctorPresenceHandler(app)))
 			route(r, "POST", "/sessions/{scheduleID}/control/end-section-now", proctorEndSectionHandler(app))
 			route(r, "POST", "/sessions/{scheduleID}/control/extend-section", proctorExtendSectionHandler(app))
 			route(r, "POST", "/sessions/{scheduleID}/control/complete-exam", proctorCompleteExamHandler(app))
@@ -373,7 +391,7 @@ func BuildRouter(app *App) http.Handler {
 			route(r, "POST", "/alerts/{alertID}/ack", proctorAckAlertHandler(app))
 			route(r, "GET", "/live-mode", proctorLiveModeHandler(app))
 		})
-		r.With(adminLimit).Route("/library", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/library", func(r chi.Router) {
 			route(r, "GET", "/passages", libraryPassagesListHandler(app))
 			route(r, "POST", "/passages", libraryPassageCreateHandler(app))
 			route(r, "GET", "/passages/{id}", libraryPassageGetHandler(app))
@@ -389,13 +407,13 @@ func BuildRouter(app *App) http.Handler {
 			route(r, "POST", "/questions/{id}/increment-usage", libraryQuestionIncrementUsageHandler(app))
 			route(r, "PATCH", "/questions/{id}/increment-usage", libraryQuestionIncrementUsageHandler(app))
 		})
-		r.With(adminLimit).Route("/settings", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/settings", func(r chi.Router) {
 			route(r, "GET", "/exam-defaults", settingsExamDefaultsGetHandler(app))
 			route(r, "PUT", "/exam-defaults", settingsExamDefaultsPutHandler(app))
 			route(r, "GET", "/export-profiles", settingsExportProfilesListHandler(app))
 			route(r, "POST", "/export-profiles", settingsExportProfilesCreateHandler(app))
 		})
-		r.With(adminLimit).Route("/grading", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/grading", func(r chi.Router) {
 			route(r, "GET", "/sessions", gradingSessionsHandler(app))
 			route(r, "GET", "/sessions/{sessionID}", gradingSessionHandler(app))
 			route(r, "GET", "/schedules/{scheduleID}/objective-overrides", gradingOverridesHandler(app))
@@ -418,7 +436,7 @@ func BuildRouter(app *App) http.Handler {
 			route(r, "POST", "/submissions/{submissionID}/reopen-review", gradingReopenHandler(app))
 			route(r, "GET", "/results/{resultID}/events", gradingResultEventsHandler(app))
 		})
-		r.With(adminLimit).Route("/results", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/results", func(r chi.Router) {
 			route(r, "GET", "/", resultsListHandler(app))
 			route(r, "GET", "/dashboard", resultsDashboardHandler(app))
 			route(r, "GET", "/analytics", resultsAnalyticsHandler(app))
@@ -429,31 +447,37 @@ func BuildRouter(app *App) http.Handler {
 			route(r, "GET", "/{resultID}/events", resultsEventsHandler(app))
 			route(r, "GET", "/{resultID}", resultsGetHandler(app))
 		})
-		r.With(adminLimit).Route("/media", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierWrites, userKey())).With(adminLimit).Route("/media", func(r chi.Router) {
 			route(r, "POST", "/uploads", mediaUploadHandler(app))
 			route(r, "PUT", "/uploads/{assetID}", mediaUploadBytesHandler(app))
 			route(r, "POST", "/uploads/{assetID}/complete", mediaCompleteHandler(app))
-			route(r, "GET", "/assets/{assetID}", mediaDownloadHandler(app))
-			route(r, "GET", "/{assetID}", mediaGetHandler(app))
+			route(r, "GET", "/assets/{assetID}", withAuthedReadsTier(app, mediaDownloadHandler(app)))
+			route(r, "GET", "/{assetID}", withAuthedReadsTier(app, mediaGetHandler(app)))
 		})
-		r.With(adminLimit).Route("/answer-history", func(r chi.Router) {
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/answer-history", func(r chi.Router) {
 			route(r, "GET", "/submissions/{submissionID}/overview", answerHistoryOverviewHandler(app))
 			route(r, "GET", "/submissions/{submissionID}/targets/{targetID}", answerHistoryTargetDetailHandler(app))
 			route(r, "GET", "/submissions/{submissionID}/export", answerHistoryExportHandler(app))
 			route(r, "GET", "/attempts/{attemptID}/overview", answerHistoryOverviewByAttemptHandler(app))
 			route(r, "GET", "/attempts/{attemptID}/targets/{targetID}", answerHistoryTargetDetailByAttemptHandler(app))
 		})
-		route(r, "GET", "/ws/live", liveWebSocketHandler(app))
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Group(func(r chi.Router) {
+			route(r, "GET", "/ws/live", liveWebSocketHandler(app))
+		})
 	})
 
 	// V2 student response protocol (tight student tier).
 	for _, prefix := range []string{"/api/v2", "/v2"} {
 		prefix := prefix
 		r.With(studentLimit).Route(prefix+"/student/attempts", func(r chi.Router) {
-			route(r, "POST", "/{attemptID}/responses:batch", v2BatchHandler(app))
-			route(r, "POST", "/{attemptID}/submit", v2SubmitHandler(app))
-			route(r, "POST", "/{attemptID}/takeover", v2TakeoverHandler(app))
-			route(r, "GET", "/{attemptID}/responses", v2SnapshotHandler(app))
+			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Group(func(r chi.Router) {
+				route(r, "POST", "/{attemptID}/responses:batch", v2BatchHandler(app))
+				route(r, "POST", "/{attemptID}/submit", v2SubmitHandler(app))
+				route(r, "POST", "/{attemptID}/takeover", v2TakeoverHandler(app))
+			})
+			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
+				route(r, "GET", "/{attemptID}/responses", v2SnapshotHandler(app))
+			})
 		})
 	}
 
@@ -464,6 +488,90 @@ func BuildRouter(app *App) http.Handler {
 		httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Method not allowed."))
 	})
 	return r
+}
+
+
+// buildTierSet wires the per-tier quotas for BuildRouter. Each tier gets its
+// own distributed-counter namespace (route_key = tier name), so bulk traffic
+// in one tier can never starve another. The backstop has no DB checker: it
+// is a local-only abuse floor. A nil DB (tests without a pool) yields a
+// local-only TierSet that still isolates tiers in-memory.
+func buildTierSet(app *App) {
+	cfg := app.Config
+	burst := cfg.RateLimitBucketCap
+	if burst < 0 {
+		burst = 0
+	}
+	perMin := map[string]int{
+		httpx.TierAuthCritical: cfg.RateLimitAuthCriticalPerMin,
+		httpx.TierAnonAuth:     cfg.RateLimitAnonAuthPerMin,
+		httpx.TierAuthedReads:  cfg.RateLimitAuthedReadsPerMin,
+		httpx.TierPolling:      cfg.RateLimitPollingPerMin,
+		httpx.TierHeartbeat:    cfg.RateLimitHeartbeatPerMin,
+		httpx.TierWrites:       cfg.RateLimitWritesPerMin,
+		httpx.TierBackstop:     cfg.RateLimitBackstopPerMin,
+	}
+	budgets := httpx.TierBudgetsFromConfig(perMin, burst)
+	dbs := map[string]httpx.DBChecker{}
+	if app.DB != nil {
+		for tier := range budgets {
+			if tier == httpx.TierBackstop {
+				continue
+			}
+			limiter := httpx.NewDBRateLimiter(app.DB, tier, budgets[tier].PerMin, time.Minute)
+			dbs[tier] = limiter.Check
+		}
+	}
+	cap := cfg.RateLimitBucketCap
+	if cap <= 0 {
+		cap = 10000
+	}
+	app.Tiers = httpx.NewTierSet(budgets, dbs, cap)
+}
+
+// sessionUserLookup adapts SessionOf for tier keying without an import cycle
+// (httpx cannot import main): authenticated cookie sessions key by user ID,
+// anonymous requests fall back to IP inside the key func.
+func sessionUserLookup(r *http.Request) (string, bool) {
+	sess := SessionOf(r.Context())
+	if sess == nil || sess.UserID == "" {
+		return "", false
+	}
+	return sess.UserID, true
+}
+
+// limitTier is a chi group middleware applying one rate-limit tier.
+func limitTier(app *App, tier string, keyFn httpx.KeyFunc) func(http.Handler) http.Handler {
+	return app.Tiers.Middleware(tier, keyFn)
+}
+
+// withHeartbeatTier re-tiers a single handler inside an otherwise
+// authed-reads group (e.g. proctor presence heartbeats).
+func withHeartbeatTier(app *App, h http.HandlerFunc) http.HandlerFunc {
+	mw := app.Tiers.Middleware(httpx.TierHeartbeat, userKey())
+	return mw(h).ServeHTTP
+}
+
+// withAuthedReadsTier keeps cheap GETs in authed-reads inside an otherwise
+// writes group (e.g. media downloads inside the media upload group).
+func withAuthedReadsTier(app *App, h http.HandlerFunc) http.HandlerFunc {
+	mw := app.Tiers.Middleware(httpx.TierAuthedReads, userKey())
+	return mw(h).ServeHTTP
+}
+
+// userKey tiers authenticated traffic by user, anonymous by IP.
+func userKey() httpx.KeyFunc {
+	return httpx.UserOrIPKey(sessionUserLookup)
+}
+
+// attemptKey tiers student/attempt-bearer traffic by attempt hash, then user, then IP.
+func attemptKey() httpx.KeyFunc {
+	return httpx.AttemptOrUserOrIPKey(sessionUserLookup)
+}
+
+// ipKey tiers strictly anonymous endpoints (login, entry) by client IP.
+func ipKey() httpx.KeyFunc {
+	return httpx.ClientIPKey
 }
 
 // route registers one wired handler with its route-template annotation.

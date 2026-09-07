@@ -104,7 +104,25 @@ function extractEnvelopeData<T>(response: { data?: BackendEnvelope<T> | T | unde
 }
 
 class AuthService {
+  private inflightSession: Promise<AuthSession | null> | null = null;
+
   async getSession(): Promise<AuthSession | null> {
+    // Single-flight: concurrent refresh() callers (StrictMode double-mount,
+    // multiple guards) share one in-flight request instead of stamping the
+    // auth-critical tier once per caller.
+    if (this.inflightSession) {
+      return this.inflightSession;
+    }
+    const pending = this.fetchSession();
+    this.inflightSession = pending;
+    try {
+      return await pending;
+    } finally {
+      this.inflightSession = null;
+    }
+  }
+
+  private async fetchSession(): Promise<AuthSession | null> {
     try {
       const response = await get<BackendEnvelope<AuthSession> | AuthSession>('/v1/auth/session', {
         retries: 0,

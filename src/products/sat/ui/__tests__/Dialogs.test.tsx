@@ -112,4 +112,44 @@ describe('SatFormDialog', () => {
     );
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('carries the workspace scope on portal overlay and content so positioning survives outside .sat-product', () => {
+    // Radix portals mount at document.body, escaping the `.sat-product`
+    // ancestor in SatRoot. The scope class must ride on the portal nodes
+    // themselves or the centered-card CSS never matches (bottom-left pileup).
+    render(
+      <SatFormDialog open eyebrow="Digital SAT" title="New SAT" onClose={vi.fn()}>
+        <form aria-label="New SAT form">
+          <input aria-label="SAT exam name" readOnly />
+        </form>
+      </SatFormDialog>,
+    );
+    const dialog = screen.getByRole('dialog', { name: 'New SAT' });
+    expect(dialog).toHaveClass('sat-product');
+    expect(dialog).toHaveClass('sat-dialog-center');
+    const overlay = document.querySelector('.sat-dialog-overlay');
+    expect(overlay).not.toBeNull();
+    expect(overlay).toHaveClass('sat-product');
+  });
+});
+
+describe('SatConfirmDialog portal scope', () => {
+  it('carries the workspace scope on alert overlay and content', () => {
+    render(
+      <SatConfirmDialog
+        open
+        title="Finish this SAT session?"
+        description="The session will be completed for the cohort."
+        confirmLabel="Finish Session"
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+    const dialog = screen.getByRole('alertdialog', { name: 'Finish this SAT session?' });
+    expect(dialog).toHaveClass('sat-product');
+    expect(dialog).toHaveClass('sat-dialog-center');
+    const overlay = document.querySelector('.sat-dialog-overlay');
+    expect(overlay).not.toBeNull();
+    expect(overlay).toHaveClass('sat-product');
+  });
 });

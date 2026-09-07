@@ -51,7 +51,9 @@ export function StudentSessionRoute() {
   }
 
   if (error) {
-    const isInvalidAccessCode = error.toLowerCase().includes('invalid wcode');
+    const loweredError = error.toLowerCase();
+    const isInvalidAccessCode =
+      loweredError.includes('invalid wcode') || loweredError.includes('invalid access code');
     const isSessionExpired =
       error.toLowerCase().includes('authentication is required') ||
       error.toLowerCase().includes('unauthorized');
@@ -59,7 +61,7 @@ export function StudentSessionRoute() {
       <ErrorSurface
         title={
           isInvalidAccessCode
-            ? 'Wcode invalid'
+            ? 'Access code invalid'
             : isSessionExpired
               ? 'Session expired'
               : 'Loading Error'

@@ -26,7 +26,7 @@ export interface AssessmentModuleAttemptSnapshot {
   accumulatedPausedSeconds: number;
   extensionSeconds: number;
   deadlineAt: string | null;
-  remainingSeconds: number;
+  remainingSeconds: number | null;
   completionReason: string | null;
   rawCorrect: number | null;
   operationalQuestionCount: number | null;

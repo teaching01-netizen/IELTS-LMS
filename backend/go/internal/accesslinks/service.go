@@ -137,7 +137,7 @@ type PublishedVersionSummary struct {
 	ID            string    `json:"id"`
 	VersionNumber int32     `json:"versionNumber"`
 	Revision      int32     `json:"revision"`
-	PublishNotes  *string   `json:"publishNotes,omitempty"`
+	PublishNotes  *string   `json:"publishNotes"`
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
@@ -158,11 +158,11 @@ type AccessLink struct {
 	ScheduleID           string           `json:"scheduleId"`
 	Name                 string           `json:"name"`
 	AudienceType         AudienceType     `json:"audienceType"`
-	AudienceLabel        *string          `json:"audienceLabel,omitempty"`
+	AudienceLabel        *string          `json:"audienceLabel"`
 	AccessMode           Mode             `json:"accessMode"`
 	AvailabilityType     AvailabilityType `json:"availabilityType"`
-	OpensAt              *time.Time       `json:"opensAt,omitempty"`
-	ClosesAt             *time.Time       `json:"closesAt,omitempty"`
+	OpensAt              *time.Time       `json:"opensAt"`
+	ClosesAt             *time.Time       `json:"closesAt"`
 	LifecycleState       LifecycleState   `json:"lifecycleState"`
 	Status               Status           `json:"status"`
 	SelectedStudentCount int64            `json:"selectedStudentCount"`
@@ -182,11 +182,11 @@ type PublicAccessLink struct {
 	VersionNumber    int32            `json:"versionNumber"`
 	Name             string           `json:"name"`
 	AudienceType     AudienceType     `json:"audienceType"`
-	AudienceLabel    *string          `json:"audienceLabel,omitempty"`
+	AudienceLabel    *string          `json:"audienceLabel"`
 	AccessMode       Mode             `json:"accessMode"`
 	AvailabilityType AvailabilityType `json:"availabilityType"`
-	OpensAt          *time.Time       `json:"opensAt,omitempty"`
-	ClosesAt         *time.Time       `json:"closesAt,omitempty"`
+	OpensAt          *time.Time       `json:"opensAt"`
+	ClosesAt         *time.Time       `json:"closesAt"`
 	Status           Status           `json:"status"`
 }
 
@@ -200,8 +200,8 @@ type MemberInput struct {
 // Member mirrors AccessLinkMember.
 type Member struct {
 	StudentCode  string  `json:"studentCode"`
-	StudentName  *string `json:"studentName,omitempty"`
-	StudentEmail *string `json:"studentEmail,omitempty"`
+	StudentName  *string `json:"studentName"`
+	StudentEmail *string `json:"studentEmail"`
 }
 
 // CreateRequest mirrors CreateAssessmentAccessLinkRequest.

@@ -90,22 +90,32 @@ func NewService(db *sql.DB, runner *tx.Runner) *Service {
 
 // Schedule is the exam_schedules row projection.
 type Schedule struct {
-	ID                     string    `json:"id"`
-	ExamID                 string    `json:"examId"`
-	ProviderKey            string    `json:"providerKey"`
-	OrganizationID         *string   `json:"organizationId,omitempty"`
-	ExamTitle              string    `json:"examTitle"`
-	ProctorDisplayName     string    `json:"proctorDisplayName"`
-	GradingDisplayName     string    `json:"gradingDisplayName"`
-	PublishedVersionID     string    `json:"publishedVersionId"`
-	CohortName             string    `json:"cohortName"`
-	Institution            *string   `json:"institution,omitempty"`
-	StartTime              time.Time `json:"startTime"`
-	EndTime                time.Time `json:"endTime"`
-	PlannedDurationMinutes int       `json:"plannedDurationMinutes"`
-	DeliveryMode           string    `json:"deliveryMode"`
-	Status                 string    `json:"status"`
-	Revision               int       `json:"revision"`
+	ID                     string     `json:"id"`
+	ExamID                 string     `json:"examId"`
+	ProviderKey            string     `json:"providerKey"`
+	OrganizationID         *string    `json:"organizationId,omitempty"`
+	ExamTitle              string     `json:"examTitle"`
+	ProctorDisplayName     string     `json:"proctorDisplayName"`
+	GradingDisplayName     string     `json:"gradingDisplayName"`
+	PublishedVersionID     string     `json:"publishedVersionId"`
+	CohortName             string     `json:"cohortName"`
+	Institution            *string    `json:"institution,omitempty"`
+	StartTime              time.Time  `json:"startTime"`
+	EndTime                time.Time  `json:"endTime"`
+	PlannedDurationMinutes int        `json:"plannedDurationMinutes"`
+	DeliveryMode           string     `json:"deliveryMode"`
+	RecurrenceType         string     `json:"recurrenceType"`
+	RecurrenceInterval     int        `json:"recurrenceInterval"`
+	RecurrenceEndDate      *time.Time `json:"recurrenceEndDate"`
+	BufferBeforeMinutes    *int       `json:"bufferBeforeMinutes"`
+	BufferAfterMinutes     *int       `json:"bufferAfterMinutes"`
+	AutoStart              bool       `json:"autoStart"`
+	AutoStop               bool       `json:"autoStop"`
+	CreatedAt              time.Time  `json:"createdAt"`
+	CreatedBy              string     `json:"createdBy"`
+	UpdatedAt              time.Time  `json:"updatedAt"`
+	Status                 string     `json:"status"`
+	Revision               int        `json:"revision"`
 }
 
 // CreateRequest mirrors CreateScheduleRequest.
@@ -199,14 +209,14 @@ func conflictError(msg string) *apperrors.Error {
 	return apperrors.New(apperrors.CodeConflict, msg)
 }
 
-const scheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, COALESCE(proctor_display_name, exam_title), COALESCE(grading_display_name, exam_title), published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, status, revision"
+const scheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, COALESCE(proctor_display_name, exam_title), COALESCE(grading_display_name, exam_title), published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, status, revision, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, created_at, created_by, updated_at"
 
 func scanSchedule(row interface {
 	Scan(dest ...any) error
 }) (Schedule, error) {
 	var s Schedule
 	var orgID, institution sql.NullString
-	if err := row.Scan(&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle, &s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName, &institution, &s.StartTime, &s.EndTime, &s.PlannedDurationMinutes, &s.DeliveryMode, &s.Status, &s.Revision); err != nil {
+	if err := row.Scan(&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle, &s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName, &institution, &s.StartTime, &s.EndTime, &s.PlannedDurationMinutes, &s.DeliveryMode, &s.Status, &s.Revision, &s.RecurrenceType, &s.RecurrenceInterval, &s.RecurrenceEndDate, &s.BufferBeforeMinutes, &s.BufferAfterMinutes, &s.AutoStart, &s.AutoStop, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt); err != nil {
 		return Schedule{}, err
 	}
 	if orgID.Valid {
@@ -470,12 +480,16 @@ func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cm
 // cannot create clocks for a section the author turned off.
 func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.PlanEntry, string, error) {
 	var configRaw sql.NullString
-	if err := s.db.QueryRowContext(ctx, "SELECT CAST(config_snapshot AS CHAR) FROM exam_versions WHERE id = ?", sch.PublishedVersionID).Scan(&configRaw); err != nil {
+	var examType string
+	if err := s.db.QueryRowContext(ctx, "SELECT CAST(v.config_snapshot AS CHAR), e.exam_type FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.id = ?", sch.PublishedVersionID).Scan(&configRaw, &examType); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, "", notFoundError("Published exam version not found.")
 		}
 		return nil, "", err
 	}
+	// Legacy ACT rows carry provider_key='ielts' with exam_type='ACT'; the
+	// effective provider heals that mismatch so science survives planning.
+	effectiveProvider := examdomain.EffectiveProviderKey(sch.ProviderKey, examType)
 	enabled := configuredRuntimeSections(configRaw.String)
 	rows, err := s.db.QueryContext(ctx, "SELECT section_key, title, display_order, duration_seconds, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id", sch.PublishedVersionID)
 	if err != nil {
@@ -489,7 +503,7 @@ func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.
 		if err := rows.Scan(&key, &label, &order, &durationSeconds, &gapSeconds); err != nil {
 			return nil, "", err
 		}
-		if !examdomain.ValidSectionKey(sch.ProviderKey, key) || (enabled != nil && !enabled[key]) {
+		if !examdomain.ValidSectionKey(effectiveProvider, key) || (enabled != nil && !enabled[key]) {
 			continue
 		}
 		plan = append(plan, examruntime.PlanEntry{
@@ -504,10 +518,10 @@ func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.
 		return nil, "", err
 	}
 	if len(plan) == 0 {
-		plan = configuredRuntimePlan(configRaw.String, sch.ProviderKey)
+		plan = configuredRuntimePlan(configRaw.String, effectiveProvider)
 	}
 	if len(plan) == 0 {
-		plan = fallbackRuntimePlan(sch.ProviderKey, sch.PlannedDurationMinutes)
+		plan = fallbackRuntimePlan(effectiveProvider, sch.PlannedDurationMinutes)
 	}
 	timingModel := "legacy_section_v1"
 	if strings.EqualFold(sch.ProviderKey, examdomain.ProviderSAT) {
@@ -824,10 +838,12 @@ func NormalizeAccessCode(raw string) string {
 	return trimmed
 }
 
-// ValidateWcode requires a non-empty access code.
+// ValidateWcode requires a non-empty access code. Any format is accepted
+// (legacy W123456 codes are uppercased by NormalizeAccessCode; free-form
+// codes pass through trimmed).
 func ValidateWcode(wcode string) error {
 	if NormalizeAccessCode(wcode) == "" {
-		return validationError("Wcode is required.")
+		return validationError("Access code is required.")
 	}
 	return nil
 }

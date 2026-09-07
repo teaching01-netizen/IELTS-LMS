@@ -117,6 +117,19 @@ func NormalizeProviderKey(providerKey string) string {
 	return p
 }
 
+// EffectiveProviderKey heals legacy ACT rows: exams created through the
+// legacy IELTS path carry provider_key='ielts' while exam_type='ACT'
+// (provider_exam_type='ACT'). Plan derivation, content validation, and
+// section allowlists must treat those rows as ACT so the science section is
+// not silently dropped. exam_type ACT always wins; otherwise the stored
+// provider key (normalized) is authoritative.
+func EffectiveProviderKey(providerKey, examType string) string {
+	if strings.EqualFold(strings.TrimSpace(examType), ExamTypeACT) {
+		return ProviderACT
+	}
+	return NormalizeProviderKey(providerKey)
+}
+
 // Service wires exam transitions explicitly.
 type Service struct {
 	db     *sql.DB
@@ -161,6 +174,7 @@ type Version struct {
 	Content       json.RawMessage `json:"contentSnapshot"`
 	Config        json.RawMessage `json:"configSnapshot"`
 	Validation    json.RawMessage `json:"validationSnapshot,omitempty"`
+	CreatedAt     time.Time       `json:"createdAt"`
 	CreatedBy     string          `json:"createdBy"`
 	PublishNotes  *string         `json:"publishNotes,omitempty"`
 	IsDraft       bool            `json:"isDraft"`
@@ -174,6 +188,7 @@ type Event struct {
 	ExamID    string          `json:"examId"`
 	VersionID *string         `json:"versionId,omitempty"`
 	ActorID   string          `json:"actorId"`
+	CreatedAt time.Time       `json:"createdAt"`
 	Action    string          `json:"action"`
 	FromState *string         `json:"fromState,omitempty"`
 	ToState   *string         `json:"toState,omitempty"`
@@ -676,6 +691,11 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		if _, err := q.ExecContext(ctx, "DELETE FROM exam_events WHERE exam_id = ?", id); err != nil {
 			return err
 		}
+		// Internal version lineage must be detached before the exam cascade;
+		// MySQL checks self-referential foreign keys during the cascade.
+		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET parent_version_id = NULL WHERE exam_id = ?", id); err != nil {
+			return err
+		}
 		res, err := q.ExecContext(ctx, "DELETE FROM exam_entities WHERE id = ?", id)
 		if err != nil {
 			return err
@@ -745,8 +765,8 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 		var versionNumber int
 		var content, config string
 		var draftRev int
-		var providerKey string
-		if err := q.QueryRowContext(ctx, "SELECT v.id, v.version_number, CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR), v.revision, e.provider_key FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND v.id = (SELECT current_draft_version_id FROM exam_entities WHERE id = ?) FOR UPDATE", examID, examID).Scan(&draftID, &versionNumber, &content, &config, &draftRev, &providerKey); err != nil {
+		var providerKey, examType string
+		if err := q.QueryRowContext(ctx, "SELECT v.id, v.version_number, CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR), v.revision, e.provider_key, e.exam_type FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND v.id = (SELECT current_draft_version_id FROM exam_entities WHERE id = ?) FOR UPDATE", examID, examID).Scan(&draftID, &versionNumber, &content, &config, &draftRev, &providerKey, &examType); err != nil {
 			if err == sql.ErrNoRows {
 				return notFoundError("Draft version not found.")
 			}
@@ -758,7 +778,18 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 		if req.ExpectedDraftRevision != nil && *req.ExpectedDraftRevision != draftRev {
 			return conflictError("Draft changed while publish checks were running. Run the checks again.")
 		}
-		if draftRev != req.Revision {
+		var entityRevision int
+		if err := q.QueryRowContext(ctx, "SELECT revision FROM exam_entities WHERE id = ? FOR UPDATE", examID).Scan(&entityRevision); err != nil {
+			return err
+		}
+		// SAT sends both counters: revision fences the entity and
+		// expectedDraftRevision fences its content. Legacy IELTS clients send
+		// only revision, which historically fences the draft.
+		if req.ExpectedDraftRevision != nil {
+			if entityRevision != req.Revision {
+				return conflictError("Exam changed while publish checks were running. Run the checks again.")
+			}
+		} else if draftRev != req.Revision {
 			return conflictError("Draft changed while publish checks were running. Run the checks again.")
 		}
 		if isEmptySnapshot(content) {
@@ -767,24 +798,13 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 		if isEmptySnapshot(config) {
 			return validationError("Draft configuration is missing. Save a draft before publishing.")
 		}
-		if issues := validateContentShape(content, config, providerKey); len(issues) > 0 {
+		if issues := validateContentShape(content, config, EffectiveProviderKey(providerKey, examType)); len(issues) > 0 {
 			return validationError("Draft content is invalid: " + issues[0].Message)
 		}
 		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET is_draft = FALSE, is_published = TRUE, publish_notes = ?, revision = revision + 1 WHERE id = ?", nullableStrPtr(req.PublishNotes), draftID); err != nil {
 			return err
 		}
-		// Lock the entity row first so the draft-pointer clear and the
-		// published-pointer advance are atomic with the version flip above;
-		// otherwise current_draft_version_id keeps pointing at a sealed row
-		// and the next SaveDraft 404s on the is_draft guard.
-		var entityRev int
-		if err := q.QueryRowContext(ctx, "SELECT revision FROM exam_entities WHERE id = ? FOR UPDATE", examID).Scan(&entityRev); err != nil {
-			if err == sql.ErrNoRows {
-				return notFoundError("Exam not found.")
-			}
-			return err
-		}
-		_ = entityRev
+		// The entity and draft remain locked until both publication pointers commit.
 		if _, err := q.ExecContext(ctx, "UPDATE exam_entities SET current_draft_version_id = NULL, current_published_version_id = ?, status = 'published', published_at = NOW(), revision = revision + 1 WHERE id = ?", draftID, examID); err != nil {
 			return err
 		}
@@ -802,9 +822,123 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 	return out, err
 }
 
+// ReopenDraft heals clone-database IELTS exams that lost their editable draft
+// (orphan NULL/NULL pointers from failed clone writes, or published rows whose
+// draft was sealed by Publish). It inserts a fresh draft seeded from the
+// latest surviving version — published snapshots stay immutable; the new draft
+// parents from them — or an empty skeleton when no version survives, CASes
+// current_draft_version_id only when the exam still lacks a live draft, and
+// records a version_created event. A healthy exam with a live draft pointer
+// shortcuts to the existing draft so Retry/concurrent callers converge without
+// duplicating versions.
+func (s *Service) ReopenDraft(ctx context.Context, examID string, actorID string) (Version, error) {
+	var out Version
+	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		row := q.QueryRowContext(ctx, "SELECT "+examColumns+" FROM exam_entities WHERE id = ? FOR UPDATE", examID)
+		exam, err := scanExam(row)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return notFoundError("Exam not found.")
+			}
+			return err
+		}
+		if exam.CurrentDraftVersionID != nil && strings.TrimSpace(*exam.CurrentDraftVersionID) != "" {
+			v, err := loadVersion(ctx, q, strings.TrimSpace(*exam.CurrentDraftVersionID))
+			if err != nil {
+				if err == sql.ErrNoRows {
+					return notFoundError("Draft version not found.")
+				}
+				return err
+			}
+			if !v.IsDraft {
+				return notFoundError("Draft version not found.")
+			}
+			out = v
+			return nil
+		}
+		type survivingVersion struct {
+			id            string
+			versionNumber int
+			content       string
+			config        string
+		}
+		rows, err := q.QueryContext(ctx, "SELECT id, version_number, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), created_by, is_draft, is_published, revision FROM exam_versions WHERE exam_id = ? ORDER BY version_number DESC, created_at DESC", examID)
+		if err != nil {
+			return err
+		}
+		var latest *survivingVersion
+		for rows.Next() {
+			var sv survivingVersion
+			var createdBy string
+			var isDraft, isPublished bool
+			var revision int
+			if err := rows.Scan(&sv.id, &sv.versionNumber, &sv.content, &sv.config, &createdBy, &isDraft, &isPublished, &revision); err != nil {
+				rows.Close()
+				return err
+			}
+			if latest == nil {
+				copy := sv
+				latest = &copy
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		seedContent := "{}"
+		seedConfig := "{}"
+		var parentVersionID *string
+		if latest != nil {
+			if strings.TrimSpace(latest.content) != "" {
+				seedContent = latest.content
+			}
+			if strings.TrimSpace(latest.config) != "" {
+				seedConfig = latest.config
+			}
+			parent := latest.id
+			parentVersionID = &parent
+		}
+		var nextVersionNumber int
+		if err := q.QueryRowContext(ctx, "SELECT COALESCE(MAX(version_number), 0) + 1 FROM exam_versions WHERE exam_id = ?", examID).Scan(&nextVersionNumber); err != nil {
+			return err
+		}
+		newVersionID := uuid.NewString()
+		if _, err := q.ExecContext(ctx, "INSERT INTO exam_versions (id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, created_at, is_draft, is_published, revision) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NOW(), TRUE, FALSE, 0)", newVersionID, examID, nextVersionNumber, nullableStrPtr(parentVersionID), seedContent, seedConfig, strings.TrimSpace(actorID)); err != nil {
+			return err
+		}
+		res, err := q.ExecContext(ctx, "UPDATE exam_entities SET current_draft_version_id = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ? AND current_draft_version_id IS NULL", newVersionID, examID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return conflictError("The exam draft changed while reopening. Refresh and try again.")
+		}
+		if _, err := q.ExecContext(ctx, "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, created_at) VALUES (?, ?, ?, ?, 'version_created', NOW())", uuid.NewString(), examID, newVersionID, strings.TrimSpace(actorID)); err != nil {
+			return err
+		}
+		v, err := loadVersion(ctx, q, newVersionID)
+		if err != nil {
+			return err
+		}
+		out = v
+		return nil
+	})
+	return out, err
+}
+
+func (s *Service) ReopenDraftForActor(ctx context.Context, actor auth.ActorContext, examID string) (Version, error) {
+	if err := requireWriteActor(actor); err != nil {
+		return Version{}, err
+	}
+	if _, err := s.GetForActor(ctx, actor, examID); err != nil {
+		return Version{}, err
+	}
+	return s.ReopenDraft(ctx, examID, actor.UserID)
+}
+
 // ListEvents returns the append-only audit trail for an exam.
 func (s *Service) ListEvents(ctx context.Context, examID string) ([]Event, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, exam_id, version_id, actor_id, action, from_state, to_state, payload FROM exam_events WHERE exam_id = ? ORDER BY created_at DESC, id DESC", examID)
+	rows, err := s.db.QueryContext(ctx, "SELECT id, exam_id, version_id, actor_id, action, from_state, to_state, payload, created_at FROM exam_events WHERE exam_id = ? ORDER BY created_at DESC, id DESC", examID)
 	if err != nil {
 		return nil, err
 	}
@@ -814,7 +948,7 @@ func (s *Service) ListEvents(ctx context.Context, examID string) ([]Event, error
 		var e Event
 		var versionID, fromState, toState sql.NullString
 		var payload sql.NullString
-		if err := rows.Scan(&e.ID, &e.ExamID, &versionID, &e.ActorID, &e.Action, &fromState, &toState, &payload); err != nil {
+		if err := rows.Scan(&e.ID, &e.ExamID, &versionID, &e.ActorID, &e.Action, &fromState, &toState, &payload, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		if versionID.Valid {
@@ -878,7 +1012,7 @@ func (s *Service) GetValidation(ctx context.Context, examID string) (ValidationR
 		rep.Errors = append(rep.Errors, ValidationIssue{Field: "configSnapshot", Message: "Draft configuration is empty. Save delivery configuration before publishing."})
 	}
 	if !isEmptySnapshot(contentStr) && !isEmptySnapshot(configStr) {
-		rep.Errors = append(rep.Errors, validateContentShape(contentStr, configStr, exam.ProviderKey)...)
+		rep.Errors = append(rep.Errors, validateContentShape(contentStr, configStr, EffectiveProviderKey(exam.ProviderKey, exam.ExamType))...)
 	}
 	rep.CanPublish = len(rep.Errors) == 0
 	return rep, nil
@@ -886,7 +1020,7 @@ func (s *Service) GetValidation(ctx context.Context, examID string) (ValidationR
 
 // ListVersions returns every version for an exam, newest first.
 func (s *Service) ListVersions(ctx context.Context, examID string) ([]Version, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, is_draft, is_published, revision FROM exam_versions WHERE exam_id = ? ORDER BY version_number DESC, created_at DESC", examID)
+	rows, err := s.db.QueryContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, is_draft, is_published, revision, created_at FROM exam_versions WHERE exam_id = ? ORDER BY version_number DESC, created_at DESC", examID)
 	if err != nil {
 		return nil, err
 	}
@@ -988,7 +1122,7 @@ func (s *Service) ListVersionSummaries(ctx context.Context, examID string) ([]Ve
 }
 
 func loadVersion(ctx context.Context, q tx.Tx, id string) (Version, error) {
-	row := q.QueryRowContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, is_draft, is_published, revision FROM exam_versions WHERE id = ?", id)
+	row := q.QueryRowContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, is_draft, is_published, revision, created_at FROM exam_versions WHERE id = ?", id)
 	return scanVersion(row)
 }
 
@@ -999,7 +1133,7 @@ func scanVersion(row interface {
 	var parent sql.NullString
 	var content, config, validation sql.NullString
 	var notes sql.NullString
-	if err := row.Scan(&v.ID, &v.ExamID, &v.VersionNumber, &parent, &content, &config, &validation, &v.CreatedBy, &notes, &v.IsDraft, &v.IsPublished, &v.Revision); err != nil {
+	if err := row.Scan(&v.ID, &v.ExamID, &v.VersionNumber, &parent, &content, &config, &validation, &v.CreatedBy, &notes, &v.IsDraft, &v.IsPublished, &v.Revision, &v.CreatedAt); err != nil {
 		return Version{}, err
 	}
 	if parent.Valid {

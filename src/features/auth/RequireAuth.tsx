@@ -14,15 +14,29 @@ function buildNextPath(location: ReturnType<typeof useLocation>) {
 }
 
 /**
- * Student wcodes look like `W123456` (see `normalizeAccessCode` in
- * `StudentEntryRoute`). Only a well-formed wcode may unlock anonymous student
- * delivery — anything else (e.g. `/student/:id/precheck`) must not render
- * protected children without a session.
+ * Student entry is free by default: any non-empty access code
+ * (`W123456`, `alice`, `guest-alpha_01`, … — see `normalizeAccessCode` in
+ * `StudentEntryRoute`) may unlock anonymous student delivery. Only reserved
+ * route words (e.g. `/student/:id/precheck`, `/student/:id/register`) must
+ * not render protected children without a session.
  */
-const STUDENT_WCODE_PATTERN = /^W\d{6}$/;
+const RESERVED_STUDENT_PATH_SEGMENTS = new Set(['register', 'precheck', 'lobby', 'exam', 'complete']);
 
-function isStudentWcode(value: string | undefined): value is string {
-  return typeof value === 'string' && STUDENT_WCODE_PATTERN.test(value.trim());
+function isStudentAccessCode(value: string | undefined): value is string {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    decoded = value;
+  }
+  const trimmed = decoded.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return !RESERVED_STUDENT_PATH_SEGMENTS.has(trimmed.toLocaleLowerCase());
 }
 
 function parseStudentPath(pathname: string): { scheduleId: string; wcode?: string } | null {
@@ -55,11 +69,11 @@ export function RequireAuth({ allowedRoles, children }: RequireAuthProps) {
   if (!session) {
     const studentPath = parseStudentPath(location.pathname);
     if (studentPath) {
-      // Allow student access only when the route carries a well-formed
-      // registration wcode (e.g. `/student/:scheduleId/W250334`). Anonymous
-      // renders of any other `/student/...` path would bypass protection.
+      // Allow student access when the route carries any non-empty access
+      // code (e.g. `/student/:scheduleId/alice`). Anonymous renders of
+      // reserved phases (`/student/:id/precheck`, …) still bypass protection.
       if (
-        isStudentWcode(studentPath.wcode) &&
+        isStudentAccessCode(studentPath.wcode) &&
         allowedRoles?.includes('student')
       ) {
         return <>{children}</>;

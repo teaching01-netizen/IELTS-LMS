@@ -21,9 +21,9 @@ type SatConfirmDialogProps = {
   onConfirm: () => void;
 };
 
-const OVERLAY_CLASS = 'sat-dialog-overlay';
-const CONFIRM_CLASS = 'sat-dialog sat-dialog-center w-[calc(100vw-40px)] max-w-[390px] p-5';
-const FORM_CLASS = 'sat-dialog sat-dialog-center w-[calc(100vw-40px)] max-w-[480px] overflow-hidden';
+const OVERLAY_CLASS = 'sat-dialog-overlay sat-product';
+const CONFIRM_CLASS = 'sat-dialog sat-dialog-center sat-product w-[calc(100vw-40px)] max-w-[390px] p-5';
+const FORM_CLASS = 'sat-dialog sat-dialog-center sat-product w-[calc(100vw-40px)] max-w-[480px] overflow-hidden';
 
 const CANCEL_BUTTON_CLASS =
   'sat-quiet-button min-h-10 rounded-[10px] px-3.5 text-[12px] font-semibold text-slate-500 hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/40';

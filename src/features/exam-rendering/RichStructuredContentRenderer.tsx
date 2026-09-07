@@ -183,8 +183,30 @@ function StaticStructuredImage({ node }: { node: RichTextNode }) {
   );
 }
 
-function RichNode({ node }: { node: RichTextNode }): ReactNode {
-  const children = (key: string) => renderNodes(node.content, key);
+export type StructuredTextRenderer = (value: {
+  nodeId: string;
+  blockText: string;
+  text: string;
+  startOffset: number;
+}) => ReactNode;
+
+function RichNode({ node, renderText }: { node: RichTextNode; renderText?: StructuredTextRenderer | undefined }): ReactNode {
+  const children = (key: string) => renderNodes(node.content, key, renderText);
+  const nodeId = stringAttribute(node, 'id');
+  const annotatable = Boolean(renderText && nodeId && (node.content ?? []).every((child) => child.type === 'text' || child.type === 'hardBreak'));
+  const textAttributes = annotatable ? { 'data-content-text-node': nodeId } : {};
+  const textChildren = () => {
+    if (!annotatable || !renderText) return children('text-block');
+    const blockText = textFromNodes(node.content);
+    let offset = 0;
+    return (node.content ?? []).map((child, index) => {
+      if (child.type === 'hardBreak') return <br key={index} />;
+      const text = child.text ?? '';
+      const startOffset = offset;
+      offset += text.length;
+      return <span key={index}>{applyMarks(child, renderText({ nodeId, blockText, text, startOffset }))}</span>;
+    });
+  };
 
   switch (node.type) {
     case "text":
@@ -192,13 +214,13 @@ function RichNode({ node }: { node: RichTextNode }): ReactNode {
     case "doc":
       return children("doc");
     case "paragraph":
-      return <p>{children("paragraph")}</p>;
+      return <p {...textAttributes}>{textChildren()}</p>;
     case "heading": {
       const level = Number(node.attrs?.["level"] ?? 2);
-      const content = children("heading");
-      if (level <= 1) return <h1>{content}</h1>;
-      if (level === 2) return <h2>{content}</h2>;
-      return <h3>{content}</h3>;
+      const content = textChildren();
+      if (level <= 1) return <h1 {...textAttributes}>{content}</h1>;
+      if (level === 2) return <h2 {...textAttributes}>{content}</h2>;
+      return <h3 {...textAttributes}>{content}</h3>;
     }
     case "blockquote":
       return <blockquote>{children("blockquote")}</blockquote>;
@@ -213,7 +235,7 @@ function RichNode({ node }: { node: RichTextNode }): ReactNode {
     case "codeBlock":
       return (
         <pre>
-          <code>{textFromNodes(node.content)}</code>
+          <code {...textAttributes}>{annotatable ? textChildren() : textFromNodes(node.content)}</code>
         </pre>
       );
     case "hardBreak":
@@ -248,15 +270,17 @@ function cellSpanAttributes(node: RichTextNode): { colSpan?: number; rowSpan?: n
   };
 }
 
-function renderNodes(nodes: readonly RichTextNode[] | undefined, keyPrefix: string): ReactNode[] {
-  return (nodes ?? []).map((node, index) => <RichNode key={`${keyPrefix}-${index}`} node={node} />);
+function renderNodes(nodes: readonly RichTextNode[] | undefined, keyPrefix: string, renderText?: StructuredTextRenderer): ReactNode[] {
+  return (nodes ?? []).map((node, index) => <RichNode key={`${keyPrefix}-${index}`} node={node} renderText={renderText} />);
 }
 
 export const RichStructuredContentRenderer = memo(function RichStructuredContentRenderer({
   content,
+  renderText,
 }: {
   content: StructuredContent;
+  renderText?: StructuredTextRenderer | undefined;
 }) {
   const document = documentFromStructuredContent(content) as RichTextDocument;
-  return <div className={CONTENT_CLASS_NAME}>{renderNodes(document.content, "content")}</div>;
+  return <div className={CONTENT_CLASS_NAME}>{renderNodes(document.content, "content", renderText)}</div>;
 });

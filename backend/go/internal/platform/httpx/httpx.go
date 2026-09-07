@@ -4,7 +4,9 @@
 package httpx
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -117,6 +119,29 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 func DecodeLimited(r *http.Request, maxBytes int64, v any) error {
 	r.Body = http.MaxBytesReader(nil, r.Body, maxBytes)
 	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return apperrors.New(apperrors.CodeBadRequest, "Invalid request body.")
+	}
+	return nil
+}
+
+// DecodeLimitedOptional decodes JSON with a byte cap, accepting an empty
+// body as the zero value. It exists for create-style endpoints whose clients
+// POST without a body; non-empty bodies stay as strict as DecodeLimited
+// (unknown fields are rejected).
+func DecodeLimitedOptional(r *http.Request, maxBytes int64, v any) error {
+	if r.Body == nil {
+		return nil
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxBytes))
+	if err != nil {
+		return apperrors.New(apperrors.CodeBadRequest, "Invalid request body.")
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return apperrors.New(apperrors.CodeBadRequest, "Invalid request body.")

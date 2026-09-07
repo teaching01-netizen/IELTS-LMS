@@ -12,10 +12,6 @@ import { WritingPromptPane, WritingResponsePane } from './StudentWritingPanes';
 import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentLayoutMode } from './layout/studentLayoutMode';
 
-import { useStudentRuntimeClock } from './providers/StudentRuntimeProvider';
-
-
-
 interface StudentWritingProps {
   state: ExamState;
   writingAnswers: Record<string, string>;
@@ -138,7 +134,6 @@ export function StudentWriting({
   const isTabletMode = Boolean(tabletMode);
   const isCompactLayout = layoutMode === 'compact';
   const attemptContext = useOptionalStudentAttempt();
-  const runtimeClock = useStudentRuntimeClock();
   const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
   const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
   const writingConfig = state.config.sections.writing;
@@ -700,20 +695,10 @@ export function StudentWriting({
   const configuredDurationSeconds = Number.isFinite(writingConfig.duration) && (writingConfig.duration as number) > 0
     ? (writingConfig.duration as number) * 60
     : 3600;
-  const resolvedTimeRemaining =
-    Number.isFinite(timeRemaining) && (timeRemaining as number) >= 0
-      ? (timeRemaining as number)
-      : Number.isFinite(runtimeClock) && (runtimeClock as number) >= 0
-        ? (runtimeClock as number)
-        : configuredDurationSeconds;
-
-  const totalTime = configuredDurationSeconds;
-  const progressPercent = totalTime > 0
-    ? Math.max(0, Math.min(100, ((totalTime - resolvedTimeRemaining) / totalTime) * 100))
-    : 0;
-
-  const isTimeCritical = resolvedTimeRemaining <= 300;
-  const isTimeWarning = resolvedTimeRemaining <= 600;
+  // T2.5: writing pane no longer subscribes to the per-second runtime clock.
+  // The prompt-pane countdown leaves (StudentWritingCountdownBar/Badge) own the
+  // ticking subscription; this component passes only the stable exam duration and
+  // the optional parent-provided timeRemaining so typing renders stay tick-free.
 
 
 
@@ -758,10 +743,8 @@ export function StudentWriting({
   currentChart={currentChart}
   currentPrompt={currentPrompt}
   currentPromptContainsMarkup={currentPromptContainsMarkup}
-  resolvedTimeRemaining={resolvedTimeRemaining}
-  isTimeCritical={isTimeCritical}
-  isTimeWarning={isTimeWarning}
-  progressPercent={progressPercent}
+  durationSeconds={configuredDurationSeconds}
+  timeRemaining={timeRemaining}
   highlightEnabled={highlightEnabled}
   highlightColor={highlightColor}
   highlightClassName={highlightClassName}

@@ -7,7 +7,10 @@ export function isStudentHighlightToolContextActive(input: {
 }): boolean {
   return (
     input.phase === 'exam' &&
-    (input.module === 'reading' || input.module === 'listening' || input.module === 'writing') &&
+    (input.module === 'reading' ||
+      input.module === 'listening' ||
+      input.module === 'writing' ||
+      input.module === 'science') &&
     input.blockingReason === null &&
     !input.submitConfirmOpen &&
     input.finalSubmitIdle

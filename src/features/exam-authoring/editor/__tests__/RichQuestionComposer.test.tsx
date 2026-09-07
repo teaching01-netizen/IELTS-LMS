@@ -5,6 +5,13 @@ import { FastQuestionComposer } from "../FastQuestionComposer";
 import { RichQuestionComposer, SAT_CHOICE_COMPOSER_CAPABILITIES } from "../RichQuestionComposer";
 
 describe("SAT rich question composer capabilities", () => {
+  it("retains a persisted text-block identity when the editor loads", async () => {
+    render(<RichQuestionComposer value={{ version: 2, nodes: [], document: {
+      type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'passage-evidence' }, content: [{ type: 'text', text: 'Evidence' }] }],
+    } }} onChange={vi.fn()} label="Passage" />);
+    const editor = await screen.findByRole('textbox', { name: 'Passage' });
+    expect(editor.querySelector('p')).toHaveAttribute('data-content-id', 'passage-evidence');
+  });
   it("keeps rich SAT choice tools available in compact presentation", async () => {
     render(
       <RichQuestionComposer
