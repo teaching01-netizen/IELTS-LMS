@@ -38,8 +38,16 @@
   flex: 0 0 var(--spine-rail-width);
   width: var(--spine-rail-width);
   min-width: 0;
+  min-height: 0;
+  align-self: stretch;
+  overflow: hidden;
   border-right: 1px solid var(--color-border);
   background: var(--color-card);
+}
+
+.sat-spine__queue > * {
+  min-height: 0;
+  height: 100%;
 }
 
 .sat-spine__main {

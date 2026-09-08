@@ -156,9 +156,11 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
         />
       </div>
 
-      <div className="relative z-0 min-h-0 flex-1 overflow-hidden">
+      <div className="relative z-0 min-h-0 flex-1 overflow-y-auto" data-queue-scroll-region>
         {rows.length ? (
           <Virtuoso
+            useWindowScroll={false}
+            style={{ height: "100%" }}
             data={rows}
             itemContent={(index, row) => {
               return row.kind === "empty" ? (
