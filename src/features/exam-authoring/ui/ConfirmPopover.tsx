@@ -11,9 +11,9 @@ export interface ConfirmPopoverProps {
 }
 
 /**
- * Compatibility name for the authoring confirmation API. Destructive actions
- * now use the shared Radix alert dialog so focus, Escape, and scroll locking
- * are consistent with the rest of the workspace.
+ * @deprecated Use `AuthoringConfirmDialog` directly (destructive confirm).
+ * Compatibility alias kept for the legacy workspace branch.
+ * TODO(spine P10): remove this alias with the legacy panes.
  */
 export function ConfirmPopover(props: ConfirmPopoverProps) {
   return <AuthoringConfirmDialog {...props} destructive />;

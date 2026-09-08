@@ -1,7 +1,6 @@
-import { motion, useReducedMotion } from "motion/react";
 import { SAT_DOMAINS, getSatSkills } from "../providers/sat/taxonomy";
 import type { Difficulty, QuestionRevision } from "../contracts/assessment";
-import { authoringMotion } from "./authoringMotion";
+import { AuthoringSegmented } from "./AuthoringSegmented";
 
 export interface QuestionPropertiesProps {
   question: QuestionRevision;
@@ -12,7 +11,6 @@ const controlClass =
   "w-full rounded-xl border border-transparent bg-au-fill px-3 py-2.5 text-xs text-slate-800 outline-none transition focus:border-au-accent/30 focus:bg-au-surface focus:ring-4 focus:ring-au-accent/10";
 
 export function QuestionProperties({ question, onChange }: QuestionPropertiesProps) {
-  const reduceMotion = useReducedMotion();
   const domains =
     question.metadata.sectionKey === "math" ? SAT_DOMAINS.math : SAT_DOMAINS["reading-writing"];
   const skills = getSatSkills(question.metadata.domain);
@@ -84,35 +82,26 @@ export function QuestionProperties({ question, onChange }: QuestionPropertiesPro
       </div>
 
       <div className="space-y-1.5">
-        <span className="text-xs font-medium text-slate-600">Difficulty</span>
-        <div
-          className="authoring-segmented grid grid-cols-3 gap-1 rounded-full p-1"
-          role="group"
-          aria-label="Difficulty"
-        >
-          {(["easy", "medium", "hard"] as Difficulty[]).map((difficulty) => (
-            <motion.button
-              key={difficulty}
-              type="button"
-              whileTap={reduceMotion ? {} : authoringMotion.press}
-              transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
-              onClick={() =>
-                onChange({ ...question, metadata: { ...question.metadata, difficulty } })
-              }
-              aria-pressed={question.metadata.difficulty === difficulty}
-              className={`relative min-h-9 overflow-hidden rounded-full px-2 py-2 text-[11px] font-semibold capitalize ${question.metadata.difficulty === difficulty ? "text-slate-950" : "text-slate-500 hover:text-slate-700"}`}
-            >
-              {question.metadata.difficulty === difficulty ? (
-                <motion.span
-                  layoutId="sat-difficulty-pill"
-                  className="au-elevation-card absolute inset-0 rounded-full bg-au-surface"
-                  transition={reduceMotion ? { duration: 0.01 } : authoringMotion.spring}
-                />
-              ) : null}
-              <span className="relative z-10">{difficulty}</span>
-            </motion.button>
-          ))}
-        </div>
+        <span id="sat-question-difficulty-label" className="text-xs font-medium text-slate-600">
+          Difficulty
+        </span>
+        <AuthoringSegmented<Difficulty>
+          ariaLabel="Difficulty"
+          layoutId="sat-difficulty"
+          value={question.metadata.difficulty}
+          onChange={(difficulty) =>
+            onChange({ ...question, metadata: { ...question.metadata, difficulty } })
+          }
+          className="w-full"
+          options={([
+            { value: "easy", label: "Easy" },
+            { value: "medium", label: "Medium" },
+            { value: "hard", label: "Hard" },
+          ] as const).map((option) => ({
+            value: option.value as Difficulty,
+            label: <span className="capitalize">{option.label}</span>,
+          }))}
+        />
       </div>
       <label
         htmlFor="sat-question-tags"

@@ -1,0 +1,87 @@
+/*
+ * SAT authoring spine styles — scoped to `.sat-spine` only (plan Phase 1).
+ *
+ * TOKEN MAP (incumbent `au-*` / `.sat-authoring` in src/index.css is FROZEN,
+ * anti-reference, and removed in Phase 10 — never add new `au-*` tokens):
+ *   spine canvas/bg  -> var(--color-background)
+ *   spine surface    -> var(--color-card)
+ *   spine text       -> var(--color-foreground)
+ *   secondary text   -> var(--color-muted-foreground) (AA-checked)
+ *   hairlines/rails  -> var(--color-border) / var(--color-border-strong)
+ *   primary action   -> var(--color-primary) / --color-primary-foreground
+ *   success/warn/danger text -> existing `-text` tokens (never tint alone)
+ *   student preview parity -> --sat-* delivery vars (QuestionPaper /
+ *     SatQuestionBody / ExamQuestionRenderer keep their own markup)
+ * Radii come from the shadcn scale only; motion is CSS transitions here
+ * (motion/react only for sheet/dialog entrance + question-swap fade).
+ */
+
+.sat-spine {
+  --spine-measure: 720px;
+  --spine-rail-width: 288px;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+
+.sat-spine__body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.sat-spine__queue {
+  flex: 0 0 var(--spine-rail-width);
+  width: var(--spine-rail-width);
+  min-width: 0;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-card);
+}
+
+.sat-spine__main {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.sat-spine__column {
+  margin-inline: auto;
+  width: calc(100% - 2rem);
+  max-width: var(--spine-measure);
+  padding-block: 1.75rem 6rem;
+}
+
+.sat-spine__skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -999px;
+  z-index: 100;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.sat-spine__skip-link:focus-visible {
+  top: 1rem;
+}
+
+@media (max-width: 900px) {
+  .sat-spine__queue {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sat-spine * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

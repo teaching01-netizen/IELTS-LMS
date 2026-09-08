@@ -69,6 +69,10 @@ import {
   SatAuthoringErrorSurface,
   SatAuthoringLoadingSurface,
 } from "./SatAuthoringStateSurfaces";
+import { SpineLayout } from "./spine/SpineLayout";
+import { SpineHeader } from "./spine/SpineHeader";
+import { QuestionQueueRail } from "./spine/QuestionQueueRail";
+import { isSpineEnabled } from "./spine/spineFlag";
 
 export interface AuthoringWorkspaceProps {
   examId: string;
@@ -1072,6 +1076,133 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         }}
       />
     ) : null;
+
+  const spineEnabled = isSpineEnabled(searchParams);
+
+  if (spineEnabled) {
+    const spineQueue = (() => {
+      if (!selectedModule || !selectedSection) return null;
+      if (workspaceMode === "build") {
+        return (
+          <QuestionQueueRail
+            module={selectedModule}
+            sections={shell.sections}
+            sectionKey={selectedSection.sectionKey}
+            moveTargets={moveTargets}
+            selectedQuestionId={selectedExamQuestionId}
+            selectedQuestionIds={selectedIds}
+            searchQuery={searchQuery}
+            filter={filter}
+            searchInputRef={searchInputRef}
+            isMutating={
+              createQuestion.isPending ||
+              duplicateQuestion.isPending ||
+              reorderQuestions.isPending ||
+              bulkQuestions.isPending ||
+              batchCreate.isPending ||
+              loadSampleExam.isPending
+            }
+            onSearchQueryChange={setSearchQuery}
+            onSelectModule={(moduleId) => void selectModule(moduleId)}
+            onOpenImport={() => setImportOpen(true)}
+            onFilterChange={setFilter}
+            onSelectQuestion={(questionId) => void selectQuestion(questionId)}
+            onCreateQuestion={() => void handleCreateQuestion()}
+            onToggleSelection={toggleSelection}
+            onClearSelection={() => {
+              setSelectedIds(new Set());
+              selectionAnchorRef.current = null;
+            }}
+            onQuickAnswerKey={(questionId, optionId) =>
+              void handleQuickAnswerKey(questionId, optionId)
+            }
+            onReorder={handleReorder}
+            onBulkAction={handleBulkAction}
+            saveStatus={autosave.status}
+          />
+        );
+      }
+      return (
+        <IssuesPane
+          report={validation.data ?? null}
+          loading={validation.isPending}
+          onRefresh={() => void openIssues()}
+          onOpenIssue={(issue) => void openIssue(issue)}
+        />
+      );
+    })();
+    return (
+      <div
+        className="sat-product"
+        data-au-section={selectedSection?.sectionKey ?? "rw"}
+      >
+        <SpineLayout
+          header={
+            <SpineHeader
+              examTitle={examTitle}
+              sectionTitle={selectedSection?.title ?? null}
+              moduleTitle={selectedModule?.title ?? null}
+              authored={totalAuthored}
+              target={totalTarget}
+              progressPct={progressPct}
+              onBack={() => {
+                void (async () => {
+                  if (await flushBeforeNavigation()) navigate("/sat/exams");
+                })();
+              }}
+              onOpenQueue={() => setQuestionListOpen(true)}
+            />
+          }
+          queue={spineQueue}
+          banner={
+            <>
+              {navigationError ? (
+                <div role="alert" className="border-b px-5 py-2 text-center text-xs font-medium">
+                  {navigationError}
+                </div>
+              ) : null}
+              {workbookUndo?.available ? (
+                <WorkbookImportUndoBanner
+                  busy={workbookUndoBusy}
+                  onUndo={() => void handleWorkbookUndo()}
+                />
+              ) : null}
+            </>
+          }
+        >
+          {draft ? (
+            <QuestionEditor
+              question={draft}
+              {...(selectedModuleIndex >= 0 ? { questionNumber: selectedModuleIndex + 1 } : {})}
+              saveStatus={autosave.status}
+              onChange={handleChange}
+              onSaveNow={() => void handleSaveNow()}
+              onSaveAndNext={() => void handleSaveAndNext()}
+              keepMetadataForNext={keepMetadataForNext}
+              onKeepMetadataForNextChange={setKeepMetadataForNext}
+              onDuplicate={() => void handleDuplicate()}
+              onDelete={() => handleDelete()}
+            />
+          ) : selectedExamQuestionId && questionQuery.error ? (
+            <QuestionLoadError
+              error={questionQuery.error}
+              onRetry={() => void questionQuery.refetch()}
+            />
+          ) : selectedExamQuestionId ? (
+            <EditorSkeleton />
+          ) : (
+            <EmptyEditor
+              moduleTitle={selectedModule?.title ?? null}
+              {...(selectedModule &&
+              selectedModule.questions.length < selectedModule.targetQuestionCount
+                ? { onCreate: () => void handleCreateQuestion() }
+                : {})}
+            />
+          )}
+        </SpineLayout>
+      </div>
+    );
+  }
 
   return (
     <div

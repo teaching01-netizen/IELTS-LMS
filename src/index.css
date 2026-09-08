@@ -2192,7 +2192,12 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 }
 
-/* SAT authoring workspace — one material hierarchy, not a card farm.
+/* SAT authoring workspace — FROZEN (spine plan Phase 1 → Phase 10).
+ * Bugfix-only until the spine (src/features/exam-authoring/ui/spine/,
+ * `.sat-spine` in spine.css) replaces it. No new `au-*` tokens, no new
+ * `authoring-*` classes: new work uses shadcn scale + semantic roles +
+ * `--sat-*` delivery vars. Incumbent system is anti-reference, not authority.
+ * Original description: one material hierarchy, not a card farm.
  * Layer order: glass chrome → frosted rail → quiet canvas → sheet of paper. */
 .sat-authoring {
   --authoring-sidebar-width: clamp(280px, 30vw, 430px);

@@ -4,8 +4,9 @@ import { authoringMotion } from "./authoringMotion";
 
 /**
  * The workspace's single segmented-control vocabulary: a shared-layout thumb
- * that slides between segments on a critically damped spring. The thumb
- * animates from its live position, so rapid switching stays interruptible.
+ * that slides between segments on a short duration cross-fade (no spring on
+ * this hot path). The thumb animates from its live position, so rapid
+ * switching stays interruptible.
  * All controls keep `aria-pressed` semantics; the group carries the label.
  */
 export interface AuthoringSegmentedOption<T extends string> {
