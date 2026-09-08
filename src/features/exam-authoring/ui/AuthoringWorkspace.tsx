@@ -72,6 +72,8 @@ import {
 import { SpineLayout } from "./spine/SpineLayout";
 import { SpineHeader } from "./spine/SpineHeader";
 import { QuestionQueueRail } from "./spine/QuestionQueueRail";
+import { SpineQuestionView } from "./spine/SpineQuestionView";
+import { SaveCluster } from "./spine/SaveCluster";
 import { isSpineEnabled } from "./spine/spineFlag";
 
 export interface AuthoringWorkspaceProps {
@@ -1145,6 +1147,15 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               authored={totalAuthored}
               target={totalTarget}
               progressPct={progressPct}
+              saveSlot={
+                draft ? (
+                  <SaveCluster
+                    status={autosave.status}
+                    lastSavedAt={autosave.lastSavedAt}
+                    onRetry={() => autosave.retry(draft)}
+                  />
+                ) : null
+              }
               onBack={() => {
                 void (async () => {
                   if (await flushBeforeNavigation()) navigate("/sat/exams");
@@ -1171,17 +1182,21 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
           }
         >
           {draft ? (
-            <QuestionEditor
+            <SpineQuestionView
               question={draft}
               {...(selectedModuleIndex >= 0 ? { questionNumber: selectedModuleIndex + 1 } : {})}
               saveStatus={autosave.status}
+              lastSavedAt={autosave.lastSavedAt}
+              issues={selectedQuestionIssues}
+              keepMetadataForNext={keepMetadataForNext}
+              onKeepMetadataForNextChange={setKeepMetadataForNext}
               onChange={handleChange}
               onSaveNow={() => void handleSaveNow()}
               onSaveAndNext={() => void handleSaveAndNext()}
-              keepMetadataForNext={keepMetadataForNext}
-              onKeepMetadataForNextChange={setKeepMetadataForNext}
+              onRetrySave={() => autosave.retry(draft)}
               onDuplicate={() => void handleDuplicate()}
               onDelete={() => handleDelete()}
+              onIssueSelect={(field) => setFocusField(resolveAuthoringField(field))}
             />
           ) : selectedExamQuestionId && questionQuery.error ? (
             <QuestionLoadError
