@@ -34,6 +34,7 @@ export interface SpineQuestionViewProps {
   onRetrySave: () => void;
   onDuplicate: () => void;
   onDelete: () => boolean | Promise<boolean>;
+  onPreview: () => void;
   onIssueSelect: (field: string | null) => void;
 }
 
@@ -61,6 +62,7 @@ export function SpineQuestionView({
   onRetrySave,
   onDuplicate,
   onDelete,
+  onPreview,
   onIssueSelect,
 }: SpineQuestionViewProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -124,6 +126,15 @@ export function SpineQuestionView({
           </h2>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={onPreview}
+            aria-label="Preview question as students will see it"
+            title="Preview as students will see it (Space)"
+            className="flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            Preview
+          </button>
           <button
             type="button"
             onClick={onDuplicate}

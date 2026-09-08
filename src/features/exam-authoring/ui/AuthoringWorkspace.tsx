@@ -71,6 +71,8 @@ import {
 } from "./SatAuthoringStateSurfaces";
 import { SpineLayout } from "./spine/SpineLayout";
 import { SpineHeader } from "./spine/SpineHeader";
+import { SpinePreviewSheet } from "./spine/SpinePreviewSheet";
+import { SpineQueueSheet } from "./spine/SpineQueueSheet";
 import { QuestionQueueRail } from "./spine/QuestionQueueRail";
 import { QuestionJumpPalette } from "./spine/QuestionJumpPalette";
 import { ShortcutHelpDialog } from "./spine/ShortcutHelpDialog";
@@ -1165,6 +1167,16 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               authored={totalAuthored}
               target={totalTarget}
               progressPct={progressPct}
+              errorCount={totalErrors}
+              workspaceMode={workspaceMode}
+              onModeChange={(mode) => {
+                if (mode === "issues") {
+                  setQuestionListOpen(false);
+                  void openIssues();
+                } else {
+                  setWorkspaceMode(mode);
+                }
+              }}
               saveSlot={
                 draft ? (
                   <SaveCluster
@@ -1174,6 +1186,20 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                   />
                 ) : null
               }
+              workbookImportDisabled={!shell}
+              onOpenWorkbookImport={() => void openWorkbookImport()}
+              previewDisabled={!shell}
+              onOpenFullPreview={() => {
+                void (async () => {
+                  if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/preview`);
+                })();
+              }}
+              releaseHref={`/sat/exams/${examId}/release`}
+              onOpenRelease={() => {
+                void (async () => {
+                  if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/release`);
+                })();
+              }}
               onBack={() => {
                 void (async () => {
                   if (await flushBeforeNavigation()) navigate("/sat/exams");
@@ -1214,6 +1240,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               onRetrySave={() => autosave.retry(draft)}
               onDuplicate={() => void handleDuplicate()}
               onDelete={() => handleDelete()}
+              onPreview={() => setPreviewOpen(true)}
               onIssueSelect={(field) => setFocusField(resolveAuthoringField(field))}
             />
           ) : selectedExamQuestionId && questionQuery.error ? (
@@ -1246,6 +1273,74 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
           />
         ) : null}
         <ShortcutHelpDialog open={shortcutHelpOpen} onClose={() => setShortcutHelpOpen(false)} />
+        {compactViewport ? (
+          <SpineQueueSheet
+            open={questionListOpen}
+            issuesMode={workspaceMode === "issues"}
+            onOpenChange={setQuestionListOpen}
+            onCaptureOpener={() => {
+              if (document.activeElement instanceof HTMLElement) {
+                questionSheetFocusRef.current = document.activeElement;
+              }
+            }}
+            onRestoreOpener={() => {
+              const opener = questionSheetFocusRef.current;
+              questionSheetFocusRef.current = null;
+              restoreAuthoringFocus(opener);
+            }}
+          >
+            {spineQueue}
+          </SpineQueueSheet>
+        ) : null}
+        <SpinePreviewSheet
+          open={previewOpen}
+          question={draft}
+          onOpenChange={(next) => {
+            if (!next) setPreviewOpen(false);
+          }}
+          onCaptureOpener={() => {
+            if (document.activeElement instanceof HTMLElement) {
+              inspectorSheetFocusRef.current = document.activeElement;
+            }
+          }}
+          onRestoreOpener={() => {
+            const opener = inspectorSheetFocusRef.current;
+            inspectorSheetFocusRef.current = null;
+            restoreAuthoringFocus(opener);
+          }}
+        />
+        <QuestionImportSheet
+          open={importOpen}
+          sectionKey={selectedSection?.sectionKey ?? "reading-writing"}
+          remainingCapacity={importRemaining}
+          isImporting={batchCreate.isPending}
+          onClose={() => {
+            if (!batchCreate.isPending) setImportOpen(false);
+          }}
+          onImport={handleBatchImport}
+        />
+        {workbookBaseline ? (
+          <SatWorkbookImportSheet
+            open={workbookImportOpen}
+            examId={examId}
+            shell={workbookBaseline}
+            existingQuestionCount={totalAuthored}
+            onClose={() => {
+              setWorkbookImportOpen(false);
+              setWorkbookBaseline(null);
+            }}
+            onCommitted={handleWorkbookCommitted}
+          />
+        ) : null}
+        <SampleExamLoadDialog
+          open={sampleDialogOpen}
+          busy={loadSampleExam.isPending}
+          existingQuestionCount={totalAuthored}
+          onCancel={() => {
+            if (!loadSampleExam.isPending) setSampleDialogOpen(false);
+          }}
+          onConfirm={() => void handleLoadSampleExam()}
+        />
       </div>
     );
   }

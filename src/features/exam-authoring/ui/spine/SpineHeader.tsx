@@ -9,7 +9,16 @@ export interface SpineHeaderProps {
   authored: number;
   target: number;
   progressPct: number;
+  errorCount: number;
+  workspaceMode: "build" | "issues";
+  onModeChange: (mode: "build" | "issues") => void;
   saveSlot?: ReactNode | undefined;
+  workbookImportDisabled: boolean;
+  onOpenWorkbookImport: () => void;
+  previewDisabled: boolean;
+  onOpenFullPreview: () => void;
+  releaseHref: string;
+  onOpenRelease: () => void;
   onBack: () => void;
   onOpenQueue: () => void;
 }
@@ -25,7 +34,16 @@ export function SpineHeader({
   authored,
   target,
   progressPct,
+  errorCount,
+  workspaceMode,
+  onModeChange,
   saveSlot,
+  workbookImportDisabled,
+  onOpenWorkbookImport,
+  previewDisabled,
+  onOpenFullPreview,
+  releaseHref,
+  onOpenRelease,
   onBack,
   onOpenQueue,
 }: SpineHeaderProps) {
@@ -65,12 +83,68 @@ export function SpineHeader({
         <button
           type="button"
           onClick={onOpenQueue}
-          aria-label="Open question navigator"
+          aria-label={workspaceMode === "issues" ? "Open authoring issues" : "Open question navigator"}
           className="hidden max-[900px]:flex min-h-9 shrink-0 items-center rounded-md px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          Questions
+          {workspaceMode === "issues" ? "Issues" : "Questions"}
         </button>
+        <div
+          role="group"
+          aria-label="Authoring view"
+          className="hidden shrink-0 items-center rounded-md bg-muted p-0.5 min-[901px]:flex"
+        >
+          <button
+            type="button"
+            aria-pressed={workspaceMode === "build"}
+            onClick={() => onModeChange("build")}
+            className={`min-h-9 rounded px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${workspaceMode === "build" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Build
+          </button>
+          <button
+            type="button"
+            aria-pressed={workspaceMode === "issues"}
+            onClick={() => onModeChange("issues")}
+            className={`flex min-h-9 items-center gap-1.5 rounded px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${workspaceMode === "issues" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Issues
+            {errorCount ? (
+              <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-destructive/10 px-1.5 text-[10px] font-semibold tabular-nums text-destructive">
+                {errorCount}
+              </span>
+            ) : null}
+          </button>
+        </div>
         {saveSlot}
+        <button
+          type="button"
+          disabled={workbookImportDisabled}
+          onClick={onOpenWorkbookImport}
+          title="Import the complete SAT from an Excel workbook"
+          className="hidden min-h-9 shrink-0 items-center rounded-md px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30 min-[901px]:flex"
+        >
+          Import
+        </button>
+        <button
+          type="button"
+          disabled={previewDisabled}
+          onClick={onOpenFullPreview}
+          aria-label="Open the full SAT preview"
+          title="Open the full SAT using the real student delivery renderer"
+          className="hidden min-h-9 shrink-0 items-center rounded-md px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30 md:flex"
+        >
+          Preview
+        </button>
+        <a
+          href={releaseHref}
+          onClick={(event) => {
+            event.preventDefault();
+            onOpenRelease();
+          }}
+          className="flex min-h-9 shrink-0 items-center rounded-md bg-primary px-3.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
+          Release
+        </a>
       </div>
     </header>
   );
