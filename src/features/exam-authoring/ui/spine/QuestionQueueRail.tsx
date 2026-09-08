@@ -1,5 +1,4 @@
-import { useMemo, type RefObject } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { useEffect, useMemo, useRef, type RefObject } from "react";
 import {
   AlertCircle,
   Check,
@@ -84,6 +83,16 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
     () => countQueueReadiness(props.module),
     [props.module],
   );
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const selectedId = props.selectedQuestionId;
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const row = listRef.current?.querySelector<HTMLElement>(
+      '[data-question-list-row="' + CSS.escape(selectedId) + '"]',
+    );
+    row?.scrollIntoView({ block: "nearest" });
+  }, [selectedId, rows.length]);
 
   return (
     <section
@@ -156,30 +165,31 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
         />
       </div>
 
-      <div className="relative z-0 min-h-0 flex-1 overflow-y-auto" data-queue-scroll-region>
+      <div ref={listRef} className="relative z-0 min-h-0 flex-1 overflow-y-auto" data-queue-scroll-region>
         {rows.length ? (
-          <Virtuoso
-            useWindowScroll={false}
-            style={{ height: "100%" }}
-            data={rows}
-            itemContent={(index, row) => {
-              return row.kind === "empty" ? (
-                <QueueEmptyRow position={index + 1} disabled={props.isMutating} onCreate={props.onCreateQuestion} />
+          <ol aria-label="Questions in this module" className="m-0 list-none p-0 py-1">
+            {rows.map((row, index) =>
+              row.kind === "empty" ? (
+                <li key={"empty-" + String(index)}>
+                  <QueueEmptyRow position={index + 1} disabled={props.isMutating} onCreate={props.onCreateQuestion} />
+                </li>
               ) : (
-                <QueueRow
-                  question={row.question}
-                  position={index + 1}
-                  selected={row.question.examQuestionId === props.selectedQuestionId}
-                  checked={props.selectedQuestionIds.has(row.question.examQuestionId)}
-                  disabled={props.isMutating}
-                  moduleQuestions={props.module.questions}
-                  onSelect={props.onSelectQuestion}
-                  onToggleSelection={props.onToggleSelection}
-                  onReorder={props.onReorder}
-                />
-              );
-            }}
-          />
+                <li key={row.question.examQuestionId}>
+                  <QueueRow
+                    question={row.question}
+                    position={index + 1}
+                    selected={row.question.examQuestionId === props.selectedQuestionId}
+                    checked={props.selectedQuestionIds.has(row.question.examQuestionId)}
+                    disabled={props.isMutating}
+                    moduleQuestions={props.module.questions}
+                    onSelect={props.onSelectQuestion}
+                    onToggleSelection={props.onToggleSelection}
+                    onReorder={props.onReorder}
+                  />
+                </li>
+              ),
+            )}
+          </ol>
         ) : (
           <div className="flex h-full items-center justify-center px-8 text-center"><div><p className="text-xs font-semibold text-foreground">No matching questions</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Change the search or readiness filter.</p></div></div>
         )}

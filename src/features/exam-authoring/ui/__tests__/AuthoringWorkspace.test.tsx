@@ -81,12 +81,6 @@ vi.mock("../../editor/RichQuestionComposer", () => ({ SAT_CHOICE_COMPOSER_CAPABI
 vi.mock("../../providers/sat/contentTemplates", () => ({
   createSatSupportingMaterial: (kind: string) => ({ version: 2 as const, nodes: [], document: { type: "doc" as const, content: [{ type: "paragraph", text: kind }] } }),
 }));
-vi.mock("react-virtuoso", () => ({
-  Virtuoso: ({ data, itemContent }: { data: never[]; itemContent: (i: number, r: never) => React.ReactNode }) => (
-    <div>{data.map((row, i) => <div key={i}>{itemContent(i, row)}</div>)}</div>
-  ),
-}));
-
 import { AuthoringWorkspace } from "../AuthoringWorkspace";
 
 function structuredText(id: string, text: string) {

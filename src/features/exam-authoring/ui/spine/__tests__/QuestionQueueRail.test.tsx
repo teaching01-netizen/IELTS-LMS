@@ -3,20 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { AssessmentModuleShell, AssessmentSectionShell } from "../../../contracts/assessment";
 import { QuestionQueueRail } from "../QuestionQueueRail";
 
-// react-virtuoso relies on layout measurement unavailable in jsdom; render
-// rows synchronously like the existing workspace suites do.
-vi.mock("react-virtuoso", () => ({
-  Virtuoso: ({ data, itemContent }: { data: unknown[]; itemContent: (index: number, row: never) => React.ReactNode }) => (
-    <div data-testid="virtuoso-list">
-      {data.map((row, index) => (
-        <div key={index} data-testid="virtuoso-item">
-          {itemContent(index, row as never)}
-        </div>
-      ))}
-    </div>
-  ),
-}));
-
 function summary(id: string, index: number) {
   return {
     examQuestionId: id,
