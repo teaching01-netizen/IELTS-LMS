@@ -17,7 +17,7 @@
 
 .sat-spine {
   --spine-measure: 720px;
-  --spine-rail-width: 340px;
+  --spine-rail-width: 384px;
   display: flex;
   min-height: 0;
   flex: 1 1 auto;

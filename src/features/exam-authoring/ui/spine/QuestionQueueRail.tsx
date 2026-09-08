@@ -160,12 +160,13 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
         {rows.length ? (
           <Virtuoso
             data={rows}
-            itemContent={(_index, row) => {
+            itemContent={(index, row) => {
               return row.kind === "empty" ? (
-                <QueueEmptyRow displayOrder={row.displayOrder} disabled={props.isMutating} onCreate={props.onCreateQuestion} />
+                <QueueEmptyRow position={index + 1} disabled={props.isMutating} onCreate={props.onCreateQuestion} />
               ) : (
                 <QueueRow
                   question={row.question}
+                  position={index + 1}
                   selected={row.question.examQuestionId === props.selectedQuestionId}
                   checked={props.selectedQuestionIds.has(row.question.examQuestionId)}
                   disabled={props.isMutating}
@@ -191,6 +192,7 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
 
 function QueueRow({
   question,
+  position,
   selected,
   checked,
   disabled,
@@ -200,6 +202,7 @@ function QueueRow({
   onReorder,
 }: {
   question: AssessmentQuestionSummary;
+  position: number;
   selected: boolean;
   checked: boolean;
   disabled: boolean;
@@ -239,7 +242,7 @@ function QueueRow({
       tabIndex={disabled ? -1 : 0}
       aria-current={selected ? "true" : undefined}
       aria-disabled={disabled || undefined}
-      aria-label={`Question ${question.displayOrder + 1}: ${question.promptPreview || "Empty question"}${selected ? ", current" : ""}`}
+      aria-label={`Question ${position}: ${question.promptPreview || "Empty question"}${selected ? ", current" : ""}`}
       className={`group relative mx-2 my-px cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? "bg-muted" : "hover:bg-muted/60"}`}
     >
       <div className="flex min-h-[56px] items-center gap-2 px-2.5 py-2">
@@ -251,14 +254,14 @@ function QueueRow({
             event.stopPropagation();
             onToggleSelection(question.examQuestionId, event.shiftKey);
           }}
-          aria-label={`${checked ? "Deselect" : "Select"} question ${question.displayOrder + 1}`}
+          aria-label={`${checked ? "Deselect" : "Select"} question ${position}`}
           aria-pressed={checked}
           className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-transparent group-hover:border-ring/40 group-hover:text-muted-foreground/40"}`}
         >
           <Check size={11} strokeWidth={3.2} aria-hidden="true" />
         </button>
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="w-5 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">{question.displayOrder + 1}</span>
+          <span className="w-5 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">{position}</span>
           <QueueReadinessDot question={question} />
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{question.promptPreview || "Empty question"}</span>
           {question.questionType === "single_choice" && question.answerKeyPreview ? (
@@ -293,10 +296,10 @@ function QueueReadinessDot({ question }: { question: AssessmentQuestionSummary }
   );
 }
 
-function QueueEmptyRow({ displayOrder, disabled, onCreate }: { displayOrder: number; disabled: boolean; onCreate: () => void }) {
+function QueueEmptyRow({ position, disabled, onCreate }: { position: number; disabled: boolean; onCreate: () => void }) {
   return (
-    <button type="button" disabled={disabled} onClick={onCreate} aria-label={`Add question ${displayOrder + 1}`} className="mx-2 my-px flex min-h-[48px] w-[calc(100%_-_1rem)] items-center gap-2.5 rounded-md border border-dashed border-border px-2.5 text-left text-muted-foreground hover:border-ring/40 hover:bg-muted/50 hover:text-foreground disabled:opacity-40">
-      <span className="w-5 shrink-0 text-xs font-semibold tabular-nums">{displayOrder + 1}</span>
+    <button type="button" disabled={disabled} onClick={onCreate} aria-label={`Add question ${position}`} className="mx-2 my-px flex min-h-[48px] w-[calc(100%_-_1rem)] items-center gap-2.5 rounded-md border border-dashed border-border px-2.5 text-left text-muted-foreground hover:border-ring/40 hover:bg-muted/50 hover:text-foreground disabled:opacity-40">
+      <span className="w-5 shrink-0 text-xs font-semibold tabular-nums">{position}</span>
       <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded bg-muted" aria-hidden="true"><Plus size={13} /></span>
       <span className="truncate text-xs font-medium">Add question</span>
     </button>
