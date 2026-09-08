@@ -72,6 +72,8 @@ import {
 import { SpineLayout } from "./spine/SpineLayout";
 import { SpineHeader } from "./spine/SpineHeader";
 import { QuestionQueueRail } from "./spine/QuestionQueueRail";
+import { QuestionJumpPalette } from "./spine/QuestionJumpPalette";
+import { ShortcutHelpDialog } from "./spine/ShortcutHelpDialog";
 import { SpineQuestionView } from "./spine/SpineQuestionView";
 import { SaveCluster } from "./spine/SaveCluster";
 import { isSpineEnabled } from "./spine/spineFlag";
@@ -137,6 +139,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const [workbookUndo, setWorkbookUndo] = useState<SatWorkbookUndoState | null>(null);
   const [workbookUndoBusy, setWorkbookUndoBusy] = useState(false);
   const [sampleDialogOpen, setSampleDialogOpen] = useState(false);
+  const [jumpPaletteOpen, setJumpPaletteOpen] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [inspectorSheetOpen, setInspectorSheetOpen] = useState(false);
   const [questionListOpen, setQuestionListOpen] = useState(false);
@@ -878,6 +882,10 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     [selectQuestion, shell]
   );
 
+  const spineEnabledEarly = isSpineEnabled(searchParams);
+  const spineEnabledRef = useRef(spineEnabledEarly);
+  spineEnabledRef.current = spineEnabledEarly;
+
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       const command = event.metaKey || event.ctrlKey;
@@ -908,8 +916,18 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       }
       if (command && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        if (spineEnabledRef.current && selectedModule) {
+          setWorkspaceMode("build");
+          setJumpPaletteOpen(true);
+          return;
+        }
         setWorkspaceMode("build");
         window.requestAnimationFrame(() => searchInputRef.current?.focus());
+        return;
+      }
+      if (!command && event.key === "?" && spineEnabledRef.current) {
+        event.preventDefault();
+        setShortcutHelpOpen(true);
         return;
       }
       if (command && event.key === "Enter") {
@@ -1079,7 +1097,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       />
     ) : null;
 
-  const spineEnabled = isSpineEnabled(searchParams);
+  const spineEnabled = spineEnabledEarly;
 
   if (spineEnabled) {
     const spineQueue = (() => {
@@ -1215,6 +1233,19 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             />
           )}
         </SpineLayout>
+        {selectedModule ? (
+          <QuestionJumpPalette
+            open={jumpPaletteOpen}
+            questions={selectedModule.questions}
+            selectedQuestionId={selectedExamQuestionId}
+            onSelect={(questionId) => {
+              setJumpPaletteOpen(false);
+              void selectQuestion(questionId);
+            }}
+            onClose={() => setJumpPaletteOpen(false)}
+          />
+        ) : null}
+        <ShortcutHelpDialog open={shortcutHelpOpen} onClose={() => setShortcutHelpOpen(false)} />
       </div>
     );
   }
