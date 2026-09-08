@@ -45,8 +45,7 @@ export function QuestionJumpPalette({
         role="dialog"
         aria-modal="true"
         aria-label="Jump to question"
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- dialog panel owns Escape dismissal; the scrim button owns pointer dismissal.
-        onKeyDown={(event) => {
+        onKeyDownCapture={(event) => {
           if (event.key === "Escape") {
             event.stopPropagation();
             onClose();
