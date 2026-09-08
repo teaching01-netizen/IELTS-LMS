@@ -10,8 +10,12 @@ beforeEach(() => {
 });
 
 describe("isSpineEnabled", () => {
-  it("is off by default with no param and no stored preference", () => {
-    expect(isSpineEnabled(params(""))).toBe(false);
+  it("is on by default (Phase 9.5 rollout) with no param and no stored preference", () => {
+    expect(isSpineEnabled(params(""))).toBe(true);
+  });
+
+  it("lets ?spine=0 opt back to legacy for one release", () => {
+    expect(isSpineEnabled(params("spine=0"))).toBe(false);
   });
 
   it("turns on with ?spine=1", () => {
@@ -43,8 +47,8 @@ describe("isSpineEnabled", () => {
   });
 
   it("treats unrelated param values as absent", () => {
-    expect(isSpineEnabled(params("spine=yes"))).toBe(false);
-    expect(isSpineEnabled(params("spine=yes"), true)).toBe(true);
+    expect(isSpineEnabled(params("spine=yes"))).toBe(true);
+    expect(isSpineEnabled(params("spine=yes"), false)).toBe(false);
   });
 
   it("survives denied storage without throwing", () => {
@@ -52,8 +56,8 @@ describe("isSpineEnabled", () => {
       throw new Error("denied");
     });
     try {
-      expect(isSpineEnabled(params(""))).toBe(false);
-      expect(isSpineEnabled(params("spine=1"))).toBe(true);
+      expect(isSpineEnabled(params(""))).toBe(true);
+      expect(isSpineEnabled(params("spine=0"))).toBe(false);
     } finally {
       getItem.mockRestore();
     }

@@ -19,7 +19,7 @@ export function readStoredSpinePreference(): "1" | "0" | null {
   }
 }
 
-export function isSpineEnabled(searchParams: URLSearchParams, defaultOn = false): boolean {
+export function isSpineEnabled(searchParams: URLSearchParams, defaultOn = true): boolean {
   const param = searchParams.get("spine");
   if (param === "1") return true;
   if (param === "0") return false;

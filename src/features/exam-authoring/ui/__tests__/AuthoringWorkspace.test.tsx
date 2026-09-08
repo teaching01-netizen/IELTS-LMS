@@ -524,13 +524,13 @@ function setupDefaults() {
   (harness.api.deleteQuestion as any).mockResolvedValue({});
 }
 
-function renderWorkspace() {
+function renderWorkspace(query = "?spine=0") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[`/sat/exams/exam-1${query}`]}>
         <AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />
       </MemoryRouter>
     </QueryClientProvider>,
