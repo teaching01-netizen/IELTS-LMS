@@ -203,7 +203,7 @@ func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID strin
 				payload, _ = json.Marshal(map[string]any{
 					"scheduleId": scheduleID, "event": "auto_advance_section", "origin": origin,
 				})
-				if err := s.outbx.EnqueueInTx(ctx, q, "schedule_runtime", scheduleID, runtime.revision+transitionCount, outbox.FamilyRuntimeChanged, payload); err != nil {
+				if err := s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, runtime.revision+transitionCount, outbox.FamilyRuntimeChanged, payload); err != nil {
 					return err
 				}
 				break
@@ -235,7 +235,7 @@ func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID strin
 			payload, _ := json.Marshal(map[string]any{
 				"scheduleId": scheduleID, "event": "auto_advance_section", "origin": origin,
 			})
-			if err := s.outbx.EnqueueInTx(ctx, q, "schedule_runtime", scheduleID, runtime.revision+transitionCount, outbox.FamilyRuntimeChanged, payload); err != nil {
+			if err := s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, runtime.revision+transitionCount, outbox.FamilyRuntimeChanged, payload); err != nil {
 				return err
 			}
 

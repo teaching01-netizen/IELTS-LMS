@@ -109,7 +109,7 @@ func attemptIDFromStudentWire(app *App, r *http.Request, scheduleID, attemptID s
 	if bearer == "" {
 		return "", apperrors.New(apperrors.CodeValidation, "Attempt is required.")
 	}
-	claims, err := auth.VerifyAttemptToken(r.Context(), app.DB, app.Config, time.Now().UTC(), bearer)
+	claims, err := verifyAttemptBearer(app, r, bearer)
 	if err != nil {
 		return "", apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
 	}
@@ -122,31 +122,57 @@ func attemptIDFromStudentWire(app *App, r *http.Request, scheduleID, attemptID s
 // v1SessionHandler returns the V1 attempt session projection.
 func v1SessionHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess := requireStudentDeps(w, r, app)
-		if sess == nil {
-			return
-		}
-		out, err := studentSessionContext(
-			r.Context(), app, sess, chi.URLParam(r, "scheduleID"),
-			r.URL.Query().Get("candidateId"), r.URL.Query().Get("clientSessionId"), true,
-		)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				writeStudentNotFound(w, r)
-				return
-			}
-			httpx.WriteError(w, r, err)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		// Plan E1: bounded budget on the per-poll session read.
+		withQueryTimeout(w, r, DefaultQueryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			v1SessionInner(app, w, r)
+		})
 	}
+}
+
+func v1SessionInner(app *App, w http.ResponseWriter, r *http.Request) {
+	sess := requireStudentDeps(w, r, app)
+	if sess == nil {
+		return
+	}
+	out, err := studentSessionContext(
+		r.Context(), app, sess, chi.URLParam(r, "scheduleID"),
+		r.URL.Query().Get("candidateId"), r.URL.Query().Get("clientSessionId"), true,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeStudentNotFound(w, r)
+			return
+		}
+		httpx.WriteError(w, r, MapDBError(err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // v1StaticHandler returns the V1 static content snapshot.
 func v1StaticHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Plan E1: bounded budget on the version-assembly read.
+		withQueryTimeout(w, r, DefaultQueryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			v1StaticInner(app, w, r)
+		})
+	}
+}
+
+func v1StaticInner(app *App, w http.ResponseWriter, r *http.Request) {
+	{
 		if requireStudentDeps(w, r, app) == nil {
 			return
+		}
+		// Plan D1: conditional read — 2 indexed probes before assembly.
+		var staticETag string
+		if app.Delivery != nil {
+			if _, _, etag, terr := app.Delivery.VersionTag(r.Context(), chi.URLParam(r, "scheduleID")); terr == nil {
+				staticETag = etag
+				if writeETagOrNotModified(w, r, etag) {
+					return
+				}
+			}
 		}
 		schedule, version, _, err := loadStudentScheduleVersion(r.Context(), app.DB, chi.URLParam(r, "scheduleID"))
 		if err != nil {
@@ -154,8 +180,11 @@ func v1StaticHandler(app *App) http.HandlerFunc {
 				writeStudentNotFound(w, r)
 				return
 			}
-			httpx.WriteError(w, r, err)
+			httpx.WriteError(w, r, MapDBError(err))
 			return
+		}
+		if staticETag != "" {
+			w.Header().Set("ETag", staticETag)
 		}
 		out := map[string]any{"schedule": schedule, "version": version, "degradedLiveMode": false}
 		httpx.WriteJSON(w, http.StatusOK, out)
@@ -165,33 +194,40 @@ func v1StaticHandler(app *App) http.HandlerFunc {
 // v1LiveHandler returns the V1 live session context.
 func v1LiveHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess := requireStudentDeps(w, r, app)
-		if sess == nil {
-			return
-		}
-		ctx, err := studentSessionContext(
-			r.Context(), app, sess, chi.URLParam(r, "scheduleID"),
-			r.URL.Query().Get("candidateId"), "", false,
-		)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				writeStudentNotFound(w, r)
-				return
-			}
-			httpx.WriteError(w, r, err)
-			return
-		}
-		schedule, _ := ctx["schedule"].(map[string]any)
-		out := map[string]any{
-			"runtime":          ctx["runtime"],
-			"attempt":          ctx["attempt"],
-			"degradedLiveMode": false,
-		}
-		if publishedVersionID, ok := schedule["publishedVersionId"].(string); ok {
-			out["publishedVersionId"] = publishedVersionID
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		// Plan E1: bounded budget on the per-poll live read.
+		withQueryTimeout(w, r, DefaultQueryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			v1LiveInner(app, w, r)
+		})
 	}
+}
+
+func v1LiveInner(app *App, w http.ResponseWriter, r *http.Request) {
+	sess := requireStudentDeps(w, r, app)
+	if sess == nil {
+		return
+	}
+	ctx, err := studentSessionContext(
+		r.Context(), app, sess, chi.URLParam(r, "scheduleID"),
+		r.URL.Query().Get("candidateId"), "", false,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeStudentNotFound(w, r)
+			return
+		}
+		httpx.WriteError(w, r, MapDBError(err))
+		return
+	}
+	schedule, _ := ctx["schedule"].(map[string]any)
+	out := map[string]any{
+		"runtime":          ctx["runtime"],
+		"attempt":          ctx["attempt"],
+		"degradedLiveMode": false,
+	}
+	if publishedVersionID, ok := schedule["publishedVersionId"].(string); ok {
+		out["publishedVersionId"] = publishedVersionID
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // v1PrecheckHandler returns the V1 integrity projection.
@@ -258,26 +294,33 @@ func v1PrecheckHandler(app *App) http.HandlerFunc {
 // v1BootstrapHandler returns the V1 flags/recovery projection.
 func v1BootstrapHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess := requireStudentDeps(w, r, app)
-		if sess == nil {
-			return
-		}
-		var req studentBootstrapRequest
-		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		out, err := bootstrapStudentAttempt(r.Context(), app, sess, chi.URLParam(r, "scheduleID"), req)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				writeStudentNotFound(w, r)
-				return
-			}
-			httpx.WriteError(w, r, err)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		// Plan E1: bounded budget on the attempt-mint read.
+		withQueryTimeout(w, r, DefaultQueryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			v1BootstrapInner(app, w, r)
+		})
 	}
+}
+
+func v1BootstrapInner(app *App, w http.ResponseWriter, r *http.Request) {
+	sess := requireStudentDeps(w, r, app)
+	if sess == nil {
+		return
+	}
+	var req studentBootstrapRequest
+	if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := bootstrapStudentAttempt(r.Context(), app, sess, chi.URLParam(r, "scheduleID"), req)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			writeStudentNotFound(w, r)
+			return
+		}
+		httpx.WriteError(w, r, MapDBError(err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // v1HeartbeatHandler lists recent V1 heartbeat events for an attempt.
@@ -309,7 +352,13 @@ func v1HeartbeatHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		attempt, err := app.Student.RecordHeartbeat(r.Context(), student.HeartbeatRequest{
+		// Plan D2: memory path = Touch + dedupe with zero heartbeat-event
+		// SQL (projection re-read only); inline (default) = today's tx.
+		record := app.Student.RecordHeartbeat
+		if app.Config.PresenceMemory() && app.Student.PresenceMap() != nil {
+			record = app.Student.RecordHeartbeatMemory
+		}
+		attempt, err := record(r.Context(), student.HeartbeatRequest{
 			AttemptID: attemptID, ScheduleID: chi.URLParam(r, "scheduleID"), StudentKey: body.StudentKey,
 			ClientSessionID: identity.ClientSessionID, ActorUserID: identity.UserID, MutationID: body.MutationID,
 			EventType: body.EventType, Payload: body.Payload, ClientTimestamp: body.ClientTimestamp,
@@ -319,7 +368,11 @@ func v1HeartbeatHandler(app *App) http.HandlerFunc {
 			return
 		}
 		ackOnly := r.URL.Query().Get("responseMode") != "full"
-		response := map[string]any{"attempt": nil, "runtime": nil, "refreshedAttemptCredential": nil}
+		// Plan C5: every heartbeat ack echoes the presence window so
+		// clients can coalesce beats after any write (save/poll/beat).
+		// nextHeartbeatSecs mirrors the server TTL (90s); clients skip
+		// standalone beats inside it.
+		response := map[string]any{"attempt": nil, "runtime": nil, "refreshedAttemptCredential": nil, "nextHeartbeatSecs": student.PresenceWindowSeconds()}
 		if !ackOnly {
 			response["attempt"] = attempt
 			response["runtime"], _ = loadStudentRuntimeContext(r.Context(), app.DB, chi.URLParam(r, "scheduleID"))

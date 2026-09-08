@@ -72,6 +72,21 @@ func normalizeRuntimeCommandAction(action string) string {
 	}
 }
 
+// ValidateRuntimeCommandAction normalizes + validates a runtime command
+// action WITHOUT touching the DB (round 57: fail-fast envelope). The
+// handler calls this before authz + schedule Get so an unknown action
+// 400s without burning a read; ApplyRuntimeCommand reuses it so the
+// single switch stays the vocabulary authority.
+func ValidateRuntimeCommandAction(action string) (string, error) {
+	normalized := normalizeRuntimeCommandAction(action)
+	switch normalized {
+	case CommandStart, CommandPause, CommandResume, CommandComplete:
+		return normalized, nil
+	default:
+		return "", validationError(fmt.Sprintf("Unknown runtime command %q.", strings.TrimSpace(action)))
+	}
+}
+
 // ProtocolVersionV2 is the only version minted for new attempts (V1
 // retirement stage 1; see plan 124 and migration 0049).
 const ProtocolVersionV2 = 2
@@ -250,18 +265,29 @@ func (s *Service) List(ctx context.Context) ([]Schedule, error) {
 
 // Create inserts a schedule row after validating the exam/version linkage
 // (mirrors create_schedule_in_transaction: version must belong to exam).
-func (s *Service) Create(ctx context.Context, req CreateRequest) (Schedule, error) {
+// ValidateCreateRequest checks the schedule-create envelope WITHOUT
+// touching the DB (round 59: fail-fast series). Create reuses it so the
+// single gate stays authoritative; callers needing pre-tx validation
+// (handlers) use it directly.
+func ValidateCreateRequest(req CreateRequest) error {
 	if strings.TrimSpace(req.ExamID) == "" {
-		return Schedule{}, validationError("Exam id is required.")
+		return validationError("Exam id is required.")
 	}
 	if strings.TrimSpace(req.PublishedVersionID) == "" {
-		return Schedule{}, validationError("Published version id is required.")
+		return validationError("Published version id is required.")
 	}
 	if strings.TrimSpace(req.CohortName) == "" {
-		return Schedule{}, validationError("Cohort name is required.")
+		return validationError("Cohort name is required.")
 	}
 	if !req.EndTime.After(req.StartTime) {
-		return Schedule{}, validationError("Schedule end time must be after start time.")
+		return validationError("Schedule end time must be after start time.")
+	}
+	return nil
+}
+
+func (s *Service) Create(ctx context.Context, req CreateRequest) (Schedule, error) {
+	if err := ValidateCreateRequest(req); err != nil {
+		return Schedule{}, err
 	}
 	id := uuid.NewString()
 	var created Schedule
@@ -323,10 +349,25 @@ func (s *Service) Get(ctx context.Context, id string) (Schedule, error) {
 	return sch, nil
 }
 
+// ValidateUpdateWindow checks an explicit start/end pair WITHOUT touching
+// the DB (round 62: fail-fast series). Both-nil means "keep existing"
+// and always passes here; the merged-window check inside the tx stays
+// authoritative (it sees the stored row). Handlers call this post-decode
+// so an inverted explicit window 400s before any read.
+func ValidateUpdateWindow(start, end *time.Time) error {
+	if start != nil && end != nil && !end.After(*start) {
+		return validationError("Schedule end time must be after start time.")
+	}
+	return nil
+}
+
 // Update applies schedule edits with revision fencing (mirrors
 // update_schedule; stale revision is a CONFLICT; version changes on
 // non-scheduled sessions are rejected).
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Schedule, error) {
+	if err := ValidateUpdateWindow(req.StartTime, req.EndTime); err != nil {
+		return Schedule{}, err
+	}
 	var updated Schedule
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		// SELECT ... FOR UPDATE on exam_schedules serializes editors.
@@ -431,15 +472,14 @@ func (s *Service) GetRuntime(ctx context.Context, scheduleID string) (Runtime, e
 // "Runtime changed; refresh before retrying."). Lock order everywhere:
 // schedule attempt rows -> runtime row -> section rows.
 func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cmd RuntimeCommand) (Runtime, error) {
-	cmd.Action = normalizeRuntimeCommandAction(cmd.Action)
+	normalized, err := ValidateRuntimeCommandAction(cmd.Action)
+	if err != nil {
+		return Runtime{}, err
+	}
+	cmd.Action = normalized
 	cmd.ActorID = strings.TrimSpace(cmd.ActorID)
 	if cmd.ActorID == "" {
 		cmd.ActorID = "system"
-	}
-	switch cmd.Action {
-	case CommandStart, CommandPause, CommandResume, CommandComplete:
-	default:
-		return Runtime{}, validationError(fmt.Sprintf("Unknown runtime command %q.", cmd.Action))
 	}
 
 	sch, err := s.Get(ctx, scheduleID)
@@ -652,24 +692,37 @@ func valueOrDefault(value *string, fallback string) string {
 // CreateRegistration inserts or idempotently replays a schedule registration
 // (mirrors create_student_registration: wcode + email validation, same-user
 // replay updates contact, cross-user wcode reuse is a CONFLICT).
-func (s *Service) CreateRegistration(ctx context.Context, scheduleID string, req RegistrationRequest) (Registration, error) {
+// ValidateRegistrationRequest checks the registration envelope WITHOUT
+// touching the DB (round 63: fail-fast series, entry-wave hot path).
+// CreateRegistration reuses it so the single gate stays authoritative;
+// the schedule existence/status gate necessarily stays inside the tx
+// (locked read — check and write cannot race).
+func ValidateRegistrationRequest(req RegistrationRequest) (string, error) {
 	wcode := NormalizeAccessCode(req.Wcode)
 	if err := ValidateWcode(wcode); err != nil {
-		return Registration{}, err
+		return "", err
 	}
 	if err := ValidateEmail(req.Email); err != nil {
-		return Registration{}, err
+		return "", err
 	}
 	if strings.TrimSpace(req.StudentName) == "" {
-		return Registration{}, validationError("Student name is required.")
+		return "", validationError("Student name is required.")
 	}
 	if strings.TrimSpace(req.UserID) == "" {
-		return Registration{}, validationError("User id is required.")
+		return "", validationError("User id is required.")
+	}
+	return wcode, nil
+}
+
+func (s *Service) CreateRegistration(ctx context.Context, scheduleID string, req RegistrationRequest) (Registration, error) {
+	wcode, err := ValidateRegistrationRequest(req)
+	if err != nil {
+		return Registration{}, err
 	}
 	// The existence/status gate lives inside the tx below (locked read), so the
 	// schedule cannot be cancelled, completed, or deleted between check and write.
 	var out Registration
-	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err2 := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		// Locked schedule gate first: rejects missing/cancelled/completed/deleted
 		// rows inside the tx so the check cannot race the registration write.
 		var schStatus string
@@ -731,11 +784,41 @@ func (s *Service) CreateRegistration(ctx context.Context, scheduleID string, req
 		out = reg
 		return nil
 	})
-	return out, err
+	return out, err2
 }
 
 // CreateScheduleAttempt mints one attempt row for a registration with
 // protocol_version=2 (V1 retirement stage 1: new rows never mint V1).
+// LookupAttemptByRegistration is the plan-D3 unique-key-first fast path: one
+// unlocked committed-read SELECT turns check-in retries (and pre-provisioned
+// attempts minted ahead of exam day) into 1 SELECT instead of the full mint
+// tx. found=false means the caller proceeds to CreateScheduleAttempt. The
+// scheduleID equality check keeps a cross-schedule registration_id collision
+// (should be impossible via UNIQUE, but fail-closed) from binding the wrong
+// schedule.
+func (s *Service) LookupAttemptByRegistration(ctx context.Context, scheduleID, registrationID string) (AttemptRef, bool, error) {
+	if s.db == nil {
+		return AttemptRef{}, false, nil
+	}
+	var ref AttemptRef
+	var proto sql.NullInt64
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT id, schedule_id, protocol_version FROM student_attempts WHERE registration_id = ?",
+		registrationID).Scan(&ref.AttemptID, &ref.ScheduleID, &proto); err != nil {
+		if err == sql.ErrNoRows {
+			return AttemptRef{}, false, nil
+		}
+		return AttemptRef{}, false, err
+	}
+	if ref.ScheduleID != scheduleID {
+		return AttemptRef{}, false, nil
+	}
+	if proto.Valid {
+		ref.ProtocolVersion = int(proto.Int64)
+	}
+	return ref, true, nil
+}
+
 func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registrationID, studentKey, candidateID, candidateName, candidateEmail, clientSessionID string) (AttemptRef, error) {
 	attemptID := uuid.NewString()
 	protocolVersion := ProtocolVersionV2
@@ -790,6 +873,9 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 		if _, err := q.ExecContext(ctx, "INSERT INTO student_attempts (id, schedule_id, registration_id, user_id, wcode, student_key, organization_id, exam_id, published_version_id, exam_title, candidate_id, candidate_name, candidate_email, phase, current_module, answers, writing_answers, flags, violations_snapshot, integrity, recovery, created_at, updated_at, revision, protocol_version, delivery_status, lease_epoch, control_epoch, response_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, '{}', '{}', '{}', '[]', '{}', ?, NOW(), NOW(), 0, ?, 'running', 1, 1, 0)", attemptID, scheduleID, regID, userID, regWcode, studentKey, nullableStrPtr(sch.OrganizationID), sch.ExamID, sch.PublishedVersionID, sch.ExamTitle, candidateID, candidateName, candidateEmail, currentModule, fmt.Sprintf("{\"clientSessionId\":%q}", clientSessionID), ProtocolVersionV2); err != nil {
 			if isDuplicateKey(err) {
 				return conflictError("Attempt already exists for this registration.")
+			}
+			if isForeignKeyViolation(err) {
+				return conflictError("Schedule references a missing exam or version; republish the schedule.")
 			}
 			return err
 		}
@@ -916,4 +1002,17 @@ func isDuplicateKey(err error) bool {
 	}
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "duplicate") && (strings.Contains(s, "entry") || strings.Contains(s, "unique") || strings.Contains(s, "1062"))
+}
+
+// isForeignKeyViolation reports a MySQL 1452 (child-row FK) failure:
+// the mint snapshotted a schedule pin (exam/version) whose parent row is
+// gone. Callers map it to a 409 naming the pin, never a 500 INTERNAL.
+// (Round 73: live rehearsal proved the raw driver error escaped WriteError
+// as unknown→500 on a stale-shaped DB.)
+func isForeignKeyViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "1452") || (strings.Contains(s, "foreign key") && strings.Contains(s, "fails"))
 }

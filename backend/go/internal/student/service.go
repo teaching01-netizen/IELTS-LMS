@@ -21,7 +21,32 @@ type CounterHook func(method string)
 type Service struct {
 	db       *sql.DB
 	onV1Read CounterHook
+	// presence is the plan-D2 in-memory liveness map (nil = inline tx
+	// path). Wired in BuildApp when PRESENCE_MODE=memory.
+	presence *PresenceMap
+	// rowFirst mirrors the plan-B3 posture (wired from ROW_FIRST_WRITES).
+	// When on, answer/flag readers for protocol-2 attempts resolve through
+	// the attempt_responses_v2 materializer; protocol-1 blobs stay
+	// column-authoritative. Off keeps today's column reads everywhere.
+	rowFirst bool
 }
+
+// SetRowFirst selects the B3 read-through posture. Chainable.
+func (s *Service) SetRowFirst(on bool) *Service {
+	s.rowFirst = on
+	return s
+}
+
+// SetPresence wires the plan-D2 memory path (chainable). Nil keeps the
+// inline per-beat tx.
+func (s *Service) SetPresence(p *PresenceMap) *Service {
+	s.presence = p
+	return s
+}
+
+// PresenceMap exposes the wired map (nil when inline). The handler routes
+// memory beats here; the worker flusher drains it.
+func (s *Service) PresenceMap() *PresenceMap { return s.presence }
 
 // NewService wires dependencies explicitly. A nil hook disables counting.
 func NewService(db *sql.DB, hook CounterHook) *Service {
@@ -94,6 +119,9 @@ type AuditRow struct {
 func (s *Service) GetSession(ctx context.Context, attemptID string) (Session, error) {
 	s.count("GetSession")
 	var out Session
+	if s.rowFirst {
+		return s.getSessionRowFirst(ctx, attemptID)
+	}
 	var answers sql.NullString
 	err := s.db.QueryRowContext(ctx, "SELECT id, schedule_id, phase, CAST(answers AS CHAR) FROM student_attempts WHERE id = ?", attemptID).Scan(&out.AttemptID, &out.ScheduleID, &out.Phase, &answers)
 	if err != nil {
@@ -162,6 +190,9 @@ func (s *Service) Precheck(ctx context.Context, attemptID string) (Precheck, err
 // DeprecatedV1: migration-only read path; do not add V1 mutation logic.
 func (s *Service) Bootstrap(ctx context.Context, attemptID string) (Bootstrap, error) {
 	s.count("Bootstrap")
+	if s.rowFirst {
+		return s.getBootstrapRowFirst(ctx, attemptID)
+	}
 	var out Bootstrap
 	err := s.db.QueryRowContext(ctx, "SELECT id, CAST(flags AS CHAR), CAST(recovery AS CHAR) FROM student_attempts WHERE id = ?", attemptID).Scan(&out.AttemptID, rawJSON(&out.Flags), rawJSON(&out.Recovery))
 	if err != nil {

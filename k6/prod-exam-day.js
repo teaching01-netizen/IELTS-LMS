@@ -85,9 +85,25 @@ function jsonHeaders(extra) {
   return Object.assign({ 'content-type': 'application/json' }, extra || {});
 }
 
-function pickFirstQuestionId(snapshot) {
-  // Heuristic: find the first `questions[].id`.
-  const stack = [snapshot];
+function pickQuestionIdInSection(snapshot, sectionKey) {
+  // Section-aware pick: search ONLY inside snapshot[sectionKey] so the
+  // chosen id resolves to the runtime's ACTIVE section (the V2 section
+  // gate 400s cross-section writes; round 123-125 root cause: the
+  // section-blind DFS could return an id from any section subtree).
+  const roots = [];
+  if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+    if (sectionKey && snapshot[sectionKey]) roots.push(snapshot[sectionKey]);
+    // Case-tolerant fallback: `Reading` vs `reading`.
+    if (!roots.length && sectionKey) {
+      for (const k of Object.keys(snapshot)) {
+        if (String(k).toLowerCase() === String(sectionKey).toLowerCase()) { roots.push(snapshot[k]); break; }
+      }
+    }
+    if (!roots.length) roots.push(snapshot);
+  } else {
+    roots.push(snapshot);
+  }
+  const stack = roots.slice();
   while (stack.length) {
     const value = stack.pop();
     if (!value || typeof value !== 'object') continue;
@@ -99,6 +115,16 @@ function pickFirstQuestionId(snapshot) {
       for (let i = 0; i < value.questions.length; i += 1) {
         const q = value.questions[i];
         if (q && typeof q === 'object' && typeof q.id === 'string' && q.id.length > 0) return q.id;
+      }
+    }
+    if (Array.isArray(value.blocks)) {
+      for (let i = 0; i < value.blocks.length; i += 1) {
+        const b = value.blocks[i];
+        if (b && typeof b === 'object' && Array.isArray(b.questions) && b.questions.length > 0) {
+          const q = b.questions[0];
+          if (q && typeof q === 'object' && typeof q.id === 'string' && q.id.length > 0) return q.id;
+        }
+        stack.push(b);
       }
     }
     for (const k of Object.keys(value)) stack.push(value[k]);
@@ -270,9 +296,13 @@ export function controlFlow() {
       continue;
     }
     const json = runtime.json();
-    const status = (((json || {}).data || {}).status || '').toString();
-    if (DEBUG) console.log(`[control] runtime status=${status}`);
-    if (status === 'live') break;
+    // The staff runtime endpoint returns the FLAT runtime object
+    // ({status:'live', actualStartAt, ...}), not a {data} envelope.
+    const rdata = (json || {}).data || json || {};
+    const status = (rdata.status || '').toString();
+    const startedShape = Boolean(rdata.actualStartAt || rdata.activeSectionKey || rdata.currentSectionKey);
+    if (DEBUG) console.log(`[control] runtime status=${status} startedShape=${startedShape}`);
+    if (status === 'live' || (status === '' && startedShape)) break;
     if (status === 'completed' || status === 'cancelled') {
       fail(
         `Schedule runtime is already ${status} for scheduleId=${scheduleId}. ` +
@@ -413,7 +443,9 @@ export function studentFlow() {
   const jitter = computeJitterSeconds(runId, student.wcode, maxJitter);
   sleep(jitter);
 
-  const entryResp = http.post(
+  // Plan D3: under ENTRY_GATE the entry wave is a queue, not an outage —
+  // 429s with queuePosition mean the gate held; poll entry until admitted.
+  let entryResp = http.post(
     `${baseUrl}/api/v1/auth/student/entry`,
     JSON.stringify({
       scheduleId,
@@ -423,6 +455,28 @@ export function studentFlow() {
     }),
     { jar, headers: jsonHeaders() },
   );
+  const entryQueueMaxWait = clampInt(__ENV.K6_ENTRY_QUEUE_MAX_SECONDS || '600', 0, 3600);
+  const entryQueueStart = Date.now();
+  while (entryResp.status === 429 && (Date.now() - entryQueueStart) / 1000 < entryQueueMaxWait) {
+    let retryAfter = 5;
+    try {
+      const body = entryResp.json();
+      const details = (body && (body.details || (body.error && body.error.details))) || {};
+      if (details.retryAfterSecs) retryAfter = clampInt(details.retryAfterSecs, 1, 60);
+      else if (details.retryAfterSeconds) retryAfter = clampInt(details.retryAfterSeconds, 1, 60);
+    } catch (e) { /* keep default backoff */ }
+    sleep(retryAfter);
+    entryResp = http.post(
+      `${baseUrl}/api/v1/auth/student/entry`,
+      JSON.stringify({
+        scheduleId,
+        wcode: student.wcode,
+        email: student.email,
+        studentName: student.fullName,
+      }),
+      { jar, headers: jsonHeaders() },
+    );
+  }
 
   check(entryResp, {
     'student entry 200': (r) => r.status === 200,
@@ -432,13 +486,12 @@ export function studentFlow() {
   const clientSessionId = uuidV4();
   const bootstrapResp = http.post(
     `${baseUrl}/api/v1/student/sessions/${scheduleId}/bootstrap`,
+    // V1 bootstrap requires populated candidate identity (candidateId +
+    // name + email); empty strings 422. Mirror the entry identity here.
     JSON.stringify({
-      wcode: student.wcode,
-      email: student.email,
-      studentKey: '',
-      candidateId: '',
-      candidateName: '',
-      candidateEmail: '',
+      candidateId: student.wcode,
+      candidateName: student.fullName,
+      candidateEmail: student.email,
       clientSessionId,
     }),
     { jar, headers: jsonHeaders(csrfHeader(jar, baseUrl)) },
@@ -450,7 +503,9 @@ export function studentFlow() {
   if (DEBUG) console.log(`[student ${__VU}] bootstrap ok`);
 
   const bootstrapJson = bootstrapResp.json();
-  const ctx = bootstrapJson && bootstrapJson.data;
+  // Bootstrap returns the FLAT session context (no `data` envelope —
+  // same shape as the session GET, proven round 116). Read both.
+  const ctx = (bootstrapJson && (bootstrapJson.data || bootstrapJson)) || {};
   const attempt = ctx && ctx.attempt;
   const attemptId = (attempt && attempt.id) || '';
   let attemptToken = (ctx && ctx.attemptCredential && ctx.attemptCredential.attemptToken) || '';
@@ -461,15 +516,19 @@ export function studentFlow() {
   }
 
   // Persist precheck (2-step UI equivalent; backend only needs a snapshot).
+  // Identity mirrors the fixed bootstrap body (round 108): populated
+  // candidateId/Name/Email — empty strings fail the identity gate.
   const precheckResp = http.post(
     `${baseUrl}/api/v1/student/sessions/${scheduleId}/precheck`,
+    // DecodeLimited rejects unknown fields: only the handler's wire
+    // fields may be sent — and the attempt MUST ride the Authorization
+    // bearer (attemptIDFromStudentWire falls back to bearer claims when
+    // body attemptId is absent; no bearer => 422 "Attempt is required").
     JSON.stringify({
-      wcode: student.wcode,
-      email: student.email,
       studentKey: '',
-      candidateId: '',
-      candidateName: '',
-      candidateEmail: '',
+      candidateId: student.wcode,
+      candidateName: student.fullName,
+      candidateEmail: student.email,
       clientSessionId,
       preCheck: {
         browser: 'chromium',
@@ -480,7 +539,12 @@ export function studentFlow() {
       },
       deviceFingerprintHash: null,
     }),
-    { jar, headers: jsonHeaders(csrfHeader(jar, baseUrl)) },
+    {
+      jar,
+      headers: jsonHeaders(
+        Object.assign({}, csrfHeader(jar, baseUrl), { authorization: `Bearer ${attemptToken}` }),
+      ),
+    },
   );
 
   check(precheckResp, {
@@ -499,12 +563,16 @@ export function studentFlow() {
       continue;
     }
     const json = sessionResp.json();
-    const status = (((json || {}).data || {}).runtime || {}).status || '';
+    // Session context is FLAT ({runtime:{status:'live',...}}, no `data`
+    // envelope — proven live round 116). Read both shapes.
+    const rt = ((json || {}).runtime || (((json || {}).data || {}).runtime || {}));
+    const status = rt.status || '';
+    const startedShape = Boolean(rt.actualStartAt || rt.activeSectionKey || rt.currentSectionKey);
     if (DEBUG && Date.now() - lastStatusLogAt > 5000) {
       lastStatusLogAt = Date.now();
-      console.log(`[student ${__VU}] runtime status=${status}`);
+      console.log(`[student ${__VU}] runtime status=${status} startedShape=${startedShape}`);
     }
-    if (status === 'live') break;
+    if (status === 'live' || (status === '' && startedShape)) break;
     if (status === 'completed' || status === 'cancelled') {
       fail(
         `Student ${student.wcode} cannot start: runtime already ${status} for scheduleId=${scheduleId}. ` +
@@ -516,9 +584,16 @@ export function studentFlow() {
   if (DEBUG) console.log(`[student ${__VU}] runtime live; working`);
 
   // Act like a real client for a short interval: heartbeats + position + some answers.
+  // sessLive tracks the latest session-context runtime (active section +
+  // epochs); refreshed every work loop below.
+  let sessLive = null;
   const workSeconds = clampInt(__ENV.K6_STUDENT_WORK_SECONDS || '60', 10, 1800);
   const heartbeatEverySeconds = clampInt(__ENV.K6_STUDENT_HEARTBEAT_SECONDS || '10', 5, 120);
-  const firstQuestionId = contentSnapshot ? pickFirstQuestionId(contentSnapshot) : '';
+  // Pick inside the runtime's live section (session context carries the
+  // active section; default `listening` matches the E2E runtime shape).
+  const bootRuntime = (ctx && ctx.runtime) || {};
+  const bootSection = bootRuntime.activeSectionKey || bootRuntime.currentSectionKey || 'listening';
+  const firstQuestionId = contentSnapshot ? pickQuestionIdInSection(contentSnapshot, bootSection) : '';
   const firstWritingTaskId = contentSnapshot ? pickFirstWritingTaskId(contentSnapshot) : '';
   const workStartedAt = Date.now();
   let lastHbAt = 0;
@@ -547,17 +622,25 @@ export function studentFlow() {
       );
       if (hbResp.status === 200) {
         try {
+          // Heartbeat acks are FLAT ({refreshedAttemptCredential, ...});
+          // older reads used a `data` envelope and silently dropped the
+          // rotated token, dying later with "session is not recognized".
           const json = hbResp.json();
-          const refreshed =
-            (((json || {}).data || {}).refreshedAttemptCredential || {}).attemptToken;
+          const hbody = (json && (json.data || json)) || {};
+          const refreshed = (hbody.refreshedAttemptCredential || {}).attemptToken;
           if (refreshed) attemptToken = refreshed;
         } catch (_) {}
       }
     }
 
     // Every loop: send a small mutation batch that mirrors the UI adapter behavior.
+    // V2 section gate (round 123): only questions in the runtime's ACTIVE
+    // section persist — the script cycles modules, but the E2E runtime sits
+    // in `listening`, so reading/writing answers 400. Track the live
+    // section from the session poll and answer only inside it.
     const nowIso = new Date().toISOString();
-    const module = seq % 3 === 0 ? 'writing' : seq % 2 === 0 ? 'reading' : 'listening';
+    const liveSection = (sessLive && sessLive.activeSectionKey) || 'listening';
+    const module = liveSection;
     const mutations = [
       {
         id: uuidV4(),
@@ -604,6 +687,57 @@ export function studentFlow() {
       seq += 1;
     }
 
+    // V2-protocol attempts persist real answers via the V2 responses
+    // batch (required: submit seals only when attempt_responses_v2 is
+    // non-empty). V1 attempts use the session mutation batch.
+    // Epochs are refreshed from the session context every loop: the
+    // runtime start / proctor heartbeat can bump control_epoch mid-run,
+    // and a stale epoch 400s the whole batch (no responses stored).
+    try {
+      // Session context is FLAT (no `data` envelope — round 116).
+      const sess = http.get(`${baseUrl}/api/v1/student/sessions/${scheduleId}`, { jar, headers: jsonHeaders() });
+      if (sess.status === 200) {
+        const sj = sess.json();
+        const sbody = (sj && (sj.data || sj)) || {};
+        const sa = sbody.attempt || {};
+        if (sa.leaseEpoch) attempt.leaseEpoch = sa.leaseEpoch;
+        if (sa.controlEpoch) attempt.controlEpoch = sa.controlEpoch;
+        const sat = (sbody.attemptCredential || {}).attemptToken;
+        if (sat) attemptToken = sat;
+        if (sbody.runtime) sessLive = sbody.runtime;
+      }
+    } catch (_) {}
+    const v2proto = (attempt && attempt.protocolVersion) || ((ctx && ctx.protocolVersion) || '');
+    const useV2Batch = String(v2proto) === '2';
+    if (useV2Batch) {
+      const cmds = [];
+      for (const m of mutations) {
+        if (m.mutationType === 'answer' && m.payload && m.payload.questionId) {
+          cmds.push({ writeId: m.id, questionId: String(m.payload.questionId), clientVersion: 1, response: { answer: String(m.payload.value) } });
+        } else if (m.mutationType === 'writing_answer' && m.payload && m.payload.taskId) {
+          cmds.push({ writeId: m.id, questionId: String(m.payload.taskId), clientVersion: 1, response: { answer: String(m.payload.value) } });
+        }
+      }
+      if (cmds.length > 0) {
+        const batchResp = http.post(
+          `${baseUrl}/api/v2/student/attempts/${attemptId}/responses:batch`,
+          JSON.stringify({ leaseEpoch: attempt.leaseEpoch || 1, controlEpoch: attempt.controlEpoch || 0, commands: cmds }),
+          {
+            jar,
+            // V2 batch is cookie-session authed: CSRF required alongside
+            // the attempt bearer (round 120: bearer-only => CSRF_REJECTED).
+            headers: jsonHeaders(
+              Object.assign({}, csrfHeader(jar, baseUrl), { authorization: `Bearer ${attemptToken}` }),
+            ),
+            responseCallback: EXPECT_2XX_OR_409,
+          },
+        );
+        check(batchResp, { 'v2 response batch 200/409 ok': (r) => r.status === 200 || r.status === 409 }) ||
+          fail(`V2 batch failed (${student.wcode}): status=${batchResp.status} body=${batchResp.body.slice(0, 200)}`);
+      }
+      sleep(2);
+      continue;
+    }
     const mutationResp = http.post(
       `${baseUrl}/api/v1/student/sessions/${scheduleId}/mutations:batch`,
       JSON.stringify({
@@ -628,8 +762,8 @@ export function studentFlow() {
     if (mutationResp.status === 200) {
       try {
         const json = mutationResp.json();
-        const refreshed =
-          (((json || {}).data || {}).refreshedAttemptCredential || {}).attemptToken;
+        const mbody = (json && (json.data || json)) || {};
+        const refreshed = (mbody.refreshedAttemptCredential || {}).attemptToken;
         if (refreshed) attemptToken = refreshed;
       } catch (_) {}
     }
@@ -637,10 +771,25 @@ export function studentFlow() {
     sleep(2);
   }
 
-  // Submit (end of exam).
+  // Submit (end of exam). V1 attempts seal via the V1 session submit;
+  // V2-protocol attempts (IELTS E2E schedules mint protocol_version=2)
+  // seal via the V2 submit, which the V1 handler refuses by design (409
+  // "Attempt uses the V2 response protocol"). Probe the attempt protocol
+  // from the bootstrap context: V2 attempts carry protocolVersion/response
+  // shape; fall back to attemptToken prefix heuristic when absent.
+  const attemptProtocol = (attempt && attempt.protocolVersion) || ((ctx && ctx.protocolVersion) || '');
+  const isV2Attempt = String(attemptProtocol) === '2' || attemptToken.indexOf('.') < 0;
+  const submitUrl = isV2Attempt
+    ? `${baseUrl}/api/v2/student/attempts/${attemptId}/submit`
+    : `${baseUrl}/api/v1/student/sessions/${scheduleId}/submit`;
+  // V2 submit requires the live lease/control epochs from bootstrap
+  // (fail-fast 400/422 otherwise); V1 needs attemptId + studentKey.
+  const submitBody = isV2Attempt
+    ? { submissionId: uuidV4(), leaseEpoch: attempt.leaseEpoch || 1, controlEpoch: attempt.controlEpoch || 0, finalCommands: [] }
+    : { attemptId, studentKey: '' };
   const submitResp = http.post(
-    `${baseUrl}/api/v1/student/sessions/${scheduleId}/submit`,
-    JSON.stringify({ attemptId, studentKey: '' }),
+    submitUrl,
+    JSON.stringify(submitBody),
     {
       jar,
       headers: jsonHeaders({
@@ -658,17 +807,18 @@ export function studentFlow() {
   if (submitResp.status === 200) {
     try {
       const json = submitResp.json();
-      const refreshed =
-        (((json || {}).data || {}).refreshedAttemptCredential || {}).attemptToken;
+      const sbody = (json && (json.data || json)) || {};
+      const refreshed = (sbody.refreshedAttemptCredential || {}).attemptToken;
       if (refreshed) attemptToken = refreshed;
     } catch (_) {}
   }
 
-  // Verify submitted_at is set in session context.
+  // Verify submitted_at is set in session context (flat shape).
   const afterSubmit = http.get(`${baseUrl}/api/v1/student/sessions/${scheduleId}`, { jar, headers: jsonHeaders() });
   if (afterSubmit.status === 200) {
     const json = afterSubmit.json();
-    const submittedAt = (((json || {}).data || {}).attempt || {}).submittedAt;
+    const abody = (json && (json.data || json)) || {};
+    const submittedAt = (abody.attempt || {}).submittedAt;
     const ok = Boolean(submittedAt);
     check({ ok }, { 'attempt submittedAt present': (v) => v.ok === true });
     if (!ok) fail(`Missing attempt.submittedAt after submit (${student.wcode}).`);

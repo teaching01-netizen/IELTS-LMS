@@ -56,12 +56,24 @@ function isLiveUpdateEvent(frame: unknown): frame is LiveUpdateEvent {
   );
 }
 
+// Plan C1: STUDENT_ROLE_SOCKET_RETIRED — student sockets are retired in favor
+// of the versioned runtime poll (GET .../runtime?sinceRevision=). The student
+// exam hook must NOT open this socket (pass role: 'proctor-observer' only for
+// staff surfaces, or leave enabled=false). This hook stays for proctor-only
+// live updates; student callers migrate to createStudentRuntimePoll.
+export const STUDENT_ROLE_SOCKET_RETIRED = 'STUDENT_WS_RETIRED' as const;
+
 export function useLiveUpdates(options: {
   scheduleId?: string;
   attemptId?: string;
   lastSeenRuntimeRevision?: number;
   enabled?: boolean;
   debounceMs?: number;
+  // role gates the socket: 'student' short-circuits to disconnected (the
+  // server answers 410 STUDENT_WS_RETIRED; do not burn reconnect loops).
+  // Staff surfaces pass 'proctor-observer'. Defaults to proctor-observer
+  // for backward compatibility with existing staff callers.
+  role?: 'student' | 'proctor-observer';
   onConnected?: () => void;
   onDisconnected?: () => void;
   onError?: (error: { code?: string; message?: string }) => void;
@@ -111,6 +123,13 @@ export function useLiveUpdates(options: {
   }, [options.lastSeenRuntimeRevision]);
 
   useEffect(() => {
+    // Plan C1: student role never opens the socket. Report disconnected so
+    // callers fall back to the runtime poll (no 410 round-trip, no retry
+    // storm, zero student sockets — the 1M enabler).
+    if (options.role === 'student') {
+      onDisconnectedRef.current?.();
+      return () => undefined;
+    }
     const staticUrl = buildLiveUpdatesUrl({
       ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
       ...(options.attemptId ? { attemptId: options.attemptId } : {}),

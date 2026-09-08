@@ -25,6 +25,8 @@ const credentialRefreshes = new Map<string, Promise<boolean>>();
 
 export interface SatHeartbeatResponse {
   refreshedAttemptCredential?: BackendAttemptCredential | null;
+  /** Plan C5: server-echoed presence window (coalesce beats inside it). */
+  nextHeartbeatSecs?: number | null;
 }
 
 function attemptKey(scheduleId: string, attemptId: string): string {
@@ -128,11 +130,21 @@ export const assessmentDeliveryApi = {
     ));
   },
 
-  bootstrap(scheduleId: string, attemptId: string): Promise<AssessmentDeliveryBootstrap> {
+  // Plan C4: conditional bootstrap — If-None-Match makes reconnects a 304
+  // (zero bytes) instead of a full version re-fetch. Pass the cached ETag
+  // from createBootstrapCache; null = first fetch.
+  bootstrap(
+    scheduleId: string,
+    attemptId: string,
+    ifNoneMatch?: string | null,
+  ): Promise<AssessmentDeliveryBootstrap> {
     return attemptRequest(scheduleId, attemptId, (config) => backendPost<AssessmentDeliveryBootstrap>(
       `/v1/assessment-delivery/schedules/${scheduleId}/bootstrap`,
       undefined,
-      config,
+      {
+        ...config,
+        ...(ifNoneMatch ? { headers: { ...config.headers, 'If-None-Match': ifNoneMatch } } : {}),
+      },
     ));
   },
 

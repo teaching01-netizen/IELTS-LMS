@@ -102,9 +102,24 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // WriteError renders the stable error envelope without leaking internals (plan 12).
+// Unknown (non-apperrors) errors render INTERNAL and fire the unknown-error
+// hook so operators can count + locate masking bugs (round 74: the live
+// entry funnel proved raw driver errors escape here silently). The hook
+// defaults to a no-op log line; tests override it via SetUnknownHook.
+var unknownHook = func(r *http.Request, err error) {}
+
+// SetUnknownHook overrides the unknown-error hook (tests + alternate sinks).
+// It returns a restore function.
+func SetUnknownHook(fn func(r *http.Request, err error)) func() {
+	prev := unknownHook
+	unknownHook = fn
+	return func() { unknownHook = prev }
+}
+
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	appErr, ok := apperrors.As(err)
 	if !ok {
+		unknownHook(r, err)
 		appErr = apperrors.New(apperrors.CodeInternal, "Internal server error.")
 	}
 	WriteJSON(w, appErr.HTTPStatus, apperrors.Envelope{

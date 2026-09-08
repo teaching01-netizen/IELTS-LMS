@@ -257,7 +257,9 @@ func (s *Service) ApplyMutationBatch(ctx context.Context, req V1MutationBatchReq
 	if s.db == nil {
 		return V1MutationBatchResponse{}, apperrors.New(apperrors.CodeServiceUnavailable, "Student service is unavailable.")
 	}
-	sqlTx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	// B1: attempt-locked batch write on one PK row + idempotency probes
+	// (RC-safe; serialization comes from the attempt FOR UPDATE, not RR).
+	sqlTx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return V1MutationBatchResponse{}, err
 	}

@@ -26,7 +26,7 @@ import {
 const EXPECT_2XX_OR_409 = http.expectedStatuses({ min: 200, max: 299 }, 409);
 const DEBUG = __ENV.K6_DEBUG === 'true';
 
-const submitRequestMs = new Trend('submit_request_ms', true);
+const submitRequestMs = new Trend('submit_request_ms');
 const submitCorrectnessFailures = new Counter('submit_correctness_failures');
 const submitMissingData = new Counter('submit_missing_data');
 

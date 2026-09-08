@@ -445,6 +445,12 @@ func schedulesCreateHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
+		// Round 60 fail-fast: malformed envelope 400s before the builder
+		// preview check + exam Get (no DB read burned on bad input).
+		if verr := schedules.ValidateCreateRequest(schedules.CreateRequest{ExamID: req.ExamID, PublishedVersionID: req.PublishedVersionID, CohortName: req.CohortName, StartTime: req.StartTime, EndTime: req.EndTime}); verr != nil {
+			httpx.WriteError(w, r, verr)
+			return
+		}
 		if sess.Role == auth.RoleBuilder {
 			if !isPreviewRuntimeSchedule(schedules.Schedule{CohortName: req.CohortName}) {
 				httpx.WriteError(w, r, apperrors.New(apperrors.CodeForbidden, "Builders may only create isolated preview schedules."))
@@ -538,6 +544,13 @@ func schedulesUpdateHandler(app *App) http.HandlerFunc {
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
+			return
+		}
+		// Round 62 fail-fast: explicitly inverted window 400s before
+		// the FOR UPDATE row lock (merged-window check in the tx stays
+		// authoritative for single-sided patches).
+		if verr := schedules.ValidateUpdateWindow(req.StartTime, req.EndTime); verr != nil {
+			httpx.WriteError(w, r, verr)
 			return
 		}
 		id := chi.URLParam(r, "id")
@@ -649,6 +662,12 @@ func schedulesRuntimeCommandHandler(app *App) http.HandlerFunc {
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
+			return
+		}
+		// Round 57 fail-fast: unknown actions 400 before authz + schedule
+		// Get (no DB read burned on a malformed command).
+		if _, verr := schedules.ValidateRuntimeCommandAction(req.Action); verr != nil {
+			httpx.WriteError(w, r, verr)
 			return
 		}
 		id := chi.URLParam(r, "id")

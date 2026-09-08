@@ -58,6 +58,16 @@ func ValidateSaveEnvelope(cmd SaveResponsesCommand) error {
 	if len(cmd.Commands) > MaxBatchCommands {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Too many commands in batch.", HTTPStatus: 400}
 	}
+	// I2: duplicate write IDs within one batch can never be intentional
+	// (clients mint UUIDs) and would otherwise insert-or-conflict against
+	// itself mid-tx. Fail closed at the envelope, before any tx begins.
+	seen := make(map[string]struct{}, len(cmd.Commands))
+	for _, c := range cmd.Commands {
+		if _, dup := seen[c.WriteID]; dup {
+			return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Duplicate write id in batch.", HTTPStatus: 400}
+		}
+		seen[c.WriteID] = struct{}{}
+	}
 	for _, c := range cmd.Commands {
 		if err := ValidateCommand(c); err != nil {
 			return err

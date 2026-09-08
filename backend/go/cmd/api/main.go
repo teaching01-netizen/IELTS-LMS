@@ -30,6 +30,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/config"
+	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/db"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/objectstore"
@@ -78,9 +79,70 @@ type App struct {
 	LiveBus         *liveupdates.Bus
 	LiveHub         *liveupdates.Hub
 	Leases          *liveupdates.LeaseRepository
+	// Admission is the plan-C2 in-memory WS gate. Always non-nil (db mode
+	// leaves it unused; memory mode serves acquires with zero SQL).
+	Admission *liveupdates.Admission
 	Outbox          *outbox.Repository
 	Secret          []byte
 	LiveForwardOnce sync.Once
+	// SessionCache is the plan-A2 in-process session LRU. Always non-nil
+	// (disabled cache = never stores, never hits = today's behavior).
+	// Wired in BuildApp so authMiddleware serves hits with zero SQL.
+	SessionCache *auth.SessionCache
+	// EntryGate is the plan-D3 per-schedule check-in bucket. Always non-nil
+	// (off = present-but-unused, today's shape untouched). Wired in BuildApp
+	// from ENTRY_PER_SEC_PER_SCHEDULE/ENTRY_BURST.
+	EntryGate *entryGate
+	// Versions is the plan-D1 versionID -> assembled-tree VersionCache.
+	Versions *delivery.VersionCache
+	// RuntimeSnapshots is the plan-B2 schedule -> runtime SnapshotCache.
+	// Always non-nil (off = present-but-unused, today's FOR UPDATE path
+	// untouched). Wired in BuildApp so V2 handlers share one TTL view.
+	RuntimeSnapshots *runtime.SnapshotCache
+}
+
+// RowFirst reports the plan-B3 row-first posture (config-derived, so it is
+// assertable without a pool; services are wired from the same flag in
+// BuildApp when a pool is present).
+func (a *App) RowFirst() bool {
+	return a != nil && a.Config.RowFirstWrites
+}
+
+// RuntimeLockerFor returns the RuntimeLocker for V2 writes under the
+// RUNTIME_SNAPSHOT posture: on = shared snapshotLocker (committed-read
+// pre-gate, zero SQL on fresh+live TTL hits; exactly one sync refresh +
+// retry on stale, then today's 422/409); off = v2Locker (today's
+// runtime + section FOR UPDATE path). Never nil.
+func (a *App) RuntimeLockerFor() attempts.RuntimeLocker {
+	if a != nil && a.Config.RuntimeSnapshotEnabled && a.DB != nil && a.RuntimeSnapshots != nil {
+		return snapshotLocker{db: a.DB, cache: a.RuntimeSnapshots}
+	}
+	return v2Locker{}
+}
+
+// AttemptVerifyMode surfaces the plan-A3 bearer-verification posture so all
+// attempt-bearer handlers route identically through verifyAttemptBearer:
+// strict = HMAC + expiry + attempt_sessions DB binding (ship default);
+// stateless = HMAC + expiry only, zero SQL (binding enforced against the
+// locked attempt row in-tx + URL params at the edge).
+func (a *App) AttemptVerifyMode() auth.AttemptVerifyMode {
+	if a == nil {
+		return auth.AttemptVerifyStrict
+	}
+	if a.Config.AttemptVerifyStateless() {
+		return auth.AttemptVerifyStateless
+	}
+	return auth.AttemptVerifyStrict
+}
+
+// verifyAttemptBearer is the single bearer-verification choke point for all
+// attempt-bearer handlers (delivery x5, v1 identity, domain wire, v2
+// snapshot). One call site to audit; posture flips via ATTEMPT_VERIFY.
+// Strict performs the attempt_sessions DB binding; stateless verifies HMAC +
+// expiry only (zero SQL) and relies on downstream binding checks (attempt
+// row in-tx + URL params at the edge, which every caller already performs).
+func verifyAttemptBearer(app *App, r *http.Request, bearer string) (crypto.AttemptClaims, error) {
+	return auth.VerifyAttemptTokenRouted(r.Context(), app.DB, app.Config, app.AttemptVerifyMode(), time.Now().UTC(), bearer)
 }
 
 // BuildApp composes the application from validated config + open pool.
@@ -91,20 +153,34 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 	if cap <= 0 {
 		cap = 10000
 	}
-	app := &App{Config: cfg, DB: pool, Limiter: httpx.NewBucketStore(cap)}
+	app := &App{Config: cfg, DB: pool, Limiter: httpx.NewBucketStore(cap), SessionCache: auth.NewSessionCache(auth.SessionCacheConfig{
+		Enabled:           cfg.SessionCacheEnabled,
+		MaxEntries:        cfg.SessionCacheMax,
+		TouchCoalesceSecs: cfg.SessionTouchCoalesce(),
+	}), RuntimeSnapshots: runtime.NewSnapshotCache(runtime.SnapshotTTL),
+		// Plan D1: always non-nil (off = present-but-unused, today's N+1
+		// path untouched). Wired into Delivery when VERSION_CACHE=on.
+		Versions: delivery.NewVersionCache(delivery.VersionCacheMaxVersions),
+		// Plan D3: always non-nil (off = present-but-unused). Wired from
+		// ENTRY_PER_SEC_PER_SCHEDULE/ENTRY_BURST (clamped in config).
+		EntryGate: newEntryGate(entryGateConfig{PerSec: cfg.EntryPerSec, Burst: cfg.EntryBurst})}
 	if pool != nil {
 		app.Tx = tx.NewRunner(pool)
 		secret := []byte(cfg.AuthSecret)
 		app.Secret = secret
 		outbx := outbox.NewRepository(pool)
 		app.Outbox = outbx
-		app.Terminal = terminalization.NewService(app.Tx, nil, nil)
-		app.Attempts = attempts.NewService(app.Tx, clock.System{}, secret)
+		app.Terminal = terminalization.NewService(app.Tx, nil, nil).SetOutboxExecOnly(cfg.OutboxExecOnly)
+		app.Attempts = attempts.NewService(app.Tx, clock.System{}, secret).SetRowFirst(cfg.RowFirstWrites)
 		app.Exams = exams.NewService(pool, app.Tx)
 		app.Schedules = schedules.NewService(pool, app.Tx)
-		app.Student = student.NewService(pool, nil)
+		app.Student = student.NewService(pool, nil).SetRowFirst(cfg.RowFirstWrites)
+		// Plan D2: memory presence (off/inline = untouched per-beat tx).
+		if cfg.PresenceMemory() {
+			app.Student.SetPresence(student.NewPresenceMap(student.DefaultPresenceTTL))
+		}
 		assign := proctor.SQLAssignmentChecker{}
-		app.Proctor = proctor.NewService(app.Tx, pool, app.Terminal, nil, assign)
+		app.Proctor = proctor.NewService(app.Tx, pool, app.Terminal, nil, assign).SetOutboxExecOnly(cfg.OutboxExecOnly)
 		app.Grading = grading.NewService(pool, app.Tx)
 		app.Results = results.NewService(pool)
 		app.Media = media.NewService(pool, app.Tx, objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot))
@@ -116,12 +192,16 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.ACT = act.NewService(pool, app.Tx)
 		app.Terminal.SetAttemptScorer(app.ACT)
 		app.Release = release.NewService(pool)
-		app.Runtime = runtime.NewService(app.Tx, nil)
+		app.Runtime = runtime.NewService(app.Tx, nil).SetOutboxExecOnly(cfg.OutboxExecOnly).SetSnapshotCache(app.RuntimeSnapshots)
 		// Each API process needs a distinct bus origin so the forwarder can
 		// distinguish local post-commit fanout from events written by peers.
 		app.LiveBus = liveupdates.NewBus(pool, uuid.NewString())
 		app.LiveHub = liveupdates.NewHub()
-		app.Delivery = delivery.NewService(pool, app.Tx).SetLive(app.LiveBus.Origin(), app.LiveHub).SetCompleter(func(ctx context.Context, scheduleID, attemptID string) error {
+		deliverySvc := delivery.NewService(pool, app.Tx).SetLive(app.LiveBus.Origin(), app.LiveHub).SetLiveDirect(cfg.IsDirect()).SetLiveSink(app.LiveBus, cfg.LiveBusSink)
+		if cfg.VersionCacheEnabled {
+			deliverySvc.SetVersionCache(app.Versions)
+		}
+		app.Delivery = deliverySvc.SetCompleter(func(ctx context.Context, scheduleID, attemptID string) error {
 			var providerKey string
 			if err := pool.QueryRowContext(ctx, "SELECT e.provider_key FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id WHERE a.id = ? AND a.schedule_id = ?", attemptID, scheduleID).Scan(&providerKey); err != nil {
 				return err
@@ -142,16 +222,29 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 			}
 		})
 		app.Leases = liveupdates.NewLeaseRepository(pool)
+		app.Admission = liveupdates.NewAdmission(liveupdates.AdmissionCaps{
+			Total:       cfg.WSCapTotal,
+			PerUser:     cfg.WSCapUser,
+			PerSchedule: cfg.WSCapSchedule,
+			TTL:         liveupdates.LeaseTTL,
+		})
 	}
 	return app
 }
 
 func main() {
 	cfg := config.Load()
+	// Round 75: unknown-error hook logs the raw error server-side so
+	// masking bugs (raw driver errors escaping as silent 500s) self-
+	// report in the deploy log. The client envelope stays INTERNAL
+	// (no internals leak); only the route + error text are logged.
+	httpx.SetUnknownHook(func(r *http.Request, err error) {
+		log.Printf(`{"level":"error","msg":"unknown error masked as 500","route":%q,"err":%q}`, r.URL.Path, err.Error())
+	})
 	if err := cfg.ValidateForRuntime(); err != nil {
 		log.Fatalf("api: invalid config: %v", err)
 	}
-	pool, err := db.Open(cfg)
+	pool, err := db.OpenRole(cfg, db.RoleAPI)
 	if err != nil {
 		log.Fatalf("api: open db: %v", err)
 	}
@@ -164,6 +257,8 @@ func main() {
 	}
 
 	app := BuildApp(cfg, pool)
+	// Plan E3: report absorbed tx transients on db_deadlocks_total{kind}.
+	defer installTxRetryHook()()
 	srvCfg := httpx.DefaultServerConfig()
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
@@ -353,6 +448,12 @@ func BuildRouter(app *App) http.Handler {
 			})
 			r.With(limitTier(app, httpx.TierPolling, attemptKey())).Group(func(r chi.Router) {
 				route(r, "GET", "/{scheduleID}/live", v1LiveHandler(app))
+				// Plan C3: versioned runtime poll (the 1M enabler). 304 on
+				// steady state; adaptive pollAfterSecs (2s fast-lane 60s
+				// after control commands, 25s steady). Visibility bound:
+				// control effects land within pollAfterSecs; write gates
+				// enforce regardless of poll lag.
+				route(r, "GET", "/{scheduleID}/runtime", runtimePollHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierHeartbeat, attemptKey())).Group(func(r chi.Router) {
 				route(r, "POST", "/{scheduleID}/heartbeat", v1HeartbeatHandler(app))
@@ -366,6 +467,9 @@ func BuildRouter(app *App) http.Handler {
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/proctor", func(r chi.Router) {
 			route(r, "GET", "/sessions", proctorSessionsHandler(app))
 			route(r, "GET", "/sessions/{scheduleID}", proctorSessionHandler(app))
+			// Plan D4: paginated roster (?cursorUpdatedAt, ?cursorID,
+			// ?limit, ?status). Additive; the full detail endpoint stays.
+			route(r, "GET", "/sessions/{scheduleID}/roster", proctorRosterHandler(app))
 			route(r, "GET", "/notes", proctorAllSessionNotesHandler(app))
 			route(r, "DELETE", "/notes/{noteID}", proctorSessionNoteDeleteByIDHandler(app))
 			route(r, "GET", "/sessions/{scheduleID}/notes", proctorSessionNotesListHandler(app))
@@ -496,24 +600,32 @@ func BuildRouter(app *App) http.Handler {
 // in one tier can never starve another. The backstop has no DB checker: it
 // is a local-only abuse floor. A nil DB (tests without a pool) yields a
 // local-only TierSet that still isolates tiers in-memory.
+//
+// Plan A1 (RATE_LIMIT_MODE): local skips wiring DB checkers entirely (zero
+// per-request DB verdicts — single-deploy: local IS global); dual preserves
+// today's wiring. buildTierSet also mirrors the mode onto the TierSet flag
+// so tests and future admin endpoints can flip posture without rewiring.
 func buildTierSet(app *App) {
 	cfg := app.Config
 	burst := cfg.RateLimitBucketCap
 	if burst < 0 {
 		burst = 0
 	}
-	perMin := map[string]int{
-		httpx.TierAuthCritical: cfg.RateLimitAuthCriticalPerMin,
-		httpx.TierAnonAuth:     cfg.RateLimitAnonAuthPerMin,
-		httpx.TierAuthedReads:  cfg.RateLimitAuthedReadsPerMin,
-		httpx.TierPolling:      cfg.RateLimitPollingPerMin,
-		httpx.TierHeartbeat:    cfg.RateLimitHeartbeatPerMin,
-		httpx.TierWrites:       cfg.RateLimitWritesPerMin,
-		httpx.TierBackstop:     cfg.RateLimitBackstopPerMin,
-	}
+	// Plan E2: exam windows rebalance budgets toward submit/seal/autosave
+	// (writes never shed) at the expense of poll/heartbeat/admin reads.
+	// Off = ship budgets (rollback = flip + redeploy).
+	perMin := config.ApplyShedMode(cfg.ShedMode, map[string]int{
+		httpx.TierWrites:      cfg.RateLimitWritesPerMin,
+		httpx.TierPolling:     cfg.RateLimitPollingPerMin,
+		httpx.TierHeartbeat:   cfg.RateLimitHeartbeatPerMin,
+		httpx.TierAuthedReads: cfg.RateLimitAuthedReadsPerMin,
+	})
+	perMin[httpx.TierAuthCritical] = cfg.RateLimitAuthCriticalPerMin
+	perMin[httpx.TierAnonAuth] = cfg.RateLimitAnonAuthPerMin
+	perMin[httpx.TierBackstop] = cfg.RateLimitBackstopPerMin
 	budgets := httpx.TierBudgetsFromConfig(perMin, burst)
 	dbs := map[string]httpx.DBChecker{}
-	if app.DB != nil {
+	if app.DB != nil && !cfg.RateLimitLocalOnly() {
 		for tier := range budgets {
 			if tier == httpx.TierBackstop {
 				continue
@@ -527,6 +639,10 @@ func buildTierSet(app *App) {
 		cap = 10000
 	}
 	app.Tiers = httpx.NewTierSet(budgets, dbs, cap)
+	app.Tiers.SetLocalOnly(cfg.RateLimitLocalOnly())
+	// Plan E2 dashboard slice: denials served under exam budgets count
+	// separately from ship-budget denials.
+	httpx.SetShedExam(cfg.ShedMode == config.ShedExam)
 }
 
 // sessionUserLookup adapts SessionOf for tier keying without an import cycle
@@ -589,16 +705,19 @@ func healthz(_ *App) http.HandlerFunc {
 	}
 }
 
-// readyz is the readiness probe: DB ping + schema version.
+// readyz is the readiness probe: DB ping + schema version, both under a
+// bounded budget (plan E1). A wedged MySQL must fail the probe fast so
+// the orchestrator restarts/reroutes instead of piling up handlers.
 func readyz(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if app.DB == nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Database not configured."))
 			return
 		}
-		ctx := r.Context()
+		ctx, cancel := QueryContext(r, 5*time.Second)
+		defer cancel()
 		if err := app.DB.PingContext(ctx); err != nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Database unreachable."))
+			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
 		version, err := db.SchemaVersion(ctx, app.DB)
@@ -606,10 +725,9 @@ func readyz(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Schema version unknown."))
 			return
 		}
-		st := app.DB.Stats()
-		telemetry.SetGauge(telemetry.MPoolOpen, float64(st.OpenConnections))
-		telemetry.SetGauge(telemetry.MPoolInUse, float64(st.InUse))
-		telemetry.SetGauge(telemetry.MPoolWait, float64(st.WaitCount))
+		// Plan E3/§7: pool gauges with role label (API/worker split is
+		// queryable; single-pool callers report role=single).
+		db.ReportPoolStats(db.RoleAPI, app.DB.Stats())
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{
 			"status":        "ready",
 			"database":      "ready",
@@ -636,7 +754,7 @@ func authMiddleware(app *App) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, httpx.CtxActorClass, "anonymous")))
 				return
 			}
-			sess, err := auth.LookupSession(ctx, app.DB, app.Config, cookie.Value, time.Now().UTC())
+			sess, err := auth.LookupSessionWithCache(ctx, app.DB, app.SessionCache, app.Config, cookie.Value, time.Now().UTC())
 			if err != nil {
 				// DB failure must not authenticate nor masquerade as
 				// anonymous (which downstream maps to 401): report 503

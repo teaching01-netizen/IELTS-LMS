@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"example.com/ielts-proctoring/internal/platform/telemetry"
@@ -97,11 +99,18 @@ func bearerHash(r *http.Request) string {
 
 // TierSet is a named collection of per-tier limiters sharing one BucketStore
 // cap namespace but independent token buckets per (tier, key). Each request
-// passing through a tier middleware produces exactly one DB verdict.
+// passing through a tier middleware produces at most one DB verdict (zero
+// in local-only mode, exactly one in dual mode when a checker is wired).
 type TierSet struct {
 	budgets map[string]TierBudget
 	local   *BucketStore
 	dbs     map[string]DBChecker
+	// localOnly drops the distributed verdict (plan A1 single-deploy:
+	// local IS global when exactly one app process serves traffic).
+	// Default false = dual (behavior-preserving). Guarded by mutex so
+	// tests and future admin endpoints can flip without a restart.
+	mu        sync.RWMutex
+	localOnly bool
 }
 
 // NewTierSet builds a tier set. A nil db map entry means local-only (used
@@ -132,7 +141,6 @@ func (t *TierSet) Middleware(tier string, keyFn KeyFunc) func(http.Handler) http
 		Window:      budget.Window,
 		Burst:       budget.Burst * PrefilterMultiple,
 	}
-	dbCheck := t.dbs[tier]
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := ""
@@ -147,6 +155,15 @@ func (t *TierSet) Middleware(tier string, keyFn KeyFunc) func(http.Handler) http
 			if res := t.local.Allow(localCfg, namespaced); !res.Allowed {
 				denyTierRateLimit(w, r, tier, keyClassOf(key), res.RetryAfter)
 				return
+			}
+			// Per-request read (one RLock): SetLocalOnly flips apply to
+			// already-mounted middleware without a restart.
+			t.mu.RLock()
+				localOnly := t.localOnly
+				t.mu.RUnlock()
+			dbCheck := t.dbs[tier]
+			if localOnly {
+				dbCheck = nil
 			}
 			if dbCheck != nil {
 				allowed, retryAfter, err := dbCheck(r.Context(), namespaced)
@@ -165,6 +182,51 @@ func (t *TierSet) Middleware(tier string, keyFn KeyFunc) func(http.Handler) http
 	}
 }
 
+
+// SetLocalOnly flips the distributed verdict at runtime (plan A1): true =
+// local-only (zero DB verdicts), false = dual (behavior-preserving). It is
+// safe for concurrent use; in-flight requests observe the flip on their
+// next per-request read.
+func (t *TierSet) SetLocalOnly(localOnly bool) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.localOnly = localOnly
+	t.mu.Unlock()
+}
+
+// LocalOnly reports the current distributed-verdict posture.
+func (t *TierSet) LocalOnly() bool {
+	if t == nil {
+		return false
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.localOnly
+}
+
+// DBCheckerCount reports how many tiers have a distributed checker wired.
+// Tests use it to assert buildTierSet's RATE_LIMIT_MODE posture without a DB.
+func (t *TierSet) DBCheckerCount() int {
+	if t == nil {
+		return 0
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return len(t.dbs)
+}
+
+// HasTier reports whether a tier has a budget configured.
+func (t *TierSet) HasTier(tier string) bool {
+	if t == nil {
+		return false
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	_, ok := t.budgets[tier]
+	return ok
+}
 
 // ---- TierSet construction from process config ----
 
@@ -206,12 +268,28 @@ func keyClassOf(key string) string {
 // denyTierRateLimit renders the stable 429 envelope with an additive tier
 // detail, records the per-tier denial counter, and logs one structured line
 // (429s bypass AccessLog by design, so this is their observability path).
+// SetShedExam marks requests served under exam shed budgets (plan E2
+// dashboard slice). The tier set is rebuilt at startup, so this is a
+// process-wide flag set once by BuildApp — not per-request state.
+var shedExamActive atomic.Int32
+
+// SetShedExam records the exam-shed posture for observability.
+func SetShedExam(on bool) {
+	shedExamActive.Store(1)
+	if !on {
+		shedExamActive.Store(0)
+	}
+}
+
 func denyTierRateLimit(w http.ResponseWriter, r *http.Request, tier, keyClass string, retryAfter time.Duration) {
 	secs := int(retryAfter.Seconds())
 	if secs < 1 {
 		secs = 1
 	}
 	telemetry.DefaultRegistry.IncCounter(telemetry.MRatelimitDeniedTotal, "tier", tier, "key_class", keyClass)
+	if shedExamActive.Load() == 1 {
+		telemetry.DefaultRegistry.IncCounter(telemetry.MShedExam)
+	}
 	route := routeOf(r)
 	if route == "" || strings.HasPrefix(route, "/") && strings.Contains(route, "{") == false && len(route) > 64 {
 		route = r.URL.Path

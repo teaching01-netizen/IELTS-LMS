@@ -262,7 +262,7 @@ func logoutHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if app.DB != nil {
 			if cookie, err := r.Cookie(app.Config.EffectiveSessionCookieName()); err == nil && cookie.Value != "" {
-				if err := auth.RevokeSession(r.Context(), app.DB, cookie.Value, time.Now().UTC()); err != nil {
+				if err := auth.RevokeSessionWithCache(r.Context(), app.DB, app.SessionCache, cookie.Value, time.Now().UTC()); err != nil {
 					httpx.WriteError(w, r, err)
 					return
 				}
@@ -285,7 +285,7 @@ func logoutAllHandler(app *App) http.HandlerFunc {
 			return
 		}
 		now := time.Now().UTC()
-		if err := auth.RevokeAllSessions(r.Context(), app.DB, sess.UserID, "logout_all", now); err != nil {
+		if err := auth.RevokeAllSessionsWithCache(r.Context(), app.DB, app.SessionCache, sess.UserID, "logout_all", now); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
@@ -437,7 +437,7 @@ func passwordResetCompleteHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if err := auth.RevokeAllSessions(ctx, app.DB, userID, "password_reset", now); err != nil {
+		if err := auth.RevokeAllSessionsWithCache(ctx, app.DB, app.SessionCache, userID, "password_reset", now); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}

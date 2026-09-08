@@ -279,6 +279,16 @@ func proctorSessionHandler(app *App) http.HandlerFunc {
 				return
 			}
 		}
+		// Plan D4: ?mode=rollup serves the 1-row header (dashboard poll fast
+		// path; falls back to the full roster on a miss so old clients keep
+		// working). Default mode keeps today's full detail (rollback shape).
+		if r.URL.Query().Get("mode") == "rollup" {
+			rollup, rerr := app.Proctor.LoadRollup(r.Context(), scheduleID)
+			if rerr == nil {
+				httpx.WriteJSON(w, http.StatusOK, rollup)
+				return
+			}
+		}
 		auditLimit, alertLimit := proctorSessionLimits(r)
 		detail, err := app.Proctor.GetSessionDetail(r.Context(), proctorActorOf(sess), scheduleID, auditLimit, alertLimit)
 		if err != nil {

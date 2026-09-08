@@ -29,7 +29,20 @@ type Service struct {
 	tx     *tx.Runner
 	clock  clock.Clock
 	secret []byte
+	// rowFirst selects the plan-B3 rows-only write path (no blob
+	// SELECT/UPDATE per answer). Off keeps mergeProjection. Wired via
+	// SetRowFirst (BuildApp from ROW_FIRST_WRITES); tests set directly.
+	rowFirst bool
 }
+
+// SetRowFirst selects the B3 row-first write path. Chainable.
+func (s *Service) SetRowFirst(on bool) *Service {
+	s.rowFirst = on
+	return s
+}
+
+// RowFirst reports the write-path posture (tests + observability).
+func (s *Service) RowFirst() bool { return s != nil && s.rowFirst }
 
 func NewService(runner *tx.Runner, clk clock.Clock, secret []byte) *Service {
 	return &Service{tx: runner, clock: clk, secret: secret}
@@ -77,7 +90,13 @@ func (s *Service) SaveResponses(ctx context.Context, bearer string, cmd SaveResp
 		return SaveResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Attempt credential mismatch.", HTTPStatus: 401}
 	}
 	var out SaveResult
-	err = s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	// B1: hot write path runs READ COMMITTED (point gets + explicit FOR
+	// UPDATE; no snapshot dependency). Seal stays RR.
+	// E3: bounded RC retry (3) absorbs transient InnoDB deadlocks/lock-waits
+	// under the 500-way wave. Idempotency-safe: write_id UNIQUE +
+	// exact-replay turn the retried attempt into a replay, not a duplicate.
+	// The absorbed count labels retried_accepted (E3 observability).
+	retried, rerr := s.tx.WithTxRCRetryCounted(ctx, 3, func(ctx context.Context, q tx.Tx) error {
 		res, err := s.saveInTx(ctx, q, claims, cmd, qr, rl)
 		if err != nil {
 			return err
@@ -85,9 +104,11 @@ func (s *Service) SaveResponses(ctx context.Context, bearer string, cmd SaveResp
 		out = res
 		return nil
 	})
+	err = rerr
 	// Telemetry records the commit decision outside the tx (plan 69):
-	// success emits accepted (or exact_replay on the fast path), fencing
-	// and validation failures map to the outcome vocabulary.
+	// success emits accepted / retried_accepted (or exact_replay on the
+	// fast path), fencing and validation failures map to the outcome
+	// vocabulary.
 	if err != nil {
 		outcome := v2BatchOutcome(err)
 		telemetry.IncCounter(telemetry.MV2BatchTotal, "outcome", outcome)
@@ -96,18 +117,27 @@ func (s *Service) SaveResponses(ctx context.Context, bearer string, cmd SaveResp
 		}
 		return out, err
 	}
-	if out.Replayed {
-		telemetry.IncCounter(telemetry.MV2BatchTotal, "outcome", telemetry.OutcomeExactReplay)
-		for range cmd.Commands {
-			telemetry.IncCounter(telemetry.MV2CommandsTotal, "outcome", telemetry.OutcomeExactReplay)
-		}
-	} else {
-		telemetry.IncCounter(telemetry.MV2BatchTotal, "outcome", telemetry.OutcomeAccepted)
-		for range cmd.Commands {
-			telemetry.IncCounter(telemetry.MV2CommandsTotal, "outcome", telemetry.OutcomeAccepted)
-		}
+	outcome := successOutcome(out.Replayed, retried)
+	telemetry.IncCounter(telemetry.MV2BatchTotal, "outcome", outcome)
+	for range cmd.Commands {
+		telemetry.IncCounter(telemetry.MV2CommandsTotal, "outcome", outcome)
 	}
 	return out, nil
+}
+
+// successOutcome labels a committed batch (plan E3): exact_replay wins over
+// retry count (a replay is a replay); otherwise >=1 absorbed transient
+// (deadlock/lock-wait counted on db_deadlocks_total{kind}) labels
+// retried_accepted so contended waves stay distinguishable from clean ones.
+// retries counts absorbed transients observed during this call.
+func successOutcome(replayed bool, retries int) string {
+	if replayed {
+		return telemetry.OutcomeExactReplay
+	}
+	if retries > 0 {
+		return telemetry.OutcomeRetriedAccepted
+	}
+	return telemetry.OutcomeAccepted
 }
 
 // v2BatchOutcome maps a save error to the plan 69 outcome label vocabulary.
@@ -298,14 +328,23 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 			if err != nil {
 				return SaveResult{}, err
 			}
-			writing := strings.Contains(strings.ToLower(owner.ModuleID), "writing")
-			answersJSON, writingJSON, flagsJSON, err := mergeProjection(ctx, q, cmd.AttemptID, c.QuestionID, canonical, c, writing, owner.ModuleID, cmd.LeaseEpoch, cmd.ControlEpoch, reqHash, serverRev, respHash, now)
-			if err != nil {
-				return SaveResult{}, err
+			// B3: row-first path persists only the answer cell row (no blob
+			// SELECT/UPDATE); legacy path keeps mergeProjection. Both share
+			// the same canonical bytes + idempotency/version fencing above.
+			if s.rowFirst {
+				if err := upsertResponseRow(ctx, q, cmd.AttemptID, c.QuestionID, owner.ModuleID, cmd.LeaseEpoch, cmd.ControlEpoch, c.ClientVersion, c.WriteID, reqHash, canonical, respHash, serverRev, now); err != nil {
+					return SaveResult{}, err
+				}
+			} else {
+				writing := strings.Contains(strings.ToLower(owner.ModuleID), "writing")
+				answersJSON, writingJSON, flagsJSON, err := mergeProjection(ctx, q, cmd.AttemptID, c.QuestionID, canonical, c, writing, owner.ModuleID, cmd.LeaseEpoch, cmd.ControlEpoch, reqHash, serverRev, respHash, now)
+				if err != nil {
+					return SaveResult{}, err
+				}
+				_ = answersJSON
+				_ = writingJSON
+				_ = flagsJSON
 			}
-			_ = answersJSON
-			_ = writingJSON
-			_ = flagsJSON
 		}
 		canonical, err := CanonicalJSON(commandToAny(cmd.LeaseEpoch, c))
 		_ = canonical

@@ -112,12 +112,15 @@ type RetentionReport struct {
 	OutboxRows      int64 `json:"outboxRows"`
 	RateLimitRows   int64 `json:"rateLimitRows"`
 	LiveUpdateRows  int64 `json:"liveUpdateRows"`
+	// LeaseRows counts purged leftover websocket leases (plan C2: memory
+	// mode stops writing per-conn rows; retention reaps the leftovers).
+	LeaseRows int64 `json:"leaseRows"`
 }
 
 // Total sums a retention pass.
 func (r RetentionReport) Total() int64 {
 	return r.CacheRows + r.IdempotencyRows + r.UserSessionRows + r.HeartbeatRows +
-		r.MutationRows + r.OutboxRows + r.RateLimitRows + r.LiveUpdateRows
+		r.MutationRows + r.OutboxRows + r.RateLimitRows + r.LiveUpdateRows + r.LeaseRows
 }
 
 // RunRetention executes the retention pass, bounded per table.
@@ -222,6 +225,16 @@ func RunRetention(ctx context.Context, db *sql.DB, budget StorageBudget) (Retent
 		DELETE FROM live_update_events
 		WHERE created_at < DATE_SUB(NOW(), INTERVAL 72 HOUR)
 		ORDER BY sequence_id ASC
+		LIMIT ?`, batch)
+	if err != nil {
+		return rep, err
+	}
+	// Leftover websocket leases (plan C2: memory mode stops per-conn
+	// writes; expired rows are reaped here instead of inline in Acquire).
+	rep.LeaseRows, err = exec(`
+		DELETE FROM websocket_connection_leases
+		WHERE expires_at < NOW()
+		ORDER BY expires_at ASC
 		LIMIT ?`, batch)
 	if err != nil {
 		return rep, err

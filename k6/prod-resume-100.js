@@ -24,7 +24,7 @@ import {
 const EXPECT_2XX_OR_409 = http.expectedStatuses({ min: 200, max: 299 }, 409);
 const DEBUG = __ENV.K6_DEBUG === 'true';
 
-const resumeRecoveryMs = new Trend('resume_recovery_ms', true);
+const resumeRecoveryMs = new Trend('resume_recovery_ms');
 const resumeStateFailures = new Counter('resume_state_failures');
 const resumeMissingData = new Counter('resume_missing_data');
 

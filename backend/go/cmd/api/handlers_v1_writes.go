@@ -30,7 +30,7 @@ func requireV1StudentIdentity(app *App, r *http.Request, attemptID, scheduleID, 
 		return v1StudentIdentity{}, apperrors.New(apperrors.CodeValidation, "Attempt and schedule are required.")
 	}
 	if bearer := bearerOf(r); bearer != "" {
-		claims, err := auth.VerifyAttemptToken(r.Context(), app.DB, app.Config, time.Now().UTC(), bearer)
+		claims, err := verifyAttemptBearer(app, r, bearer)
 		if err != nil {
 			return v1StudentIdentity{}, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
 		}
@@ -123,7 +123,11 @@ func v1SubmitHandler(app *App) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		sqlTx, err := app.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+		// B1: V1 submit = prepare + seal-composed tx on one attempt row.
+		// RC-safe: both phases lock the attempt row explicitly. (The seal
+		// itself, TerminalizeInTx, keeps its own RR guarantees internally
+		// where it opens nested scope — this outer tx only needs RC.)
+		sqlTx, err := app.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

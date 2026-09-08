@@ -19,6 +19,8 @@ import {
   type LiveSnapshotFreshness,
 } from '../liveSnapshotFreshness';
 import { createStudentSessionBootstrap } from '../application/exam-session/studentSessionBootstrap';
+import { createStudentRuntimePoll } from '../infrastructure/exam-session/studentRuntimePoll';
+import { createStudentRuntimePollLoop } from '../infrastructure/exam-session/studentRuntimePollLoop';
 import {
   createStudentRealtimeCoordinator,
   type StudentRealtimeCoordinator,
@@ -629,18 +631,17 @@ export function useStudentSessionRouteData(
     [scheduleId],
   );
 
+  // Plan C1: students never open live sockets (server 410s them). The
+  // versioned runtime poll below is the sole student live channel; the
+  // role gate keeps this hook disconnected without a network round-trip.
   useLiveUpdates({
+    role: 'student',
     ...(scheduleId ? { scheduleId } : {}),
     ...(attemptSnapshot?.id ? { attemptId: attemptSnapshot.id } : {}),
     ...(Number.isInteger(runtimeSnapshot?.revision)
       ? { lastSeenRuntimeRevision: runtimeSnapshot?.revision as number }
       : {}),
-    enabled: Boolean(
-      scheduleId &&
-        candidateId &&
-        authStatus === 'authenticated' &&
-        !error,
-    ),
+    enabled: false,
     debounceMs: 500,
     onConnected: () => {
       setLiveSocketConnected(true);
@@ -843,15 +844,95 @@ export function useStudentSessionRouteData(
     loadStudentDataRef.current('load').catch(() => {});
   }, [authStatus, candidateId, scheduleId]);
 
+  // Plan C1: the runtime poll loop is the student live channel (sockets
+  // retired). pollAfterSecs from the server drives cadence adaptively:
+  // 2s fast-lane within 60s of a control command, 25s steady. A revision
+  // change triggers exactly one debounced refresh; 304 = steady, no work.
+  // liveSocketConnected stays false (no socket); the coordinator's
+  // disconnected policy is the fallback before the first poll lands.
   const pollingPolicy = realtimeCoordinator?.getPollingPolicy(runtimeSnapshot?.status ?? null) ?? {
-    intervalMs: runtimeSnapshot?.status === 'live' && liveSocketConnected ? 20_000 : 15_000,
-    maxIntervalMs: runtimeSnapshot?.status === 'live' && liveSocketConnected ? 30_000 : 25_000,
+    intervalMs: 15_000,
+    maxIntervalMs: 25_000,
   };
+  const runtimePollRevisionRef = useRef<number>(0);
+  const runtimePollLoopRef = useRef<ReturnType<typeof createStudentRuntimePollLoop> | null>(null);
+  // Runtime-poll interop: the loop only starts once the initial snapshot has
+  // loaded AND the backend serves the versioned poll route. refreshTick
+  // probes the route (one 404 максимум per session); a 404 disables the
+  // loop for the session so older backends keep today's refresh cadence.
+  const runtimePollProbedRef = useRef(false);
+  const runtimePollAvailableRef = useRef(true);
+  if (scheduleId && !runtimePollLoopRef.current) {
+    const pollClient = createStudentRuntimePoll({
+      scheduleId,
+      fetchJson: async (path) => {
+        const res = await fetch(path, { credentials: 'include' });
+        if (res.status === 304) {
+          return { status: 304, json: null };
+        }
+        let json: unknown = null;
+        try {
+          json = await res.json();
+        } catch {
+          json = null;
+        }
+        return { status: res.status, json };
+      },
+    });
+    runtimePollLoopRef.current = createStudentRuntimePollLoop({
+      poll: (since) => pollClient.poll(since),
+      sinceRevision: 0,
+      onRevision: () => {
+        scheduleDebouncedRefresh();
+      },
+      schedule: () => {},
+    });
+  }
 
   useAsyncPolling(
     async () => {
       try {
-        await refreshBackendSessionSnapshot();
+        const loop = runtimePollLoopRef.current;
+        if (
+          loop &&
+          !loop.stopped() &&
+          runtimePollAvailableRef.current &&
+          runtimePollProbedRef.current
+        ) {
+          let view;
+          try {
+            view = await loop.tick();
+          } catch (pollError) {
+            // No runtime-poll route in this deployment (404/HTML shell):
+            // park the loop for the session and fall back to the snapshot
+            // refresh so older backends keep today's cadence (dual-serve
+            // interop, one probe 404 per session).
+            if ((pollError as { status?: number })?.status === 404) {
+              runtimePollAvailableRef.current = false;
+              try {
+                await refreshBackendSessionSnapshot();
+              } catch {
+                // Benign; live state stays as-is.
+              }
+              return;
+            }
+            throw pollError;
+          }
+          runtimePollRevisionRef.current = view.revision;
+          runtimePollProbedRef.current = true;
+          // A runtime revision change means cohort state moved: refresh
+          // the snapshot (debounced). 304/same-revision = steady, no
+          // work. The full live fetch still carries attempt freshness,
+          // so attempt updates are never gated on the runtime revision.
+          if (!view.notModified) {
+            await refreshBackendSessionSnapshot();
+          }
+          // Adaptive cadence is owned by the loop (pollAfterSecs); the
+          // outer useAsyncPolling stays as the scheduling shell.
+          void runtimePollRevisionRef;
+        } else {
+          await refreshBackendSessionSnapshot();
+        }
       } catch {
         // Polling refresh failures are benign; live state stays as-is.
       }

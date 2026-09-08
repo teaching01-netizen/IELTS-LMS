@@ -20,7 +20,7 @@ import {
 const EXPECT_2XX_OR_409 = http.expectedStatuses({ min: 200, max: 299 }, 409);
 const DEBUG = __ENV.K6_DEBUG === 'true';
 
-const sectionTransitionMs = new Trend('section_transition_ms', true);
+const sectionTransitionMs = new Trend('section_transition_ms');
 const sectionTransitionFailures = new Counter('section_transition_failures');
 const sectionTransitionMissingData = new Counter('section_transition_missing_data');
 

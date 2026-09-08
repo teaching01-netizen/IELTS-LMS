@@ -28,12 +28,31 @@ func (s *Service) Submit(ctx context.Context, bearer string, cmd SubmitCommand, 
 	if cmd.LeaseEpoch == 0 {
 		return SubmitResult{}, &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Lease epoch must be positive.", HTTPStatus: 400}
 	}
+	// I2 (round 55): FinalCommands ride into saveInTx AFTER the attempt
+	// lock + receipt probes — validate them at the envelope, before any
+	// tx begins, same as ValidateSaveEnvelope. Control epoch 0 is legal
+	// here (no racing pause to fence against); substitute 1 purely for
+	// the shared positive-epoch gate — the real epoch flows into
+	// saveInTx untouched.
+	if len(cmd.FinalCommands) > 0 {
+		ctrl := cmd.ExpectedControlEpoch
+		if ctrl == 0 {
+			ctrl = 1
+		}
+		if err := ValidateSaveEnvelope(SaveResponsesCommand{AttemptID: cmd.AttemptID, LeaseEpoch: cmd.LeaseEpoch, ControlEpoch: ctrl, Commands: cmd.FinalCommands}); err != nil {
+			return SubmitResult{}, err
+		}
+	}
 	claims, err := crypto.VerifyAttemptToken(s.secret, s.clock.Now(), bearer)
 	if err != nil {
 		return SubmitResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Invalid attempt credential.", HTTPStatus: 401}
 	}
 	var out SubmitResult
-	err = s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	// B1: hot submit path runs READ COMMITTED (same shape as SaveResponses).
+	// E3: bounded RC retry (3) — receipt-first terminalization makes the
+	// retried submit an outcome-only replay, never a double seal. The
+	// absorbed count labels retried_accepted (same E3 slice as saves).
+	retried, rerr := s.tx.WithTxRCRetryCounted(ctx, 3, func(ctx context.Context, q tx.Tx) error {
 		res, err := s.submitInTx(ctx, q, claims, cmd, qr, rl, provider, sealer)
 		if err != nil {
 			return err
@@ -41,6 +60,7 @@ func (s *Service) Submit(ctx context.Context, bearer string, cmd SubmitCommand, 
 		out = res
 		return nil
 	})
+	err = rerr
 	if err != nil {
 		outcome := v2BatchOutcome(err)
 		telemetry.IncCounter(telemetry.MV2BatchTotal, "outcome", outcome)
@@ -56,9 +76,10 @@ func (s *Service) Submit(ctx context.Context, bearer string, cmd SubmitCommand, 
 			telemetry.IncCounter(telemetry.MV2CommandsTotal, "outcome", telemetry.OutcomeExactReplay)
 		}
 	} else {
-		telemetry.IncCounter(telemetry.MV2BatchTotal, "outcome", telemetry.OutcomeAccepted)
+		outcome := successOutcome(false, retried)
+		telemetry.IncCounter(telemetry.MV2BatchTotal, "outcome", outcome)
 		for range cmd.FinalCommands {
-			telemetry.IncCounter(telemetry.MV2CommandsTotal, "outcome", telemetry.OutcomeAccepted)
+			telemetry.IncCounter(telemetry.MV2CommandsTotal, "outcome", outcome)
 		}
 	}
 	return out, nil
@@ -234,7 +255,10 @@ func loadSubmissionReceipt(ctx context.Context, q tx.Tx, attemptID string) (stor
 func insertSubmissionReceipt(ctx context.Context, q tx.Tx, cmd SubmitCommand, attempt AttemptState, reqHash, digest string, result SubmitResult, now time.Time) error {
 	receiptJSON, _ := json.Marshal(map[string]any{"submissionId": result.SubmissionID, "provisional": result.Provisional, "digest": digest})
 	actualRev := attempt.ResponseRevision
-	var expected any
+	// expected_attempt_revision is NOT NULL: a client that omits
+	// expectedAttemptRevision means "no fence", recorded as the sealed
+	// revision itself — never a nil INSERT arg (500 on strict MySQL).
+	expected := actualRev
 	if cmd.ExpectedRevision != nil {
 		expected = *cmd.ExpectedRevision
 	}
@@ -299,7 +323,10 @@ func (s *Service) Takeover(ctx context.Context, bearer, attemptID, clientSession
 		return TakeoverResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Invalid attempt credential.", HTTPStatus: 401}
 	}
 	var out TakeoverResult
-	err = s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	// B1: lease takeover is a single-row CAS + session revoke (RC-safe).
+	// E3: bounded RC retry (3) — CAS re-reads the epoch, so a retried
+	// takeover re-evaluates instead of double-fencing.
+	err = s.tx.WithTxRCRetry(ctx, 3, func(ctx context.Context, q tx.Tx) error {
 		res, err := s.takeoverInTx(ctx, q, claims, attemptID, clientSessionID)
 		if err != nil {
 			return err

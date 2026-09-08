@@ -638,12 +638,19 @@ func IssueAttemptToken(ctx context.Context, db *sql.DB, cfg config.Config, userI
 	// organization_id/lease_epoch are informational (added by a later
 	// migration outside auth-platform scope): write them when the columns
 	// exist, else fall back to the base upsert so issuance never breaks on
-	// older schemas.
+	// older schemas. The fallback triggers ONLY on missing-column (1054)
+	// - any other wide-insert failure (FK 1452, dup-key, conn loss) must
+	// surface immediately, not masquerade behind a second failing insert
+	// (round 73 live rehearsal: the blind fallback hid the real error
+	// and both failures escaped as unknown-500).
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO attempt_sessions (id, user_id, schedule_id, attempt_id, client_session_id, token_id, device_fingerprint_hash, issued_at, last_seen_at, expires_at, organization_id, lease_epoch)
 		 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), token_id = VALUES(token_id), issued_at = VALUES(issued_at), last_seen_at = VALUES(last_seen_at), expires_at = VALUES(expires_at), organization_id = VALUES(organization_id), lease_epoch = VALUES(lease_epoch), revoked_at = NULL, revocation_reason = NULL`,
 		sessionID, userID, scheduleID, attemptID, clientSessionID, tokenID, now, now, expiresAt, org, lease); err != nil {
+		if !isMissingColumn(err) {
+			return "", time.Time{}, fmt.Errorf("auth: upsert attempt_sessions: %w", err)
+		}
 		if _, ferr := db.ExecContext(ctx,
 			`INSERT INTO attempt_sessions (id, user_id, schedule_id, attempt_id, client_session_id, token_id, device_fingerprint_hash, issued_at, last_seen_at, expires_at)
 		 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
@@ -678,6 +685,17 @@ func IssueAttemptToken(ctx context.Context, db *sql.DB, cfg config.Config, userI
 		return "", time.Time{}, fmt.Errorf("auth: sign attempt token: %w", err)
 	}
 	return signed, expiresAt, nil
+}
+
+// isMissingColumn reports MySQL 1054 (unknown column): the wide
+// attempt_sessions upsert names organization_id/lease_epoch on a schema
+// that predates them. ONLY this case falls back to the base upsert.
+func isMissingColumn(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "1054") || strings.Contains(s, "unknown column")
 }
 
 // VerifyAttemptToken checks signature + expiry and binds claims to the

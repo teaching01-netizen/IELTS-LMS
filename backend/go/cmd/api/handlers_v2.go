@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -250,6 +251,8 @@ func dbNow(ctx context.Context, q tx.Tx) (time.Time, error) {
 type terminalSealer struct {
 	scorer       terminalization.AttemptScorer
 	materializer *terminalization.Service
+	// outboxExecOnly skips the wakeup attempt_terminalized INSERT (B4.1).
+	outboxExecOnly bool
 }
 
 var _ attempts.Sealer = terminalSealer{}
@@ -330,6 +333,10 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 			return err
 		}
 	}
+	// B4.1: exec-only mode skips the wakeup INSERT (live moves to Hub in C).
+	if s.outboxExecOnly {
+		return nil
+	}
 	payload, _ := json.Marshal(map[string]any{"terminalizationId": tid, "attemptId": attemptID, "scheduleId": scheduleID, "outcome": terminalization.OutcomeSubmitted, "reason": terminalization.ReasonStudentSubmit, "answerRevision": answerRev})
 	return outbox.EnqueueInTx(ctx, q, "attempt_terminalization", attemptID, revision+1, "attempt_terminalized", json.RawMessage(payload))
 }
@@ -362,7 +369,9 @@ func v2BatchHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Attempt service is unavailable."))
 			return
 		}
-		res, err := app.Attempts.SaveResponses(r.Context(), bearer, attempts.SaveResponsesCommand{AttemptID: chi.URLParam(r, "attemptID"), LeaseEpoch: body.LeaseEpoch, ControlEpoch: body.ControlEpoch, Commands: body.Commands}, v2Resolver{}, v2Locker{})
+		// B2: locker routes via RUNTIME_SNAPSHOT (snapshot pre-gate when on,
+		// today's FOR UPDATE path when off). Rollback = off.
+		res, err := app.Attempts.SaveResponses(r.Context(), bearer, attempts.SaveResponsesCommand{AttemptID: chi.URLParam(r, "attemptID"), LeaseEpoch: body.LeaseEpoch, ControlEpoch: body.ControlEpoch, Commands: body.Commands}, v2Resolver{}, app.RuntimeLockerFor())
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -403,7 +412,7 @@ func v2SubmitHandler(app *App) http.HandlerFunc {
 			v := body.ExpectedAttemptRevision
 			cmd.ExpectedRevision = &v
 		}
-		res, err := app.Attempts.Submit(r.Context(), bearer, cmd, v2Resolver{}, v2Locker{}, attempts.Provider(provider), terminalSealer{scorer: app.ACT, materializer: app.Terminal})
+		res, err := app.Attempts.Submit(r.Context(), bearer, cmd, v2Resolver{}, app.RuntimeLockerFor(), attempts.Provider(provider), terminalSealer{scorer: app.ACT, materializer: app.Terminal, outboxExecOnly: app.Config.OutboxExecOnly})
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -538,7 +547,7 @@ func v2SnapshotHandler(app *App) http.HandlerFunc {
 		// Snapshot must bind the bearer to the server session row (revoked
 		// or rotated tokens fail closed) and to THIS attempt ID: a bare
 		// crypto.VerifyAttemptToken check would accept any valid token.
-		claims, verr := auth.VerifyAttemptToken(r.Context(), app.DB, app.Config, time.Now().UTC(), bearer)
+		claims, verr := verifyAttemptBearer(app, r, bearer)
 		if verr != nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
@@ -666,6 +675,13 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Access code, email and student name are required."))
 			return
 		}
+		// Round 64 fail-fast: malformed email 400s here, before link
+		// resolution + rate-limit buckets + user lookup (no DB burned
+		// on a shape the registration gate would reject anyway).
+		if verr := schedules.ValidateEmail(body.Email); verr != nil {
+			httpx.WriteError(w, r, verr)
+			return
+		}
 		// Direct schedule entry uses the non-empty Wcode as its access
 		// credential. Link-backed entry has its own link token/access-link
 		// validation path; retaining this direct route is required for the
@@ -707,6 +723,18 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
+		// Plan D3: per-schedule check-in bucket (ENTRY_GATE=on). Over-limit
+		// check-ins get 429 + {retryAfterSecs, queuePosition} instead of a
+		// DB conflict storm on the schedule row. Off (default) = skipped.
+		if app.Config.EntryGateEnabled && app.EntryGate != nil && scheduleID != "" {
+			if gres := app.EntryGate.Allow(scheduleID, time.Now().UTC()); !gres.Allowed {
+				w.Header().Set("Retry-After", strconv.FormatInt(gres.RetryAfterSecs, 10))
+				err := apperrors.New(apperrors.CodeRateLimitExceeded, "Check-in is queued; please retry.")
+				err.Details = map[string]any{"tier": "student-entry", "retryAfterSecs": gres.RetryAfterSecs, "queuePosition": gres.QueuePosition}
+				httpx.WriteError(w, r, err)
+				return
+			}
+		}
 		// Case-insensitive email lookup + normalization (mirrors login's
 		// TrimSpace+ToLower): without it `ALICE@x` and `alice@x` mint
 		// duplicate user rows and the second INSERT 500s.
@@ -744,10 +772,22 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			return
 		}
 		clientSessionID := uuid.NewString()
-		att, err := app.Schedules.CreateScheduleAttempt(r.Context(), scheduleID, reg.ID, reg.StudentKey, wcode, strings.TrimSpace(body.StudentName), email, clientSessionID)
+		// Plan D3 unique-key-first fast path: pre-provisioned attempts (or
+		// check-in retries that already minted one) skip the mint tx
+		// entirely — 1 unlocked SELECT. Misses fall through to the mint tx
+		// whose registration lock + replay stays the correctness backstop.
+		att, err := app.fastPathAttempt(r.Context(), scheduleID, reg.ID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
+		}
+		if att == nil {
+			minted, merr := app.Schedules.CreateScheduleAttempt(r.Context(), scheduleID, reg.ID, reg.StudentKey, wcode, strings.TrimSpace(body.StudentName), email, clientSessionID)
+			if merr != nil {
+				httpx.WriteError(w, r, merr)
+				return
+			}
+			att = &minted
 		}
 		now := time.Now().UTC()
 		lease := uint64(1)

@@ -46,6 +46,9 @@ const (
 	CodeUnsupportedProvider        Code = "UNSUPPORTED_PROVIDER"
 	CodeInvalidAssessment          Code = "INVALID_ASSESSMENT"
 	CodeAssessmentReleaseInvariant Code = "ASSESSMENT_RELEASE_INVARIANT"
+	// CodeStudentWSRetired marks the plan-C3 student-socket retirement:
+	// student WS attempts render 410 + {use: runtime-poll}.
+	CodeStudentWSRetired Code = "STUDENT_WS_RETIRED"
 )
 
 // Error is a typed application error with a stable code.
@@ -91,6 +94,8 @@ func statusFor(c Code) int {
 		return http.StatusRequestEntityTooLarge
 	case CodeServiceUnavailable, CodeRecoveryFailed:
 		return http.StatusServiceUnavailable
+	case CodeStudentWSRetired:
+		return http.StatusGone
 	case CodeBadRequest:
 		return http.StatusBadRequest
 	case CodeValidation, CodeUnsupportedProvider, CodeInvalidAssessment:

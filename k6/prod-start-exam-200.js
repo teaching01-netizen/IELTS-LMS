@@ -22,7 +22,7 @@ const EXPECT_2XX_OR_409 = http.expectedStatuses({ min: 200, max: 299 }, 409);
 const DEBUG = __ENV.K6_DEBUG === 'true';
 const bodyPreview = (resp) => String((resp && resp.body) || '').slice(0, 200);
 
-const startExamPropagationMs = new Trend('start_exam_propagation_ms', true);
+const startExamPropagationMs = new Trend('start_exam_propagation_ms');
 const startExamLatencyFailures = new Counter('start_exam_latency_failures');
 const startExamSeenLive = new Rate('start_exam_seen_live');
 const startExamMissingData = new Counter('start_exam_missing_data');

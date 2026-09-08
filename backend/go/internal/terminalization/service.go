@@ -32,10 +32,45 @@ import (
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/platform/answerblobs"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
+
+// materializeBlobsForSeal rebuilds the legacy answers/writing_answers/flags
+// columns from attempt_responses_v2 rows and persists them (plan B3 seal-time
+// correctness point). Called only for protocol-2 attempts: V1 blobs stay
+// authoritative and are never touched (an empty rows table must not wipe
+// them). Runs inside the caller's seal tx after the attempt lock.
+func materializeBlobsForSeal(ctx context.Context, q tx.Tx, attemptID string) (answerblobs.Blobs, error) {
+	rows, err := q.QueryContext(ctx,
+		`SELECT question_id, module_id, CAST(response AS CHAR) FROM attempt_responses_v2 WHERE attempt_id = ? ORDER BY question_id`,
+		attemptID)
+	if err != nil {
+		return answerblobs.Blobs{}, err
+	}
+	defer rows.Close()
+	var cells []answerblobs.Cell
+	for rows.Next() {
+		var questionID, moduleID, raw string
+		if err := rows.Scan(&questionID, &moduleID, &raw); err != nil {
+			return answerblobs.Blobs{}, err
+		}
+		cells = append(cells, answerblobs.Cell{QuestionID: questionID, ModuleID: moduleID, Canonical: json.RawMessage(raw)})
+	}
+	if err := rows.Err(); err != nil {
+		return answerblobs.Blobs{}, err
+	}
+	blobs, err := answerblobs.Assemble(cells)
+	if err != nil {
+		return answerblobs.Blobs{}, err
+	}
+	if _, err := q.ExecContext(ctx, `UPDATE student_attempts SET answers=?, writing_answers=?, flags=? WHERE id=?`, blobs.Answers, blobs.WritingAnswers, blobs.Flags, attemptID); err != nil {
+		return answerblobs.Blobs{}, err
+	}
+	return blobs, nil
+}
 
 // Outcome vocabulary.
 const (
@@ -277,6 +312,14 @@ type Service struct {
 	repo          TerminalizationRepository
 	outbx         OutboxEnqueuer
 	attemptScorer AttemptScorer
+	// outboxExecOnly skips the wakeup attempt_terminalized INSERT (B4.1).
+	outboxExecOnly bool
+}
+
+// SetOutboxExecOnly toggles B4.1 executable-only enqueueing (chainable).
+func (s *Service) SetOutboxExecOnly(on bool) *Service {
+	s.outboxExecOnly = on
+	return s
 }
 
 // NewService builds the terminalization service with constructor injection.
@@ -358,30 +401,31 @@ func (s *Service) MaterializeProviderResultInTx(ctx context.Context, q tx.Tx, at
 
 // attemptRow is the locked attempt subset the seal needs.
 type attemptRow struct {
-	ID             string
-	ScheduleID     string
-	OrganizationID *string
-	ExamID         string
-	PublishedVerID string
-	Phase          string
-	DeliveryStatus string
-	ProctorStatus  string
-	Revision       int64
-	AnswerRevision int64
-	Answers        json.RawMessage
-	WritingAnswers json.RawMessage
-	Flags          json.RawMessage
+	ID              string
+	ScheduleID      string
+	OrganizationID  *string
+	ExamID          string
+	PublishedVerID  string
+	Phase           string
+	DeliveryStatus  string
+	ProctorStatus   string
+	Revision        int64
+	AnswerRevision  int64
+	Answers         json.RawMessage
+	WritingAnswers  json.RawMessage
+	Flags           json.RawMessage
+	ProtocolVersion int
 }
 
 // sealAttemptInTx implements the 12 seal steps. The receipt INSERT (step 8)
 // always precedes the claim UPDATE (step 10) in the same tx.
 func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand) (*SealResult, error) {
 	// Step 1: lock attempt FOR UPDATE.
-	const lockAttempt = "SELECT id, schedule_id, organization_id, exam_id, published_version_id, phase, COALESCE(delivery_status,'running'), COALESCE(proctor_status,'active'), revision, answer_revision, answers, writing_answers, flags FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
+	const lockAttempt = "SELECT id, schedule_id, organization_id, exam_id, published_version_id, phase, COALESCE(delivery_status,'running'), COALESCE(proctor_status,'active'), revision, answer_revision, answers, writing_answers, flags, COALESCE(protocol_version,1) FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
 	var a attemptRow
 	var org sql.NullString
 	var answers, writing, flags []byte
-	if err := q.QueryRowContext(ctx, lockAttempt, cmd.AttemptID, cmd.ScheduleID).Scan(&a.ID, &a.ScheduleID, &org, &a.ExamID, &a.PublishedVerID, &a.Phase, &a.DeliveryStatus, &a.ProctorStatus, &a.Revision, &a.AnswerRevision, &answers, &writing, &flags); err != nil {
+	if err := q.QueryRowContext(ctx, lockAttempt, cmd.AttemptID, cmd.ScheduleID).Scan(&a.ID, &a.ScheduleID, &org, &a.ExamID, &a.PublishedVerID, &a.Phase, &a.DeliveryStatus, &a.ProctorStatus, &a.Revision, &a.AnswerRevision, &answers, &writing, &flags, &a.ProtocolVersion); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
 		}
@@ -394,6 +438,19 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 	a.Answers = append(json.RawMessage(nil), answers...)
 	a.WritingAnswers = append(json.RawMessage(nil), writing...)
 	a.Flags = append(json.RawMessage(nil), flags...)
+
+	// B3 seal-time correctness point: V2 attempts rebuild blob columns from
+	// rows synchronously so grading/snapshot never see staleness. V1 blobs
+	// stay authoritative (never touched).
+	if a.ProtocolVersion == 2 {
+		blobs, merr := materializeBlobsForSeal(ctx, q, a.ID)
+		if merr != nil {
+			return nil, merr
+		}
+		a.Answers = json.RawMessage(blobs.Answers)
+		a.WritingAnswers = json.RawMessage(blobs.WritingAnswers)
+		a.Flags = json.RawMessage(blobs.Flags)
+	}
 
 	// Provider key for snapshot + SAT materialization.
 	var providerNull sql.NullString
@@ -603,8 +660,11 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 		"reason":            cmd.Reason,
 		"answerRevision":    a.AnswerRevision,
 	})
-	if err := s.outbx.EnqueueInTx(ctx, q, "attempt_terminalization", a.ID, a.Revision+1, "attempt_terminalized", payload); err != nil {
-		return nil, err
+	// B4.1: exec-only mode skips the wakeup INSERT (live moves to Hub in C).
+	if !s.outboxExecOnly {
+		if err := s.outbx.EnqueueInTx(ctx, q, "attempt_terminalization", a.ID, a.Revision+1, "attempt_terminalized", payload); err != nil {
+			return nil, err
+		}
 	}
 	return &SealResult{Created: true, TerminalizationID: terminalizationID, Outcome: cmd.Outcome, Reason: cmd.Reason, EffectiveAt: effectiveAt, RecordedAt: recordedAt}, nil
 }

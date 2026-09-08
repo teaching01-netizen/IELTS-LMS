@@ -72,7 +72,8 @@ func (s *Service) RecordPrecheck(ctx context.Context, req PrecheckRequest) (map[
 		return nil, validationError("preCheck must be a JSON object.")
 	}
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	// B1: point-write tx on one attempt row (RC-safe; no snapshot dependency).
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +150,8 @@ func (s *Service) RecordHeartbeat(ctx context.Context, req HeartbeatRequest) (ma
 		req.ClientTimestamp = time.Now().UTC()
 	}
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	// B1: point-write tx on one attempt row (RC-safe; no snapshot dependency).
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +224,8 @@ func (s *Service) RecordAudit(ctx context.Context, req AuditRequest) error {
 		return validationError("actionType is required and must be at most 255 characters.")
 	}
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	// B1: point-write tx on one attempt row (RC-safe; no snapshot dependency).
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
 	}

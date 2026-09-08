@@ -13,6 +13,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
@@ -63,7 +64,8 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 		return nil, err
 	}
 	var hubEvents []liveupdates.Event
-	if err := s.runner.WithTx(ctx, func(ctx context.Context, t tx.Tx) error {
+	// B1: module CAS + writer fence are point writes (RC-safe).
+	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
 			return err
 		}
@@ -153,7 +155,8 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 		return nil, err
 	}
 	var hubEvents []liveupdates.Event
-	if err := s.runner.WithTx(ctx, func(ctx context.Context, t tx.Tx) error {
+	// B1: module CAS + writer fence are point writes (RC-safe).
+	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
 			return err
 		}
@@ -233,7 +236,11 @@ func lockModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID, moduleID strin
 		"SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason FROM assessment_module_attempts WHERE attempt_id = ? AND module_id = ? FOR UPDATE",
 		attemptID, moduleID).Scan(&m.id, &m.moduleID, &m.state, &m.allocatedSeconds, &availableAt, &startedAt, &pausedAt, &m.accumulatedPausedSeconds, &m.extensionSeconds, &completionReason); err != nil {
 		if err == sql.ErrNoRows {
-			return saveActiveModule{}, apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+		// Round 81 (live rehearsal): this used to say "Attempt not
+		// found.", indistinguishable from a bad attempt id. The
+		// attempt binding already passed above, so a miss here is a
+		// missing MODULE row (not seeded / wrong module id) — say so.
+		return saveActiveModule{}, apperrors.New(apperrors.CodeNotFound, "Module attempt not found for this module.")
 		}
 		return saveActiveModule{}, err
 	}
@@ -283,11 +290,15 @@ func maxModuleRevisionTx(ctx context.Context, t tx.Tx, attemptID string) (int64,
 // appendModuleEventsTx dual-publishes the module event inside the commit tx
 // (attempt + schedule_roster kinds) so state changes and bus rows commit
 // atomically. It returns the shared publish revision for the post-commit hub
-// fanout.
+// fanout. Under the C1 direct posture the bus INSERTs are skipped (zero live
+// SQL; single-deploy has no peers) while the revision still feeds Hub fanout.
 func (s *Service) appendModuleEventsTx(ctx context.Context, t tx.Tx, scheduleID, attemptID, name string) (int64, error) {
 	rev, err := maxModuleRevisionTx(ctx, t, attemptID)
 	if err != nil {
 		return 0, err
+	}
+	if s != nil && s.liveDirect {
+		return rev, nil
 	}
 	if err := liveupdates.AppendInTx(ctx, t, s.liveOrigin, liveupdates.KindAttempt, attemptID, rev, name, nil); err != nil {
 		return 0, err
@@ -308,13 +319,31 @@ func dualModuleEvents(scheduleID, attemptID string, revision int64, name string)
 }
 
 // publishHubEvents fans committed events out to in-process subscribers.
-// Best-effort: it never fails the request.
+// Best-effort: it never fails the request. Under the sample sink posture
+// every 1000th event also Appends one async debug row post-commit (outside
+// any business tx; failures are dropped silently like hub drops).
 func (s *Service) publishHubEvents(events []liveupdates.Event) {
-	if s.liveHub == nil {
+	if s.liveHub != nil {
+		for _, e := range events {
+			s.liveHub.Publish(e)
+		}
+	}
+	s.maybeSampleSink(events)
+}
+
+// maybeSampleSink writes one async debug row per 1000 hub events when the
+// sample sink is on with a bus handle. Deterministic counter (no rand in
+// the hot path); context is background (post-commit, never the request tx).
+func (s *Service) maybeSampleSink(events []liveupdates.Event) {
+	if s == nil || s.liveSinkBus == nil || s.liveSinkMode != config.LiveBusSinkSample {
 		return
 	}
 	for _, e := range events {
-		s.liveHub.Publish(e)
+		n := s.liveSinkCount.Add(1)
+		if n%1000 != 0 {
+			continue
+		}
+		_ = s.liveSinkBus.Append(context.Background(), e.Kind, e.ID, e.Revision, e.Name, e.Payload)
 	}
 }
 

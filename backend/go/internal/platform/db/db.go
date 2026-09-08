@@ -13,26 +13,46 @@ import (
 	"time"
 
 	"example.com/ielts-proctoring/internal/platform/config"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	mysql "github.com/go-sql-driver/mysql"
+)
+
+// Role selects which side of the plan-B4.2 pool split a pool serves.
+type Role string
+
+const (
+	// RoleAPI serves request-path services (larger share, e.g. 40).
+	RoleAPI Role = "api"
+	// RoleWorker serves background jobs (bounded share, e.g. 10).
+	RoleWorker Role = "worker"
 )
 
 // Open creates the pool with bounded settings and UTC session init.
 func Open(cfg config.Config) (*sql.DB, error) {
-	dsn, err := normalizeMySQLDSN(cfg.DatabaseURL)
+	return OpenRole(cfg, "")
+}
+
+// OpenRole opens a second pool from the same DSN sized for one role
+// (plan B4.2): role api -> DBPoolMaxAPI, worker -> DBPoolMaxWorker,
+// empty/unknown-role callers fall back to DBPoolMax. Config load already
+// falls the split values back to the shared max, so an unset split is
+// today's single-pool sizing on both sides. Rollback = drop the split.
+func OpenRole(cfg config.Config, role Role) (*sql.DB, error) {
+	max := cfg.DBPoolMax
+	switch role {
+	case RoleAPI:
+		max = cfg.DBPoolMaxAPI
+	case RoleWorker:
+		max = cfg.DBPoolMaxWorker
+	case "":
+		// Legacy single-pool callers (migrate, seeds, tools).
+	default:
+		return nil, fmt.Errorf("unknown db role %q (want api|worker)", string(role))
+	}
+	pool, err := newPool(cfg.DatabaseURL, max, cfg.DBPoolMaxIdle)
 	if err != nil {
 		return nil, err
 	}
-	if dsn == "" {
-		return nil, fmt.Errorf("DATABASE_URL is required")
-	}
-	pool, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return nil, err
-	}
-	pool.SetMaxOpenConns(cfg.DBPoolMax)
-	pool.SetMaxIdleConns(cfg.DBPoolMaxIdle)
-	pool.SetConnMaxLifetime(25 * time.Minute)
-	pool.SetConnMaxIdleTime(5 * time.Minute)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := pool.PingContext(ctx); err != nil {
@@ -46,6 +66,43 @@ func Open(cfg config.Config) (*sql.DB, error) {
 		// callers must still read UTC_TIMESTAMP(6) inside transactions.
 		_ = err
 	}
+	return pool, nil
+}
+
+// ReportPoolStats maps one database/sql snapshot to the pool gauges with
+// a role label (plan E3 dashboards + §7 baseline item 4: pool waits split
+// API/worker). Callers pass pool.Stats() — zero new deps. Role values are
+// the Role constants (api|worker); unknown roles pass through verbatim so
+// single-pool callers stay queryable.
+func ReportPoolStats(role Role, st sql.DBStats) {
+	label := string(role)
+	if label == "" {
+		label = "single"
+	}
+	telemetry.SetGauge(telemetry.MPoolOpen, float64(st.OpenConnections), "role", label)
+	telemetry.SetGauge(telemetry.MPoolInUse, float64(st.InUse), "role", label)
+	telemetry.SetGauge(telemetry.MPoolWait, float64(st.WaitCount), "role", label)
+}
+
+// newPool builds an unconnected pool with bounded settings (sql.Open is
+// lazy: no connection is attempted, so role sizing is assertable without
+// a live DB). Callers ping + set UTC discipline explicitly (OpenRole).
+func newPool(databaseURL string, maxOpen, maxIdle int) (*sql.DB, error) {
+	dsn, err := normalizeMySQLDSN(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if dsn == "" {
+		return nil, fmt.Errorf("DATABASE_URL is required")
+	}
+	pool, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, err
+	}
+	pool.SetMaxOpenConns(maxOpen)
+	pool.SetMaxIdleConns(maxIdle)
+	pool.SetConnMaxLifetime(25 * time.Minute)
+	pool.SetConnMaxIdleTime(5 * time.Minute)
 	return pool, nil
 }
 
@@ -123,6 +180,7 @@ func normalizeMySQLDSN(raw string) (string, error) {
 	// connection (setting it once after Ping is insufficient for a pool).
 	// Use a distinct UTC location value so FormatDSN emits loc=UTC even on
 	// hosts whose Go process-local location already happens to be UTC. parseTime is forced on: without it DATETIME arrives as bytes and time scans fail.
+	config.ParseTime = true
 	config.Loc = time.FixedZone("UTC", 0)
 	if config.Params == nil {
 		config.Params = map[string]string{}

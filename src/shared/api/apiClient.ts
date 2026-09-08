@@ -437,12 +437,32 @@ class ApiClient {
     const message = parsed.message ?? this.extractErrorMessage(errorData, response.statusText);
     const headerRequestId =
       response.headers.get("X-Request-Id") ?? response.headers.get("x-request-id") ?? undefined;
+    // Plan C3/D3: the entry gate speaks 429 + Retry-After + {tier,
+    // retryAfterSecs, queuePosition}. Some 429s carry no JSON details (tier
+    // middleware), so the header is folded into details — without it the
+    // queue countdown has no cadence and clients tight-retry the storm the
+    // gate absorbed. Header wins only when details lack the field.
+    let details = parsed.details;
+    if (status === 429) {
+      const headerRetry = response.headers.get("Retry-After") ?? response.headers.get("retry-after");
+      const retrySecs = headerRetry !== null ? Number(headerRetry) : NaN;
+      if (Number.isFinite(retrySecs) && retrySecs > 0) {
+        const merged: Record<string, unknown> = { ...(details ?? {}) };
+        if (merged['retryAfterSecs'] === undefined && merged['retryAfterSeconds'] === undefined) {
+          merged['retryAfterSecs'] = Math.floor(retrySecs);
+        }
+        if (merged['tier'] === undefined) {
+          merged['tier'] = 'student-entry';
+        }
+        details = merged;
+      }
+    }
 
     return new ApiClientError({
       message,
       statusCode: status,
       backendCode: parsed.code ?? "UNKNOWN",
-      backendDetails: parsed.details,
+      backendDetails: details,
       backendRequestId: parsed.requestId ?? headerRequestId,
     });
   }

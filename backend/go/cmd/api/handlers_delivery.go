@@ -2,11 +2,9 @@ package main
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
-	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
@@ -19,11 +17,20 @@ import (
 // the bearer schedule id.
 func deliveryBootstrapHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Plan E1: bounded budget on the herd path (slow-DB honesty).
+		withQueryTimeout(w, r, DefaultQueryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			deliveryBootstrapInner(app, w, r)
+		})
+	}
+}
+
+func deliveryBootstrapInner(app *App, w http.ResponseWriter, r *http.Request) {
+	{
 		bearer, ok := requireBearer(w, r)
 		if !ok {
 			return
 		}
-		claims, err := auth.VerifyAttemptToken(r.Context(), app.DB, app.Config, time.Now().UTC(), bearer)
+		claims, err := verifyAttemptBearer(app, r, bearer)
 		if err != nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
@@ -33,11 +40,18 @@ func deliveryBootstrapHandler(app *App) http.HandlerFunc {
 			return
 		}
 		urlScheduleID := chi.URLParam(r, "scheduleID")
+		// Plan D1: conditional read — 2 indexed probes before assembly.
+		if _, _, etag, terr := app.Delivery.VersionTag(r.Context(), urlScheduleID); terr == nil {
+			if writeETagOrNotModified(w, r, etag) {
+				return
+			}
+		}
 		out, err := app.Delivery.Bootstrap(r.Context(), claims.ScheduleID, claims.AttemptID, urlScheduleID)
 		if err != nil {
-			httpx.WriteError(w, r, err)
+			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
+		w.Header().Set("ETag", delivery.VersionETag(out.VersionID, out.VersionRevision))
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}
 }
@@ -52,7 +66,7 @@ func deliverySaveResponseHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		claims, err := auth.VerifyAttemptToken(r.Context(), app.DB, app.Config, time.Now().UTC(), bearer)
+		claims, err := verifyAttemptBearer(app, r, bearer)
 		if err != nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
@@ -66,10 +80,8 @@ func deliverySaveResponseHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if err := app.Delivery.EnsureActiveWriter(r.Context(), claims.AttemptID, claims.ScheduleID, claims.ClientSessionID); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
+		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx);
+		// no separate pre-tx round trip.
 		out, err := app.Delivery.SaveResponse(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "examQuestionID"), req, claims.ClientSessionID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -89,7 +101,7 @@ func deliveryStartModuleHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		claims, err := auth.VerifyAttemptToken(r.Context(), app.DB, app.Config, time.Now().UTC(), bearer)
+		claims, err := verifyAttemptBearer(app, r, bearer)
 		if err != nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
@@ -103,10 +115,8 @@ func deliveryStartModuleHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if err := app.Delivery.EnsureActiveWriter(r.Context(), claims.AttemptID, claims.ScheduleID, claims.ClientSessionID); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
+		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx);
+		// no separate pre-tx round trip.
 		out, err := app.Delivery.StartModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, claims.ClientSessionID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -126,7 +136,7 @@ func deliverySubmitModuleHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		claims, err := auth.VerifyAttemptToken(r.Context(), app.DB, app.Config, time.Now().UTC(), bearer)
+		claims, err := verifyAttemptBearer(app, r, bearer)
 		if err != nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
@@ -140,10 +150,8 @@ func deliverySubmitModuleHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if err := app.Delivery.EnsureActiveWriter(r.Context(), claims.AttemptID, claims.ScheduleID, claims.ClientSessionID); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
+		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx);
+		// no separate pre-tx round trip.
 		out, err := app.Delivery.SubmitModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, claims.ClientSessionID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -163,7 +171,7 @@ func deliverySubmitAssessmentHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		claims, err := auth.VerifyAttemptToken(r.Context(), app.DB, app.Config, time.Now().UTC(), bearer)
+		claims, err := verifyAttemptBearer(app, r, bearer)
 		if err != nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return

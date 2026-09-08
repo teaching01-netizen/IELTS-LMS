@@ -206,15 +206,30 @@ type Subscription struct {
 // Channel exposes the event stream.
 func (s *Subscription) Channel() <-chan Event { return s.ch }
 
+// Dropped reports events dropped for this subscriber (buffer full;
+// non-blocking publish never stalls the publisher).
+func (s *Subscription) Dropped() int64 { return s.dropped }
+
 // Hub fans bus events out to in-process subscribers. It never blocks the
 // publisher: a full subscriber buffer drops the event and counts it.
+// Plan C1: per-schedule/per-attempt indexes make Publish O(interested
+// subs) instead of O(all conns); ShouldForward stays the exact filter so
+// fanout semantics are unchanged (indexes only narrow candidates).
 type Hub struct {
-	mu   sync.RWMutex
-	subs map[*Subscription]struct{}
+	mu         sync.RWMutex
+	subs       map[*Subscription]struct{}
+	bySchedule map[string]map[*Subscription]struct{}
+	byAttempt  map[string]map[*Subscription]struct{}
 }
 
 // NewHub builds an empty hub; callers own its lifetime explicitly.
-func NewHub() *Hub { return &Hub{subs: map[*Subscription]struct{}{}} }
+func NewHub() *Hub {
+	return &Hub{
+		subs:       map[*Subscription]struct{}{},
+		bySchedule: map[string]map[*Subscription]struct{}{},
+		byAttempt:  map[string]map[*Subscription]struct{}{},
+	}
+}
 
 // Subscribe registers a subscriber with its role filter inputs.
 func (h *Hub) Subscribe(role string, scheduleID, attemptID *string, allowedScheduleIDs []string) *Subscription {
@@ -231,6 +246,22 @@ func (h *Hub) Subscribe(role string, scheduleID, attemptID *string, allowedSched
 	}
 	h.mu.Lock()
 	h.subs[sub] = struct{}{}
+	if sub.scheduleID != nil && *sub.scheduleID != "" {
+		set := h.bySchedule[*sub.scheduleID]
+		if set == nil {
+			set = map[*Subscription]struct{}{}
+			h.bySchedule[*sub.scheduleID] = set
+		}
+		set[sub] = struct{}{}
+	}
+	if sub.attemptID != nil && *sub.attemptID != "" {
+		set := h.byAttempt[*sub.attemptID]
+		if set == nil {
+			set = map[*Subscription]struct{}{}
+			h.byAttempt[*sub.attemptID] = set
+		}
+		set[sub] = struct{}{}
+	}
 	n := len(h.subs)
 	h.mu.Unlock()
 	telemetry.SetGauge(telemetry.MWSConnections, float64(n))
@@ -242,6 +273,22 @@ func (h *Hub) Unsubscribe(sub *Subscription) {
 	h.mu.Lock()
 	if _, ok := h.subs[sub]; ok {
 		delete(h.subs, sub)
+		if sub.scheduleID != nil {
+			if set := h.bySchedule[*sub.scheduleID]; set != nil {
+				delete(set, sub)
+				if len(set) == 0 {
+					delete(h.bySchedule, *sub.scheduleID)
+				}
+			}
+		}
+		if sub.attemptID != nil {
+			if set := h.byAttempt[*sub.attemptID]; set != nil {
+				delete(set, sub)
+				if len(set) == 0 {
+					delete(h.byAttempt, *sub.attemptID)
+				}
+			}
+		}
 		close(sub.ch)
 	}
 	n := len(h.subs)
@@ -249,11 +296,31 @@ func (h *Hub) Unsubscribe(sub *Subscription) {
 	telemetry.SetGauge(telemetry.MWSConnections, float64(n))
 }
 
-// Publish fans one event out; slow subscribers drop it.
+// Publish fans one event out; slow subscribers drop it. Candidates come
+// from the per-schedule/per-attempt indexes plus unindexed subscribers
+// (neither schedule nor attempt: platform readers with global scope), so a
+// schedule frame touches O(subs-of-schedule), not O(all-conns). ShouldForward
+// stays the exact filter — indexes only narrow the candidate set.
 func (h *Hub) Publish(e Event) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	seen := map[*Subscription]struct{}{}
+	if set := h.bySchedule[e.ID]; set != nil {
+		for sub := range set {
+			seen[sub] = struct{}{}
+		}
+	}
+	if set := h.byAttempt[e.ID]; set != nil {
+		for sub := range set {
+			seen[sub] = struct{}{}
+		}
+	}
 	for sub := range h.subs {
+		if sub.scheduleID == nil && sub.attemptID == nil {
+			seen[sub] = struct{}{}
+		}
+	}
+	for sub := range seen {
 		if !ShouldForward(e, sub.role, optStr(sub.scheduleID), optStr(sub.attemptID), sub.allowed) {
 			continue
 		}

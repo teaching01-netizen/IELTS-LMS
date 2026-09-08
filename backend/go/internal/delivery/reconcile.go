@@ -63,9 +63,19 @@ type reconcileStage struct {
 // treat the returned CodeRecoveryFailed error as a retry signal: the tx work
 // is durable and only completion is outstanding.
 func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attemptID string, asOf time.Time) (bool, error) {
+	// Plan D1 lock-light fast path: steady drained attempts (no open modules
+	// and either no terminal modules or a result already present) skip the
+	// write tx entirely — two cheap committed-read probes instead of
+	// attempt+runtime FOR UPDATE locks. Any probe error fails closed to the
+	// full path (never skips work on uncertainty).
+	if skip, serr := s.reconcileSteady(ctx, attemptID); serr == nil && skip {
+		return false, nil
+	}
 	var shouldComplete bool
 	changed := false
-	if err := s.runner.WithTx(ctx, func(ctx context.Context, t tx.Tx) error {
+	// B1: reconcile locks attempt + runtime rows explicitly; it never depends
+	// on a repeatable snapshot, so RC only shrinks its gap-lock footprint.
+	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		var attemptRow string
 		if err := t.QueryRowContext(ctx,
 			"SELECT id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
@@ -199,6 +209,32 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 		}
 	}
 	return changed, nil
+}
+
+// reconcileSteady reports whether the attempt is provably steady: zero open
+// modules (nothing can expire) AND the drained-at-entry backstop cannot fire
+// (no terminal modules, or the result row already exists). Both probes are
+// committed-read aggregates (no locks). Errors fail closed to false (full tx).
+func (s *Service) reconcileSteady(ctx context.Context, attemptID string) (bool, error) {
+	var openModules, terminalModules int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(CASE WHEN state IN ('not_started', 'active', 'review') THEN 1 END), COUNT(CASE WHEN state IN ('submitted', 'locked') THEN 1 END) FROM assessment_module_attempts WHERE attempt_id = ?`,
+		attemptID).Scan(&openModules, &terminalModules); err != nil {
+		return false, err
+	}
+	if openModules > 0 {
+		return false, nil
+	}
+	if terminalModules == 0 {
+		return true, nil
+	}
+	var results int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM assessment_results WHERE attempt_id = ?`,
+		attemptID).Scan(&results); err != nil {
+		return false, err
+	}
+	return results > 0, nil
 }
 
 // ReconcileTimeouts is the worker-facing bounded sweep. Request paths still

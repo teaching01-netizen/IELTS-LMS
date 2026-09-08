@@ -7,6 +7,7 @@ import {
   isStudentEntryScheduleBlockedError,
 } from "../infrastructure/studentEntryGateway";
 import { commonSchemas } from "@shared/lib/validateApiResponse";
+import { entryQueueDelayMs, parseEntryQueueError } from "../../../services/entryQueueRetry";
 
 interface EntryFormData {
   wcode: string;
@@ -553,7 +554,38 @@ export function StudentEntryRoute() {
       });
       navigate(buildStudentRoute(scheduleId, normalizedWcode));
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "Check-in failed. Please try again.");
+      // Plan C3/D3: ENTRY_GATE 429s are a queue, not a failure. Render the
+      // position + countdown and auto-retry at the server's Retry-After
+      // (jittered, never tight). Anything else surfaces immediately.
+      const queue = parseEntryQueueError(error);
+      if (queue.queued) {
+        const waitMs = entryQueueDelayMs(queue.retryAfterSecs);
+        const queuedAt = new Date().toISOString();
+        const ticket: StudentQueuedAdmission = {
+          state: "queued",
+          ticketId: `gate-${scheduleId}-${Date.now()}`,
+          scheduleId,
+          wcode: normalizedWcode,
+          position: queue.queuePosition ?? 1,
+          pollAfterMs: waitMs,
+          queuedAt,
+        };
+        const payload = {
+          wcode: normalizedWcode,
+          email: normalizedEmail,
+          studentName: normalizedName,
+          nickname: normalizedNickname,
+          ieltsCourse: normalizedIeltsCourse,
+        };
+        pollAttemptsRef.current = 0;
+        setQueuedAdmission(ticket);
+        setQueuedPayload(payload);
+        setLastQueuedTicket(ticket);
+        persistStudentQueue(scheduleId, ticket, payload);
+        setSubmitError(null);
+      } else {
+        setSubmitError(error instanceof Error ? error.message : "Check-in failed. Please try again.");
+      }
     } finally {
       submittingRef.current = false;
       setIsLoading(false);

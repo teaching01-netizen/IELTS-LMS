@@ -15,14 +15,19 @@ import (
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 )
 
 const liveWebSocketInstanceID = "api"
 
+// Plan C3: staff-conn buffers raised 4K/8K -> 16K (fewer syscalls per
+// frame at staff scale; the 64K read limit + same-host origin check stay).
+// Per-conn ping/lease tickers stay: with students on the poll, remaining
+// staff conns are few enough that a shared wheel buys nothing.
 var liveWebSocketUpgrader = websocket.Upgrader{
-	ReadBufferSize:  4 * 1024,
-	WriteBufferSize: 8 * 1024,
+	ReadBufferSize:  16 * 1024,
+	WriteBufferSize: 16 * 1024,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := strings.TrimSpace(r.Header.Get("Origin"))
 		if origin == "" {
@@ -39,11 +44,23 @@ type liveWebSocketQuery struct {
 	lastSeenRuntimeRevision *int64
 }
 
+// liveForwarderEnabled reports whether the cross-instance forwarder runs:
+// db mode only. Direct mode has no peers and no bus rows, so the poll loop
+// stays down (zero poll SQL). Pure predicate so the posture pins in tests.
+func liveForwarderEnabled(cfg config.Config) bool {
+	return !cfg.IsDirect()
+}
+
 // startLiveBusForwarder fans events written by another API process into this
 // process's hub. Local writers already publish after commit, so the bus query
 // excludes this process's unique origin and avoids duplicate local frames.
+// Under the C1 direct posture there are no peers and no bus rows: the
+// forwarder stays down (zero poll SQL). Never call with direct mode.
 func startLiveBusForwarder(app *App) {
 	if app == nil || app.LiveBus == nil || app.LiveHub == nil || app.DB == nil {
+		return
+	}
+	if !liveForwarderEnabled(app.Config) {
 		return
 	}
 	app.LiveForwardOnce.Do(func() {
@@ -85,7 +102,19 @@ func liveWebSocketHandler(app *App) http.HandlerFunc {
 		if sess == nil {
 			return
 		}
-		if app.DB == nil || app.LiveHub == nil || app.Leases == nil {
+		// Plan C3: retired student sockets get 410 + {use: runtime-poll}.
+		// Staff WS is unaffected (proctors keep sockets). allow (default)
+		// keeps dual-serve while clients migrate; ROLLBACK = allow.
+		if sess.Role == auth.RoleStudent && app.Config.StudentWSGone() {
+			httpx.WriteError(w, r, &apperrors.Error{
+				Code:       apperrors.CodeStudentWSRetired,
+				Message:    "Student WebSocket is retired; poll the versioned runtime endpoint.",
+				HTTPStatus: http.StatusGone,
+				Details:    map[string]any{"use": "runtime-poll"},
+			})
+			return
+		}
+		if app.DB == nil || app.LiveHub == nil || !app.wsGateReady() {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Live updates are unavailable."))
 			return
 		}
@@ -109,7 +138,7 @@ func liveWebSocketHandler(app *App) http.HandlerFunc {
 		if query.scheduleID != "" {
 			schedulePtr = &query.scheduleID
 		}
-		leaseToken, admitted, err := app.Leases.Acquire(r.Context(), origin, sess.UserID, schedulePtr, liveupdates.CapTotal, liveupdates.CapPerUser, liveupdates.CapPerSchedule)
+		leaseToken, admitted, err := app.acquireWSLease(r.Context(), origin, sess.UserID, schedulePtr)
 		if err != nil {
 			log.Printf("api: live websocket lease acquire failed request_id=%s user_id=%s schedule_id=%s err=%v", httpx.RequestIDFrom(r.Context(), r), sess.UserID, query.scheduleID, err)
 			httpx.WriteError(w, r, err)
@@ -123,11 +152,11 @@ func liveWebSocketHandler(app *App) http.HandlerFunc {
 		conn, err := liveWebSocketUpgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Printf("api: live websocket upgrade failed request_id=%s user_id=%s schedule_id=%s err=%v", httpx.RequestIDFrom(r.Context(), r), sess.UserID, query.scheduleID, err)
-			_ = app.Leases.Release(context.Background(), leaseToken, origin, sess.UserID)
+			app.releaseWSLease(context.Background(), leaseToken, origin, sess.UserID)
 			return
 		}
 		defer func() {
-			_ = app.Leases.Release(context.Background(), leaseToken, origin, sess.UserID)
+			app.releaseWSLease(context.Background(), leaseToken, origin, sess.UserID)
 			_ = conn.Close()
 		}()
 
@@ -176,7 +205,7 @@ func liveWebSocketHandler(app *App) http.HandlerFunc {
 
 		done := make(chan struct{})
 		stop := make(chan struct{})
-		go liveWebSocketWritePump(conn, sub, app.Leases, leaseToken, origin, sess.UserID, stop, done)
+		go liveWebSocketWritePump(conn, sub, app.wsHeartbeatFunc(), leaseToken, origin, sess.UserID, stop, done)
 		liveWebSocketReadPump(conn)
 		close(stop)
 		<-done
@@ -252,7 +281,9 @@ func liveAllowedScheduleIDs(ctx context.Context, db interface {
 	return allowed, nil
 }
 
-func liveWebSocketWritePump(conn *websocket.Conn, sub *liveupdates.Subscription, leases *liveupdates.LeaseRepository, token, instanceID, userID string, stop <-chan struct{}, done chan<- struct{}) {
+// wsHeartbeatFunc is the write-pump lease tick: it closes over the active
+// gate (memory or db) so the pump body stays gate-agnostic.
+func liveWebSocketWritePump(conn *websocket.Conn, sub *liveupdates.Subscription, heartbeat wsHeartbeatFunc, token, instanceID, userID string, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
 	defer conn.Close()
 	pingTicker := time.NewTicker(25 * time.Second)
@@ -278,7 +309,7 @@ func liveWebSocketWritePump(conn *websocket.Conn, sub *liveupdates.Subscription,
 				return
 			}
 		case <-leaseTicker.C:
-			if err := leases.Heartbeat(context.Background(), token, instanceID, userID); err != nil {
+			if err := heartbeat(context.Background(), token, instanceID, userID); err != nil {
 				return
 			}
 		}

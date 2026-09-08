@@ -55,6 +55,32 @@ func IncCounter(name string, labelPairs ...string) {
 	DefaultRegistry.IncCounter(name, labelPairs...)
 }
 
+// CounterValueForTest reads one series (test seam for wire-level outcome
+// assertions). Returns 0 for absent series.
+func CounterValueForTest(r *Registry, name string, labelPairs ...string) float64 {
+	key, _ := seriesKey(name, labelPairs)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.counters[key]
+}
+
+// GaugeValueForTest reads one gauge series (test seam for duration/lag
+// assertions). Returns 0 for absent series.
+func GaugeValueForTest(r *Registry, name string, labelPairs ...string) float64 {
+	key, _ := seriesKey(name, labelPairs)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gauges[key]
+}
+
+// ResetForTest clears all series (test isolation; never call in prod).
+func ResetForTest(r *Registry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.counters = map[string]float64{}
+	r.gauges = map[string]float64{}
+}
+
 // SetGauge sets a gauge on the process registry.
 func SetGauge(name string, value float64, labelPairs ...string) {
 	DefaultRegistry.SetGauge(name, value, labelPairs...)

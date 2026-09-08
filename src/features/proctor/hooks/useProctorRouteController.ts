@@ -584,7 +584,9 @@ export function useProctorRouteController(
     [schedules, selectedScheduleId]
   );
 
+  // Staff sockets stay (plan C1 retires student sockets only).
   useLiveUpdates({
+    role: 'proctor-observer',
     ...(selectedScheduleId ? { scheduleId: selectedScheduleId } : {}),
     onConnected: () => setWsConnected(true),
     onDisconnected: () => setWsConnected(false),

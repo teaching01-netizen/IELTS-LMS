@@ -40,10 +40,8 @@ func TestCompleteExamCustomReasonKeepsVocabularyPayload(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
-	// lockScheduleScope: attempts, runtime id, sections.
-	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE")).
-		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
+	// lockScheduleScope (B2 narrowed): runtime id + sections only — no
+	// schedule-wide attempt sweep.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("rt-1"))

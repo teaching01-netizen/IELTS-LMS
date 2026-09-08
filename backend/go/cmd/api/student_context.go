@@ -181,6 +181,18 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 	if err == sql.ErrNoRows {
 		return context, nil
 	}
+	// Round 83 (live rehearsal): the SAT Bootstrap path seeds the base
+	// module row via ensureBaseModuleAttempt, but this V1 session path
+	// never did — module-start then 404d on a missing module row (now
+	// disambiguated by round 81). Seed here when the Delivery service
+	// is wired; a nil Delivery (unit scope) skips silently. Seeding is
+	// idempotent (existence probe + ON DUPLICATE KEY no-op), so session
+	// refreshes stay cheap: one indexed SELECT when rows exist.
+	if app.Delivery != nil {
+		if serr := app.Delivery.EnsureBaseModuleAttemptForSchedule(ctx, attemptID, scheduleID); serr != nil {
+			return nil, serr
+		}
+	}
 	attempt, err := app.Student.GetAttemptProjection(ctx, attemptID)
 	if err != nil {
 		return nil, err

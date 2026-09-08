@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Question 14 — Digital SAT, Reading &amp; Writing (editorial prototype)</title>
+<style>
+  :root{
+    --paper:#fdfbf4;
+    --desk:#e7e0d1;
+    --ink:#1b1712;
+    --ink-2:#3d382f;
+    --mut:#6f675a;
+    --faint:#a89f8d;
+    --rule:rgba(27,23,18,.9);
+    --rule-soft:rgba(27,23,18,.16);
+    --rule-faint:rgba(27,23,18,.09);
+    --red:#a31621;
+    --red-ink:#8c1220;
+    --red-wash:rgba(163,22,33,.07);
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--desk);color:var(--ink);
+    font-family:var(--serif);font-size:16px;line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:rgba(163,22,33,.18)}
+  :focus-visible{outline:2px solid var(--red);outline-offset:3px;border-radius:2px}
+  button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+  input,select{font:inherit}
+  caret-color:var(--red);
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#c9c0ab;border-radius:99px;border:2px solid var(--desk)}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  .desk{min-height:100dvh;display:flex;justify-content:center;align-items:flex-start;padding:28px 16px 64px}
+  .sheet{
+    width:100%;max-width:860px;background:var(--paper);
+    box-shadow:0 1px 2px rgba(27,23,18,.18),0 24px 70px rgba(27,23,18,.28);
+    padding:0 0 8px;position:relative;
+  }
+  .sheet-in{padding:30px 56px 0}
+  @media (max-width:640px){ .sheet-in{padding:22px 20px 0} .desk{padding:0 0 40px} .sheet{box-shadow:none} }
+
+  /* ── masthead ── */
+  .mast{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;
+    font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.14em;color:var(--ink-2)}
+  .mast .r{text-align:right}
+  .stamp{
+    display:inline-block;margin-top:12px;padding:4px 12px 3px;
+    border:1.5px solid var(--red);color:var(--red);border-radius:3px;
+    font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.18em;
+    transform:rotate(-3deg);
+  }
+  .rule-thick{border:0;border-top:2.5px solid var(--rule);margin:14px 0 0}
+  .rule-thin{border:0;border-top:1px solid var(--rule);margin:3px 0 0}
+
+  /* ── answer-sheet strip ── */
+  .scriptnav{margin-top:22px}
+  .scriptnav-row{display:flex;align-items:center;gap:12px}
+  .scriptnav h2{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.16em;margin:0;color:var(--ink-2);flex:none}
+  .cells{display:flex;gap:5px;overflow-x:auto;padding:6px 2px;flex:1;scrollbar-width:thin}
+  .cell{
+    flex:none;width:30px;height:34px;display:flex;align-items:center;justify-content:center;
+    font-family:var(--serif);font-size:14px;
+    border:1px solid var(--rule-soft);border-radius:3px;color:var(--ink-2);background:transparent;
+  }
+  .cell:hover{border-color:var(--ink)}
+  .cell.ready{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+  .cell.todo{border-bottom:2px solid var(--red)}
+  .cell.empty{border-style:dashed;color:var(--faint)}
+  .cell.now{box-shadow:0 0 0 2px var(--paper),0 0 0 4px var(--red);font-weight:700;color:var(--ink)}
+  .jump{flex:none;display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--mut)}
+  .jump input{width:52px;border:0;border-bottom:1px solid var(--ink);background:transparent;text-align:center;font-family:var(--mono);font-size:12px;padding:2px 0;outline:none}
+  .legend{display:flex;gap:16px;margin-top:6px;font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:var(--mut)}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:baseline}
+  .legend .a{background:var(--ink)} .legend .b{background:transparent;border:1px solid var(--rule-soft);border-bottom:2px solid var(--red)} .legend .c{background:transparent;border:1px dashed var(--faint)}
+
+  /* ── title block ── */
+  .qhead{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin:30px 0 0}
+  .qhead h1{margin:0;font-size:clamp(34px,5vw,52px);line-height:1.05;font-weight:500;letter-spacing:-.015em}
+  .qhead h1 em{font-style:italic}
+  .folio{flex:none;text-align:right;font-family:var(--mono);font-size:11px;color:var(--mut);letter-spacing:.1em;line-height:2}
+  .folio b{color:var(--red-ink);font-size:15px;letter-spacing:0}
+
+  /* ── marker's slip ── */
+  .slip{margin-top:18px;border:1.5px solid var(--ink);border-radius:3px;padding:12px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  .slip.clean{border-color:var(--rule-soft)}
+  .slip .t{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.16em}
+  .slip .t.bad{color:var(--red-ink)} .slip .t.ok{color:var(--ink-2)}
+  .slip ul{list-style:none;margin:0;padding:0;display:flex;gap:8px 18px;flex-wrap:wrap}
+  .slip li button{display:flex;align-items:center;gap:8px;font-size:14px;padding:4px 2px;border-bottom:1px solid transparent}
+  .slip li button:hover{border-bottom-color:var(--red)}
+  .box{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:1.5px solid var(--ink);border-radius:2px;font-size:12px;line-height:1;flex:none}
+  li.done .box{background:var(--ink);color:var(--paper)}
+  li.done{color:var(--mut);text-decoration:line-through;text-decoration-thickness:1px}
+  li.open .box{border-color:var(--red)}
+  li.open{color:var(--red-ink);font-weight:600}
+
+  /* ── steps ── */
+  .step{margin-top:34px}
+  .step > h2{margin:0 0 4px;font-size:22px;font-weight:600;letter-spacing:-.01em}
+  .step > h2 .no{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--red-ink);vertical-align:4px;margin-right:10px;letter-spacing:.1em}
+  .step > p.sub{margin:0 0 14px;font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--mut)}
+
+  /* filing: underline fields, no pills */
+  .fileline{display:flex;flex-wrap:wrap;gap:8px 22px;align-items:flex-end;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule-soft);padding:12px 2px}
+  .ff{display:flex;flex-direction:column;gap:2px}
+  .ff label{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.16em;color:var(--mut)}
+  .ff select{
+    appearance:none;-webkit-appearance:none;border:0;border-bottom:1.5px solid var(--ink);border-radius:0;
+    background:transparent url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="6"><path d="M1 1l3 3 3-3" fill="none" stroke="%23a31621" stroke-width="1.5"/></svg>') no-repeat right 2px center;
+    font-family:var(--serif);font-size:15px;font-weight:600;padding:2px 18px 4px 0;max-width:230px;outline:none;cursor:pointer;
+  }
+  .ff select:invalid{color:var(--red-ink);border-bottom-style:dashed}
+  .ff select:disabled{color:var(--faint);border-bottom-color:var(--rule-soft);cursor:default}
+  .tagsline{margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--mut)}
+  .tagsline b{color:var(--ink-2);font-weight:500;border-bottom:1px dotted var(--mut)}
+
+  /* set: the paper itself */
+  .passage{border-left:2px solid var(--rule);padding:2px 0 2px 20px;margin:0 0 18px;color:var(--ink-2);font-size:16.5px}
+  .prompt{font-size:19px;line-height:1.65;margin:0}
+  .prompt [contenteditable]{outline:none;border-bottom:1px dashed transparent}
+  .prompt [contenteditable]:hover{border-bottom-color:var(--rule-soft)}
+  .prompt [contenteditable]:focus{border-bottom-color:var(--red);background:var(--red-wash)}
+  .starterline{margin:16px 0 0;font-family:var(--mono);font-size:11px;color:var(--mut)}
+  .starterline button{text-decoration:underline;text-underline-offset:3px;font-family:var(--mono);font-size:11px;color:var(--ink-2);margin-left:12px}
+  .starterline button:hover{color:var(--red-ink)}
+
+  /* key: examiner's circle */
+  .opts{list-style:none;margin:6px 0 0;padding:0;border-top:1px solid var(--rule)}
+  .opts li{display:flex;align-items:baseline;gap:16px;padding:13px 4px;border-bottom:1px solid var(--rule-soft);cursor:pointer}
+  .opts li:hover{background:var(--red-wash)}
+  .L{
+    flex:none;width:34px;height:34px;border:1.5px solid var(--ink);border-radius:50%;
+    display:inline-flex;align-items:center;justify-content:center;
+    font-size:16px;font-weight:600;transform:translateY(7px);
+  }
+  li.keyed .L{border:2.5px solid var(--red);color:var(--red-ink);font-weight:700}
+  li.keyed .opt{font-weight:600}
+  .opt{flex:1;font-size:16.5px}
+  .keymark{flex:none;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.14em;color:var(--red-ink);display:flex;align-items:center;gap:6px}
+  .keysig{font-family:var(--serif);font-style:italic;font-size:15px;color:var(--red-ink)}
+  .keyhint{margin-top:10px;font-family:var(--mono);font-size:10.5px;color:var(--mut);letter-spacing:.04em}
+
+  /* mark scheme */
+  details.scheme{border:1px solid var(--rule-soft);border-radius:3px;margin-top:6px}
+  details.scheme summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;padding:12px 16px;font-size:16px;font-weight:600}
+  details.scheme summary::-webkit-details-marker{display:none}
+  details.scheme summary .m{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--mut);font-weight:500}
+  details.scheme .in{border-top:1px dashed var(--rule-soft);padding:14px 16px;color:var(--ink-2);font-size:15px}
+  details.scheme .in [contenteditable]{outline:none}
+  details.scheme .in [contenteditable]:focus{background:var(--red-wash)}
+
+  /* sign-off */
+  .signoff{margin-top:40px;border-top:2.5px solid var(--rule);padding-top:16px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+  .signoff .meta{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:var(--mut);line-height:2}
+  .signoff .meta b{color:var(--ink-2)}
+  .carryline{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;color:var(--mut);margin-top:4px}
+  .carryline input{width:15px;height:15px;accent-color:var(--red)}
+  .actions{display:flex;align-items:baseline;gap:20px}
+  .savequiet{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);text-decoration:underline;text-underline-offset:4px}
+  .savequiet:hover{color:var(--red-ink)}
+  .filenext{background:var(--ink);color:var(--paper);font-family:var(--serif);font-size:17px;font-weight:600;padding:13px 30px;border-radius:2px}
+  .filenext:hover{background:var(--red-ink)}
+  .folioot{margin:44px 0 0;text-align:center;font-family:var(--mono);font-size:10px;letter-spacing:.3em;color:var(--faint)}
+  .protonote{margin:26px 56px 30px;border:1px dashed var(--rule-soft);border-radius:3px;padding:10px 14px;font-family:var(--mono);font-size:10.5px;color:var(--mut);letter-spacing:.03em}
+  @media (max-width:640px){ .protonote{margin:18px 20px 24px} }
+</style>
+</head>
+<body>
+<div class="desk">
+  <div class="sheet">
+    <div class="sheet-in">
+
+      <div class="mast">
+        <span>DIGITAL SAT &nbsp;·&nbsp; READING &amp; WRITING &nbsp;·&nbsp; MODULE 1</span>
+        <span class="r">EXAM AUTHORING<br/>DRAFT SCRIPT</span>
+      </div>
+      <div><span class="stamp">PROTOTYPE — SPECIMEN ONLY</span></div>
+      <hr class="rule-thick"/><hr class="rule-thin"/>
+
+      <nav class="scriptnav" aria-label="Questions in this module">
+        <div class="scriptnav-row">
+          <h2>SCRIPT</h2>
+          <div class="cells" id="cells" role="list"></div>
+          <span class="jump">Go <input id="jump" value="14" aria-label="Jump to question number"/> ⌘K</span>
+        </div>
+        <div class="legend"><span><i class="a"></i>ready</span><span><i class="b"></i>to finish</span><span><i class="c"></i>blank</span></div>
+      </nav>
+
+      <div class="qhead">
+        <h1>Question <em id="qnum">14</em></h1>
+        <div class="folio"><b id="folio">14 / 22</b><br/>FILED BY R. CHEN · 09:41</div>
+      </div>
+
+      <div class="slip" id="slip">
+        <span class="t bad" id="slipT">2 TO FINISH</span>
+        <ul>
+          <li class="open" id="liDomain"><button type="button" data-goto="filing"><span class="box"></span>File the domain</button></li>
+          <li class="open" id="liSkill"><button type="button" data-goto="filing"><span class="box"></span>File the skill</button></li>
+          <li class="done" id="liKey"><button type="button" data-goto="keystep"><span class="box">✓</span>Key set — B</button></li>
+        </ul>
+      </div>
+
+      <section class="step" id="filing" aria-labelledby="h1">
+        <h2 id="h1"><span class="no">1 —</span>File it</h2>
+        <p class="sub">How this question is found later. Filing is required before it can be marked ready.</p>
+        <div class="fileline">
+          <span class="ff"><label for="domain">DOMAIN</label>
+            <select id="domain" required>
+              <option value="" selected>Unfiled…</option>
+              <option>Information and Ideas</option>
+              <option>Craft and Structure</option>
+              <option>Expression of Ideas</option>
+              <option>Standard English Conventions</option>
+            </select></span>
+          <span class="ff"><label for="skill">SKILL</label>
+            <select id="skill" disabled required>
+              <option value="">File domain first…</option>
+            </select></span>
+          <span class="ff"><label for="diff">DIFFICULTY</label>
+            <select id="diff">
+              <option>Easy</option><option selected>Medium</option><option>Hard</option>
+            </select></span>
+        </div>
+        <p class="tagsline">TAGS &nbsp;<b>urbanism</b> &nbsp;·&nbsp; <b>+ add</b></p>
+      </section>
+
+      <section class="step" aria-labelledby="h2">
+        <h2 id="h2"><span class="no">2 —</span>Set it</h2>
+        <p class="sub">Students see exactly this. Click any line to edit.</p>
+        <p class="passage">The urban planner argued that dense, mixed-use blocks reduce car trips by placing daily needs within walking distance — provided footways are continuous and crossings are frequent.</p>
+        <p class="prompt"><span contenteditable="true" spellcheck="false">Which choice best supports the planner's claim?</span></p>
+        <p class="starterline">NO PASSAGE? <button type="button">Paired texts</button><button type="button">Student notes</button><button type="button">Data table</button></p>
+      </section>
+
+      <section class="step" id="keystep" aria-labelledby="h3">
+        <h2 id="h3"><span class="no">3 —</span>Key it</h2>
+        <p class="sub">Circle the correct choice, the way an examiner would. Click a row to move the key.</p>
+        <ol class="opts" id="opts">
+          <li data-k="A"><span class="L">A</span><span class="opt">Expand bus routes to the outer suburbs</span><span class="keymark" hidden><span class="keysig">✓</span> KEY</span></li>
+          <li data-k="B" class="keyed"><span class="L">B</span><span class="opt">Locate shops and homes on the same block</span><span class="keymark"><span class="keysig">✓</span> KEY</span></li>
+          <li data-k="C"><span class="L">C</span><span class="opt">Widen the arterial roads downtown</span><span class="keymark" hidden><span class="keysig">✓</span> KEY</span></li>
+          <li data-k="D"><span class="L">D</span><span class="opt">Build structured parking at the edge of town</span><span class="keymark" hidden><span class="keysig">✓</span> KEY</span></li>
+        </ol>
+        <p class="keyhint">SHORTCUTS — ⌘1 TO ⌘4 MOVES THE KEY · CLICK ANY ROW</p>
+      </section>
+
+      <section class="step" aria-labelledby="h4">
+        <h2 id="h4"><span class="no">4 —</span>Mark scheme</h2>
+        <p class="sub">Internal. Why the key holds, and the traps. Recommended, never blocking.</p>
+        <details class="scheme">
+          <summary><span>Why B holds</span><span class="m">INTERNAL · CLICK TO OPEN</span></summary>
+          <div class="in"><span contenteditable="true" spellcheck="false">B is the only choice naming co-location of daily needs with housing — the mechanism in the passage. A and D concern car travel; C increases it.</span></div>
+        </details>
+      </section>
+
+      <div class="signoff">
+        <div>
+          <div class="meta">AUTOSAVED <b>09:41</b> · ON THIS DEVICE<br/>NOTHING LEAVES UNTIL YOU FILE IT</div>
+          <label class="carryline"><input type="checkbox" checked/> carry this filing to the next blank</label>
+        </div>
+        <div class="actions">
+          <button class="savequiet" type="button">Save</button>
+          <button class="filenext" type="button" id="nextBtn">File &amp; next →</button>
+        </div>
+      </div>
+
+      <p class="folioot">— 14 · DRAFT · NOT FOR EXAMINATION USE —</p>
+    </div>
+    <div class="protonote">STATIC PROTOTYPE — the script strip, filing selects, key rows (click or ⌘1–⌘4), jump box, and mark-scheme disclosure are live. Nothing saves; “File &amp; next” advances the strip one question.</div>
+  </div>
+</div>
+<script>
+  var TOTAL = 22, now = 14;
+  var readySet = {12:true, 13:true, 17:true};
+  var cells = document.getElementById('cells');
+  function drawCells(){
+    cells.innerHTML = '';
+    for (var i = 1; i <= TOTAL; i++){
+      (function(i){
+        var b = document.createElement('button');
+        b.type = 'button'; b.textContent = i; b.setAttribute('role','listitem');
+        var cls = 'cell';
+        if (i === now) cls += ' now';
+        else if (readySet[i]) cls += ' ready';
+        else if (i === 14 || i === 16) cls += ' todo';
+        else if (i > 17) cls += ' empty';
+        else cls += ' todo';
+        b.className = cls;
+        b.setAttribute('aria-label', 'Question ' + i + (i === now ? ', current' : readySet[i] ? ', ready' : ', to finish'));
+        b.addEventListener('click', function(){ go(i); });
+        cells.appendChild(b);
+      })(i);
+    }
+    var cur = cells.children[now - 1];
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({block:'nearest', inline:'center'});
+  }
+  function go(i){
+    if (i < 1 || i > TOTAL || isNaN(i)) return;
+    now = i;
+    document.getElementById('qnum').textContent = i;
+    document.getElementById('folio').textContent = i + ' / ' + TOTAL;
+    document.getElementById('jump').value = i;
+    document.querySelector('.folioot').textContent = '— ' + i + ' · DRAFT · NOT FOR EXAMINATION USE —';
+    drawCells();
+  }
+  document.getElementById('jump').addEventListener('change', function(e){ go(parseInt(e.target.value, 10)); });
+  document.addEventListener('keydown', function(e){
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); document.getElementById('jump').focus(); document.getElementById('jump').select(); }
+    if ((e.metaKey || e.ctrlKey) && ['1','2','3','4'].indexOf(e.key) > -1){
+      var li = document.querySelectorAll('#opts li')[parseInt(e.key,10)-1];
+      if (li && (document.activeElement === document.body || li.contains(document.activeElement) || true)){ e.preventDefault(); setKey(li); }
+    }
+  });
+  var domain = document.getElementById('domain'), skill = document.getElementById('skill');
+  var SKILLS = {
+    'Information and Ideas': ['Command of Evidence', 'Inferences', 'Central Ideas'],
+    'Craft and Structure': ['Words in Context', 'Text Structure', 'Cross-Text Connections'],
+    'Expression of Ideas': ['Rhetorical Synthesis', 'Transitions'],
+    'Standard English Conventions': ['Boundaries', 'Form and Agreement']
+  };
+  domain.addEventListener('change', function(){
+    if (domain.value){
+      skill.disabled = false;
+      skill.innerHTML = '<option value="">Choose…</option>' + SKILLS[domain.value].map(function(s){ return '<option>' + s + '</option>'; }).join('');
+      tick('liDomain', 'Filed — ' + domain.value);
+    } else {
+      skill.disabled = true; skill.innerHTML = '<option value="">File domain first…</option>';
+      untick('liDomain', 'File the domain');
+    }
+    count();
+  });
+  skill.addEventListener('change', function(){
+    if (skill.value) tick('liSkill', 'Filed — ' + skill.value); else untick('liSkill', 'File the skill');
+    count();
+  });
+  function tick(id, label){
+    var li = document.getElementById(id);
+    li.className = 'done'; li.querySelector('.box').textContent = '✓'; li.querySelector('button').lastChild.textContent = label;
+  }
+  function untick(id, label){
+    var li = document.getElementById(id);
+    li.className = 'open'; li.querySelector('.box').textContent = ''; li.querySelector('button').lastChild.textContent = label;
+  }
+  function count(){
+    var open = document.querySelectorAll('#slip li.open').length;
+    var t = document.getElementById('slipT');
+    if (open === 0){ t.textContent = 'READY TO FILE'; t.className = 't ok'; document.getElementById('slip').classList.add('clean'); }
+    else { t.textContent = open + ' TO FINISH'; t.className = 't bad'; document.getElementById('slip').classList.remove('clean'); }
+  }
+  var opts = Array.prototype.slice.call(document.querySelectorAll('#opts li'));
+  function setKey(li){
+    opts.forEach(function(o){ o.classList.remove('keyed'); o.querySelector('.keymark').hidden = true; });
+    li.classList.add('keyed'); li.querySelector('.keymark').hidden = false;
+    var k = li.getAttribute('data-k');
+    var keyLi = document.getElementById('liKey');
+    keyLi.className = 'done'; keyLi.querySelector('.box').textContent = '✓';
+    keyLi.querySelector('button').lastChild.textContent = 'Key set — ' + k;
+  }
+  opts.forEach(function(li){ li.addEventListener('click', function(){ setKey(li); }); });
+  document.querySelectorAll('[data-goto]').forEach(function(b){
+    b.addEventListener('click', function(){
+      var el = document.getElementById(b.getAttribute('data-goto'));
+      if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    });
+  });
+  document.getElementById('nextBtn').addEventListener('click', function(){ readySet[now] = true; go(now >= TOTAL ? 1 : now + 1); });
+  drawCells();
+</script>
+</body>
+</html>

@@ -26,7 +26,7 @@ import {
 const EXPECT_2XX_OR_409 = http.expectedStatuses({ min: 200, max: 299 }, 409);
 const DEBUG = __ENV.K6_DEBUG === 'true';
 
-const autoSubmitSubmittedAtMs = new Trend('auto_submit_submitted_at_ms', true);
+const autoSubmitSubmittedAtMs = new Trend('auto_submit_submitted_at_ms');
 const autoSubmitFailures = new Counter('auto_submit_failures');
 const autoSubmitMissingData = new Counter('auto_submit_missing_data');
 

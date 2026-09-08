@@ -216,6 +216,10 @@ func AccessLog(next http.Handler) http.Handler {
 		})
 		log.Println(string(line))
 		telemetry.DefaultRegistry.IncCounter(telemetry.MHTTPRequestsTotal, "route", route, "method", method, "status", statusClass(rec.status))
+		// Plan E3 dashboards: per-endpoint latency signal (p50/p99 source).
+		// Gauge holds last-observed seconds; Prometheus scrapes derive
+		// quantiles over time. Route template keeps cardinality low (I5).
+		telemetry.DefaultRegistry.SetGauge(telemetry.MHTTPRequestDur, time.Since(start).Seconds(), "route", route, "method", method, "status", statusClass(rec.status))
 		telemetry.DefaultRegistry.SetGauge(telemetry.MHTTPInFlight, float64(httpInFlight.Add(-1)), "route", "global")
 	})
 }

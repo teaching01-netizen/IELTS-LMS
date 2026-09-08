@@ -1,0 +1,94 @@
+package main
+
+import (
+	"testing"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"example.com/ielts-proctoring/internal/platform/config"
+	"example.com/ielts-proctoring/internal/platform/httpx"
+)
+
+// A1 RED: buildTierSet honors RATE_LIMIT_MODE=local — zero DB checkers wired
+// even with a pool present, all tiers still budgeted.
+func TestBuildTierSetLocalModeWiresNoDBCheckers(t *testing.T) {
+	cfg := config.Load()
+	cfg.RateLimitMode = config.RateLimitModeLocal
+	app := &App{Config: cfg, DB: nil}
+	// NOTE: nil DB today also yields local-only; the stronger assertion is
+	// below with a non-nil pool (sqlmock-free: *sql.DB zero value is enough
+	// because buildTierSet only nil-checks before wiring checkers).
+	buildTierSet(app)
+	if app.Tiers == nil {
+		t.Fatalf("buildTierSet must always set Tiers")
+	}
+	if n := app.Tiers.DBCheckerCount(); n != 0 {
+		t.Fatalf("local mode must wire 0 DB checkers, got %d", n)
+	}
+	for _, tier := range []string{httpx.TierAuthCritical, httpx.TierAnonAuth, httpx.TierAuthedReads, httpx.TierPolling, httpx.TierHeartbeat, httpx.TierWrites} {
+		if !app.Tiers.HasTier(tier) {
+			t.Fatalf("local mode must still budget tier %q", tier)
+		}
+	}
+}
+
+// A1: buildTierSet in local mode with a REAL pool still wires zero DB
+// checkers (the mode gate, not nil-DB, is what drops the per-request
+// UPSERT+SELECT). sqlmock pool proves the gate holds with DB present.
+func TestBuildTierSetLocalModeWithPoolWiresNoDBCheckers(t *testing.T) {
+	pool, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pool.Close() }()
+	cfg := config.Load()
+	cfg.RateLimitMode = config.RateLimitModeLocal
+	app := &App{Config: cfg, DB: pool}
+	buildTierSet(app)
+	if app.Tiers == nil {
+		t.Fatalf("buildTierSet must always set Tiers")
+	}
+	if n := app.Tiers.DBCheckerCount(); n != 0 {
+		t.Fatalf("local mode with pool must wire 0 DB checkers, got %d", n)
+	}
+	if !app.Tiers.LocalOnly() {
+		t.Fatalf("local mode must set the TierSet localOnly flag")
+	}
+}
+
+// A1: buildTierSet in dual mode with a pool wires one checker per tier
+// (today's behavior preserved: 6 tiers, backstop excluded).
+func TestBuildTierSetDualModeWithPoolWiresDBCheckers(t *testing.T) {
+	pool, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pool.Close() }()
+	cfg := config.Load()
+	cfg.RateLimitMode = config.RateLimitModeDual
+	app := &App{Config: cfg, DB: pool}
+	buildTierSet(app)
+	if app.Tiers == nil {
+		t.Fatalf("buildTierSet must always set Tiers")
+	}
+	if n := app.Tiers.DBCheckerCount(); n != 6 {
+		t.Fatalf("dual mode with pool must wire 6 DB checkers, got %d", n)
+	}
+	if app.Tiers.LocalOnly() {
+		t.Fatalf("dual mode must not set the TierSet localOnly flag")
+	}
+}
+
+// A1 RED: buildTierSet in dual mode with nil DB stays local-only (existing
+// behavior preserved: tests without a pool never touch the DB).
+func TestBuildTierSetDualNilDBStaysLocalOnly(t *testing.T) {
+	cfg := config.Load()
+	cfg.RateLimitMode = config.RateLimitModeDual
+	app := &App{Config: cfg, DB: nil}
+	buildTierSet(app)
+	if app.Tiers == nil {
+		t.Fatalf("buildTierSet must always set Tiers")
+	}
+	if n := app.Tiers.DBCheckerCount(); n != 0 {
+		t.Fatalf("nil DB must wire 0 DB checkers, got %d", n)
+	}
+}

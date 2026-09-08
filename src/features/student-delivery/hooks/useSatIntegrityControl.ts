@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { getDeviceFingerprint } from '../../../utils/deviceFingerprinting';
 import { assessmentDeliveryApi } from '../api/assessmentDeliveryApi';
+import { shouldSkipHeartbeat } from '../heartbeatCoalesce';
 
 interface SatIntegrityControlOptions {
   scheduleId: string;
@@ -20,10 +21,30 @@ export function useSatIntegrityControl({
   enforceInteractionGuards,
 }: SatIntegrityControlOptions) {
   const lastViolationAt = useRef(new Map<string, number>());
+  // Plan C5: last successful write stamps presence — beats inside the
+  // server window are pure load (the ack echoes presence state).
+  const lastWriteAtRef = useRef<number | null>(null);
+  const nextHeartbeatSecsRef = useRef(30);
 
   useEffect(() => {
     const send = (eventType: 'heartbeat' | 'disconnect' | 'reconnect') => {
-      void assessmentDeliveryApi.heartbeat(scheduleId, attemptId, eventType).catch(() => undefined);
+      if (shouldSkipHeartbeat({
+        eventType,
+        msSinceLastWrite: lastWriteAtRef.current === null ? null : Date.now() - lastWriteAtRef.current,
+        nextHeartbeatSecs: nextHeartbeatSecsRef.current,
+      })) {
+        return;
+      }
+      void assessmentDeliveryApi
+        .heartbeat(scheduleId, attemptId, eventType)
+        .then((res) => {
+          lastWriteAtRef.current = Date.now();
+          const window = (res as { nextHeartbeatSecs?: unknown })?.nextHeartbeatSecs;
+          if (typeof window === 'number' && Number.isFinite(window) && window > 0) {
+            nextHeartbeatSecsRef.current = Math.floor(window);
+          }
+        })
+        .catch(() => undefined);
     };
     send('heartbeat');
     const interval = window.setInterval(() => send('heartbeat'), 15_000);

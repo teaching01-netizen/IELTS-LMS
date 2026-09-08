@@ -35,6 +35,15 @@ var metricHelpText = map[string]string{
 	MWSConnections:        "Current number of WebSocket connections.",
 	MWSLeaseFailures:   "Total WebSocket lease acquisition failures.",
 	MWSSlowDisconnect:  "Total WebSocket disconnects caused by slow clients.",
+	MVersionCacheHit:   "Total version-cache hits (D1 bootstrap fast path).",
+	MVersionCacheMiss:  "Total version-cache misses (D1 full N+1 loads).",
+	MPresenceTouch:     "Total presence memory touches (D2 zero-SQL beats).",
+	MPresenceFlush:     "Total presence flush batches (D2 60s drain).",
+	MEntryGateAdmit:    "Total entry-gate admissions (D3 check-ins).",
+	MEntryGateQueued:   "Total entry-gate 429s with queue position (D3).",
+	MRollupRefresh:     "Total proctor rollup refreshes (D4 worker).",
+	MShedExam:          "Total requests served under exam shed budgets (E2).",
+	MQueryTimeout:      "Total hot-path budget short-circuits (E1 503s).",
 }
 
 // Metric name constants (plan 69).
@@ -76,6 +85,16 @@ const (
 	MWSLeaseFailures  = "websocket_lease_acquire_failures_total"
 	MWSSlowDisconnect = "websocket_slow_client_disconnects_total"
 
+	MVersionCacheHit = "version_cache_hit_total"
+	MVersionCacheMiss = "version_cache_miss_total"
+	MPresenceTouch   = "presence_touch_total"
+	MPresenceFlush   = "presence_flush_total"
+	MEntryGateAdmit  = "entry_gate_admit_total"
+	MEntryGateQueued = "entry_gate_queued_total"
+	MRollupRefresh   = "proctor_rollup_refresh_total"
+	MShedExam        = "shed_exam_requests_total"
+	MQueryTimeout    = "query_budget_exhausted_total"
+
 	MRatelimitDeniedTotal = "http_ratelimit_denied_total"
 )
 
@@ -89,6 +108,11 @@ const (
 	OutcomeWriteConflict   = "write_id_conflict"
 	OutcomeNotWritable     = "not_writable"
 	OutcomeRejected        = "rejected"
+	// OutcomeRetriedAccepted marks a batch that absorbed >=1 transient
+	// (deadlock/lock-wait, counted on db_deadlocks_total{kind}) then
+	// committed. Without it a contended wave looks identical to a clean
+	// one on v2_response_batch_total{outcome}. Low-cardinality (I5).
+	OutcomeRetriedAccepted = "retried_accepted"
 )
 
 // LogField keys for structured JSON logs (plan 70). Secrets, bearer tokens,

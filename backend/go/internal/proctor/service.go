@@ -140,6 +140,41 @@ type Service struct {
 	seal   Terminalizer
 	outbx  OutboxEnqueuer
 	assign AssignmentChecker
+	// onCommitted fires after a runtime-mutating command commits (B2
+	// snapshot invalidation). Nil disables (tests leave it unset).
+	onCommitted func(scheduleID string)
+	// outboxExecOnly skips wakeup-family INSERTs (B4.1 OUTBOX_EXEC_ONLY).
+	outboxExecOnly bool
+}
+
+// SetOutboxExecOnly toggles B4.1 executable-only enqueueing (chainable).
+func (s *Service) SetOutboxExecOnly(on bool) *Service {
+	s.outboxExecOnly = on
+	return s
+}
+
+// enqueueWakeup guards wakeup-family INSERTs behind the exec-only posture:
+// on = skip (live moves to Hub in Phase C); off = enqueue (today).
+// Executable families (auto-submit) never route here.
+func (s *Service) enqueueWakeup(ctx context.Context, q tx.Tx, aggregateKind, aggregateID string, revision int64, eventFamily string, payload json.RawMessage) error {
+	if s != nil && s.outboxExecOnly {
+		return nil
+	}
+	return s.outbx.EnqueueInTx(ctx, q, aggregateKind, aggregateID, revision, eventFamily, payload)
+}
+
+// SetSnapshotInvalidator wires post-commit snapshot invalidation (B2).
+// Callers (BuildApp) pass the shared SnapshotCache.Invalidate; nil clears.
+func (s *Service) SetSnapshotInvalidator(fn func(scheduleID string)) *Service {
+	s.onCommitted = fn
+	return s
+}
+
+// invalidated runs the post-commit hook when set.
+func (s *Service) invalidated(scheduleID string) {
+	if s != nil && s.onCommitted != nil {
+		s.onCommitted(scheduleID)
+	}
 }
 
 // NewService builds the proctor service. seal may be a
@@ -220,27 +255,16 @@ func lockAttemptScope(ctx context.Context, q tx.Tx, scheduleID, attemptID string
 	return nil
 }
 
-// lockScheduleScope locks schedule attempt rows first, then the runtime row
-// and its sections (attempt -> runtime -> section).
+// lockScheduleScope locks the runtime row and its sections (B2: the
+// schedule-wide attempt sweep is gone — one schedule no longer serializes
+// the whole cohort behind one admin click. Attempt-scoped effects flow via
+// enqueueAutoSubmitForSchedule's non-locking capture + worker-side batched
+// seal through the outbox). Lock order stays runtime -> section, matching
+// terminalization and runtime command discipline.
 func lockScheduleScope(ctx context.Context, q tx.Tx, scheduleID string) error {
-	const lockAttempts = "SELECT id FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE"
-	rows, err := q.QueryContext(ctx, lockAttempts, scheduleID)
-	if err != nil {
-		return err
-	}
-	func() {
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			_ = rows.Scan(&id)
-		}
-	}()
-	if err := rows.Err(); err != nil {
-		return err
-	}
 	const lockRuntime = "SELECT id FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
 	var runtimeID string
-	err = q.QueryRowContext(ctx, lockRuntime, scheduleID).Scan(&runtimeID)
+	err := q.QueryRowContext(ctx, lockRuntime, scheduleID).Scan(&runtimeID)
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
@@ -538,7 +562,7 @@ func (s *Service) Terminate(ctx context.Context, actor Actor, scheduleID, attemp
 // (or completes the exam). It rejects SAT/adaptive schedules and IELTS
 // authentic-mode schedules.
 func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID string, cmd AttemptCommand) error {
-	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
 			return err
 		}
@@ -669,8 +693,14 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": "end_section_now"})
-		return s.outbx.EnqueueInTx(ctx, q, "schedule_runtime", scheduleID, revision+1, "runtime_changed", payload)
+		return s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, "runtime_changed", payload)
 	})
+	if err != nil {
+		return err
+	}
+	// B2: post-commit snapshot invalidation (nil-safe when hook unset).
+	s.invalidated(scheduleID)
+	return nil
 }
 
 // ExtendSection adds minutes to the active cohort section, advances cohort
@@ -679,7 +709,7 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 	if cmd.Minutes <= 0 {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Extension minutes must be greater than zero.", HTTPStatus: 400}
 	}
-	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
 			return err
 		}
@@ -737,8 +767,14 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": "extend_section"})
-		return s.outbx.EnqueueInTx(ctx, q, "schedule_runtime", scheduleID, revision+1, "runtime_changed", payload)
+		return s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, "runtime_changed", payload)
 	})
+	if err != nil {
+		return err
+	}
+	// B2: post-commit snapshot invalidation (nil-safe when hook unset).
+	s.invalidated(scheduleID)
+	return nil
 }
 
 // CompleteExam completes the runtime and auto-submits remaining attempts via
@@ -751,7 +787,7 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 // terminalization vocabulary reason (proctor_complete) so the worker seal
 // never fails vocabulary validation and exhausts its outbox retries.
 func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID string, cmd CompleteExamCommand) error {
-	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
 			return err
 		}
@@ -798,8 +834,14 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": "complete_exam"})
-		return s.outbx.EnqueueInTx(ctx, q, "schedule_runtime", scheduleID, revision+1, "runtime_changed", payload)
+		return s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, "runtime_changed", payload)
 	})
+	if err != nil {
+		return err
+	}
+	// B2: post-commit snapshot invalidation (nil-safe when hook unset).
+	s.invalidated(scheduleID)
+	return nil
 }
 
 // AutoSubmitAfterComplete seals one remaining attempt as auto-submit
@@ -949,11 +991,11 @@ func (s *Service) requireWriterRole(actor Actor) error {
 // emitRoster enqueues schedule_roster/roster_changed + schedule_roster/attempt_changed.
 func (s *Service) emitRoster(ctx context.Context, q tx.Tx, scheduleID, event string, attemptID *string, extra map[string]any) error {
 	roster, _ := json.Marshal(rosterPayload(scheduleID, event, attemptID, extra))
-	if err := s.outbx.EnqueueInTx(ctx, q, "schedule_roster", scheduleID, 0, "roster_changed", roster); err != nil {
+	if err := s.enqueueWakeup(ctx, q, "schedule_roster", scheduleID, 0, "roster_changed", roster); err != nil {
 		return err
 	}
 	attempt, _ := json.Marshal(rosterPayload(scheduleID, "attempt_changed", attemptID, extra))
-	return s.outbx.EnqueueInTx(ctx, q, "schedule_roster", scheduleID, 0, "attempt_changed", attempt)
+	return s.enqueueWakeup(ctx, q, "schedule_roster", scheduleID, 0, "attempt_changed", attempt)
 }
 
 func rosterPayload(scheduleID, event string, attemptID *string, extra map[string]any) map[string]any {

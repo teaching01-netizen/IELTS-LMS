@@ -148,6 +148,42 @@ func (SQLOutboxEnqueuer) EnqueueInTx(ctx context.Context, q tx.Tx, aggregateKind
 type Service struct {
 	tx    *tx.Runner
 	outbx OutboxEnqueuer
+	// onCommitted fires after a runtime-mutating command commits (B2
+	// snapshot invalidation). Nil disables (tests leave it unset).
+	onCommitted func(scheduleID string)
+	// outboxExecOnly skips wakeup-family INSERTs (B4.1 OUTBOX_EXEC_ONLY).
+	outboxExecOnly bool
+	// snapshots is the shared B2 cache backing the C3 poll view (nil = no
+	// cache; every poll loads committed-read).
+	snapshots *SnapshotCache
+}
+
+// SetOutboxExecOnly toggles B4.1 executable-only enqueueing (chainable).
+func (s *Service) SetOutboxExecOnly(on bool) *Service {
+	s.outboxExecOnly = on
+	return s
+}
+
+// SetSnapshotInvalidator wires post-commit snapshot invalidation (B2).
+// Callers (BuildApp) pass the shared SnapshotCache.Invalidate; nil clears.
+func (s *Service) SetSnapshotInvalidator(fn func(scheduleID string)) *Service {
+	s.onCommitted = fn
+	return s
+}
+
+// SetSnapshotCache wires the shared B2 snapshot cache for the C3 poll view
+// (chainable). Nil disables cache use (tests leave it unset: every poll
+// loads committed-read, exactly one indexed row on the runtime header).
+func (s *Service) SetSnapshotCache(c *SnapshotCache) *Service {
+	s.snapshots = c
+	return s
+}
+
+// invalidated runs the post-commit hook when set.
+func (s *Service) invalidated(scheduleID string) {
+	if s != nil && s.onCommitted != nil {
+		s.onCommitted(scheduleID)
+	}
 }
 
 // NewService builds the runtime service.
@@ -274,6 +310,8 @@ func (s *Service) Start(ctx context.Context, scheduleID, examID string, plan []P
 	if err != nil {
 		return "", err
 	}
+	// B2: post-commit snapshot invalidation (nil-safe when hook unset).
+	s.invalidated(scheduleID)
 	if existingID != "" {
 		return existingID, nil
 	}
@@ -299,7 +337,7 @@ type PlanEntry struct {
 
 // Pause transitions live->paused with control_epoch bump + V2 sync.
 func (s *Service) Pause(ctx context.Context, scheduleID string, fence RevisionFence, reason *string, actorID string) error {
-	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
 			return err
 		}
@@ -336,11 +374,17 @@ func (s *Service) Pause(ctx context.Context, scheduleID string, fence RevisionFe
 		}
 		return s.emitRuntimeChanged(ctx, q, scheduleID, rt.Revision+1, eventWithReason("pause_runtime", reason))
 	})
+	if err != nil {
+		return err
+	}
+	// B2: post-commit snapshot invalidation (nil-safe when hook unset).
+	s.invalidated(scheduleID)
+	return nil
 }
 
 // Resume transitions paused->live, accumulating paused seconds + V2 sync.
 func (s *Service) Resume(ctx context.Context, scheduleID string, fence RevisionFence, actorID string) error {
-	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
 			return err
 		}
@@ -395,6 +439,12 @@ func (s *Service) Resume(ctx context.Context, scheduleID string, fence RevisionF
 		}
 		return s.emitRuntimeChanged(ctx, q, scheduleID, rt.Revision+1, "resume_runtime")
 	})
+	if err != nil {
+		return err
+	}
+	// B2: post-commit snapshot invalidation (nil-safe when hook unset).
+	s.invalidated(scheduleID)
+	return nil
 }
 
 // Extend adds minutes to the active section + cohort clocks with V2 sync.
@@ -402,7 +452,7 @@ func (s *Service) Extend(ctx context.Context, scheduleID string, fence RevisionF
 	if minutes <= 0 {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Extension minutes must be greater than zero.", HTTPStatus: 400}
 	}
-	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
 			return err
 		}
@@ -436,6 +486,12 @@ func (s *Service) Extend(ctx context.Context, scheduleID string, fence RevisionF
 		}
 		return s.emitRuntimeChanged(ctx, q, scheduleID, rt.Revision+1, eventWithReason("extend_section", reason))
 	})
+	if err != nil {
+		return err
+	}
+	// B2: post-commit snapshot invalidation (nil-safe when hook unset).
+	s.invalidated(scheduleID)
+	return nil
 }
 
 // Complete finishes the runtime and every section (attempt locks first).
@@ -443,7 +499,7 @@ func (s *Service) Complete(ctx context.Context, scheduleID, completionReason, ac
 	if completionReason == "" {
 		completionReason = "proctor_complete"
 	}
-	return s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
 			return err
 		}
@@ -471,6 +527,12 @@ func (s *Service) Complete(ctx context.Context, scheduleID, completionReason, ac
 		}
 		return s.emitRuntimeChanged(ctx, q, scheduleID, rt.Revision+1, completionReason)
 	})
+	if err != nil {
+		return err
+	}
+	// B2: post-commit snapshot invalidation (nil-safe when hook unset).
+	s.invalidated(scheduleID)
+	return nil
 }
 
 // SyncV2Timing re-projects protocol-2 attempt deadlines from the locked section.
@@ -512,6 +574,10 @@ func SyncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, secti
 }
 
 func (s *Service) emitRuntimeChanged(ctx context.Context, q tx.Tx, scheduleID string, revision int64, event string) error {
+	// B4.1: exec-only mode skips wakeup-family INSERTs (live moves to Hub in C).
+	if s != nil && s.outboxExecOnly {
+		return nil
+	}
 	payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": event})
 	return s.outbx.EnqueueInTx(ctx, q, "schedule_runtime", scheduleID, revision, "runtime_changed", payload)
 }

@@ -13,7 +13,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +23,7 @@ import (
 	"example.com/ielts-proctoring/internal/act"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/proctor"
 	"example.com/ielts-proctoring/internal/sat"
@@ -30,12 +33,26 @@ import (
 type Service struct {
 	db     *sql.DB
 	runner *tx.Runner
+	// versions caches immutable published trees (plan D1, nil = off).
+	versions *VersionCache
 	// liveOrigin is this instance's bus origin id (mirrors App.LiveBus.Origin).
 	// liveHub fans committed events to in-process subscribers (App.LiveHub).
 	// Both are optional: nil hub disables fanout, empty origin writes an
 	// empty origin on bus rows (tests leave them unset).
 	liveOrigin string
 	liveHub    *liveupdates.Hub
+	// liveDirect selects the plan-C1 Hub-only posture: in-tx AppendInTx
+	// INSERTs are skipped (zero live-bus SQL on hot paths); post-commit
+	// Hub.Publish still fans out (single-deploy: no peers to forward to).
+	liveDirect bool
+	// liveSinkBus + liveSinkMode select the optional async debug sink
+	// (plan C1): sample = ~1:1000 hub events also Append a bus row
+	// post-commit (outside any business tx); off = zero bus writes.
+	liveSinkBus  *liveupdates.Bus
+	liveSinkMode config.LiveBusSinkMode
+	// liveSinkCount counts hub events for deterministic 1:1000 sampling
+	// (atomic: publishHubEvents runs concurrently per request).
+	liveSinkCount atomic.Uint64
 	// completer runs CompleteAssessment when reconcile finalizes the last open
 	// module (Rust complete_assessment, submission_id=attempt_id). Optional:
 	// nil disables the hook (tests leave it unset); invoked outside the tx.
@@ -56,11 +73,51 @@ func (s *Service) SetLive(origin string, hub *liveupdates.Hub) *Service {
 	return s
 }
 
+// SetLiveDirect toggles the plan-C1 Hub-only posture (chainable). Direct =
+// in-tx bus INSERTs skipped; Hub.Publish post-commit still fans out.
+func (s *Service) SetLiveDirect(on bool) *Service {
+	s.liveDirect = on
+	return s
+}
+
+// LiveDirect reports the Hub-only posture (assertable without a pool).
+func (s *Service) LiveDirect() bool { return s != nil && s.liveDirect }
+
+// SetLiveSink wires the optional async debug sink (plan C1, chainable):
+// sample keeps ~1:1000 bus rows post-commit for debugging; off (default)
+// writes nothing. A nil bus disables the sink regardless of mode.
+func (s *Service) SetLiveSink(bus *liveupdates.Bus, mode config.LiveBusSinkMode) *Service {
+	s.liveSinkBus = bus
+	s.liveSinkMode = mode
+	return s
+}
+
 // SetCompleter wires the terminal CompleteAssessment hook for reconcile.
 // Callers (BuildApp) pass the sat adapter; nil disables the hook.
 func (s *Service) SetCompleter(c AssessmentCompleter) *Service {
 	s.completer = c
 	return s
+}
+
+// SetVersionCache wires the plan-D1 immutable version cache (chainable).
+// Nil disables caching (today's N+1 LoadSections on every bootstrap).
+func (s *Service) SetVersionCache(c *VersionCache) *Service {
+	s.versions = c
+	return s
+}
+
+// VersionCached reports the D1 cache posture (assertable without a pool).
+func (s *Service) VersionCached() bool { return s != nil && s.versions != nil }
+
+// InvalidateVersion drops one cached tree (authoring publish path hook).
+// Correctness does not depend on it — the revision probe fails closed on
+// publish races — but calling it on publish avoids one redundant reload.
+// No version-publish flow exists in Go today (authoring works on drafts),
+// so this is wired for the future path, not an active call site.
+func (s *Service) InvalidateVersion(versionID string) {
+	if s != nil && s.versions != nil {
+		s.versions.Invalidate(versionID)
+	}
 }
 
 // DeliveredQuestion is one version-pinned question in delivery order.
@@ -160,6 +217,9 @@ type Bootstrap struct {
 	ExamID                string            `json:"examId"`
 	ProviderKey           string            `json:"providerKey"`
 	VersionID             string            `json:"versionId"`
+	// VersionRevision is the exam_versions row revision backing Sections
+	// (plan D1: ETag W/"v{versionID}-{revision}" + If-None-Match -> 304).
+	VersionRevision int64 `json:"versionRevision"`
 	ServerNow             time.Time         `json:"serverNow"`
 	CandidateName         string            `json:"candidateName"`
 	ScheduleRuntimeStatus string            `json:"scheduleRuntimeStatus"`
@@ -213,7 +273,14 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if _, err := s.ReconcileAttemptTimeout(ctx, bearerScheduleID, bearerAttemptID, now); err != nil {
 		return nil, err
 	}
-	sections, err := s.LoadSections(ctx, versionID)
+	// Plan D1: immutable version cache. The revision probe (1 indexed PK
+	// get) both fails closed on publish races and feeds the ETag; a cache
+	// hit skips the sections/modules/questions N+1 entirely.
+	versionRev, err := s.versionRevision(ctx, versionID)
+	if err != nil {
+		return nil, err
+	}
+	sections, err := s.cachedSections(ctx, versionID, versionRev)
 	if err != nil {
 		return nil, err
 	}
@@ -245,6 +312,7 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 		ExamID:                examID,
 		ProviderKey:           providerKey,
 		VersionID:             versionID,
+		VersionRevision:       versionRev,
 		ServerNow:             now,
 		CandidateName:         control.candidateName,
 		ScheduleRuntimeStatus: runtimeStatus,
@@ -277,6 +345,60 @@ func (s *Service) loadBootstrapResult(ctx context.Context, providerKey, attemptI
 	default:
 		return nil, nil
 	}
+}
+
+// VersionETag renders the weak ETag for a bootstrap/static payload:
+// W/"v{versionID}-{revision}" (plan D1: client caches across reconnects).
+func VersionETag(versionID string, revision int64) string {
+	return "W/\"v" + versionID + "-" + strconv.FormatInt(revision, 10) + "\""
+}
+
+// VersionTag resolves the ETag inputs for a schedule (plan D1): versionID
+// + revision via two indexed point gets (schedule row, version row). Handlers
+// compare If-None-Match before running the full bootstrap/static assembly.
+func (s *Service) VersionTag(ctx context.Context, scheduleID string) (versionID string, revision int64, etag string, err error) {
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT published_version_id FROM exam_schedules WHERE id = ?", scheduleID).Scan(&versionID); err != nil {
+		if err == sql.ErrNoRows {
+			return "", 0, "", apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
+		}
+		return "", 0, "", err
+	}
+	revision, err = s.versionRevision(ctx, versionID)
+	if err != nil {
+		return "", 0, "", err
+	}
+	return versionID, revision, VersionETag(versionID, revision), nil
+}
+
+// versionRevision probes the version row revision (1 indexed PK get). It
+// fails closed: a missing row is NOT_FOUND (never a stale cached tree).
+func (s *Service) versionRevision(ctx context.Context, versionID string) (int64, error) {
+	var rev int64
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT revision FROM exam_versions WHERE id = ?", versionID).Scan(&rev); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, apperrors.New(apperrors.CodeNotFound, "Published exam version not found.")
+		}
+		return 0, err
+	}
+	return rev, nil
+}
+
+// cachedSections serves the assembled tree from the D1 cache when the
+// probed revision matches, else loads via LoadSections under singleflight
+// and stores with the probed revision. Cache disabled (nil) = today's N+1.
+func (s *Service) cachedSections(ctx context.Context, versionID string, probedRev int64) ([]DeliverySection, error) {
+	if s.versions == nil {
+		return s.LoadSections(ctx, versionID)
+	}
+	return s.versions.GetChecked(ctx, versionID, probedRev, func() ([]DeliverySection, int64, error) {
+		tree, err := s.LoadSections(ctx, versionID)
+		if err != nil {
+			return nil, 0, err
+		}
+		return tree, probedRev, nil
+	})
 }
 
 // LoadSections projects a version into candidate content without grading keys.
@@ -398,6 +520,30 @@ func (s *Service) loadQuestions(ctx context.Context, moduleID string) ([]Deliver
 // module in not_started state. The insert is idempotent on the
 // (attempt_id, module_id) unique (uq_assessment_attempt_module): a lost seed
 // race stays a no-op instead of surfacing a 1062.
+// EnsureBaseModuleAttemptForSchedule is the exported V1-session entry
+// point (round 83): the V1 student-session path knows only the schedule
+// id, so it resolves the pinned version + sections itself, then reuses
+// the same idempotent seeder the SAT Bootstrap path uses.
+func (s *Service) EnsureBaseModuleAttemptForSchedule(ctx context.Context, attemptID, scheduleID string) error {
+	var versionID string
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT published_version_id FROM exam_schedules WHERE id = ?", scheduleID).Scan(&versionID); err != nil {
+		if err == sql.ErrNoRows {
+		return apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
+		}
+		return err
+	}
+	versionRev, err := s.versionRevision(ctx, versionID)
+	if err != nil {
+		return err
+	}
+	sections, err := s.cachedSections(ctx, versionID, versionRev)
+	if err != nil {
+		return err
+	}
+	return s.ensureBaseModuleAttempt(ctx, attemptID, sections)
+}
+
 func (s *Service) ensureBaseModuleAttempt(ctx context.Context, attemptID string, sections []DeliverySection) error {
 	var existing string
 	err := s.db.QueryRowContext(ctx,
@@ -695,7 +841,8 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 	}
 	now := time.Now().UTC()
 	var out *ResponseSnapshot
-	if err := s.runner.WithTx(ctx, func(ctx context.Context, t tx.Tx) error {
+	// B1: single-response save is a point-write tx (RC-safe).
+	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
 			return err
 		}
@@ -794,7 +941,7 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 		if existing != nil {
 			res, err := t.ExecContext(ctx,
 				"UPDATE assessment_question_responses SET response = ?, marked_for_review = ?, eliminated_options = ?, annotations = ?, client_write_id = COALESCE(?, client_write_id), revision = revision + 1, updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND revision = ?",
-				nullableSaveRaw(req.Response), req.MarkedForReview, string(eliminatedJSON), nullableSaveRaw(req.Annotations), clientWriteID, responseID, req.Revision)
+				nullableSaveRaw(req.Response), req.MarkedForReview, string(eliminatedJSON), emptySaveJSON(req.Annotations), clientWriteID, responseID, req.Revision)
 			if err != nil {
 				return err
 			}
@@ -809,7 +956,7 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 			responseID = uuid.NewString()
 			if _, err := t.ExecContext(ctx,
 				"INSERT INTO assessment_question_responses (id, module_attempt_id, exam_question_id, response, marked_for_review, eliminated_options, annotations, client_write_id, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
-				responseID, active.id, examQuestionID, nullableSaveRaw(req.Response), req.MarkedForReview, string(eliminatedJSON), nullableSaveRaw(req.Annotations), clientWriteID); err != nil {
+				responseID, active.id, examQuestionID, nullableSaveRaw(req.Response), req.MarkedForReview, string(eliminatedJSON), emptySaveJSON(req.Annotations), clientWriteID); err != nil {
 				if isDuplicateKeyError(err) {
 					return assessmentConflict("RESPONSE_REVISION_MISMATCH", "Response changed while this write was being applied.")
 				}
@@ -1419,6 +1566,17 @@ func nullableSaveRaw(raw json.RawMessage) any {
 	return string(raw)
 }
 
+// emptySaveJSON normalizes an optional JSON body for NOT NULL columns
+// (round 84 live rehearsal: omitting `annotations` sent NULL into a
+// NOT NULL column — 1048 escaped as a silent 500). Absent/null becomes
+// the empty object '{}', matching the reader's rawJSON default.
+func emptySaveJSON(raw json.RawMessage) any {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "{}"
+	}
+	return string(raw)
+}
+
 // isDuplicateKeyError reports a MySQL duplicate-key violation (1062) without
 // importing the driver: the assessment_question_responses
 // (module_attempt_id, exam_question_id) unique turns a lost insert race into
@@ -1451,7 +1609,9 @@ func nullInt(v sql.NullInt64) *int64 {
 // its own tx BEFORE the mutation tx (same as Rust: separate tx, commit, then
 // the work tx). Bootstrap does not use it (schedule-match check only).
 func (s *Service) EnsureActiveWriter(ctx context.Context, attemptID, scheduleID, clientSessionID string) error {
-	return s.runner.WithTx(ctx, func(ctx context.Context, t tx.Tx) error {
+	// B1: claim-then-verify on one PK row; the conditional UPDATE + FOR UPDATE
+	// re-read make RC safe (no snapshot dependency across statements).
+	return s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		if _, err := t.ExecContext(ctx,
 			"UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL AND submitted_at IS NULL AND COALESCE(proctor_status, 'active') <> 'terminated' AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
 			clientSessionID, attemptID, scheduleID); err != nil {
@@ -1475,15 +1635,21 @@ func (s *Service) EnsureActiveWriter(ctx context.Context, attemptID, scheduleID,
 	})
 }
 
-// enforceWriterSessionTx re-checks the exclusive writer session inside the
-// mutation tx: SELECT active_client_session_id ... FOR UPDATE + equality with
-// the bearer client session id. Empty session ids skip the check so existing
-// callers (and tests) that do not bind a writer keep the legacy behavior;
-// HTTP handlers always pass the bearer session, closing the takeover race
-// between the pre-tx EnsureActiveWriter gate and this write.
-func enforceWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, clientSessionIDs []string) error {
-	if len(clientSessionIDs) == 0 || clientSessionIDs[0] == "" {
+// claimWriterSessionTx claims + verifies the exclusive writer session INSIDE
+// the mutation tx (plan B2.4 fold-in): conditional claim UPDATE (free slot ->
+// bearer session; guarded by terminal/proctor predicates) + SELECT ... FOR
+// UPDATE + equality. One PK row, one tx — the separate pre-tx
+// EnsureActiveWriter round trip is gone; the takeover race it raced is
+// closed by construction (claim and write commit atomically). Empty session
+// ids skip so existing callers/tests without writer binding keep behavior.
+func claimWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID, clientSessionID string) error {
+	if clientSessionID == "" {
 		return nil
+	}
+	if _, err := t.ExecContext(ctx,
+		"UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL AND submitted_at IS NULL AND COALESCE(proctor_status, 'active') <> 'terminated' AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
+		clientSessionID, attemptID, scheduleID); err != nil {
+		return err
 	}
 	var active sql.NullString
 	if err := t.QueryRowContext(ctx,
@@ -1494,12 +1660,22 @@ func enforceWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID 
 		}
 		return err
 	}
-	if !active.Valid || active.String != clientSessionIDs[0] {
+	if !active.Valid || active.String != clientSessionID {
 		err := apperrors.New(apperrors.CodeActiveSessionSuperseded, "A newer student session owns this attempt.")
 		err.Details = map[string]any{"reason": "ACTIVE_SESSION_SUPERSEDED"}
 		return err
 	}
 	return nil
+}
+
+// enforceWriterSessionTx keeps the historical in-tx call shape (variadic
+// bearer sessions) and routes into the folded claimWriterSessionTx: claim +
+// verify in one tx. All mutation-tx call sites keep working unchanged.
+func enforceWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, clientSessionIDs []string) error {
+	if len(clientSessionIDs) == 0 || clientSessionIDs[0] == "" {
+		return nil
+	}
+	return claimWriterSessionTx(ctx, t, scheduleID, attemptID, clientSessionIDs[0])
 }
 
 // Only fields in DeliveredAnswerDefinition may cross the candidate boundary.

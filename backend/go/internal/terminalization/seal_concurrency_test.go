@@ -24,9 +24,9 @@ func lockAttemptRow(delivery, proctor string) *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "schedule_id", "organization_id", "exam_id", "published_version_id",
 		"phase", "delivery_status", "proctor_status", "revision", "answer_revision",
-		"answers", "writing_answers", "flags",
+		"answers", "writing_answers", "flags", "protocol_version",
 	}).AddRow("att-1", "sched-1", nil, "exam-1", "pv-1", "exam",
-		delivery, proctor, int64(4), int64(9), []byte("{}"), []byte("{}"), []byte("{}"))
+		delivery, proctor, int64(4), int64(9), []byte("{}"), []byte("{}"), []byte("{}"), 1)
 }
 
 func sealReceiptRow(outcome, reason string) *sqlmock.Rows {
