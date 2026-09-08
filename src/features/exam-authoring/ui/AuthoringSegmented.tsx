@@ -1,6 +1,4 @@
-import { motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
-import { authoringMotion } from "./authoringMotion";
 
 /**
  * The workspace's single segmented-control vocabulary: a shared-layout thumb
@@ -18,8 +16,12 @@ export interface AuthoringSegmentedProps<T extends string> {
   options: ReadonlyArray<AuthoringSegmentedOption<T>>;
   value: T;
   onChange: (value: T) => void;
-  /** Unique per control instance — names the shared-layout thumb. */
-  layoutId: string;
+  /**
+   * @deprecated Spine motion restraint (Phase 9.3): the thumb is a CSS
+   * transition cross-fade, not a shared-layout spring. Kept optional so
+   * legacy call sites keep compiling until Phase 10 removal.
+   */
+  layoutId?: string;
   ariaLabel: string;
   className?: string;
 }
@@ -32,7 +34,6 @@ export function AuthoringSegmented<T extends string>({
   ariaLabel,
   className,
 }: AuthoringSegmentedProps<T>) {
-  const reduceMotion = useReducedMotion();
   return (
     <div
       role="group"
@@ -52,10 +53,8 @@ export function AuthoringSegmented<T extends string>({
             }`}
           >
             {active ? (
-              <motion.span
+              <span
                 aria-hidden="true"
-                layoutId={layoutId}
-                transition={reduceMotion ? { duration: 0.01 } : authoringMotion.snap}
                 className="au-elevation-card absolute inset-0 rounded-[8px] bg-au-surface"
               />
             ) : null}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, MoreHorizontal } from "lucide-react";
+import { Copy, Save } from "lucide-react";
 import type {
   AssessmentValidationIssue,
   QuestionRevision,
@@ -144,18 +144,15 @@ export function SpineQuestionView({
             <Copy size={13} aria-hidden="true" />
             Duplicate
           </button>
-          <div className="relative">
-            <button
-              type="button"
-              aria-label="More question actions"
-              aria-haspopup="menu"
-              onClick={onSaveNow}
-              title="Save now"
-              className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted"
-            >
-              <MoreHorizontal size={15} aria-hidden="true" />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onSaveNow}
+            aria-label="Save now"
+            title="Save now"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Save size={15} aria-hidden="true" />
+          </button>
         </div>
       </header>
 
