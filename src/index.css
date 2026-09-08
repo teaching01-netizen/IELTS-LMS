@@ -2626,16 +2626,6 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   backdrop-filter: saturate(160%) blur(18px);
 }
 
-.sat-product .authoring-question-row {
-  box-shadow: none;
-}
-
-/* Selection is carried by a tint plus a hairline ring — color is reinforced
- * by the aria-current outline so it never depends on hue alone. */
-.sat-product .authoring-question-row:has([aria-current="true"]) {
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--au-tint) 24%, transparent);
-}
-
 .sat-product .authoring-editor-canvas {
   background: var(--authoring-canvas);
 }
@@ -2747,55 +2737,6 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     background: var(--au-material-sidebar-header);
 }
 
-
-/* Dirty-bit flush: a 2px tint bar drains across the active row while the save
- * write is in flight: a disk-activity LED, never a spinner. The row keeps
- * `position: relative` (set in QuestionListPane) so the bar rides its bottom edge. */
-.sat-product .au-flush-bar {
-
-    position: absolute;
-    inset-inline:2px;
-    bottom:0;
-    height:2px;
-    border-radius:999px;
-    background:var(--au-tint);
-    transform-origin:left;
-    transform: scaleX(0);
-    opacity:0;
-    pointer-events:none;
-}
-
-@keyframes au-flush-drain {
-     from { transform: scaleX(0); opacity:1; }
-     to   { transform: scaleX(1); opacity:1; }
-}
-
-.sat-product [data-flushing="true"] .au-flush-bar {
-
-    animation: au-flush-drain 420ms var(--authoring-ease) both;
-}
-
-/* Warm next: the question adjacent to the selection is already prefetched, so a
- * single 3px tint dot in its corner says next is warm. No counters, no bars. */
-.sat-product [data-warm="true"]::after {
-    content:"";
-    position:absolute;
-    right:10px;
-    bottom:9px;
-    width:3px;
-    height:3px;
-    border-radius:999px;
-    background:var(--au-tint);
-    opacity:0.55;
-    pointer-events:none;
-}
-
-/* Commit settle: while a save write is in flight,the sheet's hairline border
- * flashes to the section tint: a 1px commit haptic that reads as the UI
- * bottoming out, never a toast or spinner. */
-.sat-product .authoring-editor-sheet[data-committing="true"] {
-    border-color: color-mix(in oklab, var(--au-tint) 50%, transparent);
-}
 
 /* System dark appearance: SAT is a distinct product surface, so its semantic
  * tokens invert together instead of leaving light cards stranded in a dark UI. */

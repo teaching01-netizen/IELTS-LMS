@@ -91,32 +91,35 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
       className={"flex min-h-0 min-w-0 flex-col bg-card" + (props.embedded ? " h-full w-full flex-1" : " h-full w-full")}
     >
       <div className="relative z-10 border-b border-border px-3 pb-3 pt-2.5">
-        <div className="mb-2 flex items-center gap-1">
-          <ModuleScopePicker
-            sections={props.sections}
-            selectedModuleId={props.module.id}
-            disabled={props.isMutating}
-            onSelectModule={props.onSelectModule}
-          />
-          <button
-            type="button"
-            onClick={props.onOpenImport}
-            disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
-            aria-label="Paste or import questions into this module"
-            title="Paste questions"
-            className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
-          >
-            <FileUp size={13} aria-hidden="true" />
-            <span className="hidden 2xl:inline">Paste</span>
-          </button>
-          <button
-            type="button"
-            onClick={props.onCreateQuestion}
-            disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
-            className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-35"
-          >
-            <Plus size={13} aria-hidden="true" /> Question
-          </button>
+        <div className="mb-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
+          <div className="min-w-0">
+            <ModuleScopePicker
+              sections={props.sections}
+              selectedModuleId={props.module.id}
+              disabled={props.isMutating}
+              onSelectModule={props.onSelectModule}
+            />
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={props.onOpenImport}
+              disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
+              aria-label="Paste or import questions into this module"
+              title="Paste questions"
+              className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+            >
+              <FileUp size={14} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={props.onCreateQuestion}
+              disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
+              className="flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-35"
+            >
+              <Plus size={14} aria-hidden="true" /> Question
+            </button>
+          </div>
         </div>
         <div className="relative">
           <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
@@ -133,7 +136,7 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
             }}
             placeholder="Search questions"
             aria-label="Search questions"
-            className="h-9 w-full rounded-md bg-muted pl-9 pr-9 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring"
+            className="h-9 w-full rounded-md bg-muted pl-9 pr-9 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring"
           />
           {props.searchQuery ? (
             <button type="button" onClick={() => props.onSearchQueryChange("")} aria-label="Clear question search" className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><X size={12} aria-hidden="true" /></button>
@@ -157,11 +160,7 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
         {rows.length ? (
           <Virtuoso
             data={rows}
-            itemContent={(index, row) => {
-              const prev = index > 0 ? rows[index - 1] : undefined;
-              const warm =
-                prev?.kind === "question" &&
-                prev.question.examQuestionId === props.selectedQuestionId;
+            itemContent={(_index, row) => {
               return row.kind === "empty" ? (
                 <QueueEmptyRow displayOrder={row.displayOrder} disabled={props.isMutating} onCreate={props.onCreateQuestion} />
               ) : (
@@ -173,13 +172,7 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
                   moduleQuestions={props.module.questions}
                   onSelect={props.onSelectQuestion}
                   onToggleSelection={props.onToggleSelection}
-                  onQuickAnswerKey={props.onQuickAnswerKey}
                   onReorder={props.onReorder}
-                  flushing={
-                    row.question.examQuestionId === props.selectedQuestionId &&
-                    props.saveStatus === "saving"
-                  }
-                  warm={warm}
                 />
               );
             }}
@@ -202,11 +195,8 @@ function QueueRow({
   checked,
   disabled,
   moduleQuestions,
-  flushing,
-  warm,
   onSelect,
   onToggleSelection,
-  onQuickAnswerKey,
   onReorder,
 }: {
   question: AssessmentQuestionSummary;
@@ -214,11 +204,8 @@ function QueueRow({
   checked: boolean;
   disabled: boolean;
   moduleQuestions: AssessmentQuestionSummary[];
-  flushing: boolean;
-  warm: boolean;
   onSelect: (questionId: string) => void;
   onToggleSelection: (questionId: string, range: boolean) => void;
-  onQuickAnswerKey: (questionId: string, optionId: string) => void;
   onReorder: (questionIds: string[], expectedQuestionIds: string[]) => Promise<void>;
 }) {
   const index = moduleQuestions.findIndex((item) => item.examQuestionId === question.examQuestionId);
@@ -237,54 +224,35 @@ function QueueRow({
   return (
     <div
       data-question-list-row={question.examQuestionId}
-      data-flushing={flushing || undefined}
-      data-warm={warm || undefined}
-      className={`group relative mx-2 my-px rounded-md transition-colors ${selected ? "bg-muted" : "hover:bg-muted/60"}`}
+      className={`group relative mx-2 my-px rounded-md ${selected ? "bg-muted" : "hover:bg-muted/60"}`}
     >
-      <div className="flex min-h-[72px] items-start gap-2 px-2.5 py-2.5">
+      <div className="flex min-h-[56px] items-center gap-2 px-2.5 py-2">
         <button
           type="button"
           disabled={disabled}
           onClick={(event) => onToggleSelection(question.examQuestionId, event.shiftKey)}
           aria-label={`${checked ? "Deselect" : "Select"} question ${question.displayOrder + 1}`}
           aria-pressed={checked}
-          className={`mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border transition-colors ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-transparent group-hover:border-ring/40 group-hover:text-muted-foreground/40"}`}
+          className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-transparent group-hover:border-ring/40 group-hover:text-muted-foreground/40"}`}
         >
           <Check size={11} strokeWidth={3.2} aria-hidden="true" />
         </button>
         <button type="button" onClick={() => onSelect(question.examQuestionId)} disabled={disabled} aria-current={selected ? "true" : undefined} aria-label={`Question ${question.displayOrder + 1}: ${question.promptPreview || "Empty question"}${selected ? ", current" : ""}`} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <div className="flex items-baseline gap-2">
-            <span className="w-6 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">{question.displayOrder + 1}</span>
-            <span className="truncate text-[15px] font-medium tracking-tight text-foreground">{question.promptPreview || "Empty question"}</span>
-          </div>
-          <div className="mt-1.5 flex items-center gap-1.5 pl-8 text-xs font-medium text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span className="w-5 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">{question.displayOrder + 1}</span>
             <QueueReadinessDot question={question} />
-            {question.domain ? <span className="max-w-[112px] truncate">{question.domain.replaceAll("-", " ")}</span> : <span>No domain</span>}
-            <span aria-hidden="true">·</span><span className="capitalize">{question.difficulty}</span>
-            {question.hasStimulus ? <><span aria-hidden="true">·</span><span>Stimulus</span></> : null}
-            {selected ? <><span aria-hidden="true">·</span><span className="font-semibold text-foreground">Current</span></> : null}
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{question.promptPreview || "Empty question"}</span>
+            {question.questionType === "single_choice" && question.answerKeyPreview ? (
+              <span aria-hidden="true" className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">{question.answerKeyPreview}</span>
+            ) : question.questionType !== "single_choice" ? (
+              <span aria-hidden="true" className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">SPR</span>
+            ) : null}
+            {selected ? <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-foreground">Current</span> : null}
           </div>
         </button>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          {question.questionType === "single_choice" ? (
-            <div role="group" aria-label={`Question ${question.displayOrder + 1} answer key`} className="flex gap-0.5">
-              {(["A", "B", "C", "D"] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  disabled={disabled}
-                  aria-pressed={question.answerKeyPreview === option}
-                  aria-label={`Set question ${question.displayOrder + 1} key to ${option}`}
-                  onClick={() => onQuickAnswerKey(question.examQuestionId, option)}
-                  className={`h-6 w-6 rounded text-[10px] font-bold transition-colors ${question.answerKeyPreview === option ? "bg-primary text-primary-foreground" : "text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 max-[900px]:opacity-100"}`}
-                >{option}</button>
-              ))}
-            </div>
-          ) : <span className="rounded bg-muted px-1.5 py-1 text-[10px] font-semibold text-muted-foreground">SPR</span>}
-          <div className="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 max-[900px]:opacity-100">
-            <button type="button" disabled={disabled || index <= 0} onClick={() => move(-1)} aria-label="Move question up" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronUp size={12} aria-hidden="true" /></button>
-            <button type="button" disabled={disabled || index >= moduleQuestions.length - 1} onClick={() => move(1)} aria-label="Move question down" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronDown size={12} aria-hidden="true" /></button>
-          </div>
+        <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex focus-within:flex">
+          <button type="button" disabled={disabled || index <= 0} onClick={() => move(-1)} aria-label="Move question up" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronUp size={12} aria-hidden="true" /></button>
+          <button type="button" disabled={disabled || index >= moduleQuestions.length - 1} onClick={() => move(1)} aria-label="Move question down" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronDown size={12} aria-hidden="true" /></button>
         </div>
       </div>
     </div>
@@ -309,10 +277,10 @@ function QueueReadinessDot({ question }: { question: AssessmentQuestionSummary }
 
 function QueueEmptyRow({ displayOrder, disabled, onCreate }: { displayOrder: number; disabled: boolean; onCreate: () => void }) {
   return (
-    <button type="button" disabled={disabled} onClick={onCreate} aria-label={`Add question ${displayOrder + 1}`} className="mx-2 my-px flex min-h-[56px] w-[calc(100%_-_1rem)] items-center gap-3 rounded-md border border-dashed border-border px-3 text-left text-muted-foreground transition-colors hover:border-ring/40 hover:bg-muted/50 hover:text-foreground disabled:opacity-40">
-      <span className="w-6 text-xs font-semibold tabular-nums">{displayOrder + 1}</span>
-      <span className="flex h-[22px] w-[22px] items-center justify-center rounded bg-muted" aria-hidden="true"><Plus size={13} /></span>
-      <span className="text-xs font-medium">Add question</span>
+    <button type="button" disabled={disabled} onClick={onCreate} aria-label={`Add question ${displayOrder + 1}`} className="mx-2 my-px flex min-h-[48px] w-[calc(100%_-_1rem)] items-center gap-2.5 rounded-md border border-dashed border-border px-2.5 text-left text-muted-foreground hover:border-ring/40 hover:bg-muted/50 hover:text-foreground disabled:opacity-40">
+      <span className="w-5 shrink-0 text-xs font-semibold tabular-nums">{displayOrder + 1}</span>
+      <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded bg-muted" aria-hidden="true"><Plus size={13} /></span>
+      <span className="truncate text-xs font-medium">Add question</span>
     </button>
   );
 }
