@@ -1,8 +1,7 @@
 /*
  * SAT authoring spine styles — scoped to `.sat-spine` only (plan Phase 1).
  *
- * TOKEN MAP (incumbent `au-*` / `.sat-authoring` in src/index.css is FROZEN,
- * anti-reference, and removed in Phase 10 — never add new `au-*` tokens):
+ * TOKEN MAP (shared `au-*` dialog/sheet/material tokens live in src/index.css;
  *   spine canvas/bg  -> var(--color-background)
  *   spine surface    -> var(--color-card)
  *   spine text       -> var(--color-foreground)

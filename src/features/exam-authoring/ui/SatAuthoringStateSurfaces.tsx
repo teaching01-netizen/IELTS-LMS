@@ -3,7 +3,7 @@ import { LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 export function SatAuthoringLoadingSurface({ label }: { label: string }) {
   return (
     <main
-      className="sat-product sat-authoring flex min-h-screen items-center justify-center bg-au-canvas px-6 text-slate-950"
+      className="sat-product flex min-h-screen items-center justify-center bg-au-canvas px-6 text-slate-950"
       data-sat-authoring-state="loading"
       role="status"
       aria-busy="true"
@@ -37,7 +37,7 @@ export function SatAuthoringErrorSurface({
   onAction,
 }: SatAuthoringErrorSurfaceProps) {
   return (
-    <main className="sat-product sat-authoring flex min-h-screen items-center justify-center bg-au-canvas px-6 text-slate-950">
+    <main className="sat-product flex min-h-screen items-center justify-center bg-au-canvas px-6 text-slate-950">
       <section
         className="authoring-surface authoring-surface--error w-full max-w-lg px-6 py-8 sm:px-8"
         data-sat-authoring-state="error"

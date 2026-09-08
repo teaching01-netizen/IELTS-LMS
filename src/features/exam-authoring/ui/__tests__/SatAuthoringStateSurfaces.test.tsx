@@ -12,7 +12,7 @@ describe("SAT authoring state surfaces", () => {
     const loading = screen.getByRole("status");
     expect(loading).toHaveAttribute("data-sat-authoring-state", "loading");
     expect(loading).toHaveTextContent("Opening SAT workspace…");
-    expect(loading).toHaveClass("sat-product", "sat-authoring");
+    expect(loading).toHaveClass("sat-product");
   });
 
   it("renders a recoverable SAT-specific error landmark", () => {

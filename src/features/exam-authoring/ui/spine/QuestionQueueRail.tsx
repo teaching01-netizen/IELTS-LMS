@@ -142,7 +142,6 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
         <AuthoringSegmented
           className="mt-2 w-full"
           ariaLabel="Question readiness filters"
-          layoutId="sat-queue-readiness"
           value={props.filter}
           onChange={props.onFilterChange}
           options={[

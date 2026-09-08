@@ -59,14 +59,14 @@ export function ModuleScopePicker({
           type="button"
           disabled={disabled}
           aria-label={`Choose module. Current: ${selected.section.title}, ${selected.module.title}, ${authored} of ${target} authored`}
-          className="group flex min-h-11 max-w-full flex-1 items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-45"
+          className="group flex min-h-11 max-w-full flex-1 items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45"
         >
           <div className="min-w-0 flex-1">
             <div className="truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
               {selected.section.title}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-              <span className="truncate text-[13px] font-semibold tracking-[-0.012em] text-slate-950">
+              <span className="truncate text-[13px] font-semibold tracking-[-0.012em] text-foreground">
                 {selected.module.title}
               </span>
               <ChevronDown
@@ -80,9 +80,9 @@ export function ModuleScopePicker({
             <div className="text-[11px] font-semibold tabular-nums text-slate-500">
               {authored}/{target}
             </div>
-            <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-au-fill" aria-hidden="true">
+            <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-muted" aria-hidden="true">
               <div
-                className="h-full rounded-full bg-au-accent transition-[width] duration-500 ease-out"
+                className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -95,7 +95,7 @@ export function ModuleScopePicker({
         aria-label="Choose SAT module"
         onEscapeKeyDown={() => setOpen(false)}
         data-au-section={selected.section.sectionKey}
-        className="sat-product sat-authoring sat-module-menu au-elevation-menu isolate z-[110] max-h-[min(520px,calc(100dvh-112px))] w-[340px] max-w-[calc(100vw-24px)] overflow-y-auto overscroll-contain rounded-[14px] border border-au-separator bg-au-surface p-1.5"
+        className="sat-product sat-module-menu shadow-lg isolate z-[110] max-h-[min(520px,calc(100dvh-112px))] w-[340px] max-w-[calc(100vw-24px)] overflow-y-auto overscroll-contain rounded-[14px] border border-border bg-card p-1.5"
       >
         <DropdownMenuRadioGroup
           value={selectedModuleId}
@@ -132,10 +132,10 @@ export function ModuleScopePicker({
                     <DropdownMenuRadioItem
                       key={module.id}
                       value={module.id}
-                      className={`flex min-h-[58px] w-full items-center gap-2 rounded-[10px] !pl-2.5 px-2.5 py-2.5 text-left outline-none focus-visible:ring-4 focus-visible:ring-au-accent/10 ${current ? "bg-au-tint-soft-strong text-slate-950" : "text-slate-700 hover:bg-au-fill"}`}
+                      className={`flex min-h-[58px] w-full items-center gap-2 rounded-[10px] !pl-2.5 px-2.5 py-2.5 text-left outline-none focus-visible:ring-4 focus-visible:ring-ring/10 ${current ? "bg-primary/10 text-foreground" : "text-foreground hover:bg-muted"}`}
                     >
                       <span
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${current ? "bg-au-tint text-white" : "text-transparent"}`}
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${current ? "bg-primary text-primary-foreground" : "text-transparent"}`}
                         aria-hidden="true"
                       >
                         <Check size={11} strokeWidth={3} />
@@ -151,16 +151,16 @@ export function ModuleScopePicker({
                         </div>
                         <div className="mt-1.5 flex items-center gap-2">
                           <div
-                            className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-au-fill"
+                            className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-muted"
                             aria-hidden="true"
                           >
                             <div
-                              className="h-full rounded-full bg-au-tint"
+                              className="h-full rounded-full bg-primary"
                               style={{ width: `${moduleProgress}%` }}
                             />
                           </div>
                           {errors ? (
-                            <span className="text-[10px] font-semibold text-au-danger-text">
+                            <span className="text-[10px] font-semibold text-destructive">
                               {errors} error{errors === 1 ? "" : "s"}
                             </span>
                           ) : incomplete ? (
@@ -168,7 +168,7 @@ export function ModuleScopePicker({
                               {incomplete} incomplete
                             </span>
                           ) : module.questions.length === module.targetQuestionCount ? (
-                            <span className="text-[10px] font-semibold text-au-success-text">
+                            <span className="text-[10px] font-semibold text-green-800">
                               Complete
                             </span>
                           ) : null}
@@ -278,14 +278,14 @@ function StaticModuleScopePicker({
           setOpen(true);
         }}
         onClick={() => setOpen((value) => !value)}
-        className="group flex min-h-11 max-w-full items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-45"
+        className="group flex min-h-11 max-w-full items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45"
       >
         <div className="min-w-0 flex-1">
           <div className="truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
             {selected.section.title}
           </div>
           <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-[13px] font-semibold tracking-[-0.012em] text-slate-950">
+            <span className="truncate text-[13px] font-semibold tracking-[-0.012em] text-foreground">
               {selected.module.title}
             </span>
             <ChevronDown
@@ -299,9 +299,9 @@ function StaticModuleScopePicker({
           <div className="text-[11px] font-semibold tabular-nums text-slate-500">
             {authored}/{target}
           </div>
-          <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-au-fill" aria-hidden="true">
+          <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-muted" aria-hidden="true">
             <div
-              className="h-full rounded-full bg-au-accent transition-[width] duration-500 ease-out"
+              className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -316,11 +316,11 @@ function StaticModuleScopePicker({
           tabIndex={-1}
           onKeyDown={handleMenuKeyDown}
           data-au-section={selected.section.sectionKey}
-          className="sat-product sat-authoring au-elevation-menu absolute left-0 top-[calc(100%+6px)] z-[110] max-h-[min(520px,calc(100vh-112px))] w-[340px] max-w-[calc(100vw-24px)] isolate overflow-y-auto overscroll-contain rounded-[14px] border border-au-separator bg-au-surface p-1.5"
+          className="sat-product shadow-lg absolute left-0 top-[calc(100%+6px)] z-[110] max-h-[min(520px,calc(100vh-112px))] w-[340px] max-w-[calc(100vw-24px)] isolate overflow-y-auto overscroll-contain rounded-[14px] border border-border bg-card p-1.5"
         >
           {sections.map((section, sectionIndex) => (
             <div key={section.id}>
-              {sectionIndex ? <div className="my-2 h-px bg-au-separator" role="separator" /> : null}
+              {sectionIndex ? <div className="my-2 h-px bg-border" role="separator" /> : null}
               <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
                 <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
                   {section.title}
@@ -353,10 +353,10 @@ function StaticModuleScopePicker({
                         closeMenu(true);
                         if (!current) onSelectModule(module.id);
                       }}
-                      className={`flex min-h-[58px] w-full items-center gap-2 rounded-[10px] px-2.5 py-2.5 text-left outline-none transition focus-visible:ring-4 focus-visible:ring-au-accent/10 ${current ? "bg-au-tint-soft-strong text-slate-950" : "text-slate-700 hover:bg-au-fill"}`}
+                      className={`flex min-h-[58px] w-full items-center gap-2 rounded-[10px] px-2.5 py-2.5 text-left outline-none transition focus-visible:ring-4 focus-visible:ring-ring/10 ${current ? "bg-primary/10 text-foreground" : "text-foreground hover:bg-muted"}`}
                     >
                       <span
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${current ? "bg-au-tint text-white" : "text-transparent"}`}
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${current ? "bg-primary text-primary-foreground" : "text-transparent"}`}
                         aria-hidden="true"
                       >
                         <Check size={11} strokeWidth={3} />
@@ -371,14 +371,14 @@ function StaticModuleScopePicker({
                           </span>
                         </div>
                         <div className="mt-1.5 flex items-center gap-2">
-                          <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-au-fill" aria-hidden="true">
+                          <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
                             <div
-                              className="h-full rounded-full bg-au-tint"
+                              className="h-full rounded-full bg-primary"
                               style={{ width: `${moduleProgress}%` }}
                             />
                           </div>
                           {errors ? (
-                            <span className="text-[10px] font-semibold text-au-danger-text">
+                            <span className="text-[10px] font-semibold text-destructive">
                               {errors} error{errors === 1 ? "" : "s"}
                             </span>
                           ) : incomplete ? (
@@ -386,7 +386,7 @@ function StaticModuleScopePicker({
                               {incomplete} incomplete
                             </span>
                           ) : module.questions.length === module.targetQuestionCount ? (
-                            <span className="text-[10px] font-semibold text-au-success-text">
+                            <span className="text-[10px] font-semibold text-green-800">
                               Complete
                             </span>
                           ) : null}

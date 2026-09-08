@@ -201,7 +201,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
           restoreFocusRef.current = null;
           restoreAuthoringFocus(opener);
         }}
-        className="sat-product sat-authoring authoring-mobile-sheet au-elevation-sheet flex h-full w-full max-w-[520px] flex-col gap-0 border-l border-au-separator bg-au-fill p-0 sm:max-w-[520px]"
+        className="sat-product authoring-mobile-sheet au-elevation-sheet flex h-full w-full max-w-[520px] flex-col gap-0 border-l border-au-separator bg-au-fill p-0 sm:max-w-[520px]"
       >
             <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4 authoring-glass">
               <div className="min-w-0 flex-1"><p className="text-[11px] font-medium text-slate-400">Digital SAT · Current release</p><SheetTitle className="mt-0.5 text-lg font-semibold tracking-[-0.02em] text-slate-950">{props.link ? "Edit Student Link" : "Create Student Link"}</SheetTitle>

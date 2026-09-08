@@ -69,7 +69,7 @@ export function AuthoringDialog({
         <DialogPrimitive.Overlay className="authoring-dialog-overlay" />
         <DialogPrimitive.Content
           className={cn(
-            "sat-product sat-authoring authoring-dialog-content w-[calc(100vw-2rem)] max-w-[32rem]",
+            "sat-product authoring-dialog-content w-[calc(100vw-2rem)] max-w-[32rem]",
             contentClassName
           )}
           aria-label={ariaLabel}
@@ -175,7 +175,7 @@ export function AuthoringConfirmDialog({
       <AlertDialogPrimitive.Portal>
         <AlertDialogPrimitive.Overlay className="authoring-dialog-overlay" />
         <AlertDialogPrimitive.Content
-          className="sat-product sat-authoring authoring-confirm-dialog"
+          className="sat-product authoring-confirm-dialog"
           onOpenAutoFocus={(event) => {
             if (!restoreFocusRef.current && document.activeElement instanceof HTMLElement) {
               restoreFocusRef.current = document.activeElement;

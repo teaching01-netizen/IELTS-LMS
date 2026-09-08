@@ -16,12 +16,6 @@ export interface AuthoringSegmentedProps<T extends string> {
   options: ReadonlyArray<AuthoringSegmentedOption<T>>;
   value: T;
   onChange: (value: T) => void;
-  /**
-   * @deprecated Spine motion restraint (Phase 9.3): the thumb is a CSS
-   * transition cross-fade, not a shared-layout spring. Kept optional so
-   * legacy call sites keep compiling until Phase 10 removal.
-   */
-  layoutId?: string;
   ariaLabel: string;
   className?: string;
 }
@@ -30,7 +24,6 @@ export function AuthoringSegmented<T extends string>({
   options,
   value,
   onChange,
-  layoutId,
   ariaLabel,
   className,
 }: AuthoringSegmentedProps<T>) {

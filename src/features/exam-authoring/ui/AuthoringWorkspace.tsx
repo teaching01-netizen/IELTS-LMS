@@ -1,14 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
-  ArrowLeft,
-  FileSpreadsheet,
   ListChecks,
-  MoreHorizontal,
-  PanelRight,
   PencilLine,
 } from "lucide-react";
 import type {
@@ -42,29 +37,14 @@ import {
   supportsFastPlainEditing,
 } from "../editor/richContent";
 import { validateSatQuestion } from "../providers/sat/satProvider";
-import { QuestionEditor } from "./QuestionEditor";
 import { QuestionImportSheet } from "../import/QuestionImportSheet";
 import { SatWorkbookImportSheet } from "../import/SatWorkbookImportSheet";
-import { QuestionListPane, type QuestionListFilter } from "./QuestionListPane";
-import { QuestionInspectorPane, type InspectorSection } from "./QuestionInspectorPane";
-import { QuestionQuickPreview } from "./QuestionQuickPreview";
-import { SaveStatusIndicator } from "./SaveStatusIndicator";
+import type { SpineQueueFilter } from "./spine/queueModel";
 import { SampleExamLoadDialog } from "./SampleExamLoadDialog";
 import { WorkbookImportUndoBanner } from "./WorkbookImportUndoBanner";
-import { authoringMotion } from "./authoringMotion";
 import { useOptionalAuthSession } from "../../auth/api/authSession";
 import { buildStaffDraftKey } from "../../../utils/staffDraftKey";
-import { AuthoringSegmented } from "./AuthoringSegmented";
-import { SatMenu } from "../../../products/sat/ui/Menu";
-import { AuthoringPaneResizer } from "./AuthoringPaneResizer";
 import { restoreAuthoringFocus } from "./authoringPrimitives";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "../../../components/ui/sheet";
 import {
   SatAuthoringErrorSurface,
   SatAuthoringLoadingSurface,
@@ -78,7 +58,6 @@ import { QuestionJumpPalette } from "./spine/QuestionJumpPalette";
 import { ShortcutHelpDialog } from "./spine/ShortcutHelpDialog";
 import { SpineQuestionView } from "./spine/SpineQuestionView";
 import { SaveCluster } from "./spine/SaveCluster";
-import { isSpineEnabled } from "./spine/spineFlag";
 
 export interface AuthoringWorkspaceProps {
   examId: string;
@@ -86,33 +65,8 @@ export interface AuthoringWorkspaceProps {
 }
 
 type WorkspaceMode = "build" | "issues";
-type AuthoringPane = "sidebar" | "inspector";
-
-const AUTHORING_PANE_STORAGE_KEY = "sat-authoring:pane-width";
-
-function readStoredPaneWidth(pane: AuthoringPane, fallback: number, min: number, max: number): number {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const stored = window.localStorage.getItem(`${AUTHORING_PANE_STORAGE_KEY}:${pane}`);
-    if (stored === null) return fallback;
-    const value = Number(stored);
-    return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function persistPaneWidth(pane: AuthoringPane, width: number): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(`${AUTHORING_PANE_STORAGE_KEY}:${pane}`, String(width));
-  } catch {
-    // Private browsing and locked-down embedded contexts may deny storage.
-  }
-}
 
 export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProps) {
-  const reduceMotion = useReducedMotion();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const authSession = useOptionalAuthSession();
@@ -131,7 +85,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const [draft, setDraft] = useState<QuestionRevision | null>(null);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("build");
   const [searchQuery, setSearchQuery] = useState("");
-  const [filter, setFilter] = useState<QuestionListFilter>("all");
+  const [filter, setFilter] = useState<SpineQueueFilter>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [navigationError, setNavigationError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -143,20 +97,10 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const [sampleDialogOpen, setSampleDialogOpen] = useState(false);
   const [jumpPaletteOpen, setJumpPaletteOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [inspectorSheetOpen, setInspectorSheetOpen] = useState(false);
   const [questionListOpen, setQuestionListOpen] = useState(false);
   const [compactViewport, setCompactViewport] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(() =>
-    readStoredPaneWidth("sidebar", 320, 280, 440)
-  );
-  const [inspectorWidth, setInspectorWidth] = useState(() =>
-    readStoredPaneWidth("inspector", 320, 280, 440)
-  );
-  const [activeInspectorSection, setActiveInspectorSection] = useState<InspectorSection>("content");
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
   const [focusField, setFocusField] = useState<string | null>(null);
-  const [topbarScrolled, setTopbarScrolled] = useState(false);
   const selectionAnchorRef = useRef<string | null>(null);
   const questionSheetFocusRef = useRef<HTMLElement | null>(null);
   const inspectorSheetFocusRef = useRef<HTMLElement | null>(null);
@@ -172,23 +116,12 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const shellVersionRevision = shell?.versionRevision ?? null;
 
   useEffect(() => {
-    persistPaneWidth("sidebar", sidebarWidth);
-  }, [sidebarWidth]);
-
-  useEffect(() => {
-    persistPaneWidth("inspector", inspectorWidth);
-  }, [inspectorWidth]);
-
-  useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const media = window.matchMedia("(max-width: 900px)");
     const update = () => {
       const isCompact = media.matches;
       setCompactViewport(isCompact);
-      if (!isCompact) {
-        setQuestionListOpen(false);
-        setInspectorSheetOpen(false);
-      }
+      if (!isCompact) setQuestionListOpen(false);
     };
     update();
     media.addEventListener?.("change", update);
@@ -290,10 +223,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   }, [searchParams, selectedModuleId, setSearchParams, shell]);
 
   useEffect(() => {
-    setActiveInspectorSection("content");
-  }, [selectedExamQuestionId]);
-
-  useEffect(() => {
     if (
       questionQuery.data?.question &&
       questionQuery.data.examQuestionId === selectedExamQuestionId &&
@@ -307,7 +236,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     if (!draft || !focusField) return;
     const frame = window.requestAnimationFrame(() => {
       const target = document.querySelector<HTMLElement>(`[data-authoring-field="${focusField}"]`);
-      target?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
       (target?.matches("input, textarea, select, button, [contenteditable=true]")
         ? target
         : target?.querySelector<HTMLElement>(
@@ -317,7 +246,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       setFocusField(null);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [draft, focusField, reduceMotion]);
+  }, [draft, focusField]);
 
   useEffect(() => {
     if (!selectedModule || selectedModuleIndex < 0) return;
@@ -884,10 +813,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     [selectQuestion, shell]
   );
 
-  const spineEnabledEarly = isSpineEnabled(searchParams);
-  const spineEnabledRef = useRef(spineEnabledEarly);
-  spineEnabledRef.current = spineEnabledEarly;
-
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       const command = event.metaKey || event.ctrlKey;
@@ -918,7 +843,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       }
       if (command && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (spineEnabledRef.current && selectedModule) {
+        if (selectedModule) {
           setWorkspaceMode("build");
           setJumpPaletteOpen(true);
           return;
@@ -927,7 +852,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         window.requestAnimationFrame(() => searchInputRef.current?.focus());
         return;
       }
-      if (!command && event.key === "?" && spineEnabledRef.current) {
+      if (!command && event.key === "?") {
         event.preventDefault();
         setShortcutHelpOpen(true);
         return;
@@ -1008,100 +933,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     ? Math.max(0, selectedModule.targetQuestionCount - selectedModule.questions.length)
     : 0;
 
-  const renderQuestionListPane = (embedded = false) => {
-    if (selectedModule && selectedSection) {
-      if (workspaceMode === "build") {
-        return (
-          <QuestionListPane
-            embedded={embedded}
-            module={selectedModule}
-            sections={shell.sections}
-            sectionKey={selectedSection.sectionKey}
-            moveTargets={moveTargets}
-            selectedQuestionId={selectedExamQuestionId}
-            selectedQuestionIds={selectedIds}
-            searchQuery={searchQuery}
-            filter={filter}
-            searchInputRef={searchInputRef}
-            isMutating={
-              createQuestion.isPending ||
-              duplicateQuestion.isPending ||
-              reorderQuestions.isPending ||
-              bulkQuestions.isPending ||
-              batchCreate.isPending ||
-              loadSampleExam.isPending
-            }
-            onSearchQueryChange={setSearchQuery}
-            onSelectModule={(moduleId) => {
-              setQuestionListOpen(false);
-              void selectModule(moduleId);
-            }}
-            onOpenImport={() => {
-              setQuestionListOpen(false);
-              setImportOpen(true);
-            }}
-            onFilterChange={setFilter}
-            onSelectQuestion={(questionId) => {
-              setQuestionListOpen(false);
-              void selectQuestion(questionId);
-            }}
-            onCreateQuestion={() => {
-              setQuestionListOpen(false);
-              void handleCreateQuestion();
-            }}
-            onToggleSelection={toggleSelection}
-            onClearSelection={() => {
-              setSelectedIds(new Set());
-              selectionAnchorRef.current = null;
-            }}
-            onQuickAnswerKey={(questionId, optionId) =>
-              void handleQuickAnswerKey(questionId, optionId)
-            }
-            onReorder={handleReorder}
-            onBulkAction={handleBulkAction}
-            saveStatus={autosave.status}
-          />
-        );
-      }
-      return (
-        <IssuesPane
-          report={validation.data ?? null}
-          loading={validation.isPending}
-          onRefresh={() => void openIssues()}
-          onOpenIssue={(issue) => {
-            setQuestionListOpen(false);
-            void openIssue(issue);
-          }}
-        />
-      );
-    }
-    return (
-      <div className="authoring-sidebar flex w-[var(--authoring-sidebar-width)] min-w-0 items-center justify-center border-r border-au-separator bg-au-surface p-8 text-center text-[12px] text-slate-500">
-        Choose a SAT module.
-      </div>
-    );
-  };
-
-  const renderInspector = (embedded = false) =>
-    (embedded || inspectorOpen) && draft ? (
-      <QuestionInspectorPane
-        embedded={embedded}
-        question={draft}
-        issues={selectedQuestionIssues}
-        activeSection={activeInspectorSection}
-        onSectionChange={setActiveInspectorSection}
-        onChange={handleChange}
-        onClose={() => (embedded ? setInspectorSheetOpen(false) : setInspectorOpen(false))}
-        onIssueSelect={(issue) => {
-          setActiveInspectorSection("validation");
-          setFocusField(resolveAuthoringField(issue.field ?? issue.path));
-        }}
-      />
-    ) : null;
-
-  const spineEnabled = spineEnabledEarly;
-
-  if (spineEnabled) {
+  {
     const spineQueue = (() => {
       if (!selectedModule || !selectedSection) return null;
       if (workspaceMode === "build") {
@@ -1344,370 +1176,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       </div>
     );
   }
-
-  return (
-    <div
-      className="sat-product sat-authoring flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-au-canvas text-slate-950"
-      data-au-section={selectedSection?.sectionKey ?? "rw"}
-      style={
-        {
-          "--authoring-sidebar-width": `${sidebarWidth}px`,
-          "--authoring-inspector-width": `${inspectorWidth}px`,
-        } as CSSProperties
-      }
-    >
-      <header
-        className="authoring-glass authoring-topbar z-50 shrink-0 border-b border-au-separator px-2 py-1.5 sm:px-3"
-        data-scrolled={topbarScrolled ? "true" : undefined}
-      >
-        <div className="mx-auto flex min-h-[52px] max-w-[1920px] items-center gap-1 sm:gap-2">
-          <button
-            type="button"
-            onClick={async () => {
-              if (await flushBeforeNavigation()) navigate("/sat/exams");
-            }}
-            className="authoring-interactive flex min-h-10 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-au-fill hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
-            aria-label="Back to SAT Exam Library"
-            title="Back to SAT Exam Library"
-          >
-            <ArrowLeft size={15} aria-hidden="true" />
-            <span className="hidden lg:inline">Exam Library</span>
-          </button>
-          <div className="mx-0.5 h-5 w-px shrink-0 bg-au-fill" aria-hidden="true" />
-          <div className="min-w-0 flex-1 px-1">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate text-[13px] font-semibold tracking-[-0.012em]">{examTitle}</h1>
-              <span className="shrink-0 rounded-full bg-au-fill px-2 py-0.5 text-[10px] font-semibold tracking-[0.02em] text-slate-600">
-                Draft
-              </span>
-            </div>
-            <div className="mt-1 flex items-center gap-2">
-              <p className="truncate text-[11px] tabular-nums text-slate-500">
-                {totalAuthored} of {totalTarget} questions authored
-              </p>
-              <span
-                className="hidden h-[3px] w-14 shrink-0 overflow-hidden rounded-full bg-au-fill sm:block"
-                aria-hidden="true"
-              >
-                <span
-                  className="block h-full rounded-full bg-au-accent transition-[width] duration-500 ease-out"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setQuestionListOpen(true)}
-            className="hidden min-h-9 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-au-fill hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent max-[900px]:flex"
-            aria-label={workspaceMode === "issues" ? "Open authoring issues" : "Open question navigator"}
-          >
-            <ListChecks size={14} aria-hidden="true" />
-            <span>{workspaceMode === "issues" ? "Issues" : "Questions"}</span>
-          </button>
-          <AuthoringSegmented
-            className="shrink-0 max-[900px]:hidden"
-            ariaLabel="Authoring view"
-            layoutId="sat-authoring-mode"
-            value={workspaceMode}
-            onChange={(mode) => {
-              if (mode === "issues") {
-                setQuestionListOpen(false);
-                void openIssues();
-              } else {
-                setWorkspaceMode(mode);
-              }
-            }}
-            options={[
-              { value: "build", label: "Build" },
-              {
-                value: "issues",
-                label: (
-                  <>
-                    Issues
-                    {totalErrors ? (
-                      <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-au-danger-tint px-1.5 text-[10px] font-semibold tabular-nums text-au-danger-text">
-                        {totalErrors}
-                      </span>
-                    ) : null}
-                  </>
-                ),
-              },
-            ]}
-          />
-          <button
-            type="button"
-            onClick={() => (compactViewport ? setInspectorSheetOpen(true) : setInspectorOpen((open) => !open))}
-            disabled={!draft}
-            className="authoring-interactive flex min-h-9 shrink-0 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-au-fill hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:cursor-not-allowed disabled:opacity-40"
-            aria-controls="sat-question-inspector"
-            aria-expanded={compactViewport ? inspectorSheetOpen && Boolean(draft) : inspectorOpen}
-            title={compactViewport ? "Open question inspector" : inspectorOpen ? "Hide question inspector" : "Show question inspector"}
-          >
-            <PanelRight size={14} aria-hidden="true" />
-            <span className="hidden xl:inline">Inspector</span>
-          </button>
-          <div className="hidden md:block">
-            <SaveStatusIndicator
-              status={autosave.status}
-              lastSavedAt={autosave.lastSavedAt}
-              {...(draft ? { onRetry: () => autosave.retry(draft) } : {})}
-            />
-          </div>
-          <button
-            type="button"
-            disabled={!shell}
-            onClick={() => void openWorkbookImport()}
-            className="authoring-interactive hidden min-h-9 items-center gap-1.5 rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-au-fill hover:text-slate-950 disabled:opacity-30 sm:flex max-[900px]:hidden"
-            title="Import the complete SAT from an Excel workbook"
-          >
-            <FileSpreadsheet size={14} aria-hidden="true" />
-            Import
-          </button>
-          <SatMenu
-            label="More authoring actions"
-            compact
-            align="end"
-            triggerContent={<MoreHorizontal size={16} aria-hidden="true" />}
-            items={[
-              {
-                id: "build-workspace",
-                label: "Build questions",
-                onSelect: () => setWorkspaceMode("build"),
-                current: workspaceMode === "build",
-              },
-              {
-                id: "issues-workspace",
-                label: "Review issues",
-                onSelect: () => void openIssues(),
-                current: workspaceMode === "issues",
-              },
-              ...(compactViewport
-                ? [
-                    {
-                      id: "import-workbook",
-                      label: "Import from Excel…",
-                      onSelect: () => void openWorkbookImport(),
-                      disabled: !shell,
-                      separatorBefore: true,
-                    },
-                  ]
-                : []),
-              {
-                id: "preview-question",
-                label: "Preview current question",
-                onSelect: () => setPreviewOpen(true),
-                disabled: !draft,
-                separatorBefore: true,
-              },
-              {
-                id: "load-sample",
-                label: "Load sample exam…",
-                onSelect: () => setSampleDialogOpen(true),
-                disabled: loadSampleExam.isPending,
-              },
-            ]}
-          />
-          <button
-            type="button"
-            disabled={!shell}
-            onClick={async () => {
-              if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/preview`);
-            }}
-            title="Open the full SAT using the real student delivery renderer"
-            className="authoring-interactive hidden min-h-9 items-center rounded-[10px] px-2.5 text-[12px] font-semibold text-slate-600 hover:bg-au-fill hover:text-slate-950 disabled:opacity-30 md:flex"
-          >
-            Preview
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/release`);
-            }}
-            className="authoring-interactive flex min-h-9 shrink-0 items-center rounded-[10px] bg-au-accent px-3.5 text-[12px] font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2"
-          >
-            Release
-          </button>
-        </div>
-      </header>
-
-      {navigationError ? (
-        <div
-          role="alert"
-          className="shrink-0 border-b border-au-danger/15 bg-au-danger-tint px-5 py-2 text-center text-[12px] font-medium text-au-danger-text"
-        >
-          {navigationError}
-        </div>
-      ) : null}
-
-      {workbookUndo?.available ? (
-        <WorkbookImportUndoBanner
-          busy={workbookUndoBusy}
-          onUndo={() => void handleWorkbookUndo()}
-        />
-      ) : null}
-
-      <main className="authoring-workspace mx-auto flex min-h-0 w-full max-w-[1920px] flex-1 overflow-hidden">
-        {!compactViewport ? renderQuestionListPane() : null}
-        {!compactViewport && selectedModule && selectedSection ? (
-          <AuthoringPaneResizer
-            label="Question navigator width"
-            value={sidebarWidth}
-            min={280}
-            max={440}
-            onChange={setSidebarWidth}
-          />
-        ) : null}
-
-        <section
-          className="authoring-editor-canvas min-w-0 flex-1 overflow-y-auto"
-          onScroll={(event) => setTopbarScrolled(event.currentTarget.scrollTop > 6)}
-        >
-          {draft ? (
-            <motion.div
-              key={selectedExamQuestionId ?? draft.id}
-              initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={reduceMotion ? { duration: 0.04 } : authoringMotion.state}
-            >
-              <QuestionEditor
-                question={draft}
-                {...(selectedModuleIndex >= 0 ? { questionNumber: selectedModuleIndex + 1 } : {})}
-                saveStatus={autosave.status}
-                onChange={handleChange}
-                onSaveNow={() => void handleSaveNow()}
-                onSaveAndNext={() => void handleSaveAndNext()}
-                keepMetadataForNext={keepMetadataForNext}
-                onKeepMetadataForNextChange={setKeepMetadataForNext}
-                onDuplicate={() => void handleDuplicate()}
-                onDelete={() => handleDelete()}
-              />
-            </motion.div>
-          ) : selectedExamQuestionId && questionQuery.error ? (
-            <QuestionLoadError
-              key="error"
-              error={questionQuery.error}
-              onRetry={() => void questionQuery.refetch()}
-            />
-          ) : selectedExamQuestionId ? (
-            <EditorSkeleton key="loading" />
-          ) : (
-            <EmptyEditor
-              key="empty"
-              moduleTitle={selectedModule?.title ?? null}
-              {...(selectedModule &&
-              selectedModule.questions.length < selectedModule.targetQuestionCount
-                ? { onCreate: () => void handleCreateQuestion() }
-                : {})}
-            />
-          )}
-        </section>
-        {!compactViewport && inspectorOpen && draft ? (
-          <AuthoringPaneResizer
-            label="Question inspector width"
-            value={inspectorWidth}
-            min={280}
-            max={440}
-            direction={-1}
-            onChange={setInspectorWidth}
-          />
-        ) : null}
-        {!compactViewport ? renderInspector() : null}
-        <QuestionQuickPreview
-          open={previewOpen}
-          question={draft}
-          onClose={() => setPreviewOpen(false)}
-        />
-      </main>
-
-      <Sheet
-        open={compactViewport && questionListOpen}
-        onOpenChange={setQuestionListOpen}
-      >
-        <SheetContent
-          side="left"
-          onOpenAutoFocus={() => {
-            if (document.activeElement instanceof HTMLElement) {
-              questionSheetFocusRef.current = document.activeElement;
-            }
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            const opener = questionSheetFocusRef.current;
-            questionSheetFocusRef.current = null;
-            restoreAuthoringFocus(opener);
-          }}
-          className="sat-product sat-authoring authoring-mobile-sheet flex w-[min(92vw,380px)] max-w-[380px] flex-col gap-0 border-r border-au-separator bg-au-canvas p-0"
-        >
-          <SheetHeader className="sr-only">
-            <SheetTitle>{workspaceMode === "issues" ? "Authoring issues" : "Question navigator"}</SheetTitle>
-            <SheetDescription>{workspaceMode === "issues" ? "Review validation issues in the current SAT draft." : "Choose a SAT question to edit."}</SheetDescription>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-hidden">{renderQuestionListPane(true)}</div>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet
-        open={compactViewport && inspectorSheetOpen && Boolean(draft)}
-        onOpenChange={setInspectorSheetOpen}
-      >
-        <SheetContent
-          side="right"
-          onOpenAutoFocus={() => {
-            if (document.activeElement instanceof HTMLElement) {
-              inspectorSheetFocusRef.current = document.activeElement;
-            }
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            const opener = inspectorSheetFocusRef.current;
-            inspectorSheetFocusRef.current = null;
-            restoreAuthoringFocus(opener);
-          }}
-          className="sat-product sat-authoring authoring-mobile-sheet flex w-[min(94vw,390px)] max-w-[390px] flex-col gap-0 border-l border-au-separator bg-au-canvas p-0"
-        >
-          <SheetHeader className="sr-only">
-            <SheetTitle>Question inspector</SheetTitle>
-            <SheetDescription>Review question metadata, answers, and validation.</SheetDescription>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-hidden">{renderInspector(true)}</div>
-        </SheetContent>
-      </Sheet>
-
-      {workbookBaseline ? (
-        <SatWorkbookImportSheet
-          open={workbookImportOpen}
-          examId={examId}
-          shell={workbookBaseline}
-          existingQuestionCount={totalAuthored}
-          onClose={() => {
-            setWorkbookImportOpen(false);
-            setWorkbookBaseline(null);
-          }}
-          onCommitted={handleWorkbookCommitted}
-        />
-      ) : null}
-      <SampleExamLoadDialog
-        open={sampleDialogOpen}
-        busy={loadSampleExam.isPending}
-        existingQuestionCount={totalAuthored}
-        onCancel={() => {
-          if (!loadSampleExam.isPending) setSampleDialogOpen(false);
-        }}
-        onConfirm={() => void handleLoadSampleExam()}
-      />
-      <QuestionImportSheet
-        open={importOpen}
-        sectionKey={selectedSection?.sectionKey ?? "reading-writing"}
-        remainingCapacity={importRemaining}
-        isImporting={batchCreate.isPending}
-        onClose={() => {
-          if (!batchCreate.isPending) setImportOpen(false);
-        }}
-        onImport={handleBatchImport}
-      />
-    </div>
-  );
 }
 
 function summaryFromRevision(

@@ -204,7 +204,6 @@ export function SpineQuestionView({
             </p>
             <AuthoringSegmented
               ariaLabel="Response type"
-              layoutId="sat-spine-response-type"
               value={isSpr ? "spr" : "choice"}
               onChange={(kind) =>
                 changeKind(kind === "spr" ? "student_produced_response" : "single_choice")
