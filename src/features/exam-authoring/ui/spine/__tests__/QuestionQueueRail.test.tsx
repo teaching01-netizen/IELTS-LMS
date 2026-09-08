@@ -96,6 +96,13 @@ describe("QuestionQueueRail", () => {
     expect(screen.getByText("Current")).toBeInTheDocument();
   });
 
+  it("selects the question when any area of the row is clicked", () => {
+    const onSelectQuestion = vi.fn();
+    renderRail({ onSelectQuestion });
+    fireEvent.click(screen.getByRole("button", { name: /question 2:/i }));
+    expect(onSelectQuestion).toHaveBeenCalledWith("q-2");
+  });
+
   it("clears the active search with Escape", () => {
     const onSearchQueryChange = vi.fn();
     renderRail({ searchQuery: "text", onSearchQueryChange });

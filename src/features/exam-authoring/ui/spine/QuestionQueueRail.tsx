@@ -224,35 +224,53 @@ function QueueRow({
   return (
     <div
       data-question-list-row={question.examQuestionId}
-      className={`group relative mx-2 my-px rounded-md ${selected ? "bg-muted" : "hover:bg-muted/60"}`}
+      onClick={() => {
+        if (!disabled) onSelect(question.examQuestionId);
+      }}
+      onKeyDown={(event) => {
+        if (disabled) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const target = event.target as HTMLElement | null;
+        if (target?.closest("button, input, select, textarea, a[href], [role=button]")) return;
+        event.preventDefault();
+        onSelect(question.examQuestionId);
+      }}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-current={selected ? "true" : undefined}
+      aria-disabled={disabled || undefined}
+      aria-label={`Question ${question.displayOrder + 1}: ${question.promptPreview || "Empty question"}${selected ? ", current" : ""}`}
+      className={`group relative mx-2 my-px cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? "bg-muted" : "hover:bg-muted/60"}`}
     >
       <div className="flex min-h-[56px] items-center gap-2 px-2.5 py-2">
         <button
           type="button"
           disabled={disabled}
-          onClick={(event) => onToggleSelection(question.examQuestionId, event.shiftKey)}
+          tabIndex={-1}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleSelection(question.examQuestionId, event.shiftKey);
+          }}
           aria-label={`${checked ? "Deselect" : "Select"} question ${question.displayOrder + 1}`}
           aria-pressed={checked}
           className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-transparent group-hover:border-ring/40 group-hover:text-muted-foreground/40"}`}
         >
           <Check size={11} strokeWidth={3.2} aria-hidden="true" />
         </button>
-        <button type="button" onClick={() => onSelect(question.examQuestionId)} disabled={disabled} aria-current={selected ? "true" : undefined} aria-label={`Question ${question.displayOrder + 1}: ${question.promptPreview || "Empty question"}${selected ? ", current" : ""}`} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <div className="flex items-center gap-2">
-            <span className="w-5 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">{question.displayOrder + 1}</span>
-            <QueueReadinessDot question={question} />
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{question.promptPreview || "Empty question"}</span>
-            {question.questionType === "single_choice" && question.answerKeyPreview ? (
-              <span aria-hidden="true" className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">{question.answerKeyPreview}</span>
-            ) : question.questionType !== "single_choice" ? (
-              <span aria-hidden="true" className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">SPR</span>
-            ) : null}
-            {selected ? <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-foreground">Current</span> : null}
-          </div>
-        </button>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="w-5 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">{question.displayOrder + 1}</span>
+          <QueueReadinessDot question={question} />
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{question.promptPreview || "Empty question"}</span>
+          {question.questionType === "single_choice" && question.answerKeyPreview ? (
+            <span aria-hidden="true" className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">{question.answerKeyPreview}</span>
+          ) : question.questionType !== "single_choice" ? (
+            <span aria-hidden="true" className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">SPR</span>
+          ) : null}
+          {selected ? <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-foreground">Current</span> : null}
+        </div>
         <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex focus-within:flex">
-          <button type="button" disabled={disabled || index <= 0} onClick={() => move(-1)} aria-label="Move question up" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronUp size={12} aria-hidden="true" /></button>
-          <button type="button" disabled={disabled || index >= moduleQuestions.length - 1} onClick={() => move(1)} aria-label="Move question down" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronDown size={12} aria-hidden="true" /></button>
+          <button type="button" disabled={disabled || index <= 0} onClick={(event) => { event.stopPropagation(); move(-1); }} aria-label="Move question up" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronUp size={12} aria-hidden="true" /></button>
+          <button type="button" disabled={disabled || index >= moduleQuestions.length - 1} onClick={(event) => { event.stopPropagation(); move(1); }} aria-label="Move question down" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronDown size={12} aria-hidden="true" /></button>
         </div>
       </div>
     </div>
