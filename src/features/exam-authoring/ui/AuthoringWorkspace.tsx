@@ -648,58 +648,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     selectedModule,
   ]);
 
-  const handleQuickAnswerKey = useCallback(
-    async (questionId: string, optionId: string) => {
-      setNavigationError(null);
-      try {
-        if (questionId === selectedExamQuestionId && draft?.answer.kind === "single_choice") {
-          const next: QuestionRevision = {
-            ...draft,
-            answer: { ...draft.answer, correctOptionId: optionId },
-          };
-          setDraft(next);
-          const result = await autosave.flushNow(next);
-          if (!result.ok) throw new Error("Answer key could not be saved.");
-          return;
-        }
-        if (!(await flushBeforeNavigation())) return;
-        const detail = await assessmentAuthoringApi.getQuestion(questionId);
-        if (detail.question.answer.kind !== "single_choice")
-          throw new Error("Only multiple-choice questions have an A–D answer key.");
-        const next = {
-          ...detail.question,
-          answer: { ...detail.question.answer, correctOptionId: optionId },
-        } satisfies QuestionRevision;
-        const saved = await assessmentAuthoringApi.saveQuestionRevision(next.id, {
-          revision: next.revision,
-          questionType: next.questionType,
-          stimulus: next.stimulus,
-          prompt: next.prompt,
-          answer: next.answer,
-          rationale: next.rationale,
-          metadata: next.metadata,
-          accessibility: next.accessibility,
-        });
-        updateSummaryCache(questionId, saved);
-        void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-        void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      } catch (error) {
-        setNavigationError(
-          error instanceof Error ? error.message : "Answer key could not be changed."
-        );
-      }
-    },
-    [
-      autosave,
-      draft,
-      examId,
-      flushBeforeNavigation,
-      queryClient,
-      selectedExamQuestionId,
-      updateSummaryCache,
-    ]
-  );
-
   const handleReorder = useCallback(
     async (questionIds: string[], expectedQuestionIds: string[]) => {
       if (!selectedModuleId || !(await flushBeforeNavigation())) return;
@@ -967,12 +915,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               setSelectedIds(new Set());
               selectionAnchorRef.current = null;
             }}
-            onQuickAnswerKey={(questionId, optionId) =>
-              void handleQuickAnswerKey(questionId, optionId)
-            }
             onReorder={handleReorder}
             onBulkAction={handleBulkAction}
-            saveStatus={autosave.status}
           />
         );
       }

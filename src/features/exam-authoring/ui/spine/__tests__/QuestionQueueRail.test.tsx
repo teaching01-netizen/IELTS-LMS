@@ -66,10 +66,8 @@ function renderRail(overrides: Partial<Parameters<typeof QuestionQueueRail>[0]> 
       onCreateQuestion={vi.fn()}
       onToggleSelection={vi.fn()}
       onClearSelection={vi.fn()}
-      onQuickAnswerKey={vi.fn()}
       onReorder={vi.fn().mockResolvedValue(undefined)}
       onBulkAction={vi.fn().mockResolvedValue(undefined)}
-      saveStatus="saved"
       {...overrides}
     />,
   );
@@ -111,9 +109,8 @@ describe("QuestionQueueRail", () => {
         searchInputRef={{ current: null }} isMutating onSearchQueryChange={vi.fn()}
         onSelectModule={vi.fn()} onOpenImport={vi.fn()} onFilterChange={vi.fn()}
         onSelectQuestion={vi.fn()} onCreateQuestion={onCreateQuestion} onToggleSelection={vi.fn()}
-        onClearSelection={vi.fn()} onQuickAnswerKey={vi.fn()}
+        onClearSelection={vi.fn()}
         onReorder={vi.fn().mockResolvedValue(undefined)} onBulkAction={vi.fn().mockResolvedValue(undefined)}
-        saveStatus="saved"
       />,
     );
     expect(screen.getByRole("button", { name: "Add question 3" })).toBeDisabled();
@@ -145,9 +142,8 @@ describe("QuestionQueueRail", () => {
         searchInputRef={{ current: null }} isMutating={false} onSearchQueryChange={vi.fn()}
         onSelectModule={vi.fn()} onOpenImport={vi.fn()} onFilterChange={vi.fn()}
         onSelectQuestion={vi.fn()} onCreateQuestion={vi.fn()} onToggleSelection={vi.fn()}
-        onClearSelection={vi.fn()} onQuickAnswerKey={vi.fn()}
+        onClearSelection={vi.fn()}
         onReorder={vi.fn().mockResolvedValue(undefined)} onBulkAction={vi.fn().mockResolvedValue(undefined)}
-        saveStatus="saved"
       />,
     );
     expect(screen.queryByRole("button", { name: /add question/i })).not.toBeInTheDocument();

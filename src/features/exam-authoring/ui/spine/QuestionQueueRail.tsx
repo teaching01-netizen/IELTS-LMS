@@ -26,7 +26,6 @@ import { SAT_DOMAINS, getSatSkills } from "../../providers/sat/taxonomy";
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
 import { ModuleScopePicker } from "../ModuleScopePicker";
 import { AuthoringSegmented } from "../AuthoringSegmented";
-import type { QuestionSaveStatus } from "../../hooks/useQuestionAutosave";
 import {
   buildQueueRows,
   countQueueReadiness,
@@ -54,14 +53,12 @@ export interface QuestionQueueRailProps {
   onCreateQuestion: () => void;
   onToggleSelection: (questionId: string, range: boolean) => void;
   onClearSelection: () => void;
-  onQuickAnswerKey: (questionId: string, optionId: string) => void;
   onReorder: (questionIds: string[], expectedQuestionIds: string[]) => Promise<void>;
   onBulkAction: (
     questionIds: string[],
     action: BulkQuestionAction,
     expectedRevisions?: Record<string, number>,
   ) => Promise<void>;
-  saveStatus: QuestionSaveStatus;
   /** Renders inside the compact viewport navigation sheet. */
   embedded?: boolean;
 }
@@ -83,8 +80,15 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
   );
   const listRef = useRef<HTMLDivElement | null>(null);
   const selectedId = props.selectedQuestionId;
+  const mountedRef = useRef(false);
 
   useEffect(() => {
+    // Skip the initial mount: the selected row is already visible on first
+    // paint, so scrolling would only fight the browser restore position.
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
     if (!selectedId) return;
     const row = listRef.current?.querySelector<HTMLElement>(
       '[data-question-list-row="' + CSS.escape(selectedId) + '"]',

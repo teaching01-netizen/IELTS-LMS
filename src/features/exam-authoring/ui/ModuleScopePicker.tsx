@@ -82,7 +82,7 @@ export function ModuleScopePicker({
             </div>
             <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-muted" aria-hidden="true">
               <div
-                className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+                className="h-full rounded-full bg-primary"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -301,7 +301,7 @@ function StaticModuleScopePicker({
           </div>
           <div className="mt-1 h-[3px] overflow-hidden rounded-full bg-muted" aria-hidden="true">
             <div
-              className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+              className="h-full rounded-full bg-primary"
               style={{ width: `${progress}%` }}
             />
           </div>
