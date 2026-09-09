@@ -47,6 +47,8 @@ interface StudentMaterialWithQuestionPaneProps {
     getBlockStartQuestionNumber: (blockId: string) => number;
     renderBlockInstruction: (instruction: string, blockId: string) => React.ReactNode;
     expandedQuestionGapClassName?: string | undefined;
+    showOnlyCurrentQuestion?: boolean | undefined;
+    allowOptionImages?: boolean | undefined;
     hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
     hideStepper?: boolean | undefined;
     shouldFocusQuestion?: (() => boolean) | undefined;
@@ -187,6 +189,8 @@ export function StudentMaterialWithQuestionPane({
       getBlockStartQuestionNumber={questionPanel.getBlockStartQuestionNumber}
       renderBlockInstruction={questionPanel.renderBlockInstruction}
       expandedQuestionGapClassName={questionPanel.expandedQuestionGapClassName}
+      showOnlyCurrentQuestion={questionPanel.showOnlyCurrentQuestion}
+      allowOptionImages={questionPanel.allowOptionImages}
       hideDiagramReferenceForBlock={questionPanel.hideDiagramReferenceForBlock}
       hideStepper={questionPanel.hideStepper ?? isCompact}
       shouldFocusQuestion={questionPanel.shouldFocusQuestion}

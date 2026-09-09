@@ -2,7 +2,8 @@ import React, { useEffect } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createInitialExamState } from "../../../services/examAdapterService";
-import type { ExamState } from "../../../types";
+import type { ExamState, SingleMCQBlock } from "../../../types";
+import { QuestionRenderer } from "../QuestionRenderer";
 import { StudentScience } from "../StudentScience";
 import { StudentHighlightPersistenceProvider } from "../highlightV2Persistence";
 import { readPersistedSurfaceRanges } from "../highlight/highlightStore";
@@ -71,6 +72,48 @@ function createActScienceState(includeSecondQuestion = false): ExamState {
   };
 }
 
+function createActScienceStateWithSecondStimulus(): ExamState {
+  const state = createActScienceState(true);
+  const options = ["A", "B", "C", "D"].map((label, index) => ({
+    id: `second-option-${label.toLowerCase()}`,
+    text: `Second option ${label}`,
+    isCorrect: index === 0,
+  }));
+  const question = {
+    id: "science-question-3",
+    stem: "Which result was observed in the second experiment?",
+    skillCategory: "interpretation_of_data" as const,
+    options,
+  };
+
+  state.science.stimuli.push({
+    id: "stimulus-2",
+    title: "Cell growth results",
+    content: "The second passage shows a different experiment.",
+    blocks: [
+      {
+        id: "science-block-2",
+        type: "SINGLE_MCQ" as const,
+        instruction: "Use the second experiment results to answer the question.",
+        stem: question.stem,
+        options,
+        questions: [
+          question,
+          {
+            ...question,
+            id: "science-question-4",
+            stem: "Which variable was measured in the second experiment?",
+            skillCategory: "scientific_investigation" as const,
+          },
+        ],
+      },
+    ],
+    images: [],
+  });
+
+  return state;
+}
+
 describe("StudentScience", () => {
   it("hides choice elimination controls until the toolbar mode is enabled", () => {
     render(
@@ -120,6 +163,27 @@ describe("StudentScience", () => {
     expect(screen.getByText("Option D")).toBeInTheDocument();
   });
 
+  it("shows only the active ACT Science question in the question pane", () => {
+    render(
+      <StudentScience
+        state={createActScienceState(true)}
+        answers={{}}
+        onAnswerChange={vi.fn()}
+        currentQuestionId="science-question-1"
+        onNavigate={vi.fn()}
+        flags={{}}
+        onToggleFlag={vi.fn()}
+      />
+    );
+
+    expect(
+      screen.getByText("Which conclusion is supported by the experiment?")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Which variable was changed by the researchers?")
+    ).not.toBeInTheDocument();
+  });
+
   it("lets a student select one answer and replace it with another answer", () => {
     const onAnswerChange = vi.fn();
 
@@ -160,6 +224,90 @@ describe("StudentScience", () => {
     expect(optionB).not.toBeChecked();
     expect(optionC).toBeChecked();
     expect(onAnswerChange.mock.lastCall?.slice(0, 2)).toEqual(["science-question-1", "option-c"]);
+  });
+
+  it("renders an image inside an ACT Science answer choice", () => {
+    const state = createActScienceState();
+    const block = state.science.stimuli[0].blocks[0];
+    const imageUrl = "https://example.test/act-option-b.png";
+    const options = block.options.map((option) =>
+      option.id === "option-b" ? { ...option, imageUrl } : option
+    );
+    block.options = options;
+    block.questions![0].options = options;
+
+    render(
+      <StudentScience
+        state={state}
+        answers={{}}
+        onAnswerChange={vi.fn()}
+        currentQuestionId="science-question-1"
+        onNavigate={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("img", { name: "Option B image" })).toHaveAttribute("src", imageUrl);
+  });
+
+  it("renders an image inside an ACT Science question stem", () => {
+    const state = createActScienceState();
+    const imageUrl = "https://example.test/act-question.png";
+    const question = state.science.stimuli[0].blocks[0].questions![0];
+    state.science.stimuli[0].blocks[0].questions![0] = { ...question, imageUrl };
+
+    render(
+      <StudentScience
+        state={state}
+        answers={{}}
+        onAnswerChange={vi.fn()}
+        currentQuestionId="science-question-1"
+        onNavigate={vi.fn()}
+      />
+    );
+
+    const image = screen.getByRole("img", { name: "Question 1 stem image" });
+    const zoomTrigger = screen.getByRole("button", { name: "Open question 1 stem image" });
+    const legend = image.closest("legend");
+    const mediaContainer = zoomTrigger.parentElement;
+    const stemText = screen.getByText("Which conclusion is supported by the experiment?");
+
+    expect(image).toHaveAttribute("src", imageUrl);
+    expect(image).toHaveClass("max-h-[32rem]");
+    expect(zoomTrigger).toContainElement(image);
+    expect(legend).toHaveClass("w-full");
+    expect(stemText.parentElement).not.toBe(legend);
+    expect(stemText.parentElement).toHaveClass("flex", "gap-3");
+    expect(mediaContainer?.parentElement).toBe(legend);
+    expect(mediaContainer).toHaveClass("mx-auto", "mt-4", "w-full", "max-w-3xl");
+  });
+
+  it("keeps answer-choice images disabled by default for non-ACT callers", () => {
+    const block: SingleMCQBlock = {
+      id: "single-image-boundary",
+      type: "SINGLE_MCQ",
+      instruction: "Choose one answer.",
+      stem: "Which diagram is correct?",
+      options: [
+        {
+          id: "image-a",
+          text: "Diagram A",
+          isCorrect: true,
+          imageUrl: "https://example.test/diagram-a.png",
+        },
+      ],
+    };
+
+    render(
+      <QuestionRenderer
+        question={null}
+        block={block}
+        number={1}
+        answer={null}
+        onChange={() => {}}
+      />
+    );
+
+    expect(screen.queryByRole("img", { name: "Option A image" })).not.toBeInTheDocument();
   });
 
   it("lets a student eliminate and restore an ACT Science answer choice without changing the answer", () => {
@@ -252,41 +400,52 @@ describe("StudentScience", () => {
   });
 
   it("keeps eliminated choices independent for each ACT Science question", () => {
-    render(
-      <StudentScience
-        state={createActScienceState(true)}
-        answers={{}}
-        onAnswerChange={vi.fn()}
-        currentQuestionId="science-question-1"
-        onNavigate={vi.fn()}
-        choiceEliminationEnabled
-      />
-    );
+    function StudentScienceEliminationHarness() {
+      const [currentQuestionId, setCurrentQuestionId] = React.useState("science-question-1");
+
+      return (
+        <StudentScience
+          state={createActScienceState(true)}
+          answers={{}}
+          onAnswerChange={vi.fn()}
+          currentQuestionId={currentQuestionId}
+          onNavigate={setCurrentQuestionId}
+          choiceEliminationEnabled
+        />
+      );
+    }
+
+    render(<StudentScienceEliminationHarness />);
 
     const firstQuestion = screen.getByRole("group", {
       name: /Which conclusion is supported by the experiment\?/i,
     });
-    const secondQuestion = screen.getByRole("group", {
-      name: /Which variable was changed by the researchers\?/i,
-    });
-
     fireEvent.click(within(firstQuestion).getByRole("button", { name: "Eliminate option B" }));
 
     expect(within(firstQuestion).getByRole("button", { name: "Restore option B" })).toHaveAttribute(
       "aria-pressed",
       "true"
     );
-    expect(
-      within(secondQuestion).getByRole("button", { name: "Eliminate option B" })
-    ).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+
+    const secondQuestion = screen.getByRole("group", {
+      name: /Which variable was changed by the researchers\?/i,
+    });
 
     fireEvent.click(within(secondQuestion).getByRole("button", { name: "Eliminate option B" }));
 
     expect(
-      within(firstQuestion).getByRole("button", { name: "Restore option B" })
-    ).toBeInTheDocument();
-    expect(
       within(secondQuestion).getByRole("button", { name: "Restore option B" })
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous question" }));
+
+    expect(
+      within(
+        screen.getByRole("group", {
+          name: /Which conclusion is supported by the experiment\?/i,
+        })
+      ).getByRole("button", { name: "Restore option B" })
     ).toBeInTheDocument();
   });
 
@@ -319,15 +478,73 @@ describe("StudentScience", () => {
     expect(
       screen.getByText("Which conclusion is supported by the experiment?")
     ).toBeInTheDocument();
-    expect(screen.getByText("Which variable was changed by the researchers?")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Which variable was changed by the researchers?")
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Next question" }));
     expect(onNavigate).toHaveBeenLastCalledWith("science-question-2");
+    expect(
+      screen.queryByText("Which conclusion is supported by the experiment?")
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Which variable was changed by the researchers?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next question" })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Previous question" }));
     expect(onNavigate).toHaveBeenLastCalledWith("science-question-1");
+    expect(
+      screen.getByText("Which conclusion is supported by the experiment?")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Which variable was changed by the researchers?")
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Previous question" })).toBeDisabled();
+  });
+
+  it("switches to the next stimulus when navigation crosses a passage boundary", () => {
+    const onNavigate = vi.fn();
+
+    function StudentScienceStimulusNavigationHarness() {
+      const [currentQuestionId, setCurrentQuestionId] = React.useState("science-question-1");
+
+      return (
+        <StudentScience
+          state={createActScienceStateWithSecondStimulus()}
+          answers={{}}
+          onAnswerChange={vi.fn()}
+          currentQuestionId={currentQuestionId}
+          onNavigate={(questionId) => {
+            onNavigate(questionId);
+            setCurrentQuestionId(questionId);
+          }}
+          flags={{}}
+          onToggleFlag={vi.fn()}
+        />
+      );
+    }
+
+    render(<StudentScienceStimulusNavigationHarness />);
+
+    expect(screen.getByText("Water temperature results")).toBeInTheDocument();
+    expect(screen.queryByText("Cell growth results")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    expect(onNavigate).toHaveBeenLastCalledWith("science-question-2");
+    expect(screen.getByText("Water temperature results")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Which conclusion is supported by the experiment?")
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    expect(onNavigate).toHaveBeenLastCalledWith("science-question-3");
+    expect(screen.queryByText("Water temperature results")).not.toBeInTheDocument();
+    expect(screen.getByText("Cell growth results")).toBeInTheDocument();
+    expect(
+      screen.getByText("Which result was observed in the second experiment?")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Which variable was measured in the second experiment?")
+    ).not.toBeInTheDocument();
   });
 
   it("renders stimulus tables and opens annotated images in the shared zoom view", () => {

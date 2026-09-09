@@ -261,6 +261,7 @@ export function StudentScience({
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, "science"), [state]);
   const currentQuestion =
     allQuestions.find((question) => question.id === currentQuestionId) ?? allQuestions[0];
+  const displayQuestionId = currentQuestion?.id ?? null;
   const activeStimulusId = currentQuestion?.groupId ?? state.activeScienceStimulusId;
   const activeStimulus =
     state.science.stimuli.find((stimulus) => stimulus.id === activeStimulusId) ??
@@ -333,7 +334,7 @@ export function StudentScience({
         allQuestions,
         answers,
         onAnswerChange,
-        currentQuestionId,
+        currentQuestionId: displayQuestionId,
         onNavigate,
         flags,
         onToggleFlag,
@@ -347,6 +348,8 @@ export function StudentScience({
         getBlockStartQuestionNumber,
         renderBlockInstruction,
         expandedQuestionGapClassName: "space-y-8 md:space-y-10",
+        showOnlyCurrentQuestion: true,
+        allowOptionImages: true,
         eliminatedOptionIdsByQuestion: choiceEliminationAvailable
           ? eliminatedOptionIdsByQuestion
           : undefined,

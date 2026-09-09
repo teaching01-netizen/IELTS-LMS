@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultConfig } from "../../constants/examDefaults";
+import { createActScienceBlock } from "../../components/ActScienceQuestionBuilderPane";
 import { hydrateExamState } from "../examAdapterService";
 
 describe("hydrateExamState", () => {
@@ -22,6 +23,72 @@ describe("hydrateExamState", () => {
     const state = createInitialExamState("ACT Science Draft", "ACT", "ACT Science", sharedDefaults);
 
     expect(state.config.general.summary).toBe("Standard ACT Exam");
+  });
+
+  it("preserves ACT Science answer-choice image URLs during hydration", async () => {
+    const { createInitialExamState } = await import("../examAdapterService");
+    const state = createInitialExamState("ACT Science Image Draft", "ACT", "ACT Science");
+    const block = createActScienceBlock("act-image-block");
+    const imageUrl = " https://example.test/act-option-a.png ";
+    const options = block.options.map((option) =>
+      option.id === block.options[0]?.id ? { ...option, imageUrl } : option
+    );
+    block.options = options;
+    block.questions![0].options = options;
+    state.science.stimuli = [
+      {
+        id: "act-image-stimulus",
+        title: "Image stimulus",
+        content: "Compare the choices.",
+        blocks: [block],
+      },
+    ];
+
+    const hydrated = hydrateExamState(state);
+    const hydratedBlock = hydrated.science.stimuli[0]?.blocks[0];
+
+    expect(hydratedBlock?.options[0]?.imageUrl).toBe("https://example.test/act-option-a.png");
+    expect(hydratedBlock?.questions?.[0]?.options[0]?.imageUrl).toBe(
+      "https://example.test/act-option-a.png"
+    );
+
+    const academicState = createInitialExamState("IELTS Draft", "Academic");
+    academicState.reading.passages[0].blocks = [block];
+    const hydratedAcademicState = hydrateExamState(academicState);
+    const hydratedAcademicBlock = hydratedAcademicState.reading.passages[0]?.blocks[0];
+
+    expect(hydratedAcademicBlock?.options[0]?.imageUrl).toBeUndefined();
+    expect(hydratedAcademicBlock?.questions?.[0]?.options[0]?.imageUrl).toBeUndefined();
+  });
+
+  it("preserves ACT Science question-stem image URLs but strips them from IELTS", async () => {
+    const { createInitialExamState } = await import("../examAdapterService");
+    const actState = createInitialExamState("ACT Science Stem Image Draft", "ACT", "ACT Science");
+    const actBlock = createActScienceBlock("act-stem-image-block");
+    actBlock.questions![0] = {
+      ...actBlock.questions![0],
+      imageUrl: " https://example.test/act-question.png ",
+    };
+    actState.science.stimuli = [
+      {
+        id: "act-stem-image-stimulus",
+        title: "Question image stimulus",
+        content: "Read the image.",
+        blocks: [actBlock],
+      },
+    ];
+
+    const hydratedAct = hydrateExamState(actState);
+    expect(hydratedAct.science.stimuli[0]?.blocks[0]?.questions?.[0]?.imageUrl).toBe(
+      "https://example.test/act-question.png"
+    );
+
+    const academicState = createInitialExamState("IELTS Draft", "Academic");
+    academicState.reading.passages[0].blocks = [actBlock];
+    const hydratedAcademicState = hydrateExamState(academicState);
+    expect(hydratedAcademicState.reading.passages[0]?.blocks[0]?.questions?.[0]?.imageUrl).toBe(
+      undefined
+    );
   });
 
   it("fills missing exam sections when a corrupted draft only contains config", () => {

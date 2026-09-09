@@ -4,6 +4,7 @@ use ielts_backend_infrastructure::{
     config::AppConfig,
     distributed_rate_limit::DistributedRateLimiter,
     live_update_bus::LiveUpdateBusRepository,
+    object_store::MediaObjectStore,
     pool::DatabasePool,
     rate_limit::{RateLimitConfig, RateLimitKey, RateLimitResult, RateLimiter},
     telemetry::Telemetry,
@@ -24,6 +25,7 @@ pub struct AppState {
     pub rate_limiter: RateLimiter,
     pub distributed_rate_limiter: Option<DistributedRateLimiter>,
     pub live_update_bus: Option<LiveUpdateBusRepository>,
+    pub media_object_store: Option<MediaObjectStore>,
     pub instance_id: String,
     pub background_runtime: Option<BackgroundRuntimeHandle>,
 }
@@ -45,6 +47,7 @@ impl AppState {
             rate_limiter,
             distributed_rate_limiter: None,
             live_update_bus: None,
+            media_object_store: None,
             instance_id: format!("api-{}", Uuid::new_v4()),
             background_runtime: None,
         }
@@ -70,6 +73,7 @@ impl AppState {
                 pool_for_distributed_limiter,
             )),
             live_update_bus: Some(LiveUpdateBusRepository::new(pool)),
+            media_object_store: None,
             instance_id: format!("api-{}", Uuid::new_v4()),
             background_runtime: None,
         }
@@ -77,6 +81,11 @@ impl AppState {
 
     pub fn with_background_runtime(mut self, handle: BackgroundRuntimeHandle) -> Self {
         self.background_runtime = Some(handle);
+        self
+    }
+
+    pub fn with_media_object_store(mut self, store: MediaObjectStore) -> Self {
+        self.media_object_store = Some(store);
         self
     }
 

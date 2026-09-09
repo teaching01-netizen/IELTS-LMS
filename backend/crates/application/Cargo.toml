@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 base64 = "0.22.1"
+bytes = "1.9.0"
 chrono = { version = "0.4.38", default-features = false, features = ["clock"] }
 ielts-backend-domain = { path = "../domain", features = ["sqlx"] }
 ielts-backend-infrastructure = { path = "../infrastructure" }

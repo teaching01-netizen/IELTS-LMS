@@ -34,6 +34,8 @@ export interface StudentQuestionBlockSectionProps {
   getBlockStartQuestionNumber: (blockId: string) => number;
   renderBlockInstruction: (instruction: string, blockId: string) => React.ReactNode;
   expandedQuestionGapClassName: string;
+  showOnlyCurrentQuestion?: boolean | undefined;
+  allowOptionImages?: boolean | undefined;
   hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
   eliminatedOptionIdsByQuestion?: Readonly<Record<string, readonly string[]>> | undefined;
   onToggleOptionElimination?: ((questionId: string, optionId: string) => void) | undefined;
@@ -116,6 +118,8 @@ function areBlockPropsEqual(
     previous.getBlockStartQuestionNumber !== next.getBlockStartQuestionNumber ||
     previous.renderBlockInstruction !== next.renderBlockInstruction ||
     previous.expandedQuestionGapClassName !== next.expandedQuestionGapClassName ||
+    previous.showOnlyCurrentQuestion !== next.showOnlyCurrentQuestion ||
+    previous.allowOptionImages !== next.allowOptionImages ||
     previous.hideDiagramReferenceForBlock !== next.hideDiagramReferenceForBlock ||
     previous.eliminatedOptionIdsByQuestion !== next.eliminatedOptionIdsByQuestion ||
     previous.onToggleOptionElimination !== next.onToggleOptionElimination
@@ -155,12 +159,18 @@ export const StudentQuestionBlockSection = React.memo(function StudentQuestionBl
   getBlockStartQuestionNumber,
   renderBlockInstruction,
   expandedQuestionGapClassName,
+  showOnlyCurrentQuestion = false,
+  allowOptionImages = false,
   hideDiagramReferenceForBlock,
   eliminatedOptionIdsByQuestion,
   onToggleOptionElimination,
 }: StudentQuestionBlockSectionProps) {
   const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
   const treeQuestions = blockQuestions.filter((question) => question.isSubAnswerTreeLeaf);
+  const visibleTreeQuestions =
+    showOnlyCurrentQuestion && activeQuestionId
+      ? treeQuestions.filter((question) => question.id === activeQuestionId)
+      : treeQuestions;
   const rootNumbers = Array.from(
     new Set(
       blockQuestions
@@ -176,6 +186,18 @@ export const StudentQuestionBlockSection = React.memo(function StudentQuestionBl
   const containsCurrentQuestion = blockQuestions.some(
     (question) => question.id === activeQuestionId
   );
+  const visibleBlockQuestions =
+    showOnlyCurrentQuestion && activeQuestionId
+      ? "questions" in block
+        ? block.questions.filter((question) =>
+            blockQuestions.some(
+              (entry) => entry.id === activeQuestionId && entry.question?.id === question.id
+            )
+          )
+        : []
+      : "questions" in block
+        ? block.questions
+        : [];
   const blockSpacingClassName = answerCompact
     ? "space-y-3 mb-3 md:mb-4"
     : "space-y-4 md:space-y-6 mb-4 md:mb-6";
@@ -194,9 +216,9 @@ export const StudentQuestionBlockSection = React.memo(function StudentQuestionBl
         {renderBlockInstruction(block.instruction, block.id)}
       </div>
       <div className={answerCompact ? "space-y-5" : expandedQuestionGapClassName}>
-        {treeQuestions.length > 0 ? (
+        {visibleTreeQuestions.length > 0 ? (
           <SubAnswerTreeQuestionList
-            questions={treeQuestions}
+            questions={visibleTreeQuestions}
             answers={answers}
             currentQuestionId={activeQuestionId}
             flags={flags}
@@ -207,7 +229,7 @@ export const StudentQuestionBlockSection = React.memo(function StudentQuestionBl
             onAnswerChange={onAnswerChange}
           />
         ) : "questions" in block ? (
-          block.questions.map((question, questionIndex) => {
+          visibleBlockQuestions.map((question, questionIndex) => {
             const questionEntries = blockQuestions.filter(
               (entry) => entry.question?.id === question.id
             );
@@ -272,6 +294,7 @@ export const StudentQuestionBlockSection = React.memo(function StudentQuestionBl
                   compactPane={answerCompact}
                   highlightEnabled={highlightEnabled}
                   highlightColor={highlightColor}
+                  allowOptionImages={allowOptionImages}
                   hideDiagramReference={hideDiagramReferenceForBlock?.(block.id)}
                   eliminatedOptionIds={eliminatedOptionIdsByQuestion?.[question.id]}
                   onToggleOptionElimination={
@@ -323,6 +346,7 @@ export const StudentQuestionBlockSection = React.memo(function StudentQuestionBl
               compactPane={answerCompact}
               highlightEnabled={highlightEnabled}
               highlightColor={highlightColor}
+              allowOptionImages={allowOptionImages}
               hideDiagramReference={hideDiagramReferenceForBlock?.(block.id)}
               eliminatedOptionIds={
                 eliminatedOptionIdsByQuestion?.[singleBlockQuestion?.id ?? block.id]

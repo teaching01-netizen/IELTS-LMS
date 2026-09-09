@@ -1146,6 +1146,7 @@ fn app_state(pool: sqlx::MySqlPool) -> AppState {
         rate_limiter: RateLimiter::new(RateLimitConfig::new(1000, 60)),
         distributed_rate_limiter: None,
         live_update_bus: None,
+        media_object_store: None,
         instance_id: "test-instance".to_owned(),
         background_runtime: None,
     }
