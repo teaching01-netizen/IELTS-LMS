@@ -14,7 +14,7 @@ import type { SatExamToolPolicy } from './satToolPolicy';
  * Parallel regions (never one giant union — no combinatorial explosion):
  *   - surface:    exactly one exclusive surface (structural impossibility of two)
  *   - tools:      calculator + reference open/closed independently
- *   - annotation: persistent mode (off/highlight/underline/note) + transient selection
+ *   - annotation: persistent mode (off/highlight/underline/note/erase) + transient selection
  *   - scope:      module/question identity for explicit transition contracts
  *
  * Deliberately NOT here (better owners exist): paused, terminated,
@@ -39,7 +39,7 @@ export type SatExclusiveSurface =
   | { kind: 'question-notes'; returnFocus: SatInteractionFocusTarget }
   | { kind: 'annotation-note-editor'; annotationId: string; returnFocus: SatInteractionFocusTarget };
 
-export type SatAnnotationInteractionMode = 'off' | 'highlight' | 'underline' | 'note';
+export type SatAnnotationInteractionMode = 'off' | 'highlight' | 'underline' | 'note' | 'erase';
 export type SatTextSelectionPhase = 'idle' | 'selecting' | 'captured';
 export type SatToolVisibility = 'closed' | 'open';
 
@@ -133,6 +133,7 @@ export function isAnnotationModeAllowed(
   if (mode === 'off') return true;
   if (mode === 'highlight') return toolPolicy.highlight;
   if (mode === 'underline') return toolPolicy.underline;
+  if (mode === 'erase') return toolPolicy.highlight || toolPolicy.underline || toolPolicy.notes;
   return toolPolicy.notes;
 }
 

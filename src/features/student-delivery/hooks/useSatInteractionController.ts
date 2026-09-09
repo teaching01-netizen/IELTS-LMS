@@ -38,7 +38,7 @@ export interface SatInteractionController {
   toggleCalculator: () => void;
   toggleReference: () => void;
   setAnnotationMode: (mode: SatAnnotationInteractionMode) => void;
-  toggleAnnotationMode: (mode: 'highlight' | 'underline' | 'note') => void;
+  toggleAnnotationMode: (mode: 'highlight' | 'underline' | 'note' | 'erase') => void;
   selectionStarted: () => void;
   selectionCaptured: () => void;
   selectionCleared: () => void;
@@ -229,7 +229,7 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
     [dispatchIntent],
   );
   const toggleAnnotationMode = useCallback(
-    (mode: 'highlight' | 'underline' | 'note') => {
+    (mode: 'highlight' | 'underline' | 'note' | 'erase') => {
       // Exclusive toggle: re-pressing the armed mode disarms (matches today's
       // TopBar setAnnotationMode(current === mode ? 'none' : mode)).
       const current = stateRef.current;

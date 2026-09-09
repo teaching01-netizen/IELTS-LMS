@@ -21,7 +21,7 @@ export type SatInteractionIntent =
   | { type: 'ANNOTATION_NOTE_REQUESTED'; annotationId: string; returnFocus?: SatInteractionFocusTarget }
   | { type: 'CALCULATOR_TOGGLE_REQUESTED' }
   | { type: 'REFERENCE_TOGGLE_REQUESTED' }
-  | { type: 'ANNOTATION_MODE_REQUESTED'; mode: 'highlight' | 'underline' | 'note' | 'off' }
+  | { type: 'ANNOTATION_MODE_REQUESTED'; mode: 'highlight' | 'underline' | 'note' | 'erase' | 'off' }
   | { type: 'SURFACE_CLOSE_REQUESTED' }
   | { type: 'SURFACE_TOGGLE_REQUESTED'; surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes'; returnFocus?: SatInteractionFocusTarget }
   | { type: 'ESCAPE_PRESSED'; lineReaderEnabled?: boolean | undefined }

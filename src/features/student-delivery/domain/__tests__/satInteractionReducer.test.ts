@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   createSatInteractionState,
+  isAnnotationModeAllowed,
   normalizeSatInteractionState,
   satInteractionReducer,
 } from '../satInteractionState';
+import { resolveEscapeAction } from '../satInteractionEscape';
+import { resolveSatInteractionIntent } from '../satInteractionIntents';
 import { resolveSatExamToolPolicy } from '../satToolPolicy';
 import type { SatInteractionContext } from '../satInteractionState';
 
@@ -146,5 +149,40 @@ describe('satInteractionReducer transition contracts', () => {
     const a = satInteractionReducer(createSatInteractionState(), event, mathCtx());
     const b = satInteractionReducer(createSatInteractionState(), event, mathCtx());
     expect(a).toEqual(b);
+  });
+});
+
+describe('annotation eraser mode', () => {
+  it('arms erase in R&W and refuses it where no annotation capability exists', () => {
+    expect(isAnnotationModeAllowed('erase', rwCtx().toolPolicy)).toBe(true);
+    expect(isAnnotationModeAllowed('erase', mathCtx().toolPolicy)).toBe(false);
+    let state = createSatInteractionState({ moduleKey: 'rw-m1', questionId: 'q1' });
+    state = satInteractionReducer(state, { type: 'ANNOTATION_MODE_CHANGED', mode: 'highlight' }, rwCtx());
+    expect(state.annotation.mode).toBe('highlight');
+    state = satInteractionReducer(state, { type: 'ANNOTATION_MODE_CHANGED', mode: 'erase' }, rwCtx());
+    expect(state.annotation.mode).toBe('erase');
+    // Refused transitions keep current state (established reducer contract);
+    // central normalization is what drops a revoked mode to 'off'.
+    const fromOff = satInteractionReducer(createSatInteractionState(), { type: 'ANNOTATION_MODE_CHANGED', mode: 'erase' }, mathCtx());
+    expect(fromOff.annotation.mode).toBe('off');
+    expect(normalizeSatInteractionState(state, mathCtx()).annotation.mode).toBe('off');
+  });
+
+  it('resolves the erase intent, survives question change, and resets on module change', () => {
+    const ctx = rwCtx();
+    let state = createSatInteractionState({ moduleKey: 'rw-m1', questionId: 'q1' });
+    const event = resolveSatInteractionIntent(state, ctx, { type: 'ANNOTATION_MODE_REQUESTED', mode: 'erase' });
+    expect(event).toEqual({ type: 'ANNOTATION_MODE_CHANGED', mode: 'erase' });
+    state = satInteractionReducer(state, event!, ctx);
+    state = satInteractionReducer(state, { type: 'QUESTION_CHANGED', moduleKey: 'rw-m1', questionId: 'q2' }, { ...ctx, questionId: 'q2' });
+    expect(state.annotation.mode).toBe('erase');
+    state = satInteractionReducer(state, { type: 'MODULE_SCOPE_CHANGED', moduleKey: 'rw-m2', questionId: 'q1' }, { ...ctx, moduleKey: 'rw-m2' });
+    expect(state.annotation.mode).toBe('off');
+  });
+
+  it('exits erase through the standard Escape arbitration', () => {
+    const ctx = rwCtx();
+    const armed = satInteractionReducer(createSatInteractionState(), { type: 'ANNOTATION_MODE_CHANGED', mode: 'erase' }, ctx);
+    expect(resolveEscapeAction(armed, ctx)).toEqual({ type: 'DISABLE_ANNOTATION_MODE' });
   });
 });
