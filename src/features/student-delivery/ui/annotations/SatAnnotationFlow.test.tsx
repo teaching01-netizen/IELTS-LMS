@@ -63,4 +63,43 @@ describe('SAT shell annotation flow', () => {
     expect(container.querySelectorAll('[data-sat-highlight="true"]')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'false');
   });
+  it('erases a highlight via Eraser mode and exits erase on Escape', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    fireEvent.click(screen.getByRole('button', { name: 'Highlight' }));
+    const selectFirstWord = () => {
+      const leaf = container.querySelector('[data-sat-annotation-region="stimulus"] [data-content-text-node] span span')!.firstChild!;
+      const range = document.createRange();
+      range.setStart(leaf, 0); range.setEnd(leaf, 7);
+      window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
+      fireEvent.pointerUp(leaf.parentElement!);
+    };
+    selectFirstWord();
+    expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
+    fireEvent.click(screen.getByRole('button', { name: 'Eraser' }));
+    expect(screen.getByRole('button', { name: 'Eraser' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'false');
+    selectFirstWord();
+    expect(container.querySelectorAll('[data-sat-highlight="true"]')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Eraser' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('button', { name: 'Eraser' })).toHaveAttribute('aria-pressed', 'false');
+    selectFirstWord();
+    expect(container.querySelectorAll('[data-sat-highlight="true"]')).toHaveLength(0);
+  });
+  it('erases with the keyboard (shift+arrows then keyup) while erase is armed', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    fireEvent.click(screen.getByRole('button', { name: 'Highlight' }));
+    const leaf = container.querySelector('[data-sat-annotation-region="stimulus"] [data-content-text-node] span span')!.firstChild!;
+    const seed = document.createRange();
+    seed.setStart(leaf, 0); seed.setEnd(leaf, 7);
+    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(seed);
+    fireEvent.pointerUp(leaf.parentElement!);
+    expect(container.querySelector('[data-sat-highlight="true"]')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Eraser' }));
+    const again = document.createRange();
+    again.setStart(leaf, 0); again.setEnd(leaf, 7);
+    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(again);
+    fireEvent.keyUp(document, { key: 'ArrowRight', shiftKey: true });
+    expect(container.querySelectorAll('[data-sat-highlight="true"]')).toHaveLength(0);
+  });
 });
