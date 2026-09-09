@@ -276,7 +276,7 @@ function QueueRow({
           }}
           aria-label={`${checked ? "Deselect" : "Select"} question ${position}`}
           aria-pressed={checked}
-          className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-transparent group-hover:border-ring/40 group-hover:text-muted-foreground/40"}`}
+          className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-muted-foreground/50 hover:text-muted-foreground"}`}
         >
           <Check size={11} strokeWidth={3.2} aria-hidden="true" />
         </button>
@@ -291,7 +291,7 @@ function QueueRow({
           ) : null}
           {selected ? <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-foreground">Current</span> : null}
         </div>
-        <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex focus-within:flex">
+        <div className="flex shrink-0 items-center gap-0.5 opacity-40 group-hover:opacity-100 focus-within:opacity-100">
           <button type="button" disabled={reorderBusy || index <= 0} onClick={(event) => { event.stopPropagation(); move(-1); }} aria-label="Move question up" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronUp size={12} aria-hidden="true" /></button>
           <button type="button" disabled={reorderBusy || index >= moduleQuestions.length - 1} onClick={(event) => { event.stopPropagation(); move(1); }} aria-label="Move question down" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronDown size={12} aria-hidden="true" /></button>
         </div>

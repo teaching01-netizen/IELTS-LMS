@@ -119,6 +119,17 @@ describe("QuestionQueueRail", () => {
     expect(screen.getByRole("button", { name: "Add question 3" })).toBeDisabled();
   });
 
+  it("keeps reorder buttons discoverable without hover", () => {
+    renderRail();
+    const ups = screen.getAllByRole("button", { name: "Move question up" });
+    expect(ups.length).toBeGreaterThan(0);
+    // No `hidden` gate: visible at rest, dimmed until hover/focus.
+    for (const up of ups) {
+      expect(up).toBeVisible();
+      expect(up.parentElement?.className).toContain("opacity-40");
+    }
+  });
+
   it("disables the header Question button while mutating", () => {
     renderRail({ isMutating: true });
     expect(screen.getByRole("button", { name: /question$/i })).toBeDisabled();
