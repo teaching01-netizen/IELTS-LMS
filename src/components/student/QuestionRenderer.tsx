@@ -73,6 +73,7 @@ interface QuestionRendererProps {
   studentId?: string | undefined;
   hideDiagramReference?: boolean | undefined;
   registerLiveAnswer?: ((payload: { value: QuestionAnswer }) => void) | undefined;
+  allowOptionImages?: boolean | undefined;
   eliminatedOptionIds?: readonly string[] | undefined;
   onToggleOptionElimination?: ((optionId: string) => void) | undefined;
 }
@@ -98,6 +99,7 @@ export function QuestionRenderer({
   studentId,
   hideDiagramReference = false,
   registerLiveAnswer,
+  allowOptionImages = false,
   eliminatedOptionIds = [],
   onToggleOptionElimination,
 }: QuestionRendererProps) {
@@ -512,16 +514,30 @@ export function QuestionRenderer({
 
     return (
       <fieldset className="flex flex-col gap-4">
-        <legend className="flex gap-3">
-          <StudentQuestionNumber number={blockNum} />
-          <StudentQuestionText
-            as="span"
-            className="text-gray-800"
-            text={stem}
-            highlightEnabled={highlightEnabled}
-            highlightColor={highlightColor}
-            highlightSurfaceId={getHighlightSurfaceId(questionLevel?.id ?? mcqBlock.id, "stem")}
-          />
+        <legend className="w-full">
+          <div className="flex gap-3">
+            <StudentQuestionNumber number={blockNum} />
+            <StudentQuestionText
+              as="span"
+              className="text-gray-800"
+              text={stem}
+              highlightEnabled={highlightEnabled}
+              highlightColor={highlightColor}
+              highlightSurfaceId={getHighlightSurfaceId(questionLevel?.id ?? mcqBlock.id, "stem")}
+            />
+          </div>
+          {allowOptionImages && questionLevel?.imageUrl?.trim() ? (
+            <div className="mx-auto mt-4 w-full max-w-3xl">
+              <StudentZoomableMedia
+                sources={getImageUrlCandidates(questionLevel.imageUrl)}
+                alt={`Question ${blockNum} stem image`}
+                label={`Open question ${blockNum} stem image`}
+                hint="Tap to zoom the question image"
+                className="overflow-hidden rounded-md border border-gray-200 bg-white"
+                imageClassName="mx-auto max-h-[32rem]"
+              />
+            </div>
+          ) : null}
         </legend>
         <div className={`${fieldIndentClass} space-y-3`}>
           {options.map((option, index) => {
@@ -533,70 +549,84 @@ export function QuestionRenderer({
             return (
               <div
                 key={option.id}
-                className={`flex items-start gap-3 rounded-md border p-3 transition-colors ${
+                className={`rounded-md border p-3 transition-colors ${
                   answer === option.id
                     ? "border-blue-500 bg-blue-50"
                     : "border-gray-200 hover:border-blue-300"
                 }`}
               >
-                <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
-                  <input
-                    type="radio"
-                    name={inputGroupName}
-                    checked={answer === option.id}
-                    onChange={() => commitAnswerChange(option.id)}
-                    className="mt-1 h-4 w-4 flex-shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <div className={`relative flex gap-2 ${eliminatedOptionClassName}`}>
-                    <StudentQuestionText
-                      as="span"
-                      className="font-bold text-gray-700"
-                      text={`${letter}.`}
-                      highlightEnabled={highlightEnabled}
-                      highlightColor={highlightColor}
-                      highlightSurfaceId={getHighlightSurfaceId(
-                        `${questionId}:${option.id}`,
-                        "option-letter"
-                      )}
+                <div className="flex items-start gap-3">
+                  <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+                    <input
+                      type="radio"
+                      name={inputGroupName}
+                      checked={answer === option.id}
+                      onChange={() => commitAnswerChange(option.id)}
+                      className="mt-1 h-4 w-4 flex-shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
-                    <StudentQuestionText
-                      as="span"
-                      className={`text-gray-800 ${eliminatedOptionClassName}`}
-                      text={option.text}
-                      highlightEnabled={highlightEnabled}
-                      highlightColor={highlightColor}
-                      highlightSurfaceId={getHighlightSurfaceId(
-                        `${questionId}:${option.id}`,
-                        "option-text"
-                      )}
+                    <div className={`relative flex min-w-0 gap-2 ${eliminatedOptionClassName}`}>
+                      <StudentQuestionText
+                        as="span"
+                        className="font-bold text-gray-700"
+                        text={`${letter}.`}
+                        highlightEnabled={highlightEnabled}
+                        highlightColor={highlightColor}
+                        highlightSurfaceId={getHighlightSurfaceId(
+                          `${questionId}:${option.id}`,
+                          "option-letter"
+                        )}
+                      />
+                      <StudentQuestionText
+                        as="span"
+                        className={`text-gray-800 ${eliminatedOptionClassName}`}
+                        text={option.text}
+                        highlightEnabled={highlightEnabled}
+                        highlightColor={highlightColor}
+                        highlightSurfaceId={getHighlightSurfaceId(
+                          `${questionId}:${option.id}`,
+                          "option-text"
+                        )}
+                      />
+                      {isEliminated ? (
+                        <>
+                          <span
+                            aria-hidden="true"
+                            data-testid="choice-elimination-mark"
+                            className="pointer-events-none absolute inset-x-0 top-1/2 h-0.5 -rotate-6 bg-gray-400/80"
+                          />
+                          <span
+                            aria-hidden="true"
+                            data-testid="choice-elimination-mark"
+                            className="pointer-events-none absolute inset-x-0 top-1/2 h-0.5 rotate-6 bg-gray-400/80"
+                          />
+                        </>
+                      ) : null}
+                    </div>
+                  </label>
+                  {showEliminationButton ? (
+                    <button
+                      type="button"
+                      className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-sm border border-gray-700 bg-gray-800 p-0 text-white transition-colors hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600/40"
+                      aria-label={`${eliminationAction} option ${letter}`}
+                      aria-pressed={isEliminated}
+                      title={`${eliminationAction} option ${letter}`}
+                      onClick={() => onToggleOptionElimination?.(option.id)}
+                    >
+                      <X size={16} strokeWidth={2.5} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </div>
+                {allowOptionImages && option.imageUrl?.trim() ? (
+                  <div className="ml-7 mt-3 max-w-full md:ml-7 md:max-w-[28rem]">
+                    <StudentZoomableMedia
+                      sources={getImageUrlCandidates(option.imageUrl)}
+                      alt={`Option ${letter} image`}
+                      label={`Open option ${letter} image`}
+                      hint="Tap to zoom the answer choice image"
+                      className="overflow-hidden rounded-md border border-gray-200 bg-white"
+                      imageClassName="max-h-48"
                     />
-                    {isEliminated ? (
-                      <>
-                        <span
-                          aria-hidden="true"
-                          data-testid="choice-elimination-mark"
-                          className="pointer-events-none absolute inset-x-0 top-1/2 h-0.5 -rotate-6 bg-gray-400/80"
-                        />
-                        <span
-                          aria-hidden="true"
-                          data-testid="choice-elimination-mark"
-                          className="pointer-events-none absolute inset-x-0 top-1/2 h-0.5 rotate-6 bg-gray-400/80"
-                        />
-                      </>
-                    ) : null}
                   </div>
-                </label>
-                {showEliminationButton ? (
-                  <button
-                    type="button"
-                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-sm border border-gray-700 bg-gray-800 p-0 text-white transition-colors hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600/40"
-                    aria-label={`${eliminationAction} option ${letter}`}
-                    aria-pressed={isEliminated}
-                    title={`${eliminationAction} option ${letter}`}
-                    onClick={() => onToggleOptionElimination?.(option.id)}
-                  >
-                    <X size={16} strokeWidth={2.5} aria-hidden="true" />
-                  </button>
                 ) : null}
               </div>
             );

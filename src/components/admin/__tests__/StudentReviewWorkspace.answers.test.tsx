@@ -574,6 +574,10 @@ describe("StudentReviewWorkspace objective answers", () => {
     const { StudentReviewWorkspace } = await import("../StudentReviewWorkspace");
 
     const examState = createInitialExamState("Exam", "Academic");
+    let resolveExamVersion: (() => void) | undefined;
+    const examVersionReady = new Promise<void>((resolve) => {
+      resolveExamVersion = resolve;
+    });
 
     (gradingRepository.getSubmissionById as any).mockResolvedValue({
       id: "sub-3",
@@ -645,9 +649,12 @@ describe("StudentReviewWorkspace objective answers", () => {
       updatedAt: new Date().toISOString(),
     });
 
-    (examRepository.getVersionById as any).mockResolvedValue({
-      id: "ver-3",
-      contentSnapshot: examState,
+    (examRepository.getVersionById as any).mockImplementation(async () => {
+      await examVersionReady;
+      return {
+        id: "ver-3",
+        contentSnapshot: examState,
+      };
     });
 
     render(
@@ -659,6 +666,11 @@ describe("StudentReviewWorkspace objective answers", () => {
       />
     );
 
+    await waitFor(() => expect(examRepository.getVersionById).toHaveBeenCalledWith("ver-3"));
+    await act(async () => {
+      resolveExamVersion?.();
+    });
+
     fireEvent.click(await screen.findByRole("button", { name: /writing/i }));
 
     expect((await screen.findAllByText(/You should write something/)).length).toBeGreaterThan(0);
@@ -669,7 +681,7 @@ describe("StudentReviewWorkspace objective answers", () => {
     expect(screen.queryByText(/MsoNormal/)).not.toBeInTheDocument();
 
     const printSpy = vi.spyOn(window, "print").mockImplementation(() => undefined);
-    fireEvent.click(screen.getByRole("button", { name: /print writing/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /print writing/i }));
     expect(printSpy).toHaveBeenCalledOnce();
     printSpy.mockRestore();
   });

@@ -83,24 +83,30 @@ function normalizeDiagramImageUrl(block: DiagramLabelingBlock): DiagramLabelingB
   };
 }
 
-function normalizeMcqOptions(options: unknown, idPrefix: string): MCQOption[] {
+function normalizeMcqOptions(
+  options: unknown,
+  idPrefix: string,
+  preserveImageUrl = false
+): MCQOption[] {
   if (!Array.isArray(options)) {
     return [];
   }
 
   return options.map((option, optionIndex) => {
     const optionValue = option as Partial<MCQOption> | undefined;
+    const imageUrl = preserveImageUrl ? readNonEmptyString(optionValue?.imageUrl) : null;
     return {
       id: readNonEmptyString(optionValue?.id) ?? `${idPrefix}:opt${optionIndex + 1}`,
       text: typeof optionValue?.text === "string" ? optionValue.text : "",
       isCorrect: Boolean(optionValue?.isCorrect),
+      ...(imageUrl ? { imageUrl } : {}),
     };
   });
 }
 
-function normalizeSingleMcqBlock(block: SingleMCQBlock): SingleMCQBlock {
+function normalizeSingleMcqBlock(block: SingleMCQBlock, preserveImageUrl = false): SingleMCQBlock {
   const legacyStem = readNonEmptyString(block.stem) ?? "";
-  const legacyOptions = normalizeMcqOptions(block.options, block.id);
+  const legacyOptions = normalizeMcqOptions(block.options, block.id, preserveImageUrl);
   const rawQuestions = Array.isArray(block.questions) ? block.questions : [];
 
   const normalizedQuestions = rawQuestions.map((question, questionIndex) => {
@@ -109,7 +115,12 @@ function normalizeSingleMcqBlock(block: SingleMCQBlock): SingleMCQBlock {
       readNonEmptyString(questionValue?.id) ??
       (questionIndex === 0 ? block.id : `${block.id}:q${questionIndex + 1}`);
     const questionStem = readNonEmptyString(questionValue?.stem) ?? "";
-    const questionOptions = normalizeMcqOptions(questionValue?.options, questionId);
+    const questionImageUrl = preserveImageUrl ? readNonEmptyString(questionValue?.imageUrl) : null;
+    const questionOptions = normalizeMcqOptions(
+      questionValue?.options,
+      questionId,
+      preserveImageUrl
+    );
 
     return {
       id: questionId,
@@ -121,6 +132,7 @@ function normalizeSingleMcqBlock(block: SingleMCQBlock): SingleMCQBlock {
         questionValue?.skillCategory === "evaluating_scientific_arguments_and_models_with_evidence"
           ? questionValue.skillCategory
           : undefined,
+      ...(questionImageUrl ? { imageUrl: questionImageUrl } : {}),
     } satisfies SingleMCQQuestion;
   });
 
@@ -148,24 +160,27 @@ function normalizeSingleMcqBlock(block: SingleMCQBlock): SingleMCQBlock {
   };
 }
 
-function normalizeQuestionBlock(block: QuestionBlock): QuestionBlock {
+function normalizeQuestionBlock(block: QuestionBlock, preserveImageUrl = false): QuestionBlock {
   if (block.type === "DIAGRAM_LABELING") {
     return normalizeDiagramImageUrl(block);
   }
 
   if (block.type === "SINGLE_MCQ") {
-    return normalizeSingleMcqBlock(block);
+    return normalizeSingleMcqBlock(block, preserveImageUrl);
   }
 
   return block;
 }
 
-function normalizeQuestionBlocks(blocks: QuestionBlock[] | undefined): QuestionBlock[] {
+function normalizeQuestionBlocks(
+  blocks: QuestionBlock[] | undefined,
+  preserveImageUrl = false
+): QuestionBlock[] {
   if (!Array.isArray(blocks)) {
     return [];
   }
 
-  return blocks.map((block) => normalizeQuestionBlock(block));
+  return blocks.map((block) => normalizeQuestionBlock(block, preserveImageUrl));
 }
 
 export interface StudentQuestionDescriptor {
@@ -503,7 +518,7 @@ export function hydrateExamState(state: ExamState): ExamState {
       stimuli: Array.isArray(mergedState.science?.stimuli)
         ? mergedState.science.stimuli.map((stimulus: ActScienceStimulus) => ({
             ...stimulus,
-            blocks: normalizeQuestionBlocks(stimulus.blocks) as ActScienceStimulus["blocks"],
+            blocks: normalizeQuestionBlocks(stimulus.blocks, true) as ActScienceStimulus["blocks"],
             images: stimulus.images ?? [],
             wordCount:
               stimulus.wordCount ??

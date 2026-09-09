@@ -24,6 +24,7 @@ use ielts_backend_domain::{
 use ielts_backend_infrastructure::{
     actor_context::{ActorContext, ActorRole},
     config::AppConfig,
+    object_store::MediaObjectStore,
 };
 
 use mysql::create_authenticated_user;
@@ -1349,7 +1350,10 @@ async fn media_upload_intent_and_completion_round_trip() {
     .await;
     let mut config = AppConfig::default();
     config.grading_sync_on_read_fallback = true;
-    let app = build_router(AppState::with_pool(config, database.pool().clone()));
+    let app = build_router(
+        AppState::with_pool(config, database.pool().clone())
+            .with_media_object_store(MediaObjectStore::in_memory()),
+    );
 
     let create = app
         .clone()
@@ -1406,6 +1410,7 @@ async fn media_upload_intent_and_completion_round_trip() {
     );
 
     let get = app
+        .clone()
         .oneshot(
             auth.with_auth(Request::builder().uri(format!("/api/v1/media/{asset_id}")))
                 .body(Body::empty())
@@ -1416,6 +1421,131 @@ async fn media_upload_intent_and_completion_round_trip() {
     assert_eq!(get.status(), StatusCode::OK);
     let get_json = json_body(get).await;
     assert_eq!(get_json["data"]["id"], asset_id);
+
+    let act_create = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri("/api/v1/media/uploads")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "ownerKind": "act_science_choice",
+                        "ownerId": "act-science-choice:q1:option-a",
+                        "contentType": "image/png",
+                        "fileName": "option-a.png"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(act_create.status(), StatusCode::OK);
+    let act_create_json = json_body(act_create).await;
+    let act_asset_id = act_create_json["data"]["asset"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let act_upload_url = act_create_json["data"]["uploadUrl"].as_str().unwrap();
+
+    let image_bytes = b"fake-png-bytes".to_vec();
+    let upload = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("PUT")
+                .uri(act_upload_url)
+                .header("content-type", "image/png")
+                .body(Body::from(image_bytes.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), StatusCode::NO_CONTENT);
+
+    let act_complete = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri(format!("/api/v1/media/uploads/{act_asset_id}/complete"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "sizeBytes": image_bytes.len()
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(act_complete.status(), StatusCode::OK);
+    let act_complete_json = json_body(act_complete).await;
+    assert_eq!(act_complete_json["data"]["uploadStatus"], "finalized");
+
+    let act_content = app
+        .clone()
+        .oneshot(
+            auth.with_auth(Request::builder())
+                .uri(format!("/api/v1/media/{act_asset_id}/content"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(act_content.status(), StatusCode::OK);
+    assert_eq!(
+        act_content.headers().get("content-type").unwrap(),
+        "image/png"
+    );
+    assert_eq!(
+        to_bytes(act_content.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .as_ref(),
+        image_bytes.as_slice()
+    );
+
+    let question_create = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("POST")
+                .uri("/api/v1/media/uploads")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "ownerKind": "act_science_question",
+                        "ownerId": "act-science-question:q1",
+                        "contentType": "image/png",
+                        "fileName": "question.png"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(question_create.status(), StatusCode::OK);
+    let question_create_json = json_body(question_create).await;
+    let question_upload_url = question_create_json["data"]["uploadUrl"].as_str().unwrap();
+    let oversized_question_image = vec![0_u8; 5 * 1024 * 1024 + 1];
+    let question_upload = app
+        .clone()
+        .oneshot(
+            auth.with_csrf(Request::builder())
+                .method("PUT")
+                .uri(question_upload_url)
+                .header("content-type", "image/png")
+                .body(Body::from(oversized_question_image))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(question_upload.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
     database.shutdown().await;
 }

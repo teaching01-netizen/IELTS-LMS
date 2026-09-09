@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, patch, post, put},
@@ -303,7 +303,12 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/media",
             Router::new()
                 .route("/uploads", post(media::create_upload))
+                .route(
+                    "/uploads/:asset_id",
+                    put(media::upload_asset).layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
+                )
                 .route("/uploads/:asset_id/complete", post(media::complete_upload))
+                .route("/:asset_id/content", get(media::get_asset_content))
                 .route("/:asset_id", get(media::get_asset)),
         )
         .route("/api/v1/ws/*path", get(ws::websocket_live))

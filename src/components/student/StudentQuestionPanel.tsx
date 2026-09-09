@@ -30,6 +30,8 @@ interface StudentQuestionPanelProps {
   getBlockStartQuestionNumber: (blockId: string) => number;
   renderBlockInstruction: (instruction: string, blockId: string) => React.ReactNode;
   expandedQuestionGapClassName?: string | undefined;
+  showOnlyCurrentQuestion?: boolean | undefined;
+  allowOptionImages?: boolean | undefined;
   hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
   hideStepper?: boolean | undefined;
   shouldFocusQuestion?: (() => boolean) | undefined;
@@ -57,6 +59,8 @@ export function StudentQuestionPanel({
   getBlockStartQuestionNumber,
   renderBlockInstruction,
   expandedQuestionGapClassName = "space-y-8",
+  showOnlyCurrentQuestion = false,
+  allowOptionImages = false,
   hideDiagramReferenceForBlock,
   hideStepper = false,
   shouldFocusQuestion,
@@ -99,6 +103,13 @@ export function StudentQuestionPanel({
     }
     return map;
   }, [allQuestions]);
+  const visibleBlocks = showOnlyCurrentQuestion
+    ? blocks.filter((block) =>
+        (questionsByBlockId.get(block.id) ?? []).some(
+          (question) => question.id === currentQuestionId
+        )
+      )
+    : blocks;
 
   return (
     <div
@@ -117,7 +128,7 @@ export function StudentQuestionPanel({
           ...(contentZoomStyle ?? {}),
         }}
       >
-        {blocks.map((block) => {
+        {visibleBlocks.map((block) => {
           const activeQuestionId = (questionsByBlockId.get(block.id) ?? []).some(
             (question) => question.id === currentQuestionId
           )
@@ -143,6 +154,8 @@ export function StudentQuestionPanel({
               getBlockStartQuestionNumber={getBlockStartQuestionNumber}
               renderBlockInstruction={renderBlockInstruction}
               expandedQuestionGapClassName={expandedQuestionGapClassName}
+              showOnlyCurrentQuestion={showOnlyCurrentQuestion}
+              allowOptionImages={allowOptionImages}
               hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
               eliminatedOptionIdsByQuestion={eliminatedOptionIdsByQuestion}
               onToggleOptionElimination={onToggleOptionElimination}

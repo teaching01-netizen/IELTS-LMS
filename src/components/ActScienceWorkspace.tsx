@@ -32,6 +32,49 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
   const activeStimulus = stimuli.find((stimulus) => stimulus.id === state.activeScienceStimulusId);
 
   useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const root = document.documentElement;
+    const body = document.body;
+    const lockedElements = [root, body];
+    const previousStyles = lockedElements.map((element) => ({
+      width: element.style.width,
+      height: element.style.height,
+      margin: element.style.margin,
+      overflow: element.style.overflow,
+      overscrollBehavior: element.style.overscrollBehavior,
+    }));
+    const previousScrollX = window.scrollX;
+    const previousScrollY = window.scrollY;
+
+    lockedElements.forEach((element) => {
+      element.style.width = "100%";
+      element.style.height = "100%";
+      element.style.margin = "0";
+      element.style.overflow = "hidden";
+      element.style.overscrollBehavior = "none";
+    });
+    window.scrollTo(0, 0);
+
+    return () => {
+      lockedElements.forEach((element, index) => {
+        const previous = previousStyles[index];
+        if (!previous) {
+          return;
+        }
+        element.style.width = previous.width;
+        element.style.height = previous.height;
+        element.style.margin = previous.margin;
+        element.style.overflow = previous.overflow;
+        element.style.overscrollBehavior = previous.overscrollBehavior;
+      });
+      window.scrollTo(previousScrollX, previousScrollY);
+    };
+  }, []);
+
+  useEffect(() => {
     if (stimuli.length === 0 || activeStimulus) {
       return;
     }
@@ -145,7 +188,7 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
   }
 
   return (
-    <div className="flex min-w-0 flex-1 overflow-hidden bg-gray-50">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-gray-50">
       <aside className="w-60 shrink-0 overflow-y-auto border-r border-gray-200 bg-white p-3">
         <div className="mb-3 flex items-center justify-between px-2">
           <div>
@@ -207,7 +250,7 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
         </div>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col border-r border-gray-200">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-r border-gray-200">
         <div className="border-b border-gray-200 bg-white px-5 py-3">
           <label
             className="mb-1 block text-xs font-semibold text-gray-600"
@@ -233,7 +276,7 @@ export function ActScienceWorkspace({ state, setState }: ActScienceWorkspaceProp
         </div>
       </section>
 
-      <aside className="w-[480px] min-w-[400px] shrink-0">
+      <aside className="h-full min-h-0 w-[480px] min-w-[400px] shrink-0 overflow-hidden">
         <ActScienceQuestionBuilderPane
           stimulus={activeStimulus}
           startNumber={activeStartNumber}
