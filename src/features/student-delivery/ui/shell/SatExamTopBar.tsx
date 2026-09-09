@@ -23,7 +23,7 @@ export interface SatExamTopBarProps {
   annotationMode?: SatAnnotationMode;
   lineReaderEnabled?: boolean;
   onToggleLineReader?: () => void;
-  onToggleAnnotationMode?: (mode: 'highlight' | 'underline') => void;
+  onToggleAnnotationMode?: (mode: 'highlight' | 'underline' | 'erase') => void;
   notesOpen: boolean;
   notesButtonId: string;
   readingOpen: boolean;
@@ -107,12 +107,12 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
         </div>
 
         <div className="relative col-span-2 row-start-2 flex min-w-0 items-center justify-end gap-1 self-stretch sm:col-span-1 sm:col-start-auto sm:row-start-auto">
-          {props.notesAvailable ? (['highlight', 'underline'] as const).map((mode) => (
-            <button key={mode} type="button" aria-label={mode === 'highlight' ? 'Highlight' : 'Underline'}
+          {props.notesAvailable ? (['highlight', 'underline', 'erase'] as const).map((mode) => (
+            <button key={mode} type="button" aria-label={mode === 'highlight' ? 'Highlight' : mode === 'underline' ? 'Underline' : 'Eraser'}
               aria-pressed={props.annotationMode === mode} disabled={props.blocked}
               onClick={() => props.onToggleAnnotationMode?.(mode)}
               className="sat-touch-target min-w-0 rounded px-2 text-sm font-medium aria-pressed:bg-[var(--sat-accent-soft)] aria-pressed:text-[var(--sat-accent-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--sat-focus)]"
-            >{mode === 'highlight' ? 'Highlight' : 'Underline'}</button>
+            >{mode === 'highlight' ? 'Highlight' : mode === 'underline' ? 'Underline' : 'Eraser'}</button>
           )) : null}
           {props.notesAvailable ? (
             <button type="button" aria-label="Line Reader" aria-pressed={props.lineReaderEnabled ?? false} disabled={props.blocked}

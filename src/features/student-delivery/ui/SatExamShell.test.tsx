@@ -64,6 +64,20 @@ describe("SatExamShell", () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('button', { name: 'Underline' })).toHaveAttribute('aria-pressed', 'false');
   });
+  it("toggles Eraser exclusively with Highlight and exits on Escape", () => {
+    const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Eraser' }));
+    expect(screen.getByRole('button', { name: 'Eraser' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Highlight' }));
+    expect(screen.getByRole('button', { name: 'Eraser' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Eraser' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('button', { name: 'Eraser' })).toHaveAttribute('aria-pressed', 'false');
+    rerender(<SatExamShell {...props({ notesAvailable: false })} />);
+    expect(screen.queryByRole('button', { name: 'Eraser' })).not.toBeInTheDocument();
+  });
   it("shows SAT timer/tools without a permanent saved badge", () => {
     render(<SatExamShell {...props()} />);
     expect(screen.getByText("34:58")).toBeInTheDocument();

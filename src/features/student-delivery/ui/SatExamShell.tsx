@@ -97,6 +97,7 @@ export function SatExamShell(props: SatExamShellProps) {
     interaction.state.annotation.mode === 'highlight' ? 'highlight'
     : interaction.state.annotation.mode === 'underline' ? 'underline'
     : interaction.state.annotation.mode === 'note' ? 'note'
+    : interaction.state.annotation.mode === 'erase' ? 'erase'
     : 'none';
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
