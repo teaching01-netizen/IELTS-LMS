@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 )
@@ -104,21 +105,53 @@ type DashboardResult struct {
 	SubmittedAt   *time.Time         `json:"submittedAt,omitempty"`
 }
 
+// SATModule mirrors one administered SAT module attempt inside a section.
+// Rows come from assessment_module_attempts joined to assessment_modules;
+// a branch that was never administered is not returned (the UI renders it
+// as "Not administered") rather than as a zero row.
+type SATModule struct {
+	ModuleKey      string  `json:"moduleKey"`
+	AdaptiveRole   string  `json:"adaptiveRole"`
+	RawCorrect     int64   `json:"rawCorrect"`
+	Operational    int64   `json:"operationalQuestionCount"`
+	State          string  `json:"state"`
+	IsAdministered bool    `json:"isAdministered"`
+	DisplayOrder   int     `json:"displayOrder"`
+}
+
+// SATQuestion is one administered SAT question with its sealed response and
+// server-computed verdict. IsCorrect is nil (JSON null) whenever no verdict
+// may be shown: pretest items, unanswered items, missing keys, pending or
+// invalidated outcomes. A nil verdict never renders as incorrect.
+type SATQuestion struct {
+	QuestionID      string `json:"questionId"`
+	DisplayOrder    int    `json:"displayOrder"`
+	ModuleKey       string `json:"moduleKey"`
+	SectionKey      string `json:"sectionKey"`
+	Response        any    `json:"response"`
+	CorrectAnswer   any    `json:"correctAnswer"`
+	IsCorrect       *bool  `json:"isCorrect"`
+	IsPretest       bool   `json:"isPretest"`
+	MarkedForReview bool   `json:"markedForReview"`
+}
+
 // SATSection mirrors one adaptive/scaled SAT section outcome.
 type SATSection struct {
-	SectionKey  string  `json:"sectionKey"`
-	Route       *string `json:"route"`
-	RawCorrect  int64   `json:"rawCorrect"`
-	Operational int64   `json:"operationalQuestionCount"`
-	Scaled      *int    `json:"scaledScore"`
-	Details     any     `json:"details"`
+	SectionKey  string      `json:"sectionKey"`
+	Route       *string     `json:"route"`
+	RawCorrect  int64       `json:"rawCorrect"`
+	Operational int64       `json:"operationalQuestionCount"`
+	Scaled      *int        `json:"scaledScore"`
+	Details     any         `json:"details"`
+	Modules     []SATModule `json:"modules"`
 }
 
 // SATDetail is the full SAT result with adaptive/scaled sections.
 type SATDetail struct {
-	Summary  ResultSummary `json:"summary"`
-	Payload  any           `json:"scorePayload"`
-	Sections []SATSection  `json:"sections"`
+	Summary   ResultSummary `json:"summary"`
+	Payload   any           `json:"scorePayload"`
+	Sections  []SATSection  `json:"sections"`
+	Questions []SATQuestion `json:"questions"`
 }
 
 // ACTScienceRow is one ACT science outcome row.
@@ -466,7 +499,11 @@ func (s *Service) ListReadyToRelease(ctx context.Context, actor auth.ActorContex
 }
 
 // GetSATResult loads one SAT result with its adaptive/scaled sections.
-func (s *Service) GetSATResult(ctx context.Context, resultID string) (*SATDetail, error) {
+// The actor scope mirrors ListDashboard/resultScope: platform readers see
+// all rows; tenant actors narrow to their organization plus a live staff
+// assignment; actors with neither see NOT_FOUND (never cross-schedule
+// state, and graders cannot probe other schedules by result id).
+func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, resultID string) (*SATDetail, error) {
 	var (
 		id, attemptID, provider, outcome, release string
 		sub, email                                sql.NullString
@@ -477,7 +514,8 @@ func (s *Service) GetSATResult(ctx context.Context, resultID string) (*SATDetail
 		scheduleID, examID, examTitle, cohortName string
 		versionNumber                             int
 	)
-	err := s.db.QueryRowContext(ctx, `
+	scope, scopeArgs := resultScope("sch", actor)
+	query := `
 		SELECT ar.id, ar.attempt_id, ar.submission_id, ar.provider_key, ar.outcome_status,
 			ar.total_score, ar.score_payload, ar.release_status,
 			a.schedule_id, a.exam_id, sch.exam_title, version.version_number,
@@ -486,7 +524,9 @@ func (s *Service) GetSATResult(ctx context.Context, resultID string) (*SATDetail
 		JOIN student_attempts a ON a.id = ar.attempt_id
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
 		JOIN exam_versions version ON version.id = a.published_version_id
-		WHERE ar.id = ? AND ar.provider_key = 'sat'`, resultID).
+		WHERE ar.id = ? AND ar.provider_key = 'sat'` + scope
+	args := append([]any{resultID}, scopeArgs...)
+	err := s.db.QueryRowContext(ctx, query, args...).
 		Scan(&id, &attemptID, &sub, &provider, &outcome, &total, &payload, &release,
 			&scheduleID, &examID, &examTitle, &versionNumber,
 			&studentID, &studentName, &email, &cohortName, &submittedAt)
@@ -513,7 +553,18 @@ func (s *Service) GetSATResult(ctx context.Context, resultID string) (*SATDetail
 	if err != nil {
 		return nil, err
 	}
-	return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections}, nil
+	// Module + question detail is best-effort read-path enrichment: section
+	// aggregates stay authoritative, so a detail-query failure degrades to
+	// empty detail instead of failing the whole result.
+	if sum.Outcome == OutcomeScored {
+		if modules, byModule, err := s.satModules(ctx, attemptID); err == nil {
+			attachSATModules(sections, modules, byModule)
+		}
+		if questions, err := s.satQuestions(ctx, attemptID); err == nil {
+			return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections, Questions: questions}, nil
+		}
+	}
+	return &SATDetail{Summary: sum, Payload: payloadVal, Sections: sections, Questions: []SATQuestion{}}, nil
 }
 
 // ListACTScience serves GET /api/v1/results/act-science from the sealed
@@ -623,7 +674,7 @@ func (s *Service) satSections(ctx context.Context, resultID string) ([]SATSectio
 		return nil, err
 	}
 	defer rows.Close()
-	var out []SATSection
+	out := []SATSection{}
 	for rows.Next() {
 		var sec SATSection
 		var route sql.NullString
@@ -646,9 +697,157 @@ func (s *Service) satSections(ctx context.Context, resultID string) ([]SATSectio
 				sec.Details = v
 			}
 		}
+		sec.Modules = []SATModule{}
 		out = append(out, sec)
 	}
+	if out == nil {
+		out = []SATSection{}
+	}
 	return out, rows.Err()
+}
+
+// satModules loads one row per administered module attempt for an SAT
+// attempt, ordered by section then module display order. Attempts without
+// module rows (provisional, invalidated) yield an empty slice, never an
+// error, so section aggregates stay authoritative.
+func (s *Service) satModules(ctx context.Context, attemptID string) ([]SATModule, map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT s.section_key, m.module_key, m.adaptive_role, m.display_order,
+			ma.state, ma.raw_correct, ma.operational_question_count
+		FROM assessment_module_attempts ma
+		JOIN assessment_modules m ON m.id = ma.module_id
+		JOIN assessment_sections s ON s.id = m.section_id
+		WHERE ma.attempt_id = ?
+		ORDER BY s.display_order, m.display_order`, attemptID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	modules := []SATModule{}
+	byModule := map[string]string{}
+	for rows.Next() {
+		var sectionKey, moduleKey, role, state string
+		var displayOrder int
+		var raw, operational sql.NullInt64
+		if err := rows.Scan(&sectionKey, &moduleKey, &role, &displayOrder, &state, &raw, &operational); err != nil {
+			return nil, nil, err
+		}
+		mod := SATModule{
+			ModuleKey: moduleKey, AdaptiveRole: role,
+			State: state, IsAdministered: true, DisplayOrder: displayOrder,
+		}
+		if raw.Valid {
+			mod.RawCorrect = raw.Int64
+		}
+		if operational.Valid {
+			mod.Operational = operational.Int64
+		}
+		modules = append(modules, mod)
+		byModule[moduleKey] = sectionKey
+	}
+	return modules, byModule, rows.Err()
+}
+
+// attachSATModules nests each administered module under its section.
+func attachSATModules(sections []SATSection, modules []SATModule, byModule map[string]string) {
+	if len(modules) == 0 {
+		return
+	}
+	index := map[string]int{}
+	for i := range sections {
+		index[sections[i].SectionKey] = i
+		if sections[i].Modules == nil {
+			sections[i].Modules = []SATModule{}
+		}
+	}
+	for _, mod := range modules {
+		sectionKey, ok := byModule[mod.ModuleKey]
+		if !ok {
+			continue
+		}
+		pos, ok := index[sectionKey]
+		if !ok {
+			continue
+		}
+		sections[pos].Modules = append(sections[pos].Modules, mod)
+	}
+}
+
+// satQuestions loads one row per administered SAT question with the sealed
+// response and a server-computed verdict. Verdict semantics:
+//   - pretest, unanswered, missing key, or malformed definition/render
+//     => IsCorrect nil (JSON null), never incorrect;
+//   - otherwise the seal-time comparison (single-choice option id,
+//     student-produced accepted/numeric-tolerance) decides true/false.
+//
+// Rows pin to eq.question_revision_id (the administered revision), cap at
+// 500, and order deterministically by section/module/question display
+// order so large adaptive exams paginate stably on the client.
+func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQuestion, error) {
+	out := []SATQuestion{}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT s.section_key, m.module_key, m.display_order, eq.display_order,
+			eq.question_id, eq.is_pretest, ar.marked_for_review, ar.response,
+			CAST(qr.answer_definition AS CHAR)
+		FROM assessment_module_attempts ma
+		JOIN assessment_modules m ON m.id = ma.module_id
+		JOIN assessment_sections s ON s.id = m.section_id
+		JOIN assessment_exam_questions eq ON eq.module_id = m.id
+		JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id
+		LEFT JOIN assessment_question_responses ar
+			ON ar.module_attempt_id = ma.id AND ar.exam_question_id = eq.id
+		WHERE ma.attempt_id = ?
+		ORDER BY s.display_order, m.display_order, eq.display_order
+		LIMIT 500`, attemptID)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sectionKey, moduleKey, questionID string
+		var moduleOrder, questionOrder int
+		var isPretest bool
+		var marked sql.NullBool
+		var response, answerDef sql.NullString
+		if err := rows.Scan(&sectionKey, &moduleKey, &moduleOrder, &questionOrder,
+			&questionID, &isPretest, &marked, &response, &answerDef); err != nil {
+			return out, err
+		}
+		question := SATQuestion{
+			QuestionID: questionID, DisplayOrder: questionOrder,
+			ModuleKey: moduleKey, SectionKey: sectionKey,
+			IsPretest: isPretest,
+			MarkedForReview: marked.Valid && marked.Bool,
+		}
+		if response.Valid && strings.TrimSpace(response.String) != "" {
+			var decoded any
+			if json.Unmarshal([]byte(response.String), &decoded) == nil {
+				question.Response = decoded
+			} else {
+				question.Response = response.String
+			}
+		}
+		answerJSON := ""
+		if answerDef.Valid {
+			answerJSON = answerDef.String
+		}
+		if key, ok := assessscore.SATCorrectAnswer(answerJSON); ok {
+			question.CorrectAnswer = key
+		}
+		// Null-verdict rule: pretest, unanswered, or key-less rows never
+		// claim incorrect. Only a answered, keyed, operational row gets a
+		// true/false verdict from the seal-time comparison.
+		answered := response.Valid && strings.TrimSpace(response.String) != "" && response.String != "null"
+		if !isPretest && answered && assessscore.SATHasKey(answerJSON) {
+			verdict := assessscore.SATResponseCorrect(answerJSON, response.Valid, response.String)
+			question.IsCorrect = &verdict
+		}
+		out = append(out, question)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
 func parseIntPrefix(s string) int {

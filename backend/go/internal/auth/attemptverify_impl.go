@@ -20,6 +20,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/crypto"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
 
 // AttemptVerifyMode selects the bearer-verification posture.
@@ -38,9 +39,21 @@ const (
 // defaults to strict defensively).
 func VerifyAttemptTokenRouted(ctx context.Context, db Querier, cfg config.Config, mode AttemptVerifyMode, now time.Time, token string) (crypto.AttemptClaims, error) {
 	if mode == AttemptVerifyStateless {
-		return VerifyAttemptTokenStateless(cfg, now, token)
+		claims, err := VerifyAttemptTokenStateless(cfg, now, token)
+		if err != nil {
+			telemetry.IncCounter(telemetry.MAttemptVerify, "mode", "stateless", "result", "reject")
+			return claims, err
+		}
+		telemetry.IncCounter(telemetry.MAttemptVerify, "mode", "stateless", "result", "accept")
+		return claims, nil
 	}
-	return VerifyAttemptToken(ctx, db, cfg, now, token)
+	claims, err := VerifyAttemptToken(ctx, db, cfg, now, token)
+	if err != nil {
+		telemetry.IncCounter(telemetry.MAttemptVerify, "mode", "strict", "result", "reject")
+		return claims, err
+	}
+	telemetry.IncCounter(telemetry.MAttemptVerify, "mode", "strict", "result", "accept")
+	return claims, nil
 }
 
 // VerifyAttemptTokenStateless verifies signature + expiry only. It performs

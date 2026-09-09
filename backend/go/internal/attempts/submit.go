@@ -383,10 +383,13 @@ func (s *Service) takeoverInTx(ctx context.Context, q tx.Tx, claims crypto.Attem
 	}
 	expiresAt := now.Add(15 * time.Minute)
 	newTokenID := uuid.NewString()
-	if _, err := q.ExecContext(ctx, `INSERT INTO attempt_sessions (token_id, attempt_id, client_session_id, user_id, schedule_id, expires_at, revoked_at) VALUES (?,?,?,?,?,?,NULL) ON DUPLICATE KEY UPDATE token_id=VALUES(token_id), user_id=VALUES(user_id), schedule_id=VALUES(schedule_id), expires_at=VALUES(expires_at), revoked_at=NULL`, newTokenID, attemptID, clientSessionID, attempt.UserID, attempt.ScheduleID, expiresAt); err != nil {
+	// Round 168: live attempt_sessions PK is `id` (no default) with
+	// `revoked_at`/`revocation_reason` (no `reason`, no `revoked_at` write
+	// on insert). Name the live columns or the takeover 500s (1364).
+	if _, err := q.ExecContext(ctx, `INSERT INTO attempt_sessions (id, token_id, attempt_id, client_session_id, user_id, schedule_id, expires_at, revoked_at, revocation_reason) VALUES (?,?,?,?,?,?,?,NULL,NULL) ON DUPLICATE KEY UPDATE token_id=VALUES(token_id), user_id=VALUES(user_id), schedule_id=VALUES(schedule_id), expires_at=VALUES(expires_at), revoked_at=NULL, revocation_reason=NULL`, uuid.NewString(), newTokenID, attemptID, clientSessionID, attempt.UserID, attempt.ScheduleID, expiresAt); err != nil {
 		return TakeoverResult{}, err
 	}
-	if _, err := q.ExecContext(ctx, `UPDATE attempt_sessions SET revoked_at=?, reason='response_durability_lease_takeover' WHERE attempt_id=? AND client_session_id<>? AND revoked_at IS NULL`, now, attemptID, clientSessionID); err != nil {
+	if _, err := q.ExecContext(ctx, `UPDATE attempt_sessions SET revoked_at=?, revocation_reason='response_durability_lease_takeover' WHERE attempt_id=? AND client_session_id<>? AND revoked_at IS NULL`, now, attemptID, clientSessionID); err != nil {
 		return TakeoverResult{}, err
 	}
 	if newLease != attempt.LeaseEpoch || !active.Valid || active.String != clientSessionID {

@@ -295,7 +295,7 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
-	control, err := s.loadAttemptControl(ctx, attemptID)
+	control, err := s.loadAttemptControl(ctx, attemptID, attemptControl{})
 	if err != nil {
 		return nil, err
 	}
@@ -645,18 +645,24 @@ type attemptControl struct {
 }
 
 // loadAttemptControl loads candidate/proctor/device/lifecycle fields.
-func (s *Service) loadAttemptControl(ctx context.Context, attemptID string) (attemptControl, error) {
-	var c attemptControl
-	var proctorNote sql.NullString
-	var submittedAt sql.NullTime
-	if err := s.db.QueryRowContext(ctx,
-		"SELECT candidate_name, COALESCE(proctor_status, 'active'), proctor_note, COALESCE(delivery_status, 'running'), submitted_at, COALESCE(phase, '') FROM student_attempts WHERE id = ?",
-		attemptID).Scan(&c.candidateName, &c.proctorStatus, &proctorNote,
-		&c.deliveryStatus, &submittedAt, &c.phase); err != nil {
-		return c, err
+// Round 145: the attempt-row fields ride the Bootstrap binding probe
+// (same row, already read); only the device-fingerprint leg queries here.
+// A zero bound (empty candidate + deliveryStatus) means the caller has no
+// binding row (post-write assemble path): fall back to the full row read.
+func (s *Service) loadAttemptControl(ctx context.Context, attemptID string, bound attemptControl) (attemptControl, error) {
+	c := bound
+	if c.candidateName == "" && c.deliveryStatus == "" {
+		var proctorNote sql.NullString
+		var submittedAt sql.NullTime
+		if err := s.db.QueryRowContext(ctx,
+			"SELECT candidate_name, COALESCE(proctor_status, 'active'), proctor_note, COALESCE(delivery_status, 'running'), submitted_at, COALESCE(phase, '') FROM student_attempts WHERE id = ?",
+			attemptID).Scan(&c.candidateName, &c.proctorStatus, &proctorNote,
+			&c.deliveryStatus, &submittedAt, &c.phase); err != nil {
+			return c, err
+		}
+		c.proctorNote = nullStringToPtr(proctorNote)
+		c.submittedAt = nullTime(submittedAt)
 	}
-	c.proctorNote = nullStringToPtr(proctorNote)
-	c.submittedAt = nullTime(submittedAt)
 	var fingerprint sql.NullString
 	err := s.db.QueryRowContext(ctx,
 		"SELECT device_fingerprint_hash FROM attempt_sessions WHERE attempt_id = ? ORDER BY issued_at DESC LIMIT 1",
@@ -674,6 +680,10 @@ func (s *Service) loadAttemptControl(ctx context.Context, attemptID string) (att
 
 // loadTiming loads the cohort runtime status; attempts without a runtime
 // row fall back to the legacy attempt-level timing projection.
+// Round 144: the schedule pre-probe SELECT status duplicated the identical
+// probe inside LoadSessionRuntimeBySchedule (same row, twice, on the 2k-herd
+// hot path). One probe row now: NoRows -> legacy fallback, else hydrate in
+// the same call (runtime + sections legs, skipping the duplicate).
 func (s *Service) loadTiming(ctx context.Context, scheduleID string, now time.Time) (TimingSnapshot, string, error) {
 	var status string
 	err := s.db.QueryRowContext(ctx, "SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&status)
@@ -683,7 +693,7 @@ func (s *Service) loadTiming(ctx context.Context, scheduleID string, now time.Ti
 	if err != nil {
 		return TimingSnapshot{}, "", err
 	}
-	runtime, err := proctor.LoadSessionRuntimeBySchedule(ctx, s.db, scheduleID)
+	runtime, err := proctor.LoadSessionRuntimeByStatus(ctx, s.db, scheduleID, status)
 	if err != nil {
 		return TimingSnapshot{}, "", err
 	}

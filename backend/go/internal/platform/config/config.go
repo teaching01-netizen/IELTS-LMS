@@ -513,6 +513,14 @@ type Config struct {
 	StorageWarningBytes  int64
 	StorageCriticalBytes int64
 
+	// HTTPWriteTimeoutSecs tunes the plan-E conn-layer lever (round 137):
+	// saturated entry handlers ran up to ~38s in the 5k wave while the
+	// 30s WriteTimeout severed slow-but-healthy admissions (EOF class).
+	// Default 30 = today's behavior (behavior-preserving ship default);
+	// non-positive values clamp to 30 (never unbounded, never deny-all).
+	// Rollback = unset.
+	HTTPWriteTimeoutSecs int
+
 	ResourceProfile string
 	Environment     string // development | preview | staging | production
 }
@@ -721,9 +729,22 @@ func Load() Config {
 		StorageWarningBytes:  getenvInt64("STORAGE_WARNING_BYTES", 10<<30),
 		StorageCriticalBytes: getenvInt64("STORAGE_CRITICAL_BYTES", 50<<30),
 
+		HTTPWriteTimeoutSecs: httpWriteTimeoutSecsFromEnv(),
+
 		ResourceProfile: profile,
 		Environment:     environment,
 	}
+}
+
+// httpWriteTimeoutSecsFromEnv reads HTTP_WRITE_TIMEOUT_SECS (default 30 =
+// today's WriteTimeout). Non-positive values clamp to 30: the lever only
+// ever lengthens the bound, never disables it.
+func httpWriteTimeoutSecsFromEnv() int {
+	n := getenvInt("HTTP_WRITE_TIMEOUT_SECS", 30)
+	if n <= 0 {
+		return 30
+	}
+	return n
 }
 
 // offcut: __Host- cookies require Secure; without it browsers drop the

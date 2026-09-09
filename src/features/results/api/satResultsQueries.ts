@@ -22,6 +22,31 @@ export interface SatResultSummary {
   releaseStatus: string;
 }
 
+export type SatModuleAdaptiveRole = 'base' | 'lower_branch' | 'higher_branch' | 'none';
+
+export interface SatModuleResult {
+  moduleKey: string;
+  adaptiveRole: SatModuleAdaptiveRole | string;
+  rawCorrect: number;
+  operationalQuestionCount: number;
+  state: string;
+  isAdministered: boolean;
+  displayOrder: number;
+}
+
+export interface SatQuestionResult {
+  questionId: string;
+  displayOrder: number;
+  moduleKey: string;
+  sectionKey: string;
+  response: unknown;
+  correctAnswer: unknown;
+  /** Null verdict = pretest, unanswered, missing key, or unscored outcome. Never render null as incorrect. */
+  isCorrect: boolean | null;
+  isPretest: boolean;
+  markedForReview: boolean;
+}
+
 export interface SatSectionResult {
   sectionKey: string;
   route: SatAssessmentRoute | null;
@@ -29,12 +54,14 @@ export interface SatSectionResult {
   operationalQuestionCount: number;
   scaledScore: number | null;
   details: Record<string, unknown>;
+  modules: SatModuleResult[];
 }
 
 export interface SatResultDetail {
   summary: SatResultSummary;
   scorePayload: Record<string, unknown>;
   sections: SatSectionResult[];
+  questions: SatQuestionResult[];
 }
 
 export const satResultKeys = {

@@ -654,24 +654,33 @@ func loadSessionRuntime(ctx context.Context, q sessionQuerier, schedule SessionS
 		}
 		return SessionRuntime{}, err
 	}
-	srows, err := q.QueryContext(ctx, "SELECT "+sessionRuntimeSectionColumns+" FROM exam_session_runtime_sections WHERE runtime_id = ? ORDER BY section_order ASC", row.id)
+	sections, err := loadRuntimeSections(ctx, q, row.id)
 	if err != nil {
 		return SessionRuntime{}, err
+	}
+	return hydrateSessionRuntime(row, sections, now), nil
+}
+
+// loadRuntimeSections runs the sections leg shared by loadSessionRuntime
+// and LoadSessionRuntimeByStatus.
+func loadRuntimeSections(ctx context.Context, q sessionQuerier, runtimeID string) ([]SessionRuntimeSection, error) {
+	srows, err := q.QueryContext(ctx, "SELECT "+sessionRuntimeSectionColumns+" FROM exam_session_runtime_sections WHERE runtime_id = ? ORDER BY section_order ASC", runtimeID)
+	if err != nil {
+		return nil, err
 	}
 	sections := []SessionRuntimeSection{}
 	defer srows.Close()
 	for srows.Next() {
 		sec, err := scanSessionRuntimeSection(srows)
 		if err != nil {
-			return SessionRuntime{}, err
+			return nil, err
 		}
 		sections = append(sections, sec)
 	}
-
 	if err := srows.Err(); err != nil {
-		return SessionRuntime{}, err
+		return nil, err
 	}
-	return hydrateSessionRuntime(row, sections, now), nil
+	return sections, nil
 }
 
 // LoadSessionRuntimeBySchedule returns the same hydrated runtime projection
@@ -687,6 +696,51 @@ func LoadSessionRuntimeBySchedule(ctx context.Context, db *sql.DB, scheduleID st
 		return SessionRuntime{}, err
 	}
 	return loadSessionRuntime(ctx, db, schedule, time.Now().UTC())
+}
+
+// LoadSessionRuntimeByStatus hydrates the same projection when the caller
+// already probed the runtime header (round 144: delivery.loadTiming holds
+// the status row, so the header re-probe inside loadSessionRuntime is
+// skipped — one fewer statement per bootstrap on the 2k-herd hot path).
+// Only the schedule row (exam link) + sections leg run here; the hydrated
+// status comes from the pre-probed row the caller already holds.
+func LoadSessionRuntimeByStatus(ctx context.Context, db *sql.DB, scheduleID, status string) (SessionRuntime, error) {
+	var schedule SessionSchedule
+	if err := db.QueryRowContext(ctx, `
+		SELECT id, exam_id, provider_key
+		FROM exam_schedules
+		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey); err != nil {
+		return SessionRuntime{}, err
+	}
+	now := time.Now().UTC()
+	var row sessionRuntimeRow
+	if err := db.QueryRowContext(ctx,
+		"SELECT "+sessionRuntimeColumns+" FROM exam_session_runtimes WHERE schedule_id = ?",
+		schedule.ID).Scan(
+		&row.id, &row.scheduleID, &row.examID, &row.providerKey, &row.status,
+		&row.planSnapshot, &row.timingModel, &row.actualStartAt, &row.actualEndAt,
+		&row.activeSectionKey, &row.currentSectionKey, &row.remaining,
+		&row.waiting, &row.overrun, &row.totalPaused, &row.createdAt, &row.updatedAt, &row.revision,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return notStartedSessionRuntime(schedule, now), nil
+		}
+		return SessionRuntime{}, err
+	}
+	// Belt-and-braces: the row raced the probe (publish/start between the
+	// two reads). Trust the row, not the stale status argument.
+	_ = status
+	return hydrateSessionRuntimeByRow(ctx, db, row, now)
+}
+
+// hydrateSessionRuntimeByRow runs the sections leg + hydrate for a header
+// row the caller already holds (shared with loadSessionRuntime).
+func hydrateSessionRuntimeByRow(ctx context.Context, db *sql.DB, row sessionRuntimeRow, now time.Time) (SessionRuntime, error) {
+	sections, err := loadRuntimeSections(ctx, db, row.id)
+	if err != nil {
+		return SessionRuntime{}, err
+	}
+	return hydrateSessionRuntime(row, sections, now), nil
 }
 
 // studentSessionRow is the raw detail projection row.

@@ -1,3 +1,4 @@
+import { MotionConfig } from 'motion/react';
 import { useParams } from 'react-router-dom';
 import { SatAuthoringErrorSurface } from '../ui/SatAuthoringStateSurfaces';
 import { AuthoringWorkspace } from '../ui/AuthoringWorkspace';
@@ -18,5 +19,9 @@ export function SatAuthoringRoute({ examId: propExamId, examTitle }: SatAuthorin
       />
     );
   }
-  return <AuthoringWorkspace examId={examId} examTitle={examTitle ?? 'Digital SAT'} />;
+  return (
+    <MotionConfig reducedMotion="user" transition={{ duration: 0.18 }}>
+      <AuthoringWorkspace examId={examId} examTitle={examTitle ?? 'Digital SAT'} />
+    </MotionConfig>
+  );
 }

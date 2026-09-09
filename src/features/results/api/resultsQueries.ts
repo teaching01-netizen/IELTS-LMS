@@ -38,11 +38,37 @@ export interface ResultsAnalytics {
   averageOverallBand: number;
 }
 
+export interface ActScienceQuestion {
+  questionId: string;
+  displayOrder: number;
+  response: unknown;
+  correctAnswer: unknown;
+  /** Null verdict = unanswered or missing key. Never render null as incorrect. */
+  isCorrect: boolean | null;
+  answered: boolean;
+}
+
+export interface ActScienceDetail {
+  attemptId: string;
+  scheduleId: string;
+  studentId: string;
+  studentName: string;
+  totalScore: number;
+  maxScore: number;
+  percentage: number;
+  outcomeStatus: string;
+  releaseStatus: string;
+  submittedAt?: string | null | undefined;
+  questions: ActScienceQuestion[];
+}
+
 export const resultKeys = {
   all: ["results"] as const,
   dashboard: (provider: ResultProviderKey | "all" = "all") =>
     [...resultKeys.all, "dashboard", provider] as const,
   analytics: () => [...resultKeys.all, "analytics"] as const,
+  actDetail: (attemptId: string) =>
+    [...resultKeys.all, "act", "detail", attemptId] as const,
 };
 
 export function useAdminResultsQuery(provider: ResultProviderKey | "all" = "all") {
@@ -51,6 +77,19 @@ export function useAdminResultsQuery(provider: ResultProviderKey | "all" = "all"
     queryKey: resultKeys.dashboard(provider),
     queryFn: () => resultsGateway.get<AdminResultRow[]>(`/v1/results/dashboard${queryString}`),
     staleTime: 15_000,
+    gcTime: 5 * 60_000,
+  });
+}
+
+export function useActScienceDetailQuery(attemptId?: string | null) {
+  return useQuery({
+    queryKey: resultKeys.actDetail(attemptId ?? "missing"),
+    queryFn: () =>
+      resultsGateway.get<ActScienceDetail>(
+        `/v1/results/act-science/${encodeURIComponent(attemptId ?? "")}`,
+      ),
+    enabled: Boolean(attemptId),
+    staleTime: 30_000,
     gcTime: 5 * 60_000,
   });
 }

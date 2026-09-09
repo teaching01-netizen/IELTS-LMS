@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Plus, Search } from 'lucide-react';
+import { ArrowRight, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ErrorSurface } from '../../../components/ui/ErrorSurface';
@@ -9,6 +9,17 @@ import { invalidateExamList, useExamListQuery } from '../../../features/exam-aut
 import { examAuthoringFacade } from '../../../features/exam-authoring/application/examAuthoringFacade';
 import type { ExamEntity } from '../../../types/domain';
 import { SatFormDialog } from '../ui/ConfirmDialog';
+import {
+  SatContainer,
+  SatEmptyState,
+  SatList,
+  SatListRow,
+  SatPageHeader,
+  SatPrimaryButton,
+  SatSearchField,
+  SatStatusPill,
+  type SatStatusTone,
+} from '../ui/SatPage';
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
@@ -24,10 +35,11 @@ function statusLabel(exam: ExamEntity): string {
   return 'Draft';
 }
 
-function statusClass(label: string): string {
-  if (label === 'Published') return 'text-emerald-700';
-  if (label === 'Changes') return 'text-amber-700';
-  return 'text-slate-500';
+function statusTone(label: string): SatStatusTone {
+  if (label === 'Published') return 'published';
+  if (label === 'Changes') return 'changes';
+  if (label === 'Archived') return 'archived';
+  return 'draft';
 }
 
 export function SatExamLibraryRoute() {
@@ -76,7 +88,7 @@ export function SatExamLibraryRoute() {
       if (!result.success || !result.exam) throw new Error(result.error ?? 'The SAT could not be created.');
       await invalidateExamList(queryClient);
       setCreateOpen(false);
-      navigate(`/sat/exams/${result.exam.id}`);
+      navigate('/sat/exams/' + result.exam.id);
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : 'The SAT could not be created.');
     } finally {
@@ -88,47 +100,51 @@ export function SatExamLibraryRoute() {
   if (query.error) return <ErrorSurface title="Exam Library could not load" description={query.error instanceof Error ? query.error.message : 'The exam library is unavailable.'} actionLabel="Retry" onAction={() => void query.refetch()} />;
 
   return (
-    <div className="mx-auto w-full max-w-[1180px] px-4 pb-14 pt-7 sm:px-6 md:pt-10 lg:px-10">
-      <div className="flex flex-col gap-5 border-b border-black/[0.065] pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Digital SAT</p>
-          <h1 className="mt-1 text-[30px] font-semibold tracking-[-0.045em] text-slate-950">Exam Library</h1>
-        </div>
-        <div className="flex w-full items-center gap-2 sm:w-auto">
-          <label htmlFor="sat-exam-search" className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
-            <Search size={15} className="pointer-events-none absolute left-3 top-3 text-slate-400" aria-hidden="true" />
-            <span className="sr-only">Search SAT exams</span>
-            <input id="sat-exam-search" aria-label="Search SAT exams" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search exams" className="h-10 w-full rounded-[11px] border border-black/[0.075] bg-white pl-9 pr-3 text-sm outline-none transition focus:border-[#0071e3]/40 focus:ring-4 focus:ring-[#0071e3]/10" />
-          </label>
-          <button type="button" onClick={openCreate} className="flex h-10 shrink-0 items-center gap-1.5 rounded-[11px] bg-[#0071e3] px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#0077ed] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/20"><Plus size={15} aria-hidden="true" />New SAT</button>
-        </div>
-      </div>
+    <SatContainer>
+      <SatPageHeader
+        eyebrow="Digital SAT"
+        title="Exam Library"
+        description="Practice tests with adaptive Reading & Writing and Math modules."
+        actions={
+          <>
+            <SatSearchField
+              id="sat-exam-search"
+              label="Search SAT exams"
+              value={search}
+              onChange={setSearch}
+              placeholder="Search exams"
+              widthClassName="sm:w-64 sm:flex-none"
+            />
+            <SatPrimaryButton onClick={openCreate} icon={<Plus size={15} aria-hidden="true" />}>New SAT</SatPrimaryButton>
+          </>
+        }
+      />
 
       {exams.length ? (
-        <div className="mt-3 divide-y divide-black/[0.055] border-b border-black/[0.055]">
+        <SatList>
           {exams.map((exam) => {
             const status = statusLabel(exam);
             return (
-              <button key={exam.id} type="button" onClick={() => navigate(`/sat/exams/${exam.id}`)} className="group grid min-h-[76px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-1 text-left transition-colors hover:bg-black/[0.018] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0071e3] sm:grid-cols-[minmax(0,1fr)_130px_120px_32px]">
-                <div className="min-w-0 py-3">
-                  <p className="truncate text-[14px] font-semibold tracking-[-0.012em] text-slate-900">{exam.title}</p>
-                  <p className="mt-1 text-[10px] text-slate-400">{exam.totalQuestions ?? 0} questions</p>
-                </div>
-                <div className={`hidden text-[11px] font-semibold sm:block ${statusClass(status)}`}>{status}</div>
-                <div className="hidden text-[11px] tabular-nums text-slate-400 sm:block">{formatDate(exam.updatedAt)}</div>
-                <div className="flex items-center justify-end"><ArrowRight size={15} className="text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-500" aria-hidden="true" /></div>
-                <div className="col-span-2 -mt-3 pb-3 text-[10px] sm:hidden"><span className={statusClass(status)}>{status}</span><span className="mx-2 text-slate-300">·</span><span className="text-slate-400">{formatDate(exam.updatedAt)}</span></div>
-              </button>
+              <SatListRow key={exam.id} onOpen={() => navigate('/sat/exams/' + exam.id)}>
+                <span className="flex w-full items-center gap-3 py-3">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px] font-semibold tracking-[-0.012em] text-slate-900">{exam.title}</span>
+                    <span className="mt-1 block truncate text-[10px] text-slate-400">{exam.totalQuestions ?? 0} questions · {formatDate(exam.updatedAt)}</span>
+                  </span>
+                  <SatStatusPill tone={statusTone(status)}>{status}</SatStatusPill>
+                  <ArrowRight size={15} className="shrink-0 text-slate-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-slate-500" aria-hidden="true" />
+                </span>
+              </SatListRow>
             );
           })}
-        </div>
+        </SatList>
       ) : (
-        <div className="flex min-h-[360px] flex-col items-center justify-center text-center">
-          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-black/[0.045] text-slate-400"><Plus size={18} /></div>
-          <h2 className="mt-4 text-[16px] font-semibold tracking-[-0.02em]">{search ? 'No matching SAT exams' : 'No SAT exams yet'}</h2>
-          <p className="mt-1 max-w-sm text-[12px] leading-5 text-slate-400">{search ? 'Try a different name.' : 'Create one exam. The standard Digital SAT structure is ready immediately.'}</p>
-          {!search ? <button type="button" onClick={openCreate} className="mt-4 min-h-10 rounded-[11px] bg-[#0071e3] px-4 text-[12px] font-semibold text-white">New SAT</button> : null}
-        </div>
+        <SatEmptyState
+          icon={<Plus size={18} aria-hidden="true" />}
+          title={search ? 'No matching SAT exams' : 'No SAT exams yet'}
+          hint={search ? 'Try a different name.' : 'Create one exam. The standard Digital SAT structure is ready immediately.'}
+          action={!search ? <SatPrimaryButton onClick={openCreate}>New SAT</SatPrimaryButton> : undefined}
+        />
       )}
 
       <SatFormDialog open={createOpen} eyebrow="Digital SAT" title="New SAT" onClose={() => setCreateOpen(false)}>
@@ -146,6 +162,6 @@ export function SatExamLibraryRoute() {
           </div>
         </form>
       </SatFormDialog>
-    </div>
+    </SatContainer>
   );
 }

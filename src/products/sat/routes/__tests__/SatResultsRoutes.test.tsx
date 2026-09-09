@@ -65,9 +65,10 @@ describe('SAT Results product', () => {
       data: {
         summary: { ...summary, totalScore: null }, scorePayload: {},
         sections: [
-          { sectionKey: 'reading-writing', route: 'higher', rawCorrect: 30, operationalQuestionCount: 34, scaledScore: null, details: {} },
-          { sectionKey: 'math', route: null, rawCorrect: 12, operationalQuestionCount: 20, scaledScore: null, details: {} },
+          { sectionKey: 'reading-writing', route: 'higher', rawCorrect: 30, operationalQuestionCount: 34, scaledScore: null, details: {}, modules: [] },
+          { sectionKey: 'math', route: null, rawCorrect: 12, operationalQuestionCount: 20, scaledScore: null, details: {}, modules: [] },
         ],
+        questions: [],
       }, isLoading: false, error: null, refetch: vi.fn(),
     });
     render(<MemoryRouter initialEntries={['/sat/results/result-1']}><Routes><Route path="/sat/results/:resultId" element={<SatResultDetailRoute />} /></Routes></MemoryRouter>);
@@ -76,5 +77,39 @@ describe('SAT Results product', () => {
     expect(screen.getByText('Reading & Writing')).toBeInTheDocument();
     expect(screen.getByText('Math')).toBeInTheDocument();
     expect(screen.getByText('Adaptive route · Higher')).toBeInTheDocument();
+  });
+
+  it('shows module raw scores and question-level responses without fabricating verdicts', () => {
+    useSatResultQueryMock.mockReturnValue({
+      data: {
+        summary, scorePayload: {},
+        sections: [
+          {
+            sectionKey: 'reading-writing', route: 'higher', rawCorrect: 20, operationalQuestionCount: 34,
+            scaledScore: 680, details: {},
+            modules: [
+              { moduleKey: 'rw-base', adaptiveRole: 'base', rawCorrect: 12, operationalQuestionCount: 20, state: 'submitted', isAdministered: true, displayOrder: 1 },
+              { moduleKey: 'rw-higher', adaptiveRole: 'higher_branch', rawCorrect: 8, operationalQuestionCount: 14, state: 'submitted', isAdministered: true, displayOrder: 2 },
+            ],
+          },
+        ],
+        questions: [
+          { questionId: 'q-ok', displayOrder: 1, moduleKey: 'rw-base', sectionKey: 'reading-writing', response: 'B', correctAnswer: 'B', isCorrect: true, isPretest: false, markedForReview: false },
+          { questionId: 'q-wrong', displayOrder: 2, moduleKey: 'rw-base', sectionKey: 'reading-writing', response: 'A', correctAnswer: 'B', isCorrect: false, isPretest: false, markedForReview: true },
+          { questionId: 'q-pre', displayOrder: 3, moduleKey: 'rw-base', sectionKey: 'reading-writing', response: 'B', correctAnswer: 'B', isCorrect: null, isPretest: true, markedForReview: false },
+          { questionId: 'q-blank', displayOrder: 4, moduleKey: 'rw-base', sectionKey: 'reading-writing', response: null, correctAnswer: 'B', isCorrect: null, isPretest: false, markedForReview: false },
+        ],
+      }, isLoading: false, error: null, refetch: vi.fn(),
+    });
+    render(<MemoryRouter initialEntries={['/sat/results/result-1']}><Routes><Route path="/sat/results/:resultId" element={<SatResultDetailRoute />} /></Routes></MemoryRouter>);
+    // Module raw scores and question-level responses render by default (no toggles).
+    expect(screen.getByText('rw-base')).toBeInTheDocument();
+    expect(screen.getByText('12 / 20')).toBeInTheDocument();
+    expect(screen.getByText('q-ok · rw-base')).toBeInTheDocument();
+    expect(screen.getByText('Correct')).toBeInTheDocument();
+    expect(screen.getByText('Incorrect')).toBeInTheDocument();
+    expect(screen.getByText('Pretest · excluded')).toBeInTheDocument();
+    // A null verdict never renders as incorrect: one Correct + one Incorrect only.
+    expect(screen.getAllByText('Not scored')).toHaveLength(2);
   });
 });

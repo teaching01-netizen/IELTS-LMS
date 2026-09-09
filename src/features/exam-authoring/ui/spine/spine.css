@@ -92,6 +92,26 @@
   }
 }
 
+/* One-shot "look here" flash for issue-target fields (micro-interaction
+ * slice 5). Outline color fades; width never animates, so no layout.
+ * The 400ms keyframe is the single sanctioned non-token duration.
+ * Reduced-motion collapses it via the block below (still fires
+ * `animationend`, so the helper cleanup always runs). */
+.spine-flash-once {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  animation: spine-flash-fade 400ms ease-out forwards;
+}
+
+@keyframes spine-flash-fade {
+  from {
+    outline-color: var(--color-primary);
+  }
+  to {
+    outline-color: transparent;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sat-spine * {
     animation-duration: 0.01ms !important;

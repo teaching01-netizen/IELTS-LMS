@@ -1,4 +1,7 @@
+import { useRef } from "react";
+import { motion } from "motion/react";
 import { Check, CircleAlert, Cloud, LoaderCircle } from "lucide-react";
+import { authoringMotion } from "@/src/shared/motion";
 import type { QuestionSaveStatus } from "../../hooks/useQuestionAutosave";
 
 export const SAVE_CLUSTER_LABELS: Record<QuestionSaveStatus, string> = {
@@ -46,12 +49,48 @@ export function SaveCluster({ status, lastSavedAt, onRetry }: SaveClusterProps) 
         ? `Last saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
         : label;
 
-  const face = (
-    <span className={`flex items-center gap-1.5 text-xs font-semibold ${tone}`}>
-      <Icon size={14} aria-hidden="true" strokeWidth={2.3} />
+  // One-shot Saved tick: true only on the render that ENTERS saved, so
+  // typing (unsaved) or re-renders while saved never retrigger the pop.
+  const prevStatusRef = useRef<QuestionSaveStatus | null>(null);
+  const isFirstMount = prevStatusRef.current === null;
+  const justSaved = !isFirstMount && prevStatusRef.current !== "saved" && status === "saved";
+  prevStatusRef.current = status;
+
+  const faceInner = (
+    <>
+      {justSaved ? (
+        <motion.span
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={authoringMotion.snap}
+          className="flex"
+          aria-hidden="true"
+        >
+          <Icon size={14} strokeWidth={2.3} />
+        </motion.span>
+      ) : (
+        <Icon size={14} aria-hidden="true" strokeWidth={2.3} />
+      )}
       <span>{label}</span>
-    </span>
+    </>
   );
+
+  // Error renders instantly: a failed save must offer Retry with no
+  // entrance choreography. All other states cross-fade on change.
+  const face =
+    status === "error" ? (
+      <span className={`flex min-w-24 items-center gap-1.5 text-xs font-semibold ${tone}`}>{faceInner}</span>
+    ) : (
+      <motion.span
+        key={status}
+        initial={isFirstMount ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={authoringMotion.state}
+        className={`flex min-w-24 items-center gap-1.5 text-xs font-semibold ${tone}`}
+      >
+        {faceInner}
+      </motion.span>
+    );
 
   if (status === "error") {
     return (

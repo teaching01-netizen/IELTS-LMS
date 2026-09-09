@@ -1017,6 +1017,29 @@ func resultsACTScienceHandler(app *App) http.HandlerFunc {
 	}
 }
 
+// resultsACTScienceDetailHandler returns one sealed ACT science attempt
+// with per-question rows. Same role gate as the ACT list
+// (Admin|Grader|Proctor); pending/unsealed attempts surface NOT_FOUND so
+// the UI renders its pending empty state instead of a fabricated table.
+func resultsACTScienceDetailHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader, auth.RoleProctor) == nil {
+			return
+		}
+		if app.ACT == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "ACT service not configured."))
+			return
+		}
+		attemptID := strings.TrimSpace(chi.URLParam(r, "attemptID"))
+		out, err := app.ACT.GetScienceDetail(r.Context(), actorOf(r.Context()), attemptID)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
 // resultsSATGetHandler returns one SAT result with section detail.
 func resultsSATGetHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1028,7 +1051,7 @@ func resultsSATGetHandler(app *App) http.HandlerFunc {
 			return
 		}
 		resultID := chi.URLParam(r, "resultID")
-		out, err := app.Results.GetSATResult(r.Context(), resultID)
+		out, err := app.Results.GetSATResult(r.Context(), actorOf(r.Context()), resultID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

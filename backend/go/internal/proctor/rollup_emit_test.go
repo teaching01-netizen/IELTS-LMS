@@ -7,6 +7,7 @@ package proctor
 import (
 	"context"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
@@ -45,6 +46,18 @@ func TestRollupEmitsRefresh(t *testing.T) {
 	refresh()
 	if got := telemetry.CounterValueForTest(reg, telemetry.MRollupRefresh); got != 2 {
 		t.Fatalf("two refreshes must count 2, got %v", got)
+	}
+	// LoadRollup serves the staleness signal operators alert on: lag gauge
+	// must move on a row whose updated_at is 4s old.
+	mock.ExpectQuery("FROM shared_cache_entries WHERE cache_key").
+		WithArgs("proctor-rollup:sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"payload", "revision", "updated_at"}).
+			AddRow(`{"running":120}`, 9, time.Now().UTC().Add(-4*time.Second)))
+	if _, err := svc.LoadRollup(context.Background(), "sched-1"); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := telemetry.GaugeValueForTest(reg, telemetry.MRollupLag); got < 3 || got > 30 {
+		t.Fatalf("lag gauge must read ~4s, got %v", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -33,5 +33,11 @@ export const gradingGateway = {
   repository: {
     getSubmissionById: (submissionId: string) => gradingRepository.getSubmissionById(submissionId),
     getReviewDraftBySubmission: (submissionId: string) => gradingRepository.getReviewDraftBySubmission(submissionId),
+    getSectionSubmissionsBySubmissionId: (submissionId: string) =>
+      gradingRepository.getSectionSubmissionsBySubmissionId(submissionId),
+    getWritingSubmissionsBySubmissionId: (submissionId: string) =>
+      gradingRepository.getWritingSubmissionsBySubmissionId(submissionId),
+    getStudentResultsBySubmission: (submissionId: string) =>
+      gradingRepository.getStudentResultsBySubmission(submissionId),
   },
 } as const;

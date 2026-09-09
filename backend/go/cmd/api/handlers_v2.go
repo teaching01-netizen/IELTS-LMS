@@ -744,12 +744,15 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 		if err == sql.ErrNoRows {
 			userID = uuid.NewString()
 			if _, err := app.DB.ExecContext(r.Context(), `INSERT INTO users (id, email, display_name, role, state) VALUES (?, ?, ?, 'student', 'active')`, userID, email, strings.TrimSpace(body.StudentName)); err != nil {
-				httpx.WriteError(w, r, err)
+				// Round 159: unguarded user-mint is a bare-cancel 500 source
+				// (r159: 91 x bare `context canceled` after all auth sites
+				// mapped) — client-gone maps to retryable 503.
+				httpx.WriteError(w, r, MapDBError(err))
 				return
 			}
 			role, state, displayName = auth.RoleStudent, "active", strings.TrimSpace(body.StudentName)
 		} else if err != nil {
-			httpx.WriteError(w, r, err)
+			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
 		if !isStudentEntryAccountAllowed(role, state) {
@@ -768,7 +771,10 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 		}
 		reg, err := app.Schedules.CreateRegistration(r.Context(), scheduleID, schedules.RegistrationRequest{Wcode: wcode, Email: email, StudentName: body.StudentName, Nickname: body.Nickname, IELTSCourse: body.IELTSCourse, UserID: userID})
 		if err != nil {
-			httpx.WriteError(w, r, err)
+			// Round 153: a client gone inside the mint tx returns bare
+			// context-canceled (never wrapped) — map to retryable 503
+			// at the boundary instead of unknown-500 (E1 honesty).
+			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
 		clientSessionID := uuid.NewString()
@@ -778,13 +784,13 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 		// whose registration lock + replay stays the correctness backstop.
 		att, err := app.fastPathAttempt(r.Context(), scheduleID, reg.ID)
 		if err != nil {
-			httpx.WriteError(w, r, err)
+			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
 		if att == nil {
 			minted, merr := app.Schedules.CreateScheduleAttempt(r.Context(), scheduleID, reg.ID, reg.StudentKey, wcode, strings.TrimSpace(body.StudentName), email, clientSessionID)
 			if merr != nil {
-				httpx.WriteError(w, r, merr)
+				httpx.WriteError(w, r, MapDBError(merr))
 				return
 			}
 			att = &minted

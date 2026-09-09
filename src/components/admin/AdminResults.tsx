@@ -3,11 +3,17 @@ import { BarChart2, CheckCircle2, Clock3, RefreshCw, Search, Users, X } from "lu
 import { ErrorSurface } from "../ui/ErrorSurface";
 import { LoadingSurface } from "../ui/LoadingSurface";
 import {
+  useActScienceDetailQuery,
   useAdminResultsQuery,
   useResultsAnalyticsQuery,
   type AdminResultRow,
   type ResultProviderKey,
 } from "../../features/results/api/resultsQueries";
+import {
+  useIeltsResultDetailQuery,
+} from "../../features/results/api/ieltsResultDetail";
+import { ModuleRawTable } from "../results/ModuleRawTable";
+import { QuestionRawTable } from "../results/QuestionRawTable";
 
 type ProviderFilter = ResultProviderKey | "all";
 
@@ -88,7 +94,32 @@ function bandValue(result: AdminResultRow, key: string): string {
   return typeof value === "number" ? value.toFixed(1) : "—";
 }
 
+type ResultDetailTab = "summary" | "modules" | "questions" | "writing";
+
+function formatDetailValue(value: unknown): string {
+  if (typeof value === "string") return value === "" ? "(empty)" : value;
+  if (value === null || value === undefined) return "—";
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "(empty)";
+    return value.map((item) => (typeof item === "string" ? item : JSON.stringify(item))).join(" | ");
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "(unserializable)";
+    }
+  }
+  return String(value);
+}
+
 function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: () => void }) {
+  const [tab, setTab] = useState<ResultDetailTab>("summary");
+  const isIelts = result.providerKey === "ielts";
+  const isAct = result.providerKey === "act";
+  const ieltsSubmissionId = isIelts ? (result.submissionId ?? null) : null;
+  const ieltsDetail = useIeltsResultDetailQuery(ieltsSubmissionId, isIelts && tab !== "summary");
+  const actDetail = useActScienceDetailQuery(isAct && tab !== "summary" ? result.attemptId : null);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4"
@@ -188,9 +219,193 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
           </div>
         ) : null}
 
-        <p className="mt-5 text-[11px] leading-5 text-slate-400">
-          {result.examTitle} · {result.scheduleId}
-        </p>
+        <div className="mt-6 flex flex-wrap gap-1.5" role="tablist" aria-label="Result detail tabs">
+          {(
+            [
+              ["summary", "Summary"],
+              ["modules", "Modules"],
+              ["questions", "Questions"],
+              ...(isIelts ? [["writing", "Writing"] as const] : []),
+            ] as Array<readonly [ResultDetailTab, string]>
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={tab === value}
+              onClick={() => setTab(value)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                tab === value
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "summary" ? (
+          <p className="mt-5 text-[11px] leading-5 text-slate-400">
+            {result.examTitle} · {result.scheduleId}
+          </p>
+        ) : null}
+
+        {tab === "modules" ? (
+          <div className="mt-4" role="tabpanel" aria-label="Module raw scores">
+            {isIelts ? (
+              ieltsDetail.isLoading ? (
+                <p className="py-4 text-sm text-slate-500">Loading module raw scores…</p>
+              ) : ieltsDetail.error ? (
+                <p role="alert" className="py-4 text-sm text-red-600">
+                  Module raw scores could not load. The summary above is still authoritative.
+                </p>
+              ) : (
+                <ModuleRawTable
+                  caption="IELTS module raw scores"
+                  rows={(ieltsDetail.data?.modules ?? []).map((module) => ({
+                    key: module.key,
+                    label: module.label,
+                    sublabel: module.status,
+                    correct: module.correct,
+                    total: module.total,
+                    percentage: module.percentage,
+                    status: module.status,
+                    badges: [
+                      ...(module.overrideCount > 0 ? [`${module.overrideCount} override${module.overrideCount === 1 ? "" : "s"}`] : []),
+                      ...(module.unansweredCount > 0 ? [`${module.unansweredCount} unanswered`] : []),
+                    ],
+                  }))}
+                />
+              )
+            ) : isAct ? (
+              actDetail.isLoading ? (
+                <p className="py-4 text-sm text-slate-500">Loading module raw scores…</p>
+              ) : actDetail.error || !actDetail.data ? (
+                <p role="alert" className="py-4 text-sm text-red-600">
+                  Module raw scores could not load. The summary above is still authoritative.
+                </p>
+              ) : (
+                <ModuleRawTable
+                  caption="ACT science module raw score"
+                  rows={[
+                    {
+                      key: "science",
+                      label: "Science",
+                      sublabel: actDetail.data.releaseStatus,
+                      correct: actDetail.data.totalScore,
+                      total: actDetail.data.maxScore,
+                      percentage: actDetail.data.percentage,
+                      status: actDetail.data.outcomeStatus,
+                    },
+                  ]}
+                />
+              )
+            ) : typeof result.percentage === "number" && Number.isFinite(result.percentage) ? (
+              <ModuleRawTable
+                caption="SAT objective raw score"
+                rows={[
+                  {
+                    key: result.id,
+                    label: "Objective sections",
+                    sublabel: result.releaseStatus,
+                    correct:
+                      typeof result.totalScore === "number" ? result.totalScore : null,
+                    total: typeof result.maxScore === "number" ? result.maxScore : null,
+                    percentage: result.percentage,
+                    status: result.outcomeStatus,
+                  },
+                ]}
+              />
+            ) : (
+              <p className="py-4 text-sm text-slate-500">
+                No module raw scores recorded. Open the SAT result page for section detail.
+              </p>
+            )}
+          </div>
+        ) : null}
+
+        {tab === "questions" ? (
+          <div className="mt-4" role="tabpanel" aria-label="Question raw answers">
+            {isIelts ? (
+              ieltsDetail.isLoading ? (
+                <p className="py-4 text-sm text-slate-500">Loading question raw answers…</p>
+              ) : ieltsDetail.error ? (
+                <p role="alert" className="py-4 text-sm text-red-600">
+                  Question raw answers could not load. Try again or open this student in Grading.
+                </p>
+              ) : (
+                <QuestionRawTable
+                  caption="IELTS question raw answers"
+                  rows={(ieltsDetail.data?.questions ?? []).map((question) => ({
+                    key: `${question.section}:${question.questionId}`,
+                    index: question.displayOrder,
+                    question: question.questionId,
+                    section: question.section,
+                    studentAnswer: formatDetailValue(question.studentAnswer),
+                    correctAnswer: formatDetailValue(question.correctAnswer),
+                    isCorrect: question.isCorrect,
+                    score:
+                      question.awardedScore !== null || question.maxScore !== null
+                        ? `${question.awardedScore ?? "—"} / ${question.maxScore ?? "—"}`
+                        : undefined,
+                    badges: question.answered ? [] : ["Unanswered"],
+                    hasOverride: question.hasOverride,
+                    answered: question.answered,
+                  }))}
+                />
+              )
+            ) : isAct ? (
+              actDetail.isLoading ? (
+                <p className="py-4 text-sm text-slate-500">Loading question raw answers…</p>
+              ) : actDetail.error || !actDetail.data ? (
+                <p role="alert" className="py-4 text-sm text-red-600">
+                  Question raw answers could not load. The summary above is still authoritative.
+                </p>
+              ) : (
+                <QuestionRawTable
+                  caption="ACT science question raw answers"
+                  rows={actDetail.data.questions.map((question) => ({
+                    key: question.questionId,
+                    index: question.displayOrder,
+                    question: question.questionId,
+                    section: "science",
+                    studentAnswer: formatDetailValue(question.response),
+                    correctAnswer: formatDetailValue(question.correctAnswer),
+                    isCorrect: question.isCorrect,
+                    badges: question.answered ? [] : ["Unanswered"],
+                    answered: question.answered,
+                  }))}
+                />
+              )
+            ) : (
+              <p className="py-4 text-sm text-slate-500">
+                SAT per-question rows live on the SAT result page, where adaptive
+                module context is preserved.
+              </p>
+            )}
+          </div>
+        ) : null}
+
+        {tab === "writing" && isIelts ? (
+          <div className="mt-4 space-y-4" role="tabpanel" aria-label="Writing raw answers">
+            {ieltsDetail.isLoading ? (
+              <p className="py-4 text-sm text-slate-500">Loading writing answers…</p>
+            ) : (ieltsDetail.data?.writingTasks ?? []).length === 0 ? (
+              <p className="py-4 text-sm text-slate-500">No writing answers recorded.</p>
+            ) : (
+              (ieltsDetail.data?.writingTasks ?? []).map((task) => (
+                <article key={task.id} className="rounded-xl border border-gray-200 p-4">
+                  <h4 className="text-sm font-semibold text-slate-900">{task.taskLabel}</h4>
+                  <p className="mt-0.5 text-xs text-slate-400">{task.wordCount} words</p>
+                  <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+                    {task.studentText || "(empty)"}
+                  </p>
+                </article>
+              ))
+            )}
+          </div>
+        ) : null}
       </section>
     </div>
   );

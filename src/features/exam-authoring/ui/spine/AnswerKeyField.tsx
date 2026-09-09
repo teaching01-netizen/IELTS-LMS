@@ -1,3 +1,5 @@
+import { motion } from "motion/react";
+import { authoringMotion } from "@/src/shared/motion";
 import { FastQuestionComposer } from "../../editor/FastQuestionComposer";
 import { SAT_CHOICE_COMPOSER_CAPABILITIES } from "../../editor/RichQuestionComposer";
 import { plainTextFromContent } from "../../editor/richContent";
@@ -30,14 +32,17 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
 
   return (
     <section data-authoring-field="answer" aria-labelledby="spine-answer-key-heading">
-      <div className="mb-3">
-        <h3 id="spine-answer-key-heading" className="text-sm font-semibold text-foreground">
+      <div className="mb-1 flex items-baseline justify-between gap-3">
+        <h3 id="spine-answer-key-heading" className="text-[13px] font-semibold text-foreground">
           Answer key
         </h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Select the one correct choice. The key is shown with fill and text, not color alone.
-        </p>
+        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+          Required
+        </span>
       </div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Select the one correct choice. The key is shown with fill and text, not color alone.
+      </p>
       <div role="radiogroup" aria-label="Answer key choices" className="space-y-2">
         {answer.options.map((option, index) => {
           const letter = String.fromCharCode(65 + index);
@@ -49,9 +54,10 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
               data-spine-key-row={checked ? "key" : undefined}
               className={`flex items-start gap-2 rounded-lg border p-2 transition-colors ${checked ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/60"}`}
             >
-              <button
+              <motion.button
                 type="button"
                 role="radio"
+                whileTap={authoringMotion.press}
                 aria-checked={checked}
                 aria-label={`Choice ${letter}${text ? `: ${text}` : ""}${checked ? ", correct answer, key" : ""}`}
                 onClick={() => setKey(option.id)}
@@ -64,10 +70,10 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
                     moveKey(option.id, -1);
                   }
                 }}
-                className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${checked ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+                className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.93] ${checked ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
               >
                 {letter}
-              </button>
+              </motion.button>
               <div className="min-w-0 flex-1">
                 <FastQuestionComposer
                   label={`Answer choice ${letter}`}
@@ -91,9 +97,13 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
                 />
               </div>
               {checked ? (
-                <span className="mt-3 shrink-0 pr-1 text-[10px] font-bold uppercase tracking-wider text-primary">
+                <motion.span
+                  layoutId="spine-key-tag"
+                  transition={authoringMotion.snap}
+                  className="mt-3 shrink-0 pr-1 text-[10px] font-bold uppercase tracking-wider text-primary"
+                >
                   Key
-                </span>
+                </motion.span>
               ) : null}
             </div>
           );

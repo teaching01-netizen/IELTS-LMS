@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -44,7 +45,18 @@ func QueryContext(r *http.Request, maxWait time.Duration) (context.Context, cont
 // through untouched (WriteError maps unknown to 500 INTERNAL).
 func MapDBError(err error) error {
 	// errors.Is (not ==): sql + service layers wrap ctx.Err() with %w.
+	// Round 157: string-fallback mirrors auth.isClientGone — the mysql
+	// driver surfaces cancellations message-intact but identity-opaque
+	// (r153-r156 live: bare `context canceled` still 500 despite this
+	// guard). Both spellings map to retryable 503, never INTERNAL.
+	if err == nil {
+		return nil
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return apperrors.New(apperrors.CodeServiceUnavailable, "Database budget exhausted; please retry.")
+	}
+	s := strings.ToLower(err.Error())
+	if strings.Contains(s, "context canceled") || strings.Contains(s, "context deadline exceeded") {
 		return apperrors.New(apperrors.CodeServiceUnavailable, "Database budget exhausted; please retry.")
 	}
 	return err

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { MotionConfig } from 'motion/react';
 import { BarChart3, BookOpen, LogOut, Radio } from 'lucide-react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuthSession } from '../../features/auth/authSession';
@@ -39,6 +40,7 @@ export function SatRoot() {
   const displayName = session?.user.displayName?.trim() || session?.user.email || 'Staff';
 
   return (
+    <MotionConfig reducedMotion="user" transition={{ duration: 0.18 }}>
     <div className="sat-product min-h-screen bg-[#f5f5f7] text-slate-950 md:flex">
       <a href="#sat-main" className="skip-link">Skip to main content</a>
       <aside className="hidden w-[244px] shrink-0 border-r border-black/[0.07] bg-white/82 backdrop-blur-2xl md:flex md:min-h-screen md:flex-col">
@@ -128,5 +130,6 @@ export function SatRoot() {
         </nav>
       </div>
     </div>
+    </MotionConfig>
   );
 }

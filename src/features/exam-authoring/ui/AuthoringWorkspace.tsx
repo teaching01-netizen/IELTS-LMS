@@ -58,6 +58,9 @@ import { QuestionJumpPalette } from "./spine/QuestionJumpPalette";
 import { ShortcutHelpDialog } from "./spine/ShortcutHelpDialog";
 import { SpineQuestionView } from "./spine/SpineQuestionView";
 import { SaveCluster } from "./spine/SaveCluster";
+import { flashAuthoringField } from "./spine/TargetFlash";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { authoringMotion } from "@/src/shared/motion";
 
 export interface AuthoringWorkspaceProps {
   examId: string;
@@ -107,6 +110,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const recoveredQuestionDraftKeyRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const questionQuery = useExamQuestion(selectedExamQuestionId);
+  const reduceMotion = useReducedMotion();
   const shell = shellQuery.data;
   const questionDraftKey = selectedExamQuestionId
     ? buildStaffDraftKey(staffActorId, "assessment-question", examId, selectedExamQuestionId)
@@ -237,6 +241,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     const frame = window.requestAnimationFrame(() => {
       const target = document.querySelector<HTMLElement>(`[data-authoring-field="${focusField}"]`);
       target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      flashAuthoringField(focusField);
       (target?.matches("input, textarea, select, button, [contenteditable=true]")
         ? target
         : target?.querySelector<HTMLElement>(
@@ -1002,23 +1007,33 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
           }
         >
           {draft ? (
-            <SpineQuestionView
-              question={draft}
-              {...(selectedModuleIndex >= 0 ? { questionNumber: selectedModuleIndex + 1 } : {})}
-              saveStatus={autosave.status}
-              lastSavedAt={autosave.lastSavedAt}
-              issues={selectedQuestionIssues}
-              keepMetadataForNext={keepMetadataForNext}
-              onKeepMetadataForNextChange={setKeepMetadataForNext}
-              onChange={handleChange}
-              onSaveNow={() => void handleSaveNow()}
-              onSaveAndNext={() => void handleSaveAndNext()}
-              onRetrySave={() => autosave.retry(draft)}
-              onDuplicate={() => void handleDuplicate()}
-              onDelete={() => handleDelete()}
-              onPreview={() => setPreviewOpen(true)}
-              onIssueSelect={(field) => setFocusField(resolveAuthoringField(field))}
-            />
+            <AnimatePresence mode="popLayout" initial={false}>
+              <motion.div
+                key={selectedExamQuestionId}
+                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 8 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -6 }}
+                transition={authoringMotion.question}
+              >
+                <SpineQuestionView
+                  question={draft}
+                  {...(selectedModuleIndex >= 0 ? { questionNumber: selectedModuleIndex + 1 } : {})}
+                  saveStatus={autosave.status}
+                  lastSavedAt={autosave.lastSavedAt}
+                  issues={selectedQuestionIssues}
+                  keepMetadataForNext={keepMetadataForNext}
+                  onKeepMetadataForNextChange={setKeepMetadataForNext}
+                  onChange={handleChange}
+                  onSaveNow={() => void handleSaveNow()}
+                  onSaveAndNext={() => void handleSaveAndNext()}
+                  onRetrySave={() => autosave.retry(draft)}
+                  onDuplicate={() => void handleDuplicate()}
+                  onDelete={() => handleDelete()}
+                  onPreview={() => setPreviewOpen(true)}
+                  onIssueSelect={(field) => setFocusField(resolveAuthoringField(field))}
+                />
+              </motion.div>
+            </AnimatePresence>
           ) : selectedExamQuestionId && questionQuery.error ? (
             <QuestionLoadError
               error={questionQuery.error}

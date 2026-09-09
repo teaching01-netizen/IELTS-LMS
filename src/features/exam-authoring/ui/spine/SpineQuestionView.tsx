@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Save } from "lucide-react";
+import { ChevronRight, Copy, Save } from "lucide-react";
 import type {
   AssessmentValidationIssue,
   QuestionRevision,
@@ -15,6 +15,9 @@ import { hasStructuredContent, plainTextFromContent } from "../../editor/richCon
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
 import { ClassificationFieldset } from "./ClassificationFieldset";
 import { AnswerKeyField } from "./AnswerKeyField";
+import { SpineFieldLabel } from "./SpineFieldLabel";
+import { SpineStep } from "./SpineStep";
+import { SaveCluster } from "./SaveCluster";
 import { SatStudentResponseEditor } from "../SatStudentResponseEditor";
 import { AuthoringSegmented } from "../AuthoringSegmented";
 import { ValidationChecklist } from "./ValidationChecklist";
@@ -125,13 +128,14 @@ export function SpineQuestionView({
             {questionNumber ? `Question ${questionNumber}` : "Edit question"}
           </h2>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1.5">
+          <SaveCluster status={saveStatus} lastSavedAt={lastSavedAt} onRetry={onRetrySave} />
           <button
             type="button"
             onClick={onPreview}
             aria-label="Preview question as students will see it"
             title="Preview as students will see it (Space)"
-            className="flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold text-muted-foreground transition duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97]"
           >
             Preview
           </button>
@@ -139,7 +143,7 @@ export function SpineQuestionView({
             type="button"
             onClick={onDuplicate}
             title="Duplicate question"
-            className="flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold text-muted-foreground transition duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97]"
           >
             <Copy size={13} aria-hidden="true" />
             Duplicate
@@ -147,21 +151,20 @@ export function SpineQuestionView({
           <button
             type="button"
             onClick={onSaveNow}
+            disabled={saveStatus === "saving"}
             aria-label="Save now"
             title="Save now"
-            className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground transition duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-45"
           >
-            <Save size={15} aria-hidden="true" />
+            <Save size={14} aria-hidden="true" />
+            {saveStatus === "saving" ? "Saving…" : "Save now"}
           </button>
         </div>
       </header>
 
       <div className="space-y-6">
-        <section data-authoring-field="prompt">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <span className="text-sm font-semibold text-foreground">Question prompt</span>
-            <span className="text-[10px] font-medium text-muted-foreground">Required</span>
-          </div>
+        <SpineStep step="01" title="Prompt" field="prompt">
+          <SpineFieldLabel label="Question prompt" required />
           <FastQuestionComposer
             label="Question prompt"
             value={question.prompt}
@@ -170,13 +173,10 @@ export function SpineQuestionView({
             assetOwnerId={question.id}
             minHeightClassName="min-h-[112px]"
           />
-        </section>
+        </SpineStep>
 
-        <section data-authoring-field="stimulus">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <span className="text-xs font-semibold text-muted-foreground">Supporting material</span>
-            <span className="text-[10px] text-muted-foreground">Optional</span>
-          </div>
+        <SpineStep step="02" title="Supporting material" field="stimulus">
+          <SpineFieldLabel label="Supporting material" required={false} />
           {stimulusEmpty ? (
             <SpineSupportingStarters
               sectionKey={question.metadata.sectionKey}
@@ -193,10 +193,13 @@ export function SpineQuestionView({
             assetOwnerId={question.id}
             minHeightClassName="min-h-[92px]"
           />
-        </section>
+        </SpineStep>
 
-        <ClassificationFieldset question={question} onChange={onChange} issues={issues} />
+        <SpineStep step="03" title="Classification">
+          <ClassificationFieldset question={question} onChange={onChange} issues={issues} />
+        </SpineStep>
 
+        <SpineStep step="04" title="Answer key">
         <div className="border-t border-border pt-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
@@ -236,10 +239,15 @@ export function SpineQuestionView({
             <AnswerKeyField question={question} onChange={onChange} />
           )}
         </div>
+        </SpineStep>
 
-        <details className="rounded-lg border border-border">
-          <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-foreground marker:hidden">
-            <span>Rationale</span>
+        <SpineStep step="05" title="Rationale">
+        <details className="group rounded-lg border border-border transition-colors duration-150 open:bg-muted/40">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground marker:hidden [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-2">
+              <ChevronRight size={14} aria-hidden="true" className="text-muted-foreground transition-transform duration-150 group-open:rotate-90" />
+              <span>Rationale</span>
+            </span>
             <span className="text-xs font-normal text-muted-foreground">Internal · recommended</span>
           </summary>
           <div className="border-t border-border p-4" data-authoring-field="rationale">
@@ -253,11 +261,14 @@ export function SpineQuestionView({
             />
           </div>
         </details>
+        </SpineStep>
 
+        <SpineStep step="06" title="Validation">
         <ValidationChecklist
           issues={issues}
           onIssueSelect={(selected) => onIssueSelect(selected.field ?? selected.path)}
         />
+        </SpineStep>
 
         <SpineSaveFooter
           status={saveStatus}
@@ -324,18 +335,21 @@ function SpineSupportingStarters({
       : [{ key: "data_table", label: "Data table" }];
 
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="Supporting material starters">
+    <div className="mb-2">
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Supporting material starters">
       <span className="mr-1 text-xs font-medium text-muted-foreground">Quick start</span>
       {starters.map((starter) => (
         <button
           key={starter.key}
           type="button"
           onClick={() => onSelect(starter.key)}
-          className="rounded-md bg-muted px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+          className="rounded-md bg-muted px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.95]"
         >
           {starter.label}
         </button>
       ))}
+    </div>
+    <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">Students see this above the question.</p>
     </div>
   );
 }

@@ -109,6 +109,7 @@ func (s *Service) RefreshRollup(ctx context.Context, scheduleID string) (Proctor
 	}
 	now := time.Now().UTC()
 	telemetry.IncCounter(telemetry.MRollupRefresh)
+	telemetry.SetGauge(telemetry.MRollupLag, 0)
 	return ProctorRollup{ScheduleID: scheduleID, ByStatus: byStatus, Total: total, Revision: rev + 1, UpdatedAt: now}, nil
 }
 
@@ -146,5 +147,6 @@ func (s *Service) LoadRollup(ctx context.Context, scheduleID string) (ProctorRol
 	if ago < 0 {
 		ago = 0
 	}
+	telemetry.SetGauge(telemetry.MRollupLag, float64(ago))
 	return ProctorRollup{ScheduleID: scheduleID, ByStatus: byStatus, Total: total, Revision: rev, UpdatedAt: updated, UpdatedAgoSecs: ago}, nil
 }

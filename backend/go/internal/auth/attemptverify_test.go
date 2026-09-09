@@ -100,8 +100,9 @@ func TestVerifyAttemptStrictKeepsDBBinding(t *testing.T) {
 	defer db.Close()
 	cfg := attemptTestCfg()
 	tok := signAttempt(t, cfg, nil)
-	// Unknown token_id: both SELECT arms miss -> error, zero claims.
-	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnError(errNoRowsForTest())
+	// Unknown token_id: wide SELECT misses with sql.ErrNoRows (NOT a 1054,
+	// so per the r168 gate the fallback must NOT fire a second query) ->
+	// error, zero claims.
 	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnError(errNoRowsForTest())
 	if _, err := VerifyAttemptTokenRouted(context.Background(), db, cfg, AttemptVerifyStrict, time.Now().UTC(), tok); err == nil {
 		t.Fatalf("strict unknown session must error")
@@ -120,7 +121,6 @@ func TestVerifyAttemptRoutedDefaultStrict(t *testing.T) {
 	defer db.Close()
 	cfg := attemptTestCfg()
 	tok := signAttempt(t, cfg, nil)
-	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnError(errNoRowsForTest())
 	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnError(errNoRowsForTest())
 	if _, err := VerifyAttemptTokenRouted(context.Background(), db, cfg, AttemptVerifyMode(""), time.Now().UTC(), tok); err == nil {
 		t.Fatalf("zero-value mode must behave strict")

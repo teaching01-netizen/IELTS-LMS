@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
 
 // SnapshotTTL bounds snapshot staleness (plan B2 default 1s).
@@ -104,6 +105,7 @@ func (c *SnapshotCache) Get(scheduleID string, now time.Time, load func() (Snaps
 	c.mu.Lock()
 	if s, ok := c.items[scheduleID]; ok && now.Sub(s.LoadedAt.UTC()) < c.ttl {
 		c.mu.Unlock()
+		telemetry.IncCounter(telemetry.MSnapshotCacheHit)
 		return s, nil
 	}
 	c.mu.Unlock()
@@ -111,6 +113,7 @@ func (c *SnapshotCache) Get(scheduleID string, now time.Time, load func() (Snaps
 	if err != nil {
 		return Snapshot{}, err
 	}
+	telemetry.IncCounter(telemetry.MSnapshotCacheMiss)
 	s.LoadedAt = now
 	c.mu.Lock()
 	c.items[scheduleID] = s

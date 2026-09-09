@@ -10,6 +10,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
 
 // runtimePollHandler serves GET /api/v1/student/sessions/{scheduleID}/runtime
@@ -54,9 +55,11 @@ func runtimePollInner(app *App, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if notModified {
+		telemetry.IncCounter(telemetry.MRuntimePollTotal, "result", "not_modified")
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
+	telemetry.IncCounter(telemetry.MRuntimePollTotal, "result", "delta")
 	httpx.WriteJSON(w, http.StatusOK, view)
 }
 

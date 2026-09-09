@@ -367,7 +367,7 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
-	control, err := s.loadAttemptControl(ctx, attemptID)
+	control, err := s.loadAttemptControl(ctx, attemptID, attemptControl{})
 	if err != nil {
 		return nil, err
 	}

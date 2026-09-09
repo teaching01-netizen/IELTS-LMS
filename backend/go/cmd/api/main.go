@@ -260,12 +260,17 @@ func main() {
 	// Plan E3: report absorbed tx transients on db_deadlocks_total{kind}.
 	defer installTxRetryHook()()
 	srvCfg := httpx.DefaultServerConfig()
+	// Plan-E conn lever (round 137): HTTP_WRITE_TIMEOUT_SECS lengthens the
+	// write bound for saturated waves; default 30 = today's behavior.
+	if cfg.HTTPWriteTimeoutSecs > 0 {
+		srvCfg.WriteTimeout = time.Duration(cfg.HTTPWriteTimeoutSecs) * time.Second
+	}
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           BuildRouter(app),
 		ReadHeaderTimeout: srvCfg.ReadHeaderTimeout, // 5s
 		ReadTimeout:       srvCfg.ReadTimeout,       // 15s
-		WriteTimeout:      srvCfg.WriteTimeout,      // 30s
+		WriteTimeout:      srvCfg.WriteTimeout,
 		IdleTimeout:       srvCfg.IdleTimeout,       // 120s
 		MaxHeaderBytes:    srvCfg.MaxHeaderBytes,    // 1MB
 	}
@@ -548,6 +553,7 @@ func BuildRouter(app *App) http.Handler {
 			route(r, "GET", "/sat", resultsSATListHandler(app))
 			route(r, "GET", "/sat/{resultID}", resultsSATGetHandler(app))
 			route(r, "GET", "/act-science", resultsACTScienceHandler(app))
+			route(r, "GET", "/act-science/{attemptID}", resultsACTScienceDetailHandler(app))
 			route(r, "GET", "/{resultID}/events", resultsEventsHandler(app))
 			route(r, "GET", "/{resultID}", resultsGetHandler(app))
 		})

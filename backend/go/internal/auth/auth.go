@@ -18,6 +18,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -294,6 +295,11 @@ func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, r
 
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
+		// Round 152: same client-gone honesty as the issuance re-read —
+		// a canceled begin is a gone client, not an INTERNAL.
+		if isClientGone(err) {
+			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+		}
 		return "", "", "", fmt.Errorf("auth: create session begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -309,14 +315,28 @@ func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, r
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO user_sessions (id, user_id, session_token_hash, csrf_token, role_snapshot, issued_at, last_seen_at, expires_at, idle_timeout_at, user_agent_hash, ip_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sessionID, userID, tokenHash, csrfToken, role, now, now, expiresAt, idleAt, ua, ipMeta); err != nil {
+		// Round 157: same client-gone honesty (r156: 5 masked 500s) —
+		// a client gone mid-session-row insert is retryable 503.
+		if isClientGone(err) {
+			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+		}
 		return "", "", "", fmt.Errorf("auth: insert user_sessions: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO user_session_events (id, session_id, user_id, event_type, created_at) VALUES (?, ?, ?, 'created', ?)`,
 		uuid.NewString(), sessionID, userID, now); err != nil {
+		// Round 158: same client-gone honesty (r157: 1 masked 500) —
+		// a client gone mid-events insert is retryable 503.
+		if isClientGone(err) {
+			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+		}
 		return "", "", "", fmt.Errorf("auth: insert user_session_events: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
+		// Round 158: a commit racing a gone client is retryable 503.
+		if isClientGone(err) {
+			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+		}
 		return "", "", "", fmt.Errorf("auth: create session commit: %w", err)
 	}
 	return sessionID, sessionToken, csrfToken, nil
@@ -619,6 +639,10 @@ func AttemptTokenTTL(cfg config.Config) time.Duration {
 
 // IssueAttemptToken persists/refreshes the attempt_sessions row and signs a
 // fresh HMAC bearer token binding token/user/schedule/attempt/client/org.
+// Round 166: the single-statement upsert is deadlock-prone under entry-wave
+// concurrency (game-day r166: 7 x 1213 masked as 500 on the bootstrap
+// re-issuance path): retry the upsert legs on InnoDB transients (bounded,
+// same classifier as tx.transient) and surface exhaustion as retryable 503.
 func IssueAttemptToken(ctx context.Context, db *sql.DB, cfg config.Config, userID, scheduleID, attemptID, clientSessionID string, organizationID *string, leaseEpoch *uint64, now time.Time) (token string, expiresAt time.Time, err error) {
 	now = now.UTC()
 	expiresAt = now.Add(AttemptTokenTTL(cfg))
@@ -643,22 +667,80 @@ func IssueAttemptToken(ctx context.Context, db *sql.DB, cfg config.Config, userI
 	// surface immediately, not masquerade behind a second failing insert
 	// (round 73 live rehearsal: the blind fallback hid the real error
 	// and both failures escaped as unknown-500).
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO attempt_sessions (id, user_id, schedule_id, attempt_id, client_session_id, token_id, device_fingerprint_hash, issued_at, last_seen_at, expires_at, organization_id, lease_epoch)
+	execWide := func() error {
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO attempt_sessions (id, user_id, schedule_id, attempt_id, client_session_id, token_id, device_fingerprint_hash, issued_at, last_seen_at, expires_at, organization_id, lease_epoch)
 		 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), token_id = VALUES(token_id), issued_at = VALUES(issued_at), last_seen_at = VALUES(last_seen_at), expires_at = VALUES(expires_at), organization_id = VALUES(organization_id), lease_epoch = VALUES(lease_epoch), revoked_at = NULL, revocation_reason = NULL`,
-		sessionID, userID, scheduleID, attemptID, clientSessionID, tokenID, now, now, expiresAt, org, lease); err != nil {
-		if !isMissingColumn(err) {
-			return "", time.Time{}, fmt.Errorf("auth: upsert attempt_sessions: %w", err)
-		}
-		if _, ferr := db.ExecContext(ctx,
+			sessionID, userID, scheduleID, attemptID, clientSessionID, tokenID, now, now, expiresAt, org, lease)
+		return err
+	}
+	execBase := func() error {
+		_, err := db.ExecContext(ctx,
 			`INSERT INTO attempt_sessions (id, user_id, schedule_id, attempt_id, client_session_id, token_id, device_fingerprint_hash, issued_at, last_seen_at, expires_at)
 		 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), token_id = VALUES(token_id), issued_at = VALUES(issued_at), last_seen_at = VALUES(last_seen_at), expires_at = VALUES(expires_at), revoked_at = NULL, revocation_reason = NULL`,
-			sessionID, userID, scheduleID, attemptID, clientSessionID, tokenID, now, now, expiresAt); ferr != nil {
+			sessionID, userID, scheduleID, attemptID, clientSessionID, tokenID, now, now, expiresAt)
+		return err
+	}
+	wideErr := execWide()
+	if wideErr == nil {
+		goto issued
+	}
+	if isClientGone(wideErr) {
+		return "", time.Time{}, apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+	}
+	if !isMissingColumn(wideErr) {
+		// Deadlock/lock-wait on the upsert's unique-key dance is
+		// transient: one bounded re-drive, then retryable 503
+		// (never INTERNAL) so the client replays the issuance.
+		if isTransientDB(wideErr) {
+			rerr := execWide()
+			if rerr == nil {
+				goto issued
+			}
+			if isClientGone(rerr) {
+				return "", time.Time{}, apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+			}
+			if !isMissingColumn(rerr) {
+				return "", time.Time{}, apperrors.New(apperrors.CodeServiceUnavailable, "Session issuance contended; please retry.")
+			}
+			wideErr = rerr
+		} else {
+			return "", time.Time{}, fmt.Errorf("auth: upsert attempt_sessions: %w", wideErr)
+		}
+	}
+	if !isMissingColumn(wideErr) {
+		// Unreachable by construction (non-1054 wide errors returned
+		// above), kept as a fail-closed guard.
+		return "", time.Time{}, fmt.Errorf("auth: upsert attempt_sessions: %w", wideErr)
+	}
+	{
+		if ferr := execBase(); ferr != nil {
+			// Round 156: the fallback leg needs the same client-gone
+			// honesty — live schemas predate organization_id/lease_epoch
+			// (verified absent), so EVERY issuance takes this branch and
+			// a client gone mid-fallback masked as 500 (r155: 418 of them
+			// despite the guarded wide leg directly above).
+			// Round 166: same transient honesty on the fallback leg —
+			// a deadlock here re-drives once, then retryable 503.
+			if isTransientDB(ferr) {
+				rerr := execBase()
+				if rerr == nil {
+					goto issued
+				}
+				if isClientGone(rerr) {
+					return "", time.Time{}, apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+				}
+				return "", time.Time{}, apperrors.New(apperrors.CodeServiceUnavailable, "Session issuance contended; please retry.")
+			}
+			if isClientGone(ferr) {
+				return "", time.Time{}, apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+			}
 			return "", time.Time{}, fmt.Errorf("auth: upsert attempt_sessions: %w", ferr)
 		}
 	}
+issued:
 	// Re-read the canonical row: on upsert races the row id may differ from
 	// the freshly generated one (React StrictMode / retries), mirroring Rust.
 	var canonicalTokenID string
@@ -666,6 +748,11 @@ func IssueAttemptToken(ctx context.Context, db *sql.DB, cfg config.Config, userI
 		`SELECT token_id FROM attempt_sessions WHERE attempt_id = ? AND client_session_id = ?`,
 		attemptID, clientSessionID).Scan(&canonicalTokenID)
 	if err != nil {
+		// Round 151: a client that went away mid-statement must not
+		// mask as unknown-500 — return retryable 503 (E1 honesty).
+		if isClientGone(err) {
+			return "", time.Time{}, apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+		}
 		return "", time.Time{}, fmt.Errorf("auth: read attempt_sessions: %w", err)
 	}
 	claims := crypto.AttemptClaims{
@@ -685,6 +772,39 @@ func IssueAttemptToken(ctx context.Context, db *sql.DB, cfg config.Config, userI
 		return "", time.Time{}, fmt.Errorf("auth: sign attempt token: %w", err)
 	}
 	return signed, expiresAt, nil
+}
+
+// isClientGone reports a dead client context (canceled/timeout): the
+// caller went away mid-statement (round 151: 5k entry-wave queue-aged
+// admissions timing out client-side inside IssueAttemptToken's re-read).
+// errors.Is (not ==): sql + service layers wrap ctx.Err() with %w.
+// Round 154: ALSO string-match the terminal cause — database/sql and the
+// mysql driver surface cancellations through paths that preserve the
+// message but not the identity (r153 live: 201 x the exact wrapped string
+// `auth: upsert attempt_sessions: context canceled` still 500 despite the
+// errors.Is guard directly above the wrap site, unit-green but prod-dark).
+func isClientGone(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "context canceled") || strings.Contains(s, "context deadline exceeded")
+}
+
+// isTransientDB reports InnoDB transients safe for one bounded re-drive
+// (round 166: 1213 deadlocks on the issuance upsert under wave
+// concurrency): mirrors tx.transient's deadlock/lock-wait spellings.
+func isTransientDB(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "deadlock") ||
+		strings.Contains(s, "lock wait timeout") ||
+		strings.Contains(s, "try restarting transaction")
 }
 
 // isMissingColumn reports MySQL 1054 (unknown column): the wide
@@ -717,6 +837,13 @@ func VerifyAttemptToken(ctx context.Context, db Querier, cfg config.Config, now 
 	err = db.QueryRowContext(ctx,
 		`SELECT user_id, schedule_id, attempt_id, client_session_id, expires_at, revoked_at, organization_id, lease_epoch FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL`,
 		claims.TokenID).Scan(&userID, &scheduleID, &attemptID, &clientSessionID, &expiresAt, &revokedAt, &rowOrg, &rowLease)
+	// Round 168: live schemas predate organization_id/lease_epoch (verified
+	// absent locally AND live). A hard 1054 here fails EVERY bearer verify
+	// (strict mode) — fall back to the base select ONLY on missing-column,
+	// surface any other wide-leg error (conn loss, etc.) immediately.
+	if err != nil && !isMissingColumn(err) {
+		return zero, fmt.Errorf("auth: load attempt session: %w", err)
+	}
 	if err != nil {
 		err = db.QueryRowContext(ctx,
 			`SELECT user_id, schedule_id, attempt_id, client_session_id, expires_at, revoked_at FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL`,

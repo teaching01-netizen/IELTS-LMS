@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"example.com/ielts-proctoring/internal/accesslinks"
+	"example.com/ielts-proctoring/internal/act"
 	"example.com/ielts-proctoring/internal/release"
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/sat"
@@ -23,6 +24,8 @@ func TestNullableResponseFieldsRemainPresent(t *testing.T) {
 		{"member", accesslinks.Member{}, []string{"studentName", "studentEmail"}},
 		{"result", results.ResultSummary{}, []string{"submissionId", "studentEmail", "totalScore", "submittedAt"}},
 		{"section result", results.SATSection{}, []string{"route", "scaledScore"}},
+		{"sat question null verdict", results.SATQuestion{}, []string{"response", "correctAnswer", "isCorrect"}},
+		{"act question null verdict", act.ScienceQuestion{}, []string{"response", "correctAnswer", "isCorrect"}},
 		{"delivery result", sat.AssessmentResult{}, []string{"totalScore"}},
 	}
 	for _, tc := range cases {

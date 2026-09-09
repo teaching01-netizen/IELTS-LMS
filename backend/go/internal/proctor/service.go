@@ -288,10 +288,17 @@ func lockScheduleScope(ctx context.Context, q tx.Tx, scheduleID string) error {
 	return nil
 }
 
-// enqueueAutoSubmitForSchedule captures every still-writable attempt while
-// the caller holds the schedule scope lock. The worker seals those attempts
-// after this transaction commits; keeping the seal in the outbox preserves
-// receipt-first terminalization without opening a nested transaction here.
+// enqueueAutoSubmitForSchedule enqueues a scan job for the worker: the
+// payload carries only the schedule identity (no attempt-ID list), and the
+// worker pages eligible attempts by id cursor at execution time
+// (executeOutboxEvent falls back to listAutoSubmitAttempts when
+// attemptIds is empty, so old rows carrying IDs still drain). The old
+// whole-cohort SELECT + embedded attemptIds[] is gone: it held the control
+// tx open over an unbounded cohort scan and produced unbounded JSON
+// payloads. Eligibility is still checked per attempt at seal time, so a
+// committed completion always has a durable auto-submit job and late or
+// concurrent submissions simply seal as no-ops. Receipt-first
+// terminalization is preserved without opening a nested transaction here.
 func (s *Service) enqueueAutoSubmitForSchedule(
 	ctx context.Context,
 	q tx.Tx,
@@ -300,37 +307,26 @@ func (s *Service) enqueueAutoSubmitForSchedule(
 	actorID string,
 	reason string,
 ) error {
-	rows, err := q.QueryContext(ctx, `
+	// Cheap existence probe (1 row, no ID materialization): skip the outbox
+	// row entirely when nothing is submittable, preserving the old
+	// no-op behavior without the unbounded scan.
+	var one string
+	err := q.QueryRowContext(ctx, `
 		SELECT id FROM student_attempts
 		WHERE schedule_id = ?
 		  AND submitted_at IS NULL
 		  AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
 		  AND COALESCE(proctor_status, 'active') <> 'terminated'
-		ORDER BY id`, scheduleID)
+		LIMIT 1`, scheduleID).Scan(&one)
+	if err == sql.ErrNoRows {
+		return nil
+	}
 	if err != nil {
 		return err
-	}
-	var attemptIDs []string
-	for rows.Next() {
-		var attemptID string
-		if err := rows.Scan(&attemptID); err != nil {
-			rows.Close()
-			return err
-		}
-		attemptIDs = append(attemptIDs, attemptID)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	rows.Close()
-	if len(attemptIDs) == 0 {
-		return nil
 	}
 
 	payload, err := json.Marshal(map[string]any{
 		"scheduleId": scheduleID,
-		"attemptIds": attemptIDs,
 		"actorId":    actorID,
 		"reason":     reason,
 	})

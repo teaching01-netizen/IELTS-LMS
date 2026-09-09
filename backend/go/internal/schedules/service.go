@@ -25,6 +25,7 @@ import (
 
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
@@ -862,6 +863,7 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 			if existingProtocol.Valid {
 				protocolVersion = int(existingProtocol.Int64)
 			}
+			telemetry.IncCounter(telemetry.MDupAttemptReplay)
 			return nil
 		} else if err != sql.ErrNoRows {
 			return err

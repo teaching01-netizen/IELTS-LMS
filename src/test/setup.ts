@@ -61,3 +61,15 @@ if (typeof window !== "undefined") {
     value: () => {},
   });
 }
+
+// Deterministic micro-interactions in tests: zero all CSS/JS animation
+// durations so assertions never race transitions. Production unaffected.
+if (typeof document !== "undefined") {
+  const style = document.createElement("style");
+  style.setAttribute("data-testing", "no-motion");
+  style.textContent =
+    ".testing-no-motion *, .testing-no-motion *::before, .testing-no-motion *::after" +
+    "{ animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }";
+  document.head.appendChild(style);
+  document.documentElement.classList.add("testing-no-motion");
+}

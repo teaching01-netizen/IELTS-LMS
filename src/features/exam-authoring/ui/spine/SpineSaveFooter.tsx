@@ -51,7 +51,7 @@ export function SpineSaveFooter({
         onClick={onSaveAndNext}
         disabled={saveDisabled}
         title="Save and move to the next question"
-        className="flex min-h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45"
+        className="flex min-h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-45"
       >
         Save & Next <ChevronRight size={13} aria-hidden="true" />
       </button>

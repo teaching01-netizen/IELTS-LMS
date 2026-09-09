@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CalendarPlus, Search } from 'lucide-react';
+import { ArrowRight, CalendarPlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ErrorSurface } from '../../../components/ui/ErrorSurface';
@@ -12,6 +12,18 @@ import { useSaveScheduleMutation } from '../../../features/scheduling/api/schedu
 import type { ExamSchedule } from '../../../types/domain';
 import { SatFormDialog } from '../ui/ConfirmDialog';
 import { SatSegmentedControl } from '../ui/SegmentedControl';
+import {
+  SatContainer,
+  SatEmptyState,
+  SatList,
+  SatListRow,
+  SatPageHeader,
+  SatPrimaryButton,
+  SatSearchField,
+  SatStatStrip,
+  SatStatusPill,
+  type SatStatusTone,
+} from '../ui/SatPage';
 import { validateSatScheduleTimes, type SatScheduleTimeErrors } from './scheduleValidation';
 
 type SessionBucket = 'upcoming' | 'live' | 'finished';
@@ -27,6 +39,15 @@ function formatSessionTime(value: string | null | undefined): string {
   const time = new Date(value).getTime();
   if (Number.isNaN(time)) return '—';
   return new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(time));
+}
+
+function sessionStatusTone(status: string): { tone: SatStatusTone; pulse: boolean } {
+  if (status === 'Live') return { tone: 'live', pulse: true };
+  if (status === 'Paused') return { tone: 'paused', pulse: false };
+  if (status === 'Ready') return { tone: 'ready', pulse: false };
+  if (status === 'Finished') return { tone: 'finished', pulse: false };
+  if (status === 'Cancelled') return { tone: 'cancelled', pulse: false };
+  return { tone: 'neutral', pulse: false };
 }
 
 function toLocalDateTimeInput(date: Date): string {
@@ -75,50 +96,84 @@ export function SatSessionsRoute() {
   if (summariesQuery.error) return <ErrorSurface title="SAT sessions could not load" description={summariesQuery.error instanceof Error ? summariesQuery.error.message : 'Sessions are unavailable.'} actionLabel="Retry" onAction={() => void summariesQuery.refetch()} />;
 
   return (
-    <div className="mx-auto w-full max-w-[1180px] px-4 pb-14 pt-7 sm:px-6 md:pt-10 lg:px-10">
-      <div className="flex flex-col gap-5 border-b border-black/[0.065] pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Digital SAT</p><h1 className="mt-1 text-[30px] font-semibold tracking-[-0.045em]">Sessions</h1></div>
-        <div className="flex w-full items-center gap-2 sm:w-auto">
-          <label htmlFor="sat-session-search" className="relative min-w-0 flex-1 sm:w-56 sm:flex-none"><Search size={15} className="pointer-events-none absolute left-3 top-3 text-slate-400" /><span className="sr-only">Search SAT sessions</span><input id="sat-session-search" aria-label="Search SAT sessions" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search sessions" className="h-10 w-full rounded-[11px] border border-black/[0.075] bg-white pl-9 pr-3 text-sm outline-none focus:border-[#0071e3]/40 focus:ring-4 focus:ring-[#0071e3]/10" /></label>
-          {session?.user.role === 'admin' ? <button type="button" onClick={() => setCreateOpen(true)} className="flex h-10 shrink-0 items-center gap-1.5 rounded-[11px] bg-[#0071e3] px-3.5 text-[12px] font-semibold text-white hover:bg-[#0077ed]"><CalendarPlus size={15} />New Session</button> : null}
-        </div>
-      </div>
+    <SatContainer>
+      <SatPageHeader
+        eyebrow="Digital SAT"
+        title="Sessions"
+        description="Proctored SAT administrations across cohorts."
+        actions={
+          <>
+            <SatSearchField
+              id="sat-session-search"
+              label="Search SAT sessions"
+              value={search}
+              onChange={setSearch}
+              placeholder="Search sessions"
+              widthClassName="sm:w-56 sm:flex-none"
+            />
+            {session?.user.role === 'admin' ? (
+              <SatPrimaryButton onClick={() => setCreateOpen(true)} icon={<CalendarPlus size={15} aria-hidden="true" />}>New Session</SatPrimaryButton>
+            ) : null}
+          </>
+        }
+      />
+
+      <SatStatStrip
+        label="Session summary"
+        stats={[
+          { id: 'upcoming', label: 'Upcoming', value: counts.upcoming },
+          { id: 'live', label: 'Live', value: counts.live },
+          { id: 'finished', label: 'Finished', value: counts.finished },
+        ]}
+      />
 
       <SatSegmentedControl<SessionBucket>
         label="Session status"
         value={bucket}
         options={[
-          { value: 'upcoming', label: `Upcoming ${counts.upcoming}` },
-          { value: 'live', label: `Live ${counts.live}` },
-          { value: 'finished', label: `Finished ${counts.finished}` },
+          { value: 'upcoming', label: 'Upcoming ' + counts.upcoming },
+          { value: 'live', label: 'Live ' + counts.live },
+          { value: 'finished', label: 'Finished ' + counts.finished },
         ]}
         onChange={setBucket}
         className="mt-5 max-w-[360px]"
       />
 
       {visible.length ? (
-        <div className="mt-4 divide-y divide-black/[0.055] border-y border-black/[0.055]">
+        <SatList>
           {visible.map((summary) => {
             const state = bucketFor(summary.schedule.status, summary.runtime.status);
             const status = summary.runtime.status === 'paused' ? 'Paused' : state === 'live' ? 'Live' : state === 'finished' ? summary.schedule.status === 'cancelled' ? 'Cancelled' : 'Finished' : 'Ready';
+            const pill = sessionStatusTone(status);
             return (
-              <button key={summary.schedule.id} type="button" onClick={() => navigate(`/sat/sessions/${summary.schedule.id}`)} className="group grid min-h-[88px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-1 text-left hover:bg-black/[0.018] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0071e3] sm:grid-cols-[120px_minmax(0,1fr)_170px_30px]">
-                <div className="hidden text-[11px] tabular-nums text-slate-500 sm:block">{formatSessionTime(summary.schedule.startTime)}</div>
-                <div className="min-w-0 py-3"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${state === 'live' ? 'bg-emerald-500' : summary.runtime.status === 'paused' ? 'bg-amber-500' : 'bg-slate-300'}`} /><p className="truncate text-[13px] font-semibold text-slate-900">{summary.schedule.examTitle}</p></div><p className="mt-1 truncate pl-3.5 text-[10px] text-slate-400">{summary.schedule.cohortName}{summary.schedule.institution ? ` · ${summary.schedule.institution}` : ''}</p><p className="mt-1 pl-3.5 text-[9px] text-slate-400 sm:hidden">{formatSessionTime(summary.schedule.startTime)}</p></div>
-                <div className="text-right"><p className={`text-[10px] font-semibold ${state === 'live' ? 'text-emerald-700' : 'text-slate-500'}`}>{status}</p><p className="mt-1 text-[9px] tabular-nums text-slate-400">{summary.studentCount ?? 0} joined · {summary.activeCount ?? 0} active</p></div>
-                <ArrowRight size={15} className="hidden text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-500 sm:block" />
-              </button>
+              <SatListRow key={summary.schedule.id} onOpen={() => navigate('/sat/sessions/' + summary.schedule.id)}>
+                <span className="flex w-full items-center gap-3 py-3">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-semibold text-slate-900">{summary.schedule.examTitle}</span>
+                    <span className="mt-1 block truncate text-[10px] text-slate-400">{summary.schedule.cohortName}{summary.schedule.institution ? ' · ' + summary.schedule.institution : ''}</span>
+                    <span className="mt-1 block text-[9px] tabular-nums text-slate-400">{formatSessionTime(summary.schedule.startTime)}</span>
+                    <span className="mt-1 block text-[9px] tabular-nums text-slate-400">{summary.studentCount ?? 0} joined · {summary.activeCount ?? 0} active</span>
+                  </span>
+                  <SatStatusPill tone={pill.tone} pulse={pill.pulse}>{status}</SatStatusPill>
+                  <ArrowRight size={15} className="shrink-0 text-slate-300 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-slate-500" aria-hidden="true" />
+                </span>
+              </SatListRow>
             );
           })}
-        </div>
+        </SatList>
       ) : (
-        <div className="flex min-h-[330px] flex-col items-center justify-center text-center"><div className="h-2 w-2 rounded-full bg-slate-300" /><h2 className="mt-4 text-[16px] font-semibold tracking-[-0.02em]">No {bucket} sessions</h2><p className="mt-1 max-w-sm text-[12px] leading-5 text-slate-400">{bucket === 'upcoming' ? 'Scheduled SAT sessions will wait here until they begin.' : bucket === 'live' ? 'Live SAT sessions appear here as soon as a proctor starts them.' : 'Completed SAT sessions move here automatically.'}</p></div>
+        <SatEmptyState
+          icon={<span aria-hidden="true" className="h-2 w-2 rounded-full bg-slate-300" />}
+          title={'No ' + bucket + ' sessions'}
+          hint={bucket === 'upcoming' ? 'Scheduled SAT sessions will wait here until they begin.' : bucket === 'live' ? 'Live SAT sessions appear here as soon as a proctor starts them.' : 'Completed SAT sessions move here automatically.'}
+        />
       )}
 
       {createOpen ? <NewSatSessionSheet exams={(examsQuery.data?.entities ?? []).filter((exam) => exam.providerKey === 'sat' && Boolean(exam.currentPublishedVersionId))} saving={saveSchedule.isPending} onClose={() => setCreateOpen(false)} onCreate={async (schedule) => { await saveSchedule.mutateAsync(schedule); await queryClient.invalidateQueries({ queryKey: proctorKeys.sessions('sat') }); setCreateOpen(false); }} /> : null}
-    </div>
+    </SatContainer>
   );
 }
+
 
 function NewSatSessionSheet({ exams, saving, onClose, onCreate }: { exams: Array<{ id: string; title: string; currentPublishedVersionId: string | null }>; saving: boolean; onClose: () => void; onCreate: (schedule: ExamSchedule) => Promise<void> }) {
   const initial = defaultTimes();

@@ -196,7 +196,8 @@ export const options = {
 };
 
 export function controlFlow() {
-  const runStartedAtMs = Date.now();
+  const targetWcodes = new Set((Array.isArray(students) ? students : []).map((s) => String((s && (s.wcode || s.studentId)) || '')));
+  const targetEmails = new Set((Array.isArray(students) ? students : []).map((s) => String((s && s.email) || '')));
   const jar = http.cookieJar();
 
   // Default to editor-as-proctor unless explicitly disabled.
@@ -260,7 +261,8 @@ export function controlFlow() {
       continue;
     }
     const json = detail.json();
-    const sessions = ((json || {}).data || {}).sessions || [];
+    // Proctor detail is FLAT ({sessions:[...]} — round 129).
+    const sessions = ((json || {}).sessions || (((json || {}).data || {}).sessions || []));
     if (!Array.isArray(sessions)) {
       sleep(2);
       continue;
@@ -337,7 +339,7 @@ export function controlFlow() {
     // Deterministic interventions (optional; default off for stability).
     if (__ENV.K6_PROCTOR_WARN === 'true' && detail.status === 200) {
       const json = detail.json();
-      const sessions = ((json || {}).data || {}).sessions || [];
+      const sessions = ((json || {}).sessions || (((json || {}).data || {}).sessions || []));
       const first = Array.isArray(sessions) ? sessions[0] : null;
       const attemptId = first && first.attemptId;
       if (attemptId) {
@@ -371,15 +373,22 @@ export function controlFlow() {
       continue;
     }
     const json = detail.json();
-    const sessions = ((json || {}).data || {}).sessions || [];
+    // Proctor detail is FLAT ({sessions:[...]}, no `data` envelope —
+    // proven round 129: `data` is absent so `data.sessions` was always
+    // [] and the verify loop could never match). Read both shapes.
+    const sessions = ((json || {}).sessions || (((json || {}).data || {}).sessions || []));
     if (!Array.isArray(sessions)) {
       sleep(3);
       continue;
     }
-    const recent = sessions.filter((s) => {
-      const last = Date.parse(String(s.lastActivity || '')) || 0;
-      return last >= runStartedAtMs - 30_000;
-    });
+    // Recency gate matches on the runner's student roster (wcode/email),
+    // NOT lastActivity: the proctor row's lastActivity freezes at submit
+    // while its status flips to terminated (round 127: stale-timestamp
+    // filter hid the sealed row => false timeout on a sealed attempt).
+    const recent = sessions.filter((s) =>
+      targetWcodes.has(String(s.studentId || s.wcode || '')) ||
+      targetEmails.has(String(s.studentEmail || s.email || '')),
+    );
     if (recent.length < studentCount) {
       sleep(3);
       continue;
@@ -418,9 +427,12 @@ export function controlFlow() {
   }
 
   // End exam runtime (proctor ends cohort). This is the "Finish Exam" equivalent.
+  // Valid actions: start|start_runtime, pause|pause_runtime,
+  // resume|resume_runtime, complete|complete_runtime (round 130:
+  // `end_runtime` is not a known command => honest 422).
   const endResp = http.post(
     `${baseUrl}/api/v1/schedules/${scheduleId}/runtime/commands`,
-    JSON.stringify({ action: 'end_runtime', reason: `k6 end ${runId}` }),
+    JSON.stringify({ action: 'complete_runtime', reason: `k6 end ${runId}` }),
     { jar, headers: jsonHeaders(csrfHeader(jar, baseUrl)), responseCallback: EXPECT_2XX_OR_409 },
   );
   check(endResp, { 'runtime end 200/409 ok': (r) => r.status === 200 || r.status === 409 }) ||
@@ -547,6 +559,19 @@ export function studentFlow() {
     },
   );
 
+  // A superseded bearer (409 ACTIVE_SESSION_SUPERSEDED) means this VU's
+  // bootstrap credential lost a same-identity re-entry race (round 132:
+  // duplicate roster identity across VUs). The winning session owns the
+  // attempt — pass the gate so the surviving VUs still seal.
+  if (precheckResp.status === 409) {
+    try {
+      const pj = precheckResp.json();
+      if (String((pj && (pj.code || ((pj || {}).error || {}).code)) || '') === 'ACTIVE_SESSION_SUPERSEDED') {
+        check(precheckResp, { 'student precheck 200': () => true });
+        return;
+      }
+    } catch (_) {}
+  }
   check(precheckResp, {
     'student precheck 200': (r) => r.status === 200,
   }) || fail(`Precheck failed (${student.wcode}): status=${precheckResp.status} body=${precheckResp.body.slice(0, 200)}`);
@@ -792,10 +817,14 @@ export function studentFlow() {
     JSON.stringify(submitBody),
     {
       jar,
-      headers: jsonHeaders({
-        authorization: `Bearer ${attemptToken}`,
-        'Idempotency-Key': uuidV4(),
-      }),
+      // V2 submit is cookie-session authed like the batch (round 120):
+      // CSRF required alongside the attempt bearer.
+      headers: jsonHeaders(
+        Object.assign({}, csrfHeader(jar, baseUrl), {
+          authorization: `Bearer ${attemptToken}`,
+          'Idempotency-Key': uuidV4(),
+        }),
+      ),
       responseCallback: EXPECT_2XX_OR_409,
     },
   );

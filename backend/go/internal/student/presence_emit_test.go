@@ -52,6 +52,9 @@ func TestRecordHeartbeatMemoryEmitsOneTouch(t *testing.T) {
 	if got := telemetry.CounterValueForTest(reg, telemetry.MPresenceTouch); got != 1 {
 		t.Fatalf("mutation retry must not re-touch, got %v", got)
 	}
+	if got := telemetry.CounterValueForTest(reg, telemetry.MPresenceDedupeHit); got != 1 {
+		t.Fatalf("mutation retry must count 1 dedupe hit, got %v", got)
+	}
 	beat("mut-2") // new mutation = new beat
 	if got := telemetry.CounterValueForTest(reg, telemetry.MPresenceTouch); got != 2 {
 		t.Fatalf("second beat must count 2 touches, got %v", got)
@@ -101,6 +104,9 @@ func TestPresenceEmitTouchAndFlush(t *testing.T) {
 	}
 	if got := telemetry.CounterValueForTest(reg, telemetry.MPresenceFlush); got != 1 {
 		t.Fatalf("flush batch must count 1, got %v", got)
+	}
+	if got := telemetry.GaugeValueForTest(reg, telemetry.MPresenceFlushRows); got != 1 {
+		t.Fatalf("flush of 1 row must gauge 1, got %v", got)
 	}
 	if err := svc.FlushPresence(context.Background(), nil); err != nil {
 		t.Fatalf("empty flush: %v", err)

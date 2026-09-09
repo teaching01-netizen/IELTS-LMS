@@ -1,6 +1,12 @@
 import http from 'k6/http';
 import ws from 'k6/ws';
 import { check, fail, sleep } from 'k6';
+import { Rate } from 'k6/metrics';
+
+// Round 165: the staff half needs its own assertable signal — ws.connect
+// check results do not reliably surface in TOTAL RESULTS, so every staff
+// connect also feeds this Rate (threshold below makes it a hard gate).
+const staffConnected = new Rate('staff_ws_connected');
 
 // Plan E3/C1: staff-only WS soak. Students are 410-gone (STUDENT_WS=gone)
 // and must NEVER hold sockets; proctors/observers hold long-lived
@@ -59,6 +65,7 @@ export const options = {
   },
   thresholds: {
     http_req_failed: ['rate<0.01'],
+    staff_ws_connected: ['rate>0.99'],
   },
 };
 
@@ -73,7 +80,12 @@ export function studentGoneProbe() {
     fail('studentGoneProbe requires K6_STUDENT_COOKIE (student session cookie)');
   }
   const httpUrl = `${baseUrl}/api/v1/ws/live?scheduleId=${scheduleId}`;
-  const res = http.get(httpUrl, { headers: { Cookie: cookie } });
+  // Round 165: the 410 IS the expected verdict here — mark it expected so
+  // the generic http_req_failed threshold judges only real failures.
+  const res = http.get(httpUrl, {
+    headers: { Cookie: cookie },
+    responseCallback: http.expectedStatuses(410),
+  });
   check(res, {
     'student WS gone (410 + runtime-poll use)': (r) => {
       if (r.status !== 410) return false;
@@ -106,17 +118,17 @@ export function staffSoak() {
           fail(`staff WS abnormal error: ${e.error}`);
         }
       });
-      const endAt = Date.now() + 9 * 60 * 1000;
-      socket.setInterval(() => {
-        if (Date.now() > endAt) {
-          socket.close();
-          return;
-        }
-        socket.ping();
-      }, 15000);
-      socket.setTimeout(() => socket.close(), 10 * 60 * 1000);
+      // Round 165: the callback MUST return while the socket is open —
+      // blocking it here starves the k6 VU event loop and no ws.connect
+      // result/check ever surfaces (r164: staff half invisible). Ping +
+      // close from a short timeout; the scenario duration holds the
+      // socket, not this callback.
+      socket.setTimeout(() => socket.close(), 5000);
     },
   );
-  check(res, { 'staff socket established (101)': (r) => r && r.status === 101 });
+  const ok101 = !!(res && res.status === 101);
+  staffConnected.add(ok101 ? 1 : 0);
+  check(res, { 'staff socket established (101)': (r) => r && r.status === 101 })
+    || fail(`staff WS connect failed: status=${res && res.status} body=${String(res && res.body).slice(0, 200)}`);
   sleep(1);
 }

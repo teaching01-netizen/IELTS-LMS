@@ -215,6 +215,9 @@ func (w *worker) drainOutbox(ctx context.Context, repo *outbox.Repository, limit
 			break
 		}
 		claimed += int64(len(events))
+		for range events {
+			telemetry.IncCounter(telemetry.MOutboxClaimed)
+		}
 		for _, e := range events {
 			if !outbox.IsExecutable(e.Family) {
 				// Wakeup-only families are relayed through the durable live bus
@@ -231,6 +234,7 @@ func (w *worker) drainOutbox(ctx context.Context, repo *outbox.Repository, limit
 					continue
 				}
 				published++
+				telemetry.IncCounter(telemetry.MOutboxAcked, "family", e.Family)
 				continue
 			}
 			if err := w.executeOutboxEvent(ctx, e); err != nil {
@@ -246,6 +250,7 @@ func (w *worker) drainOutbox(ctx context.Context, repo *outbox.Repository, limit
 				continue
 			}
 			published++
+			telemetry.IncCounter(telemetry.MOutboxAcked, "family", e.Family)
 		}
 	}
 	return claimed, published, failed, rounds
@@ -439,12 +444,16 @@ func (w *worker) executeOutboxEvent(ctx context.Context, event outbox.Event) err
 		terminalization.ReasonProctorForceSub:
 		reason = payload.Reason
 	}
+	sealed := 0
 	for _, attemptID := range payload.AttemptIDs {
 		var providerKey, proctorStatus string
 		if err := w.db.QueryRowContext(ctx, `
 			SELECT e.provider_key, COALESCE(a.proctor_status, 'active')
 			FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id
 			WHERE a.id = ? AND a.schedule_id = ?`, attemptID, payload.ScheduleID).Scan(&providerKey, &proctorStatus); err != nil {
+			if sealed > 0 {
+				log.Printf("worker: auto-submit schedule=%s sealed=%d then error (resume on retry): %v", payload.ScheduleID, sealed, err)
+			}
 			return fmt.Errorf("load auto-submit attempt %s: %w", attemptID, err)
 		}
 		actorKind := terminalization.ActorSystem
@@ -469,9 +478,17 @@ func (w *worker) executeOutboxEvent(ctx context.Context, event outbox.Event) err
 			ActorKind: actorKind, ActorID: actorID, FinalSubmission: finalSubmission,
 			RequestID: event.ID,
 		}); err != nil {
+			if sealed > 0 {
+				log.Printf("worker: auto-submit schedule=%s sealed=%d then error (resume on retry): %v", payload.ScheduleID, sealed, err)
+			}
 			return fmt.Errorf("auto-submit attempt %s: %w", attemptID, err)
 		}
+		sealed++
+		if sealed%autoSubmitCursorBatch == 0 {
+			log.Printf("worker: auto-submit schedule=%s sealed=%d (progress)", payload.ScheduleID, sealed)
+		}
 	}
+	log.Printf("worker: auto-submit schedule=%s sealed=%d done", payload.ScheduleID, sealed)
 	return nil
 }
 

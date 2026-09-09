@@ -12,6 +12,8 @@ import (
 	"container/list"
 	"sync"
 	"time"
+
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
 
 // SessionCacheConfig tunes the cache. Zero values are normalized by
@@ -87,22 +89,26 @@ func (c *SessionCache) Get(tokenHash string, now time.Time) (Session, bool) {
 	defer c.mu.Unlock()
 	if !c.enabled {
 		c.misses++
+		telemetry.IncCounter(telemetry.MSessionCacheMiss, "reason", "disabled")
 		return Session{}, false
 	}
 	now = now.UTC()
 	el, ok := c.items[tokenHash]
 	if !ok {
 		c.misses++
+		telemetry.IncCounter(telemetry.MSessionCacheMiss, "reason", "absent")
 		return Session{}, false
 	}
 	k := el.Value.(cacheKey)
 	if !k.entry.session.ExpiresAt.After(now) || !k.entry.session.IdleTimeoutAt.After(now) {
 		c.removeLocked(tokenHash, el)
 		c.misses++
+		telemetry.IncCounter(telemetry.MSessionCacheMiss, "reason", "expired")
 		return Session{}, false
 	}
 	c.ll.MoveToFront(el)
 	c.hits++
+	telemetry.IncCounter(telemetry.MSessionCacheHit)
 	return k.entry.session, true
 }
 

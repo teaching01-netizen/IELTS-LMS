@@ -1,3 +1,5 @@
+import { motion } from "motion/react";
+import { authoringMotion } from "@/src/shared/motion";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   AlertCircle,
@@ -118,7 +120,7 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
               disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
               aria-label="Paste or import questions into this module"
               title="Paste questions"
-              className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+              className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.93] disabled:opacity-30"
             >
               <FileUp size={14} aria-hidden="true" />
             </button>
@@ -126,7 +128,7 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
               type="button"
               onClick={props.onCreateQuestion}
               disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
-              className="flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-35"
+              className="flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground transition duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-35"
             >
               <Plus size={14} aria-hidden="true" /> Question
             </button>
@@ -267,8 +269,16 @@ function QueueRow({
       aria-disabled={disabled || undefined}
       aria-busy={reorderPending || undefined}
       aria-label={`Question ${position}: ${question.promptPreview || "Empty question"}${selected ? ", current" : ""}`}
-      className={`group relative mx-2 my-px cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? "bg-muted" : "hover:bg-muted/60"}${reorderPending ? " opacity-60" : ""}`}
+      className={`group relative mx-2 my-px cursor-pointer rounded-md outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring ${selected ? "border border-border bg-card shadow-[0_2px_10px_rgba(17,24,39,0.08)]" : "border border-transparent hover:bg-muted/60"}${reorderPending ? " opacity-60" : ""}`}
     >
+      {selected ? (
+        <motion.span
+          aria-hidden="true"
+          layoutId="rail-accent"
+          transition={authoringMotion.snap}
+          className="absolute bottom-1.5 left-0 top-1.5 w-[2px] rounded-full bg-primary"
+        />
+      ) : null}
       <div className="flex min-h-[56px] items-center gap-2 px-2.5 py-2">
         <button
           type="button"

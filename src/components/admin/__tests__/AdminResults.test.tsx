@@ -8,9 +8,16 @@ import type {
 const mocks = vi.hoisted(() => ({
   useAdminResultsQuery: vi.fn(),
   useResultsAnalyticsQuery: vi.fn(),
+  useActScienceDetailQuery: vi.fn(),
 }));
 
 vi.mock("../../../features/results/api/resultsQueries", () => mocks);
+
+const ieltsDetailMocks = vi.hoisted(() => ({
+  useIeltsResultDetailQuery: vi.fn(),
+}));
+
+vi.mock("../../../features/results/api/ieltsResultDetail", () => ieltsDetailMocks);
 
 import { AdminResults } from "../AdminResults";
 
@@ -69,6 +76,8 @@ const actResult: AdminResultRow = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.useActScienceDetailQuery.mockReturnValue({ data: undefined, isLoading: false, error: null });
+  ieltsDetailMocks.useIeltsResultDetailQuery.mockReturnValue({ data: undefined, isLoading: false, error: null });
   mocks.useAdminResultsQuery.mockImplementation((provider: ResultProviderKey | "all" = "all") => ({
     data:
       provider === "all"
@@ -192,6 +201,63 @@ describe("AdminResults", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("backend unavailable");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows IELTS module raw and per-question raw without fabricating verdicts", () => {
+    ieltsDetailMocks.useIeltsResultDetailQuery.mockReturnValue({
+      data: {
+        submission: null,
+        sections: [],
+        writingTasks: [],
+        snapshot: null,
+        modules: [
+          { key: "listening", label: "Listening", correct: 30, total: 40, percentage: 75, status: "auto_graded", overrideCount: 1, unansweredCount: 2 },
+          { key: "reading", label: "Reading", correct: null, total: null, percentage: null, status: "needs_review", overrideCount: 0, unansweredCount: 0 },
+        ],
+        questions: [
+          { questionId: "L1", section: "listening", displayOrder: 1, studentAnswer: "A", correctAnswer: "A", isCorrect: true, awardedScore: 1, maxScore: 1, hasOverride: false, answered: true },
+          { questionId: "L2", section: "listening", displayOrder: 2, studentAnswer: "B", correctAnswer: "C", isCorrect: false, awardedScore: 0, maxScore: 1, hasOverride: true, answered: true },
+          { questionId: "L3", section: "listening", displayOrder: 3, studentAnswer: "", correctAnswer: "D", isCorrect: null, awardedScore: null, maxScore: 1, hasOverride: false, answered: false },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<AdminResults />);
+    fireEvent.click(screen.getAllByRole("button", { name: "View Report" })[1]);
+    fireEvent.click(screen.getByRole("tab", { name: "Modules" }));
+    expect(screen.getByText("30 / 40")).toBeInTheDocument();
+    expect(screen.getByText("1 override")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Questions" }));
+    expect(screen.getByText("L1")).toBeInTheDocument();
+    expect(screen.getByText("Correct")).toBeInTheDocument();
+    expect(screen.getByText("Incorrect")).toBeInTheDocument();
+    expect(screen.getByText("Override")).toBeInTheDocument();
+    // Null verdict renders as Not scored, never as Incorrect.
+    expect(screen.getByText("Not scored")).toBeInTheDocument();
+    expect(screen.getByText("Unanswered")).toBeInTheDocument();
+  });
+
+  it("shows ACT science per-question raw answers", () => {
+    mocks.useActScienceDetailQuery.mockReturnValue({
+      data: {
+        attemptId: "attempt-act", scheduleId: "schedule-act", studentId: "ACT-001",
+        studentName: "Bea ACT", totalScore: 2, maxScore: 3, percentage: 66.7,
+        outcomeStatus: "scored", releaseStatus: "ready_to_release",
+        questions: [
+          { questionId: "q1", displayOrder: 1, response: "A", correctAnswer: "A", isCorrect: true, answered: true },
+          { questionId: "q2", displayOrder: 2, response: "", correctAnswer: "B", isCorrect: null, answered: false },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<AdminResults />);
+    fireEvent.click(screen.getAllByRole("button", { name: "View Report" })[0]);
+    fireEvent.click(screen.getByRole("tab", { name: "Questions" }));
+    expect(screen.getByText("q1")).toBeInTheDocument();
+    expect(screen.getByText("Correct")).toBeInTheDocument();
+    expect(screen.getByText("Unanswered")).toBeInTheDocument();
   });
 
   it("keeps the report dialog accessible and closable", () => {

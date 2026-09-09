@@ -394,7 +394,14 @@ func lockAttempt(ctx context.Context, q tx.Tx, id string) (AttemptState, error) 
 	var a AttemptState
 	var deadline, grace, submitted sql.NullTime
 	var finalSub sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT id, schedule_id, user_id, organization_id, protocol_version, delivery_status, phase, lease_epoch, control_epoch, response_revision, deadline_at, closing_grace_until, submitted_at, final_submission, proctor_status FROM student_attempts WHERE id=? FOR UPDATE`, id).Scan(&a.ID, &a.ScheduleID, &a.UserID, &a.OrganizationID, &a.ProtocolVersion, &a.DeliveryStatus, &a.Phase, &a.LeaseEpoch, &a.ControlEpoch, &a.ResponseRevision, &deadline, &grace, &submitted, &finalSub, &a.ProctorStatus)
+	// Round 166: fresh entry-minted attempts carry NULL organization_id
+	// (game-day: 5 submit-path 500s `converting NULL to string`). Scan
+	// nullable and default to "" so NULL orgs submit cleanly.
+	var org sql.NullString
+	err := q.QueryRowContext(ctx, `SELECT id, schedule_id, user_id, organization_id, protocol_version, delivery_status, phase, lease_epoch, control_epoch, response_revision, deadline_at, closing_grace_until, submitted_at, final_submission, proctor_status FROM student_attempts WHERE id=? FOR UPDATE`, id).Scan(&a.ID, &a.ScheduleID, &a.UserID, &org, &a.ProtocolVersion, &a.DeliveryStatus, &a.Phase, &a.LeaseEpoch, &a.ControlEpoch, &a.ResponseRevision, &deadline, &grace, &submitted, &finalSub, &a.ProctorStatus)
+	if org.Valid {
+		a.OrganizationID = org.String
+	}
 	if err == sql.ErrNoRows {
 		return a, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
 	}

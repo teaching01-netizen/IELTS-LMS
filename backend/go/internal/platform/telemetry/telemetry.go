@@ -42,8 +42,20 @@ var metricHelpText = map[string]string{
 	MEntryGateAdmit:    "Total entry-gate admissions (D3 check-ins).",
 	MEntryGateQueued:   "Total entry-gate 429s with queue position (D3).",
 	MRollupRefresh:     "Total proctor rollup refreshes (D4 worker).",
+	MRollupLag:         "Freshness in seconds of the proctor rollup row (D4 lag).",
 	MShedExam:          "Total requests served under exam shed budgets (E2).",
 	MQueryTimeout:      "Total hot-path budget short-circuits (E1 503s).",
+	MSessionCacheHit:   "Total session-cache hits (A2 DB-touch skip).",
+	MSessionCacheMiss:  "Total session-cache misses (A2 DB reload).",
+	MSnapshotCacheHit:  "Total runtime-snapshot cache hits (B2 zero-SQL gate).",
+	MSnapshotCacheMiss: "Total runtime-snapshot cache misses (B2 DB load).",
+	MRuntimePollTotal:  "Total runtime polls by result (200 delta vs 304 not-modified).",
+	MAttemptVerify:     "Total attempt-bearer verifications by mode and result.",
+	MDupAttemptReplay:  "Total check-in replays served from the existing attempt row (D3).",
+	MPresenceDedupeHit: "Total presence in-memory mutation dedupe hits (D2).",
+	MPresenceFlushRows: "Total presence rows flushed to the DB (D2 drain size).",
+	MOutboxClaimed:     "Total outbox events claimed by the worker.",
+	MOutboxAcked:       "Total outbox events acknowledged by the worker.",
 }
 
 // Metric name constants (plan 69).
@@ -92,8 +104,21 @@ const (
 	MEntryGateAdmit  = "entry_gate_admit_total"
 	MEntryGateQueued = "entry_gate_queued_total"
 	MRollupRefresh   = "proctor_rollup_refresh_total"
+	MRollupLag       = "proctor_rollup_lag_seconds"
 	MShedExam        = "shed_exam_requests_total"
 	MQueryTimeout    = "query_budget_exhausted_total"
+
+	MSessionCacheHit  = "session_cache_hit_total"
+	MSessionCacheMiss = "session_cache_miss_total"
+	MSnapshotCacheHit = "runtime_snapshot_hit_total"
+	MSnapshotCacheMiss = "runtime_snapshot_miss_total"
+	MRuntimePollTotal = "runtime_poll_total"
+	MAttemptVerify    = "attempt_verify_total"
+	MDupAttemptReplay = "duplicate_attempt_replay_total"
+	MPresenceDedupeHit = "presence_dedupe_hit_total"
+	MPresenceFlushRows = "presence_flush_rows_total"
+	MOutboxClaimed    = "outbox_claimed_total"
+	MOutboxAcked      = "outbox_acked_total"
 
 	MRatelimitDeniedTotal = "http_ratelimit_denied_total"
 )

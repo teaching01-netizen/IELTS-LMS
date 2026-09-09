@@ -66,6 +66,11 @@ func mediaDownloadHandler(app *App) http.HandlerFunc {
 			contentType = "application/octet-stream"
 		}
 		w.Header().Set("Content-Type", contentType)
+		// Step 7: finalized assets are immutable (status flips pending ->
+		// finalized exactly once and never back), so long-lived caching is
+		// safe: browsers/CDNs may reuse bytes for a year. Uploads stay
+		// uncacheable via the pending-only ReadBytes guard above.
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(body)
 	}

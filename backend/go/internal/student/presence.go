@@ -179,6 +179,7 @@ func (s *Service) FlushPresence(ctx context.Context, dirty []PresenceDirty) erro
 		return nil
 	}
 	telemetry.IncCounter(telemetry.MPresenceFlush)
+	telemetry.SetGauge(telemetry.MPresenceFlushRows, float64(len(dirty)))
 	for _, d := range dirty {
 		if _, err := s.db.ExecContext(ctx, `
 			INSERT INTO student_heartbeat_events
@@ -251,6 +252,7 @@ func (s *Service) RecordHeartbeatMemory(ctx context.Context, req HeartbeatReques
 		// Retry dedupe: presence already touched by the first beat; the
 		// projection is re-read (1-2 indexed reads) but no beat is
 		// recorded twice. Zero heartbeat-event SQL either way.
+		telemetry.IncCounter(telemetry.MPresenceDedupeHit)
 		return s.GetAttemptProjection(ctx, req.AttemptID)
 	}
 	s.presence.Touch(req.AttemptID, req.ScheduleID, req.ClientSessionID, req.EventType, time.Now().UTC())

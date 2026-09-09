@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
@@ -314,6 +315,37 @@ type ScienceReport struct {
 	ReleaseState string  `json:"releaseStatus"`
 }
 
+// ScienceQuestion is one sealed ACT science question with its server-side
+// verdict. IsCorrect is nil (JSON null) whenever no verdict may be shown:
+// unanswered items or questions without a sealed key. A nil verdict never
+// renders as incorrect.
+type ScienceQuestion struct {
+	QuestionID    string `json:"questionId"`
+	DisplayOrder  int    `json:"displayOrder"`
+	Response      any    `json:"response"`
+	CorrectAnswer any    `json:"correctAnswer"`
+	IsCorrect     *bool  `json:"isCorrect"`
+	Answered      bool   `json:"answered"`
+}
+
+// ScienceDetail is the per-student ACT science report backing the results
+// question-level table. Score stays the sealed aggregate; Questions replays
+// the same key comparison as seal time (ComputeScienceScore) without ever
+// recomputing the stored total.
+type ScienceDetail struct {
+	AttemptID   string           `json:"attemptId"`
+	ScheduleID  string           `json:"scheduleId"`
+	StudentID   string           `json:"studentId"`
+	StudentName string           `json:"studentName"`
+	TotalScore  int              `json:"totalScore"`
+	MaxScore    int              `json:"maxScore"`
+	Percentage  float64          `json:"percentage"`
+	Outcome     string           `json:"outcomeStatus"`
+	Release     string           `json:"releaseStatus"`
+	SubmittedAt *time.Time       `json:"submittedAt,omitempty"`
+	Questions   []ScienceQuestion `json:"questions"`
+}
+
 // ReportFilter scopes the science report listing.
 type ReportFilter struct {
 	ScheduleID string
@@ -368,6 +400,199 @@ func (s *Service) ListScienceReports(ctx context.Context, f ReportFilter) ([]Sci
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// GetScienceDetail loads one sealed ACT science attempt with per-question
+// rows for the results detail surface. The stored score is authoritative;
+// per-question verdicts replay answersEqual against the sealed content key.
+// Unsealed (pending) or missing attempts return NOT_FOUND so the UI renders
+// its pending empty state instead of a fabricated table. The actor scope
+// mirrors the science list intent: platform readers see all rows; tenant
+// actors narrow to their organization plus a live staff assignment; actors
+// with neither see NOT_FOUND, so graders cannot probe other schedules.
+func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext, attemptID string) (*ScienceDetail, error) {
+	if strings.TrimSpace(attemptID) == "" {
+		return nil, apperrors.New(apperrors.CodeBadRequest, "Attempt id is required.")
+	}
+	var (
+		scheduleID, studentID, studentName string
+		finalSub                           sql.NullString
+		submittedAt                          sql.NullTime
+		outcome, release                   sql.NullString
+	)
+	scope, scopeArgs := actResultScope(actor)
+	query := `
+		SELECT a.schedule_id, a.candidate_id, a.candidate_name,
+			a.final_submission, a.submitted_at,
+			ar.outcome_status, ar.release_status
+		FROM student_attempts a
+		JOIN exam_entities e ON e.id = a.exam_id
+		JOIN exam_schedules sch ON sch.id = a.schedule_id
+		LEFT JOIN assessment_results ar
+			ON ar.attempt_id = a.id AND ar.provider_key = 'act'
+		WHERE a.id = ? AND e.provider_key = 'act'
+		  AND a.submitted_at IS NOT NULL` + scope
+	args := append([]any{attemptID}, scopeArgs...)
+	err := s.db.QueryRowContext(ctx, query, args...).
+		Scan(&scheduleID, &studentID, &studentName, &finalSub, &submittedAt, &outcome, &release)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.New(apperrors.CodeNotFound, "ACT result not found.")
+	}
+	if err != nil {
+		return nil, err
+	}
+	snap := map[string]any{}
+	if finalSub.Valid && strings.TrimSpace(finalSub.String) != "" {
+		_ = json.Unmarshal([]byte(finalSub.String), &snap)
+	}
+	score, _ := snap["score"].(map[string]any)
+	detail := &ScienceDetail{
+		AttemptID: attemptID, ScheduleID: scheduleID,
+		StudentID: studentID, StudentName: studentName,
+		Outcome:   firstNonEmpty(nullableString(outcome), "scored"),
+		Release:   firstNonEmpty(nullableString(release), "ready_to_release"),
+		Questions: []ScienceQuestion{},
+	}
+	if total, ok := numVal(score["totalScore"]); ok {
+		detail.TotalScore = int(total)
+	}
+	if max, ok := numVal(score["maxScore"]); ok {
+		detail.MaxScore = int(max)
+	}
+	if pct, ok := numVal(score["percentage"]); ok {
+		detail.Percentage = pct
+	}
+	if submittedAt.Valid {
+		ts := submittedAt.Time.UTC()
+		detail.SubmittedAt = &ts
+	}
+	if detail.Outcome == "scored" {
+		detail.Questions = buildScienceQuestions(snap)
+	}
+	return detail, nil
+}
+
+// buildScienceQuestions replays the sealed answers against the sealed
+// content key embedded in final_submission (falling back to the content
+// snapshot shape). Ordering follows the sealed key order, capped at 500.
+func buildScienceQuestions(snap map[string]any) []ScienceQuestion {
+	out := []ScienceQuestion{}
+	content, _ := snap["content"].(map[string]any)
+	if content == nil {
+		if raw, ok := snap["contentSnapshot"]; ok {
+			if encoded, err := json.Marshal(raw); err == nil {
+				_ = json.Unmarshal(encoded, &content)
+			}
+		}
+	}
+	var keyOrder []string
+	key := map[string]any{}
+	if content != nil {
+		normalized := normalizeScienceContent(content)
+		keyOrder = orderedQuestions(normalized)
+		key = answerKeyFromContent(normalized)
+	}
+	answers := map[string]any{}
+	if raw, ok := snap["answers"]; ok {
+		if flattened, ok := raw.(map[string]any); ok {
+			answers = flattened
+		}
+	}
+	for i, questionID := range keyOrder {
+		if len(out) >= 500 {
+			break
+		}
+		given, present := answers[questionID]
+		question := ScienceQuestion{
+			QuestionID: questionID, DisplayOrder: i + 1,
+			Answered: isScienceAnswered(given, present),
+		}
+		if present {
+			question.Response = given
+		}
+		if accepted, ok := key[questionID]; ok {
+			question.CorrectAnswer = accepted
+			// Verdict only for answered, keyed rows; unanswered stays null.
+			if question.Answered {
+				verdict := answersEqual(given, accepted)
+				question.IsCorrect = &verdict
+			}
+		}
+		out = append(out, question)
+	}
+	// Answers without a sealed key still surface (key-less, verdict null)
+	// so the table never silently drops a student response.
+	for questionID, given := range answers {
+		if _, ok := key[questionID]; ok {
+			continue
+		}
+		if len(out) >= 500 {
+			break
+		}
+		out = append(out, ScienceQuestion{
+			QuestionID: questionID, DisplayOrder: len(out) + 1,
+			Response: given, Answered: isScienceAnswered(given, true),
+		})
+	}
+	return out
+}
+
+func isScienceAnswered(value any, present bool) bool {
+	if !present || value == nil {
+		return false
+	}
+	if s, ok := value.(string); ok {
+		return strings.TrimSpace(s) != ""
+	}
+	return true
+}
+
+func nullableString(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func numVal(value any) (float64, bool) {
+	switch n := value.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+// actResultScope mirrors results.resultScope against the joined schedule
+// alias: platform readers carry no predicate, tenant actors narrow to
+// their organization plus a live staff assignment, and actors with
+// neither match nothing (the detail then surfaces NOT_FOUND).
+func actResultScope(actor auth.ActorContext) (string, []any) {
+	if actor.IsPlatformRead() {
+		return "", nil
+	}
+	if actor.OrgID == nil || strings.TrimSpace(*actor.OrgID) == "" {
+		return " AND 1 = 0", nil
+	}
+	return " AND sch.organization_id = ? AND EXISTS (SELECT 1 FROM schedule_staff_assignments assignment WHERE assignment.schedule_id = sch.id AND assignment.user_id = ? AND assignment.role = ? AND assignment.revoked_at IS NULL)", []any{*actor.OrgID, actor.UserID, actor.Role}
 }
 
 func answerKeyFromContent(content map[string]any) map[string]any {
