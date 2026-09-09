@@ -3060,28 +3060,36 @@ describe("StudentApp runtime-backed mode", () => {
       currentSectionRemainingSeconds: 0,
       updatedAt: "2026-01-01T00:00:01.000Z",
     };
-    rerender(
-      <StudentAppWrapper
-        state={examState}
-        onExit={() => {}}
-        scheduleId={attemptSnapshot.scheduleId}
-        attemptSnapshot={attemptSnapshot}
-        runtimeSnapshot={atZeroSnapshot}
-      />
-    );
+    await act(async () => {
+      rerender(
+        <StudentAppWrapper
+          state={examState}
+          onExit={() => {}}
+          scheduleId={attemptSnapshot.scheduleId}
+          attemptSnapshot={attemptSnapshot}
+          runtimeSnapshot={atZeroSnapshot}
+        />
+      );
+    });
 
-    rerender(
-      <StudentAppWrapper
-        state={examState}
-        onExit={() => {}}
-        scheduleId={attemptSnapshot.scheduleId}
-        attemptSnapshot={attemptSnapshot}
-        runtimeSnapshot={{
-          ...atZeroSnapshot,
-          updatedAt: "2026-01-01T00:00:02.000Z",
-        }}
-      />
-    );
+    await waitFor(() => {
+      expect(saveAttempt).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      rerender(
+        <StudentAppWrapper
+          state={examState}
+          onExit={() => {}}
+          scheduleId={attemptSnapshot.scheduleId}
+          attemptSnapshot={attemptSnapshot}
+          runtimeSnapshot={{
+            ...atZeroSnapshot,
+            updatedAt: "2026-01-01T00:00:02.000Z",
+          }}
+        />
+      );
+    });
 
     await waitFor(() => {
       expect(saveAttempt).toHaveBeenCalledTimes(1);
