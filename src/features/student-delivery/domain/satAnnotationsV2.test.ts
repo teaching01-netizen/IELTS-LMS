@@ -4,6 +4,8 @@ import {
   createSatTextAnnotation,
   emptySatAnnotationsV2,
   normalizeSatAnnotations,
+  removeSatAnnotationById,
+  removeSatAnnotationsInRange,
 } from './satResponses';
 
 describe('satResponses v2 annotations', () => {
@@ -103,5 +105,37 @@ describe('satResponses v2 annotations', () => {
     expect(a).toEqual({ version: 2, annotations: [], legacyQuestionNote: '' });
     expect(a).not.toBe(b);
     expect(a.annotations).not.toBe(b.annotations);
+  });
+});
+
+describe('sat annotation eraser helpers', () => {
+  it('removes highlights and underlines intersecting the range, keeps the rest', () => {
+    const base = emptySatAnnotationsV2();
+    const keep = createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 0, endOffset: 4, exact: 'Several' });
+    const hitHighlight = createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 10, endOffset: 17, exact: 'Several' });
+    const hitUnderline = createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 14, endOffset: 22, exact: 'chers ex' });
+    const otherNode = createSatTextAnnotation({ kind: 'highlight', nodeId: 'prompt:q', startOffset: 10, endOffset: 17, exact: 'Several' });
+    const seeded = { ...base, annotations: [keep, hitHighlight, hitUnderline, otherNode] };
+    const next = removeSatAnnotationsInRange(seeded, 'stimulus:p', 12, 16);
+    expect(next.annotations.map((a) => a.id).sort()).toEqual([keep.id, otherNode.id].sort());
+    expect(seeded.annotations).toHaveLength(4);
+  });
+
+  it('treats range ends as exclusive and returns the same reference on no-op', () => {
+    const base = emptySatAnnotationsV2();
+    const mark = createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' });
+    const seeded = { ...base, annotations: [mark] };
+    expect(removeSatAnnotationsInRange(seeded, 'stimulus:p', 6, 9)).toBe(seeded);
+    expect(removeSatAnnotationsInRange(seeded, 'other:p', 0, 9)).toBe(seeded);
+  });
+
+  it('removes a single annotation by id, including one that carries a note', () => {
+    const base = emptySatAnnotationsV2();
+    const noted = createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 0, endOffset: 7, exact: 'Several', note: 'Check the evidence' });
+    const plain = createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 8, endOffset: 12, exact: 'rese' });
+    const seeded = { ...base, annotations: [noted, plain] };
+    const next = removeSatAnnotationById(seeded, noted.id);
+    expect(next.annotations.map((a) => a.id)).toEqual([plain.id]);
+    expect(removeSatAnnotationById(seeded, 'missing-id')).toBe(seeded);
   });
 });

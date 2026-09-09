@@ -189,6 +189,36 @@ export function createSatTextAnnotation(args: {
   };
 }
 
+/** Remove one annotation by id. Returns the same reference when nothing matches. */
+export function removeSatAnnotationById(
+  annotations: SatQuestionAnnotations,
+  annotationId: string,
+): SatQuestionAnnotations {
+  if (!annotations.annotations.some((annotation) => annotation.id === annotationId)) return annotations;
+  return { ...annotations, annotations: annotations.annotations.filter((annotation) => annotation.id !== annotationId) };
+}
+
+/**
+ * Remove every highlight/underline whose anchor overlaps `[startOffset, endOffset)`
+ * in `nodeId`. Range ends are exclusive so touching-but-adjacent marks survive.
+ * Attached notes die with their decoration. Returns the same reference on no-op
+ * so callers can skip `onChange` churn.
+ */
+export function removeSatAnnotationsInRange(
+  annotations: SatQuestionAnnotations,
+  nodeId: string,
+  startOffset: number,
+  endOffset: number,
+): SatQuestionAnnotations {
+  const start = Math.max(0, Math.floor(startOffset));
+  const end = Math.max(start + 1, Math.floor(endOffset));
+  const next = annotations.annotations.filter(
+    (annotation) => !(annotation.anchor.nodeId === nodeId && annotation.anchor.startOffset < end && start < annotation.anchor.endOffset),
+  );
+  if (next.length === annotations.annotations.length) return annotations;
+  return { ...annotations, annotations: next };
+}
+
 export interface SatTextSegment {
   start: number;
   end: number;
