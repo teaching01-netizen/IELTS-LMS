@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   AlertCircle,
   Check,
@@ -33,8 +33,6 @@ import {
   type SpineQueueFilter,
   type SpineQueueRow,
 } from "./queueModel";
-import { useState } from "react";
-
 export type { SpineQueueFilter };
 
 export interface QuestionQueueRailProps {
@@ -225,7 +223,12 @@ function QueueRow({
 }) {
   const index = moduleQuestions.findIndex((item) => item.examQuestionId === question.examQuestionId);
   const expectedIds = moduleQuestions.map((item) => item.examQuestionId);
+  // Single-flight per row: closes the double-click window between click and
+  // mutation start (flush-before-navigate is async). Order truth stays the
+  // server shell refetch; this flag is feedback + duplicate guard only.
+  const [reorderPending, setReorderPending] = useState(false);
   const move = (direction: -1 | 1) => {
+    if (reorderPending || disabled) return;
     const target = index + direction;
     if (target < 0 || target >= expectedIds.length) return;
     const next = [...expectedIds];
@@ -234,8 +237,12 @@ function QueueRow({
     if (current === undefined || other === undefined) return;
     next[index] = other;
     next[target] = current;
-    void onReorder(next, expectedIds);
+    setReorderPending(true);
+    void onReorder(next, expectedIds)
+      .catch(() => undefined)
+      .finally(() => setReorderPending(false));
   };
+  const reorderBusy = reorderPending || disabled;
   return (
     <div
       data-question-list-row={question.examQuestionId}
@@ -254,8 +261,9 @@ function QueueRow({
       tabIndex={disabled ? -1 : 0}
       aria-current={selected ? "true" : undefined}
       aria-disabled={disabled || undefined}
+      aria-busy={reorderPending || undefined}
       aria-label={`Question ${position}: ${question.promptPreview || "Empty question"}${selected ? ", current" : ""}`}
-      className={`group relative mx-2 my-px cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? "bg-muted" : "hover:bg-muted/60"}`}
+      className={`group relative mx-2 my-px cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? "bg-muted" : "hover:bg-muted/60"}${reorderPending ? " opacity-60" : ""}`}
     >
       <div className="flex min-h-[56px] items-center gap-2 px-2.5 py-2">
         <button
@@ -284,8 +292,8 @@ function QueueRow({
           {selected ? <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-foreground">Current</span> : null}
         </div>
         <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex focus-within:flex">
-          <button type="button" disabled={disabled || index <= 0} onClick={(event) => { event.stopPropagation(); move(-1); }} aria-label="Move question up" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronUp size={12} aria-hidden="true" /></button>
-          <button type="button" disabled={disabled || index >= moduleQuestions.length - 1} onClick={(event) => { event.stopPropagation(); move(1); }} aria-label="Move question down" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronDown size={12} aria-hidden="true" /></button>
+          <button type="button" disabled={reorderBusy || index <= 0} onClick={(event) => { event.stopPropagation(); move(-1); }} aria-label="Move question up" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronUp size={12} aria-hidden="true" /></button>
+          <button type="button" disabled={reorderBusy || index >= moduleQuestions.length - 1} onClick={(event) => { event.stopPropagation(); move(1); }} aria-label="Move question down" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronDown size={12} aria-hidden="true" /></button>
         </div>
       </div>
     </div>
@@ -325,34 +333,46 @@ function QueueBulkToolbar(props: QuestionQueueRailProps & { selectedIds: string[
   const [moveTarget, setMoveTarget] = useState(props.moveTargets[0]?.id ?? "");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // One in-flight bulk op at a time: the invoking control shows disabled +
+  // aria-busy. Errors surface via the parent navigationError; nothing new here.
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const busy = busyAction !== null;
   const domains = props.sectionKey === "math" ? SAT_DOMAINS.math : SAT_DOMAINS["reading-writing"];
   const skills = getSatSkills(domain || null);
   const expectedRevisions = Object.fromEntries(
     props.module.questions.filter((q) => props.selectedQuestionIds.has(q.examQuestionId)).map((q) => [q.examQuestionId, q.revision])
   );
-  const patch = async (metadata: BulkMetadataPatch) => {
-    try {
-      await props.onBulkAction(props.selectedIds, { type: "patch_metadata", patch: metadata }, expectedRevisions);
-    } catch {
-      // Parent owns the visible navigation error; avoid unhandled rejection.
-    }
+  const patch = (key: string, metadata: BulkMetadataPatch) => {
+    if (busy) return;
+    setBusyAction(key);
+    void props
+      .onBulkAction(props.selectedIds, { type: "patch_metadata", patch: metadata }, expectedRevisions)
+      .catch(() => undefined)
+      .finally(() => setBusyAction(null));
   };
-  const run = (action: BulkQuestionAction) => {
-    void props.onBulkAction(props.selectedIds, action).catch(() => undefined);
+  const run = (key: string, action: BulkQuestionAction) => {
+    if (busy) return;
+    setBusyAction(key);
+    void props
+      .onBulkAction(props.selectedIds, action)
+      .catch(() => undefined)
+      .finally(() => setBusyAction(null));
   };
+  const busyProps = (key: string) =>
+    busyAction === key ? { disabled: true as const, "aria-busy": true as const } : {};
   return (
     <div className="border-t border-border bg-card p-3">
       <div className="mb-2 flex items-center justify-between"><span className="text-xs font-semibold text-foreground">{props.selectedIds.length} selected</span><button type="button" onClick={props.onClearSelection} aria-label="Clear selection" className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted"><X size={12} aria-hidden="true" /></button></div>
       <div className="grid grid-cols-2 gap-1.5">
-        <select value={domain} onChange={(event) => { setDomain(event.target.value); setSkill(""); if (event.target.value) void patch({ domain: event.target.value }); }} aria-label="Bulk domain" className="h-8 rounded bg-muted px-2 text-xs font-medium text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring"><option value="">Set domain…</option>{domains.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select>
-        <select value={skill} disabled={!domain} onChange={(event) => { setSkill(event.target.value); if (event.target.value) void patch({ skill: event.target.value }); }} aria-label="Bulk skill" className="h-8 rounded bg-muted px-2 text-xs font-medium text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"><option value="">Set skill…</option>{skills.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+        <select value={domain} {...busyProps("bulk-domain")} onChange={(event) => { setDomain(event.target.value); setSkill(""); if (event.target.value) patch("bulk-domain", { domain: event.target.value }); }} aria-label="Bulk domain" className="h-8 rounded bg-muted px-2 text-xs font-medium text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring"><option value="">Set domain…</option>{domains.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select>
+        <select value={skill} disabled={!domain || busy} onChange={(event) => { setSkill(event.target.value); if (event.target.value) patch("bulk-skill", { skill: event.target.value }); }} aria-label="Bulk skill" className="h-8 rounded bg-muted px-2 text-xs font-medium text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"><option value="">Set skill…</option>{skills.map((item) => <option key={item} value={item}>{item}</option>)}</select>
       </div>
-      <div className="mt-1.5 grid grid-cols-3 gap-1">{(["easy", "medium", "hard"] as Difficulty[]).map((value) => <button key={value} type="button" onClick={() => void patch({ difficulty: value })} className="h-8 rounded bg-muted text-xs font-semibold capitalize text-muted-foreground hover:bg-muted/70 hover:text-foreground">{value}</button>)}</div>
-      <div className="mt-1.5 flex gap-1.5"><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="Replace tags…" aria-label="Bulk tags" className="h-8 min-w-0 flex-1 rounded bg-muted px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" /><button type="button" disabled={!tags.trim()} onClick={() => void patch({ tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean) })} className="rounded px-2.5 text-xs font-semibold text-primary hover:bg-muted disabled:opacity-30">Apply</button></div>
-      {props.moveTargets.length ? <div className="mt-1.5 flex gap-1.5"><select value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} aria-label="Move selected to module" className="h-8 min-w-0 flex-1 rounded bg-muted px-2 text-xs text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring">{props.moveTargets.map((target) => <option key={target.id} value={target.id}>{target.title}</option>)}</select><button type="button" disabled={!moveTarget} onClick={() => run({ type: "move", destinationModuleId: moveTarget })} className="flex h-8 items-center gap-1 rounded px-2.5 text-xs font-semibold text-primary hover:bg-muted"><MoveRight size={11} aria-hidden="true" />Move</button></div> : null}
+      <div className="mt-1.5 grid grid-cols-3 gap-1">{(["easy", "medium", "hard"] as Difficulty[]).map((value) => <button key={value} type="button" {...busyProps("bulk-difficulty-" + value)} onClick={() => patch("bulk-difficulty-" + value, { difficulty: value })} className="h-8 rounded bg-muted text-xs font-semibold capitalize text-muted-foreground hover:bg-muted/70 hover:text-foreground">{value}</button>)}</div>
+      <div className="mt-1.5 flex gap-1.5"><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="Replace tags…" aria-label="Bulk tags" className="h-8 min-w-0 flex-1 rounded bg-muted px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" /><button type="button" disabled={!tags.trim() || busy} onClick={() => patch("bulk-tags", { tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean) })} className="rounded px-2.5 text-xs font-semibold text-primary hover:bg-muted disabled:opacity-30">Apply</button></div>
+      {props.moveTargets.length ? <div className="mt-1.5 flex gap-1.5"><select value={moveTarget} disabled={busy} onChange={(event) => setMoveTarget(event.target.value)} aria-label="Move selected to module" className="h-8 min-w-0 flex-1 rounded bg-muted px-2 text-xs text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring">{props.moveTargets.map((target) => <option key={target.id} value={target.id}>{target.title}</option>)}</select><button type="button" {...busyProps("bulk-move")} disabled={!moveTarget || busy} onClick={() => run("bulk-move", { type: "move", destinationModuleId: moveTarget })} className="flex h-8 items-center gap-1 rounded px-2.5 text-xs font-semibold text-primary hover:bg-muted"><MoveRight size={11} aria-hidden="true" />Move</button></div> : null}
       <div className="mt-1.5 grid grid-cols-3 gap-1">
-        <button type="button" onClick={() => run({ type: "duplicate", destinationModuleId: props.module.id })} className="flex h-9 items-center justify-center gap-1 rounded text-xs font-semibold text-muted-foreground hover:bg-muted"><Copy size={11} aria-hidden="true" />Duplicate</button>
-        <button type="button" onClick={() => run({ type: "set_pretest", value: true })} className="flex h-9 items-center justify-center gap-1 rounded text-xs font-semibold text-muted-foreground hover:bg-muted"><RotateCcw size={11} aria-hidden="true" />Pretest</button>
+        <button type="button" {...busyProps("bulk-duplicate")} disabled={busy} onClick={() => run("bulk-duplicate", { type: "duplicate", destinationModuleId: props.module.id })} className="flex h-9 items-center justify-center gap-1 rounded text-xs font-semibold text-muted-foreground hover:bg-muted"><Copy size={11} aria-hidden="true" />Duplicate</button>
+        <button type="button" {...busyProps("bulk-pretest")} disabled={busy} onClick={() => run("bulk-pretest", { type: "set_pretest", value: true })} className="flex h-9 items-center justify-center gap-1 rounded text-xs font-semibold text-muted-foreground hover:bg-muted"><RotateCcw size={11} aria-hidden="true" />Pretest</button>
         <div className="relative"><button type="button" onClick={() => setDeleteOpen(true)} className="flex h-9 w-full items-center justify-center gap-1 rounded text-xs font-semibold text-destructive hover:bg-destructive/10"><Trash2 size={11} aria-hidden="true" />Delete</button><AuthoringConfirmDialog open={deleteOpen} title={`Delete ${props.selectedIds.length} questions?`} description="This removes the selected questions from the module." confirmLabel="Delete selected" destructive busy={deleteBusy} onCancel={() => setDeleteOpen(false)} onConfirm={async () => { if (deleteBusy) return; setDeleteBusy(true); try { await props.onBulkAction(props.selectedIds, { type: "delete" }); setDeleteOpen(false); } catch { /* Parent surfaces the failure; keep the confirmation available for retry. */ } finally { setDeleteBusy(false); } }} /></div>
       </div>
     </div>

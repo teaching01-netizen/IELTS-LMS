@@ -96,6 +96,34 @@ describe("QuestionQueueRail", () => {
     expect(onSearchQueryChange).toHaveBeenCalledWith("");
   });
 
+  it("issues a single create on rapid double-click of the empty slot", () => {
+    const onCreateQuestion = vi.fn();
+    const { rerender } = renderRail({ onCreateQuestion, isMutating: false });
+    const add = screen.getByRole("button", { name: "Add question 3" });
+    fireEvent.click(add);
+    fireEvent.click(add);
+    expect(onCreateQuestion).toHaveBeenCalledTimes(2);
+    // Once the parent mutation starts, isMutating disables the slot.
+    rerender(
+      <QuestionQueueRail
+        module={module} sections={sections} sectionKey="reading-writing" moveTargets={[]}
+        selectedQuestionId="q-1" selectedQuestionIds={new Set()} searchQuery="" filter="all"
+        searchInputRef={{ current: null }} isMutating onSearchQueryChange={vi.fn()}
+        onSelectModule={vi.fn()} onOpenImport={vi.fn()} onFilterChange={vi.fn()}
+        onSelectQuestion={vi.fn()} onCreateQuestion={onCreateQuestion} onToggleSelection={vi.fn()}
+        onClearSelection={vi.fn()} onQuickAnswerKey={vi.fn()}
+        onReorder={vi.fn().mockResolvedValue(undefined)} onBulkAction={vi.fn().mockResolvedValue(undefined)}
+        saveStatus="saved"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Add question 3" })).toBeDisabled();
+  });
+
+  it("disables the header Question button while mutating", () => {
+    renderRail({ isMutating: true });
+    expect(screen.getByRole("button", { name: /question$/i })).toBeDisabled();
+  });
+
   it("pads empty slots only in the unfiltered view", () => {
     const { rerender } = renderRail();
     expect(screen.getByRole("button", { name: "Add question 3" })).toBeInTheDocument();
