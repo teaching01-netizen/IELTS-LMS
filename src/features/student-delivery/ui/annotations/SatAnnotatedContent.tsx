@@ -2,7 +2,7 @@ import { useContext, useEffect, useMemo, useRef } from 'react';
 import type { StructuredContent } from '../../../exam-authoring/api/assessmentContracts';
 import { StructuredContentRenderer } from '../../../exam-rendering/api/structuredContent';
 import type { StructuredTextRenderer } from '../../../exam-rendering/RichStructuredContentRenderer';
-import { applySatAnnotationsToText, createSatTextAnnotation, type SatQuestionAnnotations, type SatTextAnnotation, type SatTextSegment } from '../../domain/satResponses';
+import { applySatAnnotationsToText, createSatTextAnnotation, removeSatAnnotationsInRange, type SatQuestionAnnotations, type SatTextAnnotation, type SatTextSegment } from '../../domain/satResponses';
 import { SatAnnotationModeContext } from './SatAnnotationModeContext';
 import { captureSatTextSelection } from './satTextSelection';
 
@@ -19,10 +19,19 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, onC
   useEffect(() => {
     if (!enabled || !onChange || mode === 'none') return;
     const complete = (event: Event) => {
-      if (!root.current || annotations.annotations.length >= 200) return;
+      if (!root.current) return;
       if (event.type === 'pointerup' && (!(event.target instanceof Node) || !root.current.contains(event.target))) return;
       const anchor = captureSatTextSelection(root.current, region, window.getSelection());
       if (!anchor) return;
+      if (mode === 'erase') {
+        const next = removeSatAnnotationsInRange(annotations, anchor.nodeId, anchor.startOffset, anchor.endOffset);
+        if (next !== annotations) {
+          onChange(next);
+          window.getSelection()?.removeAllRanges();
+        }
+        return;
+      }
+      if (annotations.annotations.length >= 200) return;
       const kind = mode === 'note' ? 'highlight' : mode;
       const existing = annotations.annotations.find((item) => item.kind === kind && item.anchor.nodeId === anchor.nodeId &&
         item.anchor.startOffset === anchor.startOffset && item.anchor.endOffset === anchor.endOffset && item.anchor.exact === anchor.exact);
@@ -63,7 +72,8 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, onC
     };
   }, [annotations, region, content]);
 
-  return <div ref={root} data-sat-annotation-region={enabled ? region : undefined}>
+  return <div ref={root} data-sat-annotation-region={enabled ? region : undefined} data-sat-erase-armed={mode === 'erase' || undefined}
+    style={mode === 'erase' ? { cursor: 'cell' } : undefined}>
     <StructuredContentRenderer content={content} renderText={enabled ? renderText : undefined} />
   </div>;
 }
