@@ -35,6 +35,11 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   useEffect(() => { setEditingNoteId(null); }, [props.question.examQuestionId, props.disabled]);
   useEffect(() => {
+    if (editingNoteId && !props.response.annotations.annotations.some((annotation) => annotation.id === editingNoteId)) {
+      setEditingNoteId(null);
+    }
+  }, [props.response.annotations, editingNoteId]);
+  useEffect(() => {
     return props.onFlushAnnotations;
   }, [props.question.examQuestionId, props.onFlushAnnotations]);
   const editingNote = props.response.annotations.annotations.find((annotation) => annotation.id === editingNoteId);
