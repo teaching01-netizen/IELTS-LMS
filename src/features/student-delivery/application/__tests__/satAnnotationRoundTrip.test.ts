@@ -14,6 +14,18 @@ describe('SAT annotation recovery', () => {
     const wire = JSON.parse(JSON.stringify(satDraftToDurablePayload(draft)));
     expect(durablePayloadToSatDraft(draft.questionId, wire)).toEqual(draft);
   });
+  it('round-trips Bluebook paper-highlighted marks without touching the wire format', () => {
+    const draft = emptySatQuestionResponse('question-1');
+    draft.annotations.annotations.push(createSatTextAnnotation({
+      id: 'annotation-paper', kind: 'highlight', nodeId: 'stimulus:paragraph-1',
+      startOffset: 4, endOffset: 12, exact: 'evidence', prefix: 'The ',
+      suffix: ' shows', note: 'Compare the claim', now: '2026-09-06T00:00:00Z',
+    }));
+    // Phase 7 changes presentation tokens only: the durable payload (and the
+    // annotation ids/kinds/anchors it carries) must be byte-identical.
+    const wire = JSON.parse(JSON.stringify(satDraftToDurablePayload(draft)));
+    expect(durablePayloadToSatDraft(draft.questionId, wire)).toEqual(draft);
+  });
   it('keeps the wire format stable after an eraser removal', () => {
     const draft = emptySatQuestionResponse('question-1');
     const first = createSatTextAnnotation({

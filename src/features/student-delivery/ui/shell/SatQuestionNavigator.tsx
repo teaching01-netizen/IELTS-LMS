@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Bookmark, MapPin, X } from "lucide-react";
+import { Bookmark, Check, MapPin, X } from "lucide-react";
+import { SAT_COPY } from "../../domain/satCopy";
 import { AnimatePresence } from "motion/react";
 import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
 import { SatPresenceSurface } from "../motion/SatPresenceSurface";
@@ -105,6 +106,12 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
           <MapPin className="h-4 w-4" aria-hidden="true" /> Current
         </span>
         <span className="inline-flex items-center gap-1.5">
+          <span className="grid h-4 w-4 place-items-center border border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]" aria-hidden="true">
+            <Check className="h-3 w-3" aria-hidden="true" />
+          </span>{" "}
+          Answered
+        </span>
+        <span className="inline-flex items-center gap-1.5">
           <span
             className="h-4 w-4 border border-dashed border-[var(--sat-text)]"
             aria-hidden="true"
@@ -116,7 +123,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
             className="h-4 w-4 fill-[var(--sat-review)] text-[var(--sat-review)]"
             aria-hidden="true"
           />{" "}
-          For Review
+          {SAT_COPY.flag.flagged}
         </span>
       </div>
       <div className="grid grid-cols-5 justify-center gap-2 py-4 min-[360px]:grid-cols-6 sm:grid-cols-9 sm:gap-3">
@@ -124,7 +131,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
           const answered = item.status === "answered";
           const current = item.current;
           const stateClass = current
-            ? "border-[var(--sat-accent)] bg-[var(--sat-surface)] text-[var(--sat-accent-strong)] ring-2 ring-[var(--sat-accent)]"
+            ? "border-[var(--sat-accent)] bg-[var(--sat-surface)] text-[var(--sat-accent-strong)] underline decoration-2 underline-offset-4 ring-2 ring-[var(--sat-accent)]"
             : answered
               ? "border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]"
               : "border-dashed border-[var(--sat-text)] bg-[var(--sat-surface)] text-[var(--sat-accent-strong)]";
@@ -138,13 +145,16 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
                 props.onClose();
               }}
               aria-current={current ? "step" : undefined}
-              aria-label={`Question ${item.number}${answered ? ", answered" : ", unanswered"}${item.markedForReview ? ", marked for review" : ""}${current ? ", current question" : ""}`}
+              aria-label={`Question ${item.number}${answered ? ", answered" : ", unanswered"}${item.markedForReview ? ", flagged" : ""}${current ? ", current question" : ""}`}
               className={`sat-pressable relative h-11 min-w-11 border text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2 ${stateClass}`}
             >
-              {item.number}
+              <span className="inline-flex items-center gap-1">
+                {answered ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+                <span aria-hidden="true">{item.number}</span>
+              </span>
               {item.markedForReview ? (
                 <Bookmark
-                  className="absolute -right-1 -top-2 h-4 w-4 fill-[var(--sat-review)] text-[var(--sat-review)]"
+                  className="absolute -right-2 -top-2 h-5 w-5 rounded-full bg-[var(--sat-surface)] fill-[var(--sat-review)] p-[2px] text-[var(--sat-review)] shadow-sm"
                   aria-hidden="true"
                 />
               ) : null}
@@ -162,7 +172,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
           }}
           className="sat-touch-target sat-pressable rounded-full border border-[var(--sat-accent)] px-5 text-[14px] font-semibold text-[var(--sat-accent-strong)] hover:bg-[var(--sat-accent-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
         >
-          Go to Review Page
+          {SAT_COPY.navigation.reviewAnswers}
         </button>
       </div>
     </div>
@@ -170,7 +180,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
 
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 bottom-[calc(76px+var(--student-safe-bottom))] z-[80] flex justify-center px-2 sm:px-4"
+      className="pointer-events-none fixed inset-x-0 bottom-[calc(86px+var(--student-safe-bottom))] z-[80] flex justify-center px-2 sm:px-4"
       data-sat-navigator-anchor="footer"
     >
       <AnimatePresence initial={false}>

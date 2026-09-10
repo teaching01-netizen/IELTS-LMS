@@ -52,46 +52,63 @@ function props(overrides: Partial<SatExamShellProps> = {}): SatExamShellProps {
 }
 
 describe("SatExamShell", () => {
-  it("keeps highlight mode across questions, switches exclusively to underline, and exits on Escape", () => {
+  it("keeps Highlight armed across questions and exits on Escape", () => {
     const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })} />);
     fireEvent.click(screen.getByRole('button', { name: 'Highlight' }));
     expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'true');
     rerender(<SatExamShell {...props({ notesAvailable: true, questionIndex: 1 })} />);
     expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Underline' }));
-    expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByRole('button', { name: 'Underline' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.getByRole('button', { name: 'Underline' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'false');
   });
-  it("toggles Eraser exclusively with Highlight and exits on Escape", () => {
+  it("pins Display, Question note, and More panels to the top bar (never the shell bottom)", () => {
+    render(<SatExamShell {...props({ notesAvailable: true })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    const display = screen.getByRole("dialog", { name: "Display" });
+    expect(display).toHaveAttribute("data-sat-popover-panel", "anchored");
+    expect(display.className).toMatch(/fixed/);
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Question note" }));
+    const note = screen.getByRole("dialog", { name: /Question note/ });
+    expect(note).toHaveAttribute("data-sat-popover-panel", "anchored");
+    expect(note.className).toMatch(/fixed/);
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "More tools" }));
+    const menu = screen.getByRole("menu", { name: "More tools" });
+    expect(menu).toHaveAttribute("data-sat-popover-panel", "anchored");
+    expect(menu.className).toMatch(/fixed/);
+  });
+  it("shows Highlight and Question note as separate entries; hides both in Math", () => {
     const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Eraser' }));
-    expect(screen.getByRole('button', { name: 'Eraser' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'false');
+    // Separate entries: the freeform note is always reachable, never gated
+    // on highlight mode.
+    expect(screen.getByRole('button', { name: 'Question note' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Highlight' }));
-    expect(screen.getByRole('button', { name: 'Eraser' })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Eraser' }));
+    expect(screen.getByRole('button', { name: 'Question note' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.getByRole('button', { name: 'Eraser' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Question note' })).toBeInTheDocument();
     rerender(<SatExamShell {...props({ notesAvailable: false })} />);
-    expect(screen.queryByRole('button', { name: 'Eraser' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Highlight' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Question note' })).not.toBeInTheDocument();
   });
-  it("shows SAT timer/tools without a permanent saved badge", () => {
+  it("shows SAT timer/tools with a quiet persistent save token (Phase 6f)", () => {
     render(<SatExamShell {...props()} />);
     expect(screen.getByText("34:58")).toBeInTheDocument();
     expect(screen.getByText("Ada Candidate")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Calculator" })).toBeInTheDocument();
-    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+    // Phase 6f: status lives next to the hand as a quiet token (not a
+    // transient overlay, not a loud badge) — Saved at idle, no live region.
+    const indicator = screen.getByTestId("sat-footer-save-indicator");
+    expect(indicator).toHaveAttribute("data-sat-save-state", "idle");
+    expect(indicator).toHaveTextContent("All answers saved");
   });
 
-  it("opens Reading and emits presentation-only preference changes", () => {
+  it("opens Display settings and emits presentation-only preference changes", () => {
     const onReadingPreferencesChange = vi.fn();
     render(<SatExamShell {...props({ onReadingPreferencesChange })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Reading" }));
-    const dialog = screen.getByRole("dialog", { name: "Reading" });
-    expect(dialog).toHaveTextContent("Changes only how the exam looks.");
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    const dialog = screen.getByRole("dialog", { name: "Display" });
+    expect(dialog).toHaveTextContent("Only changes how the exam looks.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Increase text size" }));
     expect(onReadingPreferencesChange).toHaveBeenCalledWith({
       version: 1,
@@ -106,11 +123,13 @@ describe("SatExamShell", () => {
     expect(screen.queryByRole("button", { name: "Calculator" })).not.toBeInTheDocument();
   });
 
-  it("hides Notes in Math and keeps them in Reading and Writing", () => {
+  it("hides Highlight and Question note in Math and keeps both in Reading and Writing", () => {
     const { rerender } = render(<SatExamShell {...props({ notesAvailable: false })} />);
-    expect(screen.queryByRole("button", { name: "Notes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Highlight" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Question note" })).not.toBeInTheDocument();
     rerender(<SatExamShell {...props({ notesAvailable: true })} />);
-    expect(screen.getByRole("button", { name: "Notes" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Highlight" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Question note" })).toBeInTheDocument();
   });
 
   it("opens the bottom-anchored navigator and routes a selected question", () => {
@@ -131,39 +150,122 @@ describe("SatExamShell", () => {
 
   it("hides timer digits without changing the timer control", () => {
     render(<SatExamShell {...props()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Hide time remaining" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide timer" }));
     expect(screen.queryByText("34:58")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show time remaining" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show timer" })).toBeInTheDocument();
   });
-  it("keeps routine saving visual without announcing every autosave", () => {
+  it("announces routine saving once through a single polite status region", () => {
     render(<SatExamShell {...props({ saveState: "saving" })} />);
-    expect(screen.getByText("Saving…")).toBeVisible();
-    expect(screen.getByRole("status")).toHaveTextContent("");
+    const statuses = screen.getAllByRole("status");
+    // Exactly one save-status region (the timer announcer is the only other
+    // status, and it stays empty outside threshold crossings).
+    const saveStatuses = statuses.filter((node) => node.hasAttribute("data-sat-save-state"));
+    expect(saveStatuses).toHaveLength(1);
+    expect(saveStatuses[0]).toHaveTextContent("Saving…");
   });
 
   it("auto-reveals a hidden timer once at the 5-minute threshold and lets it hide again", () => {
     const { rerender } = render(<SatExamShell {...props({ remainingLabel: "05:02", remainingSeconds: 302 })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Hide time remaining" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide timer" }));
     expect(screen.queryByText("05:02")).not.toBeInTheDocument();
     rerender(<SatExamShell {...props({ remainingLabel: "05:00", remainingSeconds: 300 })} />);
-    expect(screen.getByText("05:00")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Hide time remaining" })).toBeInTheDocument();
+    // Timer label + warning card both show the value (warning uses a testid).
+    expect(screen.getAllByText("05:00")).toHaveLength(2);
+    expect(screen.getByTestId("sat-timer-warning-time")).toHaveTextContent("05:00");
+    expect(screen.getByRole("button", { name: "Hide timer" })).toBeInTheDocument();
+    // The visual warning is dismissible and display-only.
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss timer warning" }));
+    expect(screen.queryByTestId("sat-timer-warning")).not.toBeInTheDocument();
+    expect(screen.getByRole("timer")).toHaveTextContent("05:00");
     // One-shot: hiding again after the reveal must stick.
-    fireEvent.click(screen.getByRole("button", { name: "Hide time remaining" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide timer" }));
     rerender(<SatExamShell {...props({ remainingLabel: "04:59", remainingSeconds: 299 })} />);
     expect(screen.queryByText("04:59")).not.toBeInTheDocument();
     // A fresh module (time back above five minutes) re-arms the reveal.
     rerender(<SatExamShell {...props({ remainingLabel: "32:00", remainingSeconds: 1920 })} />);
     rerender(<SatExamShell {...props({ remainingLabel: "04:59", remainingSeconds: 299 })} />);
-    expect(screen.getByText("04:59")).toBeInTheDocument();
+    expect(screen.getAllByText("04:59")).toHaveLength(2);
+    expect(screen.getByTestId("sat-timer-warning")).toBeInTheDocument();
   });
 
   it("fires the reveal only once while remaining below five minutes", () => {
     const { rerender } = render(<SatExamShell {...props({ remainingLabel: "04:58", remainingSeconds: 298 })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Hide time remaining" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide timer" }));
     // Still below the threshold but the one-shot already fired: stays hidden.
     rerender(<SatExamShell {...props({ remainingLabel: "04:57", remainingSeconds: 297 })} />);
-    expect(screen.getByRole("button", { name: "Show time remaining" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show timer" })).toBeInTheDocument();
+  });
+
+  it("arbitrates shell Escape: open Help owns it, Line Reader survives underneath", () => {
+    const onReadingPreferencesChange = vi.fn();
+    const readingPreferences = {
+      ...createSatReadingPreferences(),
+      lineReaderEnabled: true,
+      lineReaderPosition: 0.5,
+    };
+    render(
+      <SatExamShell
+        {...props({
+          notesAvailable: true,
+          readingPreferences,
+          onReadingPreferencesChange,
+          helpOpen: true,
+          onCloseHelp: vi.fn(),
+        })}
+      />,
+    );
+    // Help owns Escape here: the route modal stays open and the shell must
+    // not double-handle (no Line Reader disable while Help is up).
+    expect(screen.getByRole("dialog", { name: "Help" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onReadingPreferencesChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ lineReaderEnabled: false }),
+    );
+  });
+
+  it("arbitrates shell Escape: open Shortcuts owns it, Line Reader survives underneath", () => {
+    const onReadingPreferencesChange = vi.fn();
+    const readingPreferences = {
+      ...createSatReadingPreferences(),
+      lineReaderEnabled: true,
+      lineReaderPosition: 0.5,
+    };
+    render(
+      <SatExamShell
+        {...props({
+          notesAvailable: true,
+          readingPreferences,
+          onReadingPreferencesChange,
+          shortcutsOpen: true,
+          onCloseShortcuts: vi.fn(),
+        })}
+      />,
+    );
+    expect(screen.getByRole("dialog", { name: "Keyboard Shortcuts" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onReadingPreferencesChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ lineReaderEnabled: false }),
+    );
+  });
+
+  it("keeps Help and Shortcuts reachable read-only while blocked", () => {
+    const { rerender } = render(
+      <SatExamShell {...props({ blocked: true, helpOpen: true, onCloseHelp: vi.fn() })} />,
+    );
+    const help = screen.getByRole("dialog", { name: "Help" });
+    expect(help).toBeInTheDocument();
+    expect(help).not.toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: "Close", exact: true })).not.toBeDisabled();
+    // The blocked exam grid is inert (answers locked), but Help lives outside it.
+    expect(screen.getByTestId("sat-exam-blocked-region")).toHaveAttribute("inert");
+    expect(screen.getByTestId("sat-exam-blocked-region").contains(help)).toBe(false);
+    rerender(
+      <SatExamShell {...props({ blocked: true, shortcutsOpen: true, onCloseShortcuts: vi.fn() })} />,
+    );
+    const shortcuts = screen.getByRole("dialog", { name: "Keyboard Shortcuts" });
+    expect(shortcuts).toBeInTheDocument();
+    expect(shortcuts).not.toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: "Close" })).not.toBeDisabled();
   });
 
   it("announces the 5-minute warning once and never per tick (T2.5)", () => {

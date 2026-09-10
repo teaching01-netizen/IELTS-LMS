@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { SAT_COPY } from "../../domain/satCopy";
 
 export function SatControlBanner({
   children,
@@ -57,10 +58,14 @@ export function SatLeaseConflictNotice({
 export function SatSubmissionOverlay({
   title = "Finalizing module…",
   note = "Your latest responses are being verified.",
+  autoSubmitted = false,
 }: {
   title?: string;
   note?: string;
+  /** Timeout attribution (Phase 1): timeout submits name expiry, manual submits do not. */
+  autoSubmitted?: boolean;
 }) {
+  const resolvedTitle = autoSubmitted ? "Time expired — submitting your saved answers." : title;
   return (
     <div
       className="sat-ui fixed inset-0 z-[95] grid place-items-center bg-[var(--sat-background)]/90"
@@ -73,7 +78,7 @@ export function SatSubmissionOverlay({
           className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2 border-[var(--sat-divider-soft)] border-t-[var(--sat-text)] motion-reduce:hidden"
           aria-hidden="true"
         />
-        <p className="text-[14px] font-semibold text-[var(--sat-text)]">{title}</p>
+        <p className="text-[14px] font-semibold text-[var(--sat-text)]">{resolvedTitle}</p>
         <p className="mt-1 text-[13px] text-[var(--sat-text-secondary)]">{note}</p>
       </div>
     </div>
@@ -112,8 +117,11 @@ export function SatBlockingOverlay({ note }: { note: string | null }) {
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         tabIndex={-1}
-        className="w-full max-w-md rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] p-8 text-center shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+        className="w-full max-w-md rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] p-8 text-center shadow-[var(--sat-shadow-modal)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
       >
+        {/* Phase 6d: blocked controls render visibly disabled WITH the reason
+            inline — the inert root alone is not an explanation (the route
+            banner carries the same copy for redundancy, not contradiction). */}
         <p className="text-[14px] font-semibold text-[var(--sat-text-secondary)]">
           Paused by proctor
         </p>
@@ -121,14 +129,13 @@ export function SatBlockingOverlay({ note }: { note: string | null }) {
           id={titleId}
           className="mt-2 text-2xl font-semibold tracking-tight text-[var(--sat-text)]"
         >
-          Your timer is paused
+          {SAT_COPY.blocking.pausedTitle}
         </h2>
         <p
           id={descriptionId}
           className="mt-3 text-[14px] leading-6 text-[var(--sat-text-secondary)]"
         >
-          {note ||
-            "Wait for the proctor to resume your attempt. Your remaining module time is preserved."}
+          {note ?? SAT_COPY.blocking.pausedBody + " Your remaining module time is preserved."}
         </p>
       </div>
     </div>

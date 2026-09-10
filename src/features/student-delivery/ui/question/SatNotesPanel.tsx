@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AnimatePresence, type MotionStyle } from "motion/react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useSatMediaQuery } from "../useSatMediaQuery";
-import { X } from "lucide-react";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
+import { SAT_COPY } from "../../domain/satCopy";
 import { satReadingStyle } from "../reading/satReadingStyle";
-import { SatPresenceSurface } from "../motion/SatPresenceSurface";
-
-const COMPACT_NOTES_QUERY = "(max-width: 720px), (max-height: 560px)";
+import { SatPopoverShell, SAT_COMPACT_POPOVER_QUERY } from "../primitives/SatPopoverShell";
+import type { RefObject } from "react";
 
 export interface SatNotesPanelProps {
   open: boolean;
@@ -14,29 +12,41 @@ export interface SatNotesPanelProps {
   disabled: boolean;
   readingPreferences: SatReadingPreferences;
   returnFocusId: string;
+  triggerRef?: RefObject<HTMLButtonElement | null>;
+  questionNumber?: number;
   onSave: (note: string) => void;
   onClose: () => void;
 }
 
+/**
+ * Question note panel — freeform per-question note (Phase 3 copy, Phase 0 focus).
+ *
+ * One of the two note concepts: this is the QUESTION note (freeform text for
+ * this question), distinct from a NOTE ON SELECTED TEXT (anchored to a
+ * passage selection). Title and labels come from the copy table; the focus
+ * contract (focus-in on every open, focus-back on every close) comes from
+ * SatPopoverShell. The textarea keeps a single label source (wrapping label;
+ * no redundant aria-label) with the character count exposed via describedby.
+ */
 export function SatNotesPanel(props: SatNotesPanelProps) {
   const [draft, setDraft] = useState(props.note);
-  const compact = useSatMediaQuery(COMPACT_NOTES_QUERY);
+  const compact = useSatMediaQuery(SAT_COMPACT_POPOVER_QUERY);
   const readingStyle = satReadingStyle(props.readingPreferences);
-  const panelStyle: MotionStyle & {
+  const panelStyle: CSSProperties & {
     "--sat-reading-scale": string;
     "--sat-reading-line-height": string;
   } = {
     "--sat-reading-scale": readingStyle["--sat-reading-scale"],
     "--sat-reading-line-height": readingStyle["--sat-reading-line-height"],
   };
-  const panelRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftRef = useRef(draft);
   const noteRef = useRef(props.note);
   const disabledRef = useRef(props.disabled);
   const onSaveRef = useRef(props.onSave);
-  const returnFocusIdRef = useRef(props.returnFocusId);
   const onCloseRef = useRef(props.onClose);
+  const fallbackTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const triggerRef = props.triggerRef ?? fallbackTriggerRef;
 
   useEffect(() => {
     draftRef.current = draft;
@@ -46,87 +56,60 @@ export function SatNotesPanel(props: SatNotesPanelProps) {
     noteRef.current = props.note;
     disabledRef.current = props.disabled;
     onSaveRef.current = props.onSave;
-    returnFocusIdRef.current = props.returnFocusId;
     onCloseRef.current = props.onClose;
     if (props.open) setDraft(props.note);
-  }, [props.disabled, props.note, props.onClose, props.onSave, props.open, props.returnFocusId]);
+  }, [props.disabled, props.note, props.onClose, props.onSave, props.open]);
 
   const commitAndClose = useCallback(() => {
     const next = draftRef.current.trim();
     if (!disabledRef.current && next !== noteRef.current) onSaveRef.current(next);
     onCloseRef.current();
-    window.requestAnimationFrame(() => document.getElementById(returnFocusIdRef.current)?.focus());
   }, []);
+
+  // Legacy return-focus by id (shell passes returnFocusId for the pre-shell
+  // path); the shell trigger ref is preferred when provided.
+  const legacyReturnFocusId = props.returnFocusId;
+  const handleClose = useCallback(() => {
+    commitAndClose();
+    if (triggerRef.current) {
+      window.requestAnimationFrame(() => triggerRef.current?.focus());
+    } else {
+      window.requestAnimationFrame(() => document.getElementById(legacyReturnFocusId)?.focus());
+    }
+  }, [commitAndClose, legacyReturnFocusId, triggerRef]);
 
   useEffect(() => {
     if (!props.open) return;
     const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        commitAndClose();
-        return;
-      }
-      if (!compact || event.key !== "Tab" || !panelRef.current) return;
-      const focusable = [
-        ...panelRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        ),
-      ];
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [commitAndClose, compact, props.open]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [props.open]);
 
-  const panel = (
-    <SatPresenceSurface
-      offsetY={compact ? 5 : 3}
-      ref={panelRef}
-      role="dialog"
-      aria-modal={compact ? true : undefined}
-      aria-labelledby="sat-question-notes-title"
-      style={panelStyle}
-      className={
-        compact
-          ? "sat-ui sat-reading-surface w-full max-w-[560px] overflow-hidden rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] shadow-[0_24px_70px_rgba(0,0,0,0.24)]"
-          : "sat-ui sat-reading-surface absolute right-[calc(1rem+var(--student-safe-right))] top-[102px] z-[70] w-[min(380px,calc(100vw-32px))] overflow-hidden rounded-[8px] border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] shadow-[0_18px_50px_rgba(0,0,0,0.18)]"
-      }
+  const dialogName =
+    props.questionNumber !== undefined ? SAT_COPY.questionNote.title + " \u2014 question " + props.questionNumber : SAT_COPY.questionNote.title;
+
+  return (
+    <SatPopoverShell
+      open={props.open}
+      title={SAT_COPY.questionNote.title}
+      ariaLabel={dialogName}
+      triggerRef={triggerRef}
+      onClose={handleClose}
+      closeLabel={SAT_COPY.questionNote.close}
+      anchoredClassName="sat-ui sat-reading-surface sat-popover-anchored fixed right-[calc(1rem+var(--student-safe-right))] top-[calc(var(--student-safe-top)+98px)] z-[70] w-[min(380px,calc(100vw-32px))] overflow-hidden rounded-[8px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] shadow-sm"
+      compactClassName="sat-ui sat-reading-surface w-full max-w-[560px] overflow-hidden rounded-[10px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
+      backdropClassName="sat-dialog-backdrop fixed inset-0 z-[78] grid place-items-center bg-black/20"
     >
-      <div className="flex min-h-11 items-center justify-between border-b border-[var(--sat-divider-soft)] px-4">
-        <h2
-          id="sat-question-notes-title"
-          className="text-[15px] font-semibold text-[var(--sat-text)]"
-        >
-          Notes
-        </h2>
-        <button
-          type="button"
-          onClick={commitAndClose}
-          className="sat-touch-target sat-pressable grid place-items-center rounded-[6px] text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
-          aria-label="Close notes and save changes"
-        >
-          <X className="h-5 w-5" aria-hidden="true" />
-        </button>
+      {/* Bluebook note card interior (Phase 7, Lane 3): pale-yellow 38px
+          header band + 12px body padding; answer-grade border + small
+          shadow live on the panel classes above (overlay contract owns
+          geometry/backdrop — untouched). */}
+      <div data-sat-note-header className="flex min-h-[38px] items-center bg-[var(--sat-note-header)] px-3">
+        <span className="text-[14px] font-semibold text-[var(--sat-text)]">{SAT_COPY.questionNote.fieldLabel}</span>
       </div>
-      <div className="p-4">
-        <label
-          htmlFor="sat-question-note"
-          className="block text-[14px] font-semibold text-[var(--sat-text-secondary)]"
-        >
-          <span>Note for this question</span>
+      <div className="p-3" style={panelStyle}>
+        <label htmlFor="sat-question-note" className="block text-[14px] font-normal text-[var(--sat-text-secondary)]">
+          <span className="sr-only">{SAT_COPY.questionNote.fieldLabel}</span>
+          {/* eslint-disable-next-line jsx-a11y/control-has-associated-label -- label text comes from the SAT_COPY table (non-literal); association is real via wrapping label + htmlFor. */}
           <textarea
             ref={textareaRef}
             id="sat-question-note"
@@ -134,40 +117,29 @@ export function SatNotesPanel(props: SatNotesPanelProps) {
             onChange={(event) => setDraft(event.target.value.slice(0, 2_000))}
             disabled={props.disabled}
             rows={6}
-            aria-label="Note for this question"
-            className="sat-reading-copy mt-2 w-full resize-y rounded-[6px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] p-3 text-[15px] font-normal leading-6 text-[var(--sat-text)] outline-none focus:border-[var(--sat-accent)] focus:ring-2 focus:ring-[var(--sat-focus)]/25 disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)]"
-            placeholder="Add a note you can revisit in this module."
+            aria-describedby="sat-question-note-count sat-question-note-hint"
+            className="sat-reading-copy w-full resize-y rounded-[6px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] p-3 text-[15px] font-normal leading-6 text-[var(--sat-text)] outline-none focus:border-[var(--sat-accent)] focus:ring-2 focus:ring-[var(--sat-focus)]/25 disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)]"
+            placeholder={SAT_COPY.questionNote.placeholder}
           />
         </label>
+        <p id="sat-question-note-hint" className="mt-2 text-[13px] text-[var(--sat-text-secondary)]">
+          {SAT_COPY.questionNote.autoSaveHint}
+        </p>
         <div className="mt-3 flex items-center justify-between gap-3">
-          <span className="text-[13px] text-[var(--sat-text-secondary)]">{draft.length}/2000</span>
+          <span id="sat-question-note-count" className="text-[13px] text-[var(--sat-text-secondary)]" aria-live="polite">
+            {draft.length}/2000
+          </span>
           <button
             type="button"
             disabled={props.disabled}
-            onClick={commitAndClose}
+            onClick={handleClose}
             className="sat-touch-target sat-pressable rounded-full bg-[var(--sat-accent)] px-5 text-[14px] font-semibold text-[var(--sat-accent-text)] hover:bg-[var(--sat-accent-strong)] disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2"
           >
-            Done
+            {SAT_COPY.questionNote.saveAndClose}
           </button>
         </div>
+        <span className="hidden" data-sat-compact-flag={compact ? "true" : undefined} aria-hidden="true" />
       </div>
-    </SatPresenceSurface>
-  );
-
-  return (
-    <AnimatePresence initial={false}>
-      {props.open ? (
-        compact ? (
-          <SatPresenceSurface
-            motionKind="backdrop"
-            className="sat-dialog-backdrop fixed inset-0 z-[78] grid place-items-center bg-black/20"
-          >
-            {panel}
-          </SatPresenceSurface>
-        ) : (
-          panel
-        )
-      ) : null}
-    </AnimatePresence>
+    </SatPopoverShell>
   );
 }

@@ -1206,12 +1206,30 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-text-secondary: #515154;
   --sat-divider: rgba(60, 60, 67, 0.36);
   --sat-divider-soft: rgba(60, 60, 67, 0.18);
-  --sat-accent: var(--sat-accent-core);
-  --sat-accent-strong: #0067b8;
-  --sat-accent-soft: #eaf5fc;
+  /* Bluebook primitives (L0 fallback R9; Lane 1 owns semantic/component layers).
+   * Royal action replaces Apple blue in exam scope only; -strong stays
+   * hover-grade (text-on-white AA 7.76:1), -pressed is the darkest step. */
+  --sat-chrome: #EAF2FD;
+  --sat-canvas: #FFFFFF;
+  --sat-accent: #3154D7;
+  --sat-accent-hover: #2947BA;
+  --sat-accent-strong: #2947BA;
+  --sat-accent-pressed: #223A98;
+  --sat-accent-soft: #E4EAFB;
   --sat-accent-text: #ffffff;
-  --sat-focus: #005fcc;
-  --sat-review: #b51d4f;
+  --sat-attention: #FFD718;
+  --sat-attention-hover: #F2C900;
+  --sat-attention-fg: #171717;
+  --sat-attention-border: #44484C;
+  --sat-focus: #005FCC;
+  --sat-review: #C9475C;
+  --sat-exam-navy: #202B78;
+  --sat-progress: #191919;
+  --sat-divider-strong: #24272A;
+  --sat-answer-border: #74787D;
+  --sat-split-divider: #777B80;
+  --sat-scrim: rgb(0 0 0 / 72%);
+  --sat-reader-mask: rgb(20 20 20 / 92%);
   --sat-danger: #b42318;
   --sat-danger-soft: #fff1f0;
   --sat-warning: #8a4b00;
@@ -1233,10 +1251,49 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-type-reference: 1rem;
   --sat-reading-scale: 1;
   --sat-reading-line-height: 1.6;
-  --sat-highlight-background: #fff1a8;
+  --sat-highlight-background: #FFF2B3;
   --sat-highlight-text: #1d1d1f;
+  --sat-note-header: #FFF9D9;
+  /* Bluebook selection preview (Phase 7, Lane 3): preview var for the
+   * ::selection utility below; defaults to the paper token. No literal
+   * change — value intentionally mirrors --sat-highlight-background. */
+  --sat-selection-color: var(--sat-highlight-background);
   --sat-underline: #1d1d1f;
-  --sat-reader-dim: rgba(0, 0, 0, 0.32);
+  --sat-reader-dim: rgb(20 20 20 / 92%);
+  /* Bluebook SEMANTIC layer (L0 R10; consumes primitives, never literals).
+   * Components must prefer these over the raw primitives above. */
+  --sat-shell-bg: var(--sat-chrome);
+  --sat-body-bg: var(--sat-background);
+  --sat-control-primary-bg: var(--sat-accent);
+  --sat-control-primary-bg-hover: var(--sat-accent-hover);
+  --sat-control-primary-bg-pressed: var(--sat-accent-pressed);
+  --sat-control-primary-fg: var(--sat-accent-text);
+  --sat-answer-bg: var(--sat-surface);
+  --sat-answer-fg: var(--sat-text);
+  --sat-answer-border-strong: var(--sat-answer-border);
+  --sat-progress-bg: var(--sat-progress);
+  --sat-progress-fg: #ffffff;
+  --sat-review-active: var(--sat-review);
+  --sat-annotation-bg: var(--sat-highlight-background);
+  --sat-modal-bg: var(--sat-surface);
+  --sat-modal-scrim: var(--sat-scrim);
+  /* Bluebook COMPONENT tokens: answer + primary button (Phase 2 contract). */
+  --sat-answer-min-height: 52px;
+  --sat-answer-padding-y: 12px;
+  --sat-answer-padding-x: 14px;
+  --sat-answer-gap: 12px;
+  --sat-answer-radius: 8px;
+  --sat-choice-marker-size: 28px;
+  --sat-button-height: 44px;
+  --sat-button-padding-x: 24px;
+  --sat-button-radius: 999px;
+  --sat-button-compact-height: 26px;
+  --sat-focus-width: 3px;
+  --sat-focus-offset: 2px;
+  /* Bluebook elevation (L0 R15): borders carry structure; only two shadows exist. */
+  --sat-shadow-floating: 0 4px 12px rgb(0 0 0 / 22%);
+  --sat-shadow-modal: 0 8px 24px rgb(0 0 0 / 24%);
+  --sat-tool-border: #5D6268;
   font-family:
     system-ui,
     -apple-system,
@@ -1247,6 +1304,20 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   background: var(--sat-background);
   -webkit-text-size-adjust: 100%;
   text-rendering: optimizeLegibility;
+}
+
+/* Bluebook selection preview (Phase 7, Lane 3): while a highlight tool is
+ * armed, native text selection previews the paper token so the drag gesture
+ * reads as the mark it will become. Underline tool uses the text token.
+ * Eraser behavior untouched (no selection-color change in erase mode). */
+.sat-ui [data-sat-highlight-preview="true"]::selection {
+  background-color: var(--sat-selection-color, var(--sat-highlight-background, #FFF2B3));
+  color: inherit;
+}
+
+.sat-ui [data-sat-highlight-preview="true"]::-moz-selection {
+  background-color: var(--sat-selection-color, var(--sat-highlight-background, #FFF2B3));
+  color: inherit;
 }
 
 .sat-exam-prose {
@@ -1313,6 +1384,19 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 .sat-exam-shell > main {
   margin-left: var(--student-safe-left);
   margin-right: var(--student-safe-right);
+}
+
+/* Anchored exam popovers (Directions / Display / Question note / More):
+   desktop panels are `fixed` against viewport offsets under the header, so
+   they never depend on which grid ancestor they mount under and can never
+   drift to the shell bottom. This guard re-pins fixed positioning even if a
+   utility layer or later rule tries to reset it. */
+.sat-popover-anchor {
+  position: relative;
+}
+
+.sat-popover-anchored[data-sat-popover-panel="anchored"] {
+  position: fixed;
 }
 
 .sat-exam-footer {
@@ -1414,9 +1498,13 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   transition-duration: 40ms;
 }
 
+/* Bluebook answer focus (Phase 6, Lane 3): 3px focus-token outline via
+ * :has(input:focus-visible) — the native radio stays sr-only while the
+ * visible row carries the focus ring. Instant under reduced-motion (the
+ * global reduced-motion guard zeroes transitions; no animation here). */
 .sat-answer-choice:has(input:focus-visible) {
-  outline: 2px solid var(--sat-focus);
-  outline-offset: 2px;
+  outline: var(--sat-focus-width, 3px) solid var(--sat-focus);
+  outline-offset: var(--sat-focus-offset, 2px);
 }
 
 @media (min-width: 640px) {
@@ -1781,6 +1869,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   background: rgba(120, 120, 128, 0.12);
 }
 .sat-product .sat-segmented-option {
+  position: relative;
   flex: 1;
   min-height: 32px;
   border-radius: 8px;
@@ -1789,19 +1878,117 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   font-weight: 600;
   color: var(--sat-secondary-label);
   outline: none;
+  background: transparent;
   transition:
     background-color 130ms cubic-bezier(0.22, 1, 0.36, 1),
     color 130ms cubic-bezier(0.22, 1, 0.36, 1),
     box-shadow 130ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .sat-product .sat-segmented-option[aria-checked='true'] {
-  background: #ffffff;
+  background: transparent;
   color: var(--sat-label);
+  box-shadow: none;
+}
+/* Sliding selection thumb (shared layoutId in SegmentedControl.tsx): the
+ * glide between segments. Reduced-motion collapses it to an instant swap
+ * via MotionConfig reducedMotion="user" at the SAT roots. */
+.sat-product .sat-segmented-thumb {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+}
+.sat-product .sat-segmented-label {
+  position: relative;
+  z-index: 1;
 }
 .sat-product .sat-segmented-option:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--sat-accent) 72%, white);
   outline-offset: 1px;
+}
+
+/* SAT staff list motion: one capped stagger + one fade vocabulary.
+ * Rows cascade via --sat-row-index (cap 5 at call sites); route chrome
+ * fades without translating; banners fade so content never jumps.
+ * Motion tokens: 160ms state / 140ms banner, ease [0.22,1,0.36,1]. */
+.sat-product .sat-row-enter {
+  animation: sat-row-enter 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(min(var(--sat-row-index, 0), 5) * 60ms);
+}
+@keyframes sat-row-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.sat-product .sat-route-enter {
+  animation: sat-route-enter 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes sat-route-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.sat-product .sat-banner-enter {
+  animation: sat-route-enter 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Pending spinner: static ring + Working text carry meaning when motion
+ * is reduced; rotation is decoration only. */
+.sat-product .sat-spinner {
+  animation: sat-spin 0.8s linear infinite;
+}
+@keyframes sat-spin {
+  to { transform: rotate(360deg); }
+}
+/* Live presence dot: gentle opacity pulse; the text label stays the
+ * state carrier, never the pulse alone. */
+.sat-product .sat-live-dot {
+  animation: sat-live-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes sat-live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+/* List-row skeleton shimmer: gradient sweep matching authoring rhythm.
+ * animate-pulse stays forbidden in SAT (pinned by SatPage.test). */
+.sat-product .sat-skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.sat-product .sat-skeleton-shimmer::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(100deg, transparent 20%, rgba(120, 120, 128, 0.14) 50%, transparent 80%);
+  animation: sat-shimmer-sweep 1.35s ease-in-out infinite;
+}
+@keyframes sat-shimmer-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+/* List rows: tactile hover + press, never lift (no translate — transform is
+ * press-scale only). Chevron nudges on row hover. */
+.sat-product .sat-list-row {
+  transition: background-color 160ms cubic-bezier(0.22, 1, 0.36, 1), transform 100ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sat-product .sat-list-row:hover {
+  background-color: rgba(120, 120, 128, 0.06);
+}
+.sat-product .sat-list-row:active:not(:disabled) {
+  transform: scale(0.99);
+}
+.sat-product .sat-row-chevron {
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), color 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sat-product .sat-list-row:hover .sat-row-chevron {
+  transform: translateX(2px);
+}
+/* Menu trigger chevron: rotates on open; static under reduced motion. */
+.sat-product .sat-menu-trigger-chevron {
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sat-product .sat-menu-trigger-chevron[data-open],
+.group[data-state='open'] .sat-product .sat-menu-trigger-chevron,
+.sat-product .group[data-state='open'] .sat-menu-trigger-chevron {
+  transform: rotate(180deg);
 }
 
 /* Loading skeleton: inside the SAT workspace the shared skeleton is
@@ -1835,12 +2022,31 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 }
 @media (prefers-reduced-motion: reduce) {
   .sat-product .sat-segmented-option,
-  .sat-product .animate-pulse {
+  .sat-product .animate-pulse,
+  .sat-product .sat-row-enter,
+  .sat-product .sat-route-enter,
+  .sat-product .sat-banner-enter,
+  .sat-product .sat-spinner,
+  .sat-product .sat-live-dot,
+  .sat-product .sat-skeleton-shimmer::after,
+  .sat-product .sat-list-row,
+  .sat-product .sat-row-chevron,
+  .sat-product .sat-menu-trigger-chevron {
     transition: none !important;
     animation: none !important;
   }
+  .sat-product .sat-list-row:active:not(:disabled) {
+    transform: none !important;
+  }
 }
 
+/* Dialog z-scale (single rule for both families — SAT `sat-dialog-*` at
+ * 110/111 and authoring `authoring-dialog-*` at 200/201 never nest inside
+ * each other: SAT routes use Sat* dialogs, authoring uses Authoring*
+ * dialogs. If nesting is ever introduced, the inner family must portal to
+ * a higher layer explicitly. One scrim recipe: dark translucent + blur;
+ * one radius per size (confirm 16-22px, form 16-22px, sheet bottom-docked
+ * under 640px). Do not invent a third dialog language. */
 /* Shared SAT authoring primitives. Interaction primitives are composed from
  * Radix in TSX; these classes keep their visual language in one place. */
 .authoring-dialog-overlay {

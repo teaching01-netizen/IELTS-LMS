@@ -15,8 +15,19 @@ export interface SatSingleChoiceAnswerProps {
 
 export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
   return (
-    <fieldset className="space-y-3" disabled={props.disabled}>
+    // Phase 6d: the blocked fieldset keeps its disabled treatment AND names
+    // the reason — a greyed control with no explanation reads as broken.
+    <fieldset
+      className="space-y-3"
+      disabled={props.disabled}
+      aria-describedby={props.disabled ? "sat-answers-blocked-reason" : undefined}
+    >
       <legend className="sr-only">Answer choices</legend>
+      {props.disabled ? (
+        <p id="sat-answers-blocked-reason" className="sr-only">
+          Answer choices unavailable: paused by the proctor, answers safe.
+        </p>
+      ) : null}
       {props.options.map((option, index) => {
         const eliminated = props.eliminatedOptionIds.has(option.id);
         const selected = props.value === option.id;
@@ -29,7 +40,12 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
           <div key={option.id} className="relative">
             <label
               htmlFor={inputId}
-              className={`sat-answer-choice group flex min-h-[68px] cursor-pointer items-start gap-3 rounded-[7px] border bg-[var(--sat-surface)] px-4 py-3.5 pr-14 ${selected ? "border-[var(--sat-accent)] ring-2 ring-[var(--sat-accent)]/20" : eliminated ? "border-[var(--sat-divider)] bg-[var(--sat-surface-subtle)]" : "border-[var(--sat-text)] hover:border-[var(--sat-accent)]"}`}
+              // Bluebook answer system (Phase 6): min-height + radius +
+              // 1px answer-border from component tokens; selected = 2px
+              // accent border + accent-soft tint (never flooded blue);
+              // hover = subtle surface token; borders carry the structure
+              // (no shadow utilities on rows).
+              className={`sat-answer-choice group flex min-h-[var(--sat-answer-min-height)] cursor-pointer items-start gap-3 rounded-[var(--sat-answer-radius)] border border-[var(--sat-answer-border)] bg-[var(--sat-answer-bg)] px-4 py-3.5 pr-14 ${selected ? "border-2 border-[var(--sat-accent)] bg-[var(--sat-accent-soft)]" : eliminated ? "bg-[var(--sat-surface-subtle)]" : "hover:bg-[var(--sat-surface-hover)] hover:border-[var(--sat-accent)]"}`}
             >
               <input
                 id={inputId}
@@ -46,14 +62,19 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                 Option {letter}.
               </span>
               <span
-                className={`sat-state-transition grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[14px] font-semibold ${selected ? "border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]" : "border-[var(--sat-text-secondary)] text-[var(--sat-text)]"}`}
+                // Bluebook marker (Phase 6): 28px circle with a 2px border.
+                // Selected fill lives HERE only — the row itself keeps the
+                // calm accent-soft tint, never a flooded blue fill.
+                className={`sat-state-transition grid h-[var(--sat-choice-marker-size)] w-[var(--sat-choice-marker-size)] shrink-0 place-items-center rounded-full border-2 text-[14px] font-semibold ${selected ? "border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]" : "border-[var(--sat-text-secondary)] text-[var(--sat-text)]"}`}
                 aria-hidden="true"
               >
                 {letter}
               </span>
               <div
                 id={optionContentId}
-                className={`min-w-0 flex-1 sat-type-body text-[var(--sat-text)] ${eliminated ? "[&_p]:line-through [&_p]:decoration-[1.5px]" : ""}`}
+                // Whole-content strikethrough (Phase 6): eliminated choices
+                // strike lists, equations, and mixed content — not just <p>.
+                className={`min-w-0 flex-1 sat-type-body text-[var(--sat-text)] ${eliminated ? "line-through decoration-[1.5px]" : ""}`}
               >
                 <StructuredContentRenderer content={option.content} />
               </div>

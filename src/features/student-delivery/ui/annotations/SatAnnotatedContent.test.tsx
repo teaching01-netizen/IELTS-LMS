@@ -9,7 +9,7 @@ describe('SAT annotation decoration', () => {
     const onChange = vi.fn();
     const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text: 'A tree grows.' }] };
     const annotations = emptySatAnnotations();
-    const view = (mode: 'none' | 'highlight' | 'erase') => <SatAnnotationModeContext.Provider value={mode}>
+    const view = (mode: 'none' | 'highlight' | 'note' | 'erase') => <SatAnnotationModeContext.Provider value={mode}>
       <SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled onChange={onChange} />
     </SatAnnotationModeContext.Provider>;
     const { container, rerender } = render(view('none'));
@@ -40,6 +40,22 @@ describe('SAT annotation decoration', () => {
     rerender(<SatAnnotatedContent content={content('Today a tree grows.')} annotations={annotations} region="stimulus" enabled />);
     expect(container.querySelector('[data-sat-highlight]')).toHaveTextContent('tree');
   });
+  it('paints highlights with the paper token fallback #FFF2B3 and underlines with the text token', () => {
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [
+      createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' }),
+      createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 7, endOffset: 12, exact: 'grows' }),
+    ];
+    const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text: 'A tree grows.' }] };
+    const { container } = render(<SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled />);
+    const styled = [...container.querySelectorAll<HTMLElement>('[data-sat-highlight], [data-sat-underline]')]
+      .map((el) => el.getAttribute('style') ?? '')
+      .join(' ');
+    // Canonical token with Bluebook paper fallback (was #fff1a8).
+    expect(styled).toContain('var(--sat-highlight-background, #FFF2B3)');
+    expect(styled).toContain('var(--sat-underline');
+  });
+
   it('removes intersecting marks on selection completion while erase mode is armed', () => {
     const onChange = vi.fn();
     const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text: 'A tree grows.' }] };
@@ -48,7 +64,7 @@ describe('SAT annotation decoration', () => {
       createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' }),
       createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 7, endOffset: 12, exact: 'grows' }),
     ];
-    const view = (mode: 'none' | 'highlight' | 'erase') => <SatAnnotationModeContext.Provider value={mode}>
+    const view = (mode: 'none' | 'highlight' | 'note' | 'erase') => <SatAnnotationModeContext.Provider value={mode}>
       <SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled onChange={onChange} />
     </SatAnnotationModeContext.Provider>;
     const { container, rerender } = render(view('none'));
