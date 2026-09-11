@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Image as ImageIcon, LoaderCircle, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Plus, Trash2, X } from "lucide-react";
 import {
   ACT_SCIENCE_SKILL_CATEGORIES,
   ActScienceStimulus,
@@ -9,60 +9,48 @@ import {
   SingleMCQQuestion,
 } from "../types";
 import { createId } from "../utils/idUtils";
-import {
-  ACT_SCIENCE_CHOICE_IMAGE_TYPES,
-  uploadActScienceChoiceImageGateway,
-  uploadActScienceQuestionImageGateway,
-} from "../features/exam-authoring/infrastructure/actScienceChoiceImageGateway";
+import { getImageUrlCandidates } from "../utils/imageUrl";
 
 const OPTION_LABELS = ["A", "B", "C", "D"] as const;
-const LONG_UPLOAD_ERROR_THRESHOLD = 240;
-const ACT_SCIENCE_FILE_INPUT_CLASS_NAME =
-  "pointer-events-none fixed left-0 top-0 h-px w-px overflow-hidden opacity-0";
 
-function releaseFileInputViewport(input: HTMLInputElement) {
-  const restoreViewport = () => {
-    input.blur();
-    window.scrollTo(0, 0);
-  };
-
-  restoreViewport();
-  window.requestAnimationFrame(() => {
-    restoreViewport();
-    window.requestAnimationFrame(restoreViewport);
-  });
+interface ActImagePreviewProps {
+  src: string;
+  alt: string;
+  className: string;
 }
 
-function UploadErrorNotice({ message }: { message: string }) {
-  if (message.length <= LONG_UPLOAD_ERROR_THRESHOLD) {
+function ActImagePreview({ src, alt, className }: ActImagePreviewProps) {
+  const candidates = getImageUrlCandidates(src);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const [hasError, setHasError] = useState(false);
+  const resolvedSrc = candidates[candidateIndex] ?? "";
+
+  useEffect(() => {
+    setCandidateIndex(0);
+    setHasError(false);
+  }, [src]);
+
+  if (!resolvedSrc || hasError) {
     return (
-      <p
-        className="break-words text-xs font-medium text-red-600 [overflow-wrap:anywhere]"
-        role="alert"
-      >
-        {message}
+      <p className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+        Preview unavailable. Check the image URL.
       </p>
     );
   }
 
-  const status = message.match(/\bstatus\s+(\d{3})\b/i)?.[1];
-  const summary = status
-    ? `Image upload failed (${status}). See technical details.`
-    : "Image upload failed. See technical details.";
-
   return (
-    <div
-      className="break-words rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700 [overflow-wrap:anywhere]"
-      role="alert"
-    >
-      <p className="font-medium">{summary}</p>
-      <details className="mt-1">
-        <summary className="cursor-pointer font-semibold">Technical details</summary>
-        <p className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-mono [overflow-wrap:anywhere]">
-          {message}
-        </p>
-      </details>
-    </div>
+    <img
+      src={resolvedSrc}
+      alt={alt}
+      className={className}
+      onError={() => {
+        if (candidateIndex + 1 < candidates.length) {
+          setCandidateIndex((current) => current + 1);
+        } else {
+          setHasError(true);
+        }
+      }}
+    />
   );
 }
 
@@ -149,25 +137,13 @@ export interface ActScienceQuestionBuilderPaneProps {
   stimulus: ActScienceStimulus;
   startNumber?: number;
   onChange: (nextStimulus: ActScienceStimulus) => void;
-  uploadChoiceImage?: ActScienceChoiceImageUploader;
-  uploadQuestionImage?: ActScienceQuestionImageUploader;
 }
-
-export type ActScienceChoiceImageUploader = (file: File, ownerId: string) => Promise<string>;
-export type ActScienceQuestionImageUploader = (file: File, ownerId: string) => Promise<string>;
 
 export function ActScienceQuestionBuilderPane({
   stimulus,
   startNumber = 1,
   onChange,
-  uploadChoiceImage = uploadActScienceChoiceImageGateway,
-  uploadQuestionImage = uploadActScienceQuestionImageGateway,
 }: ActScienceQuestionBuilderPaneProps) {
-  const [uploadingChoiceKey, setUploadingChoiceKey] = useState<string | null>(null);
-  const [choiceUploadErrors, setChoiceUploadErrors] = useState<Record<string, string>>({});
-  const [uploadingQuestionKey, setUploadingQuestionKey] = useState<string | null>(null);
-  const [questionUploadErrors, setQuestionUploadErrors] = useState<Record<string, string>>({});
-
   const entries: QuestionEntry[] = stimulus.blocks.flatMap((block, blockIndex) =>
     getBlockQuestions(block).map((question, questionIndex) => ({
       blockIndex,
@@ -214,83 +190,11 @@ export function ActScienceQuestionBuilderPane({
     }));
   };
 
-  const getChoiceKey = (questionId: string, optionId: string) => `${questionId}:${optionId}`;
-
-  const uploadQuestion = async ({
-    blockIndex,
-    questionIndex,
-    questionId,
-    file,
-  }: {
-    blockIndex: number;
-    questionIndex: number;
-    questionId: string;
-    file: File;
-  }) => {
-    setUploadingQuestionKey(questionId);
-    setQuestionUploadErrors((current) => {
-      const next = { ...current };
-      delete next[questionId];
-      return next;
-    });
-
-    try {
-      const imageUrl = await uploadQuestionImage(file, `act-science-question:${questionId}`);
-      updateQuestion(blockIndex, questionIndex, (current) => ({ ...current, imageUrl }));
-    } catch (error) {
-      setQuestionUploadErrors((current) => ({
-        ...current,
-        [questionId]: error instanceof Error ? error.message : "Unable to upload this image.",
-      }));
-    } finally {
-      setUploadingQuestionKey(null);
-    }
-  };
-
   const removeQuestionImage = (blockIndex: number, questionIndex: number) => {
     updateQuestion(blockIndex, questionIndex, (current) => ({
       ...current,
       imageUrl: undefined,
     }));
-  };
-
-  const uploadChoice = async ({
-    blockIndex,
-    questionIndex,
-    questionId,
-    optionId,
-    file,
-  }: {
-    blockIndex: number;
-    questionIndex: number;
-    questionId: string;
-    optionId: string;
-    file: File;
-  }) => {
-    const choiceKey = getChoiceKey(questionId, optionId);
-    setUploadingChoiceKey(choiceKey);
-    setChoiceUploadErrors((current) => {
-      const next = { ...current };
-      delete next[choiceKey];
-      return next;
-    });
-
-    try {
-      const imageUrl = await uploadChoiceImage(file, `act-science-choice:${choiceKey}`);
-      updateQuestion(blockIndex, questionIndex, (current) => ({
-        ...current,
-        options: current.options.map((candidate) =>
-          candidate.id === optionId ? { ...candidate, imageUrl } : candidate
-        ),
-      }));
-    } catch (error) {
-      setChoiceUploadErrors((current) => ({
-        ...current,
-        [choiceKey]: error instanceof Error ? error.message : "Unable to upload this image.",
-      }));
-    } finally {
-      setUploadingChoiceKey(null);
-    }
   };
 
   const removeChoiceImage = (blockIndex: number, questionIndex: number, optionId: string) => {
@@ -392,8 +296,6 @@ export function ActScienceQuestionBuilderPane({
                   candidate.blockIndex === blockIndex && candidate.questionIndex === questionIndex
               );
               const questionNumber = entry?.number ?? startNumber;
-              const questionUploadError = questionUploadErrors[question.id];
-
               return (
                 <div
                   key={question.id}
@@ -436,40 +338,6 @@ export function ActScienceQuestionBuilderPane({
 
                   <div className="mb-4 flex flex-col gap-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <label
-                        htmlFor={`act-upload-question-image-${question.id}`}
-                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:border-blue-500 hover:text-blue-700"
-                      >
-                        {uploadingQuestionKey === question.id ? (
-                          <LoaderCircle size={14} className="animate-spin" />
-                        ) : (
-                          <ImageIcon size={14} />
-                        )}
-                        {question.imageUrl ? "Replace image" : "Upload image"}
-                        <input
-                          id={`act-upload-question-image-${question.id}`}
-                          type="file"
-                          accept={ACT_SCIENCE_CHOICE_IMAGE_TYPES.join(",")}
-                          className={ACT_SCIENCE_FILE_INPUT_CLASS_NAME}
-                          disabled={uploadingQuestionKey === question.id}
-                          aria-label={`Upload image for question ${questionNumber} stem`}
-                          onChange={(event) => {
-                            const input = event.currentTarget;
-                            const file = input.files?.[0];
-                            input.value = "";
-                            releaseFileInputViewport(input);
-                            if (!file) {
-                              return;
-                            }
-                            void uploadQuestion({
-                              blockIndex,
-                              questionIndex,
-                              questionId: question.id,
-                              file,
-                            });
-                          }}
-                        />
-                      </label>
                       {question.imageUrl ? (
                         <button
                           type="button"
@@ -482,16 +350,20 @@ export function ActScienceQuestionBuilderPane({
                       ) : null}
                     </div>
                     {question.imageUrl ? (
-                      <img
+                      <ActImagePreview
                         src={question.imageUrl}
                         alt={`Question ${questionNumber} stem preview`}
                         className="max-h-40 max-w-full rounded-md border border-gray-200 object-contain"
                       />
                     ) : null}
-                    {questionUploadError ? (
-                      <UploadErrorNotice message={questionUploadError} />
-                    ) : null}
+                    <label
+                      className="text-[11px] font-semibold uppercase tracking-wider text-gray-500"
+                      htmlFor={`act-question-image-url-${question.id}`}
+                    >
+                      Question image URL
+                    </label>
                     <input
+                      id={`act-question-image-url-${question.id}`}
                       type="url"
                       value={question.imageUrl ?? ""}
                       onChange={(event) =>
@@ -501,7 +373,7 @@ export function ActScienceQuestionBuilderPane({
                         }))
                       }
                       aria-label={`Question ${questionNumber} image URL`}
-                      placeholder="Or paste an image URL"
+                      placeholder="https://drive.google.com/file/d/... or https://example.com/image.png"
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
@@ -540,10 +412,6 @@ export function ActScienceQuestionBuilderPane({
                         return null;
                       }
 
-                      const choiceKey = getChoiceKey(question.id, option.id);
-                      const isUploading = uploadingChoiceKey === choiceKey;
-                      const uploadError = choiceUploadErrors[choiceKey];
-
                       return (
                         <div key={option.id} className="flex items-start gap-2">
                           <input
@@ -580,41 +448,6 @@ export function ActScienceQuestionBuilderPane({
                               className="min-w-0 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
                             />
                             <div className="flex flex-wrap items-center gap-2">
-                              <label
-                                htmlFor={`act-upload-image-${question.id}-${option.id}`}
-                                className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:border-blue-500 hover:text-blue-700"
-                              >
-                                {isUploading ? (
-                                  <LoaderCircle size={14} className="animate-spin" />
-                                ) : (
-                                  <ImageIcon size={14} />
-                                )}
-                                {option.imageUrl ? "Replace image" : "Upload image"}
-                                <input
-                                  id={`act-upload-image-${question.id}-${option.id}`}
-                                  type="file"
-                                  accept={ACT_SCIENCE_CHOICE_IMAGE_TYPES.join(",")}
-                                  className={ACT_SCIENCE_FILE_INPUT_CLASS_NAME}
-                                  disabled={isUploading}
-                                  aria-label={`Upload image for option ${label} question ${questionNumber}`}
-                                  onChange={(event) => {
-                                    const input = event.currentTarget;
-                                    const file = input.files?.[0];
-                                    input.value = "";
-                                    releaseFileInputViewport(input);
-                                    if (!file) {
-                                      return;
-                                    }
-                                    void uploadChoice({
-                                      blockIndex,
-                                      questionIndex,
-                                      questionId: question.id,
-                                      optionId: option.id,
-                                      file,
-                                    });
-                                  }}
-                                />
-                              </label>
                               {option.imageUrl ? (
                                 <button
                                   type="button"
@@ -629,14 +462,20 @@ export function ActScienceQuestionBuilderPane({
                               ) : null}
                             </div>
                             {option.imageUrl ? (
-                              <img
+                              <ActImagePreview
                                 src={option.imageUrl}
                                 alt={`Option ${label} preview`}
                                 className="max-h-32 max-w-full rounded-md border border-gray-200 object-contain"
                               />
                             ) : null}
-                            {uploadError ? <UploadErrorNotice message={uploadError} /> : null}
+                            <label
+                              className="text-[11px] font-semibold uppercase tracking-wider text-gray-500"
+                              htmlFor={`act-option-image-url-${question.id}-${option.id}`}
+                            >
+                              Option {label} image URL
+                            </label>
                             <input
+                              id={`act-option-image-url-${question.id}-${option.id}`}
                               type="url"
                               value={option.imageUrl ?? ""}
                               onChange={(event) =>
@@ -650,7 +489,7 @@ export function ActScienceQuestionBuilderPane({
                                 }))
                               }
                               aria-label={`Option ${label} image URL for question ${questionNumber}`}
-                              placeholder="Or paste an image URL"
+                              placeholder="https://drive.google.com/file/d/... or https://example.com/image.png"
                               className="min-w-0 w-full rounded-md border border-gray-300 px-3 py-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
                             />
                           </div>
