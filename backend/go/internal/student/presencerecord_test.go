@@ -27,11 +27,13 @@ func TestRecordHeartbeatMemoryDedupes(t *testing.T) {
 	mock.ExpectQuery("FROM student_attempts WHERE id").
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(v1AttemptRows("att-1", "sched-1"))
-	if _, err := svc.RecordHeartbeatMemory(ctx, HeartbeatRequest{
+	if _, deduped, err := svc.RecordHeartbeatMemory(ctx, HeartbeatRequest{
 		AttemptID: "att-1", ScheduleID: "sched-1", ClientSessionID: "sess-a",
 		MutationID: "mut-1", EventType: "heartbeat",
 	}); err != nil {
 		t.Fatalf("first: %v", err)
+	} else if deduped {
+		t.Fatal("first beat must not report deduped")
 	}
 	// Retry with the same mutation: no SECOND beat is recorded (presence
 	// LastSeen unchanged) and no heartbeat-event write occurs. The
@@ -44,11 +46,13 @@ func TestRecordHeartbeatMemoryDedupes(t *testing.T) {
 	mock.ExpectQuery("FROM student_attempts WHERE id").
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(v1AttemptRows("att-1", "sched-1"))
-	if _, err := svc.RecordHeartbeatMemory(ctx, HeartbeatRequest{
+	if _, deduped, err := svc.RecordHeartbeatMemory(ctx, HeartbeatRequest{
 		AttemptID: "att-1", ScheduleID: "sched-1", ClientSessionID: "sess-a",
 		MutationID: "mut-1", EventType: "heartbeat",
 	}); err != nil {
 		t.Fatalf("retry: %v", err)
+	} else if !deduped {
+		t.Fatal("retry must report deduped=true")
 	}
 	after, _ := svc.PresenceMap().Lookup("att-1")
 	if !after.LastSeen.Equal(before.LastSeen) {
@@ -71,7 +75,7 @@ func v1AttemptRows(attemptID, scheduleID string) *sqlmock.Rows {
 // D2 RED: invalid event types fail closed (never touch presence).
 func TestRecordHeartbeatMemoryValidation(t *testing.T) {
 	svc := NewService(nil, nil).SetPresence(NewPresenceMap(90 * 1000000000))
-	if _, err := svc.RecordHeartbeatMemory(context.Background(), HeartbeatRequest{
+	if _, _, err := svc.RecordHeartbeatMemory(context.Background(), HeartbeatRequest{
 		AttemptID: "att-1", ScheduleID: "sched-1", EventType: "bogus",
 	}); err == nil {
 		t.Fatalf("bogus event must fail")

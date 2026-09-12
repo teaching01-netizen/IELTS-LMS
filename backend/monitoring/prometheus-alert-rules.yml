@@ -1,25 +1,35 @@
 groups:
   - name: ielts-student-answer-integrity
     rules:
+      # NOTE (WS-10a): the previous expr referenced a student-answer loss-risk
+      # series that no backend emits (no IncCounter/SetGauge call site). Rewritten to
+      # terminal_invariant_violation_total — the real invariant-violation signal
+      # (terminalization/service.go). If a dedicated loss-risk counter is added
+      # later, point this rule at it and extend the registry-parity test.
       - alert: StudentAnswerLossRiskDetected
-        expr: increase(student_answer_loss_risk_total[5m]) > 0
+        expr: increase(terminal_invariant_violation_total[5m]) > 0
         for: 2m
         labels:
           severity: page
           slo: answer-integrity
         annotations:
-          summary: "Student answer loss risk signal detected"
-          description: "Submit-time risk signals (pending seq gap / final flush risk) have increased in the last 5 minutes."
+          summary: "Student answer integrity risk signal detected"
+          description: "Terminal-state invariant violations observed in the last 5 minutes. Check terminal_invariant_violation_total{name} and the worker logs."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
 
+      # NOTE (WS-10a): the previous submit-replay-incomplete series was never
+      # emitted by any backend. Rewritten to terminalization_conflict_total — the real seal-time conflict
+      # signal (terminalization/service.go: terminalization_conflict_total).
       - alert: SubmitReplayIncompleteDetected
-        expr: increase(backend_submit_replay_incomplete_total[5m]) > 0
+        expr: increase(terminalization_conflict_total[5m]) > 0
         for: 2m
         labels:
           severity: page
           slo: answer-integrity
         annotations:
-          summary: "Replay incomplete at submit detected"
-          description: "Client final seq exceeded server accepted seq at seal time. Investigate mutation flush lag and grace merges."
+          summary: "Seal-time conflicts detected"
+          description: "Terminalization conflicts at seal time. Investigate mutation flush lag and concurrent seal attempts."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
 
       - alert: RateLimitAuthCriticalDenials
         expr: increase(http_ratelimit_denied_total{tier="auth-critical"}[5m]) > 0
@@ -29,7 +39,8 @@ groups:
           slo: auth-availability
         annotations:
           summary: "Auth-critical rate-limit denials detected"
-          description: "Session/logout reads are being denied. This is a misconfiguration or attack — never fix by raising only this tier without checking the tier table. See docs/runbooks/rate-limit-tiers.md."
+          description: "Session/logout reads are being denied. This is a misconfiguration or attack — never fix by raising only this tier without checking the tier table. See docs/runbooks/exam-day-mysql-scale.md."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
 
       - alert: RateLimitTierBurnRate
         expr: increase(http_ratelimit_denied_total[10m]) >= 50
@@ -40,13 +51,134 @@ groups:
         annotations:
           summary: "Rate-limit denials elevated"
           description: "Check http_ratelimit_denied_total by tier/key_class to find the hot tier, then tune that tier's RATE_LIMIT_*_PER_MIN knob. Do not raise RATE_LIMIT_GLOBAL (single-global mode is removed)."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
 
+      # NOTE (WS-10a): the previous post-submit grace-rejected series was never
+      # emitted by any backend. Rewritten to v2_response_batch_total{outcome="not_writable"} — the real
+      # post-terminal/deadline rejection signal (attempts/service.go
+      # v2BatchOutcome: ATTEMPT_NOT_WRITABLE/DEADLINE_EXPIRED/PROCTOR_BLOCKED).
       - alert: PostSubmitGraceRejectedSpike
-        expr: increase(backend_post_submit_grace_rejected_total[10m]) >= 20
+        expr: increase(v2_response_batch_total{outcome="not_writable"}[10m]) >= 20
         for: 5m
         labels:
           severity: warning
           slo: answer-integrity
         annotations:
-          summary: "Post-submit grace rejections elevated"
-          description: "New post-submit mutations are arriving after grace-window expiry. Check network delay and client flush behavior."
+          summary: "Post-submit rejections elevated"
+          description: "Writes rejected against non-writable attempts (sealed/expired/blocked). Check network delay and client flush behavior."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+      # Readyz failures are observable via the AccessLog HTTP series. The
+      # probe route is registered with the "GET /readyz" template
+      # (main.go authorize wrapper), and AccessLog back-reports inner
+      # WithRoute templates through the route holder, so the label is the
+      # template — never the raw path.
+      - alert: ReadyzProbeFailing
+        expr: increase(http_requests_total{route="GET /readyz",status="5xx"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: page
+          slo: api-availability
+        annotations:
+          summary: "Readiness probe failing"
+          description: "The /readyz probe is returning 5xx (DB ping or schema-version check failing). The orchestrator will restart/reroute; check MySQL health and pool saturation."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+      # WS-10a: the worker reports outbox_oldest_age_seconds every drain
+      # (cmd/worker/main.go). A growing oldest age means the relay is stalled.
+      - alert: OutboxOldestAgeHigh
+        expr: outbox_oldest_age_seconds > 300
+        for: 5m
+        labels:
+          severity: page
+          slo: answer-integrity
+        annotations:
+          summary: "Outbox relay stalled"
+          description: "Oldest pending outbox event is over 5 minutes old. Check worker liveness, claim mode, and DB contention."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+      # SAT authoring: conflict burn across save/create/batch/bulk/commit/
+      # publish (authoring_operation_total{outcome="version_collision"}).
+      # Sustained conflicts mean two authors are racing the same draft — page
+      # so the on-call can check whether an import or bulk job is colliding
+      # with live editing, not a backend fault.
+      - alert: AuthoringConflictBurnRate
+        expr: increase(authoring_operation_total{outcome="version_collision"}[10m]) >= 10
+        for: 5m
+        labels:
+          severity: warning
+          slo: authoring-availability
+        annotations:
+          summary: "Authoring conflicts elevated"
+          description: "Stale-revision conflicts elevated over the last 10 minutes. Break down authoring_operation_total by operation to find the colliding surface (save_revision, bulk, workbook_commit, publish). Check for a concurrent import or bulk job racing live editing."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+      # SAT authoring: rejection burn (validation + authz + service faults).
+      - alert: AuthoringRejectionBurnRate
+        expr: increase(authoring_operation_total{outcome="rejected"}[10m]) >= 50
+        for: 5m
+        labels:
+          severity: warning
+          slo: authoring-availability
+        annotations:
+          summary: "Authoring rejections elevated"
+          description: "Authoring mutation rejections elevated over the last 10 minutes. Break down authoring_operation_total by operation/outcome; rejections include validation failures, capacity fences, and permission denials."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+      # Exam-day SAT: legacy-fallback scoring means V2-saved answers are not
+      # reaching the scorer (delivery/start_submit.go sat_score_source_total).
+      # Any sustained legacy scoring post-fix is a scoring-disconnect
+      # regression — page, do not ignore.
+      - alert: SATLegacyScoringFallbackDetected
+        expr: increase(sat_score_source_total{source="legacy"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: page
+          slo: answer-integrity
+        annotations:
+          summary: "SAT scoring fell back to legacy rows"
+          description: "SAT module scoring used legacy assessment_question_responses rows over the last 10 minutes. Break down sat_score_source_total by source; a nonzero legacy rate after the V2-canonical rollout means V2 answers are not reaching the scorer (finding 1 regression)."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+      # Exam-day re-audit defect 5: partial migration gaps hide under the v2
+      # pass series (a mixed pass emits only source="v2"). The per-row
+      # fallback series pages on ANY legacy gap inside a V2-owned pass
+      # (source="legacy") or on a zero-answer pass where neither source
+      # answered any question (source="zero": mass fencing/transport loss).
+      - alert: SATMixedScoringFallbackDetected
+        expr: increase(sat_score_fallback_rows_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: page
+          slo: answer-integrity
+        annotations:
+          summary: "SAT scoring answered rows from legacy gaps"
+          description: "SAT module scoring filled per-question gaps from legacy rows inside V2-owned passes (source=legacy), or scored a pass with zero answered rows from either source (source=zero: mass lease-fencing or transport loss). Break down sat_score_fallback_rows_total by source; any nonzero rate means V2 answers are missing for questions the scorer expected."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+      # Exam-day re-audit observability residual: backend-observed terminal
+      # finalization outcomes (sat/service.go sat_finalize_total). A nonzero
+      # rejected rate during the exam window means students are hitting
+      # finalize failures the frontend beacons may never report (outage).
+      - alert: SATFinalizationRejectedSpike
+        expr: increase(sat_finalize_total{outcome="rejected"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: page
+          slo: answer-integrity
+        annotations:
+          summary: "SAT terminal finalizations rejected"
+          description: "SAT CompleteAssessment rejected terminal finalize calls over the last 10 minutes. Break down sat_finalize_total by outcome (completed/replayed/rejected); a nonzero rejected rate means finalize failures need the directions-phase retry path and the reconcile watchdog."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+      # WS-10a: server-error burn across all routes (AccessLog status class).
+      - alert: HTTP5xxRateHigh
+        expr: increase(http_requests_total{status="5xx"}[5m]) >= 50
+        for: 5m
+        labels:
+          severity: warning
+          slo: api-availability
+        annotations:
+          summary: "Server error rate elevated"
+          description: "5xx responses elevated over the last 5 minutes. Break down http_requests_total by route/method to find the hot endpoint."
+          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/crypto"
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
 func errNoRowsForTest() error { return sql.ErrNoRows }
@@ -70,9 +70,9 @@ func TestVerifyAttemptStatelessRejectsBadTokens(t *testing.T) {
 	cfg := attemptTestCfg()
 	good := signAttempt(t, cfg, nil)
 	cases := map[string]string{
-		"tampered":   good[:len(good)-2] + "AA",
-		"malformed":  "not-a-token",
-		"expired":    signAttempt(t, cfg, func(c *crypto.AttemptClaims) { c.Exp = time.Now().UTC().Add(-time.Minute).Unix() }),
+		"tampered":    good[:len(good)-2] + "AA",
+		"malformed":   "not-a-token",
+		"expired":     signAttempt(t, cfg, func(c *crypto.AttemptClaims) { c.Exp = time.Now().UTC().Add(-time.Minute).Unix() }),
 		"zero-expiry": signAttempt(t, cfg, func(c *crypto.AttemptClaims) { c.Exp = 0 }),
 	}
 	for name, tok := range cases {

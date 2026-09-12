@@ -20,16 +20,19 @@ import type {
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
 import {
   assessmentKeys,
+  toEnsureDraftShellErrorInfo,
   useAssessmentValidation,
   useAuthoringShell,
   useBatchCreateAssessmentQuestions,
   useBulkAssessmentQuestions,
   useCreateAssessmentQuestion,
   useDuplicateAssessmentQuestion,
+  useEnsureDraftShell,
   useExamQuestion,
   useLoadSatSampleExam,
   useReorderAssessmentQuestions,
 } from "../api/assessmentQueries";
+import { isBackendNotFound } from "../../../services/backendBridge";
 import { useQuestionAutosave } from "../hooks/useQuestionAutosave";
 import {
   hasStructuredContent,
@@ -44,7 +47,7 @@ import { SampleExamLoadDialog } from "./SampleExamLoadDialog";
 import { WorkbookImportUndoBanner } from "./WorkbookImportUndoBanner";
 import { useOptionalAuthSession } from "../../auth/api/authSession";
 import { buildStaffDraftKey } from "../../../utils/staffDraftKey";
-import { restoreAuthoringFocus } from "./authoringPrimitives";
+import { AuthoringConfirmDialog, restoreAuthoringFocus } from "./authoringPrimitives";
 import {
   SatAuthoringErrorSurface,
   SatAuthoringLoadingSurface,
@@ -54,28 +57,43 @@ import { SpineHeader } from "./spine/SpineHeader";
 import { SpinePreviewSheet } from "./spine/SpinePreviewSheet";
 import { SpineQueueSheet } from "./spine/SpineQueueSheet";
 import { QuestionQueueRail } from "./spine/QuestionQueueRail";
+import { ExamOverviewPane } from "./spine/ExamOverviewPane";
+import { buildExamOverview, selectionAfterDelete } from "./spine/overviewModel";
 import { QuestionJumpPalette } from "./spine/QuestionJumpPalette";
 import { ShortcutHelpDialog } from "./spine/ShortcutHelpDialog";
 import { SpineQuestionView } from "./spine/SpineQuestionView";
+import { resolveAuthoringField } from "./spine/readinessFamilies";
+import { Inspector } from "./spine/Inspector";
+import { useRailWidth } from "./spine/RailResizer";
+import { useOverlayStack } from "./spine/useOverlayStack";
+import { useOverlayToggle } from "./spine/useOverlayToggle";
 import { SaveCluster } from "./spine/SaveCluster";
 import { flashAuthoringField } from "./spine/TargetFlash";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { authoringMotion } from "@/src/shared/motion";
+import { motion, useReducedMotion } from "motion/react";
+import { spineMotion } from "@/src/shared/motion";
 
 export interface AuthoringWorkspaceProps {
   examId: string;
   examTitle: string;
 }
 
-type WorkspaceMode = "build" | "issues";
+type WorkspaceMode = "build" | "overview" | "issues";
 
 export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProps) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const authSession = useOptionalAuthSession();
   const staffActorId = authSession?.session?.user.id ?? null;
+  // Verified role path: useOptionalAuthSession() from ../../auth/api/authSession
+  // (re-export of src/features/auth/authSession.tsx) -> session.user.role:
+  // AuthUserRole = "admin" | "builder" | "proctor" | "grader" | "student"
+  // (src/services/authService.ts:12). Only admin/builder may open a draft;
+  // grader/proctor/student (+ signed-out null) are preview/read-only here.
+  const sessionRole = authSession?.session?.user.role ?? null;
+  const canOpenDraft = sessionRole === "admin" || sessionRole === "builder";
   const [searchParams, setSearchParams] = useSearchParams();
   const shellQuery = useAuthoringShell(examId);
+  const ensureDraft = useEnsureDraftShell(examId);
   const createQuestion = useCreateAssessmentQuestion(examId);
   const batchCreate = useBatchCreateAssessmentQuestions(examId);
   const duplicateQuestion = useDuplicateAssessmentQuestion(examId);
@@ -91,19 +109,41 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const [filter, setFilter] = useState<SpineQueueFilter>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [navigationError, setNavigationError] = useState<string | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
-  const [workbookImportOpen, setWorkbookImportOpen] = useState(false);
+  const overlayStack = useOverlayStack();
+  const [previewOpen, setPreviewOpen] = useOverlayToggle(overlayStack,"preview","sheet");
+  const [importOpen, setImportOpen] = useOverlayToggle(overlayStack,"import","sheet");
+  const [workbookImportOpen, setWorkbookImportOpen] = useOverlayToggle(overlayStack,"workbook","sheet");
   const [workbookBaseline, setWorkbookBaseline] = useState<AssessmentAuthoringShell | null>(null);
   const [workbookUndo, setWorkbookUndo] = useState<SatWorkbookUndoState | null>(null);
   const [workbookUndoBusy, setWorkbookUndoBusy] = useState(false);
-  const [sampleDialogOpen, setSampleDialogOpen] = useState(false);
-  const [jumpPaletteOpen, setJumpPaletteOpen] = useState(false);
-  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
-  const [questionListOpen, setQuestionListOpen] = useState(false);
+  const [sampleDialogOpen, setSampleDialogOpen] = useOverlayToggle(overlayStack,"sample","dialog");
+  const [jumpPaletteOpen, setJumpPaletteOpen] = useOverlayToggle(overlayStack,"palette","dialog");
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useOverlayToggle(overlayStack,"shortcuts","dialog");
+  const [questionListOpen, setQuestionListOpen] = useOverlayToggle(overlayStack,"navigator","sheet");
+  const rail = useRailWidth();
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
   const [focusField, setFocusField] = useState<string | null>(null);
+  const [inspectorOpen,setInspectorOpen]=useState(false);
+  const [inspectorModal,setInspectorModal]=useState(false);
+  const inspectorOpener=useRef<HTMLElement|null>(null);
+  const {requestOpen:requestOverlay,close:closeOverlay}=overlayStack;
+  const openInspector=useCallback(()=>{
+    if(inspectorModal&&!requestOverlay('inspector','sheet'))return;
+    inspectorOpener.current=document.activeElement instanceof HTMLElement?document.activeElement:null;
+    setInspectorOpen(true);
+  },[inspectorModal,requestOverlay]);
+  const closeInspector=useCallback(()=>{setInspectorOpen(false);closeOverlay('inspector');restoreAuthoringFocus(inspectorOpener.current);},[closeOverlay]);
+  const requestField=useCallback((path:string|null)=>{const field=resolveAuthoringField(path);if(['domain','skill','difficulty','tags','accessibility'].includes(field))openInspector();setFocusField(field);},[openInspector]);
+  useEffect(()=>{
+    if(typeof window.matchMedia!=='function')return;const media=window.matchMedia('(max-width: 1279px)');
+    const update=()=>setInspectorModal(media.matches);update();media.addEventListener?.('change',update);return()=>media.removeEventListener?.('change',update);
+  },[]);
+  useEffect(()=>{if(!inspectorOpen)return;if(inspectorModal){if(!requestOverlay('inspector','sheet'))setInspectorOpen(false);}else closeOverlay('inspector');},[inspectorModal,inspectorOpen,requestOverlay,closeOverlay]);
+  const [deleteTarget, updateDeleteTarget] = useState<string|null>(null);
+  const setDeleteTarget=useCallback((id:string|null)=>{if(id){if(requestOverlay('delete','dialog'))updateDeleteTarget(id);}else{updateDeleteTarget(null);closeOverlay('delete');}},[requestOverlay,closeOverlay]);
+  const [rowMutationBusy, setRowMutationBusy] = useState(false);
+  const rowMutationFlight = useRef(false);
   const selectionAnchorRef = useRef<string | null>(null);
   const questionSheetFocusRef = useRef<HTMLElement | null>(null);
   const inspectorSheetFocusRef = useRef<HTMLElement | null>(null);
@@ -130,7 +170,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     update();
     media.addEventListener?.("change", update);
     return () => media.removeEventListener?.("change", update);
-  }, []);
+  }, [setQuestionListOpen]);
 
   useEffect(() => {
     if (!shellVersionId) return;
@@ -176,19 +216,10 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     ? validateSatQuestion(draft.metadata.sectionKey, draft)
     : [];
   const totalAuthored = allQuestions.length;
-  const totalTarget =
-    shell?.sections.reduce(
-      (total, section) =>
-        total + section.modules.reduce((sum, module) => sum + module.targetQuestionCount, 0),
-      0
-    ) ?? 0;
   const totalErrors = allQuestions.reduce(
     (sum, question) => sum + (question.readiness.status === "error" ? 1 : 0),
     0
   );
-  const progressPct = totalTarget
-    ? Math.min(100, Math.round((totalAuthored / totalTarget) * 100))
-    : 0;
 
   useEffect(() => {
     if (!shell) return;
@@ -206,7 +237,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       if (target?.question) {
         setSelectedModuleId(target.module.id);
         setSelectedExamQuestionId(target.question.examQuestionId);
-        setFocusField(resolveAuthoringField(deepField));
+        requestField(deepField);
         const next = new URLSearchParams(searchParams);
         next.delete("question");
         next.delete("field");
@@ -224,7 +255,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       setSelectedModuleId(firstModule?.id ?? null);
       setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
     }
-  }, [searchParams, selectedModuleId, setSearchParams, shell]);
+  }, [searchParams, selectedModuleId, setSearchParams, shell, requestField]);
 
   useEffect(() => {
     if (
@@ -238,20 +269,16 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
 
   useEffect(() => {
     if (!draft || !focusField) return;
-    const frame = window.requestAnimationFrame(() => {
-      const target = document.querySelector<HTMLElement>(`[data-authoring-field="${focusField}"]`);
-      target?.scrollIntoView({ behavior: "smooth", block: "center" });
-      flashAuthoringField(focusField);
-      (target?.matches("input, textarea, select, button, [contenteditable=true]")
-        ? target
-        : target?.querySelector<HTMLElement>(
-            'input, textarea, select, button, [contenteditable="true"]'
-          )
-      )?.focus();
-      setFocusField(null);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [draft, focusField]);
+    let frame=0,attempts=0;
+    const focus=()=>{
+      const target=document.querySelector<HTMLElement>(`[data-authoring-field="${focusField}"]`);
+      if(!target&&attempts++<3){frame=window.requestAnimationFrame(focus);return;}
+      if(target){target.scrollIntoView({behavior:reduceMotion?'auto':'smooth',block:'nearest'});flashAuthoringField(focusField);
+        const control=target.matches('input,textarea,select,[contenteditable=true]')?target:target.querySelector<HTMLElement>('input,textarea,select,[contenteditable=true]')??target.querySelector<HTMLElement>('button')??target;
+        control.focus({preventScroll:true});setFocusField(null);}
+    };
+    frame=window.requestAnimationFrame(focus);return()=>window.cancelAnimationFrame(frame);
+  },[draft,focusField,inspectorOpen,inspectorModal,reduceMotion]);
 
   useEffect(() => {
     if (!selectedModule || selectedModuleIndex < 0) return;
@@ -363,28 +390,32 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     const result = await autosave.flushNow(draft);
     if (result.ok) return true;
     setNavigationError(
-      autosave.isOffline
-        ? "You are offline. This draft is saved on this device; reconnect before leaving so it can sync."
-        : "Save failed. The current question remains open; navigation was stopped so no work is lost."
+      autosave.status === "conflict"
+        ? "Another author saved this question first. Your edits are kept here — reload the latest version before leaving, or copy your changes first."
+        : autosave.isOffline
+          ? "You are offline. This draft is saved on this device; reconnect before leaving so it can sync."
+          : "Save failed. The current question remains open; navigation was stopped so no work is lost."
     );
     return false;
   }, [autosave, draft]);
 
   const selectQuestion = useCallback(
     async (questionId: string, moduleId = selectedModuleId) => {
-      if (questionId === selectedExamQuestionId) return;
+      if (rowMutationFlight.current) return false;
+      if (questionId === selectedExamQuestionId) return true;
       setNavigationError(null);
-      if (!(await flushBeforeNavigation())) return;
+      if (!(await flushBeforeNavigation())) return false;
       if (moduleId) setSelectedModuleId(moduleId);
       setDraft(null);
       setSelectedExamQuestionId(questionId);
+      return true;
     },
     [flushBeforeNavigation, selectedExamQuestionId, selectedModuleId]
   );
 
   const selectModule = useCallback(
     async (moduleId: string) => {
-      if (moduleId === selectedModuleId) return;
+      if (rowMutationFlight.current || moduleId === selectedModuleId) return;
       if (!(await flushBeforeNavigation())) return;
       const module = shell?.sections
         .flatMap((section) => section.modules)
@@ -418,6 +449,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const handleCreateQuestion = useCallback(
     async (inheritFrom?: QuestionRevision) => {
       if (
+        rowMutationFlight.current ||
         !selectedModuleId ||
         !selectedModule ||
         selectedModule.questions.length >= selectedModule.targetQuestionCount
@@ -476,7 +508,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         throw new Error("Save the current question before importing.");
       const result = await batchCreate.mutateAsync({
         moduleId: selectedModuleId,
-        request: { questions: drafts },
+        request: { questions: drafts, operationKey: crypto.randomUUID() },
       });
       await queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
       setImportOpen(false);
@@ -486,7 +518,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         setDraft(null);
       }
     },
-    [batchCreate, examId, flushBeforeNavigation, queryClient, selectedModuleId]
+    [batchCreate, examId, flushBeforeNavigation, queryClient, selectedModuleId, setImportOpen]
   );
 
   const openWorkbookImport = useCallback(async () => {
@@ -501,7 +533,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         error instanceof Error ? error.message : "The SAT workbook importer could not be opened."
       );
     }
-  }, [examId, flushBeforeNavigation]);
+  }, [examId, flushBeforeNavigation, setWorkbookImportOpen]);
 
   const handleWorkbookCommitted = useCallback(
     (result: SatWorkbookCommitResult) => {
@@ -521,7 +553,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       setWorkbookBaseline(null);
       setWorkbookUndo(result.undo.available ? result.undo : null);
     },
-    [examId, queryClient]
+    [examId, queryClient, setWorkbookImportOpen]
   );
 
   const handleWorkbookUndo = useCallback(async () => {
@@ -581,53 +613,44 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         error instanceof Error ? error.message : "The sample SAT could not be loaded."
       );
     }
-  }, [examId, flushBeforeNavigation, loadSampleExam]);
+  }, [examId, flushBeforeNavigation, loadSampleExam, setSampleDialogOpen]);
 
-  const handleDuplicate = useCallback(async () => {
-    if (!selectedExamQuestionId || !selectedModuleId || !(await flushBeforeNavigation())) return;
+  // Explicit target IDs: never select a row and invoke a stale selected-row closure.
+  const handleDuplicate = useCallback(async (targetId = selectedExamQuestionId) => {
+    const module = shell?.sections.flatMap(section=>section.modules).find(module=>module.questions.some(q=>q.examQuestionId===targetId));
+    if (!targetId || !module || module.questions.length>=module.targetQuestionCount || rowMutationFlight.current) return;
+    rowMutationFlight.current=true;setRowMutationBusy(true);
     try {
-      const created = await duplicateQuestion.mutateAsync({
-        examQuestionId: selectedExamQuestionId,
-        request: {
-          destinationModuleId: selectedModuleId,
-          insertAfterExamQuestionId: selectedExamQuestionId,
-        },
-      });
-      setSelectedExamQuestionId(created.examQuestionId);
-      setDraft(created.question);
-    } catch (error) {
-      setNavigationError(
-        error instanceof Error ? error.message : "Question could not be duplicated."
-      );
-    }
-  }, [duplicateQuestion, flushBeforeNavigation, selectedExamQuestionId, selectedModuleId]);
+      if (!(await flushBeforeNavigation())) return;
+      const created=await duplicateQuestion.mutateAsync({examQuestionId:targetId,request:{destinationModuleId:module.id,insertAfterExamQuestionId:targetId,operationKey:crypto.randomUUID()}});
+      setSelectedModuleId(module.id);setSelectedExamQuestionId(created.examQuestionId);setDraft(created.question);
+    } catch(error) {setNavigationError(error instanceof Error?error.message:"Question could not be duplicated.");}
+    finally {rowMutationFlight.current=false;setRowMutationBusy(false);}
+  },[duplicateQuestion,flushBeforeNavigation,selectedExamQuestionId,shell]);
 
-  const handleDelete = useCallback(async () => {
-    if (!selectedExamQuestionId || !selectedModule || !(await flushBeforeNavigation())) return false;
-    const currentIndex = selectedModule.questions.findIndex(
-      (question) => question.examQuestionId === selectedExamQuestionId
-    );
-    const fallback =
-      selectedModule.questions[currentIndex + 1] ??
-      selectedModule.questions[currentIndex - 1] ??
-      null;
+  const handleDelete = useCallback(async (targetId = selectedExamQuestionId) => {
+    const module=shell?.sections.flatMap(section=>section.modules).find(module=>module.questions.some(q=>q.examQuestionId===targetId));
+    if(!targetId||!module||rowMutationFlight.current)return false;
+    rowMutationFlight.current=true;setRowMutationBusy(true);
+    const deletingActive=targetId===selectedExamQuestionId;
+    const index=module.questions.findIndex(q=>q.examQuestionId===targetId);
+    const fallback=selectionAfterDelete(module.questions.filter(q=>q.examQuestionId!==targetId),index);
     try {
-      await assessmentAuthoringApi.deleteQuestion(selectedExamQuestionId);
-      queryClient.removeQueries({ queryKey: assessmentKeys.question(selectedExamQuestionId) });
-      setDraft(null);
-      setSelectedExamQuestionId(fallback?.examQuestionId ?? null);
-      await queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
+      if(!(await flushBeforeNavigation()))return false;
+      await assessmentAuthoringApi.deleteQuestion(targetId);
+      queryClient.removeQueries({queryKey:assessmentKeys.question(targetId)});
+      if(deletingActive){setDraft(null);setSelectedExamQuestionId(fallback.examQuestionId);}
+      setSelectedIds(current=>{const next=new Set(current);next.delete(targetId);return next;});
+      await queryClient.invalidateQueries({queryKey:assessmentKeys.shell(examId)});
+      void queryClient.invalidateQueries({queryKey:assessmentKeys.release(examId)});
+      void queryClient.invalidateQueries({queryKey:assessmentKeys.readinessRoot(examId)});
       return true;
-    } catch (error) {
-      setNavigationError(error instanceof Error ? error.message : "Question could not be deleted.");
-      return false;
-    }
-  }, [examId, flushBeforeNavigation, queryClient, selectedExamQuestionId, selectedModule]);
+    }catch(error){setNavigationError(error instanceof Error?error.message:"Question could not be deleted.");return false;}
+    finally {rowMutationFlight.current=false;setRowMutationBusy(false);}
+  },[examId,flushBeforeNavigation,queryClient,selectedExamQuestionId,shell]);
 
   const handleSaveAndNext = useCallback(async () => {
-    if (!draft || !selectedModule) return;
+    if (rowMutationFlight.current || !draft || !selectedModule) return;
     const result = await autosave.commitAndAdvance(draft);
     if (!result.ok || !result.isLatest) {
       setNavigationError("Save failed. The next question was not opened.");
@@ -684,6 +707,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
           questionIds,
           action,
           ...(expectedRevisions ? { expectedRevisions } : {}),
+          operationKey: crypto.randomUUID(),
         });
         setSelectedIds(new Set());
         selectionAnchorRef.current = null;
@@ -760,10 +784,9 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       if (!target?.question || !questionId) return;
       setWorkspaceMode("build");
       setSelectedIds(new Set());
-      setFocusField(resolveAuthoringField(fieldPath ?? null));
-      await selectQuestion(questionId, target.moduleId);
+      if(await selectQuestion(questionId, target.moduleId))requestField(fieldPath??null);
     },
-    [selectQuestion, shell]
+    [selectQuestion, shell, requestField]
   );
 
   useEffect(() => {
@@ -779,7 +802,12 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       const inOverlay = Boolean(
         target?.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [data-radix-popper-content-wrapper]')
       );
-      if (inOverlay) return;
+      if (event.defaultPrevented || event.isComposing || inOverlay) return;
+      if(command&&event.key.toLowerCase()==='s'){
+        if(event.shiftKey){if(!editing){event.preventDefault();openInspector();}return;}
+        event.preventDefault();void handleSaveNow();return;
+      }
+      if(!editing&&command&&event.key==='/'){event.preventDefault();setShortcutHelpOpen(true);return;}
       if (interactive || editing) {
         if (editing && event.key === "Escape") {
           (document.activeElement as HTMLElement | null)?.blur();
@@ -789,9 +817,10 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         }
         return;
       }
-      if (command && event.key.toLowerCase() === "s") {
+      if (command && event.key.toLowerCase() === "f") {
         event.preventDefault();
-        void handleSaveNow();
+        setWorkspaceMode("build");
+        window.requestAnimationFrame(() => searchInputRef.current?.focus());
         return;
       }
       if (command && event.key.toLowerCase() === "k") {
@@ -827,7 +856,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         void handleDuplicate();
         return;
       }
-      if (!interactive && !inOverlay && !editing && (event.key === "ArrowDown" || event.key === "ArrowUp") && selectedModule) {
+      if (!interactive && !inOverlay && !editing && !command && (event.key === "ArrowDown" || event.key === "ArrowUp") && selectedModule) {
         const direction = event.key === "ArrowDown" ? 1 : -1;
         const next = selectedModule.questions[selectedModuleIndex + direction];
         if (next) {
@@ -863,9 +892,48 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     selectedExamQuestionId,
     selectedModule,
     selectedModuleIndex,
+    setJumpPaletteOpen,setPreviewOpen,setShortcutHelpOpen,openInspector,
   ]);
 
   if (shellQuery.isLoading) return <SatAuthoringLoadingSurface label="Opening SAT workspace…" />;
+  // Phase 04: the shell query is now GET-only. A 404 means "no editable draft
+  // yet" — a state DISTINCT from the generic error surface. Editors get an
+  // explicit, role-gated "Open draft" CTA that runs the ensure mutation
+  // (POST) once per click; observers never see the CTA and never trigger it.
+  // Ensure success installs the shell via setQueryData so this component
+  // re-renders with data; ensure failure shows the error with no auto-loop.
+  const isNoDraft = !shell && isBackendNotFound(shellQuery.error);
+  if (isNoDraft) {
+    const ensureInfo = ensureDraft.error
+      ? toEnsureDraftShellErrorInfo(ensureDraft.error)
+      : null;
+    const ensureDescription =
+      ensureInfo?.kind === "exam-missing"
+        ? "This exam does not exist, so there is no draft to open."
+        : ensureInfo?.kind === "forbidden"
+          ? "You do not have permission to open an editable draft for this exam."
+          : ensureInfo?.kind === "conflict"
+            ? "The draft changed while opening. Retry the open, or refresh to load the latest state."
+            : ensureInfo
+              ? ensureInfo.message
+              : "This exam has no editable draft yet. Opening a draft creates one explicitly — refreshing never creates one.";
+    return (
+      <SatAuthoringErrorSurface
+        title="No editable draft"
+        description={ensureDescription}
+        actionLabel={canOpenDraft ? (ensureDraft.isPending ? "Opening draft…" : "Open draft") : undefined}
+        onAction={
+          canOpenDraft
+            ? () => {
+                if (ensureDraft.isPending) return;
+                ensureDraft.mutate();
+              }
+            : undefined
+        }
+        actionDisabled={ensureDraft.isPending}
+      />
+    );
+  }
   if (shellQuery.error || !shell)
     return (
       <SatAuthoringErrorSurface
@@ -887,14 +955,40 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     : 0;
 
   {
+    const examOverview = buildExamOverview(shell.sections);
     const spineQueue = (() => {
       if (!selectedModule || !selectedSection) return null;
+      if (workspaceMode === "overview") {
+        return (
+          <ExamOverviewPane
+            overview={examOverview}
+            isMutating={
+              rowMutationBusy || createQuestion.isPending ||
+              duplicateQuestion.isPending ||
+              reorderQuestions.isPending ||
+              bulkQuestions.isPending ||
+              batchCreate.isPending ||
+              loadSampleExam.isPending
+            }
+            onSelectModule={(moduleId) => {
+              setWorkspaceMode("build");
+              void selectModule(moduleId);
+            }}
+            onOpenIssueModule={(moduleId) => {
+              setWorkspaceMode("build");
+              void selectModule(moduleId);
+              void openIssues();
+            }}
+          />
+        );
+      }
       if (workspaceMode === "build") {
         return (
           <QuestionQueueRail
             module={selectedModule}
             sections={shell.sections}
             sectionKey={selectedSection.sectionKey}
+            sectionTitle={selectedSection.title}
             moveTargets={moveTargets}
             selectedQuestionId={selectedExamQuestionId}
             selectedQuestionIds={selectedIds}
@@ -914,6 +1008,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             onOpenImport={() => setImportOpen(true)}
             onFilterChange={setFilter}
             onSelectQuestion={(questionId) => void selectQuestion(questionId)}
+            onDuplicateQuestion={(id)=>void handleDuplicate(id)}
+            onRequestDelete={setDeleteTarget}
             onCreateQuestion={() => void handleCreateQuestion()}
             onToggleSelection={toggleSelection}
             onClearSelection={() => {
@@ -945,15 +1041,18 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               examTitle={examTitle}
               sectionTitle={selectedSection?.title ?? null}
               moduleTitle={selectedModule?.title ?? null}
-              authored={totalAuthored}
-              target={totalTarget}
-              progressPct={progressPct}
-              errorCount={totalErrors}
+              issueCount={totalErrors}
+              onOpenSampleExam={() => setSampleDialogOpen(true)}
+              sampleExamDisabled={loadSampleExam.isPending}
+              onOpenShortcuts={() => setShortcutHelpOpen(true)}
               workspaceMode={workspaceMode}
               onModeChange={(mode) => {
                 if (mode === "issues") {
                   setQuestionListOpen(false);
                   void openIssues();
+                } else if (mode === "overview") {
+                  setQuestionListOpen(false);
+                  setWorkspaceMode("overview");
                 } else {
                   setWorkspaceMode(mode);
                 }
@@ -961,9 +1060,17 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               saveSlot={
                 draft ? (
                   <SaveCluster
+                    transientSaved
+                    announce={false}
                     status={autosave.status}
                     lastSavedAt={autosave.lastSavedAt}
                     onRetry={() => autosave.retry(draft)}
+                    onReviewConflict={() => {
+                      setNavigationError(
+                        "Another author saved this question first. Your edits are kept on this device — reload the latest version, then reapply your changes."
+                      );
+                      void questionQuery.refetch();
+                    }}
                   />
                 ) : null
               }
@@ -975,7 +1082,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                   if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/preview`);
                 })();
               }}
-              releaseHref={`/sat/exams/${examId}/release`}
               onOpenRelease={() => {
                 void (async () => {
                   if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/release`);
@@ -989,7 +1095,10 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               onOpenQueue={() => setQuestionListOpen(true)}
             />
           }
-          queue={spineQueue}
+          queue={compactViewport?null:spineQueue}
+          railWidth={rail.width}
+          onRailWidthChange={rail.setWidth}
+          inspector={draft?<Inspector open={inspectorOpen&&(!inspectorModal||overlayStack.openSheet==='inspector')} modal={inspectorModal} question={draft} issues={selectedQuestionIssues} onChange={handleChange} onClose={closeInspector} isPretest={questionQuery.data?.isPretest} onPretestChange={selectedExamQuestionId?(isPretest)=>{void handleBulkAction([selectedExamQuestionId],{type:'set_pretest',value:isPretest}).catch(()=>undefined);}:undefined}/>:undefined}
           banner={
             <>
               {navigationError ? (
@@ -1007,16 +1116,21 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
           }
         >
           {draft ? (
-            <AnimatePresence mode="popLayout" initial={false}>
               <motion.div
                 key={selectedExamQuestionId}
-                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 8 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -6 }}
-                transition={authoringMotion.question}
+                initial={reduceMotion ? false : { opacity: 0.96 }}
+                animate={{ opacity: 1 }}
+                transition={spineMotion.question}
               >
                 <SpineQuestionView
                   question={draft}
+                  focusField={focusField}
+                  onOpenSettings={openInspector}
+                  isMutating={rowMutationBusy}
+                  onRequestDelete={()=>setDeleteTarget(selectedExamQuestionId)}
+                  canMoveUp={selectedModuleIndex>0}
+                  canMoveDown={Boolean(selectedModule && selectedModuleIndex<selectedModule.questions.length-1)}
+                  onMove={direction=>{if(!selectedModule)return;const expected=selectedModule.questions.map(q=>q.examQuestionId);const next=[...expected];const i=selectedModuleIndex,j=i+direction;const from=next[i],to=next[j];if(!from||!to)return;next[i]=to;next[j]=from;void handleReorder(next,expected).catch(()=>undefined);}}
                   {...(selectedModuleIndex >= 0 ? { questionNumber: selectedModuleIndex + 1 } : {})}
                   saveStatus={autosave.status}
                   lastSavedAt={autosave.lastSavedAt}
@@ -1027,13 +1141,18 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                   onSaveNow={() => void handleSaveNow()}
                   onSaveAndNext={() => void handleSaveAndNext()}
                   onRetrySave={() => autosave.retry(draft)}
+                  onReviewConflict={() => {
+                    setNavigationError(
+                      "Another author saved this question first. Your edits are kept on this device — reload the latest version, then reapply your changes."
+                    );
+                    void questionQuery.refetch();
+                  }}
                   onDuplicate={() => void handleDuplicate()}
                   onDelete={() => handleDelete()}
                   onPreview={() => setPreviewOpen(true)}
-                  onIssueSelect={(field) => setFocusField(resolveAuthoringField(field))}
+                  onIssueSelect={requestField}
                 />
               </motion.div>
-            </AnimatePresence>
           ) : selectedExamQuestionId && questionQuery.error ? (
             <QuestionLoadError
               error={questionQuery.error}
@@ -1056,6 +1175,19 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             open={jumpPaletteOpen}
             questions={selectedModule.questions}
             selectedQuestionId={selectedExamQuestionId}
+            commands={[
+              {id:'settings',label:'Open question settings',group:'Question',onSelect:openInspector,disabledReason:!draft?'Select a question first':undefined},
+              {id:'duplicate',label:'Duplicate question',group:'Question',onSelect:()=>void handleDuplicate(),disabledReason:rowMutationBusy?'Another operation is running':!draft?'Select a question first':selectedModule.questions.length>=selectedModule.targetQuestionCount?'Module is full':undefined},
+              {id:'delete',label:'Delete question',group:'Question',onSelect:()=>setDeleteTarget(selectedExamQuestionId),disabledReason:!draft?'Select a question first':rowMutationBusy?'Another operation is running':undefined},
+              ...([-1,1] as const).map(direction=>({id:direction===-1?'up':'down',label:direction===-1?'Move question up':'Move question down',group:'Question' as const,disabledReason:!draft?'Select a question first':rowMutationBusy?'Another operation is running':!selectedModule.questions[selectedModuleIndex+direction]?'Already at module boundary':undefined,onSelect:()=>{const expected=selectedModule.questions.map(q=>q.examQuestionId),next=[...expected],i=selectedModuleIndex,j=i+direction;const from=next[i],to=next[j];if(!from||!to)return;next[i]=to;next[j]=from;void handleReorder(next,expected).catch(()=>undefined);}})),
+              {id:'question-preview',label:'Preview as student',group:'Question',onSelect:()=>setPreviewOpen(true),disabledReason:!draft?'Select a question first':undefined},
+              {id:'preview',label:'Preview exam',group:'Exam',onSelect:()=>{void flushBeforeNavigation().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/preview`);});}},
+              {id:'release',label:'Release exam',group:'Exam',onSelect:()=>{void flushBeforeNavigation().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/release`);});}},
+              {id:'overview',label:'Exam overview',group:'Exam',onSelect:()=>setWorkspaceMode('overview')},
+              {id:'issues',label:'Review issues',group:'Exam',onSelect:()=>void openIssues()},
+              {id:'navigator',label:'Open question navigator',group:'View',onSelect:()=>{setWorkspaceMode('build');if(compactViewport)setQuestionListOpen(true);else searchInputRef.current?.focus();}},
+              {id:'help',label:'Keyboard shortcuts',group:'View',onSelect:()=>setShortcutHelpOpen(true)},
+            ]}
             onSelect={(questionId) => {
               setJumpPaletteOpen(false);
               void selectQuestion(questionId);
@@ -1063,6 +1195,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             onClose={() => setJumpPaletteOpen(false)}
           />
         ) : null}
+        <AuthoringConfirmDialog open={deleteTarget!==null} title="Delete this question?" description="This removes the selected question from its SAT module. Other questions are unchanged." confirmLabel="Delete question" destructive busy={rowMutationBusy} onCancel={()=>setDeleteTarget(null)} onConfirm={()=>{const target=deleteTarget;if(target)void handleDelete(target).then(ok=>{if(ok)setDeleteTarget(null);});}}/>
         <ShortcutHelpDialog open={shortcutHelpOpen} onClose={() => setShortcutHelpOpen(false)} />
         {compactViewport ? (
           <SpineQueueSheet
@@ -1086,6 +1219,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         <SpinePreviewSheet
           open={previewOpen}
           question={draft}
+          saveStatus={autosave.status}
           onOpenChange={(next) => {
             if (!next) setPreviewOpen(false);
           }}
@@ -1189,15 +1323,6 @@ function truncatePreview(value: string, limit: number): string {
   return normalized.length <= limit
     ? normalized
     : `${normalized.slice(0, Math.max(0, limit - 1))}…`;
-}
-
-function resolveAuthoringField(path: string | null): string {
-  if (path?.startsWith("metadata.domain")) return "domain";
-  if (path?.startsWith("metadata.skill")) return "skill";
-  if (path?.startsWith("stimulus")) return "stimulus";
-  if (path?.startsWith("prompt")) return "prompt";
-  if (path?.startsWith("rationale")) return "rationale";
-  return "answer";
 }
 
 function IssuesPane({

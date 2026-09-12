@@ -26,8 +26,9 @@ export function SatAuthoringLoadingSurface({ label }: { label: string }) {
 export interface SatAuthoringErrorSurfaceProps {
   title: string;
   description: string;
-  actionLabel?: string;
-  onAction?: () => void;
+  actionLabel?: string | undefined;
+  onAction?: (() => void) | undefined;
+  actionDisabled?: boolean | undefined;
 }
 
 export function SatAuthoringErrorSurface({
@@ -35,6 +36,7 @@ export function SatAuthoringErrorSurface({
   description,
   actionLabel,
   onAction,
+  actionDisabled = false,
 }: SatAuthoringErrorSurfaceProps) {
   return (
     <main className="sat-product flex min-h-screen items-center justify-center bg-au-canvas px-6 text-slate-950">
@@ -56,7 +58,8 @@ export function SatAuthoringErrorSurface({
           <button
             type="button"
             onClick={onAction}
-            className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-[10px] bg-au-accent px-4 text-[13px] font-semibold text-white hover:bg-au-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2"
+            disabled={actionDisabled}
+            className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-[10px] bg-au-accent px-4 text-[13px] font-semibold text-white hover:bg-au-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshCw size={15} aria-hidden="true" />
             {actionLabel}

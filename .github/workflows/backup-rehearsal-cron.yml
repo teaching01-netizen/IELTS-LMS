@@ -1,0 +1,82 @@
+name: Backup rehearsal (monthly)
+
+# Plan E1: prove the backup restores and boots, monthly. A backup that has
+# never restored is not a backup. Modeled on ci.yml MySQL service
+# conventions (mysql:8.4 + health check + same DSN shape).
+#
+# Skip policy (fail-closed, documented here): this cron runs on schedule
+# with repository secrets present. A manually-triggered run without a
+# scratch DSN fails non-zero via scripts/backup-rehearsal.sh - there is no
+# silent skip that could mask a broken rehearsal as green.
+
+on:
+  schedule:
+    # 03:00 UTC on the first of every month.
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/go
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ielts_rehearsal
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    env:
+      BACKUP_REHEARSAL_DSN: "root:root@tcp(127.0.0.1:3306)/ielts_rehearsal?parseTime=true&multiStatements=true&charset=utf8mb4"
+      BACKUP_REHEARSAL_DB: ielts_rehearsal
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      DATABASE_URL: "root:root@tcp(127.0.0.1:3306)/ielts_rehearsal?parseTime=true&multiStatements=true&charset=utf8mb4"
+      DATABASE_DIRECT_URL: "root:root@tcp(127.0.0.1:3306)/ielts_rehearsal?parseTime=true&multiStatements=true&charset=utf8mb4"
+      DATABASE_MIGRATOR_URL: "root:root@tcp(127.0.0.1:3306)/ielts_rehearsal?parseTime=true&multiStatements=true&charset=utf8mb4"
+      DATABASE_WORKER_URL: "root:root@tcp(127.0.0.1:3306)/ielts_rehearsal?parseTime=true&multiStatements=true&charset=utf8mb4"
+      AUTH_SECRET: ci-only-secret-with-at-least-32-characters
+      API_HOST: 127.0.0.1
+      PORT: 4100
+      API_PORT: 4100
+      APP_ENV: test
+      ENVIRONMENT: test
+      MIGRATIONS_DIR: migrations
+      COOKIE_SECURE: "false"
+      SESSION_COOKIE_NAME: session
+      CSRF_COOKIE_NAME: csrf
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go/go.mod
+          cache-dependency-path: backend/go/go.sum
+
+      - name: Syntax check rehearsal script
+        run: bash -n ../../scripts/backup-rehearsal.sh
+
+      - name: Apply migrations to scratch
+        run: go run ./cmd/migrate
+
+      - name: Seed rehearsal dump (mysqldump round-trip)
+        run: |
+          mysqldump -h 127.0.0.1 -P 3306 -uroot -proot --single-transaction --routines --events ielts_rehearsal > "$RUNNER_TEMP/rehearsal.sql"
+          test -s "$RUNNER_TEMP/rehearsal.sql"
+
+      - name: Backup rehearsal (restore + validate-only + readyz)
+        run: bash ../../scripts/backup-rehearsal.sh --dump="$RUNNER_TEMP/rehearsal.sql"

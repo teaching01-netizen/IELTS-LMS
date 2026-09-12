@@ -71,6 +71,27 @@ describe('staff SAT question draft durability laws', () => {
     await act(async () => { result = await hook.result.current.flushNow(localDraft); });
 
     expect(result).toEqual({ ok: false, isLatest: true });
+    // Stale-revision rejections enter the dedicated conflict state while
+    // the exact local wording stays durable — never auto-retried, never
+    // dropped, so the author can reload and reapply.
+    await waitFor(() => expect(hook.result.current.status).toBe('conflict'));
     expect((await loadDurableDraft<QuestionRevision>(KEY))?.prompt).toEqual(localDraft.prompt);
+  });
+
+  it('maps a 409 version collision to the conflict state', async () => {
+    const localDraft = revision('Two authors, one winner', 7);
+    const conflict = Object.assign(new Error('Question changed while you were editing'), {
+      status: 409,
+      code: 'CONFLICT',
+    });
+    const save = vi.fn().mockRejectedValue(conflict);
+    const hook = renderHook(() => useQuestionAutosave({ save, durableKey: null }));
+
+    await act(async () => {
+      await hook.result.current.flushNow(localDraft);
+    });
+
+    expect(hook.result.current.status).toBe('conflict');
+    expect(hook.result.current.hasPendingChanges).toBe(true);
   });
 });

@@ -18,12 +18,13 @@ export type SatInteractionIntent =
   | { type: 'DIRECTIONS_OPEN_REQUESTED'; returnFocus?: SatInteractionFocusTarget }
   | { type: 'READING_SETTINGS_OPEN_REQUESTED'; returnFocus?: SatInteractionFocusTarget }
   | { type: 'QUESTION_NOTES_OPEN_REQUESTED'; returnFocus?: SatInteractionFocusTarget }
+  | { type: 'MORE_MENU_OPEN_REQUESTED'; returnFocus?: SatInteractionFocusTarget }
   | { type: 'ANNOTATION_NOTE_REQUESTED'; annotationId: string; returnFocus?: SatInteractionFocusTarget }
   | { type: 'CALCULATOR_TOGGLE_REQUESTED' }
   | { type: 'REFERENCE_TOGGLE_REQUESTED' }
   | { type: 'ANNOTATION_MODE_REQUESTED'; mode: 'highlight' | 'underline' | 'note' | 'erase' | 'off' }
   | { type: 'SURFACE_CLOSE_REQUESTED' }
-  | { type: 'SURFACE_TOGGLE_REQUESTED'; surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes'; returnFocus?: SatInteractionFocusTarget }
+  | { type: 'SURFACE_TOGGLE_REQUESTED'; surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes' | 'more-menu'; returnFocus?: SatInteractionFocusTarget }
   | { type: 'ESCAPE_PRESSED'; lineReaderEnabled?: boolean | undefined }
   | { type: 'QUESTION_NAVIGATION_REQUESTED'; moduleKey: string; questionId: string }
   | { type: 'TEXT_SELECTION_STARTED' }
@@ -35,7 +36,7 @@ export type SatInteractionIntent =
   | { type: 'TERMINAL_TRANSITION' };
 
 function defaultReturnFocus(
-  surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes',
+  surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes' | 'more-menu',
   fallbackQuestionId: string,
 ): SatInteractionFocusTarget {
   switch (surface) {
@@ -47,6 +48,8 @@ function defaultReturnFocus(
       return { type: 'topbar', control: 'reading' };
     case 'question-notes':
       return { type: 'topbar', control: 'notes' };
+    case 'more-menu':
+      return { type: 'topbar', control: 'more' };
     default:
       return { type: 'question', questionId: fallbackQuestionId };
   }
@@ -56,7 +59,7 @@ function defaultReturnFocus(
  * Conflict matrix (executable policy):
  * - navigator/directions/reading/notes replace each other (exclusive surface)
  * - annotation editor rejects competing surfaces until resolved
- * - calculator/reference open closes the exclusive surface, preserves annotation mode
+ * - calculator/reference are runner-owned independent layers; intents refuse them here and opening a tool never closes the exclusive surface (shell coexistence contract).
  * - question navigation clears transient selection, closes editor+panels+navigator
  * - scope change resets harder (annotation off, tools closed)
  */
@@ -94,6 +97,13 @@ export function resolveSatInteractionIntent(
         returnFocus: intent.returnFocus ?? defaultReturnFocus('question-notes', ctx.questionId),
       };
     }
+    case 'MORE_MENU_OPEN_REQUESTED': {
+      if (!satInteractionCan.openMoreMenu(state, ctx)) return null;
+      return {
+        type: 'MORE_MENU_OPENED',
+        returnFocus: intent.returnFocus ?? defaultReturnFocus('more-menu', ctx.questionId),
+      };
+    }
     case 'ANNOTATION_NOTE_REQUESTED': {
       if (!satInteractionCan.annotate(state, ctx)) return null;
       return {
@@ -102,17 +112,13 @@ export function resolveSatInteractionIntent(
         returnFocus: intent.returnFocus ?? { type: 'question', questionId: ctx.questionId },
       };
     }
-    case 'CALCULATOR_TOGGLE_REQUESTED': {
-      // Closing is always allowed locally; opening requires the guard.
-      if (state.tools.calculator === 'open') return { type: 'CALCULATOR_CLOSED' };
-      if (!satInteractionCan.openCalculator(state, ctx)) return null;
-      return { type: 'CALCULATOR_OPENED' };
-    }
-    case 'REFERENCE_TOGGLE_REQUESTED': {
-      if (state.tools.reference === 'open') return { type: 'REFERENCE_CLOSED' };
-      if (!satInteractionCan.openReference(state, ctx)) return null;
-      return { type: 'REFERENCE_OPENED' };
-    }
+    // Tool buttons dispatch runner commands directly (activeTools is the
+    // single tool truth), so no interaction intent exists for tools. These
+    // stale cases stay refused — never resolve — to keep intent→event total
+    // for in-flight callers without forking a second truth.
+    case 'CALCULATOR_TOGGLE_REQUESTED':
+    case 'REFERENCE_TOGGLE_REQUESTED':
+      return null;
     case 'ANNOTATION_MODE_REQUESTED': {
       if (intent.mode !== 'off' && !satInteractionCan.annotate(state, ctx)) return null;
       return { type: 'ANNOTATION_MODE_CHANGED', mode: intent.mode };
@@ -129,6 +135,7 @@ export function resolveSatInteractionIntent(
         : state.surface.kind === 'directions' ? 'directions'
         : state.surface.kind === 'reading-settings' ? 'reading-settings'
         : state.surface.kind === 'question-notes' ? 'question-notes'
+        : state.surface.kind === 'more-menu' ? 'more-menu'
         : null;
       if (openKind === intent.surface) return { type: 'SURFACE_CLOSED' };
       const returnFocus = intent.returnFocus ?? defaultReturnFocus(intent.surface, ctx.questionId);
@@ -144,8 +151,15 @@ export function resolveSatInteractionIntent(
         if (!satInteractionCan.openReadingSettings(state, ctx)) return null;
         return { type: 'READING_SETTINGS_OPENED', returnFocus };
       }
-      if (!satInteractionCan.openQuestionNotes(state, ctx)) return null;
-      return { type: 'QUESTION_NOTES_OPENED', returnFocus };
+      if (intent.surface === 'question-notes') {
+        if (!satInteractionCan.openQuestionNotes(state, ctx)) return null;
+        return { type: 'QUESTION_NOTES_OPENED', returnFocus };
+      }
+      if (intent.surface === 'more-menu') {
+        if (!satInteractionCan.openMoreMenu(state, ctx)) return null;
+        return { type: 'MORE_MENU_OPENED', returnFocus };
+      }
+      return null;
     }
     case 'ESCAPE_PRESSED':
       // Arbitration needs current state beyond a pure event; the controller

@@ -4,16 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"math"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
@@ -45,7 +45,9 @@ const (
 // active-started idempotent shortcut (commit, then bootstrap_payload outside
 // the tx), the not_started-only CAS update, and the provider phase update.
 // Reconcile-then-write per Rust start_module:402 (own tx, before the write tx).
-func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID string, clientSessionID ...string) (*Bootstrap, error) {
+// StartModule/SubmitModule take writerBinding [clientSessionID, tokenID]
+// (see SaveResponse). Handlers forward both from verified claims.
+func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID string, writerBinding ...string) (*Bootstrap, error) {
 	if urlScheduleID != bearerScheduleID {
 		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
 	}
@@ -69,7 +71,7 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, clientSessionID); err != nil {
+		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, writerBinding...); err != nil {
 			return err
 		}
 		module, err := lockModuleAttemptTx(ctx, t, bearerAttemptID, moduleID)
@@ -136,7 +138,7 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 // timing gate plus the personal-deadline workability check, and
 // finalize_module_tx (student_submit).
 // Reconcile-then-write per Rust submit_module:730 (own tx, before the write tx).
-func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID string, clientSessionID ...string) (*Bootstrap, error) {
+func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID string, writerBinding ...string) (*Bootstrap, error) {
 	if urlScheduleID != bearerScheduleID {
 		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
 	}
@@ -160,7 +162,7 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, clientSessionID); err != nil {
+		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, writerBinding...); err != nil {
 			return err
 		}
 		active, err := lockModuleAttemptTx(ctx, t, bearerAttemptID, moduleID)
@@ -236,11 +238,11 @@ func lockModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID, moduleID strin
 		"SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason FROM assessment_module_attempts WHERE attempt_id = ? AND module_id = ? FOR UPDATE",
 		attemptID, moduleID).Scan(&m.id, &m.moduleID, &m.state, &m.allocatedSeconds, &availableAt, &startedAt, &pausedAt, &m.accumulatedPausedSeconds, &m.extensionSeconds, &completionReason); err != nil {
 		if err == sql.ErrNoRows {
-		// Round 81 (live rehearsal): this used to say "Attempt not
-		// found.", indistinguishable from a bad attempt id. The
-		// attempt binding already passed above, so a miss here is a
-		// missing MODULE row (not seeded / wrong module id) — say so.
-		return saveActiveModule{}, apperrors.New(apperrors.CodeNotFound, "Module attempt not found for this module.")
+			// Round 81 (live rehearsal): this used to say "Attempt not
+			// found.", indistinguishable from a bad attempt id. The
+			// attempt binding already passed above, so a miss here is a
+			// missing MODULE row (not seeded / wrong module id) — say so.
+			return saveActiveModule{}, apperrors.New(apperrors.CodeNotFound, "Module attempt not found for this module.")
 		}
 		return saveActiveModule{}, err
 	}
@@ -479,7 +481,130 @@ type scoringRow struct {
 }
 
 // loadScoringRowsTx loads the scoring join for finalizeModuleTx.
+//
+// V2-canonical read (exam-day P0): student saves land in
+// attempt_responses_v2 through the V2 durability transport, so the scorer
+// must read V2 first. Legacy assessment_question_responses rows stay as the
+// fallback for pre-V2 attempts that never wrote V2 rows. Per question the
+// V2 canonical payload wins when present; legacy fills only gaps. The
+// scorer input for a V2 row is its canonical "answer" field re-encoded as
+// JSON (assessscore.V2ResponseToScorerInput), byte-equivalent to the legacy
+// JSON-string response for the same logical answer.
 func loadScoringRowsTx(ctx context.Context, t tx.Tx, moduleAttemptID, moduleID string) ([]scoringRow, error) {
+	return loadScoringRowsV2FirstTx(ctx, t, moduleAttemptID, moduleID)
+}
+
+// loadScoringRowsV2FirstTx is the V2-first scoring join: one round-trip
+// returning legacy + V2 columns per question, V2 winning per row. Exactly
+// one scoringRow per eq.id (Go-side dedup, eq.id match preferred). Callers
+// that need the legacy-only join (historical probes, tests pinning fallback)
+// use loadScoringRowsLegacyTx directly.
+//
+// Fan-out guard (exam-day re-audit defect 1): V2 rows are keyed by
+// (attempt_id, question_id) where question_id may be eq.id or
+// eq.question_id, so a bare IN-join can match 0..2 V2 rows per eq row and
+// inflate operationalCount/rawCorrect. The join therefore fences on the
+// scoring module (v.module_id = eq.module_id) and prefers the eq.id match;
+// Go-side dedup keeps exactly one row per eq.id.
+func loadScoringRowsV2FirstTx(ctx context.Context, t tx.Tx, moduleAttemptID, moduleID string) ([]scoringRow, error) {
+	rows, err := t.QueryContext(ctx,
+		"SELECT eq.id, eq.is_pretest, qr.answer_definition, ar.response, CAST(v.response AS CHAR), CAST(v.question_id AS CHAR) FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id LEFT JOIN assessment_question_responses ar ON ar.module_attempt_id = ? AND ar.exam_question_id = eq.id LEFT JOIN attempt_responses_v2 v ON v.question_id IN (eq.id, eq.question_id) AND v.module_id = eq.module_id AND v.attempt_id = (SELECT attempt_id FROM assessment_module_attempts WHERE id = ?) WHERE eq.module_id = ? ORDER BY eq.display_order, CASE WHEN (CAST(v.question_id AS CHAR) COLLATE utf8mb4_unicode_ci) = eq.id THEN 0 ELSE 1 END",
+		moduleAttemptID, moduleAttemptID, moduleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []scoringRow
+	seen := make(map[string]struct{})
+	// Operational-only attribution: the scorer skips pretest rows entirely,
+	// so paging counters must too — a pretest-only legacy answer (or a
+	// pretest-only unanswered pass) is not a scoring gap and must not page
+	// on EITHER the pass-level source series or the per-row fallback series.
+	operationalV2 := false
+	operationalLegacy := false
+	legacyFallbackRows := 0
+	operationalRows := 0
+	for rows.Next() {
+		var eqID string
+		var r scoringRow
+		var canonical sql.NullString
+		var vQuestionID sql.NullString
+		if err := rows.Scan(&eqID, &r.isPretest, &r.answerDefinition, &r.response, &canonical, &vQuestionID); err != nil {
+			return nil, err
+		}
+		if _, dup := seen[eqID]; dup {
+			// Second V2 match for the same question (eq.id + eq.question_id
+			// variants): the ORDER BY already placed the eq.id match
+			// first, so the duplicate is dropped, never double-counted.
+			continue
+		}
+		seen[eqID] = struct{}{}
+		if !r.isPretest {
+			operationalRows++
+		}
+		if canonical.Valid && canonical.String != "" {
+			if !r.isPretest {
+				operationalV2 = true
+			}
+			if input, ok := assessscore.V2ResponseToScorerInput(canonical.String); ok {
+				r.response = sql.NullString{String: input, Valid: true}
+			} else {
+				// Present-but-unusable payload (null/malformed answer):
+				// V2 owns the question, so legacy must not resurrect a
+				// stale row; an empty response scores as incorrect.
+				r.response = sql.NullString{}
+			}
+		} else if r.response.Valid && r.response.String != "" {
+			if !r.isPretest {
+				operationalLegacy = true
+				// Gap attribution is decided after the full pass: this
+				// legacy row is a pageable gap only when V2 owns
+				// sibling OPERATIONAL questions (pretest rows never
+				// count — the scorer skips them).
+				legacyFallbackRows++
+			}
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Pass-level source: operational rows only. A pretest-only V2 (or
+	// legacy) pass emits nothing — there is no scored content to attribute.
+	if operationalV2 {
+		telemetry.IncCounter(telemetry.MSATScoreSource, "source", telemetry.SATScoreV2)
+	}
+	if operationalLegacy {
+		telemetry.IncCounter(telemetry.MSATScoreSource, "source", telemetry.SATScoreLegacy)
+	}
+	if operationalV2 && legacyFallbackRows > 0 {
+		// Mixed pass: some OPERATIONAL questions scored from legacy gaps
+		// while V2 owned the rest. Emit one increment per gap row (not
+		// one per pass) so the page fires on ANY gap and the magnitude
+		// tracks its size.
+		for range legacyFallbackRows {
+			telemetry.IncCounter(telemetry.MSATScoreFallbackRows, "source", telemetry.SATScoreLegacy)
+		}
+	} else if !operationalV2 && !operationalLegacy && operationalRows > 0 {
+		// Zero-answer pass: operational questions existed but no response
+		// row answered any of them (mass lease-fencing / transport
+		// loss). Scoring silence would otherwise release an
+		// all-incorrect module with no page — emit one increment per
+		// unanswered OPERATIONAL question. Pretest-only passes stay
+		// silent (the scorer skips pretest, so there is no gap).
+		for range operationalRows {
+			telemetry.IncCounter(telemetry.MSATScoreFallbackRows, "source", telemetry.SATScoreZero)
+		}
+	}
+	return out, nil
+}
+
+// loadScoringRowsLegacyTx is the pre-V2 scoring join, retained for
+// historical probes and tests pinning the legacy fallback. It emits no
+// scoring telemetry itself: callers that page on legacy gaps route through
+// loadScoringRowsV2FirstTx (the only paged path); direct users must decide
+// their own paging (a silent historical probe must never page on-call).
+func loadScoringRowsLegacyTx(ctx context.Context, t tx.Tx, moduleAttemptID, moduleID string) ([]scoringRow, error) {
 	rows, err := t.QueryContext(ctx,
 		"SELECT eq.is_pretest, qr.answer_definition, ar.response FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id LEFT JOIN assessment_question_responses ar ON ar.module_attempt_id = ? AND ar.exam_question_id = eq.id WHERE eq.module_id = ? ORDER BY eq.display_order",
 		moduleAttemptID, moduleID)
@@ -521,162 +646,12 @@ func answerString(v sql.NullString) string {
 	return v.String
 }
 
-// responseIsCorrect mirrors response_is_correct (Rust
-// assessment_delivery.rs:2969): only a JSON string response can be correct.
+// responseIsCorrect is the write-path verdict: one canonical import, not a
+// fork. Exam-day re-audit defect 7 collapsed the verbatim duplicate into
+// assessscore.SATResponseCorrect so seal-time scoring and result-review
+// verdicts cannot drift on a one-line tolerance fix.
 func responseIsCorrect(answerJSON string, response sql.NullString) bool {
-	if !response.Valid || strings.TrimSpace(response.String) == "" {
-		return false
-	}
-	var respStr string
-	if err := json.Unmarshal([]byte(response.String), &respStr); err != nil {
-		return false
-	}
-	if strings.TrimSpace(answerJSON) == "" {
-		return false
-	}
-	var def map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(answerJSON), &def); err != nil {
-		return false
-	}
-	var kind string
-	if raw, ok := def["kind"]; ok {
-		_ = json.Unmarshal(raw, &kind)
-	}
-	switch kind {
-	case "single_choice":
-		raw, ok := answerField(def, "correctOptionId", "correct_option_id")
-		if !ok || string(raw) == "null" {
-			return false
-		}
-		var correct string
-		if err := json.Unmarshal(raw, &correct); err != nil {
-			return false
-		}
-		return correct == respStr
-	case "student_produced_response":
-		var accepted []string
-		if raw, ok := answerField(def, "acceptedResponses", "accepted_responses"); ok {
-			_ = json.Unmarshal(raw, &accepted)
-		}
-		normalizeFraction := answerBool(def, "normalizeFraction", "normalize_fraction")
-		normalizeDecimal := answerBool(def, "normalizeDecimal", "normalize_decimal")
-		var tolerance *string
-		if raw, ok := answerField(def, "numericTolerance", "numeric_tolerance"); ok && string(raw) != "null" {
-			var tol string
-			if err := json.Unmarshal(raw, &tol); err == nil {
-				tolerance = &tol
-			}
-		}
-		for _, a := range accepted {
-			if responseMatches(a, respStr, normalizeFraction, normalizeDecimal, tolerance) {
-				return true
-			}
-		}
-		return false
-	default:
-		return false
-	}
-}
-
-// answerField reads a camelCase answer-definition field with its snake_case
-// alias (Rust serde rename + alias).
-func answerField(def map[string]json.RawMessage, camel, snake string) (json.RawMessage, bool) {
-	if raw, ok := def[camel]; ok {
-		return raw, true
-	}
-	raw, ok := def[snake]
-	return raw, ok
-}
-
-// answerBool reads a boolean answer-definition flag (both casings).
-func answerBool(def map[string]json.RawMessage, camel, snake string) bool {
-	raw, ok := answerField(def, camel, snake)
-	if !ok {
-		return false
-	}
-	var b bool
-	if err := json.Unmarshal(raw, &b); err != nil {
-		return false
-	}
-	return b
-}
-
-// responseMatches mirrors response_matches (Rust assessment_delivery.rs:2994):
-// numeric comparison with tolerance when either normalization is on and both
-// sides parse, otherwise ASCII case-insensitive trimmed equality.
-func responseMatches(accepted, response string, normalizeFraction, normalizeDecimal bool, tolerance *string) bool {
-	if normalizeFraction || normalizeDecimal {
-		if a, ok := parseNumericResponse(accepted, normalizeFraction); ok {
-			if r, ok := parseNumericResponse(response, normalizeFraction); ok {
-				explicit := 0.0
-				if tolerance != nil {
-					if t, err := strconv.ParseFloat(*tolerance, 64); err == nil && !math.IsNaN(t) && !math.IsInf(t, 0) && t >= 0 {
-						explicit = t
-					}
-				}
-				scale := math.Max(math.Abs(a), math.Abs(r))
-				if scale < 1.0 {
-					scale = 1.0
-				}
-				floor := (math.Nextafter(1, 2) - 1) * scale * 8.0
-				bound := explicit
-				if floor > bound {
-					bound = floor
-				}
-				return math.Abs(a-r) <= bound
-			}
-		}
-	}
-	return asciiEqualFold(strings.TrimSpace(accepted), strings.TrimSpace(response))
-}
-
-// parseNumericResponse mirrors parse_numeric_response (Rust
-// assessment_delivery.rs:3019).
-func parseNumericResponse(value string, allowFraction bool) (float64, bool) {
-	v := strings.TrimSpace(value)
-	if allowFraction {
-		if idx := strings.IndexByte(v, '/'); idx >= 0 {
-			numStr, denStr := v[:idx], v[idx+1:]
-			if strings.Contains(denStr, "/") {
-				return 0, false
-			}
-			n, errNum := strconv.ParseFloat(numStr, 64)
-			d, errDen := strconv.ParseFloat(denStr, 64)
-			if errNum != nil || errDen != nil {
-				return 0, false
-			}
-			if math.IsNaN(n) || math.IsInf(n, 0) || math.IsNaN(d) || math.IsInf(d, 0) || d == 0 {
-				return 0, false
-			}
-			return n / d, true
-		}
-	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0, false
-	}
-	return f, true
-}
-
-// asciiEqualFold is ASCII-only case-insensitive equality (Rust
-// eq_ignore_ascii_case).
-func asciiEqualFold(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := 0; i < len(a); i++ {
-		ca, cb := a[i], b[i]
-		if 'A' <= ca && ca <= 'Z' {
-			ca += 'a' - 'A'
-		}
-		if 'A' <= cb && cb <= 'Z' {
-			cb += 'a' - 'A'
-		}
-		if ca != cb {
-			return false
-		}
-	}
-	return true
+	return assessscore.SATResponseCorrect(answerJSON, response.Valid, response.String)
 }
 
 // nextModuleTx mirrors next_module (Rust assessment_delivery.rs:2219): base

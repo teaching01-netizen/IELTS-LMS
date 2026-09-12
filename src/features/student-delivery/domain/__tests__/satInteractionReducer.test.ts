@@ -51,10 +51,10 @@ describe('satInteractionReducer transition contracts', () => {
     expect(state.surface.kind).not.toBe('navigator');
   });
 
-  it('keeps calculator open beside highlight mode, but closes reading settings on tool open', () => {
-    // The machine is policy-agnostic: use a synthetic context granting both
-    // (real section policies never do — R&W has no calculator, math has no
-    // highlight — which is exactly what normalization enforces below).
+  // Tool events are runner-owned (activeTools) and reduce to strict no-ops
+  // here: the same state reference returns, disturbing neither annotation
+  // mode nor the exclusive surface.
+  it('treats tool events as strict no-ops beside highlight mode and open surfaces', () => {
     const bothCtx = {
       ...mathCtx(),
       toolPolicy: { ...mathCtx().toolPolicy, highlight: true, underline: true, notes: true },
@@ -66,10 +66,11 @@ describe('satInteractionReducer transition contracts', () => {
       bothCtx,
     );
     state = satInteractionReducer(state, { type: 'ANNOTATION_MODE_CHANGED', mode: 'highlight' }, bothCtx);
+    const before = state;
     state = satInteractionReducer(state, { type: 'CALCULATOR_OPENED' }, bothCtx);
-    expect(state.tools.calculator).toBe('open');
+    expect(state).toBe(before);
     expect(state.annotation.mode).toBe('highlight');
-    expect(state.surface.kind).toBe('none');
+    expect(state.surface.kind).toBe('reading-settings');
   });
 
   it('rejects navigator while the annotation note editor is unresolved', () => {
@@ -106,10 +107,9 @@ describe('satInteractionReducer transition contracts', () => {
     expect(state.surface.kind).toBe('none');
   });
 
-  it('resets annotation mode and closes tools on module change, preserving nothing ephemeral', () => {
+  it('resets annotation mode on module change, preserving nothing ephemeral', () => {
     let state = createSatInteractionState();
     state = satInteractionReducer(state, { type: 'ANNOTATION_MODE_CHANGED', mode: 'underline' }, rwCtx());
-    state = satInteractionReducer(state, { type: 'CALCULATOR_OPENED' }, mathCtx());
     state = satInteractionReducer(
       state,
       { type: 'MODULE_SCOPE_CHANGED', moduleKey: 'rw-m1', questionId: 'q1' },
@@ -117,26 +117,20 @@ describe('satInteractionReducer transition contracts', () => {
     );
     expect(state.annotation.mode).toBe('off');
     expect(state.annotation.textSelection).toBe('idle');
-    expect(state.tools.calculator).toBe('closed');
-    expect(state.tools.reference).toBe('closed');
     expect(state.surface.kind).toBe('none');
     expect(state.scope).toEqual({ moduleKey: 'rw-m1', questionId: 'q1' });
   });
 
-  it('normalizes away tools that policy revokes (math -> R&W)', () => {
+  it('normalizes away annotation modes that policy revokes (math -> R&W)', () => {
     let state = createSatInteractionState();
-    state = satInteractionReducer(state, { type: 'CALCULATOR_OPENED' }, mathCtx());
-    state = satInteractionReducer(state, { type: 'REFERENCE_OPENED' }, mathCtx());
+    state = satInteractionReducer(state, { type: 'ANNOTATION_MODE_CHANGED', mode: 'underline' }, mathCtx());
     const normalized = normalizeSatInteractionState(state, rwCtx());
-    expect(normalized.tools.calculator).toBe('closed');
-    expect(normalized.tools.reference).toBe('closed');
     expect(normalized.annotation.mode).toBe('off');
   });
 
   it('discards all interaction on terminal transition', () => {
     let state = createSatInteractionState();
     state = satInteractionReducer(state, { type: 'ANNOTATION_MODE_CHANGED', mode: 'highlight' }, rwCtx());
-    state = satInteractionReducer(state, { type: 'CALCULATOR_OPENED' }, mathCtx());
     state = satInteractionReducer(state, { type: 'TERMINAL_TRANSITION' }, mathCtx());
     expect(state).toEqual({
       ...createSatInteractionState(),

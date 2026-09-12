@@ -29,6 +29,7 @@ export interface ClassifiedError {
 }
 
 const CODE_MAP: Record<string, Omit<ClassifiedError, 'requestId'> & { code: string }> = {
+  CONFLICT: { kind: 'version-collision', code: 'CONFLICT', retryable: false, recovery: 'reload-and-reapply' },
   LEASE_FENCED: { kind: 'lease-fenced', code: 'LEASE_FENCED', retryable: false, recovery: 'takeover-or-recover' },
   CONTROL_EPOCH_STALE: { kind: 'stale-control', code: 'CONTROL_EPOCH_STALE', retryable: false, recovery: 're-snapshot-and-retry' },
   VERSION_COLLISION: { kind: 'version-collision', code: 'VERSION_COLLISION', retryable: false, recovery: 're-snapshot-and-retry' },
@@ -43,7 +44,30 @@ const CODE_MAP: Record<string, Omit<ClassifiedError, 'requestId'> & { code: stri
   RATE_LIMIT_EXCEEDED: { kind: 'rate-limit', code: 'RATE_LIMIT_EXCEEDED', retryable: true, recovery: 'backoff-retry' },
 };
 
-export function classifyBackendCode(code: string, requestId?: string): ClassifiedError {
+/**
+ * Structured-conflict reasons ride `details.reason` on the shared 409
+ * code ASSESSMENT_CONFLICT (see backend assessmentConflict helper and
+ * the save-response OpenAPI description). Code-only classification maps
+ * every such conflict to generic version-collision, which misroutes
+ * terminal (stop) and clock-missing (operator issue) outcomes into the
+ * reload-and-reapply bucket. Pass the backend `details.reason` through
+ * so callers can branch terminal vs retryable without string-matching
+ * elsewhere. Unknown reasons stay version-collision (safe default:
+ * re-snapshot before retry, never silent drop).
+ */
+const REASON_MAP: Record<string, Omit<ClassifiedError, 'requestId'> & { code: string }> = {
+  ATTEMPT_TERMINAL: { kind: 'terminal', code: 'ATTEMPT_TERMINAL', retryable: false, recovery: 'terminal' },
+  ATTEMPT_PROCTOR_BLOCKED: { kind: 'proctor-blocked', code: 'ATTEMPT_PROCTOR_BLOCKED', retryable: false, recovery: 'await-proctor' },
+  DEADLINE_EXPIRED: { kind: 'deadline', code: 'DEADLINE_EXPIRED', retryable: false, recovery: 'terminal' },
+  SECTION_CLOCK_MISSING: { kind: 'server', code: 'SECTION_CLOCK_MISSING', retryable: true, recovery: 'retry-after-cohort-start' },
+  RESPONSE_REVISION_MISMATCH: { kind: 'version-collision', code: 'RESPONSE_REVISION_MISMATCH', retryable: false, recovery: 're-snapshot-and-retry' },
+};
+
+export function classifyBackendCode(code: string, requestId?: string, reason?: string | null): ClassifiedError {
+  if (code === 'ASSESSMENT_CONFLICT' && reason && REASON_MAP[reason]) {
+    const hit = REASON_MAP[reason];
+    return { ...hit, requestId };
+  }
   const hit = CODE_MAP[code];
   if (hit) return { ...hit, requestId };
   return { kind: 'unknown', code, requestId, retryable: false, recovery: 'report-with-request-id' };

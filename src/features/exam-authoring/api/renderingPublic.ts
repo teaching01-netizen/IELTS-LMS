@@ -3,4 +3,4 @@ export {
   hasStructuredContent,
 } from '../editor/richContent';
 export { SatImage } from '../editor/SatImageExtension';
-export { sanitizeSatStudentResponseInput } from '../providers/sat/studentResponse';
+export { sanitizeSatStudentResponseInput, validateSatStudentResponse } from '../providers/sat/studentResponse';

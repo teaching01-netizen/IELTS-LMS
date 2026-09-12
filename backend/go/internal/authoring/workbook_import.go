@@ -79,13 +79,31 @@ func (s *Service) LoadSampleExam(ctx context.Context, examID string, request Loa
 // CommitSATWorkbook validates the staged import again under locks, checkpoints
 // the existing draft, replaces all question placements, and records the
 // revision needed for a safe one-step undo.
-func (s *Service) CommitSATWorkbook(ctx context.Context, examID string, request SatWorkbookCommitRequest, actorID string) (CommitResult, error) {
+func (s *Service) CommitSATWorkbook(ctx context.Context, examID string, request SatWorkbookCommitRequest, actorID string, opts ...OperationOption) (CommitResult, error) {
 	if strings.TrimSpace(request.ImportID) == "" {
 		return CommitResult{}, validationError("Workbook import id is required.")
 	}
 	if len(request.Modules) != len(satWorkbookModules) {
 		return CommitResult{}, validationError("A complete SAT workbook must contain all six modules.")
 	}
+	cfg := operationConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	var operationKey, fingerprint string
+	if strings.TrimSpace(cfg.operationKey) != "" {
+		key, err := normalizeOperationKey(cfg.operationKey)
+		if err != nil {
+			return CommitResult{}, err
+		}
+		operationKey = key
+		fp, err := operationFingerprint(map[string]any{"import": request.ImportID, "version": request.ExpectedVersionID, "rev": request.ExpectedVersionRevision, "modules": request.Modules, "assets": request.Assets})
+		if err != nil {
+			return CommitResult{}, err
+		}
+		fingerprint = fp
+	}
+	scope := "workbook:" + examID
 	requests := make([]satReplacementRequest, 0, len(request.Modules))
 	for _, module := range request.Modules {
 		requests = append(requests, satReplacementRequest{
@@ -93,6 +111,15 @@ func (s *Service) CommitSATWorkbook(ctx context.Context, examID string, request 
 			SectionKey: module.SectionKey,
 			Questions:  module.Questions,
 		})
+	}
+	// Single-tx path: claim + mutation + replay-store commit atomically
+	// inside replaceCompleteSATDraftOpKey (no pre/post-tx window).
+	if operationKey != "" {
+		shell, err := s.replaceCompleteSATDraftOpKey(ctx, examID, request.ExpectedVersionID, request.ExpectedVersionRevision, actorID, requests, &satImportRequest{ImportID: request.ImportID, Assets: request.Assets}, operationKey, scope, fingerprint)
+		if err != nil {
+			return CommitResult{}, err
+		}
+		return CommitResult{Shell: shell, Undo: UndoState{ImportID: request.ImportID, Available: true}}, nil
 	}
 	shell, err := s.replaceCompleteSATDraft(ctx, examID, request.ExpectedVersionID, request.ExpectedVersionRevision, actorID, requests, &satImportRequest{ImportID: request.ImportID, Assets: request.Assets})
 	if err != nil {
@@ -229,6 +256,16 @@ type satTargetModule struct {
 }
 
 func (s *Service) replaceCompleteSATDraft(ctx context.Context, examID, expectedVersionID string, expectedRevision int, actorID string, requests []satReplacementRequest, importRequest *satImportRequest) (Shell, error) {
+	return s.replaceCompleteSATDraftOpKey(ctx, examID, expectedVersionID, expectedRevision, actorID, requests, importRequest, "", "", "")
+}
+
+// replaceCompleteSATDraftOpKey runs claim + mutation + replay-store in ONE
+// tx: the opkey row, the draft replacement, and the stored replay result
+// commit atomically, so a crash can never leave a claimed key without a
+// replayable result (or a committed draft without one). The replay Shell
+// is built from in-tx reads; every other op (create/duplicate/batch/bulk)
+// already claims+stores in-tx via claimOperationKey/storeOperationResult.
+func (s *Service) replaceCompleteSATDraftOpKey(ctx context.Context, examID, expectedVersionID string, expectedRevision int, actorID string, requests []satReplacementRequest, importRequest *satImportRequest, operationKey, opScope, opFingerprint string) (Shell, error) {
 	for moduleIndex := range requests {
 		for questionIndex := range requests[moduleIndex].Questions {
 			metadata, err := normalizeSATQuestionMetadata(requests[moduleIndex].Questions[questionIndex].Metadata)
@@ -238,7 +275,26 @@ func (s *Service) replaceCompleteSATDraft(ctx context.Context, examID, expectedV
 			requests[moduleIndex].Questions[questionIndex].Metadata = metadata
 		}
 	}
+	var replayed CommitResult
+	var replayHit bool
+	var committed CommitResult
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if operationKey != "" {
+			replay, claimed, err := claimOperationKey(ctx, q, actorID, opScope, operationKey, opFingerprint)
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				if len(replay) == 0 {
+					return conflictError("This workbook commit is still being processed; retry with the same operation key.")
+				}
+				if err := json.Unmarshal(replay, &replayed); err != nil {
+					return err
+				}
+				replayHit = true
+				return nil
+			}
+		}
 		var provider string
 		var currentDraft sql.NullString
 		if err := q.QueryRowContext(ctx, "SELECT provider_key, current_draft_version_id FROM exam_entities WHERE id = ? FOR UPDATE", examID).Scan(&provider, &currentDraft); err != nil {
@@ -424,12 +480,69 @@ func (s *Service) replaceCompleteSATDraft(ctx context.Context, examID, expectedV
 				return err
 			}
 		}
+		// Build the replay Shell from in-tx reads and store it with the
+		// key in the SAME tx: commit is atomic over (claim, mutation,
+		// replay result). A crash before commit leaves no partial effect
+		// and no poisoned key; a crash after commit leaves a replayable
+		// result (the committed import row is itself idempotent via the
+		// previewed->committed CAS above).
+		if operationKey != "" && !replayHit {
+			shell, err := buildShellTx(ctx, s, q, examID)
+			if err != nil {
+				return err
+			}
+			committed = CommitResult{Shell: shell, Undo: UndoState{ImportID: importRequestID(importRequest), Available: true}}
+			if err := storeOperationResult(ctx, q, actorID, opScope, operationKey, committed); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return Shell{}, err
 	}
+	if replayHit {
+		return replayed.Shell, nil
+	}
+	if operationKey != "" {
+		return committed.Shell, nil
+	}
 	return s.Shell(ctx, examID)
+}
+
+// buildShellTx reads the post-commit draft shell inside the replace tx
+// (same snapshot that committed the mutation).
+func buildShellTx(ctx context.Context, s *Service, q tx.Tx, examID string) (Shell, error) {
+	var providerKey string
+	var draftID sql.NullString
+	if err := q.QueryRowContext(ctx, "SELECT provider_key, current_draft_version_id FROM exam_entities WHERE id = ?", examID).Scan(&providerKey, &draftID); err != nil {
+		if err == sql.ErrNoRows {
+			return Shell{}, notFoundError("Exam not found.")
+		}
+		return Shell{}, err
+	}
+	if !draftID.Valid || draftID.String == "" {
+		return Shell{}, notFoundError("Draft version not found.")
+	}
+	var rev int
+	if err := q.QueryRowContext(ctx, "SELECT revision FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE", draftID.String, examID).Scan(&rev); err != nil {
+		if err == sql.ErrNoRows {
+			return Shell{}, notFoundError("Draft version not found.")
+		}
+		return Shell{}, err
+	}
+	sections, err := s.loadSections(ctx, q, draftID.String)
+	if err != nil {
+		return Shell{}, err
+	}
+	return Shell{ExamID: examID, ProviderKey: providerKey, VersionID: draftID.String, VersionRevision: rev, Sections: sections}, nil
+}
+
+func importRequestID(r *satImportRequest) string {
+	if r == nil {
+		return ""
+	}
+	return r.ImportID
 }
 
 func workbookValidationError(issues []ValidationIssue, moduleKey string, index int) *apperrors.Error {

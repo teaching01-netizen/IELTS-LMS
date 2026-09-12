@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Navigate, createBrowserRouter, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/AppShell";
 import { AppLoadingSkeleton } from "../../components/ui/AppLoadingSkeleton";
+import { SatListSkeleton } from "../../products/sat/ui/SatPage";
 import { ErrorSurface } from "../../components/ui/ErrorSurface";
 import { LoadingSurface } from "../../components/ui/LoadingSurface";
 import { ActivateAccountPage } from "../../features/auth/ActivateAccountPage";
@@ -139,6 +140,22 @@ const DevSatAccessibilityRoute = lazy(() =>
 
 function RouteLoadingFallback() {
   return <AppLoadingSkeleton />;
+}
+
+/**
+ * SAT workspace chunk fallback: staff skin (NOT the admin grey skeleton).
+ * Used ONLY on /sat/* lazy boundaries so code-split loads never flash
+ * IELTS chrome inside the SAT workspace. Everywhere else keeps
+ * RouteLoadingFallback. Single live region via SatListSkeleton.
+ */
+function SatRouteLoadingFallback() {
+  return (
+    <div className="mx-auto w-full max-w-[1180px] px-4 pb-14 pt-7 sm:px-6 md:pt-10 lg:px-10">
+      <div className="flex min-h-[60vh] flex-col justify-center">
+        <SatListSkeleton rows={5} label="Loading SAT workspace" />
+      </div>
+    </div>
+  );
 }
 
 function NotFoundRoute() {
@@ -313,7 +330,7 @@ const baseRoutes = [
         path: "sat",
         errorElement: <RouteErrorBoundary />,
         element: withAuth(
-          <Suspense fallback={<RouteLoadingFallback />}>
+          <Suspense fallback={<SatRouteLoadingFallback />}>
             <SatRoot />
           </Suspense>,
           ["admin", "builder", "proctor", "grader"]
@@ -323,71 +340,71 @@ const baseRoutes = [
           {
             path: "exams",
             element: withAuth(
-              <Suspense fallback={<RouteLoadingFallback />}><SatExamLibraryRoute /></Suspense>,
+              <Suspense fallback={<SatRouteLoadingFallback />}><SatExamLibraryRoute /></Suspense>,
               ["admin", "builder"]
             ),
           },
           {
             path: "sessions",
             element: withAuth(
-              <Suspense fallback={<RouteLoadingFallback />}><SatSessionsRoute /></Suspense>,
+              <Suspense fallback={<SatRouteLoadingFallback />}><SatSessionsRoute /></Suspense>,
               ["admin", "proctor"]
             ),
           },
           {
             path: "results",
             element: withAuth(
-              <Suspense fallback={<RouteLoadingFallback />}><SatResultsRoute /></Suspense>,
+              <Suspense fallback={<SatRouteLoadingFallback />}><SatResultsRoute /></Suspense>,
               ["admin", "grader", "proctor"]
             ),
           },
           {
             path: "results/:resultId",
             element: withAuth(
-              <Suspense fallback={<RouteLoadingFallback />}><SatResultDetailRoute /></Suspense>,
+              <Suspense fallback={<SatRouteLoadingFallback />}><SatResultDetailRoute /></Suspense>,
               ["admin", "grader", "proctor"]
             ),
           },
           {
             path: "sessions/:scheduleId",
             element: withAuth(
-              <Suspense fallback={<RouteLoadingFallback />}><SatSessionRoomRoute /></Suspense>,
+              <Suspense fallback={<SatRouteLoadingFallback />}><SatSessionRoomRoute /></Suspense>,
               ["admin", "proctor"]
             ),
           },
+          {
+            path: "exams/:examId",
+            errorElement: <RouteErrorBoundary />,
+            element: withAuth(
+              <Suspense fallback={<RouteLoadingFallback />}><ProviderBuilderRoute /></Suspense>,
+              ["admin", "builder"]
+            ),
+          },
+          {
+            path: "exams/:examId/release",
+            errorElement: <RouteErrorBoundary />,
+            element: withAuth(
+              <Suspense fallback={<RouteLoadingFallback />}><ProviderReviewRoute /></Suspense>,
+              ["admin", "builder"]
+            ),
+          },
+          {
+            path: "exams/:examId/preview",
+            errorElement: <RouteErrorBoundary />,
+            element: withAuth(
+              <Suspense fallback={<RouteLoadingFallback />}><ProviderPreviewRoute /></Suspense>,
+              ["admin", "builder"]
+            ),
+          },
+          {
+            path: "exams/:examId/access",
+            errorElement: <RouteErrorBoundary />,
+            element: withAuth(
+              <Suspense fallback={<SatRouteLoadingFallback />}><SatAccessRoute /></Suspense>,
+              ["admin", "builder"]
+            ),
+          },
         ],
-      },
-      {
-        path: "sat/exams/:examId",
-        errorElement: <RouteErrorBoundary />,
-        element: withAuth(
-          <Suspense fallback={<RouteLoadingFallback />}><ProviderBuilderRoute /></Suspense>,
-          ["admin", "builder"]
-        ),
-      },
-      {
-        path: "sat/exams/:examId/release",
-        errorElement: <RouteErrorBoundary />,
-        element: withAuth(
-          <Suspense fallback={<RouteLoadingFallback />}><ProviderReviewRoute /></Suspense>,
-          ["admin", "builder"]
-        ),
-      },
-      {
-        path: "sat/exams/:examId/preview",
-        errorElement: <RouteErrorBoundary />,
-        element: withAuth(
-          <Suspense fallback={<RouteLoadingFallback />}><ProviderPreviewRoute /></Suspense>,
-          ["admin", "builder"]
-        ),
-      },
-      {
-        path: "sat/exams/:examId/access",
-        errorElement: <RouteErrorBoundary />,
-        element: withAuth(
-          <Suspense fallback={<RouteLoadingFallback />}><SatAccessRoute /></Suspense>,
-          ["admin", "builder"]
-        ),
       },
       {
         path: "builder/:examId",

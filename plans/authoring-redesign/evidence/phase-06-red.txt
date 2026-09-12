@@ -1,0 +1,703 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ❯ src/features/exam-authoring/editor/__tests__/RichQuestionComposer.test.tsx (5 tests | 2 failed) 1058ms
+   × SAT rich question composer capabilities > shows only five default controls plus overflow 536ms
+     → expected [ <button …(6)>…(1)</button>, …(12) ] to have a length of 5 but got 13
+   × SAT rich question composer capabilities > keeps rich SAT choice tools available in compact presentation 182ms
+     → Unable to find an accessible element with the role "button" and name "More formatting"
+
+Here are the accessible roles:
+
+  toolbar:
+
+  Name "Formatting tools":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Formatting tools"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar"[39m
+    [33mrole[39m=[32m"toolbar"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  group:
+
+  Name "Text formatting":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Text formatting"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-group"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "Insert content":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Insert content"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-group"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "History":
+  [36m<div[39m
+    [33maria-label[39m=[32m"History"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-group sat-rich-editor__toolbar-group--history"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Bold (⌘B)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Bold (⌘B)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Bold (⌘B)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Italic (⌘I)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Italic (⌘I)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Italic (⌘I)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Underline (⌘U)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Underline (⌘U)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Underline (⌘U)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Superscript":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Superscript"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Superscript"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Subscript":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Subscript"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Subscript"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Insert equation":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Insert equation"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Insert equation"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Insert image or graph":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Insert image or graph"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Insert image or graph"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Code block":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Code block"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Code block"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Insert table":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Insert table"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Insert table"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Undo (⌘Z)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Undo (⌘Z)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Undo (⌘Z)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Redo (⇧⌘Z)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Redo (⇧⌘Z)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mdisabled[39m=[32m""[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Redo (⇧⌘Z)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  textbox:
+
+  Name "Answer choice A":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Answer choice A"[39m
+    [33mclass[39m=[32m"tiptap ProseMirror min-h-[132px] sat-rich-editor__input"[39m
+    [33mcontenteditable[39m=[32m"true"[39m
+    [33mdata-placeholder[39m=[32m"Start typing…"[39m
+    [33mrole[39m=[32m"textbox"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtranslate[39m=[32m"no"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p[39m
+    [33mdata-content-id[39m=[32m"content-11rquow"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-rich-editor"[39m
+      [33mdata-compact[39m=[32m"true"[39m
+      [33mdata-editor-surface[39m=[32m"rich"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"Formatting tools"[39m
+        [33mclass[39m=[32m"sat-rich-editor__toolbar"[39m
+        [33mrole[39m=[32m"toolbar"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"sat-rich-editor__toolbar-row"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"Text formatting"[39m
+            [33mclass[39m=[32m"sat-rich-editor__toolbar-group"[39m
+            [33mrole[39m=[32m"group"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Bold (⌘B)"[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+              [33mtabindex[39m=[32m"0"[39m
+              [33mtitle[39m=[32m"Bold (⌘B)"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"relative z-10"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-bold"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Italic (⌘I)"[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+              [33mtabindex[39m=[32m"0"[39m
+              [33mtitle[39m=[32m"Italic (⌘I)"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"relative z-10"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-italic"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<line[39m
+                    [33mx1[39m=[32m"19"[39m
+                    [33mx2[39m=[32m"10"[39m
+                    [33my1[39m=[32m"4"[39m
+                    [33my2[39m=[32m"4"[39m
+                  [36m/>[39m
+                  [36m<line[39m
+                    [33mx1[39m=[32m"14"[39m
+                    [33mx2[39m=[32m"5"[39m
+                    [33my1[39m=[32m"20"[39m
+                    [33my2[39m=[32m"20"[39m
+                  [36m/>[39m
+                  [36m<line[39m
+                    [33mx1[39m=[32m"15"[39m
+                    [33mx2[39m=[32m"9"[39m
+                    [33my1[39m=[32m"4"[39m
+                    [33my2[39m=[32m"20"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Underline (⌘U)"[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+              [33mtabindex[39m=[32m"0"[39m
+              [33mtitle[39m=[32m"Underline (⌘U)"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"relative z-10"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-underline"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"M6 4v6a6 6 0 0 0 12 0V4"[39m
+                  [36m/>[39m
+                  [36m<line[39m
+                    [33mx1[39m=[32m"4"[39m
+                    [33mx2[39m=[32m"20"[39m
+                    [33my1[39m=[32m"20"[39m
+                    [33my2[39m=[32m"20"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Superscript"[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+              [33mtabindex[39m=[32m"0"[39m
+              [33mtitle[39m=[32m"Superscript"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"relative z-10"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-superscript"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[3...
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/features/exam-authoring/editor/__tests__/RichQuestionComposer.test.tsx > SAT rich question composer capabilities > shows only five default controls plus overflow
+AssertionError: expected [ <button …(6)>…(1)</button>, …(12) ] to have a length of 5 but got 13
+
+- Expected
++ Received
+
+- 5
++ 13
+
+ ❯ src/features/exam-authoring/editor/__tests__/RichQuestionComposer.test.tsx:11:52
+      9|     render(<RichQuestionComposer value={plainContentFromText("Hello")}…
+     10|     const toolbar=await screen.findByRole("toolbar", {name:"Formatting…
+     11|     expect(within(toolbar).getAllByRole("button")).toHaveLength(5);
+       |                                                    ^
+     12|     expect(within(toolbar).getByRole("combobox", {name:"Text style"}))…
+     13|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/features/exam-authoring/editor/__tests__/RichQuestionComposer.test.tsx > SAT rich question composer capabilities > keeps rich SAT choice tools available in compact presentation
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "More formatting"
+
+Here are the accessible roles:
+
+  toolbar:
+
+  Name "Formatting tools":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Formatting tools"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar"[39m
+    [33mrole[39m=[32m"toolbar"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  group:
+
+  Name "Text formatting":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Text formatting"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-group"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "Insert content":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Insert content"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-group"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "History":
+  [36m<div[39m
+    [33maria-label[39m=[32m"History"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-group sat-rich-editor__toolbar-group--history"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Bold (⌘B)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Bold (⌘B)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Bold (⌘B)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Italic (⌘I)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Italic (⌘I)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Italic (⌘I)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Underline (⌘U)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Underline (⌘U)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Underline (⌘U)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Superscript":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Superscript"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Superscript"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Subscript":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Subscript"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Subscript"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Insert equation":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Insert equation"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Insert equation"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Insert image or graph":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Insert image or graph"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Insert image or graph"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Code block":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Code block"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Code block"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Insert table":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Insert table"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Insert table"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Undo (⌘Z)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Undo (⌘Z)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Undo (⌘Z)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Redo (⇧⌘Z)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Redo (⇧⌘Z)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mdisabled[39m=[32m""[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtitle[39m=[32m"Redo (⇧⌘Z)"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  textbox:
+
+  Name "Answer choice A":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Answer choice A"[39m
+    [33mclass[39m=[32m"tiptap ProseMirror min-h-[132px] sat-rich-editor__input"[39m
+    [33mcontenteditable[39m=[32m"true"[39m
+    [33mdata-placeholder[39m=[32m"Start typing…"[39m
+    [33mrole[39m=[32m"textbox"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtranslate[39m=[32m"no"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p[39m
+    [33mdata-content-id[39m=[32m"content-11rquow"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-rich-editor"[39m
+      [33mdata-compact[39m=[32m"true"[39m
+      [33mdata-editor-surface[39m=[32m"rich"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"Formatting tools"[39m
+        [33mclass[39m=[32m"sat-rich-editor__toolbar"[39m
+        [33mrole[39m=[32m"toolbar"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"sat-rich-editor__toolbar-row"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"Text formatting"[39m
+            [33mclass[39m=[32m"sat-rich-editor__toolbar-group"[39m
+            [33mrole[39m=[32m"group"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Bold (⌘B)"[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+              [33mtabindex[39m=[32m"0"[39m
+              [33mtitle[39m=[32m"Bold (⌘B)"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"relative z-10"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-bold"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Italic (⌘I)"[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+              [33mtabindex[39m=[32m"0"[39m
+              [33mtitle[39m=[32m"Italic (⌘I)"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"relative z-10"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-italic"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<line[39m
+                    [33mx1[39m=[32m"19"[39m
+                    [33mx2[39m=[32m"10"[39m
+                    [33my1[39m=[32m"4"[39m
+                    [33my2[39m=[32m"4"[39m
+                  [36m/>[39m
+                  [36m<line[39m
+                    [33mx1[39m=[32m"14"[39m
+                    [33mx2[39m=[32m"5"[39m
+                    [33my1[39m=[32m"20"[39m
+                    [33my2[39m=[32m"20"[39m
+                  [36m/>[39m
+                  [36m<line[39m
+                    [33mx1[39m=[32m"15"[39m
+                    [33mx2[39m=[32m"9"[39m
+                    [33my1[39m=[32m"4"[39m
+                    [33my2[39m=[32m"20"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Underline (⌘U)"[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+              [33mtabindex[39m=[32m"0"[39m
+              [33mtitle[39m=[32m"Underline (⌘U)"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"relative z-10"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-underline"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"M6 4v6a6 6 0 0 0 12 0V4"[39m
+                  [36m/>[39m
+                  [36m<line[39m
+                    [33mx1[39m=[32m"4"[39m
+                    [33mx2[39m=[32m"20"[39m
+                    [33my1[39m=[32m"20"[39m
+                    [33my2[39m=[32m"20"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Superscript"[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+              [33mtabindex[39m=[32m"0"[39m
+              [33mtitle[39m=[32m"Superscript"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"relative z-10"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-superscript"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[3...
+ ❯ Object.getElementError node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/features/exam-authoring/editor/__tests__/RichQuestionComposer.test.tsx:37:28
+     35|     expect(screen.getByRole("toolbar", { name: "Formatting tools" })).…
+     36|     expect(screen.getByRole("button", { name: "Insert equation" })).to…
+     37|     fireEvent.click(screen.getByRole("button", {name:"More formatting"…
+       |                            ^
+     38|     expect(screen.getByRole("menuitem", {name:"Underline (⌘U)"})).toBe…
+     39|     expect(screen.queryByRole("menuitem", {name:"Bulleted list"})).not…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 passed (5)
+   Start at  17:18:16
+   Duration  7.58s (transform 594ms, setup 637ms, collect 1.36s, tests 1.06s, environment 1.28s, prepare 264ms)
+

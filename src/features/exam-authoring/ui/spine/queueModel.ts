@@ -4,6 +4,14 @@ import type {
   AssessmentSectionShell,
 } from "../../contracts/assessment";
 
+/** A single row signal, with blockers taking precedence over answer metadata. */
+export function queueRowToken(question: AssessmentQuestionSummary): {kind: "issue" | "answer" | "spr"; label: string} | null {
+  if (question.readiness.blockingIssueCount > 0 || question.readiness.status === "error") return {kind:"issue",label:"Needs attention"};
+  if (question.questionType === "single_choice" && question.answerKeyPreview) return {kind:"answer",label:question.answerKeyPreview};
+  if (question.questionType !== "single_choice") return {kind:"spr",label:"SPR"};
+  return null;
+}
+
 export type SpineQueueFilter = "all" | "ready" | "incomplete" | "error";
 
 export type SpineQueueRow =
@@ -26,9 +34,10 @@ export function normalizeQueueSearch(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
 
-export function matchesQueueSearch(question: AssessmentQuestionSummary, query: string): boolean {
+export function matchesQueueSearch(question: AssessmentQuestionSummary, query: string, position?: number): boolean {
   if (!query) return true;
   return [
+    position === undefined ? "" : String(position),
     question.promptPreview,
     question.answerKeyPreview ?? "",
     question.domain ?? "",
@@ -44,8 +53,8 @@ export function buildQueueRows(
   filter: SpineQueueFilter,
 ): SpineQueueRow[] {
   const query = normalizeQueueSearch(searchQuery);
-  const questions = module.questions.filter((question) => {
-    if (!matchesQueueSearch(question, query)) return false;
+  const questions = module.questions.filter((question, index) => {
+    if (!matchesQueueSearch(question, query, index + 1)) return false;
     return filter === "all" || question.readiness.status === filter;
   });
   const result: SpineQueueRow[] = questions.map((question) => ({ kind: "question", question }));
@@ -55,6 +64,10 @@ export function buildQueueRows(
     }
   }
   return result;
+}
+
+export function moduleReadyCount(module: AssessmentModuleShell): number {
+  return module.questions.filter((question) => question.readiness.status === "ready").length;
 }
 
 export function countQueueReadiness(module: AssessmentModuleShell): SpineQueueCounts {

@@ -1,0 +1,13 @@
+src/features/student-delivery/application/satBootstrapEquality.ts(61,16): error TS18048: 'n' is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(62,22): error TS18048: 'n' is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(63,19): error TS18048: 'n' is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(64,22): error TS18048: 'n' is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(65,23): error TS18048: 'n' is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(66,22): error TS18048: 'n' is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(67,30): error TS18048: 'n' is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(68,24): error TS18048: 'n' is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(69,25): error TS18048: 'n' is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(70,30): error TS18048: 'n' is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(83,36): error TS2532: Object is possibly 'undefined'.
+src/features/student-delivery/application/satBootstrapEquality.ts(83,74): error TS2532: Object is possibly 'undefined'.
+src/products/sat/routes/SatSessionsRoute.tsx(248,4056): error TS2304: Cannot find name 'navigate'.

@@ -21,8 +21,6 @@ func TestAccessLogEmitsCounterAndGauge(t *testing.T) {
 	defer func() { telemetry.DefaultRegistry = old }()
 
 	// WithRoute OUTSIDE: it annotates ctx before AccessLog reads routeOf.
-	// (AccessLog(WithRoute(h)) would hide the template — the inner wrapper's
-	// WithContext never propagates back to the outer request.)
 	h := WithRoute(AccessLog(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	})), "/api/v1/student/sessions/{id}/runtime")
@@ -35,6 +33,19 @@ func TestAccessLogEmitsCounterAndGauge(t *testing.T) {
 	if got := telemetry.CounterValueForTest(reg, telemetry.MHTTPRequestsTotal,
 		"route", "/api/v1/student/sessions/{id}/runtime", "method", "GET", "status", "2xx"); got != 1 {
 		t.Fatalf("request counter must be 1, got %v", got)
+	}
+
+	// WithRoute INSIDE (production order: r.Use(AccessLog) is outer): the
+	// inner template back-reports through the route holder, so the label
+	// is still the template — never the raw path.
+	hInner := AccessLog(WithRoute(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}), "GET /readyz"))
+	reqInner := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	hInner.ServeHTTP(httptest.NewRecorder(), reqInner)
+	if got := telemetry.CounterValueForTest(reg, telemetry.MHTTPRequestsTotal,
+		"route", "GET /readyz", "method", "GET", "status", "2xx"); got != 1 {
+		t.Fatalf("inner-WithRoute template must propagate, got %v", got)
 	}
 	if got := telemetry.GaugeValueForTest(reg, telemetry.MHTTPInFlight, "route", "global"); got != 0 {
 		t.Fatalf("in-flight gauge must return to 0, got %v", got)

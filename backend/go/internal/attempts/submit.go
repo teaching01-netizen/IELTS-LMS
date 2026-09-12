@@ -47,6 +47,9 @@ func (s *Service) Submit(ctx context.Context, bearer string, cmd SubmitCommand, 
 	if err != nil {
 		return SubmitResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Invalid attempt credential.", HTTPStatus: 401}
 	}
+	if cmd.BearerTokenID != "" && cmd.BearerTokenID != claims.TokenID {
+		return SubmitResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Attempt credential mismatch.", HTTPStatus: 401}
+	}
 	var out SubmitResult
 	// B1: hot submit path runs READ COMMITTED (same shape as SaveResponses).
 	// E3: bounded RC retry (3) — receipt-first terminalization makes the

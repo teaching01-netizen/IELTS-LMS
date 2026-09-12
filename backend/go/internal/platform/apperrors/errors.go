@@ -17,6 +17,7 @@ const (
 	CodeUnauthorized               Code = "UNAUTHORIZED"
 	CodeForbidden                  Code = "FORBIDDEN"
 	CodeNotFound                   Code = "NOT_FOUND"
+	CodeMethodNotAllowed           Code = "METHOD_NOT_ALLOWED"
 	CodeConflict                   Code = "CONFLICT"
 	CodeRateLimited                Code = "RATE_LIMITED"
 	CodeRateLimitExceeded          Code = "RATE_LIMIT_EXCEEDED"
@@ -82,6 +83,8 @@ func statusFor(c Code) int {
 		return http.StatusForbidden
 	case CodeNotFound:
 		return http.StatusNotFound
+	case CodeMethodNotAllowed:
+		return http.StatusMethodNotAllowed
 	case CodeConflict, CodeControlEpochStale, CodeVersionCollision, CodeWriteIDConflict,
 		CodeTerminalConflict, CodeSubmissionReplayMisuse, CodeResponseRevisionMismatch,
 		CodeRuntimeRevisionStale, CodeAssessmentConflict, CodeActiveSessionSuperseded:

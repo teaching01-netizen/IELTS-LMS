@@ -64,10 +64,10 @@ func TestLoadTimingRuntimeRowReadOnce(t *testing.T) {
 			"waiting_for_next_section", "is_overrun", "total_paused_seconds",
 			"created_at", "updated_at", "revision",
 		}).AddRow("rt-1", "sched-1", "exam-1", "sat", "live",
-		nil, "cohort_section_v3", nil, nil,
-		nil, nil, 0,
-		nil, nil, 0,
-		now, now, 3))
+			nil, "cohort_section_v3", nil, nil,
+			nil, nil, 0,
+			nil, nil, 0,
+			now, now, 3))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtime_sections WHERE runtime_id")).
 		WithArgs("rt-1").
 		WillReturnRows(sqlmock.NewRows([]string{

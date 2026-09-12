@@ -1,7 +1,7 @@
 import type { SatQuestionAnnotations, SatQuestionResponseDraft } from '../domain/satResponses';
 import { emptySatQuestionResponse } from '../domain/satResponses';
 import type { SatActiveTool, SatToolCapabilities, SatToolId } from '../domain/satTools';
-import { emptySatToolCapabilities, nextSatActiveTool } from '../domain/satTools';
+import { EMPTY_SAT_ACTIVE_TOOLS, emptySatToolCapabilities, satActiveToolsFromLegacy, satActiveToolsToLegacy, toggleSatActiveTool, type SatActiveTools } from '../domain/satTools';
 
 export type SatSectionKey = 'reading-writing' | 'math';
 
@@ -17,6 +17,7 @@ type SatWorkingState = {
   responseRevisions: Record<string, number>;
   toolCapabilities: SatToolCapabilities;
   activeTool: SatActiveTool;
+  activeTools: SatActiveTools;
   startedAt: string;
   endsAt: string;
 };
@@ -55,6 +56,9 @@ export type SatRunnerAction =
   | { type: 'completed'; resultId: string }
   | { type: 'recover'; state: SatRunnerState };
 
+// Phase 04 identity note: candidateId is the route candidate prop, never the
+// attempt id — see useSatExamController call sites. newWorkingState carries it
+// through; the recover migration below is orthogonal (legacy activeTools).
 export function createSatRunnerState(scheduleId: string, candidateId: string): SatRunnerState {
   return { phase: 'loading', scheduleId, candidateId };
 }
@@ -73,7 +77,14 @@ function workingState(
 ): SatRunnerState {
   switch (action.type) {
     case 'setAnswer':
-      return updateResponse(state, action.questionId, (response) => ({ ...response, answer: action.value }));
+      // Bluebook parity (Phase 6): selecting an eliminated choice restores
+      // it first — selected and eliminated must never contradict. The
+      // elimination is lifted, the answer is set; both persist per question.
+      return updateResponse(state, action.questionId, (response) => ({
+        ...response,
+        answer: action.value,
+        eliminatedOptionIds: response.eliminatedOptionIds.filter((optionId) => optionId !== action.value),
+      }));
     case 'hydrateResponse':
       return {
         ...state,
@@ -106,20 +117,22 @@ function workingState(
           : [...current, action.optionId];
         return { ...response, eliminatedOptionIds };
       });
-    case 'toggleTool':
-      return {
-        ...state,
-        activeTool: nextSatActiveTool(state.toolCapabilities, state.activeTool, action.tool),
-      };
+    case 'toggleTool': {
+      // Bluebook coexistence (Phase 9): toggling one tool never closes the
+      // other. Legacy activeTool is derived from the NEW flags for compat
+      // only (calculator wins ties); route mounts read activeTools flags.
+      const activeTools = toggleSatActiveTool(state.toolCapabilities, state.activeTools, action.tool);
+      return { ...state, activeTools, activeTool: satActiveToolsToLegacy(activeTools) };
+    }
     case 'closeTool':
-      return { ...state, activeTool: null };
+      return { ...state, activeTool: null, activeTools: EMPTY_SAT_ACTIVE_TOOLS };
     case 'selectQuestion':
       return {
         ...state,
         questionIndex: Math.max(0, Math.min(action.questionIndex, state.questionIds.length - 1)),
       };
     case 'reviewModule':
-      return state.phase === 'module' ? { ...state, phase: 'review', activeTool: null } : state;
+      return state.phase === 'module' ? { ...state, phase: 'review', activeTool: null, activeTools: EMPTY_SAT_ACTIVE_TOOLS } : state;
     case 'returnToModule':
       return state.phase === 'review' ? { ...state, phase: 'module' } : state;
     default:
@@ -146,13 +159,25 @@ function newWorkingState(
     responseRevisions: { ...existingRevisions },
     toolCapabilities: action.toolCapabilities ?? emptySatToolCapabilities(),
     activeTool: null,
+    activeTools: EMPTY_SAT_ACTIVE_TOOLS,
     startedAt: action.startedAt,
     endsAt: action.endsAt,
   };
 }
 
 export function satRunnerReducer(state: SatRunnerState, action: SatRunnerAction): SatRunnerState {
-  if (action.type === 'recover') return action.state;
+  if (action.type === 'recover') {
+    // Legacy snapshots (persisted before Phase 9) lack activeTools at
+    // runtime even though the type now declares it — migrate via cast.
+    const snapshot = action.state;
+    if (snapshot.phase === 'module' || snapshot.phase === 'review') {
+      const maybeTools = (snapshot as { activeTools?: SatActiveTools }).activeTools;
+      if (!maybeTools) {
+        return { ...snapshot, activeTools: satActiveToolsFromLegacy(snapshot.activeTool) };
+      }
+    }
+    return snapshot;
+  }
 
   if (
     (state.phase === 'module' || state.phase === 'review')

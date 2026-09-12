@@ -42,17 +42,54 @@ export interface DurableResponseEngineOptions {
   drainDebounceMs?: number;
   onStatusChange?: (status: DurabilitySyncStatus, error?: string | null) => void;
   onStateChange?: (states: ReadonlyMap<string, import("./types").QuestionResponseState>) => void;
+  /**
+   * Reason-coded durability telemetry hook (WP7). Privacy-safe: the engine
+   * only sends counter names plus reason/epoch/count fields — never
+   * answer/payload content. Best-effort; never throws.
+   */
+  onDurabilityEvent?: (name: string, fields?: Record<string, string | number | boolean | null | undefined>) => void;
 }
 
 const CHECKPOINT_PREFIX = "response-checkpoint:v2:";
 const DURABLE_DRAFT_PREFIX = "v2_attempt_";
 const QUARANTINE_PREFIX = "v2_quarantine:";
 const MAX_RETRY_ATTEMPTS_PER_DRAIN = 8;
+/** F-A6: authoritative snapshot fetches never hang longer than this. */
+const SNAPSHOT_FETCH_TIMEOUT_MS = 15_000;
 
 type CommandEpoch = {
   leaseEpoch: number;
   controlEpoch: number;
 };
+
+/**
+ * Local extension of BlockedResponseInfo carrying the lease epoch the
+ * blocked draft originated under. Kept engine-local (never sent to the
+ * backend; telemetry only sees reason/epoch/ID) so types.ts stays untouched.
+ * Pre-repair checkpoints lack it; readers fall back to the record leaseEpoch.
+ */
+interface BlockedInfoEx {
+  reason: string;
+  blockedAt: string;
+  originLeaseEpoch?: number;
+}
+
+function isBlockedInfo(value: unknown): value is BlockedInfoEx {
+  if (!isRecord(value)) return false;
+  return typeof value["reason"] === "string" && typeof value["blockedAt"] === "string";
+}
+
+function readBlockedOriginLease(pending: PendingResponseState): number {
+  const extra = pending.blocked as BlockedInfoEx | undefined;
+  if (
+    extra &&
+    typeof extra.originLeaseEpoch === "number" &&
+    Number.isSafeInteger(extra.originLeaseEpoch)
+  ) {
+    return extra.originLeaseEpoch;
+  }
+  return pending.leaseEpoch;
+}
 
 type SnapshotResponse = ResponseSnapshotV2 | ResponseAcknowledgementV2[];
 
@@ -119,11 +156,50 @@ function isPendingResponseState(value: unknown): value is PendingResponseState {
     Number.isSafeInteger(value["controlEpoch"]) &&
     typeof value["clientVersion"] === "number" &&
     Number.isSafeInteger(value["clientVersion"]) &&
-    value["clientVersion"] > 0
+    // Blocked v0 provisionals (new intent typed on a fenced question) must
+    // stay recoverable as blocked non-sendable drafts — never dropped, never
+    // sent. Unblocked records still require a real issued version.
+    (value["clientVersion"] > 0 || isBlockedInfo(value["blocked"]))
   );
 }
 
+function pendingRecency(left: PendingResponseState): number {
+  const parsed = typeof left.receivedAt === "string" ? Date.parse(left.receivedAt) : Number.NaN;
+  if (Number.isFinite(parsed)) return parsed;
+  return Number.NEGATIVE_INFINITY;
+}
+
+function pendingOrder(left: PendingResponseState): number {
+  return typeof left.order === "number" && Number.isSafeInteger(left.order) ? left.order : 0;
+}
+
 function comparePendingResponses(left: PendingResponseState, right: PendingResponseState): number {
+  // F-A2/A15: acceptSequence order is the PRIMARY recency signal — monotonic
+  // per session (and seeded from storage at recovery, so it stays monotonic
+  // across reloads), immune to wall-clock skew, manual clock steps, and
+  // same-millisecond collisions. receivedAt is only a secondary tiebreak for
+  // equal orders. Legacy pre-repair records have order 0 (field absent): they
+  // predate both signals, so record-vs-record falls through to the version
+  // chain below — never trust wall-clock alone to rank a legacy record.
+  const leftOrder = pendingOrder(left);
+  const rightOrder = pendingOrder(right);
+  const leftSequenced = leftOrder > 0;
+  const rightSequenced = rightOrder > 0;
+  if (leftSequenced && rightSequenced) {
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+    const leftRecency = pendingRecency(left);
+    const rightRecency = pendingRecency(right);
+    if (leftRecency !== rightRecency) {
+      return leftRecency - rightRecency;
+    }
+  } else if (leftSequenced !== rightSequenced) {
+    // A sequenced write is newer than any legacy order-0 record.
+    return leftSequenced ? 1 : -1;
+  }
+  // Both legacy (order 0), or sequenced with equal order+recency: fall back
+  // to the pre-repair ordering so old checkpoints keep deterministic behavior.
   if (left.leaseEpoch !== right.leaseEpoch) {
     return left.leaseEpoch - right.leaseEpoch;
   }
@@ -139,6 +215,38 @@ function comparePendingResponses(left: PendingResponseState, right: PendingRespo
 
 function isSnapshotResponse(value: SnapshotResponse): value is ResponseSnapshotV2 {
   return !Array.isArray(value);
+}
+
+/**
+ * F-A6: every authoritative snapshot fetch races the transport against a
+ * timer (~15s, no new dep). A hung fetch resolves like an offline fetch:
+ * the caller keeps pending drafts, emits the fetch-failure-class event,
+ * and stays retryable — never hangs, never drops intent.
+ */
+function fetchSnapshotWithTimeout(
+  fetch: (attemptId: string) => Promise<SnapshotResponse>,
+  attemptId: string
+): Promise<SnapshotResponse> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error("Response snapshot fetch timed out."));
+    }, SNAPSHOT_FETCH_TIMEOUT_MS);
+  });
+  const request = fetch(attemptId);
+  return Promise.race([request, timeout]).then(
+    (snapshot) => {
+      if (timer) clearTimeout(timer);
+      return snapshot as SnapshotResponse;
+    },
+    (error: unknown) => {
+      if (timer) clearTimeout(timer);
+      // A late transport resolution must not surface as an unhandled
+      // rejection after the timeout already settled the race.
+      request.catch(() => undefined);
+      throw error;
+    }
+  );
 }
 
 export class DurableResponseEngine {
@@ -158,6 +266,14 @@ export class DurableResponseEngine {
   private readonly issuedCommands = new Map<string, ResponseCommandV2>();
   private readonly commandEpochs = new Map<string, CommandEpoch>();
   private readonly quarantined: QuarantinedWrite[] = [];
+  /** Incremented in destroy(); async archive/tombstone work aborts when it moves. */
+  private engineGeneration = 0;
+  /** Per-question reconcile mutex: one reconcileBlocked per question at a time. */
+  private readonly reconciling = new Set<string>();
+  private acceptSequence = 0;
+  private recoveryStarted = false;
+  private recoveryInitialized = false;
+  private readonly recoveryWaiters = new Set<() => void>();
 
   private isDraining = false;
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
@@ -177,6 +293,8 @@ export class DurableResponseEngine {
     ((status: DurabilitySyncStatus, error?: string | null) => void) | undefined;
   private onStateChange:
     ((states: ReadonlyMap<string, import("./types").QuestionResponseState>) => void) | undefined;
+  private onDurabilityEvent:
+    ((name: string, fields?: Record<string, string | number | boolean | null | undefined>) => void) | undefined;
 
   constructor(options: DurableResponseEngineOptions) {
     this.scheduleId = options.scheduleId;
@@ -187,6 +305,7 @@ export class DurableResponseEngine {
     this.drainDebounceMs = Number.isFinite(options.drainDebounceMs) ? Math.max(0, options.drainDebounceMs ?? 0) : 0;
     this.onStatusChange = options.onStatusChange;
     this.onStateChange = options.onStateChange;
+    this.onDurabilityEvent = options.onDurabilityEvent;
 
     this.setupLifecycleListeners();
   }
@@ -223,6 +342,32 @@ export class DurableResponseEngine {
     return this.outbox.size + this.inFlight.size;
   }
 
+  /** True once a snapshot (or explicit offline seeding) has initialized versions. */
+  public isRecoveryInitialized(): boolean {
+    return this.recoveryInitialized;
+  }
+
+  /** Resolves when the first recovery has seeded versions. Never rejects. */
+  public waitForRecoveryInitialization(): Promise<void> {
+    if (this.recoveryInitialized) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.recoveryWaiters.add(resolve);
+    });
+  }
+
+  /** Questions with visible drafts that must not be sent without a decision. */
+  public getBlockedQuestionIds(): string[] {
+    const blocked: string[] = [];
+    for (const [questionId, state] of this.states) {
+      if (state.pending?.blocked) blocked.push(questionId);
+    }
+    return blocked;
+  }
+
+  public getBlockedCount(): number {
+    return this.getBlockedQuestionIds().length;
+  }
+
   /**
    * Adopt an authoritative lifecycle epoch. Writes created under a different
    * epoch are quarantined rather than relabeled and replayed under the new one.
@@ -235,20 +380,24 @@ export class DurableResponseEngine {
     // roll a live engine back to an older lease/control epoch.
     const nextLeaseEpoch = Math.max(this.leaseEpoch, leaseEpoch);
     const nextControlEpoch = Math.max(this.controlEpoch, controlEpoch);
-    const changed = nextLeaseEpoch !== this.leaseEpoch || nextControlEpoch !== this.controlEpoch;
+    const leaseChanged = nextLeaseEpoch !== this.leaseEpoch;
+    const controlChanged = nextControlEpoch !== this.controlEpoch;
     this.leaseEpoch = nextLeaseEpoch;
     this.controlEpoch = nextControlEpoch;
-    if (!changed) return;
+    if (!leaseChanged && !controlChanged) return;
 
-    this.quarantineCommandsOutsideCurrentEpoch("EPOCH_STALE");
-    if (
-      !this.terminalState &&
-      (this.syncStatus === "conflict_fenced" || this.syncStatus === "conflict_terminal")
-    ) {
-      this.syncStatus = "synced";
-      this.lastError = null;
-      this.notifyStatusChange();
+    if (!leaseChanged) {
+      // Timing-only control bump (pause/resume/extend): keep unsent work
+      // visible in place as blocked instead of quarantining it away (I4).
+      // Lease changes keep the strict fence below — never auto-crossed (I6).
+      this.blockPendingOnControlBump();
+      return;
     }
+    this.quarantineCommandsOutsideCurrentEpoch("EPOCH_STALE");
+    // RISK-6: a lease change must NOT silently clear a fenced/terminal
+    // conflict back to synced. The conflict persists until a user-visible
+    // reconcile/discard or a fresh server ack resolves it (see
+    // clearConflictOnExplicitResolution). Epoch adoption still proceeds above.
   }
 
   /**
@@ -266,33 +415,56 @@ export class DurableResponseEngine {
       );
     }
 
-    // Allocate the version and update the visible state synchronously. Durable
-    // storage writes are then serialized per question so an older async
-    // IndexedDB/localStorage completion cannot overwrite a newer edit.
+    // Update the visible state synchronously and checkpoint the intent
+    // synchronously, then version it. Versions are allocated only after
+    // recovery has seeded the trackers (I1/I3); the sync checkpoint is what
+    // makes destroy()/reload safe, never the async IndexedDB completion.
     const normalized = clonePayload(payload);
-    const currentVersion = this.versionTrackers.get(questionId) ?? 0;
-    const clientVersion = currentVersion + 1;
-    this.versionTrackers.set(questionId, clientVersion);
-    const command: ResponseCommandV2 = {
-      writeId: randomWriteId(),
-      questionId,
-      clientVersion,
-      response: normalized,
-    };
+    this.acceptSequence += 1;
+    const receivedAt = new Date().toISOString();
+    const order = this.acceptSequence;
+    const provisionalWriteId = randomWriteId();
     const pendingState: PendingResponseState = {
       payload: normalized,
-      writeId: command.writeId,
+      writeId: provisionalWriteId,
       leaseEpoch: this.leaseEpoch,
       controlEpoch: this.controlEpoch,
-      clientVersion,
+      // Provisional until recovery seeds versions; replaced by the issued
+      // version in persistAcceptedResponse. Never sent as-is.
+      clientVersion: 0,
       durability: "memory",
+      receivedAt,
+      order,
+    };
+    const command: ResponseCommandV2 = {
+      writeId: provisionalWriteId,
+      questionId,
+      clientVersion: 0,
+      response: normalized,
     };
 
     const existing = this.states.get(questionId);
+    // F-A10: typing on a blocked question must not silently drop the block or
+    // re-enter the send path under the blocked epoch. Carry the blocked flag
+    // (and its origin lease) into the new intent so it stays non-sendable and
+    // reconcilable, never auto-issued.
+    const priorPending = existing?.pending;
+    if (priorPending?.blocked) {
+      const carry: BlockedInfoEx = {
+        reason: priorPending.blocked.reason,
+        blockedAt: new Date().toISOString(),
+        originLeaseEpoch: readBlockedOriginLease(priorPending),
+      };
+      pendingState.blocked = carry;
+    }
     this.states.set(questionId, {
       confirmed: existing?.confirmed ?? null,
       pending: pendingState,
     });
+    // Teardown-safe intent checkpoint runs inline — never behind the async
+    // acceptance chain — so teardown/reload always sees the latest keystroke.
+    this.checkpointIntentSync(questionId, pendingState);
+    if (this.recoveryStarted && !this.recoveryInitialized) this.emitDurabilityEvent("intent_queued_during_recovery", { attemptId: this.attemptId, scheduleId: this.scheduleId });
     this.notifyStateChange();
 
     const previous = this.acceptanceChains.get(questionId) ?? Promise.resolve();
@@ -333,45 +505,86 @@ export class DurableResponseEngine {
       return;
     }
 
-    let checkpointOk = false;
-    try {
-      if (typeof window !== "undefined" && window.localStorage) {
-        window.localStorage.setItem(
-          checkpointKey(this.attemptId, command.questionId),
-          JSON.stringify(pendingState)
-        );
-        checkpointOk = true;
-        pendingState.durability = "checkpoint";
-      }
-    } catch {
-      // IndexedDB is attempted below when localStorage is unavailable.
-    }
+    // I2: the intent checkpoint must be teardown-safe and independent of the
+    // async IndexedDB write. A slow earlier chain entry must never delay the
+    // latest intent, so checkpoint here synchronously before any await.
+    const checkpointOk = this.checkpointIntentSync(command.questionId, pendingState);
 
     let indexedDbOk = false;
     try {
-      await saveDurableDraft(durableDraftKey(this.attemptId, command.questionId), pendingState);
+      const stored = this.states.get(command.questionId)?.pending;
+      await saveDurableDraft(
+        durableDraftKey(this.attemptId, command.questionId),
+        stored && stored.writeId === command.writeId ? stored : pendingState
+      );
       indexedDbOk = true;
-      pendingState.durability = "indexeddb";
+      if (this.states.get(command.questionId)?.pending?.writeId === command.writeId) {
+        const current = this.states.get(command.questionId)?.pending;
+        if (current && current.durability !== "indexeddb") {
+          current.durability = "indexeddb";
+          // Compare-and-set: never let a stale async completion overwrite a
+          // newer checkpoint written after this write started.
+          const latest = this.readCheckpointSync(command.questionId);
+          if (!latest || latest.writeId === command.writeId) {
+            this.checkpointIntentSync(command.questionId, current);
+          }
+        }
+      }
     } catch {
       // A memory-only response is not safe enough to enqueue for transport.
     }
 
     if (this.isDestroyed) return;
 
+    // I3: no command enters the outbox/network with an uninitialized version.
+    // Wait for the first recovery to seed version trackers from the server
+    // snapshot (or explicit offline seeding) before issuing versions.
+    // Only gate when recovery was explicitly started; acceptResponse without
+    // recover() must never hang (recoveryInitialized stays false otherwise).
+    if (this.recoveryStarted) await this.waitForRecoveryInitialization();
+    if (this.isDestroyed) return;
+
     if (!checkpointOk && !indexedDbOk) {
       this.syncStatus = "durability_fault";
       this.lastError = "All browser durable storage failed. Exam cannot safely proceed.";
       this.notifyStatusChange();
+      this.emitDurabilityEvent("checkpoint_sync_failed");
       throw new Error(this.lastError);
     }
 
     // A lifecycle change can arrive while browser storage is awaiting
     // IndexedDB. Never enqueue that command under the newly adopted epoch.
-    if (
-      pendingState.leaseEpoch !== this.leaseEpoch ||
-      pendingState.controlEpoch !== this.controlEpoch
-    ) {
+    // BUG-4: split the fence like updateEpochs does — a lease change
+    // quarantines (strict fence, never crossed); a control-only change keeps
+    // the draft visible as blocked/reconcilable. A blocked draft is never
+    // enqueued here; reconcile re-issues it under the new epoch instead.
+    if (pendingState.leaseEpoch !== this.leaseEpoch) {
       this.quarantineEntry(command, "EPOCH_STALE");
+      return;
+    }
+    if (pendingState.controlEpoch !== this.controlEpoch) {
+      const livePending = this.states.get(command.questionId)?.pending;
+      if (livePending && livePending.writeId === command.writeId && !livePending.blocked) {
+        const mark: BlockedInfoEx = {
+          reason: "EPOCH_STALE",
+          blockedAt: new Date().toISOString(),
+          originLeaseEpoch: livePending.leaseEpoch,
+        };
+        livePending.blocked = mark;
+        this.checkpointIntentSync(command.questionId, livePending);
+        this.syncStatus = "blocked_attention";
+        this.lastError =
+          "Exam timing changed. Your latest answers are kept on this device and need re-check.";
+        this.notifyStateChange();
+        this.notifyStatusChange();
+        this.emitDurabilityEvent("control_epoch_blocked", {
+          reason: "CONTROL_EPOCH_STALE",
+          controlEpoch: this.controlEpoch,
+        });
+      }
+      return;
+    }
+    if (this.states.get(command.questionId)?.pending?.blocked) {
       return;
     }
 
@@ -389,9 +602,19 @@ export class DurableResponseEngine {
     // A newer command for this question may have been accepted while the
     // durable write was awaiting IndexedDB. Keep the latest unsent command and
     // retain older commands only when they are already in flight.
-    if (this.states.get(command.questionId)?.pending?.writeId !== command.writeId) {
+    const live = this.states.get(command.questionId)?.pending;
+    if (!live || live.writeId !== command.writeId) {
       return;
     }
+    // Issue the real version only now, after initialization. The provisional
+    // clientVersion 0 is never sent; skipping superseded provisional writes
+    // here also keeps the tracker monotonic.
+    const issuedVersion = (this.versionTrackers.get(command.questionId) ?? 0) + 1;
+    this.versionTrackers.set(command.questionId, issuedVersion);
+    live.clientVersion = issuedVersion;
+    live.leaseEpoch = this.leaseEpoch;
+    live.controlEpoch = this.controlEpoch;
+    command.clientVersion = issuedVersion;
     const previousOutbox = this.outbox.get(command.questionId);
     if (previousOutbox && previousOutbox.writeId !== command.writeId) {
       this.removeCommand(previousOutbox);
@@ -404,10 +627,87 @@ export class DurableResponseEngine {
     this.outbox.set(command.questionId, command);
     this.issuedCommands.set(command.writeId, command);
     this.commandEpochs.set(command.writeId, {
-      leaseEpoch: pendingState.leaseEpoch,
-      controlEpoch: pendingState.controlEpoch,
+      leaseEpoch: live.leaseEpoch,
+      controlEpoch: live.controlEpoch,
     });
+    // P1 observation: the inline sync checkpoint above stored the provisional
+    // clientVersion 0. In IDB-less environments that checkpoint is the ONLY
+    // durable copy — recovery would see an unblocked v0 draft and drop it
+    // via the clientVersion>0 gate. Re-checkpoint the versioned intent (sync
+    // + best-effort IDB refresh) so reload recovery preserves the issued
+    // write. Compare-and-set: never overwrite a newer checkpoint.
+    const versioned = this.states.get(command.questionId)?.pending;
+    if (versioned && versioned.writeId === command.writeId) {
+      // Refresh only when the checkpoint is missing/unreadable (the v0
+      // provisional fails the pending gate) or holds this same write —
+      // never overwrite a newer write's checkpoint.
+      const latest = this.readCheckpointSync(command.questionId);
+      if (!latest || latest.writeId === command.writeId) {
+        this.checkpointIntentSync(command.questionId, versioned);
+      }
+      void saveDurableDraft(durableDraftKey(this.attemptId, command.questionId), versioned).catch(
+        () => undefined
+      );
+    }
     this.scheduleDrain();
+  }
+
+  /**
+   * Synchronous teardown-safe intent checkpoint (I2). Runs inline in
+   * acceptResponse's chain — never behind an awaited IndexedDB write — so a
+   * slow/stalled earlier entry cannot delay the latest student intent.
+   * Best-effort: returns false when no sync storage is available.
+   */
+  private checkpointIntentSync(questionId: string, pending: PendingResponseState): boolean {
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem(
+          checkpointKey(this.attemptId, questionId),
+          JSON.stringify(pending)
+        );
+        if (pending.durability === "memory") pending.durability = "checkpoint";
+        return true;
+      }
+    } catch {
+      // IndexedDB is attempted by the caller when localStorage is unavailable.
+    }
+    return false;
+  }
+
+  private readCheckpointSync(questionId: string): PendingResponseState | null {
+    try {
+      if (typeof window === "undefined" || !window.localStorage) return null;
+      const raw = window.localStorage.getItem(checkpointKey(this.attemptId, questionId));
+      if (!raw) return null;
+      const parsed: unknown = JSON.parse(raw);
+      // A same-key tombstone is authoritative: the draft is gone by decision.
+      // Never surface it as a live pending draft, so a stale async CAS write
+      // can never resurrect a quarantined/discarded write as sendable.
+      if (this.isTombstoneRecord(parsed)) return null;
+      return isPendingResponseState(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Origin lease recorded for a command at enqueue time (fallback: live pending). */
+  private commandOriginLease(command: ResponseCommandV2): number {
+    const epoch = this.commandEpochs.get(command.writeId);
+    if (epoch && Number.isSafeInteger(epoch.leaseEpoch)) return epoch.leaseEpoch;
+    const live = this.states.get(command.questionId)?.pending;
+    if (live && live.writeId === command.writeId && Number.isSafeInteger(live.leaseEpoch)) {
+      return live.leaseEpoch;
+    }
+    return this.leaseEpoch;
+  }
+
+  private markRecoveryInitialized(): void {
+    if (this.recoveryInitialized) return;
+    this.recoveryInitialized = true;
+    for (const resolve of this.recoveryWaiters) {
+      try { resolve(); } catch { /* never throws */ }
+    }
+    this.recoveryWaiters.clear();
   }
 
   /**
@@ -416,6 +716,7 @@ export class DurableResponseEngine {
    * tuple (lease, control, client version) wins for each question.
    */
   public recover(): Promise<void> {
+    this.recoveryStarted = true;
     if (this.isDestroyed) return Promise.resolve();
 
     // Recovery is serialized. Takeover/bootstrap may request a fresh snapshot
@@ -430,17 +731,38 @@ export class DurableResponseEngine {
   }
 
   private async recoverInternal(): Promise<void> {
+    this.recoveryStarted = true;
     if (this.isDestroyed) return;
 
+    await this.rehydrateQuarantineLedger();
+    if (this.isDestroyed) return;
     const recoveredPending = await this.loadRecoveredPending();
     if (this.isDestroyed) return;
     let snapshot: SnapshotResponse | null = null;
 
     try {
-      snapshot = await this.transport.fetchSnapshot(this.attemptId);
+      // F-A6: a hung snapshot fetch times out like an offline fetch — local
+      // durable drafts remain visible and queued, never dropped, never hung.
+      snapshot = await fetchSnapshotWithTimeout(
+        (attemptId) => this.transport.fetchSnapshot(attemptId),
+        this.attemptId
+      );
       if (this.isDestroyed) return;
     } catch {
       // Offline startup is valid: local durable drafts remain visible and queued.
+    }
+
+    // F-A2/A15: seed the accept sequence from recovered orders so order
+    // stays a monotonic cross-reload recency signal (never reused, never
+    // regressed by a reload).
+    for (const pending of recoveredPending.values()) {
+      if (
+        typeof pending.order === "number" &&
+        Number.isSafeInteger(pending.order) &&
+        pending.order > this.acceptSequence
+      ) {
+        this.acceptSequence = pending.order;
+      }
     }
 
     const serverResponses = snapshot
@@ -464,23 +786,38 @@ export class DurableResponseEngine {
       this.installServerResponse(response);
     }
 
+    // Seed confirmed/server state first so live in-session edits (which carry
+    // recency metadata) can never be regressed by a stale durable candidate.
+    // Provisional pre-recovery writes (clientVersion 0) are always newer than
+    // any stored draft: they were accepted after recovery started reading.
     for (const [questionId, pending] of recoveredPending) {
-      this.versionTrackers.set(
-        questionId,
-        Math.max(this.versionTrackers.get(questionId) ?? 0, pending.clientVersion)
-      );
+      // RISK-24: a reconcile in flight owns Q — recovery must not install a
+      // stale candidate over it or issue competing versions under it.
+      if (this.reconciling.has(questionId)) {
+        continue;
+      }
+      const liveState = this.states.get(questionId);
+      const live = liveState?.pending;
+      if (live && (live.clientVersion <= 0 || comparePendingResponses(live, pending) > 0)) {
+        this.versionTrackers.set(
+          questionId,
+          Math.max(this.versionTrackers.get(questionId) ?? 0, pending.clientVersion)
+        );
+        continue;
+      }
 
-      const existingState = this.states.get(questionId);
-      // A local edit accepted while recovery was reading storage wins over an
-      // older durable candidate. Never let hydration regress the visible draft.
-      if (existingState?.pending && comparePendingResponses(existingState.pending, pending) > 0) {
+      // BUG-2/F-A9/F-A11: never reinstall a command quarantined mid-flight.
+      // Snapshot the quarantined writeIds before installing this batch and
+      // skip any candidate already in the audit ledger.
+      const quarantinedWrites = new Set(this.quarantined.map((entry) => entry.writeId));
+      if (quarantinedWrites.has(pending.writeId)) {
         continue;
       }
 
       const server = serverByQuestion.get(questionId);
       const hasAuthoritativeEpoch = Boolean(snapshot && isSnapshotResponse(snapshot));
-      const epochMatches =
-        pending.leaseEpoch === this.leaseEpoch && pending.controlEpoch === this.controlEpoch;
+      const leaseMatches = pending.leaseEpoch === this.leaseEpoch;
+      const controlMatches = pending.controlEpoch === this.controlEpoch;
       const serverVersionIsNewer =
         server !== undefined &&
         (server.clientVersion > pending.clientVersion ||
@@ -499,13 +836,35 @@ export class DurableResponseEngine {
         continue;
       }
 
-      if (!epochMatches || (hasAuthoritativeEpoch && serverVersionIsNewer) || Boolean(terminal)) {
+      // BUG-19: split the fence like updateEpochs does. A lease mismatch
+      // quarantines (strict fence, never crossed); a control-only mismatch
+      // surfaces as blocked/reconcilable with the same blocked shape as
+      // blockPendingOnControlBump — never quarantined away.
+      if (!leaseMatches || (hasAuthoritativeEpoch && serverVersionIsNewer) || Boolean(terminal)) {
         this.quarantinePending(
           questionId,
           pending,
-          !epochMatches ? "EPOCH_STALE" : "STALE_HYDRATION"
+          !leaseMatches ? "EPOCH_STALE" : "STALE_HYDRATION"
         );
         continue;
+      }
+      if (!controlMatches && !pending.blocked) {
+        const mark: BlockedInfoEx = {
+          reason: "EPOCH_STALE",
+          blockedAt: new Date().toISOString(),
+          originLeaseEpoch: pending.leaseEpoch,
+        };
+        pending.blocked = mark;
+        this.checkpointIntentSync(questionId, pending);
+        this.emitDurabilityEvent("control_epoch_blocked", {
+          reason: "CONTROL_EPOCH_STALE",
+          controlEpoch: this.controlEpoch,
+        });
+        if (this.syncStatus !== "conflict_fenced" && this.syncStatus !== "conflict_terminal") {
+          this.syncStatus = "blocked_attention";
+          this.lastError =
+            "Exam timing changed. Your latest answers are kept on this device and need re-check.";
+        }
       }
 
       const existing = this.states.get(questionId);
@@ -526,6 +885,10 @@ export class DurableResponseEngine {
         controlEpoch: pending.controlEpoch,
       });
     }
+
+    // First recovery seeds version ordering exactly once. Later recoveries
+    // (takeover/bootstrap refresh) only raise the floor, never regress it.
+    this.markRecoveryInitialized();
 
     // If the snapshot could not be fetched, the attempt bootstrap epochs are
     // still the only safe epoch boundary available to this browser.
@@ -562,7 +925,9 @@ export class DurableResponseEngine {
         await this.drainPromise;
         continue;
       }
-      if (this.outbox.size === 0) return;
+      // Blocked drafts stay queued until reconcile/discard — flush must not
+      // spin forever waiting for work that is deliberately never sent.
+      if (this.outbox.size === 0 || !this.hasSendableOutbox()) return;
 
       this.drainPromise = this.drainOutbox();
       await this.drainPromise;
@@ -590,16 +955,22 @@ export class DurableResponseEngine {
 
   public destroy(): void {
     this.isDestroyed = true;
+    // Archive windows (BUG-15/16/17, F-A5): async archive/tombstone work
+    // captured the prior generation aborts instead of writing for a dead engine.
+    this.engineGeneration += 1;
     if (this.drainTimer) { clearTimeout(this.drainTimer); this.drainTimer = null; }
     // In-flight network promises cannot be cancelled by every transport. Drop
     // callbacks immediately so a response from an unmounted/replaced engine
     // cannot publish into the next attempt instance.
     this.onStatusChange = undefined;
     this.onStateChange = undefined;
+    this.onDurabilityEvent = undefined;
     if (this.retryTimer) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
+    // Unblock any persistAcceptedResponse awaiting recovery so unmount never hangs.
+    this.markRecoveryInitialized();
     this.removeLifecycleListeners();
   }
 
@@ -619,9 +990,68 @@ export class DurableResponseEngine {
     if (hasError) throw firstError;
   }
 
+  private isTombstoneRecord(value: unknown): boolean {
+    if (!isRecord(value) || value["tombstoned"] !== true) return false;
+    return (
+      typeof value["writeId"] === "string" &&
+      typeof value["questionId"] === "string" &&
+      typeof value["reason"] === "string" &&
+      typeof value["quarantinedAt"] === "string" &&
+      isResponsePayload(value["payload"])
+    );
+  }
+
+  private readTombstone(value: unknown): { writeId: string; reason: string; quarantinedAt: string; payload: ResponsePayload; originLeaseEpoch?: number } | null {
+    if (!this.isTombstoneRecord(value) || !isRecord(value)) return null;
+    const origin = value["originLeaseEpoch"];
+    // exactOptionalPropertyTypes: only set originLeaseEpoch when defined —
+    // never assign an explicit undefined to an optional property.
+    const tombstone: { writeId: string; reason: string; quarantinedAt: string; payload: ResponsePayload; originLeaseEpoch?: number } = {
+      writeId: value["writeId"] as string,
+      reason: value["reason"] as string,
+      quarantinedAt: value["quarantinedAt"] as string,
+      payload: clonePayload(value["payload"] as ResponsePayload),
+    };
+    if (typeof origin === "number" && Number.isSafeInteger(origin)) {
+      tombstone.originLeaseEpoch = origin;
+    }
+    return tombstone;
+  }
+
+  public getTombstonedQuestionIds(): string[] {
+    const ids: string[] = [];
+    try {
+      if (typeof window === "undefined" || !window.localStorage) return ids;
+      const prefix = checkpointKey(this.attemptId, "");
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (!key || !key.startsWith(prefix)) continue;
+        try {
+          const raw = window.localStorage.getItem(key);
+          if (!raw) continue;
+          const parsed: unknown = JSON.parse(raw);
+          if (this.isTombstoneRecord(parsed)) {
+            const questionId = decodeURIComponent(key.slice(prefix.length));
+            ids.push(questionId);
+          }
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      return ids;
+    }
+    return ids;
+  }
+
   private async loadRecoveredPending(): Promise<Map<string, PendingResponseState>> {
     const candidates = new Map<string, PendingResponseState>();
     const consider = (questionId: string, value: unknown) => {
+      const tombstone = this.readTombstone(value);
+      if (tombstone) {
+        this.surfaceTombstonedDraft(questionId, tombstone);
+        return;
+      }
       if (!isPendingResponseState(value)) return;
       const previous = candidates.get(questionId);
       if (!previous || comparePendingResponses(value, previous) > 0) {
@@ -669,7 +1099,71 @@ export class DurableResponseEngine {
     return candidates;
   }
 
-  private installServerResponse(response: ResponseAcknowledgementV2): void {
+  private surfaceTombstonedDraft(
+    questionId: string,
+    tombstone: { writeId: string; reason: string; quarantinedAt: string; payload: ResponsePayload; originLeaseEpoch?: number }
+  ): void {
+    const live = this.states.get(questionId)?.pending;
+    if (live) return;
+    // BUG-5: the surfaced record keeps the tombstone's origin lease so a
+    // later reconcile refuses to cross the lease fence it was fenced by.
+    const mark: BlockedInfoEx = {
+      reason: tombstone.reason,
+      blockedAt: tombstone.quarantinedAt,
+      originLeaseEpoch: tombstone.originLeaseEpoch ?? this.leaseEpoch,
+    };
+    // RISK-9/10: synthetic tombstone IDs are per-write
+    // (tombstoned-Q-writeId carries the fenced writeId) so two tombstones
+    // for the same question never collide, and quarantineEntry must NEVER
+    // re-quarantine a synthetic record (guard at entry).
+    const fencedWriteId =
+      typeof tombstone.writeId === "string" && tombstone.writeId.length > 0
+        ? tombstone.writeId
+        : questionId;
+    const blocked: PendingResponseState = {
+      payload: clonePayload(tombstone.payload),
+      writeId: `tombstoned-${questionId}-${fencedWriteId}`,
+      leaseEpoch: this.leaseEpoch,
+      controlEpoch: this.controlEpoch,
+      clientVersion: 0,
+      durability: "checkpoint",
+      receivedAt: tombstone.quarantinedAt,
+      blocked: mark,
+    };
+    const existing = this.states.get(questionId);
+    this.states.set(questionId, { confirmed: existing?.confirmed ?? null, pending: blocked });
+  }
+
+  private async rehydrateQuarantineLedger(): Promise<void> {
+    try {
+      const drafts = await listDurableDrafts<QuarantinedWrite>(`${QUARANTINE_PREFIX}${this.attemptId}:`);
+      for (const draft of drafts) {
+        const value = draft.value;
+        if (!isRecord(value)) continue;
+        const record = value as Record<string, unknown>;
+        if (typeof record["writeId"] !== "string" || typeof record["questionId"] !== "string") continue;
+        if (typeof record["reason"] !== "string" || typeof record["quarantinedAt"] !== "string") continue;
+        if (!isResponsePayload(record["payload"])) continue;
+        if (this.quarantined.some((entry) => entry.writeId === record["writeId"])) continue;
+        this.quarantined.push({
+          writeId: record["writeId"] as string,
+          questionId: record["questionId"] as string,
+          clientVersion: typeof record["clientVersion"] === "number" ? (record["clientVersion"] as number) : 0,
+          payload: clonePayload(record["payload"] as ResponsePayload),
+          reason: record["reason"] as string,
+          quarantinedAt: record["quarantinedAt"] as string,
+        });
+        // 2B-1: NO silent drop-oldest here — the ledger only shrinks via the
+        // two explicit prune triggers (ack-superseded, discard). The cap of
+        // 50 counts durable IDB keys; memory growth past it is bounded by
+        // prune-on-ack/discard, never by silent eviction.
+      }
+    } catch {
+      // Quarantine rehydration is best-effort; checkpoints still surface drafts.
+    }
+  }
+
+    private installServerResponse(response: ResponseAcknowledgementV2): void {
     if (!response.questionId || !Number.isSafeInteger(response.clientVersion)) return;
     this.versionTrackers.set(
       response.questionId,
@@ -710,6 +1204,11 @@ export class DurableResponseEngine {
     if (this.syncStatus === "conflict_fenced" || this.syncStatus === "conflict_terminal") {
       throw new Error(this.lastError ?? "The attempt is no longer writable.");
     }
+    // Providers gate on blocked drafts first; the engine refuses silent
+    // exclusion as defense-in-depth so submit can never drop visible work.
+    if (this.getBlockedCount() > 0) {
+      throw new Error("Blocked drafts need attention before submit. Reconcile or discard them first.");
+    }
 
     const finalCommands = this.collectPendingCommands();
     const request: SubmitAttemptV2Request = {
@@ -727,12 +1226,17 @@ export class DurableResponseEngine {
       const errorCode = this.extractErrorCode(error);
       if (this.isTerminalConflict(errorCode)) {
         this.quarantineAllPending(errorCode ?? "SUBMISSION_CONFLICT");
+        // RISK-23/6: only a lease fence maps to conflict_fenced. A submit-time
+        // CONTROL_EPOCH_STALE is terminal for the submitted attempt
+        // (conflict_terminal) — the terminal request already went out, so
+        // the drain's block-and-retry path does not apply here.
         this.syncStatus =
-          errorCode === "LEASE_FENCED" || errorCode === "CONTROL_EPOCH_STALE"
+          errorCode === "LEASE_FENCED"
             ? "conflict_fenced"
             : "conflict_terminal";
         this.lastError = `Terminal error: ${errorCode ?? "SUBMISSION_CONFLICT"}`;
         this.notifyStatusChange();
+        if (errorCode === "VERSION_COLLISION") this.emitDurabilityEvent("version_collision", { reason: errorCode });
       }
       throw error;
     }
@@ -796,6 +1300,8 @@ export class DurableResponseEngine {
     const seen = new Set<string>();
     for (const command of [...this.inFlight.values(), ...this.outbox.values()]) {
       if (seen.has(command.writeId)) continue;
+      // Blocked drafts are visible but never sendable without reconcile/discard.
+      if (this.isBlockedPending(command.questionId, command.writeId)) continue;
       seen.add(command.writeId);
       commands.push(command);
     }
@@ -829,7 +1335,14 @@ export class DurableResponseEngine {
     if (this.outbox.size === 0) return;
 
     this.isDraining = true;
-    if (this.syncStatus !== "conflict_fenced" && this.syncStatus !== "conflict_terminal") {
+    // BUG-20: a blocked-only outbox must preserve blocked_attention — never
+    // claim saving/synced when nothing sendable is on the wire.
+    if (
+      this.syncStatus !== "conflict_fenced" &&
+      this.syncStatus !== "conflict_terminal" &&
+      this.syncStatus !== "blocked_attention" &&
+      this.hasSendableOutbox()
+    ) {
       this.syncStatus = "saving";
       this.notifyStatusChange();
     }
@@ -839,9 +1352,14 @@ export class DurableResponseEngine {
       while (this.outbox.size > 0 && !this.isDestroyed && !this.submissionPromise) {
         this.inFlight.clear();
         for (const [questionId, command] of this.outbox) {
+          // Blocked drafts stay queued in the outbox map but never fly.
+          if (this.isBlockedPending(questionId, command.writeId)) continue;
           this.inFlight.set(questionId, command);
         }
-        this.outbox.clear();
+        for (const questionId of this.inFlight.keys()) {
+          this.outbox.delete(questionId);
+        }
+        if (this.inFlight.size === 0) break;
         const commands = [...this.inFlight.values()];
         const request: ResponseBatchRequestV2 = {
           leaseEpoch: this.leaseEpoch,
@@ -876,22 +1394,46 @@ export class DurableResponseEngine {
           }
 
           if (missingAcknowledgements.length > 0) {
-            this.syncStatus = "saved_locally";
-            this.lastError = "Server response omitted one or more write acknowledgements.";
-            this.notifyStatusChange();
+            // RISK-6: never downgrade an explicit conflict to saved_locally
+            // on a partial batch — the fence stands until reconcile/discard
+            // or a fresh ack resolves it.
+            if (
+              this.syncStatus !== "conflict_fenced" &&
+              this.syncStatus !== "conflict_terminal"
+            ) {
+              this.syncStatus = "saved_locally";
+              this.lastError = "Server response omitted one or more write acknowledgements.";
+              this.notifyStatusChange();
+            }
             this.scheduleRetry(this.calculateJitterBackoff(1));
             break;
           }
         } catch (error: unknown) {
           const errorCode = this.extractErrorCode(error);
-          if (this.isTerminalConflict(errorCode)) {
+          // Retryable reason (SECTION_CLOCK_MISSING) falls through to the
+          // bounded retry below — quarantining it would strand answers that
+          // the next cohort-start bootstrap would accept.
+          if (this.isTerminalConflict(errorCode) && !this.isRetryableConflictReason(error)) {
+            // RISK-23: CONTROL_EPOCH_STALE is the control-only fence — it
+            // follows the blocked/reconcilable path (mirrors
+            // blockPendingOnControlBump), never the quarantine path. Only
+            // lease-stale and true terminal codes fence/quarantine here.
+            if (errorCode === "CONTROL_EPOCH_STALE") {
+              for (const [questionId, command] of this.inFlight) {
+                if (!this.outbox.has(questionId)) this.outbox.set(questionId, command);
+              }
+              this.inFlight.clear();
+              this.blockQueuedOnControlStale();
+              break;
+            }
             this.quarantineAllPending(errorCode ?? "TERMINAL_CONFLICT");
             this.syncStatus =
-              errorCode === "LEASE_FENCED" || errorCode === "CONTROL_EPOCH_STALE"
+              errorCode === "LEASE_FENCED"
                 ? "conflict_fenced"
                 : "conflict_terminal";
             this.lastError = `Terminal error: ${errorCode}`;
             this.notifyStatusChange();
+            if (errorCode === "VERSION_COLLISION") this.emitDurabilityEvent("version_collision", { reason: errorCode });
             break;
           }
 
@@ -901,9 +1443,15 @@ export class DurableResponseEngine {
           this.inFlight.clear();
           retryAttempt += 1;
           if (retryAttempt >= MAX_RETRY_ATTEMPTS_PER_DRAIN) {
-            this.syncStatus = "saved_locally";
-            this.lastError = this.errorMessage(error);
-            this.notifyStatusChange();
+            // RISK-6: retry exhaustion never clears an explicit conflict.
+            if (
+              this.syncStatus !== "conflict_fenced" &&
+              this.syncStatus !== "conflict_terminal"
+            ) {
+              this.syncStatus = "saved_locally";
+              this.lastError = this.errorMessage(error);
+              this.notifyStatusChange();
+            }
             this.scheduleRetry(this.calculateJitterBackoff(retryAttempt));
             break;
           }
@@ -917,10 +1465,35 @@ export class DurableResponseEngine {
         this.outbox.size === 0 &&
         this.inFlight.size === 0 &&
         this.syncStatus !== "conflict_fenced" &&
-        this.syncStatus !== "conflict_terminal"
+        this.syncStatus !== "conflict_terminal" &&
+        this.syncStatus !== "blocked_attention" &&
+        this.syncStatus !== "durability_fault"
       ) {
         this.syncStatus = "synced";
         this.lastError = null;
+        this.notifyStatusChange();
+      } else if (
+        // BUG-20: blocked-only remainder keeps blocked_attention honest.
+        (this.outbox.size > 0 || this.inFlight.size > 0) &&
+        !this.hasSendableOutbox() &&
+        this.getBlockedCount() > 0 &&
+        this.syncStatus !== "conflict_fenced" &&
+        this.syncStatus !== "conflict_terminal"
+      ) {
+        if (this.syncStatus !== "blocked_attention") {
+          this.syncStatus = "blocked_attention";
+          this.lastError =
+            "Exam timing changed. Your latest answers are kept on this device and need re-check.";
+          this.notifyStatusChange();
+        }
+      } else if (
+        this.getBlockedCount() > 0 &&
+        this.syncStatus === "synced"
+      ) {
+        // Defensive: blocked drafts visible means we were never fully synced.
+        this.syncStatus = "blocked_attention";
+        this.lastError =
+          "Exam timing changed. Your latest answers are kept on this device and need re-check.";
         this.notifyStatusChange();
       }
     } finally {
@@ -972,13 +1545,22 @@ export class DurableResponseEngine {
     }
 
     const existing = this.states.get(acknowledgement.questionId);
-    if (existing?.pending?.writeId === acknowledgement.writeId) {
+    // BUG-1: an ack must never clear a blocked pending draft. A blocked draft
+    // stays visible until reconcile/discard; the ack only advances confirmed.
+    if (existing?.pending?.writeId === acknowledgement.writeId && !existing.pending.blocked) {
       this.states.set(acknowledgement.questionId, {
         confirmed: existing.confirmed,
         pending: null,
       });
       this.clearCheckpoint(acknowledgement.questionId);
     }
+    // 2B-1(a): a server ack of a write supersedes quarantined entries for
+    // the same question — prune their durable keys + memory + event.
+    this.pruneQuarantined(acknowledgement.questionId, "ack-superseded");
+    // RISK-6: a fresh server ack is the third explicit-resolution signal — it
+    // clears a lingering conflict only when nothing remains blocked or
+    // quarantined. Drains and epoch events never clear it implicitly.
+    this.clearConflictOnExplicitResolution();
     this.notifyStateChange();
     return true;
   }
@@ -999,6 +1581,15 @@ export class DurableResponseEngine {
     }
 
     for (const command of commands.values()) {
+      // BUG-14/22: never fence past live-newer input. A clientVersion 0
+      // provisional (or any newer writeId) typed after recovery started
+      // reading is newer than the fenced write — keep it visible.
+      const liveBefore = this.states.get(command.questionId)?.pending;
+      if (liveBefore && liveBefore.writeId !== command.writeId) {
+        this.removeCommand(command);
+        this.quarantineEntry(command, "TERMINAL_CONFLICT");
+        continue;
+      }
       const acknowledged = serverWrites.get(command.writeId);
       if (
         acknowledged &&
@@ -1006,8 +1597,11 @@ export class DurableResponseEngine {
         acknowledged.clientVersion === command.clientVersion
       ) {
         this.removeCommand(command);
+        // BUG-14/22: an acked write clears pending only when it IS the live
+        // write with a real issued version; a live-newer v0 provisional is
+        // never acked and keeps its input visible.
         const state = this.states.get(command.questionId);
-        if (state?.pending?.writeId === command.writeId) {
+        if (state?.pending?.writeId === command.writeId && state.pending.clientVersion > 0) {
           this.states.set(command.questionId, {
             confirmed: state.confirmed,
             pending: null,
@@ -1032,6 +1626,10 @@ export class DurableResponseEngine {
     for (const [questionId, state] of this.states) {
       const pending = state.pending;
       if (!pending) continue;
+      // BUG-14/22: a live-newer v0 provisional (typed after recovery started
+      // reading, never issued) is newer than any fenced write. The terminal
+      // snapshot fence must keep it visible instead of tombstoning it away.
+      if (reason === "TERMINAL_CONFLICT" && pending.clientVersion <= 0) continue;
       if (
         this.issuedCommands.has(pending.writeId) ||
         this.outbox.get(questionId)?.writeId === pending.writeId ||
@@ -1087,6 +1685,63 @@ export class DurableResponseEngine {
     }
   }
 
+  /**
+   * RISK-23 mirror of blockPendingOnControlBump for the drain failure path:
+   * a control-only fence keeps every still-queued draft visible as blocked
+   * (reconcilable) instead of quarantining it away. Lease fences never come
+   * here — they keep the strict quarantine path.
+   */
+  private blockQueuedOnControlStale(): void {
+    let blockedAny = false;
+    const touch = (command: ResponseCommandV2): void => {
+      const pending = this.states.get(command.questionId)?.pending;
+      if (!pending || pending.writeId !== command.writeId || pending.blocked) return;
+      const mark: BlockedInfoEx = {
+        reason: "EPOCH_STALE",
+        blockedAt: new Date().toISOString(),
+        originLeaseEpoch: pending.leaseEpoch,
+      };
+      pending.blocked = mark;
+      this.checkpointIntentSync(command.questionId, pending);
+      this.emitDurabilityEvent("control_epoch_blocked", {
+        reason: "CONTROL_EPOCH_STALE",
+        controlEpoch: this.controlEpoch,
+      });
+      blockedAny = true;
+    };
+    for (const command of [...this.outbox.values(), ...this.inFlight.values()]) {
+      touch(command);
+    }
+    for (const command of this.issuedCommands.values()) {
+      touch(command);
+    }
+    if (blockedAny) {
+      this.syncStatus = "blocked_attention";
+      this.lastError =
+        "Exam timing changed. Your latest answers are kept on this device and need re-check.";
+      this.notifyStateChange();
+      this.notifyStatusChange();
+    }
+  }
+
+  /**
+   * RISK-6: conflict states clear ONLY on a user-visible reconcile/discard
+   * or a fresh server acknowledgement — never silently on a later drain or
+   * epoch event. Central gate for the two explicit-clear call sites.
+   */
+  private clearConflictOnExplicitResolution(): void {
+    if (
+      this.terminalState ||
+      (this.syncStatus !== "conflict_fenced" && this.syncStatus !== "conflict_terminal")
+    ) {
+      return;
+    }
+    if (this.getBlockedCount() > 0 || this.quarantined.length > 0) return;
+    this.syncStatus = "synced";
+    this.lastError = null;
+    this.notifyStatusChange();
+  }
+
   private removeCommand(command: ResponseCommandV2): void {
     if (this.outbox.get(command.questionId)?.writeId === command.writeId) {
       this.outbox.delete(command.questionId);
@@ -1096,6 +1751,239 @@ export class DurableResponseEngine {
     }
     this.issuedCommands.delete(command.writeId);
     this.commandEpochs.delete(command.writeId);
+  }
+
+  /**
+   * Timing-only control bump (pause/resume/extend): keep every unsent draft
+   * visible in place and mark it blocked (I4) instead of quarantining it
+   * away. Lease changes keep the strict quarantine fence (I6).
+   */
+  private blockPendingOnControlBump(): void {
+    let blockedAny = false;
+    for (const [questionId, state] of this.states) {
+      const pending = state.pending;
+      if (!pending || pending.blocked) continue;
+      // BUG-5: the blocked record carries its origin lease (engine-only) so
+      // reconcile can refuse to cross a lease fence.
+      const mark: BlockedInfoEx = {
+        reason: "EPOCH_STALE",
+        blockedAt: new Date().toISOString(),
+        originLeaseEpoch: pending.leaseEpoch,
+      };
+      pending.blocked = mark;
+      // Re-checkpoint so reload preserves the blocked draft, not a stale copy.
+      this.checkpointIntentSync(questionId, pending);
+      this.emitDurabilityEvent("control_epoch_blocked", { reason: "CONTROL_EPOCH_STALE", controlEpoch: this.controlEpoch });
+      blockedAny = true;
+    }
+    if (blockedAny) {
+      this.syncStatus = "blocked_attention";
+      this.lastError = "Exam timing changed. Your latest answers are kept on this device and need re-check.";
+      this.notifyStateChange();
+      this.notifyStatusChange();
+    }
+  }
+
+  /**
+   * True when a command must never be sent without a decision.
+   * BUG-1/21: a stale outbox entry (W1) must not fly just because live
+   * pending moved on to a blocked W2 — any command for a question with a
+   * blocked pending is non-sendable, as is any command whose enqueue-time
+   * epochs no longer match the live fence.
+   */
+  private isBlockedPending(questionId: string, writeId: string): boolean {
+    const pending = this.states.get(questionId)?.pending;
+    if (pending?.blocked) return true;
+    const epoch = this.commandEpochs.get(writeId);
+    if (
+      epoch &&
+      (epoch.leaseEpoch !== this.leaseEpoch || epoch.controlEpoch !== this.controlEpoch)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /** True when the outbox holds at least one draft that is allowed to fly. */
+  private hasSendableOutbox(): boolean {
+    for (const [questionId, command] of this.outbox) {
+      if (!this.isBlockedPending(questionId, command.writeId)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Reconcile one blocked draft after a timing-only control change: adopt a
+   * fresh snapshot, then re-issue the blocked payload as a NEW write under
+   * the current epoch. Refuses (returns false, stays blocked) on lease
+   * change, terminal delivery status, fetch failure, or server-newer state.
+   */
+  public async reconcileBlocked(questionId: string): Promise<boolean> {
+    // BUG-7/8 + RISK-24: per-question mutex — concurrent reconciles for Q
+    // would each re-issue the same blocked payload as a new write (duplicate
+    // sends). The same guard also covers the recover-triggered path: recover
+    // skips installing or issuing for a question while its reconcile is in
+    // flight (see recoverInternal), so a snapshot refresh racing a reconcile
+    // can neither resurrect the fenced write nor steal its version mint.
+    if (this.reconciling.has(questionId)) {
+      this.emitDurabilityEvent("reconcile_failed", { reason: "reconcile_in_progress" });
+      return false;
+    }
+    const blocked = this.states.get(questionId)?.pending;
+    if (!blocked?.blocked) return false;
+    const blockedWriteId = blocked.writeId;
+    // BUG-5: the blocked record carries its origin lease; a lease fence
+    // crossed since the block must refuse, never re-issue across the fence.
+    const originLease = readBlockedOriginLease(blocked);
+    if (this.isDestroyed || this.terminalState || this.submissionPromise) { this.emitDurabilityEvent("reconcile_failed", { reason: "engine_not_writable" }); return false; }
+    this.reconciling.add(questionId);
+    try {
+    let snapshot: SnapshotResponse;
+    try {
+      // F-A6: timeout surfaces as retryable, exactly like a fetch failure:
+      // the blocked draft stays queued, reconcile_failed snapshot_fetch_failed
+      // is emitted, nothing is dropped and the caller can retry.
+      snapshot = await fetchSnapshotWithTimeout(
+        (attemptId) => this.transport.fetchSnapshot(attemptId),
+        this.attemptId
+      );
+    } catch {
+      this.emitDurabilityEvent("reconcile_failed", { reason: "snapshot_fetch_failed" });
+      return false;
+    }
+    // BUG-7/8: re-validate after EVERY await before touching shared state.
+    const afterFetch = this.states.get(questionId)?.pending;
+    if (this.terminalState || this.submissionPromise) { this.emitDurabilityEvent("reconcile_failed", { reason: "engine_not_writable" }); return false; }
+    if (!afterFetch || afterFetch.writeId !== blockedWriteId || !afterFetch.blocked) { this.emitDurabilityEvent("reconcile_failed", { reason: "blocked_superseded" }); return false; }
+    if (!isSnapshotResponse(snapshot)) { this.emitDurabilityEvent("reconcile_failed", { reason: "snapshot_not_authoritative" }); return false; }
+    if (["submitted", "terminated", "locked", "cancelled"].includes(snapshot.deliveryStatus)) { this.emitDurabilityEvent("reconcile_failed", { reason: "attempt_terminal" }); return false; }
+    if (snapshot.leaseEpoch !== this.leaseEpoch || originLease !== this.leaseEpoch) { this.emitDurabilityEvent("reconcile_failed", { reason: "lease_changed" }); return false; }
+    if (this.isDestroyed || this.terminalState || this.submissionPromise) { this.emitDurabilityEvent("reconcile_failed", { reason: "engine_not_writable" }); return false; }
+    const afterGuard = this.states.get(questionId)?.pending;
+    if (!afterGuard || afterGuard.writeId !== blockedWriteId || !afterGuard.blocked) { this.emitDurabilityEvent("reconcile_failed", { reason: "blocked_superseded" }); return false; }
+    this.attemptRevision = Math.max(this.attemptRevision, snapshot.attemptRevision);
+    this.updateEpochs(snapshot.leaseEpoch, snapshot.controlEpoch);
+    for (const response of snapshot.responses) {
+      this.installServerResponse(response);
+    }
+    const live = this.states.get(questionId)?.pending;
+    if (this.terminalState || this.submissionPromise) { this.emitDurabilityEvent("reconcile_failed", { reason: "engine_not_writable" }); return false; }
+    if (!live || live.writeId !== blockedWriteId || !live.blocked) { this.emitDurabilityEvent("reconcile_failed", { reason: "blocked_superseded" }); return false; }
+    // Refuse only when the server actually moved past the blocked draft: a
+    // different writeId alone is normal (it is the last confirmed write the
+    // blocked draft was edited on top of). Version comparison decides.
+    const server = snapshot.responses.find((entry) => entry.questionId === questionId);
+    if (server && server.writeId !== blocked.writeId && server.clientVersion >= live.clientVersion) { this.emitDurabilityEvent("reconcile_failed", { reason: "server_newer" }); return false; }
+    // RISK-9/10: re-read the version tracker AFTER the snapshot await —
+    // installServerResponse above (and any concurrent recover/ack path)
+    // raises the floor. Capture the mint base now and revalidate before
+    // enqueue: a floor that moved past our mint means a stale version, which
+    // the backend would terminally reject as VERSION_COLLISION. Never mint
+    // stale — refuse instead and let the caller retry against fresh state.
+    const mintBase = Math.max(
+      this.versionTrackers.get(questionId) ?? 0,
+      server && server.questionId === questionId ? server.clientVersion : 0
+    );
+    const issuedVersion = mintBase + 1;
+    this.versionTrackers.set(questionId, issuedVersion);
+    const writeId = randomWriteId();
+    const payload = clonePayload(live.payload);
+    // exactOptionalPropertyTypes: only carry receivedAt/order when defined —
+    // never assign an explicit undefined to an optional property.
+    const pending: PendingResponseState = {
+      payload,
+      writeId,
+      leaseEpoch: this.leaseEpoch,
+      controlEpoch: this.controlEpoch,
+      clientVersion: issuedVersion,
+      durability: live.durability,
+    };
+    if (live.receivedAt !== undefined) pending.receivedAt = live.receivedAt;
+    if (live.order !== undefined) pending.order = live.order;
+    this.states.set(questionId, {
+      confirmed: this.states.get(questionId)?.confirmed ?? null,
+      pending,
+    });
+    this.checkpointIntentSync(questionId, pending);
+    try {
+      await saveDurableDraft(durableDraftKey(this.attemptId, questionId), pending);
+    } catch {
+      // Checkpoint above is the teardown-safe copy; IDB follows best-effort.
+    }
+    // BUG-7/8: the save above awaited — states now holds the NEW re-issued
+    // write, so compare against the new writeId: a mismatch means someone
+    // typed over our re-issue during the save (their write is preserved, we
+    // just skip enqueue).
+    const afterSave = this.states.get(questionId)?.pending;
+    if (this.isDestroyed || this.terminalState || this.submissionPromise) { this.emitDurabilityEvent("reconcile_failed", { reason: "engine_not_writable" }); return false; }
+    if (!afterSave || afterSave.writeId !== writeId) { this.emitDurabilityEvent("reconcile_failed", { reason: "blocked_superseded" }); return false; }
+    // RISK-9/10 mint revalidation: the save await above can race a server
+    // response that raised the version floor past our mint. Enqueuing the
+    // stale version would draw a terminal VERSION_COLLISION; refuse instead
+    // (blocked write is preserved in place) so the caller can retry fresh.
+    if ((this.versionTrackers.get(questionId) ?? 0) > issuedVersion) { this.emitDurabilityEvent("reconcile_failed", { reason: "blocked_superseded" }); return false; }
+    const command: ResponseCommandV2 = { writeId, questionId, clientVersion: issuedVersion, response: payload };
+    this.outbox.set(questionId, command);
+    this.issuedCommands.set(writeId, command);
+    this.commandEpochs.set(writeId, { leaseEpoch: this.leaseEpoch, controlEpoch: this.controlEpoch });
+    // RISK-6: reconcile is a user-visible explicit resolution — the success
+    // path below owns conflict clearing (blocked_attention -> saved_locally).
+    // A lingering conflict clears only when nothing remains fenced or
+    // quarantined (see clearConflictOnExplicitResolution).
+    if (this.getBlockedCount() === 0 && this.syncStatus === "blocked_attention") {
+      this.syncStatus = "saved_locally";
+      this.lastError = null;
+      this.notifyStatusChange();
+    }
+    this.clearConflictOnExplicitResolution();
+    this.notifyStateChange();
+    this.scheduleDrain();
+    this.emitDurabilityEvent("reconcile_succeeded");
+    return true;
+    } finally {
+      this.reconciling.delete(questionId);
+    }
+  }
+
+  /**
+   * Explicit user discard of one blocked draft (providers confirm + audit
+   * before calling). Removes visible pending, checkpoints, drafts, and
+   * related quarantine audit entries. Never touches confirmed state.
+   */
+  public discardBlocked(questionId: string): boolean {
+    const pending = this.states.get(questionId)?.pending;
+    if (!pending?.blocked) return false;
+    // BUG-3: discard is per-question, not per-writeId. Remove the outbox /
+    // in-flight slot for Q plus EVERY issued command ever recorded for Q, so
+    // no stale writeId for this question can fly after the discard.
+    const tracked = this.outbox.get(questionId);
+    if (tracked) this.removeCommand(tracked);
+    const flying = this.inFlight.get(questionId);
+    if (flying) this.removeCommand(flying);
+    for (const [writeId, command] of [...this.issuedCommands]) {
+      if (command.questionId === questionId) {
+        this.issuedCommands.delete(writeId);
+        this.commandEpochs.delete(writeId);
+      }
+    }
+    this.states.set(questionId, {
+      confirmed: this.states.get(questionId)?.confirmed ?? null,
+      pending: null,
+    });
+    // 2B-1(b): explicit discard prunes durable quarantine keys for Q +
+    // memory + event (never silently).
+    this.pruneQuarantined(questionId, "discard");
+    this.clearCheckpoint(questionId);
+    if (this.getBlockedCount() === 0 && this.syncStatus === "blocked_attention") {
+      this.syncStatus = this.getPendingCount() === 0 ? "synced" : "saved_locally";
+      this.lastError = null;
+      this.notifyStatusChange();
+    }
+    // RISK-6: discard is a user-visible explicit resolution — it may clear a
+    // lingering conflict once nothing remains blocked or quarantined.
+    this.clearConflictOnExplicitResolution();
+    this.notifyStateChange();
+    return true;
   }
 
   private quarantinePending(
@@ -1110,10 +1998,6 @@ export class DurableResponseEngine {
       response: clonePayload(pending.payload),
     };
     this.quarantineEntry(command, reason);
-    const currentPending = this.states.get(questionId)?.pending;
-    if (!currentPending || currentPending.writeId === pending.writeId) {
-      this.clearCheckpoint(questionId);
-    }
   }
 
   private clearRecoveredWrite(questionId: string, writeId: string): void {
@@ -1146,7 +2030,44 @@ export class DurableResponseEngine {
     }
   }
 
+  /** Synthetic tombstone IDs (tombstoned-Q-*) are audit surface only — never re-fenced. */
+  private isSyntheticTombstoneWriteId(writeId: string): boolean {
+    return writeId.startsWith("tombstoned-");
+  }
+
+  /**
+   * 2B-1 spec-exact prune: the quarantine ledger cap (50) counts DURABLE IDB
+   * keys, not just memory. Pruning happens ONLY on (a) server ack of a
+   * replacement write (reason 'ack-superseded') or (b) explicit discardBlocked
+   * (reason 'discard') — never on any other trigger. Each prune deletes the
+   * durable IDB key, splices memory, and emits quarantine_pruned with
+   * reason/epoch/ID fields only (never payload content).
+   */
+  private pruneQuarantined(questionId: string, reason: "ack-superseded" | "discard"): void {
+    let pruned = 0;
+    for (let index = this.quarantined.length - 1; index >= 0; index -= 1) {
+      const candidate = this.quarantined[index];
+      if (candidate?.questionId !== questionId) continue;
+      this.quarantined.splice(index, 1);
+      pruned += 1;
+      void clearDurableDraft(quarantineDraftKey(this.attemptId, candidate.writeId)).catch(
+        () => undefined
+      );
+    }
+    if (pruned > 0) {
+      this.emitDurabilityEvent("quarantine_pruned", {
+        reason,
+        questionId,
+        count: pruned,
+      });
+    }
+  }
+
   private quarantineEntry(command: ResponseCommandV2, reason: string): void {
+    // RISK-9/10: NEVER re-quarantine a synthetic tombstone record. Surfaced
+    // tombstones are visible-but-blocked audit surface; fencing them again
+    // would tombstone the tombstone and lose the quarantine audit trail.
+    if (this.isSyntheticTombstoneWriteId(command.writeId)) return;
     if (this.quarantined.some((entry) => entry.writeId === command.writeId)) return;
     const entry: QuarantinedWrite = {
       writeId: command.writeId,
@@ -1157,24 +2078,109 @@ export class DurableResponseEngine {
       quarantinedAt: new Date().toISOString(),
     };
     this.quarantined.push(entry);
+    // 2B-1: NO silent drop-oldest shift() — the 50-ledger cap counts durable
+    // IDB keys and the ledger only shrinks via explicit prune triggers
+    // (ack-superseded, discard) with durable deletes + quarantine_pruned
+    // events. A silent shift would evict audit evidence without deleting its
+    // durable key, diverging memory from IDB.
 
-    // A fenced/terminal response must stop retrying, but it must not vanish
-    // when the in-flight request loses the race with the server boundary.
-    // Keep a separate durable audit record rather than leaving the command in
-    // the active outbox, where recovery could incorrectly replay it.
-    void saveDurableDraft(quarantineDraftKey(this.attemptId, command.writeId), entry).catch(
-      () => undefined
-    );
+    // BUG-14/22: a live-newer intent for the same question must never be
+    // clobbered — terminal path included. A stale command contributes only
+    // the audit entry above; archiving/tombstoning its writeId would erase
+    // the student's newest keystrokes.
+    const live = this.states.get(command.questionId)?.pending;
+    if (live && live.writeId !== command.writeId) {
+      return;
+    }
 
+    // Archive windows (BUG-15/16/17, F-A5): keep the draft visible as
+    // BLOCKED — never null — until the quarantine record is durable, so a
+    // crash/teardown between quarantine and archive cannot lose the last copy.
     const existing = this.states.get(command.questionId);
-    if (existing?.pending?.writeId === command.writeId) {
-      this.states.set(command.questionId, {
-        confirmed: existing.confirmed,
-        pending: null,
-      });
-      this.clearCheckpoint(command.questionId);
+    if (existing?.pending?.writeId === command.writeId && !existing.pending.blocked) {
+      const mark: BlockedInfoEx = {
+        reason,
+        blockedAt: new Date().toISOString(),
+        originLeaseEpoch: this.commandOriginLease(command),
+      };
+      existing.pending.blocked = mark;
+      this.checkpointIntentSync(command.questionId, existing.pending);
       this.notifyStateChange();
     }
+
+    const generation = this.engineGeneration;
+    const questionId = command.questionId;
+    const writeId = command.writeId;
+    // I5 archive-before-delete: the source checkpoint/draft is removed only
+    // after the quarantine audit record is durable. Archive failure keeps the
+    // source and raises durability_fault instead of losing the last copy.
+    void (async () => {
+      try {
+        await saveDurableDraft(quarantineDraftKey(this.attemptId, writeId), entry);
+      } catch {
+        this.syncStatus = "durability_fault";
+        this.lastError = "Could not archive a blocked answer. Your work is kept on this device.";
+        this.notifyStatusChange();
+        this.emitDurabilityEvent("quarantine_failed", { reason: "quarantine_archive_failed" });
+        return;
+      }
+      // A destroy/replace during the archive aborts: never write tombstones
+      // for a dead engine generation.
+      if (generation !== this.engineGeneration || this.isDestroyed) return;
+      this.emitDurabilityEvent("quarantine_archived", { reason });
+      // BUG-14/22 re-check: a live-newer intent (including a v0 provisional
+      // typed after the fence) wins over the tombstone — never erase it.
+      const current = this.states.get(questionId)?.pending;
+      if (current && current.writeId !== writeId) return;
+      // Same-key tombstone write: atomic for localStorage readers, so a
+      // crash between archive and delete cannot resurrect a sendable draft.
+      // BUG-5: the tombstone carries the origin lease (engine-only, never on
+      // the wire) so recovery-time reconcile refuses to cross a lease fence.
+      let tombstoneOk = false;
+      const hasSyncStore =
+        typeof window !== "undefined" && Boolean(window.localStorage);
+      try {
+        if (hasSyncStore) {
+          window.localStorage.setItem(
+            checkpointKey(this.attemptId, questionId),
+            JSON.stringify({
+              tombstoned: true,
+              writeId,
+              questionId,
+              reason,
+              quarantinedAt: entry.quarantinedAt,
+              originLeaseEpoch: this.commandOriginLease(command),
+              payload: clonePayload(command.response),
+            })
+          );
+        }
+        tombstoneOk = true;
+      } catch {
+        tombstoneOk = false;
+      }
+      if (!tombstoneOk && hasSyncStore) {
+        // Tombstone-write failure: retain the source checkpoint AND the IDB
+        // draft, raise a fault — never clear the last durable copy.
+        this.syncStatus = "durability_fault";
+        this.lastError = "Could not archive a blocked answer. Your work is kept on this device.";
+        this.notifyStatusChange();
+        this.emitDurabilityEvent("quarantine_failed", { reason: "quarantine_archive_failed" });
+        return;
+      }
+      // Only clear the visible draft when the tombstone landed for THIS
+      // write; a newer intent keeps its checkpoint.
+      const still = this.states.get(questionId)?.pending;
+      if (still && still.writeId === writeId) {
+        this.states.set(questionId, {
+          confirmed: this.states.get(questionId)?.confirmed ?? null,
+          pending: null,
+        });
+        this.notifyStateChange();
+      }
+      void clearDurableDraft(durableDraftKey(this.attemptId, questionId)).catch(
+        () => undefined
+      );
+    })();
   }
 
   private clearCheckpoint(questionId: string): void {
@@ -1188,6 +2194,15 @@ export class DurableResponseEngine {
     void clearDurableDraft(durableDraftKey(this.attemptId, questionId)).catch(() => undefined);
   }
 
+  /**
+   * Terminal-outcome set. ASSESSMENT_CONFLICT alone is NOT terminal: it
+   * is the shared 409 envelope for structured reasons (see error-codes
+   * REASON_MAP) — most are terminal/stop, but SECTION_CLOCK_MISSING is
+   * a retryable operator/data state. isTerminalConflictWithReason splits
+   * on details.reason; this code-only entry stays conservative (unknown
+   * ASSESSMENT_CONFLICT quarantines as terminal = stop, never silent
+   * drop, never infinite retry).
+   */
   private isTerminalConflict(code: string | null): boolean {
     return (
       code === "LEASE_FENCED" ||
@@ -1197,8 +2212,31 @@ export class DurableResponseEngine {
       code === "ATTEMPT_NOT_WRITABLE" ||
       code === "QUESTION_NOT_IN_ATTEMPT" ||
       code === "INVALID_RESPONSE" ||
-      code === "PROTOCOL_VERSION_UNSUPPORTED"
+      code === "PROTOCOL_VERSION_UNSUPPORTED" ||
+      code === "ASSESSMENT_CONFLICT"
     );
+  }
+
+  /** SECTION_CLOCK_MISSING is the one retryable ASSESSMENT_CONFLICT reason. */
+  private isRetryableConflictReason(error: unknown): boolean {
+    const reason = this.extractConflictReason(error);
+    return reason === "SECTION_CLOCK_MISSING";
+  }
+
+  /** Read details.reason (ApiClient surfaces backend details there). */
+  private extractConflictReason(error: unknown): string | null {
+    if (!isRecord(error)) return null;
+    const read = (holder: unknown): string | null => {
+      if (!isRecord(holder)) return null;
+      const details = isRecord(holder["details"]) ? (holder["details"] as Record<string, unknown>) :
+        isRecord(holder["backendDetails"]) ? (holder["backendDetails"] as Record<string, unknown>) : null;
+      const reason = details?.["reason"];
+      return typeof reason === "string" ? reason : null;
+    };
+    const nested = isRecord(error["error"]) ? error["error"] : null;
+    const response = isRecord(error["response"]) ? error["response"] : null;
+    const responseData = isRecord(response?.["data"]) ? response["data"] : null;
+    return read(error) ?? read(nested) ?? read(responseData) ?? null;
   }
 
   private extractErrorCode(error: unknown): string | null {
@@ -1239,6 +2277,11 @@ export class DurableResponseEngine {
 
   private notifyStateChange(): void {
     this.onStateChange?.(new Map(this.states));
+  }
+
+  /** Best-effort reason-coded telemetry; never throws, never carries payload content. */
+  private emitDurabilityEvent(name: string, fields?: Record<string, string | number | boolean | null | undefined>): void {
+    try { this.onDurabilityEvent?.(name, fields); } catch { /* never throws */ }
   }
 
   private lifecycleDrainHandler = (): void => {

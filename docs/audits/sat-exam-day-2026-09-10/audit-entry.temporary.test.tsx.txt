@@ -1,0 +1,90 @@
+// Original location: src/features/student/routes/__tests__/audit-entry.temporary.test.tsx
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { StudentAccessLinkEntryRoute } from '../StudentAccessLinkEntryRoute';
+import type { PublicStudentAccessLink } from '../../contracts/access-link/PublicStudentAccessLink';
+
+const mocks = vi.hoisted(() => ({
+  studentEntry: vi.fn(),
+  link: null as PublicStudentAccessLink | null,
+  error: null as Error | null,
+  isLoading: false,
+}));
+
+vi.mock('../../../auth/api/authSession', () => ({
+  useAuthSession: () => ({ studentEntry: mocks.studentEntry }),
+}));
+
+vi.mock('../../api/access-link/studentAccessLinkQueries', () => ({
+  useStudentAccessLink: () => ({
+    data: mocks.link,
+    error: mocks.error,
+    isLoading: mocks.isLoading,
+  }),
+}));
+
+function liveLink(overrides: Partial<PublicStudentAccessLink> = {}): PublicStudentAccessLink {
+  return {
+    id: 'link-public-1',
+    examTitle: 'Digital SAT',
+    providerKey: 'sat',
+    versionNumber: 4,
+    name: 'Saturday Class',
+    audienceType: 'anyone',
+    audienceLabel: null,
+    accessMode: 'open',
+    availabilityType: 'anytime',
+    opensAt: null,
+    closesAt: null,
+    status: 'live',
+    ...overrides,
+  };
+}
+
+function DestinationProbe() {
+  const location = useLocation();
+  return <div data-testid="destination">{location.pathname}</div>;
+}
+
+function renderRoute() {
+  render(
+    <MemoryRouter initialEntries={['/join/link-public-1']}>
+      <Routes>
+        <Route path="/join/:accessLinkId" element={<StudentAccessLinkEntryRoute />} />
+        <Route path="/student/:scheduleId/:studentId" element={<DestinationProbe />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+function enterIdentity() {
+  fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Ada Student' } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ADA@example.com' } });
+}
+
+beforeEach(() => {
+  mocks.studentEntry.mockReset();
+  mocks.link = liveLink();
+  mocks.error = null;
+  mocks.isLoading = false;
+  window.localStorage.clear();
+  window.sessionStorage.clear();
+});
+
+
+it('audit: successful admission must navigate when profile storage is full', async () => {
+  mocks.studentEntry.mockResolvedValue({user:{id:'u'},scheduleId:'s',studentCode:'c'});
+  renderRoute();
+  enterIdentity();
+  const original=window.localStorage.setItem;
+  const spy=vi.spyOn(window.localStorage,'setItem').mockImplementation(function(key,value){
+    if(key.startsWith('student-access-link-profile:')) throw new DOMException('Quota exceeded','QuotaExceededError');
+    return original.call(this,key,value);
+  });
+  try {
+    fireEvent.click(screen.getByRole('button',{name:/Continue/i}));
+    await waitFor(()=>expect(mocks.studentEntry).toHaveBeenCalled());
+    expect(await screen.findByTestId('destination')).toHaveTextContent('/student/s/c');
+  } finally {spy.mockRestore();}
+});

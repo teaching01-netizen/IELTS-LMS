@@ -202,19 +202,19 @@ describe("SatPreviewRoute", () => {
     expect(screen.getByText("Staff Preview")).toBeInTheDocument();
 
     const storageWrite = vi.spyOn(window.localStorage, "setItem");
-    fireEvent.click(screen.getByRole("button", { name: "Reading" }));
-    const reading = screen.getByRole("dialog", { name: "Reading" });
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    const reading = screen.getByRole("dialog", { name: "Display" });
     fireEvent.click(within(reading).getByRole("button", { name: "Increase text size" }));
     expect(reading).toHaveTextContent("115%");
-    fireEvent.click(within(reading).getByRole("button", { name: "Close reading options" }));
+    fireEvent.click(within(reading).getByRole("button", { name: "Close display settings" }));
 
     fireEvent.change(screen.getByLabelText("Preview module"), {
       target: { value: "rw-m2-higher" },
     });
     expect(await screen.findByText("Higher branch question")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Reading" }));
-    expect(screen.getByRole("dialog", { name: "Reading" })).toHaveTextContent("115%");
-    fireEvent.click(screen.getByRole("button", { name: "Close reading options" }));
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    expect(screen.getByRole("dialog", { name: "Display" })).toHaveTextContent("115%");
+    fireEvent.click(screen.getByRole("button", { name: "Close display settings" }));
     expect(storageWrite).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Preview section"), { target: { value: "math" } });

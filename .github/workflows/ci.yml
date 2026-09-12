@@ -64,13 +64,32 @@ jobs:
         run: go vet ./...
 
       - name: Unit tests
-        run: go test ./...
+        run: go test -count=1 -coverprofile=$RUNNER_TEMP/coverage.out ./...
 
       - name: Build binaries
         run: go build ./cmd/api ./cmd/worker ./cmd/migrate
 
-      - name: Race tests (concurrency-sensitive packages)
-        run: go test -race ./internal/attempts/ ./internal/terminalization/
+      - name: Race tests
+        run: go test -race -count=1 ./internal/...
+
+      - name: Check Go coverage threshold
+        run: |
+          # Go coverage ratchet gate (mirrors frontend 75% gate style): measured total 29.4%
+          # via 'go tool cover -func=$RUNNER_TEMP/coverage.out' on the current tree; threshold = floor(29.4) - 2 = 27.
+          # Intent is ratchet-only: fail-closed below threshold, raise the threshold as coverage improves.
+          # Profile lives in $RUNNER_TEMP so no coverage.out artifact lands in the repo (do not commit it).
+          threshold=27
+          total=$(go tool cover -func=$RUNNER_TEMP/coverage.out | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
+          echo "Go total coverage: ${total}% (threshold ${threshold}%)"
+          if [ -z "$total" ]; then
+            echo "Could not parse total coverage from $RUNNER_TEMP/coverage.out"
+            exit 1
+          fi
+          if awk "BEGIN {exit !($total < $threshold)}"; then
+            echo "Go coverage ${total}% is below threshold ${threshold}%"
+            exit 1
+          fi
+          echo "Go coverage ${total}% meets threshold ${threshold}%"
 
       - name: Apply migrations
         run: go run ./cmd/migrate
@@ -87,7 +106,7 @@ jobs:
         run: npx --yes @redocly/cli lint ../../api/openapi/openapi.yaml
 
       - name: Staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 
       - name: Schema diff guard
         run: go run ./cmd/migrate --validate-only && echo "schema-ledger-clean"
@@ -198,6 +217,14 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: No tracked k6 creds
+        run: |
+          if git ls-files | grep -E "creds\.json$" | grep -v "example"; then
+            echo "Non-example *creds.json files are tracked; untrack them (git rm --cached) and commit only *.creds.example.json templates."
+            exit 1
+          fi
+          echo "No tracked non-example creds files."
 
       - name: Build
         run: npm run build
@@ -327,7 +354,7 @@ jobs:
 
   railway-deploy:
     runs-on: ubuntu-latest
-    needs: [quality-gates]
+    needs: [quality-gates, go-backend]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     steps:
       - name: Checkout

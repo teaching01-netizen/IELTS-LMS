@@ -19,6 +19,22 @@ describe("ReleaseGateCard", () => {
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
+  it("names missing publish permission as the first blocker", () => {
+    render(
+      <ReleaseGateCard
+        readinessFresh
+        readinessValid
+        dirtyCount={0}
+        isPublishing={false}
+        blockerCount={0}
+        releaseHref="/sat/exams/exam-1/release"
+        canPublishExam={false}
+        onOpenRelease={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("list")).toHaveTextContent(/permission to publish/i);
+  });
+
   it("enumerates every unmet precondition instead of hiding release", () => {
     render(
       <ReleaseGateCard

@@ -192,10 +192,21 @@ func (s *Service) loadReleaseRow(ctx context.Context, examID string) (releaseRow
 	return row, err
 } // contentSummary mirrors content_summary_tx: candidate duration, authored
 // questions, and delivered (base + branch) targets for one version.
+// Candidate duration is base-module time + the LONGER branch per section +
+// breaks: a candidate takes M1 plus exactly one M2 branch, so summing all
+// three authored modules would overstate the longest real sitting.
 func (s *Service) contentSummary(ctx context.Context, versionID string) (ReleaseContentSummary, error) {
 	var out ReleaseContentSummary
 	if err := s.db.QueryRowContext(ctx,
-		"SELECT CAST(COALESCE(SUM(duration_seconds + break_after_seconds), 0) AS SIGNED) FROM assessment_sections WHERE exam_version_id = ?",
+		"SELECT CAST(COALESCE(SUM(section_plan.candidate_seconds), 0) AS SIGNED) FROM ("+
+			"SELECT s.id, "+
+			"MAX(CASE WHEN m.adaptive_role = 'base' THEN m.duration_seconds ELSE 0 END) + "+
+			"GREATEST(MAX(CASE WHEN m.adaptive_role = 'lower_branch' THEN m.duration_seconds ELSE 0 END), "+
+			"MAX(CASE WHEN m.adaptive_role = 'higher_branch' THEN m.duration_seconds ELSE 0 END)) + "+
+			"s.break_after_seconds AS candidate_seconds "+
+			"FROM assessment_sections s "+
+			"LEFT JOIN assessment_modules m ON m.section_id = s.id "+
+			"WHERE s.exam_version_id = ? GROUP BY s.id, s.break_after_seconds) section_plan",
 		versionID).Scan(&out.CandidateDurationSeconds); err != nil {
 		return ReleaseContentSummary{}, err
 	}

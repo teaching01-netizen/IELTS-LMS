@@ -69,14 +69,140 @@ describe('SatSessionsRoute', () => {
     expect(screen.queryByRole('option', { name: 'IELTS Published' })).not.toBeInTheDocument();
   });
 
+  it('renders header plus skeleton while loading, without blanking the page', () => {
+    useSummariesMock.mockReturnValue({ data: undefined, isLoading: true, error: null, refetch: vi.fn() });
+    renderRoute();
+    expect(screen.getByText('Sessions')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading SAT sessions' })).toBeInTheDocument();
+  });
+
+  it('announces the visible session count once data is present', () => {
+    renderRoute();
+    expect(screen.getByRole('status')).toHaveTextContent('1 session');
+  });
+
+  it('focuses the first sheet field on open', () => {
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    expect(screen.getByLabelText('SAT exam')).toBeInTheDocument();
+  });
+
   it('explains an invalid session time range without clearing the form', async () => {
+    // Far-future fixtures: the D2 past-start rule (default now) must not
+    // shadow the end>start assertion as the real clock advances.
     renderRoute();
     fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
     fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
-    fireEvent.change(screen.getByLabelText('Session start time'), { target: { value: '2026-09-01T13:00' } });
-    fireEvent.change(screen.getByLabelText('Session end time'), { target: { value: '2026-09-01T10:00' } });
+    fireEvent.change(screen.getByLabelText('Session start time'), { target: { value: '2099-09-01T13:00' } });
+    fireEvent.change(screen.getByLabelText('Session end time'), { target: { value: '2099-09-01T10:00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Schedule' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('End time must be after the start time.');
-    expect(screen.getByLabelText('Session start time')).toHaveValue('2026-09-01T13:00');
+    expect(screen.getByLabelText('Session start time')).toHaveValue('2099-09-01T13:00');
+  });
+
+  it('confirms before discarding a dirty sheet, closes quietly when pristine', () => {
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Discard this session?');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('rejects a past start time in the sheet (D2 policy)', async () => {
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
+    fireEvent.change(screen.getByLabelText('Session start time'), { target: { value: '2000-09-01T10:00' } });
+    fireEvent.change(screen.getByLabelText('Session end time'), { target: { value: '2000-09-01T13:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Start time is in the past.');
+  });
+
+  it('distinguishes filtered-zero from bucket-empty with query echo and clear action', () => {
+    renderRoute();
+    fireEvent.change(screen.getByPlaceholderText('Search exam, cohort, institution'), { target: { value: 'zzz-no-match' } });
+    expect(screen.getByText('No matching sessions')).toBeInTheDocument();
+    expect(screen.getByText(/No sessions match/)).toHaveTextContent('zzz-no-match');
+    expect(screen.getByRole('status')).toHaveTextContent('0 of 1 sessions');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Search' }));
+    expect(screen.getByText('SAT Published')).toBeInTheDocument();
+  });
+
+  it('rejects a session shorter than 15 minutes in the sheet (D2 policy)', async () => {
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
+    fireEvent.change(screen.getByLabelText('Session start time'), { target: { value: '2099-09-01T10:00' } });
+    fireEvent.change(screen.getByLabelText('Session end time'), { target: { value: '2099-09-01T10:10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Sessions must be at least 15 minutes long.');
+  });
+
+  it('preserves search text when the bucket filter changes (04A composition guard)', () => {
+    renderRoute();
+    fireEvent.change(screen.getByPlaceholderText('Search exam, cohort, institution'), { target: { value: 'zzz-no-match' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Live' }));
+    expect(screen.getByPlaceholderText('Search exam, cohort, institution')).toHaveValue('zzz-no-match');
+    expect(screen.getByText('No matching sessions')).toBeInTheDocument();
+    expect(screen.getByText(/No sessions match/)).toHaveTextContent('zzz-no-match');
+  });
+
+  it('opens the discard alert when edited datetimes are cancelled, then discards both', () => {
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    fireEvent.change(screen.getByLabelText('Session start time'), { target: { value: '2099-09-01T10:00' } });
+    fireEvent.change(screen.getByLabelText('Session end time'), { target: { value: '2099-09-01T13:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Discard this session?');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'New Session' })).not.toBeInTheDocument();
+  });
+
+  it('closes a pristine sheet on Escape with no alertdialog', () => {
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    expect(screen.getByRole('dialog', { name: 'New Session' })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'New Session' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the sheet mounted on Cancel while saving is pending', () => {
+    useSaveScheduleMock.mockReturnValue({ mutateAsync: vi.fn(() => new Promise(() => {})), isPending: true });
+    renderRoute();
+    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Morning SAT' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('dialog', { name: 'New Session' })).toBeInTheDocument();
+  });
+
+  it('returns focus to the New Session trigger after pristine Cancel', () => {
+    renderRoute();
+    const trigger = screen.getByRole('button', { name: 'New Session' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'New Session' })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps every session data point on one merged 10px meta line (04A hierarchy guard)', () => {
+    const { container } = renderRoute();
+    const row = screen.getByText('SAT Published').closest('.sat-list-row');
+    expect(row).not.toBeNull();
+    expect(row).toHaveTextContent('Morning');
+    expect(row).toHaveTextContent('0 joined');
+    expect(row).toHaveTextContent('0 active');
+    expect(row).toHaveTextContent('Ready');
+    const meta = row?.querySelector('.tabular-nums');
+    expect(meta).not.toBeNull();
+    expect(meta?.className).toMatch(/text-\[10px\]/);
+    expect(container.innerHTML).not.toMatch(/bg-gradient|backdrop-blur/);
   });
 });

@@ -29,9 +29,10 @@ export interface SatInteractionController {
   openDirections: (returnFocus?: SatInteractionFocusTarget) => void;
   openReadingSettings: (returnFocus?: SatInteractionFocusTarget) => void;
   openQuestionNotes: (returnFocus?: SatInteractionFocusTarget) => void;
+  openMoreMenu: (returnFocus?: SatInteractionFocusTarget) => void;
   openAnnotationNote: (annotationId: string, returnFocus?: SatInteractionFocusTarget) => void;
   toggleSurface: (
-    surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes',
+    surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes' | 'more-menu',
     returnFocus?: SatInteractionFocusTarget,
   ) => void;
   closeSurface: () => void;
@@ -211,9 +212,14 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
       ),
     [dispatchIntent],
   );
+  const openMoreMenu = useCallback(
+    (focus?: SatInteractionFocusTarget) =>
+      dispatchIntent(focus ? { type: 'MORE_MENU_OPEN_REQUESTED', returnFocus: focus } : { type: 'MORE_MENU_OPEN_REQUESTED' }),
+    [dispatchIntent],
+  );
   const toggleSurface = useCallback(
     (
-      surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes',
+      surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes' | 'more-menu',
       focus?: SatInteractionFocusTarget,
     ) =>
       dispatchIntent(
@@ -222,6 +228,9 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
     [dispatchIntent],
   );
   const closeSurface = useCallback(() => dispatchIntent({ type: 'SURFACE_CLOSE_REQUESTED' }), [dispatchIntent]);
+  // Tool buttons dispatch runner commands directly (activeTools is the
+  // single tool truth) — these callbacks stay only so committed consumers
+  // keep compiling; they are refused no-ops by the intent layer.
   const toggleCalculator = useCallback(() => dispatchIntent({ type: 'CALCULATOR_TOGGLE_REQUESTED' }), [dispatchIntent]);
   const toggleReference = useCallback(() => dispatchIntent({ type: 'REFERENCE_TOGGLE_REQUESTED' }), [dispatchIntent]);
   const setAnnotationMode = useCallback(
@@ -299,6 +308,7 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
     openDirections,
     openReadingSettings,
     openQuestionNotes,
+    openMoreMenu,
     openAnnotationNote,
     toggleSurface,
     closeSurface,

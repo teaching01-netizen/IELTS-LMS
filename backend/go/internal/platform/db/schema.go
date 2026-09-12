@@ -17,6 +17,14 @@ type RequiredColumn struct {
 	Column string
 }
 
+// RequiredTables lists tables the runtime reads/writes every deploy.
+// A database missing 0058 (authoring_operation_keys) still passed the
+// old column/index guard, so the API served traffic whose retries could
+// never replay: table presence is load-bearing, not advisory.
+var RequiredTables = []string{
+	"authoring_operation_keys",
+}
+
 // RequiredColumns: 19 durability-critical columns from the Rust
 // REQUIRED_COLUMNS guard (student_attempts V2 lifecycle + lease/control +
 // deadline/grace + digest, terminalization id, assessment outcome linkage,
@@ -81,6 +89,10 @@ func VerifyRuntimeSchema(ctx context.Context, db *sql.DB) error {
 
 // Verify runs the full runtime schema guard.
 func (v *SchemaVerifier) Verify(ctx context.Context) error {
+	missingTables, err := v.MissingTables(ctx)
+	if err != nil {
+		return fmt.Errorf("db: verify tables: %w", err)
+	}
 	missingCols, err := v.MissingColumns(ctx)
 	if err != nil {
 		return fmt.Errorf("db: verify columns: %w", err)
@@ -90,6 +102,7 @@ func (v *SchemaVerifier) Verify(ctx context.Context) error {
 		return fmt.Errorf("db: verify indexes: %w", err)
 	}
 	var missing []string
+	missing = append(missing, missingTables...)
 	missing = append(missing, missingCols...)
 	missing = append(missing, missingIdx...)
 	if err := v.checkMutationUniquenessGuard(ctx); err != nil {
@@ -99,6 +112,24 @@ func (v *SchemaVerifier) Verify(ctx context.Context) error {
 		return fmt.Errorf("db: required schema objects missing: %s; run the database migrator before starting the API", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// MissingTables returns table names absent from information_schema.
+func (v *SchemaVerifier) MissingTables(ctx context.Context) ([]string, error) {
+	var missing []string
+	for _, t := range RequiredTables {
+		var n int64
+		err := v.DB.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?`,
+			t).Scan(&n)
+		if err != nil {
+			return nil, fmt.Errorf("table %s: %w", t, err)
+		}
+		if n == 0 {
+			missing = append(missing, t)
+		}
+	}
+	return missing, nil
 }
 
 // MissingColumns returns "table.column" entries absent from information_schema.

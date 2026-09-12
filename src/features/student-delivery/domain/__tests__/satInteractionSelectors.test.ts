@@ -23,7 +23,9 @@ describe('selectSatInteraction (dumb UI contract)', () => {
     const view = selectSatInteraction(createSatInteractionState(), ctx());
     expect(view.can.openCalculator).toBe(true);
     expect(view.can.annotate).toBe(false);
-    expect(view.tools.calculator.visible).toBe(false);
+    // Tool visibility is runner-owned (activeTools) — the view exposes
+    // only capability (can.open*), never visibility.
+    expect(view).not.toHaveProperty('tools');
     expect(view.is.blocked).toBe(false);
     expect(view.gate).toBe('interactive');
   });
@@ -34,18 +36,19 @@ describe('selectSatInteraction (dumb UI contract)', () => {
     expect(selectSatInteraction(createSatInteractionState(), { ...ctx(), paused: true }).can.answer).toBe(false);
   });
 
-  it('reflects open surfaces and tool visibility', () => {
+  // Tool visibility lives in the runner (activeTools), not this view.
+  // Surfaces still reflect.
+  it('reflects open surfaces and exposes no tool visibility', () => {
     const state = {
       ...createSatInteractionState(),
       surface: {
         kind: 'navigator' as const,
         returnFocus: { type: 'footer' as const, control: 'navigator' as const },
       },
-      tools: { calculator: 'open' as const, reference: 'closed' as const },
     };
     const view = selectSatInteraction(state, ctx());
     expect(view.is.navigatorOpen).toBe(true);
     expect(view.is.surfaceOpen).toBe(true);
-    expect(view.tools.calculator.visible).toBe(true);
+    expect(view).not.toHaveProperty('tools');
   });
 });

@@ -6,11 +6,20 @@ import type { SatReadingPreferences } from "../domain/satReadingPreferences";
 import { emptySatExamToolPolicy } from "../domain/satToolPolicy";
 import type { SatInteractionContext } from "../domain/satInteractionState";
 import { useSatInteractionController } from "../hooks/useSatInteractionController";
+import { SatSaveStatus } from "./feedback/SatSaveStatus";
 import { SatNotesPanel } from "./question/SatNotesPanel";
 import { SatExamFooter } from "./shell/SatExamFooter";
 import { SatExamTopBar } from "./shell/SatExamTopBar";
 import { SatQuestionNavigator } from "./shell/SatQuestionNavigator";
 import { SatAnnotationModeContext, type SatAnnotationMode } from './annotations/SatAnnotationModeContext';
+import { SatUnscheduledBreakDialog } from './break/SatUnscheduledBreakDialog';
+import { SatUnscheduledBreakVeil } from './break/SatUnscheduledBreakVeil';
+import { SatHelpModal } from './help/SatHelpModal';
+import { SatTimerWarning } from './shell/SatTimerWarning';
+import { SatShortcutsModal } from './help/SatShortcutsModal';
+import { useSatShortcuts } from '../hooks/useSatShortcuts';
+import type { SatToolActionBinding } from '../domain/satToolActions';
+import { SatMoreMenu } from './shell/SatMoreMenu';
 import { SatLineReader } from './reading/SatLineReader';
 import { SatContrastContext } from './reading/SatContrastContext';
 
@@ -43,8 +52,31 @@ export interface SatExamShellProps {
   onNext: () => void;
   onReviewModule: () => void;
   onSaveNote: (note: string) => void;
+  helpOpen?: boolean | undefined;
+  onOpenHelp?: (() => void) | undefined;
+  onCloseHelp?: (() => void) | undefined;
+  breakConfirmOpen?: boolean | undefined;
+  onCloseBreakConfirm?: (() => void) | undefined;
+  onTakeBreak?: (() => void) | undefined;
+  breakVeilOpen?: boolean | undefined;
+  onReturnFromBreak?: (() => void) | undefined;
+  shortcutsOpen?: boolean | undefined;
+  onOpenShortcuts?: (() => void) | undefined;
+  onCloseShortcuts?: (() => void) | undefined;
+  onCloseModals?: (() => void) | undefined;
+  onNextQuestion?: (() => void) | undefined;
+  onPreviousQuestion?: (() => void) | undefined;
+  onToggleMarkForReview?: (() => void) | undefined;
+  onToggleEliminationMode?: (() => void) | undefined;
+  onZoomIn?: (() => void) | undefined;
+  onZoomOut?: (() => void) | undefined;
+  onZoomReset?: (() => void) | undefined;
+  onOpenBreakConfirm?: (() => void) | undefined;
+  breakAvailable?: boolean | undefined;
   onReadingPreferencesChange: (preferences: SatReadingPreferences) => void;
   onRetrySave?: () => void;
+  onTakeOver?: (() => void) | undefined;
+  isTakingOver?: boolean | undefined;
 }
 
 export function SatExamShell(props: SatExamShellProps) {
@@ -85,10 +117,11 @@ export function SatExamShell(props: SatExamShellProps) {
     questionId: `${props.moduleIdentity ?? ''}::${props.questionIndex}`,
   }), [props.blocked, props.calculatorAvailable, props.referenceAvailable, notesAvailable, props.moduleIdentity, props.questionIndex]);
   const interaction = useSatInteractionController(interactionCtx);
-  const activeOverlay: "directions" | "navigator" | "notes" | "reading" | null =
+  const activeOverlay: "directions" | "navigator" | "notes" | "reading" | "more" | null =
     interaction.state.surface.kind === 'reading-settings' ? 'reading'
     : interaction.state.surface.kind === 'question-notes' ? 'notes'
     : interaction.state.surface.kind === 'navigator' ? 'navigator'
+    : interaction.state.surface.kind === 'more-menu' ? 'more'
     : interaction.state.surface.kind === 'directions' ? 'directions'
     // The annotation note editor is a dialog, not a shell overlay: it must not
     // alias to a TopBar popover.
@@ -99,9 +132,24 @@ export function SatExamShell(props: SatExamShellProps) {
     : interaction.state.annotation.mode === 'note' ? 'note'
     : interaction.state.annotation.mode === 'erase' ? 'erase'
     : 'none';
+  const routeModalOpen = props.helpOpen === true || props.shortcutsOpen === true;
+  const floatingToolOpen = props.calculatorOpen || props.referenceOpen;
+  // Bluebook 5-minute visual warning visibility (Phase 7 state; effect below).
+  // Declared above the Escape partition so the warning branch can read it.
+  const [timerWarningVisible, setTimerWarningVisible] = useState(false);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // Route modals (Help/Shortcuts) and floating tools (Calculator /
+      // Reference) own Escape themselves; the shell must not double-handle
+      // (e.g. disabling Line Reader under an open Help or a tool).
+      if (routeModalOpen || floatingToolOpen) return;
+      // Wave B R-16: the 5-minute warning keeps alertdialog clothing, so it
+      // needs an Escape path. It takes priority over surface-close: one
+      // press dismisses the warning only (the warning's own listener
+      // performs the dismiss; this branch suppresses the surface-close so
+      // exactly one state change happens per press).
+      if (timerWarningVisible && !props.blocked) return;
       interaction.handleEscape({
         lineReaderEnabled: props.readingPreferences.lineReaderEnabled ?? false,
         onDisableLineReader: () => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: false }),
@@ -111,11 +159,16 @@ export function SatExamShell(props: SatExamShellProps) {
     return () => document.removeEventListener('keydown', escape);
   });
   const [timerVisible, setTimerVisible] = useState(true);
+  const [timerRevealAnnounced, setTimerRevealAnnounced] = useState(false);
+  // Bluebook 5-minute visual warning (Phase 7): shown once per module when
+  // the threshold is crossed, dismissible, re-arms with the reveal state.
+  // Visibility state lives above the Escape partition (Wave B R-16).
   // Bluebook parity: a hidden timer automatically reveals once when the
   // module crosses the 5-minute threshold. One-shot per module timing
   // context: the student may hide it again afterwards without it reopening
   // every second, and a fresh module (remaining time jumping back above
-  // five minutes) re-arms the reveal.
+  // five minutes) re-arms the reveal. The reveal always announces itself
+  // through the timer live region (Phase 2) — never a silent override.
   const previousRemainingRef = useRef<number | null>(null);
   const timerRevealFiredRef = useRef(false);
   useEffect(() => {
@@ -124,8 +177,12 @@ export function SatExamShell(props: SatExamShellProps) {
     if (shouldAutoRevealTimer({ previousSeconds: previous, remainingSeconds: remaining, alreadyRevealed: timerRevealFiredRef.current })) {
       timerRevealFiredRef.current = true;
       setTimerVisible(true);
+      setTimerRevealAnnounced(true);
+      setTimerWarningVisible(true);
     } else if (remaining != null && remaining > SAT_TIMER_AUTO_REVEAL_SECONDS) {
       timerRevealFiredRef.current = false;
+      setTimerRevealAnnounced(false);
+      setTimerWarningVisible(false);
     }
     previousRemainingRef.current = remaining ?? null;
   }, [props.remainingSeconds]);
@@ -133,29 +190,81 @@ export function SatExamShell(props: SatExamShellProps) {
   const navigatorButtonId = useId();
   const navigatorPanelId = useId();
 
+  // Bluebook keyboard shortcuts (Phase 3): one binding converges clicks and
+  // keys on the same actions. Listener lives only while the module surface
+  // is mounted; blocked/paused shells ignore keys via `enabled`.
+  const shortcutBinding = useMemo<SatToolActionBinding>(() => ({
+    calculator: () => props.onToggleCalculator(),
+    reference: () => props.onToggleReference(),
+    lineReader: () => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: !(props.readingPreferences.lineReaderEnabled ?? false) }),
+    // Highlights arming is shell-interaction state (not runner truth), so the
+    // shortcut converges on the same interaction toggle as the TopBar button.
+    highlights: () => { interaction.closeSurface(); interaction.toggleAnnotationMode('highlight'); },
+    eliminatorMode: () => props.onToggleEliminationMode?.(),
+    markForReview: () => props.onToggleMarkForReview?.(),
+    questionMenu: () => toggleOverlay("navigator"),
+    directions: () => toggleOverlay("directions"),
+    notes: () => toggleOverlay("notes"),
+    timerVisibility: () => setTimerVisible((visible) => !visible),
+    help: () => props.onOpenHelp?.(),
+    shortcuts: () => props.onOpenShortcuts?.(),
+    breakConfirm: () => props.onOpenBreakConfirm?.(),
+    nextQuestion: () => props.onNextQuestion?.() ?? props.onNext(),
+    previousQuestion: () => props.onPreviousQuestion?.() ?? props.onPrevious(),
+    zoomIn: () => props.onZoomIn?.(),
+    zoomOut: () => props.onZoomOut?.(),
+    zoomReset: () => props.onZoomReset?.(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toggleOverlay/closeSurface are stable-by-contract per render; prefs snapshot is intentional.
+  }), [props.onToggleCalculator, props.onToggleReference, props.readingPreferences, props.onOpenHelp, props.onOpenShortcuts, props.onOpenBreakConfirm, props.onNext, props.onPrevious, props.onNextQuestion, props.onPreviousQuestion, props.onToggleEliminationMode, props.onToggleMarkForReview, props.onZoomIn, props.onZoomOut, props.onZoomReset]);
+  useSatShortcuts(!props.blocked, shortcutBinding);
+
+  // One tool truth (Phase 9): the runner's activeTools flags (calculatorOpen /
+  // referenceOpen props) are the ONLY mount/open state for floating tools.
+  // The interaction machine's dead `tools.*` region is intentionally unwired
+  // here — shell tool buttons delegate straight to the runner commands so
+  // the two truths can never diverge (no suspend/restore, no second copy).
+  // Opening a tool must not destroy an exclusive surface either: floating
+  // tools are independent layers (z-70, non-modal on desktop) and coexist,
+  // so unlike the old window manager there is nothing to suspend or
+  // restore — Directions / Display / Notes / Navigator stay open
+  // underneath with an announcement.
   const toggleOverlay = (overlay: Exclude<typeof activeOverlay, null>) => {
     if (overlay === 'directions') interaction.toggleSurface('directions');
     else if (overlay === 'navigator') interaction.toggleSurface('navigator');
     else if (overlay === 'reading') interaction.toggleSurface('reading-settings');
+    else if (overlay === 'more') interaction.toggleSurface('more-menu');
     else interaction.toggleSurface('question-notes');
   };
   const closeOverlay = () => interaction.closeSurface();
+  // Calculator / Reference are independent floating tools, NOT exclusive
+  // surfaces: opening one must not destroy an open Directions / Display /
+  // Notes / Navigator surface — or the other tool. The runner owns
+  // tool-open truth; the shell only delegates.
   const toggleCalculator = () => {
-    interaction.closeSurface();
     props.onToggleCalculator();
   };
   const toggleReference = () => {
-    interaction.closeSurface();
     props.onToggleReference();
   };
 
   return (
     <SatContrastContext.Provider value={props.readingPreferences.contrastMode ?? 'default'}>
     <div
-      className="sat-ui sat-exam-shell grid h-[100dvh] min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-background)] text-[var(--sat-text)]"
+      className="sat-ui sat-exam-shell grid h-[100dvh] min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-shell-bg)] text-[var(--sat-text)]"
       data-testid="sat-exam-shell"
       data-sat-contrast={props.readingPreferences.contrastMode ?? 'default'}
+    >
+    {/* Blocking inert covers the whole exam grid (Phase 0.6, corrected Phase 1
+        review): while a proctor pause is active NOTHING exam-interactive —
+        top bar, More menu, footer, navigator, notes — may be reachable.
+        Help/Shortcuts stay available through the route-level BlockingOverlay
+        (outside inert), which is the only read-only surface during pause.
+        Save retry / Take over live in SatSaveStatus below, also outside inert
+        (WCAG 2.1.1 / 4.1.3). */}
+    <div
+      data-testid="sat-exam-blocked-region"
       inert={props.blocked}
+      className="contents"
     >
       <SatExamTopBar
         sectionLabel={props.sectionLabel}
@@ -164,20 +273,20 @@ export function SatExamShell(props: SatExamShellProps) {
         remainingLabel={props.remainingLabel}
         remainingSeconds={props.remainingSeconds}
         timerVisible={timerVisible}
+        timerRevealAnnouncement={timerRevealAnnounced ? "Timer shown — under 5 minutes left. You can hide it again." : null}
         calculatorAvailable={props.calculatorAvailable}
         calculatorOpen={props.calculatorOpen}
         referenceAvailable={props.referenceAvailable}
         referenceOpen={props.referenceOpen}
         notesAvailable={notesAvailable}
         annotationMode={annotationMode}
-        lineReaderEnabled={props.readingPreferences.lineReaderEnabled ?? false}
-        onToggleLineReader={() => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: !props.readingPreferences.lineReaderEnabled })}
-        onToggleAnnotationMode={(mode) => {
+        onToggleHighlights={() => {
           interaction.closeSurface();
-          interaction.toggleAnnotationMode(mode);
+          interaction.toggleAnnotationMode('highlight');
         }}
-        notesOpen={annotationMode === 'note'}
+        notesOpen={activeOverlay === "notes"}
         notesButtonId={notesButtonId}
+        hasQuestionNote={props.questionNote.trim().length > 0}
         readingOpen={activeOverlay === "reading"}
         readingPreferences={props.readingPreferences}
         blocked={props.blocked}
@@ -186,17 +295,36 @@ export function SatExamShell(props: SatExamShellProps) {
         onToggleTimer={() => setTimerVisible((visible) => !visible)}
         onToggleCalculator={toggleCalculator}
         onToggleReference={toggleReference}
-        onToggleNotes={() => {
-          interaction.closeSurface();
-          interaction.toggleAnnotationMode('note');
-        }}
+        onToggleNotes={() => toggleOverlay("notes")}
+        moreOpen={activeOverlay === "more"}
+        onToggleMore={() => toggleOverlay("more")}
         onToggleReading={() => toggleOverlay("reading")}
         onCloseReading={closeOverlay}
         onReadingPreferencesChange={props.onReadingPreferencesChange}
       />
+      {/* Bluebook More utility center (Phase 1): fixed-position dropdown
+          pinned under the top-right More trigger (fixed right/top offsets
+          mirror the trigger cell, so the panel can never drop to the shell
+          bottom regardless of grid placement). Selecting Help/Shortcuts/Break
+          delegates to route-level modal owners via optional props (no-op when
+          unbound, e.g. preview). Toggling Line Reader here is the same action
+          as the shortcut. */}
+      <SatMoreMenu
+        open={activeOverlay === "more"}
+        blocked={props.blocked}
+        lineReaderOn={props.readingPreferences.lineReaderEnabled ?? false}
+        lineReaderAvailable={notesAvailable}
+        breakAvailable={props.breakAvailable ?? props.onOpenBreakConfirm !== undefined}
+        onSelectHelp={() => { closeOverlay(); props.onOpenHelp?.(); }}
+        onSelectShortcuts={() => { closeOverlay(); props.onOpenShortcuts?.(); }}
+        onToggleLineReader={() => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: !(props.readingPreferences.lineReaderEnabled ?? false) })}
+        onSelectBreak={() => { closeOverlay(); props.onOpenBreakConfirm?.(); }}
+        onClose={closeOverlay}
+      />
 
+      {/* Bluebook document: the exam body stays white inside pale-blue chrome. */}
       <main
-        className="relative min-h-0 overflow-hidden bg-[var(--sat-background)]"
+        className="relative min-h-0 overflow-hidden bg-[var(--sat-body-bg)]"
         id="sat-question-content"
         data-sat-question-presentation="instant"
       >
@@ -221,6 +349,8 @@ export function SatExamShell(props: SatExamShellProps) {
         navigatorButtonId={navigatorButtonId}
         navigatorPanelId={navigatorPanelId}
         blocked={props.blocked}
+        saveState={props.saveState}
+        onRetrySave={props.onRetrySave}
         onPrevious={props.onPrevious}
         onNext={props.onNext}
         onOpenNavigator={() => toggleOverlay("navigator")}
@@ -245,66 +375,58 @@ export function SatExamShell(props: SatExamShellProps) {
         onSave={props.onSaveNote}
         onClose={closeOverlay}
       />
-      {notesAvailable && props.questionNote ? (
-        <button type="button" className="sat-touch-target fixed bottom-20 right-4 z-[65] rounded border bg-[var(--sat-surface)] px-3 text-sm"
-          onClick={() => toggleOverlay('notes')}>General note</button>
+      {/* Bluebook Help + Shortcuts (Phases 2-3): route-owned open state;
+          the shell only presents. Timer continues and answers stay untouched
+          by design — these modals never touch exam state. */}
+      {props.helpOpen !== undefined && props.onCloseHelp ? (
+        <SatHelpModal
+          open={props.helpOpen}
+          onClose={props.onCloseHelp}
+          returnFocusSelector='[data-sat-focus="topbar-more"]'
+        />
       ) : null}
-
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {props.saveState === "offline"
-          ? "Offline. Response kept on this device."
-          : props.saveState === "retrying"
-            ? "Retrying response save"
-            : props.saveState === "failed" || props.saveState === "superseded"
-              ? "Response save failed"
-              : ""}
-      </div>
-      {props.saveState === "failed" || props.saveState === "superseded" ? (
-        <div
-          className="sat-surface-enter fixed bottom-[calc(78px+var(--student-safe-bottom))] left-1/2 z-[75] flex w-[min(680px,calc(100vw-32px))] -translate-x-1/2 items-center justify-between gap-4 border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-4 py-3 text-[14px] shadow-lg"
-          role="alert"
-        >
-          <span className="min-w-0 text-[var(--sat-danger)]">
-            {props.saveFailure || "Your latest response has not been saved yet."}
-          </span>
-          {props.saveState !== "superseded" && props.onRetrySave ? (
-            <button
-              type="button"
-              onClick={props.onRetrySave}
-              className="sat-touch-target sat-pressable shrink-0 rounded-full border border-[var(--sat-danger)] px-4 font-semibold text-[var(--sat-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
-            >
-              Retry
-            </button>
-          ) : null}
-        </div>
+      {props.shortcutsOpen !== undefined && props.onCloseShortcuts ? (
+        <SatShortcutsModal
+          open={props.shortcutsOpen}
+          onClose={props.onCloseShortcuts}
+          returnFocusSelector='[data-sat-focus="topbar-more"]'
+        />
       ) : null}
-      {props.saveState === "offline" || props.saveState === "retrying" ? (
-        <div
-          className="sat-surface-enter fixed bottom-[calc(78px+var(--student-safe-bottom))] left-1/2 z-[65] flex w-[min(680px,calc(100vw-32px))] -translate-x-1/2 items-center justify-between gap-4 border border-[var(--sat-warning)] bg-[var(--sat-warning-soft)] px-4 py-3 text-[14px] shadow-sm"
-          role="status"
-        >
-          <span className="min-w-0 text-[var(--sat-warning)]">
-            {props.saveFailure ||
-              (props.saveState === "offline"
-                ? "Offline — changes are kept on this device."
-                : "Saving is retrying.")}
-          </span>
-          {props.saveState === "retrying" && props.onRetrySave ? (
-            <button
-              type="button"
-              onClick={props.onRetrySave}
-              className="sat-touch-target sat-pressable shrink-0 rounded-full border border-[var(--sat-warning)] px-4 font-semibold text-[var(--sat-warning)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
-            >
-              Retry now
-            </button>
-          ) : null}
-        </div>
+      {/* Bluebook Unscheduled Break (Phase 8): confirm first (dangerous
+          action), then a running-timer veil. Timer keeps running, answers
+          intact, autosubmit still fires underneath. No backend pause call. */}
+      {props.breakConfirmOpen !== undefined && props.onCloseBreakConfirm && props.onTakeBreak ? (
+        <SatUnscheduledBreakDialog
+          open={props.breakConfirmOpen}
+          onCancel={props.onCloseBreakConfirm}
+          onTakeBreak={props.onTakeBreak}
+          returnFocusSelector='[data-sat-focus="topbar-more"]'
+        />
       ) : null}
-      {props.saveState === "saving" ? (
-        <div className="pointer-events-none fixed bottom-[calc(82px+var(--student-safe-bottom))] left-[calc(1rem+var(--student-safe-left))] z-[55] text-[13px] font-medium text-[var(--sat-text-secondary)]">
-          Saving…
-        </div>
+      {props.breakVeilOpen !== undefined && props.onReturnFromBreak ? (
+        <SatUnscheduledBreakVeil
+          open={props.breakVeilOpen}
+          remainingLabel={props.remainingLabel}
+          remainingSeconds={props.remainingSeconds}
+          onReturn={props.onReturnFromBreak}
+        />
       ) : null}
+      {/* Bluebook 5-minute warning (Phase 7): one-shot per module, live
+          remaining time. Hidden while blocked (pause veil owns attention).
+          Display-only: dismissing never touches timer or answers. */}
+      <SatTimerWarning
+        open={timerWarningVisible && !props.blocked}
+        remainingLabel={props.remainingLabel}
+        onDismiss={() => setTimerWarningVisible(false)}
+      />
+    </div>
+      <SatSaveStatus
+        state={props.saveState}
+        saveFailure={props.saveFailure}
+        onRetrySave={props.onRetrySave}
+        onTakeOver={props.onTakeOver}
+        isTakingOver={props.isTakingOver}
+      />
     </div>
     </SatContrastContext.Provider>
   );

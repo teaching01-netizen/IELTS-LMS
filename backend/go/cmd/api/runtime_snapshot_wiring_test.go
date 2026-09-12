@@ -2,31 +2,61 @@ package main
 
 import (
 	"testing"
+	"time"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"example.com/ielts-proctoring/internal/platform/config"
+	"example.com/ielts-proctoring/internal/runtime"
 )
 
-// B2 RED: BuildApp wires a snapshot cache from config — always non-nil
-// (off = present-but-unused, today's FOR UPDATE path untouched), on =
-// shared cache the V2 handlers route through.
+// WS-16: BuildApp snapshot-cache wiring - behavioral divergence (locker type
+// + shared TTL view), not a nil guard. Off must route V2 writes through
+// v2Locker (today's FOR UPDATE path); on with a pool must route through
+// snapshotLocker sharing the app cache (fresh+live TTL hit = zero SQL).
+// Load-bearing lines: main.go RuntimeSnapshots wiring +
+// RuntimeLockerFor Config.RuntimeSnapshotEnabled branch.
 func TestBuildAppRuntimeSnapshotWiring(t *testing.T) {
-	cfg := config.Load()
-	cfg.RuntimeSnapshotEnabled = false
-	app := BuildApp(cfg, nil)
-	if app.RuntimeSnapshots == nil {
-		t.Fatalf("BuildApp must always set RuntimeSnapshots (disabled cache, never nil)")
-	}
-	if app.RuntimeSnapshots.Len() != 0 {
-		t.Fatalf("fresh snapshot cache must be empty")
-	}
-	if app.RuntimeLockerFor() == nil {
-		t.Fatalf("RuntimeLockerFor must never return nil")
+	now := time.Now().UTC()
+	live := "live"
+	seedLive := func(c *runtime.SnapshotCache) {
+		if _, err := c.Get("sched-1", now, func() (runtime.Snapshot, error) {
+			return runtime.Snapshot{Status: runtime.StatusLive, ActiveSectionKey: &live, Revision: 1, TimingModel: "legacy_section_v1", SectionLive: true, SectionStarted: true, LoadedAt: now}, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
+	cfg := config.Load()
+	cfg.RuntimeSnapshotEnabled = false
+	off := BuildApp(cfg, nil)
+	if off.RuntimeSnapshots == nil {
+		t.Fatalf("BuildApp must always set RuntimeSnapshots (disabled cache, never nil)")
+	}
+	if _, ok := off.RuntimeLockerFor().(v2Locker); !ok {
+		t.Fatalf("snapshot-off must route through v2Locker (legacy FOR UPDATE path), got %T", off.RuntimeLockerFor())
+	}
+
+	pool, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pool.Close() }()
 	cfg2 := config.Load()
 	cfg2.RuntimeSnapshotEnabled = true
-	app2 := BuildApp(cfg2, nil)
-	if app2.RuntimeSnapshots == nil {
+	on := BuildApp(cfg2, pool)
+	if on.RuntimeSnapshots == nil {
 		t.Fatalf("BuildApp must set RuntimeSnapshots when enabled")
+	}
+	locker, ok := on.RuntimeLockerFor().(snapshotLocker)
+	if !ok {
+		t.Fatalf("snapshot-on with pool must route through snapshotLocker, got %T", on.RuntimeLockerFor())
+	}
+	if locker.cache != on.RuntimeSnapshots {
+		t.Fatalf("snapshotLocker must share the app RuntimeSnapshots cache (one TTL view)")
+	}
+	seedLive(on.RuntimeSnapshots)
+	if got := on.RuntimeSnapshots.Len(); got != 1 {
+		t.Fatalf("seeded snapshot cache must hold 1 entry, got %d", got)
 	}
 }

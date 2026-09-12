@@ -19,12 +19,12 @@ func RollupKey(scheduleID string) string { return "proctor-rollup:" + scheduleID
 // counts + freshness. Staleness is bounded by the worker refresh cadence
 // and displayed as UpdatedAgoSecs ("updated Xs ago").
 type ProctorRollup struct {
-	ScheduleID   string         `json:"scheduleId"`
-	ByStatus     map[string]int64 `json:"byStatus"`
-	Total        int64          `json:"total"`
-	Revision     int64          `json:"revision"`
-	UpdatedAt    time.Time      `json:"updatedAt"`
-	UpdatedAgoSecs int64        `json:"updatedAgoSecs"`
+	ScheduleID     string           `json:"scheduleId"`
+	ByStatus       map[string]int64 `json:"byStatus"`
+	Total          int64            `json:"total"`
+	Revision       int64            `json:"revision"`
+	UpdatedAt      time.Time        `json:"updatedAt"`
+	UpdatedAgoSecs int64            `json:"updatedAgoSecs"`
 }
 
 // LiveScheduleIDs lists live-schedule ids for the D4 worker refresh (one

@@ -75,17 +75,15 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
     expect(openThenTerminal).toEqual(terminalFirst);
   });
 
-  it('CALCULATOR_OPEN vs POLICY_REVOKED converges via normalization', () => {
-    const opened = run([{ type: 'CALCULATOR_OPENED' }], mathCtx());
-    expect(opened.tools.calculator).toBe('open');
-    // Policy revocation normalizes centrally; the tool cannot linger open.
-    const normalized = normalizeSatInteractionState(opened, rwCtx());
-    expect(normalized.tools.calculator).toBe('closed');
-    assertSatInteractionInvariants(normalized, rwCtx());
-    // Opening directly under a revoked policy is refused.
-    const refused = run([{ type: 'CALCULATOR_OPENED' }], rwCtx());
-    expect(refused.tools.calculator).toBe('closed');
-    expect(normalized.tools.calculator).toBe(refused.tools.calculator);
+  // Tool events are runner-owned strict no-ops here: both orders converge
+  // trivially on the identical state reference.
+  it('CALCULATOR_OPEN vs POLICY_REVOKED converges as strict no-ops', () => {
+    const base = createSatInteractionState();
+    const opened = satInteractionReducer(base, { type: 'CALCULATOR_OPENED' }, mathCtx());
+    expect(opened).toBe(base);
+    const refused = satInteractionReducer(base, { type: 'CALCULATOR_OPENED' }, rwCtx());
+    expect(refused).toBe(base);
+    assertSatInteractionInvariants(normalizeSatInteractionState(opened, rwCtx()), rwCtx());
   });
 
   it('NOTE_EDITOR_OPEN vs MODULE_TRANSITION converges: scope change resolves the editor', () => {
@@ -121,7 +119,7 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
   it('torture sequence never violates an invariant', () => {
     const torture: SatInteractionEvent[] = [
       { type: 'NAVIGATOR_OPENED', returnFocus: { type: 'footer', control: 'navigator' } },
-      { type: 'CALCULATOR_OPENED' },
+      { type: 'CALCULATOR_TOGGLED' },
       { type: 'ESCAPE_HANDLED' },
       { type: 'ANNOTATION_MODE_CHANGED', mode: 'highlight' },
       { type: 'TEXT_SELECTION_STARTED' },

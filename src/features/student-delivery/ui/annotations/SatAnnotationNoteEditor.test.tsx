@@ -8,7 +8,7 @@ it('flushes pending note persistence on blur and close', () => {
   const onClose = vi.fn();
   render(<SatAnnotationNoteEditor annotation={createSatTextAnnotation({ kind: 'highlight', nodeId: 'p', startOffset: 0, endOffset: 4, exact: 'tree' })}
     onChange={vi.fn()} onClose={onClose} onDelete={vi.fn()} onFlush={onFlush} />);
-  fireEvent.blur(screen.getByRole('textbox', { name: 'Note for selected text' }));
+  fireEvent.blur(screen.getByRole('textbox', { name: 'Your note' }));
   expect(onFlush).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole('button', { name: 'Done' }));
   expect(onFlush).toHaveBeenCalledTimes(2);

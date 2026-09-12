@@ -996,6 +996,33 @@ export function ensureClientSessionIdForAttempt(attempt: StudentAttempt): string
   return ensureClientSessionId(attempt.scheduleId, attempt.studentKey, preferredClientSessionId);
 }
 
+/**
+ * Shared writer-identity owner for schedule-scoped callers (e.g. SAT delivery)
+ * that know (scheduleId, studentKey) but do not hold a full StudentAttempt.
+ * Thin wrapper over the same storage key + preferred-id seeding as
+ * ensureClientSessionIdForAttempt, so both paths resolve one identity.
+ *
+ * Exam-day re-audit defect 3: every writer path (heartbeat, credential
+ * refresh, V2 saves, takeover) must derive the SAME studentKey for one
+ * attempt, or the bearer-bound session check fences the odd one out.
+ * The canonical SAT derivation is `student-${scheduleId}-${candidateId}`
+ * where candidateId is the attempt's candidate identifier (NOT the attempt
+ * id). Callers that only know the attempt id must resolve the StudentAttempt
+ * first — never invent a key.
+ */
+export function ensureClientSessionIdForStudentKey(
+  scheduleId: string,
+  studentKey: string,
+  preferredClientSessionId: string | null = null,
+): string {
+  return ensureClientSessionId(scheduleId, studentKey, preferredClientSessionId);
+}
+
+/** Canonical SAT writer-key derivation (single owner — defect 3). */
+export function satWriterStudentKey(scheduleId: string, candidateId: string): string {
+  return `student-${scheduleId}-${candidateId}`;
+}
+
 /** Persist a newly generated browser session identity after an explicit lease takeover. */
 export function rotateClientSessionIdForAttempt(attempt: StudentAttempt): string {
   return ensureClientSessionId(attempt.scheduleId, attempt.studentKey, null, true);

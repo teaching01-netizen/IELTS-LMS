@@ -54,6 +54,12 @@ type SaveResponsesCommand struct {
 	LeaseEpoch   uint64
 	ControlEpoch uint64
 	Commands     []ResponseCommand
+	// BearerTokenID threads the edge-resolved token id into the service
+	// call path (smallest diff: optional field, no signature change).
+	// When non-empty it must equal the crypto-resolved claims.TokenID or
+	// the call fails closed 401; when empty the crypto-resolved TokenID
+	// is used (older call paths keep working).
+	BearerTokenID string
 }
 
 // Ack is the per-command acknowledgement.
@@ -115,6 +121,12 @@ type SubmitCommand struct {
 	IdempotencyPayload   string
 	ActorKind            string
 	ActorID              string
+	// BearerTokenID threads the edge-resolved token id into the service
+	// call path (smallest diff: optional field, no signature change).
+	// When non-empty it must equal the crypto-resolved claims.TokenID or
+	// the call fails closed 401; when empty the crypto-resolved TokenID
+	// is used (older call paths keep working).
+	BearerTokenID string
 }
 
 // SubmitResult carries receipt + digest.

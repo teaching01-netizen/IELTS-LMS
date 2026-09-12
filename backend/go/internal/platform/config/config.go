@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -250,7 +251,7 @@ func wsCapFromEnv(key string, def int) int {
 type OutboxClaimMode string
 
 const (
-	OutboxClaimUpdate    OutboxClaimMode = "update"
+	OutboxClaimUpdate     OutboxClaimMode = "update"
 	OutboxClaimSkipLocked OutboxClaimMode = "skiplocked"
 )
 
@@ -362,9 +363,15 @@ type Config struct {
 	MasterKeyUsername         string
 	MasterKeyPassword         string
 	PrometheusEnabled         bool
-	OtelEndpoint              string
-	FrontendDistDir           string
-	ObjectStorageLocalRoot    string
+	// MetricsPublic gates /metrics exposure (WS-10a): false (default) =
+	// private, bearer-token required; true = public (no auth). Fail closed:
+	// an empty MetricsToken with MetricsPublic=false denies every scrape.
+	MetricsPublic bool
+	// MetricsToken is the bearer secret for private /metrics scrapes.
+	// Never logged; compared in constant time at the edge.
+	MetricsToken           string
+	FrontendDistDir        string
+	ObjectStorageLocalRoot string
 
 	AuthSecret             string
 	SessionCookieName      string
@@ -449,7 +456,11 @@ type Config struct {
 	// AttemptVerify selects the attempt-bearer verification posture
 	// (plan A3): strict = HMAC + expiry + attempt_sessions DB binding
 	// (ship default, behavior-preserving); stateless = HMAC + expiry only
-	// (zero SQL; binding enforced against the locked attempt row + URL).
+	// (zero SQL) on the WRITE fast-path edge verify ONLY. Reads
+	// (v2 snapshot, runtime poll, delivery bootstrap) always take the
+	// session-table touch via auth.VerifyAttemptRead in both modes, and
+	// writes keep the in-tx session/lease fence — stateless never skips
+	// the session-table touch on reads.
 	AttemptVerify AttemptVerifyMode
 
 	// RowFirstWrites gates the plan-B3 row-first write path. Off (default) =
@@ -566,6 +577,7 @@ func claimPartitionsFromEnv() int {
 
 // entryRateFromEnv reads a D3 bucket rate; empty/unparseable/non-positive
 // values clamp to the plan default (never unbounded, never deny-all).
+// Unparseable values log loudly (same silent-coerce ratchet as getenvInt).
 func entryRateFromEnv(key string, def float64) float64 {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
@@ -573,6 +585,7 @@ func entryRateFromEnv(key string, def float64) float64 {
 	}
 	n, err := strconv.ParseFloat(v, 64)
 	if err != nil || n <= 0 {
+		log.Printf("config: %s=%q invalid (must be a positive number); using default %v", key, v, def)
 		return def
 	}
 	return n
@@ -585,6 +598,9 @@ func getenvInt(key string, def int) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
+		// Loud-not-silent: a typo'd budget must self-report in the deploy
+		// log instead of booting with a wrong default invisibly.
+		log.Printf("config: %s=%q invalid (must be a base-10 integer); using default %d", key, v, def)
 		return def
 	}
 	return n
@@ -597,6 +613,7 @@ func getenvInt64(key string, def int64) int64 {
 	}
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil {
+		log.Printf("config: %s=%q invalid (must be a base-10 integer); using default %d", key, v, def)
 		return def
 	}
 	return n
@@ -612,6 +629,7 @@ func getenvBool(key string, def bool) bool {
 	case "0", "false", "no", "off":
 		return false
 	default:
+		log.Printf("config: %s=%q invalid (must be a boolean); using default %v", key, os.Getenv(key), def)
 		return def
 	}
 }
@@ -654,11 +672,16 @@ func Load() Config {
 		// master_key_*: username defaults to "master" like Rust; blank
 		// username/password env values fall back to the defaults so an
 		// explicitly empty password never silently locks the key out).
-		MasterKeyEnabled:       getenvBool("MASTER_KEY_ENABLED", false),
-		MasterKeyUsername:      getenv("MASTER_KEY_USERNAME", "master"),
-		MasterKeyPassword:      os.Getenv("MASTER_KEY_PASSWORD"),
-		PrometheusEnabled:      getenvBool("PROMETHEUS_ENABLED", false),
-		OtelEndpoint:           os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		MasterKeyEnabled:  getenvBool("MASTER_KEY_ENABLED", false),
+		MasterKeyUsername: getenv("MASTER_KEY_USERNAME", "master"),
+		MasterKeyPassword: os.Getenv("MASTER_KEY_PASSWORD"),
+		PrometheusEnabled: getenvBool("PROMETHEUS_ENABLED", false),
+		// NOTE (WS-10a): the OTEL_EXPORTER_OTLP_ENDPOINT surface was dead —
+		// no OTel SDK is vendored (trace is X-Trace-Id echo only), so the
+		// endpoint string was parsed and never consumed. Removed; use the
+		// X-Trace-Id echo + access-log trace_id field for correlation.
+		MetricsPublic:          getenvBool("METRICS_PUBLIC", false),
+		MetricsToken:           os.Getenv("METRICS_TOKEN"),
 		FrontendDistDir:        os.Getenv("FRONTEND_DIST_DIR"),
 		ObjectStorageLocalRoot: getenv("OBJECT_STORAGE_LOCAL_ROOT", ".data/object-store"),
 
@@ -681,21 +704,21 @@ func Load() Config {
 		WorkerMaintenanceIntervalSecs: getenvInt("WORKER_MAINTENANCE_INTERVAL_SECS", 300),
 		LiveUpdatePollIntervalMs:      getenvInt("LIVE_UPDATE_POLL_INTERVAL_MS", 1000),
 		OutboxBatchSize:               getenvInt("OUTBOX_BATCH_SIZE", 100),
-		LiveBus:                     parseLiveBusMode(os.Getenv("LIVE_BUS")),
-		StudentWS:                   parseStudentWSMode(os.Getenv("STUDENT_WS")),
-		ShedMode:                    parseShedMode(os.Getenv("SHED_MODE")),
-		WSAdmission:                 parseWSAdmissionMode(os.Getenv("WS_ADMISSION")),
-		WSCapTotal:                  wsCapFromEnv("WS_CAP_TOTAL", DefaultWSCapTotal),
-		WSCapUser:                   wsCapFromEnv("WS_CAP_USER", DefaultWSCapUser),
-		WSCapSchedule:               wsCapFromEnv("WS_CAP_SCHEDULE", DefaultWSCapSchedule),
-		LiveBusSink:                 parseLiveBusSink(os.Getenv("LIVE_BUS_SINK")),
-		RollupEnabled:               getenvBool("ROLLUP", false),
-		PresenceMode:                parsePresenceMode(os.Getenv("PRESENCE_MODE")),
-		OutboxExecOnly:              getenvBool("OUTBOX_EXEC_ONLY", false),
-		DBPoolMaxAPI:                poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_API", 0)),
-		DBPoolMaxWorker:             poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_WORKER", 0)),
-		WorkerClaimPartitions:       claimPartitionsFromEnv(),
-		OutboxClaimMode:             parseOutboxClaimMode(os.Getenv("OUTBOX_CLAIM_MODE")),
+		LiveBus:                       parseLiveBusMode(os.Getenv("LIVE_BUS")),
+		StudentWS:                     parseStudentWSMode(os.Getenv("STUDENT_WS")),
+		ShedMode:                      parseShedMode(os.Getenv("SHED_MODE")),
+		WSAdmission:                   parseWSAdmissionMode(os.Getenv("WS_ADMISSION")),
+		WSCapTotal:                    wsCapFromEnv("WS_CAP_TOTAL", DefaultWSCapTotal),
+		WSCapUser:                     wsCapFromEnv("WS_CAP_USER", DefaultWSCapUser),
+		WSCapSchedule:                 wsCapFromEnv("WS_CAP_SCHEDULE", DefaultWSCapSchedule),
+		LiveBusSink:                   parseLiveBusSink(os.Getenv("LIVE_BUS_SINK")),
+		RollupEnabled:                 getenvBool("ROLLUP", false),
+		PresenceMode:                  parsePresenceMode(os.Getenv("PRESENCE_MODE")),
+		OutboxExecOnly:                getenvBool("OUTBOX_EXEC_ONLY", false),
+		DBPoolMaxAPI:                  poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_API", 0)),
+		DBPoolMaxWorker:               poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_WORKER", 0)),
+		WorkerClaimPartitions:         claimPartitionsFromEnv(),
+		OutboxClaimMode:               parseOutboxClaimMode(os.Getenv("OUTBOX_CLAIM_MODE")),
 		OutboxMaxAttempts:             getenvInt("OUTBOX_MAX_ATTEMPTS", 10),
 		GradingProjectionIntervalSecs: getenvInt("GRADING_PROJECTION_INTERVAL_SECS", 5),
 
@@ -714,11 +737,11 @@ func Load() Config {
 
 		AttemptVerify: parseAttemptVerify(os.Getenv("ATTEMPT_VERIFY")),
 
-		RowFirstWrites:         getenvBool("ROW_FIRST_WRITES", false),
-		EntryGateEnabled:       getenvBool("ENTRY_GATE", false),
-		EntryPerSec:            entryRateFromEnv("ENTRY_PER_SEC_PER_SCHEDULE", 500),
-		EntryBurst:             entryRateFromEnv("ENTRY_BURST", 2000),
-		VersionCacheEnabled:    getenvBool("VERSION_CACHE", false),
+		RowFirstWrites:      getenvBool("ROW_FIRST_WRITES", false),
+		EntryGateEnabled:    getenvBool("ENTRY_GATE", false),
+		EntryPerSec:         entryRateFromEnv("ENTRY_PER_SEC_PER_SCHEDULE", 500),
+		EntryBurst:          entryRateFromEnv("ENTRY_BURST", 2000),
+		VersionCacheEnabled: getenvBool("VERSION_CACHE", false),
 
 		RuntimeSnapshotEnabled: getenvBool("RUNTIME_SNAPSHOT", false),
 

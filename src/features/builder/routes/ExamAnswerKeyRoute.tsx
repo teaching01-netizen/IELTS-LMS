@@ -198,6 +198,8 @@ export function ExamAnswerKeyRoute() {
         return 'All changes saved';
       case 'error':
         return 'Save failed';
+      case 'conflict':
+        return 'Changed elsewhere — reload before saving';
     }
   })();
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { getDeviceFingerprint } from '../../../utils/deviceFingerprinting';
+import { emitStudentObservabilityMetric } from '../../../utils/studentObservability';
 import { assessmentDeliveryApi } from '../api/assessmentDeliveryApi';
 import { shouldSkipHeartbeat } from '../heartbeatCoalesce';
 
@@ -44,7 +45,13 @@ export function useSatIntegrityControl({
             nextHeartbeatSecsRef.current = Math.floor(window);
           }
         })
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          // Exam-day P1: heartbeat failures are observable, never silent.
+          // Fire-and-forget posture is kept (no UI block), but the failure
+          // is logged + metered so session-identity regressions surface.
+          emitStudentObservabilityMetric('sat_heartbeat_error', { scheduleId, attemptId, endpoint: 'sat-heartbeat' });
+          console.warn('[sat] heartbeat failed', { scheduleId, attemptId, eventType, error });
+        });
     };
     send('heartbeat');
     const interval = window.setInterval(() => send('heartbeat'), 15_000);

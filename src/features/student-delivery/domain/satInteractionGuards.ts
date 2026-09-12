@@ -41,6 +41,15 @@ export const satInteractionCan = {
       inModule(ctx) && unblocked(ctx) && !editorOpen(state) && ctx.toolPolicy.notes
     );
   },
+  /**
+   * More utility center: reachable in-module even while blocked so Help and
+   * Keyboard Shortcuts stay available read-only during a proctor pause.
+   * Terminated attempts refuse. Row-level guards disable Line Reader and
+   * Unscheduled Break while blocked.
+   */
+  openMoreMenu(state: SatInteractionState, ctx: SatInteractionContext): boolean {
+    return inModule(ctx) && !ctx.terminated && !editorOpen(state);
+  },
   openCalculator(_state: SatInteractionState, ctx: SatInteractionContext): boolean {
     return inModule(ctx) && unblocked(ctx) && ctx.toolPolicy.calculator;
   },

@@ -10,6 +10,11 @@ import { DropdownMenu } from 'radix-ui';
  * focus, Escape/pointer-out dismissal, disabled and destructive item states.
  * Environments without window.matchMedia (jsdom, ancient engines) get a static
  * equivalent with the same DOM contract, so behavior never silently vanishes.
+ *
+ * Current-item contract: `item.current` keeps the trailing check glyph, stays
+ * clickable (no behavior change), and adds aria-current="true" in BOTH
+ * branches (Radix item + static button). Both triggers always carry
+ * aria-label={label} (compact or not) so the accessible name is branch-stable.
  */
 export type SatMenuItem = {
   id: string;
@@ -37,13 +42,13 @@ type SatMenuProps = {
 };
 
 const MENU_ELEVATION =
-  'var(--sat-menu-elevation, 0 0 0 0.5px rgba(0, 0, 0, 0.055), 0 2px 8px rgba(0, 0, 0, 0.055), 0 14px 44px rgba(0, 0, 0, 0.14))';
+  'var(--sat-staff-shadow-menu, 0 0 0 0.5px rgba(0, 0, 0, 0.055), 0 2px 8px rgba(0, 0, 0, 0.055), 0 14px 44px rgba(0, 0, 0, 0.14))';
 
 const COMPACT_TRIGGER_CLASS =
-  'flex h-10 w-10 items-center justify-center rounded-[10px] text-slate-500 hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40';
+  'flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
 
 const WORKSPACE_TRIGGER_CLASS =
-  'flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left transition-colors hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent';
+  'flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-input,12px)] px-3 text-left transition-colors hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]';
 
 function supportsNativeMenu(): boolean {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function';
@@ -53,7 +58,7 @@ function ItemFace({ item }: { item: SatMenuItem }) {
   return (
     <>
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
-      {item.current ? <Check size={13} className="shrink-0 text-au-accent" aria-hidden="true" /> : null}
+      {item.current ? <Check size={13} className="shrink-0 text-[var(--sat-staff-accent,#0071e3)]" aria-hidden="true" /> : null}
     </>
   );
 }
@@ -139,7 +144,7 @@ function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align =
             {!compact ? <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{label}</span> : null}
           </>
         )}
-        {!compact ? <ChevronDown size={14} className={`shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" /> : null}
+        {!compact ? <ChevronDown size={14} data-open={open || undefined} className="sat-menu-trigger-chevron shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)]" aria-hidden="true" /> : null}
       </button>
       {open ? (
         <div
@@ -148,19 +153,21 @@ function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align =
           role="menu"
           aria-label={label}
           tabIndex={-1}
+          data-sat-menu-animate=""
           onKeyDown={handleMenuKeyDown}
-          style={{ minWidth: width ?? 176, boxShadow: MENU_ELEVATION }}
+          style={{ minWidth: width ?? 176, boxShadow: MENU_ELEVATION, ['--sat-menu-origin' as string]: align === 'end' ? 'top right' : 'top left' }}
           className={`sat-menu sat-product absolute top-[calc(100%+6px)] z-50 ${align === 'end' ? 'right-0' : 'left-0'}`}
         >
           {items.map((item, index) => (
             <div key={item.id}>
-              {item.separatorBefore && index > 0 ? <div role="separator" className="my-1 h-px bg-au-separator" /> : null}
+              {item.separatorBefore && index > 0 ? <div role="separator" className="my-1 h-px bg-[var(--sat-staff-separator,rgba(60,60,67,0.12))]" /> : null}
               <button
                 type="button"
                 role="menuitem"
                 disabled={Boolean(item.disabled)}
                 data-destructive={item.destructive || undefined}
                 data-current={item.current || undefined}
+                aria-current={item.current ? 'true' : undefined}
                 className="sat-menu-item"
                 onClick={() => {
                   closeMenu(true);
@@ -183,14 +190,14 @@ export function SatMenu(props: SatMenuProps) {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button type="button" aria-label={compact ? label : undefined} className={compact ? COMPACT_TRIGGER_CLASS : WORKSPACE_TRIGGER_CLASS}>
+        <button type="button" aria-label={label} className={`group ${compact ? COMPACT_TRIGGER_CLASS : WORKSPACE_TRIGGER_CLASS}`}>
           {triggerContent ?? (
             <>
               {Icon ? <Icon size={16} aria-hidden="true" /> : null}
               {!compact ? <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{label}</span> : null}
             </>
           )}
-          {!compact ? <ChevronDown size={14} className="shrink-0 text-slate-400 transition-transform" aria-hidden="true" /> : null}
+          {!compact ? <ChevronDown size={14} className="sat-menu-trigger-chevron shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)] group-data-[state=open]:rotate-180" aria-hidden="true" /> : null}
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
@@ -198,16 +205,18 @@ export function SatMenu(props: SatMenuProps) {
           align={align}
           sideOffset={6}
           aria-label={label}
-          style={{ minWidth: width ?? 176, boxShadow: MENU_ELEVATION }}
+          data-sat-menu-animate=""
+          style={{ minWidth: width ?? 176, boxShadow: MENU_ELEVATION, ['--sat-menu-origin' as string]: align === 'end' ? 'top right' : 'top left' }}
           className="sat-menu sat-product z-[110]"
         >
           {items.map((item, index) => (
             <div key={item.id}>
-              {item.separatorBefore && index > 0 ? <DropdownMenu.Separator className="my-1 h-px bg-au-separator" /> : null}
+              {item.separatorBefore && index > 0 ? <DropdownMenu.Separator className="my-1 h-px bg-[var(--sat-staff-separator,rgba(60,60,67,0.12))]" /> : null}
               <DropdownMenu.Item
                 disabled={Boolean(item.disabled)}
                 data-destructive={item.destructive || undefined}
                 data-current={item.current || undefined}
+                aria-current={item.current ? 'true' : undefined}
                 className="sat-menu-item"
                 onSelect={() => {
                   item.onSelect();

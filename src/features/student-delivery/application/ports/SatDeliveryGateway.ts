@@ -9,7 +9,7 @@ import type {
 } from '../../contracts/assessmentDelivery';
 
 export interface SatDeliveryGateway {
-  bootstrap(scheduleId: string, attemptId: string): Promise<AssessmentDeliveryBootstrap>;
+  bootstrap(scheduleId: string, attemptId: string, ifNoneMatch?: string | null): Promise<AssessmentDeliveryBootstrap>;
   saveResponse(
     scheduleId: string,
     attemptId: string,

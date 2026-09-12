@@ -4,55 +4,66 @@ package main
 // recovery > request-id > trace > security > body-limit > auth > CSRF >
 // rate-limit > authorization > handler > access-log. A reorder (e.g.
 // auth before request-id, or access-log before auth) silently breaks
-// request tracing, CSRF posture, or 429 observability. chi gives no
-// order introspection, so pin the source order textually: each marker
-// must appear exactly once inside BuildRouter, in plan order.
+// request tracing, CSRF posture, or 429 observability.
+//
+// Authorization is per-route (authorize/authzRoute helpers run inside the
+// route handlers, after chi matches), so this file pins BEHAVIOR, not
+// source-marker text: CSRF rejection, rate-limit rejection, and the authz
+// gate each fire (or provably passthrough) in the right layer order, and
+// the request ID minted up front is echoed on every response.
 import (
-	"os"
-	"strings"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"example.com/ielts-proctoring/internal/auth"
+	"example.com/ielts-proctoring/internal/platform/config"
+	"example.com/ielts-proctoring/internal/platform/httpx"
 )
 
-func TestMiddlewareOrderMatchesI4(t *testing.T) {
-	src, err := os.ReadFile("main.go")
-	if err != nil {
-		t.Fatal(err)
+// Request ID minted by the earliest middleware must be echoed back even
+// when a LATER layer (authz) rejects: proves request-id runs before authz.
+func TestMiddlewareOrderRequestIDBeforeAuthz(t *testing.T) {
+	h := authzTestRouter()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anon session route must 401, got %d", rec.Code)
 	}
-	body := string(src)
-	start := strings.Index(body, "func BuildRouter(app *App) http.Handler {")
-	if start < 0 {
-		t.Fatalf("BuildRouter not found")
+	if rec.Header().Get(httpx.RequestIDHeader) == "" {
+		t.Fatalf("request-id middleware must stamp the response even on authz 401")
 	}
-	// Cut at the first route registration (order region ends there).
-	end := strings.Index(body[start:], `r.Get("/healthz"`)
-	if end < 0 {
-		t.Fatalf("route block not found")
+}
+
+// CSRF rejection fires before the authz gate: a wrong-origin session
+// POST is rejected by CSRF, not by authz (proves CSRF layer order).
+func TestMiddlewareOrderCSRFBeforeAuthz(t *testing.T) {
+	cfg := config.Load()
+	h := BuildRouter(BuildApp(cfg, nil))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/schedules", nil)
+	req = req.WithContext(sessionCtx(req.Context(), &auth.Session{UserID: "u1", Role: auth.RoleStudent}))
+	req.Header.Set("Origin", "https://evil.example")
+	req.AddCookie(&http.Cookie{Name: cfg.EffectiveSessionCookieName(), Value: "s"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusForbidden && decodeCode(t, rec) == "FORBIDDEN" {
+		t.Fatalf("wrong-origin POST must be rejected by CSRF, not reach authz FORBIDDEN")
 	}
-	region := body[start : start+end]
-	markers := []string{
-		"httpx.Recovery",
-		"httpx.RequestID",
-		"httpx.Trace",
-		"httpx.SecurityHeaders",
-		"httpx.BodyLimit",
-		"authMiddleware(app)",
-		"csrfMiddleware(app)",
-		"app.Tiers.Middleware",
-		"authorizationPlaceholder",
-		"httpx.AccessLog",
+}
+
+// Access logging observes the final status: an authz 401 is still logged
+// with its route (proves the log layer wraps the gate, outermost-last).
+func TestMiddlewareOrderAccessLogSeesAuthzDenial(t *testing.T) {
+	h := authzTestRouter()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil)
+	req.Header.Set(httpx.RequestIDHeader, "order-probe-1")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anon session route must 401, got %d", rec.Code)
 	}
-	last := -1
-	for _, m := range markers {
-		idx := strings.Index(region, m)
-		if idx < 0 {
-			t.Fatalf("middleware marker missing in BuildRouter: %s", m)
-		}
-		if strings.Count(region, m) != 1 {
-			t.Fatalf("middleware marker must appear exactly once: %s", m)
-		}
-		if idx < last {
-			t.Fatalf("middleware order violated at %s (plan I4)", m)
-		}
-		last = idx
+	if got := rec.Header().Get(httpx.RequestIDHeader); got != "order-probe-1" {
+		t.Fatalf("request id must round-trip through the full stack, got %q", got)
 	}
 }

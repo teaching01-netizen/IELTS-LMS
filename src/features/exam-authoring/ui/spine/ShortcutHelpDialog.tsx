@@ -6,17 +6,18 @@ export interface ShortcutHelpDialogProps {
 }
 
 const ROWS: Array<{ keys: string; action: string; scope: string }> = [
-  { keys: "Ctrl/⌘ S", action: "Save now", scope: "Everywhere except dialogs and menus" },
-  { keys: "Ctrl/⌘ Enter", action: "Save & move to next question", scope: "Not inside inputs — click the button instead" },
-  { keys: "Ctrl/⌘ 1–4", action: "Set answer key A–D", scope: "Multiple-choice drafts, outside inputs" },
-  { keys: "Ctrl/⌘ D", action: "Duplicate question", scope: "Outside inputs" },
-  { keys: "Ctrl/⌘ K", action: "Jump to question", scope: "Spine: opens the palette; legacy: focuses list search" },
-  { keys: "↑ / ↓ or j / k", action: "Previous / next question", scope: "Outside inputs" },
-  { keys: "Space", action: "Toggle student preview", scope: "Outside inputs" },
-  { keys: "Esc", action: "Leave editor / clear search", scope: "Inside inputs too" },
-  { keys: "?", action: "Open this help", scope: "Outside inputs" },
+  {keys:'Ctrl/⌘ S',action:'Save now',scope:'Including editors; except dialogs and menus'},
+  {keys:'Ctrl/⌘ Shift S',action:'Open question settings',scope:'Outside text inputs and overlays'},
+  {keys:'Ctrl/⌘ Enter',action:'Save & move to next question',scope:'Outside controls'},
+  {keys:'Ctrl/⌘ 1–4',action:'Set answer key A–D',scope:'Multiple-choice drafts, outside controls'},
+  {keys:'Ctrl/⌘ D',action:'Duplicate question',scope:'Outside controls'},
+  {keys:'Ctrl/⌘ K',action:'Open command palette',scope:'Outside controls'},
+  {keys:'Alt ↑ / ↓',action:'Previous / next question',scope:'Outside controls; ↑ / ↓ or j / k also work'},
+  {keys:'Space',action:'Toggle student preview',scope:'Outside controls'},
+  {keys:'Esc',action:'Close overlay / leave editor',scope:'Inside editors too'},
+  {keys:'Ctrl/⌘ / or ?',action:'Keyboard shortcuts',scope:'Outside text inputs and overlays'},
+  {keys:'Ctrl/⌘ Z · Shift Z',action:'Undo · Redo',scope:'Inside rich-text editors'},
 ];
-
 /**
  * Shortcut cheat sheet (plan Phase 8): discoverability for the existing
  * bindings. Bindings themselves are byte-identical — this dialog only

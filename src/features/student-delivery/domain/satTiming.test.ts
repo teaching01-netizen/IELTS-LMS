@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AssessmentModuleAttemptSnapshot, AssessmentTimingSnapshot } from '../contracts/assessmentDelivery';
-import { mergeAuthoritativeTiming, snapshotRemainingSeconds } from './satTiming';
+import { mergeAuthoritativeTiming, personalModuleRemainingSeconds, snapshotRemainingSeconds } from './satTiming';
 
 const attempt: AssessmentModuleAttemptSnapshot = {
   id: 'attempt', moduleId: 'module', state: 'not_started', allocatedSeconds: 1800,
@@ -18,6 +18,44 @@ describe('SAT timing wire contracts', () => {
     const started = { ...attempt, startedAt: '2026-09-06T00:00:00Z', remainingSeconds: 90 };
     expect(snapshotRemainingSeconds(started, 1000, 6000)).toBe(85);
     expect(snapshotRemainingSeconds({ ...started, pausedAt: started.startedAt }, 1000, 6000)).toBe(90);
+  });
+
+  it('ticks the personal countdown from the server deadline between bootstraps', () => {
+    const startedAt = '2026-09-10T08:00:00.000Z';
+    const started = {
+      ...attempt,
+      startedAt,
+      remainingSeconds: 60,
+      deadlineAt: '2026-09-10T08:01:00.000Z',
+    };
+    // 10s later with zero clock skew: 50s left — no bootstrap involved.
+    expect(personalModuleRemainingSeconds(started, Date.parse(startedAt), Date.parse(startedAt) + 10_000, 0)).toBe(50);
+    // Positive skew (server ahead) shortens the display; negative lengthens it.
+    expect(personalModuleRemainingSeconds(started, Date.parse(startedAt), Date.parse(startedAt) + 10_000, 5_000)).toBe(45);
+    // Paused modules never tick, even with a deadline present.
+    expect(personalModuleRemainingSeconds({ ...started, pausedAt: startedAt }, Date.parse(startedAt), Date.parse(startedAt) + 10_000, 0)).toBe(60);
+    // No deadline falls back to snapshot math.
+    const noDeadline = { ...started, deadlineAt: null };
+    expect(personalModuleRemainingSeconds(noDeadline, 1000, 11_000, 0)).toBe(50);
+    // Expired deadlines clamp at zero instead of going negative.
+    expect(personalModuleRemainingSeconds(started, Date.parse(startedAt), Date.parse(startedAt) + 120_000, 0)).toBe(0);
+  });
+
+  it('freezes the personal countdown while the cohort stage is paused', () => {
+    // Exam-day re-audit defect 9: the authoritative section clock stops when
+    // the stage leaves live; personal must freeze with it or min() drains to
+    // a spurious auto-submit during a planned pause drill.
+    const startedAt = '2026-09-10T08:00:00.000Z';
+    const started = {
+      ...attempt,
+      startedAt,
+      remainingSeconds: 60,
+      deadlineAt: '2026-09-10T08:01:00.000Z',
+    };
+    const t0 = Date.parse(startedAt);
+    expect(personalModuleRemainingSeconds(started, t0, t0 + 10_000, 0, true)).toBe(50);
+    expect(personalModuleRemainingSeconds(started, t0, t0 + 10_000, 0, false)).toBe(60);
+    expect(personalModuleRemainingSeconds(started, t0, t0 + 10_000, 0)).toBe(50);
   });
 
   it('rejects an older cohort runtime revision', () => {

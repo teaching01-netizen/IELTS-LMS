@@ -110,13 +110,13 @@ type DashboardResult struct {
 // a branch that was never administered is not returned (the UI renders it
 // as "Not administered") rather than as a zero row.
 type SATModule struct {
-	ModuleKey      string  `json:"moduleKey"`
-	AdaptiveRole   string  `json:"adaptiveRole"`
-	RawCorrect     int64   `json:"rawCorrect"`
-	Operational    int64   `json:"operationalQuestionCount"`
-	State          string  `json:"state"`
-	IsAdministered bool    `json:"isAdministered"`
-	DisplayOrder   int     `json:"displayOrder"`
+	ModuleKey      string `json:"moduleKey"`
+	AdaptiveRole   string `json:"adaptiveRole"`
+	RawCorrect     int64  `json:"rawCorrect"`
+	Operational    int64  `json:"operationalQuestionCount"`
+	State          string `json:"state"`
+	IsAdministered bool   `json:"isAdministered"`
+	DisplayOrder   int    `json:"displayOrder"`
 }
 
 // SATQuestion is one administered SAT question with its sealed response and
@@ -785,10 +785,19 @@ func attachSATModules(sections []SATSection, modules []SATModule, byModule map[s
 // order so large adaptive exams paginate stably on the client.
 func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQuestion, error) {
 	out := []SATQuestion{}
+	// V2-first read (exam-day P0): student answers written through the V2
+	// durability transport live in attempt_responses_v2; legacy
+	// assessment_question_responses rows are the fallback for pre-V2
+	// attempts. Per question the V2 canonical payload wins when present.
+	// Read-path fence (mirrors the seal JOIN): V2 rows join on question
+	// identity AND owning module + the attempt's published version, eq.id
+	// match first; Go-side dedup keeps exactly one row per eq.id so a
+	// question_id reused across modules/versions can't project phantoms.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT s.section_key, m.module_key, m.display_order, eq.display_order,
 			eq.question_id, eq.is_pretest, ar.marked_for_review, ar.response,
-			CAST(qr.answer_definition AS CHAR)
+			CAST(qr.answer_definition AS CHAR), CAST(v.response AS CHAR), v.response IS NOT NULL,
+			CAST(v.question_id AS CHAR)
 		FROM assessment_module_attempts ma
 		JOIN assessment_modules m ON m.id = ma.module_id
 		JOIN assessment_sections s ON s.id = m.section_id
@@ -796,27 +805,53 @@ func (s *Service) satQuestions(ctx context.Context, attemptID string) ([]SATQues
 		JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id
 		LEFT JOIN assessment_question_responses ar
 			ON ar.module_attempt_id = ma.id AND ar.exam_question_id = eq.id
+		LEFT JOIN attempt_responses_v2 v
+			ON v.attempt_id = ma.attempt_id AND v.question_id IN (eq.id, eq.question_id)
+			AND v.module_id = m.id
+			AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ma.attempt_id)
 		WHERE ma.attempt_id = ?
-		ORDER BY s.display_order, m.display_order, eq.display_order
+		ORDER BY s.display_order, m.display_order, eq.display_order,
+			CASE WHEN (CAST(v.question_id AS CHAR) COLLATE utf8mb4_unicode_ci) = eq.id THEN 0 ELSE 1 END
 		LIMIT 500`, attemptID)
 	if err != nil {
 		return out, err
 	}
 	defer rows.Close()
+	seen := make(map[string]struct{})
 	for rows.Next() {
 		var sectionKey, moduleKey, questionID string
 		var moduleOrder, questionOrder int
 		var isPretest bool
 		var marked sql.NullBool
-		var response, answerDef sql.NullString
+		var response, answerDef, v2canonical sql.NullString
+		var v2present sql.NullBool
+		var vQuestionID sql.NullString
 		if err := rows.Scan(&sectionKey, &moduleKey, &moduleOrder, &questionOrder,
-			&questionID, &isPretest, &marked, &response, &answerDef); err != nil {
+			&questionID, &isPretest, &marked, &response, &answerDef, &v2canonical, &v2present, &vQuestionID); err != nil {
 			return out, err
+		}
+		if _, dup := seen[questionID]; dup {
+			// Second V2 match for the same question (eq.id +
+			// eq.question_id variants): ORDER BY placed the eq.id
+			// match first, so drop the duplicate, never double-list.
+			continue
+		}
+		seen[questionID] = struct{}{}
+		// V2 wins per question when its canonical payload is present.
+		if v2canonical.Valid && v2canonical.String != "" {
+			marked = sql.NullBool{Bool: assessscore.V2MarkedForReview(v2canonical.String), Valid: true}
+			if input, ok := assessscore.V2ResponseToScorerInput(v2canonical.String); ok {
+				response = sql.NullString{String: input, Valid: true}
+			} else {
+				// Present-but-unusable V2 payload owns the question: clear
+				// any stale legacy response so review cannot resurrect it.
+				response = sql.NullString{}
+			}
 		}
 		question := SATQuestion{
 			QuestionID: questionID, DisplayOrder: questionOrder,
 			ModuleKey: moduleKey, SectionKey: sectionKey,
-			IsPretest: isPretest,
+			IsPretest:       isPretest,
 			MarkedForReview: marked.Valid && marked.Bool,
 		}
 		if response.Valid && strings.TrimSpace(response.String) != "" {

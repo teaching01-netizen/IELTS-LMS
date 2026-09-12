@@ -44,7 +44,12 @@ func TestListQuestionsModuleNotFound(t *testing.T) {
 }
 
 // OpenShell with an existing draft shortcuts to Shell without cloning:
-// the tx only reads the locked exam row, commits, then Shell projects.
+// the tx only reads the locked exam row, commits, then the bulk Shell
+// projects (single identity JOIN + sections short-circuit for the empty
+// draft). Phase 03 keeps the single write Tx (option (a)): the FOR UPDATE on
+// the exam row serializes concurrent opens, so exactly one opener can win the
+// pointer CAS and every loser either sees the winner's draft or takes the
+// documented 409 — proven live by TestOpenShellConcurrentSingleClone.
 func TestOpenShellDraftShortcut(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -58,16 +63,15 @@ func TestOpenShellDraftShortcut(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "current_draft_version_id", "current_published_version_id"}).
 			AddRow("sat", "draft-v1", nil))
 	mock.ExpectCommit()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT provider_key, current_draft_version_id FROM exam_entities WHERE id = ?")).
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT e.provider_key, e.current_draft_version_id, v.revision")).
 		WithArgs("exam-1").
-		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "current_draft_version_id"}).
-			AddRow("sat", "draft-v1"))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id = ?")).
-		WithArgs("draft-v1", "exam-1").
-		WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(3))
+		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "current_draft_version_id", "revision"}).
+			AddRow("sat", "draft-v1", 3))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_sections WHERE exam_version_id = ?")).
 		WithArgs("draft-v1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "revision"}))
+	mock.ExpectRollback()
 	shell, err := s.OpenShell(context.Background(), "exam-1", "actor-1")
 	if err != nil {
 		t.Fatalf("OpenShell draft shortcut must succeed: %v", err)

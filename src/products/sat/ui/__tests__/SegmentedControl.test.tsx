@@ -39,4 +39,25 @@ describe('SatSegmentedControl', () => {
     fireEvent.keyDown(screen.getByRole('radio', { name: 'Upcoming' }), { key: 'ArrowLeft' });
     expect(onChange).toHaveBeenCalledWith('finished');
   });
+
+  it('renders exactly one sliding thumb on the selected segment', () => {
+    const { container } = render(<SatSegmentedControl<Bucket> label="Session status" value="live" options={options} onChange={vi.fn()} />);
+    expect(container.querySelectorAll('.sat-segmented-thumb')).toHaveLength(1);
+    expect(screen.getByRole('radio', { name: 'Live' }).querySelector('.sat-segmented-thumb')).not.toBeNull();
+    expect(screen.getByRole('radio', { name: 'Upcoming' }).querySelector('.sat-segmented-thumb')).toBeNull();
+  });
+
+  it('wraps around: ArrowLeft on the first segment selects the last value', () => {
+    const onChange = vi.fn();
+    render(<SatSegmentedControl<Bucket> label="Session status" value="upcoming" options={options} onChange={onChange} />);
+    fireEvent.keyDown(screen.getByRole('radiogroup', { name: 'Session status' }), { key: 'ArrowLeft' });
+    expect(onChange).toHaveBeenCalledWith('finished');
+  });
+
+  it('passes className through to the radiogroup (e.g. max-w-360px)', () => {
+    const { container } = render(
+      <SatSegmentedControl<Bucket> label="Session status" value="upcoming" options={options} onChange={vi.fn()} className="max-w-360px" />,
+    );
+    expect(container.querySelector('[role="radiogroup"]')?.className).toContain('max-w-360px');
+  });
 });

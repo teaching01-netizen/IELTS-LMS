@@ -317,8 +317,35 @@ func cleanup(ctx context.Context, db *sql.DB) error {
 		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
 		return err
 	}
+	// Exam-level rows whose exam_versions FKs are NO ACTION (no ON DELETE
+	// clause) and therefore survive the schedule cascade as version pins.
+	// The seed never creates these; the deletes are defensive and idempotent.
+	if _, err := txn.ExecContext(ctx, `
+		DELETE FROM sat_workbook_imports
+		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		return err
+	}
+	if _, err := txn.ExecContext(ctx, `
+		DELETE FROM assessment_access_links
+		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		return err
+	}
+	// exam_events.version_id is NO ACTION (0003), so events must go before versions.
 	if _, err := txn.ExecContext(ctx, `
 		DELETE FROM exam_events
+		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		return err
+	}
+	// exam_versions.parent_version_id is a self-FK with NO ACTION (0003 line 73,
+	// Error 1451). Detach the lineage first — mirrors the production Delete
+	// path (internal/exams/service.go line 722) — then delete the versions.
+	if _, err := txn.ExecContext(ctx, `
+		UPDATE exam_versions SET parent_version_id = NULL
+		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
+		return err
+	}
+	if _, err := txn.ExecContext(ctx, `
+		DELETE FROM exam_versions
 		WHERE exam_id IN (SELECT id FROM exam_entities WHERE slug IN (?, ?, ?, ?))`, builderSlug, builderDurabilitySlug, studentSlug, actStudentSlug); err != nil {
 		return err
 	}
@@ -461,6 +488,25 @@ func seedBuilderExam(ctx context.Context, service *exams.Service, ownerID, slug,
 	return builderFixture{examID: exam.ID, draftID: draft.ID, revision: updated.Revision, versionCount: len(versions)}, nil
 }
 
+// mintOpenLink binds an open anyone/anytime ACTIVE access link to an existing
+// seeded schedule so direct (link-less) student entry resolves. Anyone
+// audience skips the code/roster gate inside ResolveEntry (service.go:1253
+// only SelectedStudents checks code+identity); anytime+active is always live
+// per deriveStatus (service.go:396-413) and the seeded schedule window
+// (start -5m, end +3h) keeps the schedule-window gate green. Direct SQL is
+// used instead of accesslinks.Create because Create mints its own backing
+// schedule while the seed needs links bound to the EXISTING schedules.
+// Column list mirrors insertLinkTx (service.go:731-737); UNIQUE(schedule_id)
+// (0034 line 18) gives one link per schedule; FKs exam CASCADE / version
+// NO ACTION / schedule CASCADE make these rows die with the existing
+// cleanup() schedule step plus the defensive exam-scoped links delete.
+func mintOpenLink(ctx context.Context, db *sql.DB, examID, publishedVersionID, scheduleID, name, createdBy string) error {
+	if _, err := db.ExecContext(ctx, "INSERT INTO assessment_access_links (id, exam_id, published_version_id, schedule_id, name, audience_type, audience_label, access_mode, availability_type, opens_at, closes_at, lifecycle_state, created_by, revision) VALUES (?, ?, ?, ?, ?, 'anyone', NULL, 'open', 'anytime', NULL, NULL, 'active', ?, 0)", uuid.NewString(), examID, publishedVersionID, scheduleID, name, createdBy); err != nil {
+		return fmt.Errorf("mint open access link for schedule %s: %w", scheduleID, err)
+	}
+	return nil
+}
+
 type studentFixture struct {
 	examID, publishedVersionID, liveScheduleID, precheckScheduleID, proctorWorkflowScheduleID, flushScheduleID, submissionScheduleID, lifecycleScheduleID, selfPacedScheduleID string
 }
@@ -500,6 +546,9 @@ func seedStudent(ctx context.Context, db *sql.DB, examService *exams.Service, sc
 		created, createErr := scheduleService.Create(ctx, req)
 		if createErr != nil {
 			return schedules.Schedule{}, createErr
+		}
+		if err := mintOpenLink(ctx, db, exam.ID, published.ID, created.ID, "E2E open entry - "+cohortName, ownerID); err != nil {
+			return schedules.Schedule{}, err
 		}
 		if _, assignErr := db.ExecContext(ctx, `
 			INSERT INTO schedule_staff_assignments
@@ -555,6 +604,9 @@ func seedStudent(ctx context.Context, db *sql.DB, examService *exams.Service, sc
 	if err != nil {
 		return studentFixture{}, err
 	}
+	if err := mintOpenLink(ctx, db, exam.ID, published.ID, selfPaced.ID, "E2E open entry - Backend E2E Self-paced", ownerID); err != nil {
+		return studentFixture{}, err
+	}
 	return studentFixture{
 		examID: exam.ID, publishedVersionID: published.ID, liveScheduleID: live.ID,
 		precheckScheduleID:        precheck.ID,
@@ -600,6 +652,9 @@ func seedACT(ctx context.Context, db *sql.DB, examService *exams.Service, schedu
 		StartTime: start, EndTime: start.Add(3 * time.Hour), CreatedBy: ownerID,
 	})
 	if err != nil {
+		return actFixture{}, err
+	}
+	if err := mintOpenLink(ctx, db, exam.ID, published.ID, schedule.ID, "E2E open entry - ACT Science Backend E2E", ownerID); err != nil {
 		return actFixture{}, err
 	}
 	if _, err := db.ExecContext(ctx, `

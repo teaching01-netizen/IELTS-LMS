@@ -67,6 +67,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
           <button
             ref={directionsButtonRef}
             type="button"
+            data-sat-focus="topbar-directions"
             onClick={props.onToggleDirections}
             aria-expanded={props.directionsOpen}
             aria-controls={directionsId}
@@ -111,9 +112,9 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
             type="button"
             onClick={props.onToggleTimer}
             aria-label={props.timerVisible ? "Hide timer" : "Show timer"}
-            className="sat-touch-target sat-pressable mt-0.5 inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+            className="sat-touch-target sat-pressable mt-0.5 inline-flex items-center justify-center underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
           >
-            <span className="rounded-full border border-[var(--sat-text)] px-3 py-1 sat-type-metadata font-semibold text-[var(--sat-text)]">
+            <span className="sat-type-control-secondary font-semibold text-[var(--sat-text)]">
               {props.timerVisible ? "Hide" : "Show"}
             </span>
           </button>
@@ -135,6 +136,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
           {props.notesAvailable ? (
             <TopToolButton
               id={props.notesButtonId}
+              dataSatFocus="topbar-notes"
               label="Question note"
               pressed={props.notesOpen}
               disabled={props.blocked}
@@ -146,6 +148,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
           <div className="sat-popover-anchor relative shrink-0">
             <TopToolButton
               buttonRef={readingButtonRef}
+              dataSatFocus="topbar-reading"
               label="Display"
               pressed={props.readingOpen}
               disabled={props.blocked}
@@ -209,6 +212,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
 function TopToolButton({
   id,
   buttonRef,
+  dataSatFocus,
   label,
   icon,
   pressed,
@@ -218,6 +222,7 @@ function TopToolButton({
 }: {
   id?: string;
   buttonRef?: Ref<HTMLButtonElement>;
+  dataSatFocus?: string | undefined;
   label: string;
   icon: React.ReactNode;
   pressed: boolean;
@@ -229,6 +234,7 @@ function TopToolButton({
     <button
       ref={buttonRef}
       id={id}
+      data-sat-focus={dataSatFocus}
       type="button"
       onClick={onClick}
       disabled={disabled}

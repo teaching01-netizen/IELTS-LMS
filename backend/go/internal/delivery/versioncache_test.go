@@ -107,7 +107,7 @@ func TestVersionCacheHerd(t *testing.T) {
 			if _, _, err := c.Get(context.Background(), "v-shared", load); err != nil {
 				t.Error(err)
 			}
-	}()
+		}()
 	}
 	wg.Wait()
 	if calls.Load() != 1 {

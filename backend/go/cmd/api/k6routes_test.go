@@ -301,7 +301,7 @@ func TestK6PollerQueryContract(t *testing.T) {
 	}
 }
 
-// The entry-wave script posts {scheduleId, wcode, email, studentName}. 
+// The entry-wave script posts {scheduleId, wcode, email, studentName}.
 // The handler requires wcode-or-accessLink + email + studentName (400
 // otherwise) — a payload rename on either side must fail here, not on
 // exam day with 5k VUs all 400ing. scheduleId rides the JSON body (the

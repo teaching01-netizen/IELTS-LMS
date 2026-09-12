@@ -31,12 +31,16 @@ describe('useSatInteractionController (only public mutation surface)', () => {
     expect(result.current.is.navigatorOpen).toBe(false);
   });
 
-  it('toggles calculator while refusing annotation without R&W capability', () => {
+  // Tool buttons dispatch runner commands directly (activeTools is the
+  // single tool truth): the controller toggle is a refused no-op that leaves
+  // all interaction state untouched.
+  it('refuses the calculator toggle while refusing annotation without R&W capability', () => {
     const { result } = renderHook(({ ctx }: { ctx: SatInteractionContext }) => useSatInteractionController(ctx), {
       initialProps: { ctx: mathCtx() },
     });
+    const before = result.current.state;
     act(() => result.current.toggleCalculator());
-    expect(result.current.state.tools.calculator).toBe('open');
+    expect(result.current.state).toBe(before);
     expect(result.current.can.annotate).toBe(false);
     act(() => result.current.setAnnotationMode('highlight'));
     expect(result.current.state.annotation.mode).toBe('off');
@@ -51,21 +55,16 @@ describe('useSatInteractionController (only public mutation surface)', () => {
     expect(result.current.is.navigatorOpen).toBe(true);
     rerender({ ctx: { ...mathCtx(), questionId: 'q2' } });
     expect(result.current.is.navigatorOpen).toBe(false);
-    act(() => result.current.toggleCalculator());
-    expect(result.current.state.tools.calculator).toBe('open');
     rerender({ ctx: { ...mathCtx(), questionId: 'q2', terminated: true } });
-    expect(result.current.state.tools.calculator).toBe('closed');
     expect(result.current.is.terminal).toBe(true);
     expect(result.current.can.answer).toBe(false);
   });
 
-  it('normalizes revoked tools when the module policy changes', () => {
+  it('normalizes revoked annotation modes when the module policy changes', () => {
     const { result, rerender } = renderHook(
       ({ ctx }: { ctx: SatInteractionContext }) => useSatInteractionController(ctx),
       { initialProps: { ctx: mathCtx() } },
     );
-    act(() => result.current.toggleCalculator());
-    expect(result.current.state.tools.calculator).toBe('open');
     rerender({
       ctx: {
         ...mathCtx(),
@@ -74,7 +73,7 @@ describe('useSatInteractionController (only public mutation surface)', () => {
         moduleKey: 'rw-m1',
       },
     });
-    expect(result.current.state.tools.calculator).toBe('closed');
+    expect(result.current.state.annotation.mode).toBe('off');
   });
 
   it('arbitrates Escape to exactly one action: surface before mode', () => {

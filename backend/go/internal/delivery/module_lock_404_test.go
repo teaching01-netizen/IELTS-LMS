@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestModuleLockMissNamesModuleNotAttempt(t *testing.T) {

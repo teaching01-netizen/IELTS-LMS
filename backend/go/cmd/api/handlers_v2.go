@@ -41,19 +41,22 @@ type v2Resolver struct{}
 var _ attempts.QuestionResolver = v2Resolver{}
 
 func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID string) (attempts.QuestionOwner, error) {
-	const sel = `SELECT m.id, s.section_key, COALESCE(ma.state, '')` +
+	const sel = `SELECT m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key` +
 		` FROM assessment_exam_questions eq` +
 		` JOIN assessment_modules m ON m.id = eq.module_id` +
 		` JOIN assessment_sections s ON s.id = m.section_id` +
+		` JOIN exam_versions v ON v.id = s.exam_version_id` +
+		` JOIN exam_entities e ON e.id = v.exam_id` +
 		` LEFT JOIN assessment_module_attempts ma ON ma.module_id = m.id AND ma.attempt_id = ?` +
 		` WHERE (eq.id = ? OR eq.question_id = ?)` +
 		` AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ?)` +
 		` ORDER BY CASE WHEN eq.id = ? THEN 0 ELSE 1 END LIMIT 1`
 	var owner attempts.QuestionOwner
 	var state string
-	err := q.QueryRowContext(ctx, sel, attemptID, questionID, questionID, attemptID, questionID).Scan(&owner.ModuleID, &owner.SectionKey, &state)
+	var providerKey sql.NullString
+	err := q.QueryRowContext(ctx, sel, attemptID, questionID, questionID, attemptID, questionID).Scan(&owner.ModuleID, &owner.SectionKey, &state, &providerKey)
 	if err == sql.ErrNoRows {
-		owner, fallbackErr := resolveSnapshotQuestion(ctx, q, attemptID, questionID)
+		owner, fallbackErr := resolveSnapshotQuestionForProvider(ctx, q, attemptID, questionID)
 		if fallbackErr != nil {
 			return attempts.QuestionOwner{}, fallbackErr
 		}
@@ -62,17 +65,48 @@ func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID st
 	if err != nil {
 		return attempts.QuestionOwner{}, err
 	}
+	// Exam-day P1: a normalized question row without an assigned module
+	// attempt for this attempt (unassigned adaptive branch, future module)
+	// must NOT resolve as writable. Report it as unassigned so the write
+	// gate rejects with ATTEMPT_NOT_WRITABLE; snapshot-backed questions
+	// (no normalized row) still resolve active via resolveSnapshotQuestion.
 	if state == "" {
-		state = "active"
+		owner.ModuleState = "unassigned"
+		return owner, nil
 	}
 	owner.ModuleState = state
 	return owner, nil
 }
 
-// resolveSnapshotQuestion keeps V2 response durability usable for the
-// published IELTS/ACT content trees that predate the normalized assessment
-// tables. SAT authoring normally has canonical assessment rows, while legacy
-// snapshot-backed exams still need the same V2 write contract during drain.
+// resolveSnapshotQuestionForProvider keeps V2 response durability usable
+// for the published IELTS/ACT content trees that predate the normalized
+// assessment tables. SAT authoring normally has canonical assessment rows,
+// while legacy snapshot-backed exams still need the same V2 write contract
+// during drain.
+//
+// Exam-day re-audit defect 6: the snapshot path is provider-gated. A SAT
+// question id that happens to appear in a snapshot tree (stale snapshot,
+// version skew, forged branch id) must NOT resolve active through this path
+// — SAT writes require a normalized row + assigned module attempt.
+func resolveSnapshotQuestionForProvider(ctx context.Context, q tx.Tx, attemptID, questionID string) (attempts.QuestionOwner, error) {
+	if isSATAttempt(ctx, q, attemptID) {
+		return attempts.QuestionOwner{}, apperrors.New(apperrors.CodeNotFound, "Question is not part of the attempt exam.")
+	}
+	return resolveSnapshotQuestion(ctx, q, attemptID, questionID)
+}
+
+// isSATAttempt reports whether the attempt belongs to a SAT exam. Unknown
+// or unreadable provider defaults to non-SAT (legacy snapshot behavior
+// preserved) — the strict rule only ever narrows SAT writes.
+func isSATAttempt(ctx context.Context, q tx.Tx, attemptID string) bool {
+	var provider sql.NullString
+	err := q.QueryRowContext(ctx, `SELECT e.provider_key FROM student_attempts sa JOIN exam_schedules s ON s.id = sa.schedule_id JOIN exam_entities e ON e.id = s.exam_id WHERE sa.id = ?`, attemptID).Scan(&provider)
+	if err != nil || !provider.Valid {
+		return false
+	}
+	return provider.String == string(attempts.ProviderSAT)
+}
+
 func resolveSnapshotQuestion(ctx context.Context, q tx.Tx, attemptID, questionID string) (attempts.QuestionOwner, error) {
 	var raw string
 	err := q.QueryRowContext(ctx, `SELECT CAST(v.content_snapshot AS CHAR) FROM student_attempts a JOIN exam_versions v ON v.id = a.published_version_id WHERE a.id = ?`, attemptID).Scan(&raw)
@@ -547,7 +581,10 @@ func v2SnapshotHandler(app *App) http.HandlerFunc {
 		// Snapshot must bind the bearer to the server session row (revoked
 		// or rotated tokens fail closed) and to THIS attempt ID: a bare
 		// crypto.VerifyAttemptToken check would accept any valid token.
-		claims, verr := verifyAttemptBearer(app, r, bearer)
+		// Reads have no in-tx fence, so the session-bound read verify runs
+		// in BOTH verify modes (terminated-bearer and post-takeover replays
+		// render 401 even when ATTEMPT_VERIFY=stateless).
+		claims, verr := verifyAttemptReadBearer(app, r, bearer)
 		if verr != nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
@@ -641,15 +678,73 @@ func studentEntryBucket(key string) httpx.RateLimitResult {
 	return studentEntryRateLimiter.Allow(httpx.RateLimitConfig{MaxRequests: 30, Window: time.Minute}, key)
 }
 
-// isStudentEntryAccountAllowed keeps student entry free by default: any ACTIVE
-// account may check in to any exam with any non-empty access code. Only the
-// account state gates entry (disabled / locked / pending_activation stay
-// blocked); the role never does. The passwordless entry flow only ever mints
-// a student-scoped session (see studentEntryHandler), so allowing staff
-// emails here grants exam access, never staff privileges.
+// isStudentEntryAccountAllowed gates entry on account state only: any ACTIVE
+// account may check in once the invite-code gate passes (direct entry needs
+// a live selected-student code; link entry verifies via ResolveEntry).
+// Disabled / locked / pending_activation stay blocked; the role never
+// gates. The passwordless entry flow only ever mints a student-scoped
+// session (see studentEntryHandler), so allowing staff emails here grants
+// exam access, never staff privileges.
 func isStudentEntryAccountAllowed(role, state string) bool {
 	_ = role
 	return state == "active"
+}
+
+// studentEntryNotFound is the 404-collapse envelope for student entry:
+// wrong invite code, unknown schedule, and unknown/expired/paused link all
+// render identically so probes cannot distinguish them (same message as
+// the proctor live-assignment miss).
+func studentEntryNotFound() error {
+	return apperrors.New(apperrors.CodeNotFound, "Resource not found.")
+}
+
+// verifyDirectEntryCode gates direct (link-less) schedule entry behind a
+// live invite code, BEFORE any user/registration/attempt mint. The wcode
+// is verified through the existing accesslinks service: it must resolve
+// as a selected-student code on a LIVE access link for the schedule
+// (locked lifecycle + schedule-window + roster/identity gate inside
+// ResolveEntry, the same verification the link branch uses). Empty codes,
+// unknown codes, expired/paused/upcoming links, and identity mismatches
+// all collapse to 404 (see studentEntryNotFound). DB trouble fails closed
+// via MapDBError (entry is denied, never minted). No schema change and
+// no new service method: issuance reads run only through ResolveEntry
+// plus one active-link-ID lookup by schedule below.
+func verifyDirectEntryCode(ctx context.Context, app *App, scheduleID, wcode, studentName, email string) error {
+	scheduleID = strings.TrimSpace(scheduleID)
+	code := schedules.NormalizeAccessCode(wcode)
+	if code == "" || scheduleID == "" {
+		return studentEntryNotFound()
+	}
+	if app == nil || app.DB == nil || app.AccessLinks == nil {
+		return apperrors.New(apperrors.CodeServiceUnavailable, "Entry service is unavailable.")
+	}
+	rows, err := app.DB.QueryContext(ctx, `SELECT id FROM assessment_access_links WHERE schedule_id = ? AND lifecycle_state = 'active'`, scheduleID)
+	if err != nil {
+		return MapDBError(err)
+	}
+	defer rows.Close()
+	var linkIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return MapDBError(err)
+		}
+		linkIDs = append(linkIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return MapDBError(err)
+	}
+	for _, linkID := range linkIDs {
+		resolved, err := app.AccessLinks.ResolveEntry(ctx, linkID, code, studentName, email)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(resolved.ScheduleID) != scheduleID {
+			continue
+		}
+		return nil
+	}
+	return studentEntryNotFound()
 }
 
 func studentEntryHandler(app *App) http.HandlerFunc {
@@ -682,10 +777,12 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, verr)
 			return
 		}
-		// Direct schedule entry uses the non-empty Wcode as its access
-		// credential. Link-backed entry has its own link token/access-link
-		// validation path; retaining this direct route is required for the
-		// existing `/student/:scheduleId` check-in flow.
+		// Direct schedule entry is closed-by-default: the Wcode must be a
+		// live selected-student invite code for the schedule (verified
+		// pre-mint below via verifyDirectEntryCode). Link-backed entry
+		// verifies via ResolveEntry above (the ONLY open-entry path).
+		// Retaining the direct route is required for the existing
+		// `/student/:scheduleId` check-in flow.
 		scheduleID := strings.TrimSpace(body.ScheduleID)
 		linkID := strings.TrimSpace(body.AccessLinkID)
 		var linkMode string
@@ -696,7 +793,12 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			}
 			resolved, err := app.AccessLinks.ResolveEntry(r.Context(), linkID, body.Wcode, body.StudentName, body.Email)
 			if err != nil {
-				httpx.WriteError(w, r, err)
+				// 404-collapse: wrong code, unknown/expired/paused link,
+				// and identity mismatch render identically (never
+				// propagate the underlying reason — it oracles link
+				// roster state). The pre-existing ModeStudentCode
+				// empty-code 400 below stays (client-visible shape).
+				httpx.WriteError(w, r, studentEntryNotFound())
 				return
 			}
 			scheduleID = resolved.ScheduleID
@@ -735,6 +837,21 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 				return
 			}
 		}
+		// Invite-code gate (closed-by-default): direct (link-less) entry
+		// must present a live selected-student code for this schedule
+		// BEFORE the email user lookup/mint and BEFORE
+		// CreateRegistration. Empty/unknown/identity-mismatched codes
+		// 404-collapse, so zero rows are written (no user, no
+		// registration, no attempt). Link-backed entry was already
+		// verified above via ResolveEntry (the ONLY open-entry path:
+		// ModeOpen links admit without a per-student code, gated by
+		// link lifecycle/window).
+		if linkID == "" {
+			if verr := verifyDirectEntryCode(r.Context(), app, scheduleID, body.Wcode, body.StudentName, body.Email); verr != nil {
+				httpx.WriteError(w, r, verr)
+				return
+			}
+		}
 		// Case-insensitive email lookup + normalization (mirrors login's
 		// TrimSpace+ToLower): without it `ALICE@x` and `alice@x` mint
 		// duplicate user rows and the second INSERT 500s.
@@ -764,9 +881,18 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 		}
 		wcode := schedules.NormalizeAccessCode(body.Wcode)
 		if wcode == "" {
+			if linkID == "" {
+				// Closed-by-default: empty codes on direct entry never
+				// mint. Unreachable in practice (the presence check
+				// 400s and verifyDirectEntryCode 404-collapses
+				// first) — fail closed, never synthesize a key.
+				httpx.WriteError(w, r, studentEntryNotFound())
+				return
+			}
 			// Open links still need a stable registration key so retries for the
 			// same browser/user replay the existing attempt instead of minting a
-			// second registration.
+			// second registration. Reachable only via the ResolveEntry-verified
+			// link branch (ModeOpen links admit without a per-student code).
 			wcode = "OPEN-" + strings.ToUpper(strings.ReplaceAll(userID, "-", ""))
 		}
 		reg, err := app.Schedules.CreateRegistration(r.Context(), scheduleID, schedules.RegistrationRequest{Wcode: wcode, Email: email, StudentName: body.StudentName, Nickname: body.Nickname, IELTSCourse: body.IELTSCourse, UserID: userID})

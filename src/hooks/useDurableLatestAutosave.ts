@@ -2,7 +2,42 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createLatestOnlyAsyncRunner, type LatestOnlyAsyncRunner } from "../utils/latestOnlyAsync";
 import { clearDurableDraft, loadDurableDraft, saveDurableDraft } from "../utils/durableDraftStore";
 
-export type DurableAutosaveStatus = "unsaved" | "saving" | "saved" | "error";
+export type DurableAutosaveStatus = "unsaved" | "saving" | "saved" | "error" | "conflict";
+
+/**
+ * Conflict detector: the server advanced while this client was editing
+ * (another author saved, or a stale import commit/import raced us). Callers
+ * map 409/CONFLICT/version-collision errors through this so the hook can
+ * enter the dedicated conflict state instead of the generic error state.
+ */
+export function isRevisionConflictError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const withCode = error as Error & {
+      code?: unknown;
+      status?: unknown;
+      statusCode?: unknown;
+      backendCode?: unknown;
+    };
+    const codes = [withCode.code, withCode.backendCode]
+      .filter((code): code is string => typeof code === "string")
+      .map((code) => code.toUpperCase());
+    if (
+      codes.includes("CONFLICT") ||
+      codes.includes("VERSION_COLLISION") ||
+      codes.includes("CONTROL_EPOCH_STALE")
+    ) {
+      return true;
+    }
+    const statuses = [withCode.status, withCode.statusCode].filter(
+      (status): status is number => typeof status === "number",
+    );
+    if (statuses.includes(409) || statuses.includes(412)) return true;
+    return /revision|stale|conflict|changed elsewhere|changed while|409|412/i.test(
+      error.message,
+    );
+  }
+  return false;
+}
 
 export interface DurableAutosaveFlushResult {
   ok: boolean;
@@ -82,7 +117,11 @@ export function useDurableLatestAutosave<T>(
       } catch (error) {
         if (item.requestId === latestRequestIdRef.current) {
           const resolved = asError(error);
-          setStatus("error");
+          // A 409/version conflict is not a transient failure: the server
+          // advanced, so the local draft is preserved and the UI enters the
+          // dedicated conflict state with reload guidance (never auto-retry
+          // the stale payload, which would loop on the same conflict).
+          setStatus(isRevisionConflictError(error) ? "conflict" : "error");
           onErrorRef.current?.(resolved);
         }
         throw error;

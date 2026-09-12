@@ -30,25 +30,31 @@ func TestRecordHeartbeatMemoryEmitsOneTouch(t *testing.T) {
 	defer db.Close()
 	svc := NewService(db, nil).SetPresence(NewPresenceMap(90 * time.Second))
 	ctx := context.Background()
-	beat := func(mut string) {
+	beat := func(mut string) bool {
 		mock.ExpectQuery("SELECT schedule_id FROM student_attempts").
 			WithArgs("att-1").
 			WillReturnRows(sqlmock.NewRows([]string{"schedule_id"}).AddRow("sched-1"))
 		mock.ExpectQuery("FROM student_attempts WHERE id").
 			WithArgs("att-1", "sched-1").
 			WillReturnRows(v1AttemptRows("att-1", "sched-1"))
-		if _, err := svc.RecordHeartbeatMemory(ctx, HeartbeatRequest{
+		_, deduped, err := svc.RecordHeartbeatMemory(ctx, HeartbeatRequest{
 			AttemptID: "att-1", ScheduleID: "sched-1", ClientSessionID: "sess-a",
 			MutationID: mut, EventType: "heartbeat",
-		}); err != nil {
+		})
+		if err != nil {
 			t.Fatalf("beat %s: %v", mut, err)
 		}
+		return deduped
 	}
-	beat("mut-1")
+	if deduped := beat("mut-1"); deduped {
+		t.Fatal("new beat must not report deduped")
+	}
 	if got := telemetry.CounterValueForTest(reg, telemetry.MPresenceTouch); got != 1 {
 		t.Fatalf("new beat must count 1 touch, got %v", got)
 	}
-	beat("mut-1") // same mutation = retry, must not re-touch
+	if deduped := beat("mut-1"); !deduped { // same mutation = retry, must not re-touch
+		t.Fatal("mutation retry must report deduped=true")
+	}
 	if got := telemetry.CounterValueForTest(reg, telemetry.MPresenceTouch); got != 1 {
 		t.Fatalf("mutation retry must not re-touch, got %v", got)
 	}

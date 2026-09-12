@@ -165,8 +165,19 @@ export function addBrowserGlobalViolations(
       continue;
     }
     const content = fs.readFileSync(file, 'utf8');
+    // Quoted string literals ('navigator', "navigator") are domain
+    // vocabulary (question navigator surface, focus targets) — never the
+    // browser global. Strip literals, comments, and camelCase member tails
+    // (navigatorOpen, navigatorMenu) before matching so the pattern only
+    // sees live bare-global references.
+    const code = content
+      .replace(/(["'])(?:\\.|(?!\1).)*\1/g, '')
+      .replace(/\/\/[^\n]*/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\.navigator[A-Z]\w*/g, '.x')
+      .replace(/\bnavigator[A-Z]\w*/g, 'x');
     const globals = new Set(
-      [...content.matchAll(browserGlobalPattern)]
+      [...code.matchAll(browserGlobalPattern)]
         .map((match) => match[1])
         .filter((name): name is string => typeof name === 'string'),
     );

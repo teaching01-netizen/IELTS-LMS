@@ -333,7 +333,8 @@ test.describe("SAT student accessibility and layout", () => {
     await page.getByRole("button", { name: "Calculator" }).click();
     const calculator = page.getByRole("dialog", { name: "Calculator" });
     await expect(calculator).toHaveAttribute("data-sat-tool-presentation", "compact-sheet");
-    await expect(calculator).toHaveAttribute("aria-modal", "true");
+    // Wave A R-02 option (ii): compact tool sheets are explicitly non-modal.
+    await expect(calculator).not.toHaveAttribute("aria-modal", "true");
     await expect(calculator).not.toHaveAttribute("data-sat-tool-detent");
     await expect(calculator).not.toHaveAttribute("data-sat-tool-resizable");
     await expect(page.locator("[data-sat-resize-handle]")).toHaveCount(0);
@@ -349,7 +350,8 @@ test.describe("SAT student accessibility and layout", () => {
     await page.getByRole("button", { name: "Reference" }).click();
     const reference = page.getByRole("dialog", { name: "Reference Sheet" });
     await expect(reference).toHaveAttribute("data-sat-tool-presentation", "compact-sheet");
-    await expect(reference).toHaveAttribute("aria-modal", "true");
+    // Wave A R-02 option (ii): compact tool sheets are explicitly non-modal.
+    await expect(reference).not.toHaveAttribute("aria-modal", "true");
     await expect(reference).not.toHaveAttribute("data-sat-tool-detent");
     await expect(reference).not.toHaveAttribute("data-sat-tool-resizable");
     await page.getByRole("button", { name: "Close Reference Sheet" }).click();

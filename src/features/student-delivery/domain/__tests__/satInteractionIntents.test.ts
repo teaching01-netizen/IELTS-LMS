@@ -19,19 +19,20 @@ function mathCtx(): SatInteractionContext {
 }
 
 describe('resolveSatInteractionIntent (intent, not mutation)', () => {
-  it('refuses calculator open when policy revokes it, but always allows close', () => {
-    const rw = {
-      ...mathCtx(),
-      toolPolicy: resolveSatExamToolPolicy('reading-writing', []),
-      sectionKey: 'reading-writing' as const,
-    };
+  // Tool buttons dispatch runner commands directly (activeTools is the
+  // single tool truth), so the machine refuses tool intents in all cases —
+  // revoked or not — instead of resolving them to events.
+  it('refuses calculator and reference toggle intents unconditionally', () => {
     expect(
-      resolveSatInteractionIntent(createSatInteractionState(), rw, { type: 'CALCULATOR_TOGGLE_REQUESTED' }),
+      resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), {
+        type: 'CALCULATOR_TOGGLE_REQUESTED',
+      }),
     ).toBeNull();
-    const open = { ...createSatInteractionState(), tools: { calculator: 'open' as const, reference: 'closed' as const } };
     expect(
-      resolveSatInteractionIntent(open, rw, { type: 'CALCULATOR_TOGGLE_REQUESTED' }),
-    ).toEqual({ type: 'CALCULATOR_CLOSED' });
+      resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), {
+        type: 'REFERENCE_TOGGLE_REQUESTED',
+      }),
+    ).toBeNull();
   });
 
   it('toggles an exclusive surface closed when the same surface is requested', () => {

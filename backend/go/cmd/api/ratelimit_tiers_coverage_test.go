@@ -58,12 +58,12 @@ func routeNearTier(src []byte, pattern, tier string) bool {
 		for _, cand := range []string{"TierAuthCritical", "TierAnonAuth", "TierAuthedReads", "TierPolling", "TierHeartbeat", "TierWrites"} {
 			for j := len(window) - len(cand); j >= 0; j-- {
 				if window[j:j+len(cand)] == cand {
-				if j > lastPos {
-					lastTier, lastPos = cand, j
+					if j > lastPos {
+						lastTier, lastPos = cand, j
+					}
+					break
 				}
-				break
 			}
-		}
 		}
 		if lastTier == tier {
 			return true
@@ -91,7 +91,7 @@ func TestTierCoverageBuildRouterWiring(t *testing.T) {
 			return true
 		}
 		fun, ok := call.Fun.(*ast.Ident)
-		if !ok || fun.Name != "route" || len(call.Args) != 4 {
+		if !ok || fun.Name != "authzRoute" || len(call.Args) != 4 {
 			return true
 		}
 		method, ok1 := stringLit(call.Args[1])
@@ -114,20 +114,20 @@ func TestTierCoverageBuildRouterWiring(t *testing.T) {
 	// Spot-check: routes known to belong to special tiers must sit inside a
 	// limitTier group textually near their registration.
 	checks := map[string]string{
-		`"/session"`:                  "TierAuthCritical",
-		`"/logout"`:                   "TierAuthCritical",
-		`"/{scheduleID}/live"`:        "TierPolling",
-		`"/{scheduleID}/heartbeat"`:   "TierHeartbeat",
+		`"/session"`:                      "TierAuthCritical",
+		`"/logout"`:                       "TierAuthCritical",
+		`"/{scheduleID}/live"`:            "TierPolling",
+		`"/{scheduleID}/heartbeat"`:       "TierHeartbeat",
 		`"/{scheduleID}/mutations:batch"`: "TierWrites",
-		`"/{attemptID}/responses:batch"`: "TierWrites",
-		`"/ws/live"`:                  "TierAuthedReads",
-		`"/login"`:                    "TierAnonAuth",
-		`"/student/entry"`:            "TierAnonAuth",
+		`"/{attemptID}/responses:batch"`:  "TierWrites",
+		`"/ws/live"`:                      "TierAuthedReads",
+		`"/login"`:                        "TierAnonAuth",
+		`"/student/entry"`:                "TierAnonAuth",
 	}
 	for pattern, tier := range checks {
 		if !routeNearTier(src, pattern, tier) {
 			t.Errorf("route %s must be wired under %s", pattern, tier)
 		}
 	}
-	t.Logf("found %d route() registrations, all spot-checks evaluated", len(routes))
+	t.Logf("found %d authzRoute() registrations, all spot-checks evaluated", len(routes))
 }

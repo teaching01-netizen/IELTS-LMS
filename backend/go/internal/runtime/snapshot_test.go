@@ -101,4 +101,3 @@ func TestSnapshotCacheErrorNotCached(t *testing.T) {
 		t.Fatalf("calls = %d, want 2", calls)
 	}
 }
-

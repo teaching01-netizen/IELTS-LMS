@@ -31,11 +31,11 @@ func LookupSessionWithCache(ctx context.Context, db Querier, cache *SessionCache
 	if cache != nil {
 		if s, ok := cache.Get(tokenHash, now); ok {
 			// Hit: the cached copy already carries extended idle state.
-		// Coalesced write-behind is owned by the flusher (Phase A2 ships
-		// the read path; the periodic flusher lands with the middleware
-		// wiring in the same change). Opportunistic due-touch here keeps
-		// single-process idle deadlines advancing even before the flusher
-		// interval elapses, bounded to one UPDATE per window.
+			// Coalesced write-behind is owned by the flusher (Phase A2 ships
+			// the read path; the periodic flusher lands with the middleware
+			// wiring in the same change). Opportunistic due-touch here keeps
+			// single-process idle deadlines advancing even before the flusher
+			// interval elapses, bounded to one UPDATE per window.
 			if cache.TouchDue(tokenHash, now) {
 				newIdle := now.Add(idleTimeoutFor(s.Role, cfg))
 				if querier, ok := db.(interface {

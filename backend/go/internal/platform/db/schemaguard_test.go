@@ -13,7 +13,30 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
+func TestVerifyFailsClosedOnMissingTable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("information_schema.tables").WillReturnRows(sqlmock.NewRows([]string{"COUNT"}).AddRow(0))
+	v := &SchemaVerifier{DB: db}
+	missing, err := v.MissingTables(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != 1 || missing[0] != "authoring_operation_keys" {
+		t.Fatalf("must name the missing 0058 table, got %v", missing)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSchemaGuardListSizes(t *testing.T) {
+	if len(RequiredTables) != 1 {
+		t.Fatalf("RequiredTables must hold 1 entry (0058), got %d", len(RequiredTables))
+	}
 	if len(RequiredColumns) != 19 {
 		t.Fatalf("RequiredColumns must hold 19 entries (I6), got %d", len(RequiredColumns))
 	}
@@ -84,6 +107,9 @@ func TestVerifyPassesWhenAllPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	for range RequiredTables {
+		mock.ExpectQuery("information_schema.tables").WillReturnRows(allPresentColumns())
+	}
 	for range RequiredColumns {
 		mock.ExpectQuery("information_schema.columns").WillReturnRows(allPresentColumns())
 	}

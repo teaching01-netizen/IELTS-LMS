@@ -1,0 +1,1977 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > renders the spine branch with header progress and queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps paste import reachable from the spine queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens the jump palette with Ctrl+K in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens shortcut help with ? in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > reviews module issues from the spine queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps import, preview, and release actions reachable in the spine header
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > duplicates the explicit noncurrent row after exactly one dirty-draft flush
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > confirms deletion of another row without changing the active draft
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > stops row mutations when the dirty draft cannot flush
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps save inside editors and gives Shift+S precedence outside editors
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > guards settings shortcut in text and exposes command actions with Ctrl+K
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens the student preview sheet from the spine question view
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ❯ src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx (12 tests | 2 failed) 9864ms
+   ✓ AuthoringWorkspace (spine-only) > renders the spine branch with header progress and queue 1217ms
+   ✓ AuthoringWorkspace (spine-only) > keeps paste import reachable from the spine queue 595ms
+   ✓ AuthoringWorkspace (spine-only) > opens the jump palette with Ctrl+K in the spine branch 804ms
+   ✓ AuthoringWorkspace (spine-only) > opens shortcut help with ? in the spine branch 557ms
+   ✓ AuthoringWorkspace (spine-only) > reviews module issues from the spine queue 798ms
+   ✓ AuthoringWorkspace (spine-only) > keeps import, preview, and release actions reachable in the spine header 456ms
+   ✓ AuthoringWorkspace (spine-only) > duplicates the explicit noncurrent row after exactly one dirty-draft flush 1029ms
+   ✓ AuthoringWorkspace (spine-only) > confirms deletion of another row without changing the active draft 965ms
+   ✓ AuthoringWorkspace (spine-only) > stops row mutations when the dirty draft cannot flush 806ms
+   × AuthoringWorkspace (spine-only) > keeps save inside editors and gives Shift+S precedence outside editors 1417ms
+     → expected "spy" to be called once, but got 0 times
+
+Ignored nodes: comments, script, style
+[36m<html[39m
+  [33mclass[39m=[32m"testing-no-motion"[39m
+[36m>[39m
+  [36m<head />[39m
+  [36m<body[39m
+    [33mstyle[39m=[32m""[39m
+  [36m>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-product"[39m
+        [33mdata-au-section[39m=[32m"reading-writing"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"sat-spine"[39m
+          [33mstyle[39m=[32m"min-height: 100dvh;"[39m
+        [36m>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"sat-spine__skip-link"[39m
+            [33mhref[39m=[32m"#sat-spine-main"[39m
+          [36m>[39m
+            [0mSkip to question[0m
+          [36m</a>[39m
+          [36m<header[39m
+            [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+                [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"17"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"17"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                  [36m/>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"M19 12H5"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"hidden xl:inline"[39m
+                [36m>[39m
+                  [0mExams[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"min-w-0 flex-1"[39m
+              [36m>[39m
+                [36m<h1[39m
+                  [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+                [36m>[39m
+                  [0mSAT Practice 1[0m
+                [36m</h1>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+                [36m>[39m
+                  [0mReading & Writing · Module 1 · Draft[0m
+                [36m</p>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"Saved"[39m
+                  [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                  [33mtitle[39m=[32m"Saved"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                    [33mstyle[39m=[32m"opacity: 1;"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-check"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"14"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2.3"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"14"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [36m<span>[39m
+                      [0mSaved[0m
+                    [36m</span>[39m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Open the full SAT preview"[39m
+                [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mPreview[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mRelease[0m
+              [36m</button>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"sat-spine__menu"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"relative"[39m
+                  [33mdata-sat-menu-root[39m=[32m"true"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"_r_c8_"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"menu"[39m
+                    [33maria-label[39m=[32m"More authoring actions"[39m
+                    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"16"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                     ...
+   × AuthoringWorkspace (spine-only) > guards settings shortcut in text and exposes command actions with Ctrl+K 772ms
+     → Unable to find an accessible element with the role "option" and name `/Open question settings/`
+
+Here are the accessible roles:
+
+  link:
+
+  Name "Skip to question":
+  [36m<a[39m
+    [33mclass[39m=[32m"sat-spine__skip-link"[39m
+    [33mhref[39m=[32m"#sat-spine-main"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  banner:
+
+  Name "":
+  [36m<header[39m
+    [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<header[39m
+    [33mclass[39m=[32m"mb-12 flex flex-wrap items-start justify-between gap-3"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Back to SAT Exam Library":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+    [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Open the full SAT preview":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Open the full SAT preview"[39m
+    [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Release":
+  [36m<button[39m
+    [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "More authoring actions":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_dh_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"More authoring actions"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Choose module. Current: Reading & Writing, Module 1, 2 of 3 authored":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_e4_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Choose module. Current: Reading & Writing, Module 1, 2 of 3 authored"[39m
+    [33mclass[39m=[32m"group flex min-h-11 max-w-full items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Select questions":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Select questions"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"min-h-11 rounded-md px-2 text-xs text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Add questions: paste or import into this module":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Add questions: paste or import into this module"[39m
+    [33mclass[39m=[32m"min-h-11 rounded-md px-2 text-xs text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Create question":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Create question"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-35"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question readiness filters":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_e5_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question readiness filters"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question 1: First prompt, medium, current":
+  [36m<button[39m
+    [33maria-current[39m=[32m"true"[39m
+    [33maria-label[39m=[32m"Question 1: First prompt, medium, current"[39m
+    [33mclass[39m=[32m"flex min-h-[52px] min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question 1 actions":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_e6_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question 1 actions"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question 2: Second prompt, medium":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Question 2: Second prompt, medium"[39m
+    [33mclass[39m=[32m"flex min-h-[52px] min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question 2 actions":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_e7_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question 2 actions"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Add question 3":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Add question 3"[39m
+    [33mclass[39m=[32m"mx-2 my-px flex min-h-[48px] w-[calc(100%_-_1rem)] items-center gap-2.5 rounded-md border border-dashed border-border px-2.5 text-left text-muted-foreground hover:border-ring/40 hover:bg-muted/50 hover:text-foreground disabled:opacity-40"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question ready":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_ea_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question ready"[39m
+    [33mclass[39m=[32m"flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-input,12px)] px-3 text-left transition-colors hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Settings":
+  [36m<button[39m
+    [33mclass[39m=[32m"hidden min-h-11 px-2 text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:block"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question actions":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_eb_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question actions"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "+ Add supporting material":
+  [36m<button[39m
+    [33mclass[39m=[32m"sat-spine__add-content"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Multiple choice":
+  [36m<button[39m
+    [33maria-pressed[39m=[32m"true"[39m
+    [33mclass[39m=[32m"relative flex min-h-9 min-w-0 flex-1 items-center justify-center rounded-[8px] px-3 text-[12px] font-semibold transition-colors active:scale-[0.96] text-slate-950"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice A earlier":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice A earlier"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mdisabled[39m=[32m""[39m
+    [33mtitle[39m=[32m"Move choice A earlier"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice A later":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice A later"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice A later"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice B earlier":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice B earlier"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice B earlier"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice B later":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice B later"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice B later"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice C earlier":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice C earlier"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice C earlier"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice C later":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice C later"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice C later"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice D earlier":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice D earlier"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice D earlier"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice D later":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice D later"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mdisabled[39m=[32m""[39m
+    [33mtitle[39m=[32m"Move choice D later"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "+ Add an explanation…":
+  [36m<button[39m
+    [33mclass[39m=[32m"sat-spine__add-content"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Save & Next":
+  [36m<button[39m
+    [33mclass[39m=[32m"flex min-h-11 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-45"[39m
+    [33mtitle[39m=[32m"Save and move to the next question"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Close jump to question":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Close jump to question"[39m
+    [33mclass[39m=[32m"fixed inset-0 z-[120] flex cursor-default items-start justify-center bg-black/40 p-4 pt-[12vh]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  heading:
+
+  Name "SAT Practice 1":
+  [36m<h1[39m
+    [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+  [36m/>[39m
+
+  Name "Question 1":
+  [36m<h2[39m
+    [33mclass[39m=[32m"text-[var(--spine-text-display)] font-semibold tracking-tight text-foreground"[39m
+    [33mid[39m=[32m"spine-question-heading"[39m
+  [36m/>[39m
+
+  Name "Question":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_ec_-heading"[39m
+  [36m/>[39m
+
+  Name "Supporting material":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_ed_-heading"[39m
+  [36m/>[39m
+
+  Name "Answer":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_ee_-heading"[39m
+  [36m/>[39m
+
+  Name "Answer key":
+  [36m<h3[39m
+    [33mclass[39m=[32m"sr-only"[39m
+    [33mid[39m=[32m"spine-answer-key-heading"[39m
+  [36m/>[39m
+
+  Name "Explanation":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_eg_-heading"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+  [36m/>[39m
+
+  Name "Exam authoring progress":
+  [36m<p[39m
+    [33maria-label[39m=[32m"Exam authoring progress"[39m
+    [33mclass[39m=[32m"mb-2 text-xs text-muted-foreground"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mb-3 text-xs text-muted-foreground"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  region:
+
+  Name "Module 1 questions":
+  [36m<section[39m
+    [33maria-label[39m=[32m"Module 1 questions"[39m
+    [33mclass[39m=[32m"flex min-h-0 min-w-0 flex-col bg-card h-full w-full"[39m
+  [36m/>[39m
+
+  Name "Question":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_ec_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"prompt"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Supporting material":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_ed_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"stimulus"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Answer":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_ee_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"answer"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Answer key":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"spine-answer-key-heading"[39m
+    [33mdata-answer-options[39m=[32m"true"[39m
+  [36m/>[39m
+
+  Name "Explanation":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_eg_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"rationale"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  searchbox:
+
+  Name "Search questions":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Search questions"[39m
+    [33mclass[39m=[32m"h-9 w-full rounded-md bg-muted pl-9 pr-9 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring"[39m
+    [33mplaceholder[39m=[32m"Search questions"[39m
+    [33mtype[39m=[32m"search"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  list:
+
+  Name "Questions in this module":
+  [36m<ol[39m
+    [33maria-label[39m=[32m"Questions in this module"[39m
+    [33mclass[39m=[32m"m-0 list-none p-0 py-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  listitem:
+
+  Name "":
+  [36m<li />[39m
+
+  Name "":
+  [36m<li />[39m
+
+  Name "":
+  [36m<li />[39m
+
+  --------------------------------------------------
+  main:
+
+  Name "":
+  [36m<main[39m
+    [33mclass[39m=[32m"sat-spine__main"[39m
+    [33mid[39m=[32m"sat-spine-main"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  article:
+
+  Name "Question 1":
+  [36m<article[39m
+    [33maria-labelledby[39m=[32m"spine-question-heading"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  textbox:
+
+  Name "Question prompt":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Question prompt"[39m
+  [36m/>[39m
+
+  Name "Answer choice A":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Answer choice A"[39m
+  [36m/>[39m
+
+  Name "Answer choice B":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Answer choice B"[39m
+  [36m/>[39m
+
+  Name "Answer choice C":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Answer choice C"[39m
+  [36m/>[39m
+
+  Name "Answer choice D":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Answer choice D"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  group:
+
+  Name "Response type":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Response type"[39m
+    [33mclass[39m=[32m"authoring-segmented relative flex w-fit items-center rounded-[10px] p-0.5 "[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "Reorder choice A":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Reorder choice A"[39m
+    [33mclass[39m=[32m"sat-spine__choice-reorder flex shrink-0 flex-col gap-1"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "Reorder choice B":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Reorder choice B"[39m
+    [33mclass[39m=[32m"sat-spine__choice-reorder flex shrink-0 flex-col gap-1"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "Reorder choice C":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Reorder choice C"[39m
+    [33mclass[39m=[32m"sat-spine__choice-reorder flex shrink-0 flex-col gap-1"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "Reorder choice D":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Reorder choice D"[39m
+    [33mclass[39m=[32m"sat-spine__choice-reorder flex shrink-0 flex-col gap-1"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radiogroup:
+
+  Name "Answer key choices":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Answer key choices"[39m
+    [33mclass[39m=[32m"space-y-2"[39m
+    [33mrole[39m=[32m"radiogroup"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radio:
+
+  Name "Choice A: A, correct answer, key":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"true"[39m
+    [33maria-label[39m=[32m"Choice A: A, correct answer, key"[39m
+    [33mclass[39m=[32m"flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] bg-primary text-primary-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Choice B: B":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"false"[39m
+    [33maria-label[39m=[32m"Choice B: B"[39m
+    [33mclass[39m=[32m"flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] bg-muted text-muted-foreground hover:text-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Choice C: C":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"false"[39m
+    [33maria-label[39m=[32m"Choice C: C"[39m
+    [33mclass[39m=[32m"flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] bg-muted text-muted-foreground hover:text-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Choice D: D":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"false"[39m
+    [33maria-label[39m=[32m"Choice D: D"[39m
+    [33mclass[39m=[32m"flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] bg-muted text-muted-foreground hover:text-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  status:
+
+  Name "Saved":
+  [36m<span[39m
+    [33maria-label[39m=[32m"Saved"[39m
+    [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+    [33mrole[39m=[32m"status"[39m
+    [33mtitle[39m=[32m"Saved"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  checkbox:
+
+  Name "Carry metadata":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Carry metadata"[39m
+    [33mchecked[39m=[32m""[39m
+    [33mclass[39m=[32m"h-4 w-4 rounded border-input accent-primary"[39m
+    [33mid[39m=[32m"sat-spine-carry-metadata"[39m
+    [33mtype[39m=[32m"checkbox"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  dialog:
+
+  Name "Jump to question":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Jump to question"[39m
+    [33maria-modal[39m=[32m"true"[39m
+    [33mclass[39m=[32m"w-full max-w-lg"[39m
+    [33mrole[39m=[32m"dialog"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  combobox:
+
+  Name "Jump to question":
+  [36m<input[39m
+    [33maria-autocomplete[39m=[32m"list"[39m
+    [33maria-controls[39m=[32m"radix-_r_eq_"[39m
+    [33maria-expanded[39m=[32m"true"[39m
+    [33maria-label[39m=[32m"Jump to question"[39m
+    [33maria-labelledby[39m=[32m"radix-_r_er_"[39m
+    [33mautocomplete[39m=[32m"off"[39m
+    [33mautocorrect[39m=[32m"off"[39m
+    [33mclass[39m=[32m"h-12 w-full border-b border-border bg-transparent px-4 text-sm text-foreground outline-none placeholder:text-muted-foreground"[39m
+    [33mcmdk-input[39m=[32m""[39m
+    [33mid[39m=[32m"radix-_r_es_"[39m
+    [33mplaceholder[39m=[32m"Search questions…"[39m
+    [33mrole[39m=[32m"combobox"[39m
+    [33mspellcheck[39m=[32m"false"[39m
+    [33mtype[39m=[32m"text"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  listbox:
+
+  Name "Suggestions":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Suggestions"[39m
+    [33mclass[39m=[32m"max-h-[40vh] overflow-y-auto p-1.5"[39m
+    [33mcmdk-list[39m=[32m""[39m
+    [33mid[39m=[32m"radix-_r_eq_"[39m
+    [33mrole[39m=[32m"listbox"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  option:
+
+  Name "Question 1: First prompt, current":
+  [36m<div[39m
+    [33maria-disabled[39m=[32m"false"[39m
+    [33maria-label[39m=[32m"Question 1: First prompt, current"[39m
+    [33maria-selected[39m=[32m"true"[39m
+    [33mclass[39m=[32m"flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-foreground aria-selected:bg-muted"[39m
+    [33mcmdk-item[39m=[32m""[39m
+    [33mdata-disabled[39m=[32m"false"[39m
+    [33mdata-selected[39m=[32m"true"[39m
+    [33mdata-value[39m=[32m"1 First prompt"[39m
+    [33mid[39m=[32m"radix-_r_et_"[39m
+    [33mrole[39m=[32m"option"[39m
+  [36m/>[39m
+
+  Name "Question 1: Second prompt":
+  [36m<div[39m
+    [33maria-disabled[39m=[32m"false"[39m
+    [33maria-label[39m=[32m"Question 1: Second prompt"[39m
+    [33maria-selected[39m=[32m"false"[39m
+    [33mclass[39m=[32m"flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-foreground aria-selected:bg-muted"[39m
+    [33mcmdk-item[39m=[32m""[39m
+    [33mdata-disabled[39m=[32m"false"[39m
+    [33mdata-selected[39m=[32m"false"[39m
+    [33mdata-value[39m=[32m"1 Second prompt"[39m
+    [33mid[39m=[32m"radix-_r_eu_"[39m
+    [33mrole[39m=[32m"option"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body[39m
+  [33mstyle[39m=[32m""[39m
+[36m>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_dh_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<circle[39m
+                     ...
+   ✓ AuthoringWorkspace (spine-only) > opens the student preview sheet from the spine question view 446ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps save inside editors and gives Shift+S precedence outside editors
+AssertionError: expected "spy" to be called once, but got 0 times
+
+Ignored nodes: comments, script, style
+[36m<html[39m
+  [33mclass[39m=[32m"testing-no-motion"[39m
+[36m>[39m
+  [36m<head />[39m
+  [36m<body[39m
+    [33mstyle[39m=[32m""[39m
+  [36m>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-product"[39m
+        [33mdata-au-section[39m=[32m"reading-writing"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"sat-spine"[39m
+          [33mstyle[39m=[32m"min-height: 100dvh;"[39m
+        [36m>[39m
+          [36m<a[39m
+            [33mclass[39m=[32m"sat-spine__skip-link"[39m
+            [33mhref[39m=[32m"#sat-spine-main"[39m
+          [36m>[39m
+            [0mSkip to question[0m
+          [36m</a>[39m
+          [36m<header[39m
+            [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+                [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"17"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"17"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                  [36m/>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"M19 12H5"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"hidden xl:inline"[39m
+                [36m>[39m
+                  [0mExams[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"min-w-0 flex-1"[39m
+              [36m>[39m
+                [36m<h1[39m
+                  [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+                [36m>[39m
+                  [0mSAT Practice 1[0m
+                [36m</h1>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+                [36m>[39m
+                  [0mReading & Writing · Module 1 · Draft[0m
+                [36m</p>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"Saved"[39m
+                  [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                  [33mtitle[39m=[32m"Saved"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                    [33mstyle[39m=[32m"opacity: 1;"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-check"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"14"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2.3"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"14"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [36m<span>[39m
+                      [0mSaved[0m
+                    [36m</span>[39m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</div>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Open the full SAT preview"[39m
+                [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mPreview[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mRelease[0m
+              [36m</button>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"sat-spine__menu"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"relative"[39m
+                  [33mdata-sat-menu-root[39m=[32m"true"[39m
+                [36m>[39m
+                  [36m<button[39m
+                    [33maria-controls[39m=[32m"_r_c8_"[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"menu"[39m
+                    [33maria-label[39m=[32m"More authoring actions"[39m
+                    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"16"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                     ...
+ ❯ src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx:252:106
+    250|   it("keeps save inside editors and gives Shift+S precedence outside e…
+    251|     renderWorkspace();const prompt=await screen.findByLabelText('Quest…
+    252|     fireEvent.keyDown(prompt,{key:'s',ctrlKey:true});await waitFor(()=…
+       |                                                                                                          ^
+    253|     fireEvent.keyDown(document.body,{key:'S',ctrlKey:true,shiftKey:tru…
+    254|     expect(screen.getByRole('region',{name:'Question inspector'})).toB…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > guards settings shortcut in text and exposes command actions with Ctrl+K
+TestingLibraryElementError: Unable to find an accessible element with the role "option" and name `/Open question settings/`
+
+Here are the accessible roles:
+
+  link:
+
+  Name "Skip to question":
+  [36m<a[39m
+    [33mclass[39m=[32m"sat-spine__skip-link"[39m
+    [33mhref[39m=[32m"#sat-spine-main"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  banner:
+
+  Name "":
+  [36m<header[39m
+    [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<header[39m
+    [33mclass[39m=[32m"mb-12 flex flex-wrap items-start justify-between gap-3"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Back to SAT Exam Library":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+    [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Open the full SAT preview":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Open the full SAT preview"[39m
+    [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Release":
+  [36m<button[39m
+    [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "More authoring actions":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_dh_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"More authoring actions"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Choose module. Current: Reading & Writing, Module 1, 2 of 3 authored":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_e4_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Choose module. Current: Reading & Writing, Module 1, 2 of 3 authored"[39m
+    [33mclass[39m=[32m"group flex min-h-11 max-w-full items-center gap-2 rounded-[12px] px-2 py-1.5 text-left outline-none transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Select questions":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Select questions"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"min-h-11 rounded-md px-2 text-xs text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Add questions: paste or import into this module":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Add questions: paste or import into this module"[39m
+    [33mclass[39m=[32m"min-h-11 rounded-md px-2 text-xs text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Create question":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Create question"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-35"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question readiness filters":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_e5_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question readiness filters"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question 1: First prompt, medium, current":
+  [36m<button[39m
+    [33maria-current[39m=[32m"true"[39m
+    [33maria-label[39m=[32m"Question 1: First prompt, medium, current"[39m
+    [33mclass[39m=[32m"flex min-h-[52px] min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question 1 actions":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_e6_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question 1 actions"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question 2: Second prompt, medium":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Question 2: Second prompt, medium"[39m
+    [33mclass[39m=[32m"flex min-h-[52px] min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question 2 actions":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_e7_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question 2 actions"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Add question 3":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Add question 3"[39m
+    [33mclass[39m=[32m"mx-2 my-px flex min-h-[48px] w-[calc(100%_-_1rem)] items-center gap-2.5 rounded-md border border-dashed border-border px-2.5 text-left text-muted-foreground hover:border-ring/40 hover:bg-muted/50 hover:text-foreground disabled:opacity-40"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question ready":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_ea_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question ready"[39m
+    [33mclass[39m=[32m"flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-input,12px)] px-3 text-left transition-colors hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Settings":
+  [36m<button[39m
+    [33mclass[39m=[32m"hidden min-h-11 px-2 text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:block"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question actions":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_eb_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question actions"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "+ Add supporting material":
+  [36m<button[39m
+    [33mclass[39m=[32m"sat-spine__add-content"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Multiple choice":
+  [36m<button[39m
+    [33maria-pressed[39m=[32m"true"[39m
+    [33mclass[39m=[32m"relative flex min-h-9 min-w-0 flex-1 items-center justify-center rounded-[8px] px-3 text-[12px] font-semibold transition-colors active:scale-[0.96] text-slate-950"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice A earlier":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice A earlier"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mdisabled[39m=[32m""[39m
+    [33mtitle[39m=[32m"Move choice A earlier"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice A later":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice A later"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice A later"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice B earlier":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice B earlier"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice B earlier"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice B later":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice B later"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice B later"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice C earlier":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice C earlier"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice C earlier"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice C later":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice C later"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice C later"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice D earlier":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice D earlier"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mtitle[39m=[32m"Move choice D earlier"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Move choice D later":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Move choice D later"[39m
+    [33mclass[39m=[32m"flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"[39m
+    [33mdisabled[39m=[32m""[39m
+    [33mtitle[39m=[32m"Move choice D later"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "+ Add an explanation…":
+  [36m<button[39m
+    [33mclass[39m=[32m"sat-spine__add-content"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Save & Next":
+  [36m<button[39m
+    [33mclass[39m=[32m"flex min-h-11 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-45"[39m
+    [33mtitle[39m=[32m"Save and move to the next question"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Close jump to question":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Close jump to question"[39m
+    [33mclass[39m=[32m"fixed inset-0 z-[120] flex cursor-default items-start justify-center bg-black/40 p-4 pt-[12vh]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  heading:
+
+  Name "SAT Practice 1":
+  [36m<h1[39m
+    [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+  [36m/>[39m
+
+  Name "Question 1":
+  [36m<h2[39m
+    [33mclass[39m=[32m"text-[var(--spine-text-display)] font-semibold tracking-tight text-foreground"[39m
+    [33mid[39m=[32m"spine-question-heading"[39m
+  [36m/>[39m
+
+  Name "Question":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_ec_-heading"[39m
+  [36m/>[39m
+
+  Name "Supporting material":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_ed_-heading"[39m
+  [36m/>[39m
+
+  Name "Answer":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_ee_-heading"[39m
+  [36m/>[39m
+
+  Name "Answer key":
+  [36m<h3[39m
+    [33mclass[39m=[32m"sr-only"[39m
+    [33mid[39m=[32m"spine-answer-key-heading"[39m
+  [36m/>[39m
+
+  Name "Explanation":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_eg_-heading"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+  [36m/>[39m
+
+  Name "Exam authoring progress":
+  [36m<p[39m
+    [33maria-label[39m=[32m"Exam authoring progress"[39m
+    [33mclass[39m=[32m"mb-2 text-xs text-muted-foreground"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mb-3 text-xs text-muted-foreground"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  region:
+
+  Name "Module 1 questions":
+  [36m<section[39m
+    [33maria-label[39m=[32m"Module 1 questions"[39m
+    [33mclass[39m=[32m"flex min-h-0 min-w-0 flex-col bg-card h-full w-full"[39m
+  [36m/>[39m
+
+  Name "Question":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_ec_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"prompt"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Supporting material":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_ed_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"stimulus"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Answer":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_ee_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"answer"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Answer key":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"spine-answer-key-heading"[39m
+    [33mdata-answer-options[39m=[32m"true"[39m
+  [36m/>[39m
+
+  Name "Explanation":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_eg_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"rationale"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  searchbox:
+
+  Name "Search questions":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Search questions"[39m
+    [33mclass[39m=[32m"h-9 w-full rounded-md bg-muted pl-9 pr-9 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring"[39m
+    [33mplaceholder[39m=[32m"Search questions"[39m
+    [33mtype[39m=[32m"search"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  list:
+
+  Name "Questions in this module":
+  [36m<ol[39m
+    [33maria-label[39m=[32m"Questions in this module"[39m
+    [33mclass[39m=[32m"m-0 list-none p-0 py-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  listitem:
+
+  Name "":
+  [36m<li />[39m
+
+  Name "":
+  [36m<li />[39m
+
+  Name "":
+  [36m<li />[39m
+
+  --------------------------------------------------
+  main:
+
+  Name "":
+  [36m<main[39m
+    [33mclass[39m=[32m"sat-spine__main"[39m
+    [33mid[39m=[32m"sat-spine-main"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  article:
+
+  Name "Question 1":
+  [36m<article[39m
+    [33maria-labelledby[39m=[32m"spine-question-heading"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  textbox:
+
+  Name "Question prompt":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Question prompt"[39m
+  [36m/>[39m
+
+  Name "Answer choice A":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Answer choice A"[39m
+  [36m/>[39m
+
+  Name "Answer choice B":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Answer choice B"[39m
+  [36m/>[39m
+
+  Name "Answer choice C":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Answer choice C"[39m
+  [36m/>[39m
+
+  Name "Answer choice D":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Answer choice D"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  group:
+
+  Name "Response type":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Response type"[39m
+    [33mclass[39m=[32m"authoring-segmented relative flex w-fit items-center rounded-[10px] p-0.5 "[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "Reorder choice A":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Reorder choice A"[39m
+    [33mclass[39m=[32m"sat-spine__choice-reorder flex shrink-0 flex-col gap-1"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "Reorder choice B":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Reorder choice B"[39m
+    [33mclass[39m=[32m"sat-spine__choice-reorder flex shrink-0 flex-col gap-1"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "Reorder choice C":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Reorder choice C"[39m
+    [33mclass[39m=[32m"sat-spine__choice-reorder flex shrink-0 flex-col gap-1"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  Name "Reorder choice D":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Reorder choice D"[39m
+    [33mclass[39m=[32m"sat-spine__choice-reorder flex shrink-0 flex-col gap-1"[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radiogroup:
+
+  Name "Answer key choices":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Answer key choices"[39m
+    [33mclass[39m=[32m"space-y-2"[39m
+    [33mrole[39m=[32m"radiogroup"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radio:
+
+  Name "Choice A: A, correct answer, key":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"true"[39m
+    [33maria-label[39m=[32m"Choice A: A, correct answer, key"[39m
+    [33mclass[39m=[32m"flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] bg-primary text-primary-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Choice B: B":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"false"[39m
+    [33maria-label[39m=[32m"Choice B: B"[39m
+    [33mclass[39m=[32m"flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] bg-muted text-muted-foreground hover:text-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Choice C: C":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"false"[39m
+    [33maria-label[39m=[32m"Choice C: C"[39m
+    [33mclass[39m=[32m"flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] bg-muted text-muted-foreground hover:text-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Choice D: D":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"false"[39m
+    [33maria-label[39m=[32m"Choice D: D"[39m
+    [33mclass[39m=[32m"flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] bg-muted text-muted-foreground hover:text-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  status:
+
+  Name "Saved":
+  [36m<span[39m
+    [33maria-label[39m=[32m"Saved"[39m
+    [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+    [33mrole[39m=[32m"status"[39m
+    [33mtitle[39m=[32m"Saved"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  checkbox:
+
+  Name "Carry metadata":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Carry metadata"[39m
+    [33mchecked[39m=[32m""[39m
+    [33mclass[39m=[32m"h-4 w-4 rounded border-input accent-primary"[39m
+    [33mid[39m=[32m"sat-spine-carry-metadata"[39m
+    [33mtype[39m=[32m"checkbox"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  dialog:
+
+  Name "Jump to question":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Jump to question"[39m
+    [33maria-modal[39m=[32m"true"[39m
+    [33mclass[39m=[32m"w-full max-w-lg"[39m
+    [33mrole[39m=[32m"dialog"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  combobox:
+
+  Name "Jump to question":
+  [36m<input[39m
+    [33maria-autocomplete[39m=[32m"list"[39m
+    [33maria-controls[39m=[32m"radix-_r_eq_"[39m
+    [33maria-expanded[39m=[32m"true"[39m
+    [33maria-label[39m=[32m"Jump to question"[39m
+    [33maria-labelledby[39m=[32m"radix-_r_er_"[39m
+    [33mautocomplete[39m=[32m"off"[39m
+    [33mautocorrect[39m=[32m"off"[39m
+    [33mclass[39m=[32m"h-12 w-full border-b border-border bg-transparent px-4 text-sm text-foreground outline-none placeholder:text-muted-foreground"[39m
+    [33mcmdk-input[39m=[32m""[39m
+    [33mid[39m=[32m"radix-_r_es_"[39m
+    [33mplaceholder[39m=[32m"Search questions…"[39m
+    [33mrole[39m=[32m"combobox"[39m
+    [33mspellcheck[39m=[32m"false"[39m
+    [33mtype[39m=[32m"text"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  listbox:
+
+  Name "Suggestions":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Suggestions"[39m
+    [33mclass[39m=[32m"max-h-[40vh] overflow-y-auto p-1.5"[39m
+    [33mcmdk-list[39m=[32m""[39m
+    [33mid[39m=[32m"radix-_r_eq_"[39m
+    [33mrole[39m=[32m"listbox"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  option:
+
+  Name "Question 1: First prompt, current":
+  [36m<div[39m
+    [33maria-disabled[39m=[32m"false"[39m
+    [33maria-label[39m=[32m"Question 1: First prompt, current"[39m
+    [33maria-selected[39m=[32m"true"[39m
+    [33mclass[39m=[32m"flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-foreground aria-selected:bg-muted"[39m
+    [33mcmdk-item[39m=[32m""[39m
+    [33mdata-disabled[39m=[32m"false"[39m
+    [33mdata-selected[39m=[32m"true"[39m
+    [33mdata-value[39m=[32m"1 First prompt"[39m
+    [33mid[39m=[32m"radix-_r_et_"[39m
+    [33mrole[39m=[32m"option"[39m
+  [36m/>[39m
+
+  Name "Question 1: Second prompt":
+  [36m<div[39m
+    [33maria-disabled[39m=[32m"false"[39m
+    [33maria-label[39m=[32m"Question 1: Second prompt"[39m
+    [33maria-selected[39m=[32m"false"[39m
+    [33mclass[39m=[32m"flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-foreground aria-selected:bg-muted"[39m
+    [33mcmdk-item[39m=[32m""[39m
+    [33mdata-disabled[39m=[32m"false"[39m
+    [33mdata-selected[39m=[32m"false"[39m
+    [33mdata-value[39m=[32m"1 Second prompt"[39m
+    [33mid[39m=[32m"radix-_r_eu_"[39m
+    [33mrole[39m=[32m"option"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body[39m
+  [33mstyle[39m=[32m""[39m
+[36m>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_dh_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<circle[39m
+                     ...
+ ❯ Object.getElementError node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx:261:19
+    259|     fireEvent.keyDown(prompt,{key:'S',ctrlKey:true,shiftKey:true});exp…
+    260|     fireEvent.keyDown(document.body,{key:'k',ctrlKey:true});
+    261|     expect(screen.getByRole('option',{name:/Open question settings/}))…
+       |                   ^
+    262|     fireEvent.click(screen.getByRole('option',{name:/Open question set…
+    263|     expect(screen.getByRole('region',{name:'Question inspector'})).toB…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 10 passed (12)
+   Start at  00:44:30
+   Duration  22.81s (transform 3.21s, setup 1.09s, collect 7.09s, tests 9.86s, environment 1.93s, prepare 144ms)
+

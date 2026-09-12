@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { Check, CircleAlert, Cloud, LoaderCircle } from "lucide-react";
 import { authoringMotion } from "@/src/shared/motion";
@@ -10,12 +10,31 @@ export const SAVE_CLUSTER_LABELS: Record<QuestionSaveStatus, string> = {
   saving: "Saving…",
   offline: "Offline · saved on this device",
   error: "Not saved — Retry",
+  conflict: "Changed elsewhere — Review",
 };
 
 export interface SaveClusterProps {
   status: QuestionSaveStatus;
   lastSavedAt: Date | null;
   onRetry?: (() => void) | undefined;
+  onReviewConflict?: (() => void) | undefined;
+  /** Header only: quietly hide success, never exceptional save states. */
+  transientSaved?: boolean;
+  /** The footer is the single live announcer when two copies render. */
+  announce?: boolean;
+}
+
+/**
+ * StrictMode-safe previous value: the ref is read during render but only
+ * written in an effect, so double-rendered commits stay consistent and the
+ * first mount always reports no previous value.
+ */
+function usePrevious<T>(value: T): T | undefined {
+  const ref = useRef<T | undefined>(undefined);
+  useEffect(() => {
+    ref.current = value;
+  }, [value]);
+  return ref.current;
 }
 
 /**
@@ -24,18 +43,27 @@ export interface SaveClusterProps {
  * autosave object. Error is a Retry button; everything else is read-only
  * status text with a polite live region.
  */
-export function SaveCluster({ status, lastSavedAt, onRetry }: SaveClusterProps) {
+export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, transientSaved = false, announce = true }: SaveClusterProps) {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    setHidden(false);
+    if (!transientSaved || status !== 'saved') return;
+    const timer = window.setTimeout(() => setHidden(true), 1500);
+    return () => window.clearTimeout(timer);
+  }, [status, lastSavedAt, transientSaved]);
+  const hideSuccess = transientSaved && status === 'saved' && hidden;
+  const statusRole = announce ? 'status' : undefined;
   const label = SAVE_CLUSTER_LABELS[status];
   const Icon =
     status === "saving"
       ? LoaderCircle
-      : status === "error"
+      : status === "error" || status === "conflict"
         ? CircleAlert
         : status === "saved"
           ? Check
           : Cloud;
   const tone =
-    status === "error"
+    status === "error" || status === "conflict"
       ? "text-destructive"
       : status === "offline"
         ? "text-amber-800"
@@ -43,18 +71,21 @@ export function SaveCluster({ status, lastSavedAt, onRetry }: SaveClusterProps) 
           ? "text-green-800"
           : "text-muted-foreground";
   const title =
-    status === "offline"
-      ? "Offline. Changes are stored on this device and will retry when you reconnect."
-      : lastSavedAt
-        ? `Last saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-        : label;
+    status === "conflict"
+      ? "Another author saved this question first. Your edits are kept on this device — reload the latest version, then reapply your changes."
+      : status === "offline"
+        ? "Offline. Changes are stored on this device and will retry when you reconnect."
+        : lastSavedAt
+          ? `Last saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+          : label;
 
   // One-shot Saved tick: true only on the render that ENTERS saved, so
   // typing (unsaved) or re-renders while saved never retrigger the pop.
-  const prevStatusRef = useRef<QuestionSaveStatus | null>(null);
-  const isFirstMount = prevStatusRef.current === null;
-  const justSaved = !isFirstMount && prevStatusRef.current !== "saved" && status === "saved";
-  prevStatusRef.current = status;
+  // The previous value is written in an effect (never during render) so
+  // StrictMode double-render cannot swallow or duplicate the tick.
+  const prevStatus = usePrevious(status);
+  const isFirstMount = prevStatus === undefined;
+  const justSaved = !isFirstMount && prevStatus !== "saved" && status === "saved";
 
   const faceInner = (
     <>
@@ -99,14 +130,29 @@ export function SaveCluster({ status, lastSavedAt, onRetry }: SaveClusterProps) 
         title={title}
         aria-label={`${title}. Retry save`}
         onClick={onRetry}
-        className="flex min-h-9 items-center justify-center gap-1.5 rounded-md px-2.5 hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <span role="status">{face}</span>
+        <span role={statusRole}>{face}</span>
+      </button>
+    );
+  }
+  // Conflict is actionable: surface the resolution path instead of stranding
+  // the author on a read-only warning. Without a handler it stays status text.
+  if (status === "conflict" && onReviewConflict) {
+    return (
+      <button
+        type="button"
+        title={title}
+        aria-label={`${title}. Review changes`}
+        onClick={onReviewConflict}
+        className="flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span role={statusRole}>{face}</span>
       </button>
     );
   }
   return (
-    <span title={title} aria-label={title} role="status" className="flex min-h-9 items-center justify-center gap-1.5 rounded-md px-2.5">
+    <span title={title} aria-label={title} role={statusRole} aria-hidden={hideSuccess || undefined} data-save-hidden={hideSuccess || undefined} className={"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity " + (hideSuccess ? "opacity-0" : "opacity-100")}> 
       {face}
     </span>
   );

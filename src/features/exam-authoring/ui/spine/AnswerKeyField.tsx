@@ -30,13 +30,28 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
     if (next) setKey(next.id);
   };
 
+  // Identity-safe reorder: swaps positions by stable option id. The key is a
+  // stable id reference so it follows its content; displayed letters are
+  // derived from order at render, never stored.
+  const moveOption = (fromOptionId: string, direction: 1 | -1) => {
+    const index = answer.options.findIndex((option) => option.id === fromOptionId);
+    if (index < 0) return;
+    const target = (index + direction + answer.options.length) % answer.options.length;
+    if (target === index) return;
+    const next = [...answer.options];
+    const [moved] = next.splice(index, 1);
+    if (!moved) return;
+    next.splice(target, 0, moved);
+    onChange({ ...question, answer: { ...answer, options: next } });
+  };
+
   return (
-    <section data-authoring-field="answer" aria-labelledby="spine-answer-key-heading">
+    <section data-answer-options="true" aria-labelledby="spine-answer-key-heading">
       <div className="mb-1 flex items-baseline justify-between gap-3">
-        <h3 id="spine-answer-key-heading" className="text-[13px] font-semibold text-foreground">
+        <h3 id="spine-answer-key-heading" className="sr-only">
           Answer key
         </h3>
-        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+        <span className="sr-only">
           Required
         </span>
       </div>
@@ -51,7 +66,7 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
           return (
             <div
               key={option.id}
-              data-spine-key-row={checked ? "key" : undefined}
+              data-spine-key-row={checked ? "key" : "option"}
               className={`flex items-start gap-2 rounded-lg border p-2 transition-colors ${checked ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/60"}`}
             >
               <motion.button
@@ -70,10 +85,32 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
                     moveKey(option.id, -1);
                   }
                 }}
-                className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.93] ${checked ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+                className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] ${checked ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
               >
                 {letter}
               </motion.button>
+              <div className="sat-spine__choice-reorder flex shrink-0 flex-col gap-1" role="group" aria-label={`Reorder choice ${letter}`}>
+                <button
+                  type="button"
+                  disabled={index === 0}
+                  onClick={() => moveOption(option.id, -1)}
+                  aria-label={`Move choice ${letter} earlier`}
+                  title={`Move choice ${letter} earlier`}
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+                >
+                  <span aria-hidden="true">↑</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={index === answer.options.length - 1}
+                  onClick={() => moveOption(option.id, 1)}
+                  aria-label={`Move choice ${letter} later`}
+                  title={`Move choice ${letter} later`}
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+                >
+                  <span aria-hidden="true">↓</span>
+                </button>
+              </div>
               <div className="min-w-0 flex-1">
                 <FastQuestionComposer
                   label={`Answer choice ${letter}`}

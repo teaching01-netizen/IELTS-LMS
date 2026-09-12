@@ -41,7 +41,7 @@ export function AuthoringSegmented<T extends string>({
             type="button"
             aria-pressed={active}
             onClick={() => onChange(option.value)}
-            className={`relative flex min-h-9 min-w-0 flex-1 items-center justify-center rounded-[8px] px-3 text-[12px] font-semibold transition duration-100 active:scale-[0.96] ${
+            className={`relative flex min-h-9 min-w-0 flex-1 items-center justify-center rounded-[8px] px-3 text-[12px] font-semibold transition-colors active:scale-[0.96] ${
               active ? "text-slate-950" : "text-slate-500 hover:text-slate-800"
             }`}
           >

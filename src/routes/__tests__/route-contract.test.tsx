@@ -24,10 +24,12 @@ describe('route contracts', () => {
     expect(getLeafPath('/sat/sessions')).toBe('sessions');
     expect(getLeafPath('/sat/results')).toBe('results');
     expect(getLeafPath('/sat/results/result-1')).toBe('results/:resultId');
-    expect(getLeafPath('/sat/exams/exam-1')).toBe('sat/exams/:examId');
-    expect(getLeafPath('/sat/exams/exam-1/release')).toBe('sat/exams/:examId/release');
-    expect(getLeafPath('/sat/exams/exam-1/preview')).toBe('sat/exams/:examId/preview');
-    expect(getLeafPath('/sat/exams/exam-1/access')).toBe('sat/exams/:examId/access');
+    // Exam detail/release/preview/access are nested under the /sat parent,
+    // so leaf paths are relative (same full URLs as the manifest entries).
+    expect(getLeafPath('/sat/exams/exam-1')).toBe('exams/:examId');
+    expect(getLeafPath('/sat/exams/exam-1/release')).toBe('exams/:examId/release');
+    expect(getLeafPath('/sat/exams/exam-1/preview')).toBe('exams/:examId/preview');
+    expect(getLeafPath('/sat/exams/exam-1/access')).toBe('exams/:examId/access');
     // Session room is nested under the /sat parent, so the leaf path is
     // relative (same URL /sat/sessions/:scheduleId as the manifest entry).
     expect(getLeafPath('/sat/sessions/session-1')).toBe('sessions/:scheduleId');

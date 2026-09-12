@@ -13,6 +13,7 @@ import (
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/platform/pagination"
 	"example.com/ielts-proctoring/internal/proctor"
 )
 
@@ -176,6 +177,26 @@ func proctorSessionLimits(r *http.Request) (auditLimit, alertLimit int) {
 	return proctorLimitParam(r, "auditLimit", 200), proctorLimitParam(r, "alertLimit", 100)
 }
 
+// parseProctorDashboardLimits parses dashboard limits fail-closed
+// (WS-13.1): malformed numerics yield FieldError (400); absent keeps
+// legacy defaults; numerics <= 0 clamp to the legacy default path via
+// proctorLimitParam (behavior preserved, only malformed becomes 400).
+func parseProctorDashboardLimits(r *http.Request) (auditLimit, alertLimit int, err error) {
+	if strings.TrimSpace(r.URL.Query().Get("mode")) != "dashboard" {
+		return 0, 0, nil
+	}
+	for _, key := range []string{"auditLimit", "alertLimit"} {
+		raw := strings.TrimSpace(r.URL.Query().Get(key))
+		if raw == "" {
+			continue
+		}
+		if _, aerr := strconv.Atoi(raw); aerr != nil {
+			return 0, 0, pagination.FieldError{Field: key, Reason: "must be a base-10 integer"}
+		}
+	}
+	return proctorLimitParam(r, "auditLimit", 200), proctorLimitParam(r, "alertLimit", 100), nil
+}
+
 // proctorLimitParam parses a positive int query param or returns def.
 func proctorLimitParam(r *http.Request, key string, def int) int {
 	raw := strings.TrimSpace(r.URL.Query().Get(key))
@@ -259,6 +280,15 @@ func proctorSessionHandler(app *App) http.HandlerFunc {
 		if sess == nil {
 			return
 		}
+		// Fail-closed dashboard parsing before service/DB gates.
+		auditLimit, alertLimit, lerr := parseProctorDashboardLimits(r)
+		if lerr != nil {
+			if writePaginationFieldError(w, r, lerr) {
+				return
+			}
+			httpx.WriteError(w, r, lerr)
+			return
+		}
 		if app.Proctor == nil || app.DB == nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Proctor service is unavailable."))
 			return
@@ -289,7 +319,6 @@ func proctorSessionHandler(app *App) http.HandlerFunc {
 				return
 			}
 		}
-		auditLimit, alertLimit := proctorSessionLimits(r)
 		detail, err := app.Proctor.GetSessionDetail(r.Context(), proctorActorOf(sess), scheduleID, auditLimit, alertLimit)
 		if err != nil {
 			httpx.WriteError(w, r, err)

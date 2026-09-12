@@ -10,6 +10,7 @@
 //   - closing_grace_until checked in-tx on the locked attempt row,
 //   - exactly one synchronous refresh + retry on mismatch before failing
 //     with today's 422/409 codes (never a lost write, never a silent accept).
+//
 // Seal, runtime commands, and reconcile-finalize keep FOR UPDATE locking.
 package runtime
 
@@ -60,8 +61,8 @@ func (s Snapshot) CheckWritable() error {
 // SnapshotCache is a mutex-guarded TTL map: scheduleID -> Snapshot.
 // Loader errors are never cached. Safe for concurrent use.
 type SnapshotCache struct {
-	mu  sync.Mutex
-	ttl time.Duration
+	mu    sync.Mutex
+	ttl   time.Duration
 	items map[string]Snapshot
 	// invalidatedAt records the last Invalidate per schedule (plan C3:
 	// a control command within the fast-lane window keeps student polls

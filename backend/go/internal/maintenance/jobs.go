@@ -104,14 +104,15 @@ func CacheGraceForBudget(b StorageBudget) int64 {
 
 // RetentionReport counts one maintenance retention pass.
 type RetentionReport struct {
-	CacheRows       int64 `json:"cacheRows"`
-	IdempotencyRows int64 `json:"idempotencyRows"`
-	UserSessionRows int64 `json:"userSessionRows"`
-	HeartbeatRows   int64 `json:"heartbeatRows"`
-	MutationRows    int64 `json:"mutationRows"`
-	OutboxRows      int64 `json:"outboxRows"`
-	RateLimitRows   int64 `json:"rateLimitRows"`
-	LiveUpdateRows  int64 `json:"liveUpdateRows"`
+	CacheRows          int64 `json:"cacheRows"`
+	IdempotencyRows    int64 `json:"idempotencyRows"`
+	AuthoringOpKeyRows int64 `json:"authoringOpKeyRows"`
+	UserSessionRows    int64 `json:"userSessionRows"`
+	HeartbeatRows      int64 `json:"heartbeatRows"`
+	MutationRows       int64 `json:"mutationRows"`
+	OutboxRows         int64 `json:"outboxRows"`
+	RateLimitRows      int64 `json:"rateLimitRows"`
+	LiveUpdateRows     int64 `json:"liveUpdateRows"`
 	// LeaseRows counts purged leftover websocket leases (plan C2: memory
 	// mode stops writing per-conn rows; retention reaps the leftovers).
 	LeaseRows int64 `json:"leaseRows"`
@@ -119,7 +120,7 @@ type RetentionReport struct {
 
 // Total sums a retention pass.
 func (r RetentionReport) Total() int64 {
-	return r.CacheRows + r.IdempotencyRows + r.UserSessionRows + r.HeartbeatRows +
+	return r.CacheRows + r.IdempotencyRows + r.AuthoringOpKeyRows + r.UserSessionRows + r.HeartbeatRows +
 		r.MutationRows + r.OutboxRows + r.RateLimitRows + r.LiveUpdateRows + r.LeaseRows
 }
 
@@ -160,6 +161,16 @@ func RunRetention(ctx context.Context, db *sql.DB, budget StorageBudget) (Retent
 	// sweep (24h past expiry) covers all routes, bounded to one batch.
 	rep.IdempotencyRows, err = exec(`
 		DELETE FROM idempotency_keys
+		WHERE expires_at < DATE_SUB(NOW(), INTERVAL ? HOUR)
+		ORDER BY expires_at ASC
+		LIMIT ?`, IdempotencyGraceHours, batch)
+	if err != nil {
+		return rep, err
+	}
+	// Authoring operation keys: 7d TTL rows (create/duplicate/batch/bulk/
+	// workbook-commit/publish) swept 24h past expiry, same grace batch.
+	rep.AuthoringOpKeyRows, err = exec(`
+		DELETE FROM authoring_operation_keys
 		WHERE expires_at < DATE_SUB(NOW(), INTERVAL ? HOUR)
 		ORDER BY expires_at ASC
 		LIMIT ?`, IdempotencyGraceHours, batch)

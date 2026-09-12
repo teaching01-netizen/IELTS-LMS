@@ -1,7 +1,7 @@
 import type { ExamState } from "../../../types";
 import { useDurableLatestAutosave } from "../../../hooks/useDurableLatestAutosave";
 
-export type BuilderSaveStatus = "unsaved" | "saving" | "saved" | "error";
+export type BuilderSaveStatus = "unsaved" | "saving" | "saved" | "error" | "conflict";
 
 export interface UseBuilderAutosaveOptions {
   /** Persists a full exam state snapshot. Serialized and retry-safe. */

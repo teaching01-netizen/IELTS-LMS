@@ -1,10 +1,16 @@
-import { useRef } from 'react';
+import { useId, useRef } from 'react';
+import { motion } from 'motion/react';
 
 /**
  * Platform segmented control for the Digital SAT staff workspace. Announces as
  * a radio group (the WAI-ARIA pattern for an exclusive choice), selects with a
  * pointer tap or an Arrow key, and keeps the roving tabindex so focus follows
  * the selection instead of stalling on unchecked segments.
+ *
+ * The selection carries a sliding thumb (shared layoutId per control) so the
+ * choice glides instead of snapping. Weight + position mark selection, never
+ * color alone. Reduced-motion users get an instant state change via the
+ * workspace MotionConfig.
  */
 type SatSegmentedControlProps<T extends string> = {
   label: string;
@@ -16,6 +22,7 @@ type SatSegmentedControlProps<T extends string> = {
 
 export function SatSegmentedControl<T extends string>({ label, value, options, onChange, className }: SatSegmentedControlProps<T>) {
   const optionsRef = useRef<Array<HTMLButtonElement | null>>([]);
+  const thumbId = useId();
 
   const move = (from: number, delta: number) => {
     const next = (from + delta + options.length) % options.length;
@@ -26,6 +33,7 @@ export function SatSegmentedControl<T extends string>({ label, value, options, o
   };
 
   return (
+    // eslint-disable-next-line jsx-a11y/interactive-supports-focus -- APG radiogroup: focus lives on the roving-tabindex radio children, never the group itself.
     <div
       role="radiogroup"
       aria-label={label}
@@ -56,7 +64,15 @@ export function SatSegmentedControl<T extends string>({ label, value, options, o
             className="sat-segmented-option capitalize"
             onClick={() => onChange(option.value)}
           >
-            {option.label}
+            {selected ? (
+              <motion.span
+                layoutId={thumbId}
+                aria-hidden="true"
+                className="sat-segmented-thumb"
+                transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+              />
+            ) : null}
+            <span className="sat-segmented-label">{option.label}</span>
           </button>
         );
       })}

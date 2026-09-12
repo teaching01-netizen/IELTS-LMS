@@ -32,10 +32,6 @@ export interface SatInteractionView {
   };
   gate: 'interactive' | 'blocked' | 'terminal';
   surface: SatInteractionState['surface'];
-  tools: {
-    calculator: { visible: boolean };
-    reference: { visible: boolean };
-  };
   annotation: {
     mode: SatInteractionState['annotation']['mode'];
     selecting: boolean;
@@ -74,10 +70,6 @@ export function selectSatInteraction(
     },
     gate,
     surface: state.surface,
-    tools: {
-      calculator: { visible: state.tools.calculator === 'open' },
-      reference: { visible: state.tools.reference === 'open' },
-    },
     annotation: {
       mode: state.annotation.mode,
       selecting: state.annotation.textSelection !== 'idle',

@@ -255,6 +255,8 @@ export interface ReorderQuestionsRequest {
 export interface DuplicateQuestionRequest {
   destinationModuleId?: string;
   insertAfterExamQuestionId?: string;
+  /** Retry-safety key: same key + identical content replays; reuse with different content is a 409. */
+  operationKey?: string;
 }
 
 export interface BulkMetadataPatch {
@@ -275,6 +277,8 @@ export interface BulkQuestionRequest {
   questionIds: string[];
   action: BulkQuestionAction;
   expectedRevisions?: Record<string, number>;
+  /** Retry-safety key: same key + identical content replays; reuse with different content is a 409. */
+  operationKey?: string;
 }
 
 export interface BulkQuestionResult {
@@ -296,6 +300,8 @@ export interface BatchQuestionDraft {
 
 export interface BatchCreateQuestionsRequest {
   questions: BatchQuestionDraft[];
+  /** Retry-safety key: same key + identical content replays; reuse with different content is a 409. */
+  operationKey?: string;
 }
 
 export interface SampleExamModuleDraft {
@@ -355,6 +361,8 @@ export interface SatWorkbookCommitRequest {
   expectedVersionRevision: number;
   modules: SatWorkbookModuleDraft[];
   assets: SatWorkbookStagedAsset[];
+  /** Retry-safety key: same key + identical content replays; reuse with different content is a 409. */
+  operationKey?: string;
 }
 
 export interface SatWorkbookUndoState {
@@ -386,6 +394,8 @@ export interface PublishAssessmentRequest {
   expectedDraftVersionId: string;
   expectedDraftRevision: number;
   publishNotes?: string;
+  /** Retry-safety key: same key + identical content replays; reuse with different content is a 409. */
+  operationKey?: string;
 }
 
 export interface PublishedAssessmentVersion {

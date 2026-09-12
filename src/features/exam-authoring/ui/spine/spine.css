@@ -16,8 +16,45 @@
  */
 
 .sat-spine {
-  --spine-measure: 720px;
-  --spine-rail-width: 384px;
+  /* Authoring-local contract: typography 28/20/14/16/13/12; spacing 4–64.
+   * Accent means action/selection/focus, never requiredness. Hairlines
+   * separate structure; only overlays and summaries need elevation.
+   * Tailwind mapping: display text-[28px], title text-xl, label text-sm,
+   * body text-base, helper text-[13px], metadata text-xs.
+   * Existing shared au-* tokens are deliberately unchanged. */
+  --spine-measure: 840px;
+  --spine-measure-compact: 720px;
+  --spine-measure-wide: 920px;
+  --spine-rail-width: 392px;
+  --spine-rail-min: 340px;
+  --spine-rail-max: 460px;
+  --spine-inspector-width: 304px;
+  --spine-text-display: 1.75rem;
+  --spine-text-title: 1.25rem;
+  --spine-text-label: 0.875rem;
+  --spine-text-body: 1rem;
+  --spine-text-helper: 0.8125rem;
+  --spine-text-meta: 0.75rem;
+  --spine-space-1: 4px;
+  --spine-space-2: 8px;
+  --spine-space-3: 12px;
+  --spine-space-4: 16px;
+  --spine-space-5: 20px;
+  --spine-space-6: 24px;
+  --spine-space-8: 32px;
+  --spine-space-10: 40px;
+  --spine-space-12: 48px;
+  --spine-space-16: 64px;
+  --spine-radius-xs: 6px;
+  --spine-radius-sm: 8px;
+  --spine-radius-md: 10px;
+  --spine-radius-lg: 12px;
+  --spine-radius-xl: 14px;
+  --spine-radius-2xl: 16px;
+  --spine-motion-fast: 120ms;
+  --spine-motion-focus: 150ms;
+  --spine-motion-menu: 170ms;
+  --spine-motion-panel: 220ms;
   display: flex;
   height: 100dvh;
   min-height: 0;
@@ -65,7 +102,7 @@
 .sat-spine__column {
   margin-inline: auto;
   width: calc(100% - 2rem);
-  max-width: var(--spine-measure);
+  max-width: clamp(var(--spine-measure-compact), 70vw, var(--spine-measure));
   padding-block: 1.75rem 6rem;
 }
 
@@ -86,10 +123,376 @@
   top: 1rem;
 }
 
+.sat-spine__nav-region {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--spine-space-4);
+}
+
+.sat-spine__nav-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spine-space-3);
+}
+
+.sat-spine__nav-title {
+  font-size: var(--spine-text-label);
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.sat-spine__nav-progress {
+  font-size: var(--spine-text-meta);
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-spine__sections,
+.sat-spine__modules {
+  display: flex;
+  gap: var(--spine-space-2);
+  margin-top: var(--spine-space-3);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sat-spine__sections::-webkit-scrollbar,
+.sat-spine__modules::-webkit-scrollbar {
+  display: none;
+}
+
+.sat-spine__tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 56px;
+  min-width: 44px;
+  flex: 1 1 0;
+  align-items: flex-start;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--spine-radius-md);
+  background: transparent;
+  padding: var(--spine-space-2) var(--spine-space-3);
+  text-align: left;
+  transition:
+    background-color var(--spine-motion-fast) ease-out,
+    border-color var(--spine-motion-fast) ease-out,
+    transform var(--spine-motion-fast) ease-out;
+}
+
+.sat-spine__tab:hover:not(:disabled) {
+  background: var(--color-muted);
+}
+
+.sat-spine__tab:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.sat-spine__tab:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+.sat-spine__tab.is-selected {
+  background: color-mix(in oklab, var(--color-primary) 8%, transparent);
+  border-color: color-mix(in oklab, var(--color-primary) 35%, var(--color-border));
+}
+
+.sat-spine__tab-title {
+  font-size: var(--spine-text-label);
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.sat-spine__tab-meta {
+  font-size: var(--spine-text-meta);
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.sat-spine__tab-bar {
+  display: block;
+  height: 2px;
+  width: 100%;
+  border-radius: 999px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.sat-spine__tab-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+  transition: width var(--spine-motion-panel) ease-out;
+}
+
+.sat-spine__nav-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spine-space-2);
+  margin-top: var(--spine-space-3);
+}
+
+.sat-spine__nav-count {
+  font-size: var(--spine-text-meta);
+  color: var(--color-muted-foreground);
+}
+
+.sat-spine__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 var(--spine-space-3);
+  border-radius: var(--spine-radius-sm);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-foreground);
+  font-size: var(--spine-text-label);
+  font-weight: 600;
+}
+
+.sat-spine__add:hover:not(:disabled) {
+  background: var(--color-muted);
+}
+
+.sat-spine__add:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+.sat-spine__add:disabled {
+  opacity: 0.4;
+}
+
+.sat-spine__selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spine-space-3);
+  flex: 0 0 auto;
+  padding: var(--spine-space-2) var(--spine-space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in oklab, var(--color-primary) 6%, transparent);
+  font-size: var(--spine-text-meta);
+}
+
+.sat-spine__resizer {
+  flex: 0 0 auto;
+  width: 7px;
+  margin-inline: -3px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 1;
+}
+
+.sat-spine__resizer:hover,
+.sat-spine__resizer:focus-visible {
+  background: color-mix(in oklab, var(--color-primary) 20%, transparent);
+  outline: none;
+}
+
+.sat-spine__list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.sat-spine__question-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--spine-space-2);
+  margin: 0 var(--spine-space-2);
+  border-radius: var(--spine-radius-md);
+  transition: background-color var(--spine-motion-fast) ease-out;
+}
+
+.sat-spine__question-row:hover {
+  background: var(--color-muted);
+}
+
+.sat-spine__question-row.is-selected {
+  background: color-mix(in oklab, var(--color-primary) 8%, transparent);
+}
+
+.sat-spine__question-row [data-selected-bar] {
+  position: absolute;
+  inset-block: 6px;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--color-primary);
+}
+
+.sat-spine__check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  flex: 0 0 auto;
+}
+
+.sat-spine__check-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  width: 18px;
+  border: 1px solid var(--color-input);
+  border-radius: 4px;
+}
+
+.sat-spine__check-box.is-checked {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
+.sat-spine__row-main {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spine-space-3);
+  min-height: 56px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--spine-space-2) var(--spine-space-2) var(--spine-space-2) var(--spine-space-3);
+  text-align: left;
+}
+
+.sat-spine__row-main:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: -2px;
+  border-radius: var(--spine-radius-md);
+}
+
+.sat-spine__row-num {
+  flex: 0 0 auto;
+  width: 22px;
+  padding-top: 2px;
+  font-size: var(--spine-text-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted-foreground);
+}
+
+.sat-spine__question-row.is-selected .sat-spine__row-num {
+  color: var(--color-foreground);
+  font-weight: 600;
+}
+
+.sat-spine__row-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--spine-text-label);
+  line-height: 1.35;
+  color: var(--color-foreground);
+}
+
+.sat-spine__question-row.is-selected .sat-spine__row-preview {
+  font-weight: 550;
+}
+
+.sat-spine__row-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex: 0 0 auto;
+  width: 34px;
+  min-height: 24px;
+  font-size: var(--spine-text-meta);
+  font-weight: 600;
+  color: var(--color-muted-foreground);
+}
+
+.sat-spine__row-status.is-issue {
+  color: var(--color-destructive);
+}
+
+.sat-spine__row-count {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sat-spine__row-status {
+    opacity: 1;
+    transition: opacity var(--spine-motion-fast) ease-out;
+  }
+  .sat-spine__question-row:hover .sat-spine__row-status,
+  .sat-spine__question-row:focus-within .sat-spine__row-status {
+    opacity: 0;
+  }
+  .sat-spine__row-actions {
+    position: absolute;
+    right: var(--spine-space-2);
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity var(--spine-motion-fast) ease-out;
+  }
+  .sat-spine__question-row:hover .sat-spine__row-actions,
+  .sat-spine__question-row:focus-within .sat-spine__row-actions {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1279px) {
+  .sat-spine {
+    --spine-rail-width: 360px;
+  }
+}
+
 @media (max-width: 900px) {
   .sat-spine__queue {
     display: none;
   }
+}
+
+
+.sat-spine__inspector { flex: 0 0 var(--spine-inspector-width); width: var(--spine-inspector-width); min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--color-border); background: var(--color-card); animation: spine-panel-enter var(--spine-motion-panel) ease-out; }
+@keyframes spine-panel-enter { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+.sat-spine__main, .sat-spine__queue { overscroll-behavior: contain; }
+.sat-spine__menu button { min-width: 44px; min-height: 44px; }
+@media (hover: hover) and (pointer: fine) {
+  .sat-spine__row-actions, .sat-spine__choice-reorder { opacity: 0; }
+  [data-spine-key-row]:hover .sat-spine__choice-reorder,
+  [data-spine-key-row]:focus-within .sat-spine__choice-reorder { opacity: 1; }
+  .sat-spine__question-row:hover .sat-spine__row-actions,
+  .sat-spine__question-row:focus-within .sat-spine__row-actions { opacity: 1; }
+}
+@media (max-width: 600px) {
+  .sat-spine__header-save { display: none; }
+  .sat-spine__header > div { gap: 4px; padding-inline: 8px; flex-wrap: wrap; }
+}
+
+.sat-spine__add-content { min-height: 44px; color: var(--muted-foreground); font-size: var(--spine-text-label); padding: 8px; border-radius: var(--spine-radius-sm); }
+.sat-spine__add-content:hover { background: var(--muted); color: var(--foreground); }
+.sat-spine__add-content:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.sat-spine__section { scroll-margin-block: 24px; outline: none; }
+
+/* Canonical spine card (taste foundation): every card in the authoring
+ * column shares one radius, one border, one surface, one elevation, so the
+ * column reads as one designed surface instead of assembled boxes.
+ * Padding stays per-component; geometry never forks. Elevation resolves
+ * from the workspace `--au-elevation-card` (under `.sat-product`). */
+.sat-spine .spine-card {
+  border-radius: var(--radius-au-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  box-shadow: var(--au-elevation-card);
 }
 
 /* One-shot "look here" flash for issue-target fields (micro-interaction

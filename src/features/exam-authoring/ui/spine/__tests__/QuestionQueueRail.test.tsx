@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { AssessmentModuleShell, AssessmentSectionShell } from "../../../contracts/assessment";
 import { QuestionQueueRail } from "../QuestionQueueRail";
@@ -76,8 +76,9 @@ function renderRail(overrides: Partial<Parameters<typeof QuestionQueueRail>[0]> 
 describe("QuestionQueueRail", () => {
   it("announces the current question with text, not color alone", () => {
     renderRail();
-    expect(screen.getByRole("button", { name: /question 1.*current/i })).toBeInTheDocument();
-    expect(screen.getByText("Current")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /question 1.*selected/i })).toBeInTheDocument();
+    expect(screen.queryByText("Current")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /question 1.*selected/i })).toHaveAttribute("aria-current", "true");
   });
 
   it("selects the question when any area of the row is clicked", () => {
@@ -116,15 +117,20 @@ describe("QuestionQueueRail", () => {
     expect(screen.getByRole("button", { name: "Add question 3" })).toBeDisabled();
   });
 
-  it("keeps reorder buttons discoverable without hover", () => {
-    renderRail();
-    const ups = screen.getAllByRole("button", { name: "Move question up" });
-    expect(ups.length).toBeGreaterThan(0);
-    // No `hidden` gate: visible at rest, dimmed until hover/focus.
-    for (const up of ups) {
-      expect(up).toBeVisible();
-      expect(up.parentElement?.className).toContain("opacity-40");
-    }
+  it("keeps reorder in a row menu without selecting that row", async () => {
+    const onSelectQuestion = vi.fn();
+    const onReorder = vi.fn().mockResolvedValue(undefined);
+    renderRail({ onSelectQuestion, onReorder });
+    fireEvent.click(screen.getByRole("button", { name: "Question 1 actions" }));
+    expect(screen.getByRole("menuitem", { name: "Move up" })).toBeDisabled();
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { name: "Move down" })); });
+    expect(onReorder).toHaveBeenCalledWith(["q-2", "q-1"], ["q-1", "q-2"]);
+    expect(onSelectQuestion).not.toHaveBeenCalled();
+  });
+
+  it("keeps real question numbers under filtering", () => {
+    renderRail({searchQuery: "Prompt 2"});
+    expect(screen.getByRole("button", {name: /Question 2: Prompt 2/})).toBeInTheDocument();
   });
 
   it("disables the header Question button while mutating", () => {
@@ -146,6 +152,6 @@ describe("QuestionQueueRail", () => {
         onReorder={vi.fn().mockResolvedValue(undefined)} onBulkAction={vi.fn().mockResolvedValue(undefined)}
       />,
     );
-    expect(screen.queryByRole("button", { name: /add question/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^add question \d+$/i })).not.toBeInTheDocument();
   });
 });

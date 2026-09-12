@@ -3,9 +3,9 @@ package main
 import (
 	"testing"
 
-	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
 // A1 RED: buildTierSet honors RATE_LIMIT_MODE=local — zero DB checkers wired

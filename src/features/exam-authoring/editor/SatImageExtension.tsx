@@ -4,8 +4,12 @@ import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tip
 import { ImageIcon } from "lucide-react";
 import { getAssessmentMediaAsset } from "../api/assessmentMediaApi";
 
+// Renderable without the media service: http(s) and app-relative paths
+// only. data:/blob: URLs are never rendered directly — pasted images must go
+// through the upload pipeline (allowBase64:false) so unverified bytes cannot
+// become publishable content and so no object-URL lifetime leaks into drafts.
 function isDirectSource(value: string): boolean {
-  return /^(https?:\/\/|data:|blob:|\/)/i.test(value);
+  return /^(https?:\/\/|\/)/i.test(value);
 }
 
 function SatImageNodeView({ node }: NodeViewProps) {

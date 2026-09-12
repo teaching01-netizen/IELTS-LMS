@@ -9,6 +9,7 @@ import type { SatQuestionAnnotations, SatQuestionResponseDraft } from "../../dom
 import type { SatSectionKey } from "../../application/satRunnerReducer";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
 import { SatQuestionBody } from "../../../exam-rendering/api/SatQuestionBody";
+import { renderSatQuestionImageEnlarge } from "../media/SatQuestionImageEnlarge";
 import { SatQuestionHeader } from "./SatQuestionHeader";
 import { SatQuestionWorkspace } from "./SatQuestionWorkspace";
 import { SatSingleChoiceAnswer } from "./SatSingleChoiceAnswer";
@@ -45,6 +46,16 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
   const editingNote = props.response.annotations.annotations.find((annotation) => annotation.id === editingNoteId);
   const editNote = (note: string | undefined) => {
     if (!editingNoteId || props.disabled) return;
+    // Deleting the note off a note-less mark removes the whole annotation:
+    // a bare highlight opened via Add note + Delete is a no-op round-trip
+    // otherwise, with no other path to remove a bare mark (erase mode was
+    // retired from the top bar in Phase 5). Note-bearing marks keep their
+    // highlight and lose only the note text (pre-existing semantics).
+    const target = props.response.annotations.annotations.find((annotation) => annotation.id === editingNoteId);
+    if (note === undefined && target && !target.note) {
+      props.onAnnotationsChange?.({ ...props.response.annotations, annotations: props.response.annotations.annotations.filter((annotation) => annotation.id !== editingNoteId) });
+      return;
+    }
     props.onAnnotationsChange?.({ ...props.response.annotations, annotations: props.response.annotations.annotations.map((annotation) => {
       if (annotation.id !== editingNoteId) return annotation;
       const { note: _previous, ...rest } = annotation;
@@ -57,7 +68,7 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
   const eliminated = new Set(props.response.eliminatedOptionIds);
   const policy = resolveSatExamToolPolicy(props.sectionKey, []);
   const renderContent = (content: StructuredContent, region: 'stimulus' | 'prompt') => (
-    <SatAnnotatedContent content={content} region={region} annotations={props.response.annotations} enabled={policy.highlight || policy.underline} onChange={props.disabled ? undefined : props.onAnnotationsChange} onEditNote={(annotation) => setEditingNoteId(annotation.id)} />
+    <SatAnnotatedContent content={content} region={region} annotations={props.response.annotations} enabled={policy.highlight || policy.underline} enlarge={props.disabled ? undefined : { renderEnlarge: renderSatQuestionImageEnlarge }} onChange={props.disabled ? undefined : props.onAnnotationsChange} onEditNote={(annotation) => setEditingNoteId(annotation.id)} />
   );
 
   const questionContent = (
@@ -97,15 +108,6 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
           />
         )}
       </SatQuestionBody>
-      {policy.notes && props.response.annotations.annotations.some((annotation) => annotation.note) ? (
-        <section aria-label="Notes on this question" className="mt-4 border-t border-[var(--sat-divider)] pt-3">
-          {props.response.annotations.annotations.filter((annotation) => annotation.note).map((annotation) => (
-            <button key={annotation.id} type="button" disabled={props.disabled} onClick={() => setEditingNoteId(annotation.id)}
-              className="sat-touch-target block w-full rounded px-3 text-left underline focus-visible:outline focus-visible:outline-2"
-              aria-label={`Edit note: ${annotation.anchor.exact}`}>{annotation.anchor.exact}</button>
-          ))}
-        </section>
-      ) : null}
       {editingNote && !props.disabled ? <SatAnnotationNoteEditor annotation={editingNote} onChange={editNote} onFlush={props.onFlushAnnotations} onClose={() => setEditingNoteId(null)} onDelete={() => { editNote(undefined); setEditingNoteId(null); }} /> : null}
     </div>
   );

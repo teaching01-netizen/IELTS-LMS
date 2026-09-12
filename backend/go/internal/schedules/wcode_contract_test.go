@@ -22,10 +22,10 @@ import (
 func TestNormalizeAccessCodeContract(t *testing.T) {
 	cases := map[string]string{
 		// Legacy W+D6: uppercase + trim.
-		"W123456":     "W123456",
-		"w123456":     "W123456",
+		"W123456":    "W123456",
+		"w123456":    "W123456",
 		"  w123456 ": "W123456",
-		"W000000":     "W000000",
+		"W000000":    "W000000",
 		// Near-miss: NOT W+D6 -> trimmed passthrough (by design).
 		"W12345":   "W12345",
 		"W1234567": "W1234567",

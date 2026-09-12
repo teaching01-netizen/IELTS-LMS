@@ -39,9 +39,9 @@ describe('annotation editor cleanup on erase', () => {
     );
     const { rerender, unmount } = render(view(seeded()));
     fireEvent.click(screen.getByRole('button', { name: 'Edit note: A tree' }));
-    expect(screen.getByRole('textbox', { name: 'Note for selected text' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Your note' })).toBeInTheDocument();
     rerender(view({ ...seeded(), annotations: { version: 2, annotations: [], legacyQuestionNote: '' } }));
-    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Note for selected text' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Your note' })).not.toBeInTheDocument());
     unmount();
   });
 });

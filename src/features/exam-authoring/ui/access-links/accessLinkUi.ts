@@ -47,6 +47,21 @@ export function accessLinkStatusDescription(link: AssessmentAccessLink, now = ne
   return "Availability follows this link's access policy.";
 }
 
+/** Map a link lifecycle status to the shared Calm Ops Bento pill tone. Single mapping — rows and detail must reuse this. */
+export function accessLinkStatusTone(status: AccessLinkStatus): "live" | "ready" | "paused" | "finished" | "invalidated" {
+  switch (status) {
+    case "live": return "live";
+    case "upcoming": return "ready";
+    case "paused": return "paused";
+    case "ended": return "finished";
+    case "revoked": return "invalidated";
+  }
+}
+
+export function shouldPulseAccessLinkStatus(status: AccessLinkStatus): boolean {
+  return status === "live";
+}
+
 export function formatCompactDateTime(date: Date, now = new Date()): string {
   const sameDay = date.getFullYear() === now.getFullYear()
     && date.getMonth() === now.getMonth()

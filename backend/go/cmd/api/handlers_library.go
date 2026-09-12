@@ -14,6 +14,7 @@ import (
 	"example.com/ielts-proctoring/internal/library"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/platform/pagination"
 )
 
 // requireLibraryService rejects requests when the library service is not wired.
@@ -34,6 +35,24 @@ func requireAnswerHistoryService(w http.ResponseWriter, r *http.Request, app *Ap
 	return true
 }
 
+// parseLibraryListLimit parses ?limit= fail-closed (WS-13.1): absent
+// yields 0 (service default); malformed yields FieldError (400);
+// non-positive clamps to 0 (service default, legacy behavior).
+func parseLibraryListLimit(r *http.Request) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, pagination.FieldError{Field: "limit", Reason: "must be a base-10 integer"}
+	}
+	if n <= 0 {
+		return 0, nil
+	}
+	return n, nil
+}
+
 // libraryListFilter builds a library ListFilter from ?difficulty= ?topic=
 // ?type= (questions only) ?limit=. Non-positive/garbage limits fall back to
 // the service default, mirroring domainQueryInt.
@@ -50,12 +69,27 @@ func libraryListFilter(r *http.Request, includeType bool) library.ListFilter {
 			typ = &v
 		}
 	}
+	// Limit is always 0 here: HTTP callers must go through
+	// libraryListFilterErr (fail-closed ?limit=); this constructor only
+	// builds the string filters.
 	return library.ListFilter{
 		Difficulty: difficulty,
 		Topic:      topic,
 		Type:       typ,
-		Limit:      domainQueryInt(r, "limit", 0),
 	}
+}
+
+// libraryListFilterErr is the fail-closed list-filter constructor: it
+// parses ?limit= strictly (malformed 400s at the caller) while keeping
+// the legacy string filters and the 0-means-service-default convention.
+func libraryListFilterErr(r *http.Request, includeType bool) (library.ListFilter, error) {
+	f := libraryListFilter(r, includeType)
+	limit, err := parseLibraryListLimit(r)
+	if err != nil {
+		return library.ListFilter{}, err
+	}
+	f.Limit = limit
+	return f, nil
 }
 
 // libraryPassagesListHandler lists passages within read scope.
@@ -64,10 +98,19 @@ func libraryPassagesListHandler(app *App) http.HandlerFunc {
 		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleBuilder) == nil {
 			return
 		}
+		// Fail-closed ?limit= before service gates.
+		filter, perr := libraryListFilterErr(r, false)
+		if perr != nil {
+			if writePaginationFieldError(w, r, perr) {
+				return
+			}
+			httpx.WriteError(w, r, perr)
+			return
+		}
 		if !requireLibraryService(w, r, app) {
 			return
 		}
-		out, err := app.Library.ListPassages(r.Context(), actorOf(r.Context()), libraryListFilter(r, false))
+		out, err := app.Library.ListPassages(r.Context(), actorOf(r.Context()), filter)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -181,10 +224,34 @@ func libraryPassageUpdateHandler(app *App) http.HandlerFunc {
 	}
 }
 
+// parseDeleteRevisionQuery parses the ?revision= guard fail-closed:
+// absent yields nil; malformed yields FieldError (400). Body revision
+// wins when present; callers run this BEFORE service gates.
+func parseDeleteRevisionQuery(r *http.Request) (*int, error) {
+	q := strings.TrimSpace(r.URL.Query().Get("revision"))
+	if q == "" {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(q)
+	if err != nil {
+		return nil, pagination.FieldError{Field: "revision", Reason: "must be a base-10 integer"}
+	}
+	return &n, nil
+}
+
 // libraryPassageDeleteHandler removes a passage within writable scope.
 func libraryPassageDeleteHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if requireRole(w, r, auth.RoleAdmin, auth.RoleBuilder) == nil {
+			return
+		}
+		// Fail-closed ?revision= before service gates (never drop guard).
+		queryRev, qerr := parseDeleteRevisionQuery(r)
+		if qerr != nil {
+			if writePaginationFieldError(w, r, qerr) {
+				return
+			}
+			httpx.WriteError(w, r, qerr)
 			return
 		}
 		if !requireLibraryService(w, r, app) {
@@ -194,13 +261,9 @@ func libraryPassageDeleteHandler(app *App) http.HandlerFunc {
 			Revision *int `json:"revision"`
 		}
 		_ = httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &delBody)
-		var delRev *int
+		delRev := queryRev
 		if delBody.Revision != nil {
 			delRev = delBody.Revision
-		} else if q := strings.TrimSpace(r.URL.Query().Get("revision")); q != "" {
-			if n, err := strconv.Atoi(q); err == nil {
-				delRev = &n
-			}
 		}
 		if err := app.Library.DeletePassage(r.Context(), actorOf(r.Context()), chi.URLParam(r, "id"), delRev); err != nil {
 			httpx.WriteError(w, r, err)
@@ -232,10 +295,19 @@ func libraryQuestionsListHandler(app *App) http.HandlerFunc {
 		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleBuilder) == nil {
 			return
 		}
+		// Fail-closed ?limit= before service gates.
+		filter, perr := libraryListFilterErr(r, true)
+		if perr != nil {
+			if writePaginationFieldError(w, r, perr) {
+				return
+			}
+			httpx.WriteError(w, r, perr)
+			return
+		}
 		if !requireLibraryService(w, r, app) {
 			return
 		}
-		out, err := app.Library.ListQuestions(r.Context(), actorOf(r.Context()), libraryListFilter(r, true))
+		out, err := app.Library.ListQuestions(r.Context(), actorOf(r.Context()), filter)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -347,6 +419,15 @@ func libraryQuestionDeleteHandler(app *App) http.HandlerFunc {
 		if requireRole(w, r, auth.RoleAdmin, auth.RoleBuilder) == nil {
 			return
 		}
+		// Fail-closed ?revision= before service gates (never drop guard).
+		queryRev, qerr := parseDeleteRevisionQuery(r)
+		if qerr != nil {
+			if writePaginationFieldError(w, r, qerr) {
+				return
+			}
+			httpx.WriteError(w, r, qerr)
+			return
+		}
 		if !requireLibraryService(w, r, app) {
 			return
 		}
@@ -354,13 +435,9 @@ func libraryQuestionDeleteHandler(app *App) http.HandlerFunc {
 			Revision *int `json:"revision"`
 		}
 		_ = httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &delQBody)
-		var delQRev *int
+		delQRev := queryRev
 		if delQBody.Revision != nil {
 			delQRev = delQBody.Revision
-		} else if q := strings.TrimSpace(r.URL.Query().Get("revision")); q != "" {
-			if n, err := strconv.Atoi(q); err == nil {
-				delQRev = &n
-			}
 		}
 		if err := app.Library.DeleteQuestion(r.Context(), actorOf(r.Context()), chi.URLParam(r, "id"), delQRev); err != nil {
 			httpx.WriteError(w, r, err)
@@ -567,17 +644,29 @@ func answerHistoryTargetTypeParam(r *http.Request) string {
 	return answerhistory.TargetObjective
 }
 
-// answerHistoryCursorParam reads the optional ?cursor= int64 param.
-func answerHistoryCursorParam(r *http.Request) *int64 {
-	raw := strings.TrimSpace(r.URL.Query().Get("cursor"))
-	if raw == "" {
-		return nil
+// parseAnswerHistoryPaging parses ?cursor= + ?limit= fail-closed (WS-13.1):
+// malformed yields pagination.FieldError (400); absent keeps legacy
+// (nil cursor, limit 200); numerics clamp limit to >= 1.
+func parseAnswerHistoryPaging(r *http.Request) (cursor *int64, limit int, err error) {
+	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
+		n, aerr := strconv.ParseInt(raw, 10, 64)
+		if aerr != nil {
+			return nil, 0, pagination.FieldError{Field: "cursor", Reason: "must be a base-10 integer"}
+		}
+		cursor = &n
 	}
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return nil
+	limit = 200
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		n, aerr := strconv.Atoi(raw)
+		if aerr != nil {
+			return nil, 0, pagination.FieldError{Field: "limit", Reason: "must be a base-10 integer"}
+		}
+		if n < 1 {
+			n = 1
+		}
+		limit = n
 	}
-	return &n
+	return cursor, limit, nil
 }
 
 // writeAnswerHistoryJSON writes a service RawMessage projection as-is with
@@ -625,6 +714,15 @@ func answerHistoryTargetDetailHandler(app *App) http.HandlerFunc {
 		if sess == nil {
 			return
 		}
+		// Fail-closed paging before service gates.
+		ahCursor, ahLimit, perr := parseAnswerHistoryPaging(r)
+		if perr != nil {
+			if writePaginationFieldError(w, r, perr) {
+				return
+			}
+			httpx.WriteError(w, r, perr)
+			return
+		}
 		if !requireAnswerHistoryService(w, r, app) {
 			return
 		}
@@ -636,7 +734,7 @@ func answerHistoryTargetDetailHandler(app *App) http.HandlerFunc {
 		if !requireAnswerHistorySchedule(w, r, app, sess, scheduleID) {
 			return
 		}
-		out, err := app.AnswerHistory.GetTargetDetail(r.Context(), submissionID, answerHistoryTargetTypeParam(r), chi.URLParam(r, "targetID"), answerHistoryCursorParam(r), domainQueryInt(r, "limit", 200))
+		out, err := app.AnswerHistory.GetTargetDetail(r.Context(), submissionID, answerHistoryTargetTypeParam(r), chi.URLParam(r, "targetID"), ahCursor, ahLimit)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -727,6 +825,15 @@ func answerHistoryTargetDetailByAttemptHandler(app *App) http.HandlerFunc {
 		if sess == nil {
 			return
 		}
+		// Fail-closed paging before service gates.
+		ahCursor, ahLimit, perr := parseAnswerHistoryPaging(r)
+		if perr != nil {
+			if writePaginationFieldError(w, r, perr) {
+				return
+			}
+			httpx.WriteError(w, r, perr)
+			return
+		}
 		if !requireAnswerHistoryService(w, r, app) {
 			return
 		}
@@ -738,7 +845,7 @@ func answerHistoryTargetDetailByAttemptHandler(app *App) http.HandlerFunc {
 		if !requireAnswerHistorySchedule(w, r, app, sess, scheduleID) {
 			return
 		}
-		out, err := app.AnswerHistory.GetTargetDetailByAttempt(r.Context(), attemptID, answerHistoryTargetTypeParam(r), chi.URLParam(r, "targetID"), answerHistoryCursorParam(r), domainQueryInt(r, "limit", 200))
+		out, err := app.AnswerHistory.GetTargetDetailByAttempt(r.Context(), attemptID, answerHistoryTargetTypeParam(r), chi.URLParam(r, "targetID"), ahCursor, ahLimit)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

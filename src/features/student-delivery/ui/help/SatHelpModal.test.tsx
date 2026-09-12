@@ -30,7 +30,7 @@ describe("SatHelpModal", () => {
     expect(screen.queryByText(SAT_HELP_ENTRIES[0].body)).not.toBeInTheDocument();
   });
 
-  it("sizes accordion rows 78px/18px with 24px icons and blue text expand controls", () => {
+  it("sizes accordion rows 78px/18px with 20px icons and blue text expand controls", () => {
     render(<SatHelpModal open onClose={() => undefined} />);
     const rows = screen.getAllByRole("button", { expanded: false });
     expect(rows.length).toBeGreaterThan(0);
@@ -38,8 +38,13 @@ describe("SatHelpModal", () => {
       expect(row.className).toContain("min-h-[78px]");
       expect(row.className).toContain("text-[18px]");
     }
-    // 24px accordion icons: every row renders an h-6 w-6 lucide icon.
-    expect(document.querySelectorAll(".lucide.h-6.w-6").length).toBe(rows.length);
+    // Wave D R-22: 20px accordion icons (h-5 w-5) against 18px titles;
+    // row height stays min-h-[78px] so targets do not shrink.
+    // Scoped to the accordion rows: the modal X close is also h-5 w-5.
+    for (const row of rows) {
+      expect(row.querySelector("svg.lucide.h-5.w-5")).not.toBeNull();
+    }
+    expect(document.querySelectorAll(".lucide.h-6.w-6").length).toBe(0);
     for (const name of ["Expand All", "Collapse All"]) {
       const control = screen.getByRole("button", { name: name });
       expect(control.className).toContain("text-[var(--sat-accent-strong)]");

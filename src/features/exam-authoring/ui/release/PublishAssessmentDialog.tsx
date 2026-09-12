@@ -1,0 +1,192 @@
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, LoaderCircle, Rocket } from "lucide-react";
+import type { AssessmentAuthoringShell } from "../../contracts/assessment";
+import {
+  MAX_PUBLISH_NOTES_LENGTH,
+  candidateSecondsForSection,
+  formatDuration,
+  normalizePublishNotes,
+  toUserFacingPublishError,
+} from "./releaseSelectors";
+import { releaseDisabledButtonClass } from "./releaseUi";
+import { AuthoringDialog } from "../authoringPrimitives";
+
+interface PublishAssessmentDialogProps {
+  open: boolean;
+  examTitle: string;
+  shell: AssessmentAuthoringShell;
+  blockerCount: number;
+  warningCount: number;
+  candidateSeconds: number;
+  candidateEstimateStale: boolean;
+  isPublishing: boolean;
+  isUpdate: boolean;
+  currentPublishedVersionNumber: number | null;
+  onClose: () => void;
+  onConfirm: (publishNotes?: string) => Promise<void>;
+}
+
+export function PublishAssessmentDialog({
+  open,
+  examTitle,
+  shell,
+  blockerCount,
+  warningCount,
+  candidateSeconds,
+  candidateEstimateStale,
+  isPublishing,
+  isUpdate,
+  currentPublishedVersionNumber,
+  onClose,
+  onConfirm,
+}: PublishAssessmentDialogProps) {
+  const [notes, setNotes] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
+
+  useEffect(() => {
+    if (!open) {
+      setNotes("");
+      setLocalError(null);
+      submittingRef.current = false;
+    }
+  }, [open ]);
+
+  const submit = async () => {
+    if (blockerCount > 0 || isPublishing || submittingRef.current) return;
+    submittingRef.current = true;
+    setLocalError(null);
+    try {
+      await onConfirm(normalizePublishNotes(notes));
+      onClose();
+    } catch (error) {
+      setLocalError(toUserFacingPublishError(error));
+    } finally {
+      submittingRef.current = false;
+    }
+  };
+
+  return (
+    <AuthoringDialog
+      open={open}
+      title={isUpdate ? `Publish changes to ${examTitle}?` : `Publish ${examTitle}?`}
+      description={
+        isUpdate && currentPublishedVersionNumber
+          ? `Students continue to receive Version ${currentPublishedVersionNumber} until this update is published.`
+          : "Students will receive this release until you publish a later update."
+      }
+      onClose={onClose}
+      closeDisabled={isPublishing}
+      contentClassName="w-[min(94vw,620px)] max-h-[88vh] overflow-y-auto rounded-2xl p-0"
+    >
+      <div className="p-5 pt-2 sm:p-6 sm:pt-3">
+        <div className="flex items-center gap-3 rounded-2xl bg-muted p-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <Rocket size={19} aria-hidden="true" />
+          </div>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Review delivery details and add optional notes before creating the immutable
+            release.
+          </p>
+        </div>
+
+        <div className="mt-5 rounded-2xl bg-muted p-4">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="text-muted-foreground">
+              Candidate time{candidateEstimateStale ? " (draft estimate \u2014 save first)" : ""}
+            </span>
+            <span className="font-semibold text-foreground">{formatDuration(candidateSeconds)}</span>
+          </div>
+          <div className="mt-3 border-t border-border pt-3">
+            {shell.sections.map((section) => (
+              <div
+                key={section.id}
+                className="flex items-center justify-between gap-3 py-1.5 text-xs"
+              >
+                <span className="text-muted-foreground">{section.title}</span>
+                <span className="font-semibold text-foreground">
+                  {formatDuration(candidateSecondsForSection(section))}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-start gap-2 rounded-2xl border border-border p-4">
+          {blockerCount === 0 ? (
+            <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-green-800 dark:text-green-200" aria-hidden="true" />
+          ) : (
+            <AlertTriangle size={17} className="mt-0.5 shrink-0 text-destructive" aria-hidden="true" />
+          )}
+          <div className="text-sm leading-6 text-muted-foreground">
+            <p className="font-semibold text-foreground">
+              {blockerCount === 0
+                ? "Release checks passed"
+                : `${blockerCount} blocking issue${blockerCount === 1 ? "" : "s"}`}
+            </p>
+            <p>
+              {warningCount} recommendation{warningCount === 1 ? "" : "s"} remain.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 flex items-baseline justify-between gap-3">
+          <span id="sat-publish-notes-label" className="block text-xs font-medium text-muted-foreground">
+            Publish notes <span className="font-normal text-muted-foreground">Optional</span>
+          </span>
+          <span id="sat-publish-notes-count" aria-live="polite" className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+            {notes.length}/{MAX_PUBLISH_NOTES_LENGTH}
+          </span>
+        </div>
+          <textarea
+            id="sat-publish-notes"
+            aria-labelledby="sat-publish-notes-label"
+            aria-describedby="sat-publish-notes-count"
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            rows={3}
+            maxLength={MAX_PUBLISH_NOTES_LENGTH}
+            placeholder="What changed in this release?"
+            className="mt-1.5 w-full resize-y rounded-xl border border-border px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/15"
+          />
+
+        {warningCount > 0 && blockerCount === 0 ? (
+          <p className="mt-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
+            Recommendations do not block publishing; review them if they affect your intended
+            delivery.
+          </p>
+        ) : null}
+        {localError ? (
+          <p role="alert" className="mt-3 rounded-xl bg-destructive/10 p-3 text-xs leading-5 text-destructive">
+            {localError}
+          </p>
+        ) : null}
+
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isPublishing}
+            data-dialog-initial-focus
+            className={`min-h-11 rounded-xl bg-muted px-4 text-sm font-semibold text-foreground hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${releaseDisabledButtonClass}`}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={blockerCount > 0 || isPublishing}
+            className={`flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${releaseDisabledButtonClass}`}
+          >
+            {isPublishing ? (
+              <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            ) : (
+              <Rocket size={15} aria-hidden="true" />
+            )}
+            {isPublishing ? "Publishing\u2026" : isUpdate ? "Publish Update" : "Publish"}
+          </button>
+        </div>
+      </div>
+    </AuthoringDialog>
+  );
+}

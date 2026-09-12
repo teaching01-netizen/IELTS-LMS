@@ -8,10 +8,24 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
+
+// verifyAttemptReadBearer verifies an attempt bearer for READ paths: HMAC +
+// expiry plus a single indexed attempt_sessions touch
+// (token_id/revoked_at/lease_epoch WHERE token_id=? AND revoked_at IS NULL)
+// in BOTH verify modes. A revoked/rotated/unknown token fails closed here so
+// terminated-bearer and post-takeover replays render 401 on reads even when
+// ATTEMPT_VERIFY=stateless. Stateless skips the session-table touch ONLY on
+// the write fast-path edge verify (WS-02b covers writes in-tx), never on
+// reads, which have no in-tx fence.
+func verifyAttemptReadBearer(app *App, r *http.Request, bearer string) (crypto.AttemptClaims, error) {
+	return auth.VerifyAttemptRead(r.Context(), app.DB, app.Config, time.Now().UTC(), bearer)
+}
 
 // runtimePollHandler serves GET /api/v1/student/sessions/{scheduleID}/runtime
 // (plan C3, Polling tier): the versioned runtime poll that replaces student
@@ -30,6 +44,14 @@ func runtimePollHandler(app *App) http.HandlerFunc {
 			runtimePollInner(app, w, r)
 		})
 	}
+}
+
+// runtimePollETag names the poll representation: weak validator over the
+// authorized schedule view at one revision. sinceRevision stays as the
+// deprecated alias (frontend poll loop sends it); If-None-Match is the
+// standard validator and wins when both agree there is nothing new.
+func runtimePollETag(scheduleID string, revision int64) string {
+	return `W/"runtime-` + scheduleID + `-` + strconv.FormatInt(revision, 10) + `"`
 }
 
 func runtimePollInner(app *App, w http.ResponseWriter, r *http.Request) {
@@ -52,6 +74,15 @@ func runtimePollInner(app *App, w http.ResponseWriter, r *http.Request) {
 	view, notModified, err := app.Runtime.PollView(r.Context(), app.DB, scheduleID, since, time.Now().UTC())
 	if err != nil {
 		httpx.WriteError(w, r, MapDBError(err))
+		return
+	}
+	// Uniform conditional read: the ETag always reflects the authorized
+	// view; If-None-Match matching it renders 304 even when the client
+	// omits (or lags) sinceRevision. sinceRevision == current keeps its
+	// legacy 304 path as a deprecated alias.
+	etag := runtimePollETag(scheduleID, view.Revision)
+	if writeETagOrNotModified(w, r, etag) {
+		telemetry.IncCounter(telemetry.MRuntimePollTotal, "result", "not_modified")
 		return
 	}
 	if notModified {
@@ -102,15 +133,18 @@ func authorizeRuntimePoll(w http.ResponseWriter, r *http.Request, app *App, sche
 }
 
 // authorizeRuntimePollBearer verifies the attempt bearer against the URL
-// schedule (mirrors attemptIDFromStudentWire's binding check). It renders
-// the denial envelope and reports false on failure.
+// schedule (mirrors attemptIDFromStudentWire's binding check). Reads have no
+// in-tx fence, so this uses the session-bound read verify (HMAC + expiry +
+// attempt_sessions touch) in BOTH verify modes: a revoked or
+// takeover-rotated bearer renders 401 even when ATTEMPT_VERIFY=stateless.
+// It renders the denial envelope and reports false on failure.
 func authorizeRuntimePollBearer(w http.ResponseWriter, r *http.Request, app *App, scheduleID string) (string, bool) {
 	bearer := bearerOf(r)
 	if bearer == "" {
 		httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Authentication is required."))
 		return "", false
 	}
-	claims, err := verifyAttemptBearer(app, r, bearer)
+	claims, err := verifyAttemptReadBearer(app, r, bearer)
 	if err != nil {
 		httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 		return "", false

@@ -41,6 +41,7 @@ describe("assessmentAuthoringApi question contracts", () => {
     expect(backendPost).toHaveBeenCalledWith(
       "/v1/assessment-authoring/modules/mod-1/questions/batch",
       { questions: [draft] },
+      undefined,
     );
     expect(result.createdQuestionIds).toEqual(["eq-1"]);
   });
@@ -88,6 +89,7 @@ describe("assessmentAuthoringApi question contracts", () => {
     expect(backendPost).toHaveBeenCalledWith(
       "/v1/assessment-authoring/exam-questions/eq-1/duplicate",
       { destinationModuleId: "mod-1", insertAfterExamQuestionId: "eq-1" },
+      undefined,
     );
   });
 
@@ -103,7 +105,7 @@ describe("assessmentAuthoringApi question contracts", () => {
       questionIds: ["eq-1"],
       action: { type: "set_pretest", value: true },
       expectedRevisions: { "eq-1": 2 },
-    });
+    }, undefined);
     expect(result).toEqual(resultPayload);
   });
 });

@@ -47,8 +47,8 @@ type presenceEntry struct {
 // O(1) amortized, Lookup is O(1), memory bounded by live attempts x small
 // struct + a bounded per-attempt mutation ring for retry dedupe.
 type PresenceMap struct {
-	mu  sync.Mutex
-	ttl time.Duration
+	mu    sync.Mutex
+	ttl   time.Duration
 	items map[string]*presenceEntry
 }
 
@@ -232,32 +232,35 @@ func flushIntegrityRecovery(integrityRaw, recoveryRaw string, d PresenceDirty) (
 // attempt projection. Identity/ownership were established at the HTTP
 // boundary (bearer or session); the DB unique on (attempt, mutation) stays
 // the backstop at flush. Duplicate retries return the projection without
-// re-touching (a retry is not a new beat).
-func (s *Service) RecordHeartbeatMemory(ctx context.Context, req HeartbeatRequest) (map[string]any, error) {
+// re-touching (a retry is not a new beat). Returns (projection, deduped,
+// err) so callers count effective writes without global-counter inference.
+func (s *Service) RecordHeartbeatMemory(ctx context.Context, req HeartbeatRequest) (map[string]any, bool, error) {
 	if strings.TrimSpace(req.AttemptID) == "" || strings.TrimSpace(req.ScheduleID) == "" {
-		return nil, validationError("Attempt and schedule are required.")
+		return nil, false, validationError("Attempt and schedule are required.")
 	}
 	switch req.EventType {
 	case "heartbeat", "disconnect", "reconnect", "lost":
 	default:
-		return nil, validationError("Unsupported heartbeat event type.")
+		return nil, false, validationError("Unsupported heartbeat event type.")
 	}
 	if strings.TrimSpace(req.MutationID) == "" {
 		req.MutationID = uuid.NewString()
 	}
 	if s.presence == nil {
-		return nil, apperrors.New(apperrors.CodeServiceUnavailable, "Presence memory path is not enabled.")
+		return nil, false, apperrors.New(apperrors.CodeServiceUnavailable, "Presence memory path is not enabled.")
 	}
 	if s.presence.RememberMutation(req.AttemptID, req.MutationID) {
 		// Retry dedupe: presence already touched by the first beat; the
 		// projection is re-read (1-2 indexed reads) but no beat is
 		// recorded twice. Zero heartbeat-event SQL either way.
 		telemetry.IncCounter(telemetry.MPresenceDedupeHit)
-		return s.GetAttemptProjection(ctx, req.AttemptID)
+		projection, err := s.GetAttemptProjection(ctx, req.AttemptID)
+		return projection, true, err
 	}
 	s.presence.Touch(req.AttemptID, req.ScheduleID, req.ClientSessionID, req.EventType, time.Now().UTC())
 	telemetry.IncCounter(telemetry.MPresenceTouch)
-	return s.GetAttemptProjection(ctx, req.AttemptID)
+	projection, err := s.GetAttemptProjection(ctx, req.AttemptID)
+	return projection, false, err
 }
 
 func (p *PresenceMap) sweepLocked(now time.Time) {

@@ -16,13 +16,13 @@ describe('SAT reading focus layout', () => {
       const question = container.querySelector<HTMLElement>('[data-sat-question-scroll]')!;
       expect(question).not.toBeVisible();
       passage.scrollTop = 120; fireEvent.scroll(passage);
-      fireEvent.click(screen.getByRole('button', { name: 'Question' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Question only' }));
       expect(passage).not.toBeVisible();
       expect(question).toBeVisible();
       question.scrollTop = 40; fireEvent.scroll(question);
-      fireEvent.click(screen.getByRole('button', { name: 'Passage' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Passage only' }));
       expect(passage.scrollTop).toBe(120);
-      fireEvent.click(screen.getByRole('button', { name: 'Question' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Question only' }));
       expect(question.scrollTop).toBe(40);
       expect(screen.queryByRole('slider', { name: 'Passage and question width' })).not.toBeInTheDocument();
     } finally { unmount(); media.mockRestore(); }
@@ -35,15 +35,15 @@ describe('SAT reading focus layout', () => {
     const question = container.querySelector<HTMLElement>('[data-sat-question-scroll]')!;
     passage.scrollTop = 120; fireEvent.scroll(passage);
     question.scrollTop = 40; fireEvent.scroll(question);
-    fireEvent.click(screen.getByRole('button', { name: 'Expand passage' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Passage only' }));
     expect(question).not.toBeVisible();
     expect(passage).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Return to split' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Split view' }));
     expect(question).toBeVisible();
     expect(onSplitRatioChange).toHaveBeenLastCalledWith(0.6);
     expect(passage.scrollTop).toBe(120);
     expect(question.scrollTop).toBe(40);
-    fireEvent.click(screen.getByRole('button', { name: 'Expand question' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Question only' }));
     expect(passage).not.toBeVisible();
     expect(question).toBeVisible();
   });

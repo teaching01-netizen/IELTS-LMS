@@ -6,11 +6,14 @@ import {
   SheetTitle,
 } from "@/src/components/ui/sheet";
 import type { QuestionRevision } from "../../contracts/assessment";
+import type { QuestionSaveStatus } from "../../hooks/useQuestionAutosave";
 import { ExamQuestionRenderer } from "../../../exam-rendering/api/ExamQuestionRenderer";
 
 export interface SpinePreviewSheetProps {
   open: boolean;
   question: QuestionRevision | null;
+  /** Current save state: drives the unsaved-vs-saved revision label. */
+  saveStatus?: QuestionSaveStatus;
   onOpenChange: (open: boolean) => void;
   onCaptureOpener: () => void;
   onRestoreOpener: () => void;
@@ -26,6 +29,7 @@ export interface SpinePreviewSheetProps {
 export function SpinePreviewSheet({
   open,
   question,
+  saveStatus = "saved",
   onOpenChange,
   onCaptureOpener,
   onRestoreOpener,
@@ -44,7 +48,9 @@ export function SpinePreviewSheet({
         <SheetHeader className="border-b border-border px-4 py-3 text-left">
           <SheetTitle className="text-xs font-semibold">Student preview</SheetTitle>
           <SheetDescription className="text-[11px]">
-            Live delivery renderer · updates as you author
+            {saveStatus === "saved"
+              ? "Saved draft revision · matches the full SAT preview"
+              : "Local unsaved edits included · save to update the full SAT preview"}
           </SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">

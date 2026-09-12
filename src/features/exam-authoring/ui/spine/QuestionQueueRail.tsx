@@ -1,14 +1,8 @@
-import { motion } from "motion/react";
-import { authoringMotion } from "@/src/shared/motion";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   AlertCircle,
   Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   Copy,
-  FileUp,
   MoveRight,
   Plus,
   RotateCcw,
@@ -26,10 +20,13 @@ import type {
 } from "../../contracts/assessment";
 import { SAT_DOMAINS, getSatSkills } from "../../providers/sat/taxonomy";
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
-import { ModuleScopePicker } from "../ModuleScopePicker";
-import { AuthoringSegmented } from "../AuthoringSegmented";
+import { ModuleSwitcher } from "./ModuleSwitcher";
+import { QuestionFilterMenu } from "./QuestionFilterMenu";
+import { QuestionRowMenu } from "./QuestionRowMenu";
+import { moduleReadyCount } from "./queueModel";
 import {
   buildQueueRows,
+  queueRowToken,
   countQueueReadiness,
   type SpineQueueFilter,
   type SpineQueueRow,
@@ -40,6 +37,7 @@ export interface QuestionQueueRailProps {
   module: AssessmentModuleShell;
   sections: AssessmentSectionShell[];
   sectionKey: string;
+  sectionTitle?: string | undefined;
   moveTargets: AssessmentModuleShell[];
   selectedQuestionId: string | null;
   selectedQuestionIds: ReadonlySet<string>;
@@ -50,8 +48,11 @@ export interface QuestionQueueRailProps {
   onSearchQueryChange: (value: string) => void;
   onSelectModule: (moduleId: string) => void;
   onOpenImport: () => void;
+  /** Opens the full-draft workbook replacement flow. Defaults to the text-add sheet when absent. */
   onFilterChange: (value: SpineQueueFilter) => void;
   onSelectQuestion: (questionId: string) => void;
+  onDuplicateQuestion?: ((id: string) => void) | undefined;
+  onRequestDelete?: ((id: string) => void) | undefined;
   onCreateQuestion: () => void;
   onToggleSelection: (questionId: string, range: boolean) => void;
   onClearSelection: () => void;
@@ -76,65 +77,103 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
     () => buildQueueRows(props.module, props.searchQuery, props.filter),
     [props.filter, props.module, props.searchQuery],
   );
-  const readinessCounts = useMemo(
-    () => countQueueReadiness(props.module),
-    [props.module],
-  );
+  const readinessCounts = useMemo(() => countQueueReadiness(props.module), [props.module]);
   const listRef = useRef<HTMLDivElement | null>(null);
   const selectedId = props.selectedQuestionId;
-  const mountedRef = useRef(false);
+  const [selecting, setSelecting] = useState(false);
+  const selectionMode = selecting || props.selectedQuestionIds.size > 0;
+  const moduleId = props.module.id;
+
+  // Per-module memory: last selected question and scroll offset, restored on
+  // return so switching Module 1 -> 2 -> 1 never jumps back to question 1.
+  const memoryRef = useRef<Map<string, { questionId: string; scrollTop: number }>>(new Map());
+  const activeModuleRef = useRef(moduleId);
+  const suppressRestoreRef = useRef(false);
+
+  useLayoutEffect(() => {
+    const previous = activeModuleRef.current;
+    if (previous !== moduleId) {
+      const list = listRef.current;
+      if (list) memoryRef.current.set(previous, { questionId: selectedId ?? "", scrollTop: list.scrollTop });
+      const remembered = memoryRef.current.get(moduleId);
+      activeModuleRef.current = moduleId;
+      if (remembered) {
+        if (remembered.questionId && remembered.questionId !== selectedId) {
+          suppressRestoreRef.current = true;
+          props.onSelectQuestion(remembered.questionId);
+        }
+        window.requestAnimationFrame(() => {
+          const target = listRef.current;
+          if (target && Math.abs(target.scrollTop - remembered.scrollTop) > 1) {
+            target.scrollTop = remembered.scrollTop;
+          }
+        });
+      }
+    }
+  }, [moduleId, props, selectedId]);
 
   useEffect(() => {
-    // Skip the initial mount: the selected row is already visible on first
-    // paint, so scrolling would only fight the browser restore position.
-    if (!mountedRef.current) {
-      mountedRef.current = true;
+    if (!selectedId) return;
+    if (suppressRestoreRef.current) {
+      suppressRestoreRef.current = false;
       return;
     }
-    if (!selectedId) return;
     const row = listRef.current?.querySelector<HTMLElement>(
       '[data-question-list-row="' + CSS.escape(selectedId) + '"]',
     );
     row?.scrollIntoView({ block: "nearest" });
   }, [selectedId, rows.length]);
 
+  const onListKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      const ids = rows
+        .filter((row): row is Extract<SpineQueueRow, { kind: "question" }> => row.kind === "question")
+        .map((row) => row.question.examQuestionId);
+      if (!ids.length) return;
+      const current = selectedId ? ids.indexOf(selectedId) : -1;
+      let next = -1;
+      if (event.key === "ArrowDown") next = current < 0 ? 0 : Math.min(ids.length - 1, current + 1);
+      else if (event.key === "ArrowUp") next = current < 0 ? 0 : Math.max(0, current - 1);
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = ids.length - 1;
+      if (next < 0) return;
+      event.preventDefault();
+      const id = ids[next];
+      if (id) props.onSelectQuestion(id);
+    },
+    [props, rows, selectedId],
+  );
+
+  const addQuestion = props.onCreateQuestion;
+
+  const examAuthored = props.sections.reduce(
+    (sum, section) => sum + section.modules.reduce((n, module) => n + module.questions.length, 0),
+    0,
+  );
+  const examTarget = props.sections.reduce(
+    (sum, section) => sum + section.modules.reduce((n, module) => n + module.targetQuestionCount, 0),
+    0,
+  );
+
   return (
-    <section
-      aria-label={`${props.module.title} questions`}
+    <nav
+      aria-label="Question navigator"
       className={"flex min-h-0 min-w-0 flex-col bg-card" + (props.embedded ? " h-full w-full flex-1" : " h-full w-full")}
     >
-      <div className="relative z-10 border-b border-border px-3 pb-3 pt-2.5">
-        <div className="mb-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5">
-          <div className="min-w-0">
-            <ModuleScopePicker
-              sections={props.sections}
-              selectedModuleId={props.module.id}
-              disabled={props.isMutating}
-              onSelectModule={props.onSelectModule}
-            />
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={props.onOpenImport}
-              disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
-              aria-label="Paste or import questions into this module"
-              title="Paste questions"
-              className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.93] disabled:opacity-30"
-            >
-              <FileUp size={14} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              onClick={props.onCreateQuestion}
-              disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
-              className="flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground transition duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-35"
-            >
-              <Plus size={14} aria-hidden="true" /> Question
-            </button>
-          </div>
+      <div className="sat-spine__nav-region">
+        <div className="sat-spine__nav-head">
+          <h2 className="sat-spine__nav-title">{props.sectionTitle ?? props.module.title}</h2>
+          <p className="sat-spine__nav-progress" aria-label={`Exam authoring progress: ${examAuthored} of ${examTarget} authored`}>
+            {examAuthored} of {examTarget} authored
+          </p>
         </div>
-        <div className="relative">
+        <ModuleSwitcher
+          sections={props.sections}
+          selectedModuleId={props.module.id}
+          disabled={props.isMutating}
+          onSelectModule={props.onSelectModule}
+        />
+        <div className="relative mt-3">
           <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <input
             ref={props.searchInputRef}
@@ -145,43 +184,85 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
               if (event.key === "Escape" && props.searchQuery) {
                 event.preventDefault();
                 props.onSearchQueryChange("");
+                return;
+              }
+              if ((event.key === "ArrowDown" || event.key === "Enter") && rows.length) {
+                event.preventDefault();
+                const first = rows.find((row) => row.kind === "question");
+                if (first && first.kind === "question") props.onSelectQuestion(first.question.examQuestionId);
               }
             }}
-            placeholder="Search questions"
+            placeholder="Search questions…"
             aria-label="Search questions"
-            className="h-9 w-full rounded-md bg-muted pl-9 pr-9 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring"
+            className="h-11 w-full rounded-md bg-muted pl-9 pr-9 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-ring"
           />
           {props.searchQuery ? (
-            <button type="button" onClick={() => props.onSearchQueryChange("")} aria-label="Clear question search" className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><X size={12} aria-hidden="true" /></button>
+            <button type="button" onClick={() => props.onSearchQueryChange("")} aria-label="Clear question search" className="absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><X size={12} aria-hidden="true" /></button>
           ) : null}
         </div>
-        <AuthoringSegmented
-          className="mt-2 w-full"
-          ariaLabel="Question readiness filters"
-          value={props.filter}
-          onChange={props.onFilterChange}
-          options={[
-            { value: "all", label: <><span className="min-w-0 truncate">All</span><span className="tabular-nums text-muted-foreground">{props.module.questions.length}</span></> },
-            { value: "ready", label: <><span className="min-w-0 truncate">Ready</span><span className="tabular-nums text-muted-foreground">{readinessCounts.ready}</span></> },
-            { value: "incomplete", label: <><span className="min-w-0 truncate">Needs work</span><span className="tabular-nums text-muted-foreground">{readinessCounts.incomplete}</span></> },
-            { value: "error", label: <><span className="min-w-0 truncate">Errors</span><span className="tabular-nums text-muted-foreground">{readinessCounts.error}</span></> },
-          ]}
-        />
+        <div className="sat-spine__nav-tools">
+          <span className="sat-spine__nav-count">
+            {props.module.questions.length} questions
+            {moduleReadyCount(props.module) !== props.module.questions.length
+              ? ' · ' + moduleReadyCount(props.module) + ' ready'
+              : ""}
+            {props.searchQuery || props.filter !== "all" ? " · " + rows.length + " shown" : ""}
+          </span>
+          <div className="flex items-center gap-1">
+            <QuestionFilterMenu filter={props.filter} counts={readinessCounts} onFilterChange={props.onFilterChange} />
+            <QuestionRowMenu
+              position={0}
+              label="Question list actions"
+              disabled={props.isMutating}
+              canMoveUp={false}
+              canMoveDown={false}
+              onMove={() => undefined}
+              onSelectQuestions={() => setSelecting(true)}
+              onOpenImport={props.onOpenImport}
+              importDisabled={props.module.questions.length >= props.module.targetQuestionCount}
+            />
+            <button
+              type="button"
+              onClick={addQuestion}
+              aria-label="Add question"
+              disabled={props.isMutating || props.module.questions.length >= props.module.targetQuestionCount}
+              className="sat-spine__add"
+            >
+              <Plus size={15} aria-hidden="true" />
+              Add
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div ref={listRef} className="relative z-0 min-h-0 flex-1 overflow-y-auto" data-queue-scroll-region>
+      {selectionMode ? (
+        <div className="sat-spine__selection-bar" role="region" aria-label="Selection mode">
+          <span>{props.selectedQuestionIds.size} selected</span>
+          <button type="button" onClick={() => { setSelecting(false); props.onClearSelection(); }} className="sat-spine__add">Done</button>
+        </div>
+      ) : null}
+
+      <div
+        ref={listRef}
+        className="sat-spine__list"
+        data-queue-scroll-region
+        onKeyDown={onListKeyDown}
+      >
         {rows.length ? (
           <ol aria-label="Questions in this module" className="m-0 list-none p-0 py-1">
             {rows.map((row, index) =>
               row.kind === "empty" ? (
                 <li key={"empty-" + String(index)}>
-                  <QueueEmptyRow position={index + 1} disabled={props.isMutating} onCreate={props.onCreateQuestion} />
+                  <QueueEmptyRow position={index + 1} disabled={props.isMutating} onCreate={addQuestion} />
                 </li>
               ) : (
                 <li key={row.question.examQuestionId}>
                   <QueueRow
                     question={row.question}
-                    position={index + 1}
+                    position={props.module.questions.findIndex(q => q.examQuestionId === row.question.examQuestionId) + 1}
+                    selectionMode={selectionMode}
+                    onDuplicate={props.onDuplicateQuestion}
+                    onDelete={props.onRequestDelete}
                     selected={row.question.examQuestionId === props.selectedQuestionId}
                     checked={props.selectedQuestionIds.has(row.question.examQuestionId)}
                     disabled={props.isMutating}
@@ -195,139 +276,59 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
             )}
           </ol>
         ) : (
-          <div className="flex h-full items-center justify-center px-8 text-center"><div><p className="text-xs font-semibold text-foreground">No matching questions</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Change the search or readiness filter.</p></div></div>
+          <div className="flex h-full items-center justify-center px-8 text-center"><div><p className="text-sm font-semibold text-foreground">No matching questions</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Change the search or readiness filter.</p><button type="button" className="min-h-11 text-sm underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => {props.onFilterChange("all"); props.onSearchQueryChange("");}}>Clear filter and search</button></div></div>
         )}
       </div>
 
       {props.selectedQuestionIds.size ? (
         <QueueBulkToolbar {...props} selectedIds={[...props.selectedQuestionIds]} />
       ) : null}
-    </section>
+    </nav>
   );
 }
 
-function QueueRow({
-  question,
-  position,
-  selected,
-  checked,
-  disabled,
-  moduleQuestions,
-  onSelect,
-  onToggleSelection,
-  onReorder,
-}: {
-  question: AssessmentQuestionSummary;
-  position: number;
-  selected: boolean;
-  checked: boolean;
-  disabled: boolean;
-  moduleQuestions: AssessmentQuestionSummary[];
-  onSelect: (questionId: string) => void;
-  onToggleSelection: (questionId: string, range: boolean) => void;
-  onReorder: (questionIds: string[], expectedQuestionIds: string[]) => Promise<void>;
+function QueueRow({question, position, selected, checked, disabled, selectionMode, moduleQuestions, onSelect, onToggleSelection, onReorder, onDuplicate, onDelete}: {
+ question: AssessmentQuestionSummary; position:number; selected:boolean; checked:boolean; disabled:boolean; selectionMode:boolean;
+ moduleQuestions:AssessmentQuestionSummary[]; onSelect:(id:string)=>void; onToggleSelection:(id:string,range:boolean)=>void;
+ onReorder:(ids:string[],expected:string[])=>Promise<void>; onDuplicate?:((id:string)=>void)|undefined; onDelete?:((id:string)=>void)|undefined;
 }) {
-  const index = moduleQuestions.findIndex((item) => item.examQuestionId === question.examQuestionId);
-  const expectedIds = moduleQuestions.map((item) => item.examQuestionId);
-  // Single-flight per row: closes the double-click window between click and
-  // mutation start (flush-before-navigate is async). Order truth stays the
-  // server shell refetch; this flag is feedback + duplicate guard only.
-  const [reorderPending, setReorderPending] = useState(false);
-  const move = (direction: -1 | 1) => {
-    if (reorderPending || disabled) return;
-    const target = index + direction;
-    if (target < 0 || target >= expectedIds.length) return;
-    const next = [...expectedIds];
-    const current = next[index];
-    const other = next[target];
-    if (current === undefined || other === undefined) return;
-    next[index] = other;
-    next[target] = current;
-    setReorderPending(true);
-    void onReorder(next, expectedIds)
-      .catch(() => undefined)
-      .finally(() => setReorderPending(false));
-  };
-  const reorderBusy = reorderPending || disabled;
-  return (
-    <div
-      data-question-list-row={question.examQuestionId}
-      onClick={() => {
-        if (!disabled) onSelect(question.examQuestionId);
-      }}
-      onKeyDown={(event) => {
-        if (disabled) return;
-        if (event.key !== "Enter" && event.key !== " ") return;
-        const target = event.target as HTMLElement | null;
-        if (target?.closest("button, input, select, textarea, a[href], [role=button]")) return;
-        event.preventDefault();
-        onSelect(question.examQuestionId);
-      }}
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-current={selected ? "true" : undefined}
-      aria-disabled={disabled || undefined}
-      aria-busy={reorderPending || undefined}
-      aria-label={`Question ${position}: ${question.promptPreview || "Empty question"}${selected ? ", current" : ""}`}
-      className={`group relative mx-2 my-px cursor-pointer rounded-md outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring ${selected ? "border border-border bg-card shadow-[0_2px_10px_rgba(17,24,39,0.08)]" : "border border-transparent hover:bg-muted/60"}${reorderPending ? " opacity-60" : ""}`}
-    >
-      {selected ? (
-        <motion.span
-          aria-hidden="true"
-          layoutId="rail-accent"
-          transition={authoringMotion.snap}
-          className="absolute bottom-1.5 left-0 top-1.5 w-[2px] rounded-full bg-primary"
-        />
-      ) : null}
-      <div className="flex min-h-[56px] items-center gap-2 px-2.5 py-2">
-        <button
-          type="button"
-          disabled={disabled}
-          tabIndex={-1}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleSelection(question.examQuestionId, event.shiftKey);
-          }}
-          aria-label={`${checked ? "Deselect" : "Select"} question ${position}`}
-          aria-pressed={checked}
-          className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-muted-foreground/50 hover:text-muted-foreground"}`}
-        >
-          <Check size={11} strokeWidth={3.2} aria-hidden="true" />
-        </button>
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="w-5 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">{position}</span>
-          <QueueReadinessDot question={question} />
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{question.promptPreview || "Empty question"}</span>
-          {question.questionType === "single_choice" && question.answerKeyPreview ? (
-            <span aria-hidden="true" className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">{question.answerKeyPreview}</span>
-          ) : question.questionType !== "single_choice" ? (
-            <span aria-hidden="true" className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">SPR</span>
-          ) : null}
-          {selected ? <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-foreground">Current</span> : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-0.5 opacity-40 group-hover:opacity-100 focus-within:opacity-100">
-          <button type="button" disabled={reorderBusy || index <= 0} onClick={(event) => { event.stopPropagation(); move(-1); }} aria-label="Move question up" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronUp size={12} aria-hidden="true" /></button>
-          <button type="button" disabled={reorderBusy || index >= moduleQuestions.length - 1} onClick={(event) => { event.stopPropagation(); move(1); }} aria-label="Move question down" className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-20"><ChevronDown size={12} aria-hidden="true" /></button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function QueueReadinessDot({ question }: { question: AssessmentQuestionSummary }) {
-  const status = question.readiness.status;
-  const label = status === "ready" ? "Ready" : status === "error" ? "Error" : "Incomplete";
-  return (
-    <span role="img" aria-label={label} className="inline-flex h-3 w-3 shrink-0 items-center justify-center">
-      {status === "ready" ? (
-        <CheckCircle2 size={11} aria-hidden="true" />
-      ) : status === "error" ? (
-        <AlertCircle size={11} aria-hidden="true" />
-      ) : (
-        <span className="h-2 w-2 rounded-full bg-muted-foreground/30" aria-hidden="true" />
-      )}
-    </span>
-  );
+ const index=moduleQuestions.findIndex(q=>q.examQuestionId===question.examQuestionId);
+ const [pending,setPending]=useState(false);
+ const flight=useRef(false);
+ const move=(direction:-1|1)=>{
+  if(disabled||flight.current) return;
+  const expected=moduleQuestions.map(q=>q.examQuestionId); const target=index+direction;
+  if(index<0||target<0||target>=expected.length) return;
+  const ids=[...expected]; const current=ids[index],other=ids[target]; if(!current||!other)return;
+  ids[index]=other;ids[target]=current;flight.current=true;setPending(true);
+  void onReorder(ids,expected).catch(()=>undefined).finally(()=>{flight.current=false;setPending(false);});
+ };
+ const token=queueRowToken(question);
+ const issueCount=question.readiness.blockingIssueCount;
+ const statusLabel = token?.kind === "issue"
+   ? (issueCount > 1 ? String(issueCount) + " issues" : "Needs attention")
+   : token?.label;
+ const preview=question.promptPreview||"Empty question";
+ return <div className={'sat-spine__question-row'+(selected?' is-selected':'')+(pending?' is-busy':'')} data-question-list-row={question.examQuestionId} aria-busy={pending||undefined}>
+  {selected?<span data-selected-bar aria-hidden="true"/> : null}
+  {selectionMode?<button type="button" role="checkbox" aria-checked={checked} disabled={disabled} aria-label={(checked?'Deselect':'Select')+' question '+position} onClick={e=>onToggleSelection(question.examQuestionId,e.shiftKey)} className="sat-spine__check"><span className={'sat-spine__check-box'+(checked?' is-checked':'')}><Check size={13} aria-hidden="true" className={checked?'':'invisible'}/></span></button>:null}
+  <button
+    type="button"
+    disabled={disabled}
+    aria-current={selected?'true':undefined}
+    aria-label={'Question '+position+': '+preview+', '+question.difficulty+(token?.kind==='issue'?(issueCount>1?', has '+issueCount+' issues':', has errors'):'')+(selected?', selected':'')}
+    onClick={()=>onSelect(question.examQuestionId)}
+    className="sat-spine__row-main"
+  >
+   <span className={'sat-spine__row-num'+(selected?' is-selected':'')}>{String(position).padStart(2,'0')}</span>
+   <span className="sat-spine__row-preview">{preview}</span>
+   <span className={'sat-spine__row-status'+(token?.kind==='issue'?' is-issue':'')}>
+     {token?.kind==='issue'?<><AlertCircle size={14} aria-hidden="true"/>{issueCount>1?<span className="sat-spine__row-count">{issueCount}</span>:null}</>:token?.label}
+     <span className="sr-only">{statusLabel}</span>
+   </span>
+  </button>
+  <div className="sat-spine__row-actions"><QuestionRowMenu position={position} disabled={disabled||pending} canMoveUp={index>0} canMoveDown={index<moduleQuestions.length-1} onMove={move} onDuplicate={onDuplicate?()=>onDuplicate(question.examQuestionId):undefined} onDelete={onDelete?()=>onDelete(question.examQuestionId):undefined}/></div>
+ </div>;
 }
 
 function QueueEmptyRow({ position, disabled, onCreate }: { position: number; disabled: boolean; onCreate: () => void }) {

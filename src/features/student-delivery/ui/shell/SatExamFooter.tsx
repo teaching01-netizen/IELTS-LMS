@@ -53,6 +53,7 @@ export function SatExamFooter(props: SatExamFooterProps) {
 
         <button
           id={props.navigatorButtonId}
+          data-sat-focus="footer-navigator"
           type="button"
           onClick={props.onOpenNavigator}
           aria-haspopup="dialog"

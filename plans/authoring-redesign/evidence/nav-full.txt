@@ -1,0 +1,3204 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/features/exam-authoring/ui/release/__tests__/releaseSelectors.test.ts (25 tests) 34ms
+stderr | src/features/exam-authoring/routes/__tests__/SatDeliveryReleaseRoute.test.tsx > SatDeliveryReleaseRoute > still opens student access when a post-publish refetch fails
+[sat-release] post-publish refresh failed Error: boom
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/routes/__tests__/SatDeliveryReleaseRoute.test.tsx:242:53
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/.pnpm/@vitest+runner@2.1.9/node_modules/@vitest/runner/dist/index.js:146:14
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/.pnpm/@vitest+runner@2.1.9/node_modules/@vitest/runner/dist/index.js:533:11
+    at runWithTimeout (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/.pnpm/@vitest+runner@2.1.9/node_modules/@vitest/runner/dist/index.js:39:7)
+    at runTest (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/.pnpm/@vitest+runner@2.1.9/node_modules/@vitest/runner/dist/index.js:1056:17)
+    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/.pnpm/@vitest+runner@2.1.9/node_modules/@vitest/runner/dist/index.js:1205:15)
+    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/.pnpm/@vitest+runner@2.1.9/node_modules/@vitest/runner/dist/index.js:1205:15)
+    at runFiles (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/.pnpm/@vitest+runner@2.1.9/node_modules/@vitest/runner/dist/index.js:1262:5)
+    at startTests (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/.pnpm/@vitest+runner@2.1.9/node_modules/@vitest/runner/dist/index.js:1271:3)
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/.pnpm/vitest@2.1.9_@types+node@22.20.2_jsdom@24.1.3_supports-color@7.2.0__lightningcss@1.32.0_supports-color@7.2.0/node_modules/vitest/dist/chunks/runBaseTests.3qpJUEJM.js:126:11
+
+ ✓ src/features/exam-authoring/routes/__tests__/SatDeliveryReleaseRoute.test.tsx (6 tests) 1620ms
+   ✓ SatDeliveryReleaseRoute > publishes the exact checked draft revision with the current exam revision 717ms
+   ✓ SatDeliveryReleaseRoute > persists Student Access as the canonical URL-addressable review mode 327ms
+ ✓ src/features/exam-authoring/import/__tests__/SatWorkbookImportSheet.test.tsx (7 tests) 4142ms
+   ✓ SAT workbook import sheet > rejects a non-xlsx file before previewing it 679ms
+   ✓ SAT workbook import sheet > keeps the sheet retryable when commit fails 1285ms
+   ✓ SAT workbook import sheet > stages embedded workbook visuals before enabling import 658ms
+   ✓ SAT workbook import sheet > does not commit when an embedded visual cannot be staged 699ms
+   ✓ SAT workbook import sheet > keeps import disabled and shows workbook row diagnostics when validation fails 306ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.test.tsx (5 tests) 4731ms
+   ✓ StudentLinksDashboard > keeps older-release links visible by default after a newer release is published 1238ms
+   ✓ StudentLinksDashboard > reconciles detail selection with the visible search result 778ms
+   ✓ StudentLinksDashboard > runs lifecycle and duplicate actions without mutating a published release 1033ms
+   ✓ StudentLinksDashboard > creates a replacement link explicitly against the current release 1628ms
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > renders the spine branch with header progress and queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > renders the spine branch with header progress and queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionQueueRail.test.tsx (8 tests) 4605ms
+   ✓ QuestionQueueRail > announces the current question with text, not color alone 1715ms
+   ✓ QuestionQueueRail > clears the active search with Escape 350ms
+   ✓ QuestionQueueRail > issues a single create on rapid double-click of the empty slot 847ms
+   ✓ QuestionQueueRail > disables the header Question button while mutating 428ms
+   ✓ QuestionQueueRail > pads empty slots only in the unfiltered view 400ms
+ ✓ src/features/exam-authoring/editor/__tests__/EditableMathExtension.test.tsx (5 tests) 3864ms
+   ✓ EditableInlineMath keyboard exit behavior > moves the document caret after the equation on a forward move-out 2202ms
+   ✓ EditableInlineMath keyboard exit behavior > moves the document caret before the equation on a backward move-out 670ms
+   ✓ EditableInlineMath keyboard exit behavior > cancels edits with Escape and returns focus to the document 560ms
+   ✓ EditableInlineMath keyboard exit behavior > commits edits with Enter and exits forward 387ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps paste import reachable from the spine queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/ui/__tests__/SatDeliveryReleasePage.test.tsx (18 tests) 11233ms
+   ✓ SatDeliveryReleasePage > enables publishing only for a checked, current, clean draft 851ms
+   ✓ SatDeliveryReleasePage > blocks publishing as soon as delivery settings become dirty 614ms
+   ✓ SatDeliveryReleasePage > protects unsaved delivery settings when leaving release 571ms
+   ✓ SatDeliveryReleasePage > keeps warning-only drafts publishable 425ms
+   ✓ SatDeliveryReleasePage > surfaces blockers and forwards question issue navigation 307ms
+   ✓ SatDeliveryReleasePage > publishes through the confirmation dialog and preserves optional notes 1222ms
+   ✓ SatDeliveryReleasePage > treats an untouched continuation draft as already published 500ms
+   ✓ SatDeliveryReleasePage > labels a changed continuation draft as an update while preserving the live release 400ms
+   ✓ SatDeliveryReleasePage > blocks publishing with an explicit stale-checks banner and reason 451ms
+   ✓ SatDeliveryReleasePage > keeps release checks visible in read-only mode once published 419ms
+   ✓ SatDeliveryReleasePage > blocks publishing without publish permission and names the reason 468ms
+   ✓ SatDeliveryReleasePage > disables section save and explains read-only delivery settings 347ms
+   ✓ SatDeliveryReleasePage > maps save conflicts to a user-safe alert 545ms
+   ✓ SatDeliveryReleasePage > submits the publish dialog only once on double click 844ms
+   ✓ SatDeliveryReleasePage > maps publish failures to user-safe copy instead of raw errors 657ms
+   ✓ SatDeliveryReleasePage > expands long issue lists on demand instead of silently truncating 1768ms
+   ✓ SatDeliveryReleasePage > keeps publish reachable by keyboard tab order 360ms
+   ✓ SatDeliveryReleasePage > pauses publishing while offline with an explicit banner 462ms
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > keeps paste import reachable from the spine queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > opens the jump palette with Ctrl+K in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens the jump palette with Ctrl+K in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/providers/sat/__tests__/satProvider.test.ts (8 tests) 20ms
+ ✓ src/features/exam-authoring/editor/__tests__/richContent.test.ts (8 tests) 90ms
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > opens shortcut help with ? in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens shortcut help with ? in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > reviews module issues from the spine queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > reviews module issues from the spine queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > keeps import, preview, and release actions reachable in the spine header
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > opens the student preview sheet from the spine question view
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps import, preview, and release actions reachable in the spine header
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ❯ src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx (7 tests | 2 failed) 11632ms
+   × SpineOverlays (Phase 9.1+9.4 parity) > renders the spine branch with header progress and queue 3652ms
+     → Unable to find an element with the text: /2 of 3 questions authored/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-0"[39m
+                [33mdata-save-hidden[39m=[32m"true"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_0_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/sv...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-0"[39m
+                [33mdata-save-hidden[39m=[32m"true"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_0_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/sv...
+   × SpineOverlays (Phase 9.1+9.4 parity) > keeps paste import reachable from the spine queue 1698ms
+     → Unable to find role="button" and name `/add questions: paste or import/i`
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_16_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<circle[39m
+                      [33mcx[39m=...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_16_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<circle[39m
+                      [33mcx[39m=...
+   ✓ SpineOverlays (Phase 9.1+9.4 parity) > opens the jump palette with Ctrl+K in the spine branch 1386ms
+   ✓ SpineOverlays (Phase 9.1+9.4 parity) > opens shortcut help with ? in the spine branch 1009ms
+   ✓ SpineOverlays (Phase 9.1+9.4 parity) > reviews module issues from the spine queue 716ms
+   ✓ SpineOverlays (Phase 9.1+9.4 parity) > keeps import, preview, and release actions reachable in the spine header 720ms
+   ✓ SpineOverlays (Phase 9.1+9.4 parity) > opens the student preview sheet from the spine question view 2443ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > duplicates the explicit noncurrent row after exactly one dirty-draft flush
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/hooks/__tests__/useQuestionAutosave.durability.test.tsx (4 tests) 439ms
+ ✓ src/features/exam-authoring/api/__tests__/examQueries.test.tsx (4 tests) 785ms
+   ✓ exam-authoring query boundary > loads entities and legacy display models from one feature-owned query 393ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ExamOverviewPane.test.tsx (4 tests) 924ms
+   ✓ buildExamOverview > renders the authored-vs-delivered explainer and per-module cards 788ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > confirms deletion of another row without changing the active draft
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/api/__tests__/assessmentAuthoringApi.test.ts (6 tests) 81ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > stops row mutations when the dirty draft cannot flush
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps save inside editors and gives Shift+S precedence outside editors
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > guards settings shortcut in text and exposes command actions with Ctrl+K
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens the student preview sheet from the spine question view
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ❯ src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx (12 tests | 2 failed) 19540ms
+   × AuthoringWorkspace (spine-only) > renders the spine branch with header progress and queue 4151ms
+     → Unable to find an element with the text: /2 of 3 questions authored/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-0"[39m
+                [33mdata-save-hidden[39m=[32m"true"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_0_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/sv...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-0"[39m
+                [33mdata-save-hidden[39m=[32m"true"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_0_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/sv...
+   × AuthoringWorkspace (spine-only) > keeps paste import reachable from the spine queue 2356ms
+     → Unable to find role="button" and name `/add questions: paste or import/i`
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_16_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<circle[39m
+                      [33mcx[39m=...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_16_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<circle[39m
+                      [33mcx[39m=...
+   ✓ AuthoringWorkspace (spine-only) > opens the jump palette with Ctrl+K in the spine branch 802ms
+   ✓ AuthoringWorkspace (spine-only) > opens shortcut help with ? in the spine branch 1115ms
+   ✓ AuthoringWorkspace (spine-only) > reviews module issues from the spine queue 1134ms
+   ✓ AuthoringWorkspace (spine-only) > keeps import, preview, and release actions reachable in the spine header 1336ms
+   ✓ AuthoringWorkspace (spine-only) > duplicates the explicit noncurrent row after exactly one dirty-draft flush 1752ms
+   ✓ AuthoringWorkspace (spine-only) > confirms deletion of another row without changing the active draft 1726ms
+   ✓ AuthoringWorkspace (spine-only) > stops row mutations when the dirty draft cannot flush 897ms
+   ✓ AuthoringWorkspace (spine-only) > keeps save inside editors and gives Shift+S precedence outside editors 1294ms
+   ✓ AuthoringWorkspace (spine-only) > guards settings shortcut in text and exposes command actions with Ctrl+K 1853ms
+   ✓ AuthoringWorkspace (spine-only) > opens the student preview sheet from the spine question view 1121ms
+ ✓ src/features/exam-authoring/ui/__tests__/ModuleScopePicker.test.tsx (4 tests) 791ms
+   ✓ ModuleScopePicker > shows all module choices grouped by section and changes the active scope 693ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/queueModel.test.ts (5 tests) 14ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ClassificationFieldset.test.tsx (4 tests) 685ms
+   ✓ ClassificationFieldset > pairs every control with a visible label 582ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/sampleExam.test.ts (3 tests) 401ms
+ ✓ src/features/exam-authoring/import/__tests__/questionImportParser.test.ts (7 tests) 13ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/AnswerKeyField.test.tsx (4 tests) 1263ms
+   ✓ AnswerKeyField > exposes the key as a radiogroup with an unmissable selected state 428ms
+   ✓ AnswerKeyField > meets the 44px target floor on every key button 380ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/accessLinkUi.test.ts (7 tests) 125ms
+ ✓ src/features/exam-authoring/editor/__tests__/RichQuestionComposer.test.tsx (5 tests) 2886ms
+   ✓ SAT rich question composer capabilities > shows only five default controls plus overflow 1100ms
+   ✓ SAT rich question composer capabilities > retains a persisted text-block identity when the editor loads 512ms
+   ✓ SAT rich question composer capabilities > keeps rich SAT choice tools available in compact presentation 383ms
+   ✓ SAT rich question composer capabilities > applies the inline placement layout to the equation preview 518ms
+   ✓ SAT rich question composer capabilities > starts plain SAT content in the rich editor without a reveal action 368ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/AnswerKeyIdentity.test.tsx (2 tests) 7260ms
+   ✓ AnswerKeyField identity-safe reorder > moves a choice by stable id and keeps the key on the same content 3061ms
+   ✓ AnswerKeyField identity-safe reorder > asks before replacing existing supporting material 4195ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QueueWorklist.test.tsx (2 tests) 2344ms
+   ✓ QueueWorklist — scannable worklist > surfaces difficulty at a glance in every row 1723ms
+   ✓ QueueWorklist — scannable worklist > makes bulk selection keyboard-operable with a visible checkbox 619ms
+ ✓ src/features/exam-authoring/routes/__tests__/ProviderReviewRoute.test.tsx (2 tests) 308ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SaveCluster.test.tsx (12 tests) 2144ms
+   ✓ SaveCluster > hides only transient success and immediately reveals exceptional states 1102ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkDetail.test.tsx (3 tests) 2232ms
+   ✓ AccessLinkDetail > keeps the immutable-version banner and replacement action on Overview 1627ms
+   ✓ AccessLinkDetail > switches to the Activity tab with arrow keys 584ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineCard.test.tsx (4 tests) 552ms
+   ✓ SpineCard — single card truth > renders ValidationChecklist on the canonical spine card 487ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineHeader.test.tsx (4 tests) 2187ms
+   ✓ SpineHeader hierarchy > keeps the exam title without a second progress or navigation control 820ms
+   ✓ SpineHeader hierarchy > routes modes through one overflow menu including the way back to questions 758ms
+   ✓ SpineHeader hierarchy > restores the sample load entry point and keeps busy guarding 451ms
+ ✓ src/features/exam-authoring/editor/__tests__/ComposerToolbar.test.tsx (3 tests) 2204ms
+   ✓ contextual toolbar > edits and converts the selected equation without losing its expression 1169ms
+   ✓ contextual toolbar > targets the selected image for metadata editing rather than inserting another 413ms
+   ✓ contextual toolbar > switches to table actions without mounting another toolbar 620ms
+ ✓ src/features/exam-authoring/routes/__tests__/ProviderPreviewRoute.test.tsx (2 tests) 119ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/OverlayStack.test.ts (4 tests) 283ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkRow.test.tsx (2 tests) 962ms
+   ✓ AccessLinkRow > selects the row and exposes overflow actions without nesting buttons 886ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ReleaseGateCard.test.tsx (3 tests) 1349ms
+   ✓ ReleaseGateCard > enables release only when checks are fresh, valid, clean, and idle 1154ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionJumpPalette.test.tsx (2 tests) 1863ms
+   ✓ QuestionJumpPalette > filters with shared queue search semantics and selects flush-guarded 1585ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/PublishAssessmentDialog.test.tsx (2 tests) 1952ms
+   ✓ PublishAssessmentDialog > shows a live character count for publish notes 1333ms
+   ✓ PublishAssessmentDialog > blocks confirm while publishing or blocked, and focuses the safe choice 617ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/Inspector.test.tsx (3 tests) 2071ms
+   ✓ Inspector > is a nonmodal region on wide screens, a real dialog on narrow screens 1774ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineStages.test.tsx (2 tests) 2372ms
+   ✓ Question canvas > uses content sections instead of stages and numbered cards 2076ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/rosterValidation.test.ts (5 tests) 21ms
+ ✓ src/features/exam-authoring/hooks/__tests__/useQuestionAutosave.offline.test.tsx (1 test) 93ms
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringDialog.test.tsx (2 tests) 1077ms
+   ✓ AuthoringDialog > provides a labelled dialog and closes through Radix dismissal semantics 586ms
+   ✓ AuthoringDialog > keeps destructive confirmation open until the controlled action succeeds 489ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ValidationChecklist.test.tsx (3 tests) 406ms
+   ✓ ValidationChecklist > orders blocking issues first with a role=status summary 326ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/CoachingLayer.test.tsx (3 tests) 1444ms
+   ✓ CoachingLayer — one coaching pattern > speaks as release guidance with the blocking count 775ms
+   ✓ CoachingLayer — one coaching pattern > celebrates readiness in release language 408ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpinePreviewSheet.test.tsx (2 tests) 777ms
+   ✓ SpinePreviewSheet > renders the delivery renderer when open with a question 763ms
+ ✓ src/features/exam-authoring/ui/__tests__/QuestionPaper.test.tsx (1 test) 92ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineHeaderManage.test.tsx (2 tests) 1919ms
+   ✓ SpineHeader actions > keeps one preview and release action, with imports behind overflow 1574ms
+   ✓ SpineHeader actions > never renders zero-error filler 343ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/StageJumpExpands.test.tsx (1 test) 2536ms
+   ✓ StageJumpExpands — collapse never strands a focus target > reveals empty explanation and keeps it mounted after one-shot focus clears 2534ms
+ ✓ src/features/exam-authoring/ui/__tests__/SatMenu.test.tsx (1 test) 1443ms
+   ✓ SatMenu constrained-environment fallback > supports roving keyboard navigation and restores focus after Escape 1423ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SaveTruth.test.tsx (1 test) 2206ms
+   ✓ SaveTruth — one save vocabulary per question > renders exactly one save status region per question view 2204ms
+ ✓ src/features/exam-authoring/api/__tests__/assessmentMediaApi.test.ts (2 tests) 8ms
+ ✓ src/features/exam-authoring/ui/__tests__/SatStudentResponseEditor.test.tsx (2 tests) 3505ms
+   ✓ SAT student response authoring > shows invalid staff input instead of silently rewriting the answer key 2447ms
+   ✓ SAT student response authoring > adds and removes validated equivalent responses 1055ms
+ ✓ src/features/exam-authoring/ui/__tests__/SampleExamLoadDialog.test.tsx (2 tests) 3198ms
+   ✓ SampleExamLoadDialog > explains the complete replacement and invokes confirmation 3161ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/LinksToolbar.test.tsx (2 tests) 2285ms
+   ✓ LinksToolbar > announces the result count and toggles the status filter 2229ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkEditorSheet.test.tsx (1 test) 5094ms
+   ✓ AccessLinkEditorSheet > confirms before discarding dirty Student Link settings 5093ms
+ ✓ src/features/exam-authoring/routes/__tests__/ProviderBuilderRoute.split.test.tsx (1 test) 355ms
+   ✓ ProviderBuilderRoute branch loading > loads only the selected provider authoring branch 354ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/contentTemplates.test.ts (3 tests) 3ms
+ ✓ src/features/exam-authoring/ui/__tests__/SatAuthoringStateSurfaces.test.tsx (2 tests) 1658ms
+   ✓ SAT authoring state surfaces > renders a SAT-specific loading landmark 537ms
+   ✓ SAT authoring state surfaces > renders a recoverable SAT-specific error landmark 1119ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/studentResponse.test.ts (14 tests) 5ms
+ ❯ src/features/exam-authoring/ui/spine/__tests__/spineTokens.test.ts (2 tests | 1 failed) 275ms
+   × authoring-local foundation > pins measures without imposing a minimum canvas width 268ms
+     → expected '/*\n * SAT authoring spine styles — s…' to contain '--spine-rail-width: 272px;'
+ ✓ src/features/exam-authoring/editor/__tests__/RichContentIdentityExtension.test.ts (1 test) 563ms
+   ✓ rich content editing identities > gives a split paragraph a distinct ID that survives subsequent typing 561ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/ReleaseReadinessParity.test.tsx (1 test) 331ms
+ ✓ src/features/exam-authoring/ui/__tests__/WorkbookImportUndoBanner.test.tsx (2 tests) 1199ms
+   ✓ WorkbookImportUndoBanner > offers one restrained undo action after a workbook import 1024ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineQueueSheet.test.tsx (2 tests) 173ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionFilterMenu.test.tsx (1 test) 110ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > renders the spine branch with header progress and queue
+TestingLibraryElementError: Unable to find an element with the text: /2 of 3 questions authored/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-0"[39m
+                [33mdata-save-hidden[39m=[32m"true"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_0_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/sv...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-0"[39m
+                [33mdata-save-hidden[39m=[32m"true"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_0_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/sv...
+ ❯ waitForWrapper node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx:186:25
+    184|     renderWorkspace();
+    185|     expect(await screen.findByRole("heading", { name: "SAT Practice 1"…
+    186|     expect(await screen.findByText(/2 of 3 questions authored/)).toBeI…
+       |                         ^
+    187|   });
+    188| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps paste import reachable from the spine queue
+TestingLibraryElementError: Unable to find role="button" and name `/add questions: paste or import/i`
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_16_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<circle[39m
+                      [33mcx[39m=...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_16_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<circle[39m
+                      [33mcx[39m=...
+ ❯ waitForWrapper node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx:191:25
+    189|   it("keeps paste import reachable from the spine queue", async () => {
+    190|     renderWorkspace();
+    191|     expect(await screen.findByRole("button", { name: /add questions: p…
+       |                         ^
+    192|     fireEvent.click(screen.getByRole("button", {name: "More authoring …
+    193|     expect(screen.getByRole("menuitem", {name: "Import from workbook"}…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > renders the spine branch with header progress and queue
+TestingLibraryElementError: Unable to find an element with the text: /2 of 3 questions authored/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-0"[39m
+                [33mdata-save-hidden[39m=[32m"true"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_0_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/sv...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-0"[39m
+                [33mdata-save-hidden[39m=[32m"true"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_0_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/sv...
+ ❯ waitForWrapper node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx:186:25
+    184|     renderSpine();
+    185|     expect(await screen.findByRole("heading", { name: "SAT Practice 1"…
+    186|     expect(await screen.findByText(/2 of 3 questions authored/)).toBeI…
+       |                         ^
+    187|   });
+    188| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > keeps paste import reachable from the spine queue
+TestingLibraryElementError: Unable to find role="button" and name `/add questions: paste or import/i`
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_16_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<circle[39m
+                      [33mcx[39m=...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sat-product"[39m
+      [33mdata-au-section[39m=[32m"reading-writing"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"sat-spine"[39m
+        [33mstyle[39m=[32m"min-height: 100dvh; --spine-rail-width: 340px;"[39m
+      [36m>[39m
+        [36m<a[39m
+          [33mclass[39m=[32m"sat-spine__skip-link"[39m
+          [33mhref[39m=[32m"#sat-spine-main"[39m
+        [36m>[39m
+          [0mSkip to question[0m
+        [36m</a>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"sat-spine__header shrink-0 border-b border-border bg-card"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex min-h-16 items-center gap-3 px-4 sm:px-6"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Back to SAT Exam Library"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11 min-w-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-arrow-left"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"17"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"17"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m12 19-7-7 7-7"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M19 12H5"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"hidden xl:inline"[39m
+              [36m>[39m
+                [0mExams[0m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0 flex-1"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"truncate text-base font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mSAT Practice 1[0m
+              [36m</h1>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"truncate text-xs text-muted-foreground"[39m
+              [36m>[39m
+                [0mReading & Writing · Module 1 · Draft[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__header-save shrink-0"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Saved"[39m
+                [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+                [33mtitle[39m=[32m"Saved"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex min-w-24 items-center gap-1.5 text-xs font-semibold text-green-800"[39m
+                  [33mstyle[39m=[32m"opacity: 1;"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2.3"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [36m<span>[39m
+                    [0mSaved[0m
+                  [36m</span>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Open the full SAT preview"[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--quiet min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mPreview[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"authoring-button authoring-button--primary min-h-11"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mRelease[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"sat-spine__menu"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"relative"[39m
+                [33mdata-sat-menu-root[39m=[32m"true"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"_r_16_"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-haspopup[39m=[32m"menu"[39m
+                  [33maria-label[39m=[32m"More authoring actions"[39m
+                  [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"16"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"16"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<circle[39m
+                      [33mcx[39m=...
+ ❯ waitForWrapper node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx:191:25
+    189|   it("keeps paste import reachable from the spine queue", async () => {
+    190|     renderSpine();
+    191|     expect(await screen.findByRole("button", { name: /add questions: p…
+       |                         ^
+    192|     fireEvent.click(screen.getByRole("button", {name: "More authoring …
+    193|     expect(screen.getByRole("menuitem", {name: "Import from workbook"}…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/features/exam-authoring/ui/spine/__tests__/spineTokens.test.ts > authoring-local foundation > pins measures without imposing a minimum canvas width
+AssertionError: expected '/*\n * SAT authoring spine styles — s…' to contain '--spine-rail-width: 272px;'
+
+- Expected
++ Received
+
+- --spine-rail-width: 272px;
++ /*
++  * SAT authoring spine styles — scoped to `.sat-spine` only (plan Phase 1).
++  *
++  * TOKEN MAP (shared `au-*` dialog/sheet/material tokens live in src/index.css;
++  *   spine canvas/bg  -> var(--color-background)
++  *   spine surface    -> var(--color-card)
++  *   spine text       -> var(--color-foreground)
++  *   secondary text   -> var(--color-muted-foreground) (AA-checked)
++  *   hairlines/rails  -> var(--color-border) / var(--color-border-strong)
++  *   primary action   -> var(--color-primary) / --color-primary-foreground
++  *   success/warn/danger text -> existing `-text` tokens (never tint alone)
++  *   student preview parity -> --sat-* delivery vars (QuestionPaper /
++  *     SatQuestionBody / ExamQuestionRenderer keep their own markup)
++  * Radii come from the shadcn scale only; motion is CSS transitions here
++  * (motion/react only for sheet/dialog entrance + question-swap fade).
++  */
++
++ .sat-spine {
++   /* Authoring-local contract: typography 28/20/14/16/13/12; spacing 4–64.
++    * Accent means action/selection/focus, never requiredness. Hairlines
++    * separate structure; only overlays and summaries need elevation.
++    * Tailwind mapping: display text-[28px], title text-xl, label text-sm,
++    * body text-base, helper text-[13px], metadata text-xs.
++    * Existing shared au-* tokens are deliberately unchanged. */
++   --spine-measure: 840px;
++   --spine-measure-compact: 720px;
++   --spine-measure-wide: 920px;
++   --spine-rail-width: 392px;
++   --spine-rail-min: 340px;
++   --spine-rail-max: 460px;
++   --spine-inspector-width: 304px;
++   --spine-text-display: 1.75rem;
++   --spine-text-title: 1.25rem;
++   --spine-text-label: 0.875rem;
++   --spine-text-body: 1rem;
++   --spine-text-helper: 0.8125rem;
++   --spine-text-meta: 0.75rem;
++   --spine-space-1: 4px;
++   --spine-space-2: 8px;
++   --spine-space-3: 12px;
++   --spine-space-4: 16px;
++   --spine-space-5: 20px;
++   --spine-space-6: 24px;
++   --spine-space-8: 32px;
++   --spine-space-10: 40px;
++   --spine-space-12: 48px;
++   --spine-space-16: 64px;
++   --spine-radius-xs: 6px;
++   --spine-radius-sm: 8px;
++   --spine-radius-md: 10px;
++   --spine-radius-lg: 12px;
++   --spine-radius-xl: 14px;
++   --spine-radius-2xl: 16px;
++   --spine-motion-fast: 120ms;
++   --spine-motion-focus: 150ms;
++   --spine-motion-menu: 170ms;
++   --spine-motion-panel: 220ms;
++   display: flex;
++   height: 100dvh;
++   min-height: 0;
++   min-height: 100dvh;
++   flex: 1 1 auto;
++   flex-direction: column;
++   overflow: hidden;
++   background: var(--color-background);
++   color: var(--color-foreground);
++ }
++
++ .sat-spine__body {
++   display: flex;
++   min-height: 0;
++   flex: 1 1 auto;
++   overflow: hidden;
++ }
++
++ .sat-spine__queue {
++   flex: 0 0 var(--spine-rail-width);
++   width: var(--spine-rail-width);
++   min-width: 0;
++   min-height: 0;
++   align-self: stretch;
++   overflow: hidden;
++   border-right: 1px solid var(--color-border);
++   background: var(--color-card);
++ }
++
++ .sat-spine__queue > * {
++   min-height: 0;
++   height: 100%;
++ }
++
++ .sat-spine__queue [data-queue-scroll-region] {
++   scrollbar-gutter: stable;
++ }
++
++ .sat-spine__main {
++   min-width: 0;
++   flex: 1 1 auto;
++   overflow-y: auto;
++ }
++
++ .sat-spine__column {
++   margin-inline: auto;
++   width: calc(100% - 2rem);
++   max-width: clamp(var(--spine-measure-compact), 70vw, var(--spine-measure));
++   padding-block: 1.75rem 6rem;
++ }
++
++ .sat-spine__skip-link {
++   position: absolute;
++   left: 1rem;
++   top: -999px;
++   z-index: 100;
++   border-radius: var(--radius-md);
++   background: var(--color-primary);
++   color: var(--color-primary-foreground);
++   padding: 0.5rem 1rem;
++   font-size: 0.8125rem;
++   font-weight: 600;
++ }
++
++ .sat-spine__skip-link:focus-visible {
++   top: 1rem;
++ }
++
++ .sat-spine__nav-region {
++   flex: 0 0 auto;
++   border-bottom: 1px solid var(--color-border);
++   padding: var(--spine-space-4);
++ }
++
++ .sat-spine__nav-head {
++   display: flex;
++   align-items: baseline;
++   justify-content: space-between;
++   gap: var(--spine-space-3);
++ }
++
++ .sat-spine__nav-title {
++   font-size: var(--spine-text-label);
++   font-weight: 600;
++   color: var(--color-foreground);
++ }
++
++ .sat-spine__nav-progress {
++   font-size: var(--spine-text-meta);
++   color: var(--color-muted-foreground);
++   font-variant-numeric: tabular-nums;
++ }
++
++ .sat-spine__sections,
++ .sat-spine__modules {
++   display: flex;
++   gap: var(--spine-space-2);
++   margin-top: var(--spine-space-3);
++   overflow-x: auto;
++   scrollbar-width: none;
++ }
++
++ .sat-spine__sections::-webkit-scrollbar,
++ .sat-spine__modules::-webkit-scrollbar {
++   display: none;
++ }
++
++ .sat-spine__tab {
++   position: relative;
++   display: flex;
++   flex-direction: column;
++   gap: 2px;
++   min-height: 56px;
++   min-width: 44px;
++   flex: 1 1 0;
++   align-items: flex-start;
++   justify-content: center;
++   border: 1px solid var(--color-border);
++   border-radius: var(--spine-radius-md);
++   background: transparent;
++   padding: var(--spine-space-2) var(--spine-space-3);
++   text-align: left;
++   transition:
++     background-color var(--spine-motion-fast) ease-out,
++     border-color var(--spine-motion-fast) ease-out,
++     transform var(--spine-motion-fast) ease-out;
++ }
++
++ .sat-spine__tab:hover:not(:disabled) {
++   background: var(--color-muted);
++ }
++
++ .sat-spine__tab:active:not(:disabled) {
++   transform: scale(0.985);
++ }
++
++ .sat-spine__tab:focus-visible {
++   outline: 2px solid var(--color-ring);
++   outline-offset: 2px;
++ }
++
++ .sat-spine__tab.is-selected {
++   background: color-mix(in oklab, var(--color-primary) 8%, transparent);
++   border-color: color-mix(in oklab, var(--color-primary) 35%, var(--color-border));
++ }
++
++ .sat-spine__tab-title {
++   font-size: var(--spine-text-label);
++   font-weight: 600;
++   color: var(--color-foreground);
++ }
++
++ .sat-spine__tab-meta {
++   font-size: var(--spine-text-meta);
++   color: var(--color-muted-foreground);
++   font-variant-numeric: tabular-nums;
++ }
++
++ .sat-spine__tab-bar {
++   display: block;
++   height: 2px;
++   width: 100%;
++   border-radius: 999px;
++   background: var(--color-border);
++   overflow: hidden;
++ }
++
++ .sat-spine__tab-bar > span {
++   display: block;
++   height: 100%;
++   background: var(--color-primary);
++   transition: width var(--spine-motion-panel) ease-out;
++ }
++
++ .sat-spine__nav-tools {
++   display: flex;
++   align-items: center;
++   justify-content: space-between;
++   gap: var(--spine-space-2);
++   margin-top: var(--spine-space-3);
++ }
++
++ .sat-spine__nav-count {
++   font-size: var(--spine-text-meta);
++   color: var(--color-muted-foreground);
++ }
++
++ .sat-spine__add {
++   display: inline-flex;
++   align-items: center;
++   gap: 6px;
++   min-height: 44px;
++   padding: 0 var(--spine-space-3);
++   border-radius: var(--spine-radius-sm);
++   background: transparent;
++   border: 1px solid var(--color-border);
++   color: var(--color-foreground);
++   font-size: var(--spine-text-label);
++   font-weight: 600;
++ }
++
++ .sat-spine__add:hover:not(:disabled) {
++   background: var(--color-muted);
++ }
++
++ .sat-spine__add:focus-visible {
++   outline: 2px solid var(--color-ring);
++   outline-offset: 2px;
++ }
++
++ .sat-spine__add:disabled {
++   opacity: 0.4;
++ }
++
++ .sat-spine__selection-bar {
++   display: flex;
++   align-items: center;
++   justify-content: space-between;
++   gap: var(--spine-space-3);
++   flex: 0 0 auto;
++   padding: var(--spine-space-2) var(--spine-space-4);
++   border-bottom: 1px solid var(--color-border);
++   background: color-mix(in oklab, var(--color-primary) 6%, transparent);
++   font-size: var(--spine-text-meta);
++ }
++
++ .sat-spine__resizer {
++   flex: 0 0 auto;
++   width: 7px;
++   margin-inline: -3px;
++   cursor: col-resize;
++   background: transparent;
++   z-index: 1;
++ }
++
++ .sat-spine__resizer:hover,
++ .sat-spine__resizer:focus-visible {
++   background: color-mix(in oklab, var(--color-primary) 20%, transparent);
++   outline: none;
++ }
++
++ .sat-spine__list {
++   min-height: 0;
++   flex: 1 1 auto;
++   overflow-y: auto;
++   overscroll-behavior: contain;
++   scrollbar-width: thin;
++   scrollbar-color: var(--color-border) transparent;
++ }
++
++ .sat-spine__question-row {
++   position: relative;
++   display: flex;
++   align-items: center;
++   gap: var(--spine-space-2);
++   margin: 0 var(--spine-space-2);
++   border-radius: var(--spine-radius-md);
++   transition: background-color var(--spine-motion-fast) ease-out;
++ }
++
++ .sat-spine__question-row:hover {
++   background: var(--color-muted);
++ }
++
++ .sat-spine__question-row.is-selected {
++   background: color-mix(in oklab, var(--color-primary) 8%, transparent);
++ }
++
++ .sat-spine__question-row [data-selected-bar] {
++   position: absolute;
++   inset-block: 6px;
++   left: 0;
++   width: 2px;
++   border-radius: 999px;
++   background: var(--color-primary);
++ }
++
++ .sat-spine__check {
++   display: flex;
++   align-items: center;
++   justify-content: center;
++   min-height: 44px;
++   min-width: 44px;
++   flex: 0 0 auto;
++ }
++
++ .sat-spine__check-box {
++   display: flex;
++   align-items: center;
++   justify-content: center;
++   height: 18px;
++   width: 18px;
++   border: 1px solid var(--color-input);
++   border-radius: 4px;
++ }
++
++ .sat-spine__check-box.is-checked {
++   background: var(--color-primary);
++   border-color: var(--color-primary);
++   color: var(--color-primary-foreground);
++ }
++
++ .sat-spine__row-main {
++   display: flex;
++   align-items: flex-start;
++   gap: var(--spine-space-3);
++   min-height: 56px;
++   flex: 1 1 auto;
++   min-width: 0;
++   padding: var(--spine-space-2) var(--spine-space-2) var(--spine-space-2) var(--spine-space-3);
++   text-align: left;
++ }
++
++ .sat-spine__row-main:focus-visible {
++   outline: 2px solid var(--color-ring);
++   outline-offset: -2px;
++   border-radius: var(--spine-radius-md);
++ }
++
++ .sat-spine__row-num {
++   flex: 0 0 auto;
++   width: 22px;
++   padding-top: 2px;
++   font-size: var(--spine-text-meta);
++   font-variant-numeric: tabular-nums;
++   color: var(--color-muted-foreground);
++ }
++
++ .sat-spine__question-row.is-selected .sat-spine__row-num {
++   color: var(--color-foreground);
++   font-weight: 600;
++ }
++
++ .sat-spine__row-preview {
++   flex: 1 1 auto;
++   min-width: 0;
++   display: -webkit-box;
++   -webkit-box-orient: vertical;
++   -webkit-line-clamp: 2;
++   line-clamp: 2;
++   overflow: hidden;
++   font-size: var(--spine-text-label);
++   line-height: 1.35;
++   color: var(--color-foreground);
++ }
++
++ .sat-spine__question-row.is-selected .sat-spine__row-preview {
++   font-weight: 550;
++ }
++
++ .sat-spine__row-status {
++   display: flex;
++   align-items: center;
++   justify-content: flex-end;
++   gap: 4px;
++   flex: 0 0 auto;
++   width: 34px;
++   min-height: 24px;
++   font-size: var(--spine-text-meta);
++   font-weight: 600;
++   color: var(--color-muted-foreground);
++ }
++
++ .sat-spine__row-status.is-issue {
++   color: var(--color-destructive);
++ }
++
++ .sat-spine__row-count {
++   font-variant-numeric: tabular-nums;
++ }
++
++ @media (hover: hover) and (pointer: fine) {
++   .sat-spine__row-status {
++     opacity: 1;
++     transition: opacity var(--spine-motion-fast) ease-out;
++   }
++   .sat-spine__question-row:hover .sat-spine__row-status,
++   .sat-spine__question-row:focus-within .sat-spine__row-status {
++     opacity: 0;
++   }
++   .sat-spine__row-actions {
++     position: absolute;
++     right: var(--spine-space-2);
++     top: 50%;
++     transform: translateY(-50%);
++     opacity: 0;
++     transition: opacity var(--spine-motion-fast) ease-out;
++   }
++   .sat-spine__question-row:hover .sat-spine__row-actions,
++   .sat-spine__question-row:focus-within .sat-spine__row-actions {
++     opacity: 1;
++   }
++ }
++
++ @media (max-width: 1279px) {
++   .sat-spine {
++     --spine-rail-width: 360px;
++   }
++ }
++
++ @media (max-width: 900px) {
++   .sat-spine__queue {
++     display: none;
++   }
++ }
++
++
++ .sat-spine__inspector { flex: 0 0 var(--spine-inspector-width); width: var(--spine-inspector-width); min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--color-border); background: var(--color-card); animation: spine-panel-enter var(--spine-motion-panel) ease-out; }
++ @keyframes spine-panel-enter { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
++ .sat-spine__main, .sat-spine__queue { overscroll-behavior: contain; }
++ .sat-spine__menu button { min-width: 44px; min-height: 44px; }
++ @media (hover: hover) and (pointer: fine) {
++   .sat-spine__row-actions, .sat-spine__choice-reorder { opacity: 0; }
++   [data-spine-key-row]:hover .sat-spine__choice-reorder,
++   [data-spine-key-row]:focus-within .sat-spine__choice-reorder { opacity: 1; }
++   .sat-spine__question-row:hover .sat-spine__row-actions,
++   .sat-spine__question-row:focus-within .sat-spine__row-actions { opacity: 1; }
++ }
++ @media (max-width: 600px) {
++   .sat-spine__header-save { display: none; }
++   .sat-spine__header > div { gap: 4px; padding-inline: 8px; flex-wrap: wrap; }
++ }
++
++ .sat-spine__add-content { min-height: 44px; color: var(--muted-foreground); font-size: var(--spine-text-label); padding: 8px; border-radius: var(--spine-radius-sm); }
++ .sat-spine__add-content:hover { background: var(--muted); color: var(--foreground); }
++ .sat-spine__add-content:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
++ .sat-spine__section { scroll-margin-block: 24px; outline: none; }
++
++ /* Canonical spine card (taste foundation): every card in the authoring
++  * column shares one radius, one border, one surface, one elevation, so the
++  * column reads as one designed surface instead of assembled boxes.
++  * Padding stays per-component; geometry never forks. Elevation resolves
++  * from the workspace `--au-elevation-card` (under `.sat-product`). */
++ .sat-spine .spine-card {
++   border-radius: var(--radius-au-lg);
++   border: 1px solid var(--color-border);
++   background: var(--color-card);
++   box-shadow: var(--au-elevation-card);
++ }
++
++ /* One-shot "look here" flash for issue-target fields (micro-interaction
++  * slice 5). Outline color fades; width never animates, so no layout.
++  * The 400ms keyframe is the single sanctioned non-token duration.
++  * Reduced-motion collapses it via the block below (still fires
++  * `animationend`, so the helper cleanup always runs). */
++ .spine-flash-once {
++   outline: 2px solid var(--color-primary);
++   outline-offset: 2px;
++   animation: spine-flash-fade 400ms ease-out forwards;
++ }
++
++ @keyframes spine-flash-fade {
++   from {
++     outline-color: var(--color-primary);
++   }
++   to {
++     outline-color: transparent;
++   }
++ }
++
++ @media (prefers-reduced-motion: reduce) {
++   .sat-spine * {
++     animation-duration: 0.01ms !important;
++     transition-duration: 0.01ms !important;
++   }
++ }
++
+
+ ❯ src/features/exam-authoring/ui/spine/__tests__/spineTokens.test.ts:8:19
+      6|   it('pins measures without imposing a minimum canvas width', () => {
+      7|     for (const [token, value] of Object.entries({measure:840,'measure-…
+      8|       expect(css).toContain('--spine-' + token + ': ' + value + 'px;');
+       |                   ^
+      9|     }
+     10|     expect(css).toContain('max-width: clamp(var(--spine-measure-compac…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+ Test Files  3 failed | 62 passed (65)
+      Tests  5 failed | 273 passed (278)
+   Start at  01:01:11
+   Duration  107.68s (transform 11.54s, setup 89.17s, collect 145.05s, tests 130.90s, environment 209.80s, prepare 31.14s)
+

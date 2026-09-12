@@ -1,0 +1,56 @@
+// Original location: src/features/student-delivery/api/audit-session.temporary.test.ts
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../infrastructure/assessmentDeliveryBackendGateway', () => ({
+  backendPatch: vi.fn(),
+  backendPost: vi.fn(),
+  hasBackendStatusCode: (error: unknown, statusCode: number) => (
+    typeof error === 'object'
+    && error !== null
+    && 'statusCode' in error
+    && (error as { statusCode?: unknown }).statusCode === statusCode
+  ),
+  isAttemptCredentialExpiringWithin: vi.fn(),
+  refreshAttemptCredential: vi.fn(),
+  storeAttemptCredential: vi.fn(),
+  tryBuildAttemptAuthorizationHeader: vi.fn(),
+}));
+
+import {
+  backendPatch,
+  backendPost,
+  isAttemptCredentialExpiringWithin,
+  refreshAttemptCredential,
+  storeAttemptCredential,
+  tryBuildAttemptAuthorizationHeader,
+} from '../infrastructure/assessmentDeliveryBackendGateway';
+import {
+  assessmentDeliveryApi,
+  configureAssessmentDeliveryAttempt,
+} from './assessmentDeliveryApi';
+
+const mockedPatch = vi.mocked(backendPatch);
+const mockedPost = vi.mocked(backendPost);
+const mockedAuthHeader = vi.mocked(tryBuildAttemptAuthorizationHeader);
+const mockedExpiring = vi.mocked(isAttemptCredentialExpiringWithin);
+const mockedRefresh = vi.mocked(refreshAttemptCredential);
+const mockedStore = vi.mocked(storeAttemptCredential);
+
+function responseSnapshot() {
+  return {
+    id: 'response-1', moduleAttemptId: 'module-attempt', examQuestionId: 'question-1',
+    response: 'A', markedForReview: false, eliminatedOptions: [], annotations: {}, revision: 1,
+  };
+}
+
+
+it('audit: heartbeat must reuse the established student client session', async () => {
+  vi.clearAllMocks();window.sessionStorage.clear();
+  window.sessionStorage.setItem('ielts-student-client-session:v1:exam-day:student-key','established-session');
+  mockedExpiring.mockReturnValue(false);
+  mockedAuthHeader.mockReturnValue({Authorization:'Bearer existing-token-bound-to-established-session'});
+  mockedPost.mockResolvedValue({});
+  configureAssessmentDeliveryAttempt('exam-day','attempt-day','candidate-day');
+  await assessmentDeliveryApi.heartbeat('exam-day','attempt-day');
+  expect(mockedPost.mock.calls[0]?.[1]).toMatchObject({clientSessionId:'established-session'});
+});

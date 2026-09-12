@@ -159,8 +159,8 @@ func (t *TierSet) Middleware(tier string, keyFn KeyFunc) func(http.Handler) http
 			// Per-request read (one RLock): SetLocalOnly flips apply to
 			// already-mounted middleware without a restart.
 			t.mu.RLock()
-				localOnly := t.localOnly
-				t.mu.RUnlock()
+			localOnly := t.localOnly
+			t.mu.RUnlock()
 			dbCheck := t.dbs[tier]
 			if localOnly {
 				dbCheck = nil
@@ -181,7 +181,6 @@ func (t *TierSet) Middleware(tier string, keyFn KeyFunc) func(http.Handler) http
 		})
 	}
 }
-
 
 // SetLocalOnly flips the distributed verdict at runtime (plan A1): true =
 // local-only (zero DB verdicts), false = dual (behavior-preserving). It is

@@ -71,8 +71,8 @@ type entryGateResult struct {
 }
 
 type entryBucket struct {
-	tokens float64
-	at     time.Time
+	tokens  float64
+	at      time.Time
 	waiting int64
 }
 

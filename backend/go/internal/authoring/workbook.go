@@ -77,12 +77,15 @@ type SatWorkbookStagedAsset struct {
 }
 
 // SatWorkbookCommitRequest is the optimistic, complete replacement request.
+// OperationKey makes a lost-response commit retry replay instead of
+// replacing the draft a second time.
 type SatWorkbookCommitRequest struct {
 	ImportID                string                   `json:"importId"`
 	ExpectedVersionID       string                   `json:"expectedVersionId"`
 	ExpectedVersionRevision int                      `json:"expectedVersionRevision"`
 	Modules                 []SatWorkbookModuleDraft `json:"modules"`
 	Assets                  []SatWorkbookStagedAsset `json:"assets"`
+	OperationKey            string                   `json:"operationKey"`
 }
 
 type satWorkbookModuleSpec struct {

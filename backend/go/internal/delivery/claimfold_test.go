@@ -27,6 +27,10 @@ func TestClaimWriterSessionTxClaimsFree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Revocation re-check first: live token row.
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id")).
+		WithArgs("tok-1").
+		WillReturnRows(sqlmock.NewRows([]string{"token_id", "revoked_at"}).AddRow("tok-1", nil))
 	mock.ExpectExec(regexp.QuoteMeta("SET active_client_session_id")).
 		WithArgs("sess-mine", "att-1", "sched-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -34,7 +38,7 @@ func TestClaimWriterSessionTxClaimsFree(t *testing.T) {
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-mine"))
 	mock.ExpectCommit()
-	if err := claimWriterSessionTx(ctx, tx, "sched-1", "att-1", "sess-mine"); err != nil {
+	if err := claimWriterSessionTx(ctx, tx, "sched-1", "att-1", "sess-mine", "tok-1"); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("free slot must claim: %v", err)
 	}
@@ -59,6 +63,9 @@ func TestClaimWriterSessionTxSuperseded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id")).
+		WithArgs("tok-1").
+		WillReturnRows(sqlmock.NewRows([]string{"token_id", "revoked_at"}).AddRow("tok-1", nil))
 	mock.ExpectExec(regexp.QuoteMeta("SET active_client_session_id")).
 		WithArgs("sess-mine", "att-1", "sched-1").
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -66,7 +73,7 @@ func TestClaimWriterSessionTxSuperseded(t *testing.T) {
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-other"))
 	mock.ExpectRollback()
-	err = claimWriterSessionTx(ctx, tx, "sched-1", "att-1", "sess-mine")
+	err = claimWriterSessionTx(ctx, tx, "sched-1", "att-1", "sess-mine", "tok-1")
 	_ = tx.Rollback()
 	if deliveryCodeOf(err) != apperrors.CodeActiveSessionSuperseded {
 		t.Fatalf("superseded slot must 409, got %v", err)
@@ -97,7 +104,11 @@ func TestSaveResponseFoldedClaimInTx(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
-	// ...then the folded claim: conditional UPDATE + FOR UPDATE verify...
+	// ...then the folded claim: revocation re-check + conditional UPDATE +
+	// FOR UPDATE verify...
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id")).
+		WithArgs("tok-1").
+		WillReturnRows(sqlmock.NewRows([]string{"token_id", "revoked_at"}).AddRow("tok-1", nil))
 	mock.ExpectExec(regexp.QuoteMeta("SET active_client_session_id")).
 		WithArgs("sess-1", "att-1", "sched-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -124,7 +135,7 @@ func TestSaveResponseFoldedClaimInTx(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"client_write_id"}).AddRow(nil))
 	mock.ExpectCommit()
 	req := SaveResponseRequest{Revision: 3, Response: json.RawMessage(`"A"`), EliminatedOptions: []string{}, Annotations: json.RawMessage(`{}`)}
-	snap, err := svc.SaveResponse(context.Background(), "sched-1", "att-1", "sched-1", "eq-1", req, "sess-1")
+	snap, err := svc.SaveResponse(context.Background(), "sched-1", "att-1", "sched-1", "eq-1", req, "sess-1", "tok-1")
 	if err != nil {
 		t.Fatalf("folded claim save must succeed, got %v", err)
 	}
@@ -136,8 +147,38 @@ func TestSaveResponseFoldedClaimInTx(t *testing.T) {
 	}
 }
 
-// B2 RED: empty session id skips (legacy callers/tests without writer binding).
-func TestClaimWriterSessionTxEmptySkips(t *testing.T) {
+// Revoked token fails closed in-tx: a revocation landing between the
+// edge verify and commit must not write (TOCTOU close).
+func TestClaimWriterSessionTxRevokedRejects(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id")).
+		WithArgs("tok-revoked").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+	if err := claimWriterSessionTx(ctx, tx, "sched-1", "att-1", "sess-mine", "tok-revoked"); err == nil {
+		_ = tx.Rollback()
+		t.Fatal("revoked token must fail closed, got nil")
+	}
+	_ = tx.Rollback()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Empty writer identity fails closed: the delivery edge guarantees
+// non-empty (every minted bearer carries one), so an empty id is a
+// programming error that must surface, never a legacy case to skip.
+func TestClaimWriterSessionTxEmptyRejects(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -150,9 +191,9 @@ func TestClaimWriterSessionTxEmptySkips(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectRollback()
-	if err := claimWriterSessionTx(ctx, tx, "sched-1", "att-1", ""); err != nil {
+	if err := claimWriterSessionTx(ctx, tx, "sched-1", "att-1", "", "tok-1"); err == nil {
 		_ = tx.Rollback()
-		t.Fatalf("empty session must skip: %v", err)
+		t.Fatal("empty session must fail closed, got nil")
 	}
 	_ = tx.Rollback()
 	if err := mock.ExpectationsWereMet(); err != nil {

@@ -1,4 +1,5 @@
-import { Extension } from '@tiptap/core';
+// Use the same core instance as useEditor (react re-exports its peer).
+import { Extension } from '@tiptap/react';
 import { Plugin } from '@tiptap/pm/state';
 import type { RichTextDocument, RichTextNode } from '../contracts/assessment';
 import { isRichTextBlock, RICH_TEXT_BLOCK_TYPES, withRichContentIdentities } from './richContentIdentity';

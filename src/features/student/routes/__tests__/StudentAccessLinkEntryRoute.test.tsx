@@ -236,6 +236,48 @@ describe('StudentAccessLinkEntryRoute', () => {
     );
   });
 
+  it('still admits when profile storage is full (QuotaExceededError on write)', async () => {
+    mocks.studentEntry.mockResolvedValue({
+      user: { id: 'user-1', email: 'ada@example.com', role: 'student', state: 'active' },
+      csrfToken: 'csrf',
+      expiresAt: '2026-08-29T00:00:00.000Z',
+      scheduleId: 'internal-schedule-1',
+      studentCode: 'guest-server-issued',
+    });
+    const quotaError = new DOMException('Quota exceeded', 'QuotaExceededError');
+    const rawSetItem = window.localStorage.setItem.bind(window.localStorage);
+    const setItem = vi.spyOn(window.localStorage, 'setItem').mockImplementation((key: string, value: string) => {
+      if (key.startsWith('student-access-link-profile:')) throw quotaError;
+      rawSetItem(key, value);
+    });
+    try {
+      renderRoute();
+      enterIdentity();
+      fireEvent.click(screen.getByRole('button', { name: /Continue/i }));
+      expect(await screen.findByTestId('destination')).toHaveTextContent(
+        '/student/internal-schedule-1/guest-server-issued',
+      );
+      expect(mocks.studentEntry).toHaveBeenCalledTimes(1);
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it('still renders when profile storage read is denied', () => {
+    const rawGetItem = window.localStorage.getItem.bind(window.localStorage);
+    const getItem = vi.spyOn(window.localStorage, 'getItem').mockImplementation((key: string) => {
+      if (key.startsWith('student-access-link-profile:')) throw new DOMException('Denied', 'SecurityError');
+      return rawGetItem(key);
+    });
+    try {
+      renderRoute();
+      expect(screen.getByLabelText('Full name')).toHaveValue('');
+      expect(screen.getByLabelText('Email')).toHaveValue('');
+    } finally {
+      getItem.mockRestore();
+    }
+  });
+
   it('renders availability as a terminal entry state and never authenticates before the window opens', () => {
     mocks.link = liveLink({
       availabilityType: 'scheduled',

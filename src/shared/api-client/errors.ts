@@ -50,7 +50,10 @@ export class ApiError extends Error {
     this.backendCode = shape.code;
     this.backendDetails = shape.details;
     this.backendRequestId = shape.requestId;
-    const c = classifyBackendCode(shape.code, shape.requestId);
+    // Forward details.reason so ASSESSMENT_CONFLICT subclasses (terminal
+    // vs clock-missing vs revision) classify to the right bucket.
+    const detailsReason = typeof shape.details?.['reason'] === 'string' ? (shape.details['reason'] as string) : undefined;
+    const c = classifyBackendCode(shape.code, shape.requestId, detailsReason);
     this.conflict = c.kind;
     this.category = toCategory(shape.status, c.kind);
   }

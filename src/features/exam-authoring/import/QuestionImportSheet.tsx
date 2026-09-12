@@ -53,10 +53,10 @@ export function QuestionImportSheet({
       <header className="flex items-center justify-between border-b border-au-separator px-5 py-4">
         <div>
           <h2 className="text-[13px] font-semibold tracking-[-0.012em] text-slate-950">
-            Paste questions
+            Add questions
           </h2>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            Paste from Excel / Google Sheets or choose a CSV/TSV file. Import is atomic.
+            Add mode: paste from Excel / Google Sheets or choose a CSV/TSV file. Questions append to this module; nothing else changes. Import is atomic.
           </p>
         </div>
         <button

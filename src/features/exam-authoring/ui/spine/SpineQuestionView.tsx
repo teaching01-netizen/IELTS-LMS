@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { ChevronRight, Copy, Save } from "lucide-react";
+import { useEffect, useState } from "react";
 import type {
   AssessmentValidationIssue,
   QuestionRevision,
@@ -13,18 +12,23 @@ import {
 } from "../../providers/sat/contentTemplates";
 import { hasStructuredContent, plainTextFromContent } from "../../editor/richContent";
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
-import { ClassificationFieldset } from "./ClassificationFieldset";
 import { AnswerKeyField } from "./AnswerKeyField";
-import { SpineFieldLabel } from "./SpineFieldLabel";
-import { SpineStep } from "./SpineStep";
-import { SaveCluster } from "./SaveCluster";
 import { SatStudentResponseEditor } from "../SatStudentResponseEditor";
 import { AuthoringSegmented } from "../AuthoringSegmented";
-import { ValidationChecklist } from "./ValidationChecklist";
 import { SpineSaveFooter } from "./SpineSaveFooter";
+import { QuestionHeader } from './QuestionHeader';
+import { SectionRule } from './SectionRule';
+import { issuesForField } from './readinessFamilies';
 
 export interface SpineQuestionViewProps {
   question: QuestionRevision;
+  focusField?: string | null | undefined;
+  onRequestDelete?: (()=>void)|undefined;
+  onOpenSettings?: (()=>void)|undefined;
+  onMove?: ((direction:-1|1)=>void)|undefined;
+  canMoveUp?: boolean|undefined;
+  canMoveDown?: boolean|undefined;
+  isMutating?: boolean|undefined;
   questionNumber?: number | undefined;
   saveStatus: QuestionSaveStatus;
   lastSavedAt: Date | null;
@@ -35,6 +39,7 @@ export interface SpineQuestionViewProps {
   onSaveNow: () => void;
   onSaveAndNext: () => void;
   onRetrySave: () => void;
+  onReviewConflict?: (() => void) | undefined;
   onDuplicate: () => void;
   onDelete: () => boolean | Promise<boolean>;
   onPreview: () => void;
@@ -51,7 +56,10 @@ function emptyContent(): StructuredContent {
  * (disclosed), ValidationChecklist, footer save cluster. One spine: no
  * QuestionMetadataBar / QuestionProperties / inspector-tab copies.
  */
-export function SpineQuestionView({
+export function SpineQuestionView(props:SpineQuestionViewProps) { return <QuestionCanvas key={props.question.id} {...props}/>; }
+
+function QuestionCanvas({
+  focusField,onRequestDelete,onOpenSettings,onMove,canMoveUp,canMoveDown,isMutating,
   question,
   questionNumber,
   saveStatus,
@@ -60,9 +68,9 @@ export function SpineQuestionView({
   keepMetadataForNext,
   onKeepMetadataForNextChange,
   onChange,
-  onSaveNow,
   onSaveAndNext,
   onRetrySave,
+  onReviewConflict,
   onDuplicate,
   onDelete,
   onPreview,
@@ -70,12 +78,18 @@ export function SpineQuestionView({
 }: SpineQuestionViewProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [pendingStarter, setPendingStarter] = useState<SatSupportingMaterialStarter | null>(null);
   const [pendingQuestionType, setPendingQuestionType] = useState<
     QuestionRevision["questionType"] | null
   >(null);
   const answer = question.answer;
   const isSpr = answer.kind === "student_produced_response";
   const stimulusEmpty = !hasStructuredContent(question.stimulus);
+  const [expanded,setExpanded]=useState({stimulus:false,rationale:false});
+  useEffect(()=>{if(focusField==='stimulus'||focusField==='rationale')setExpanded(current=>({...current,[focusField]:true}));},[focusField]);
+  const showStimulus=!stimulusEmpty||expanded.stimulus||focusField==='stimulus';
+  const showRationale=hasStructuredContent(question.rationale)||expanded.rationale||focusField==='rationale';
+  const jump=(field:string|null)=>{if(field?.startsWith('stimulus'))setExpanded(current=>({...current,stimulus:true}));if(field?.startsWith('rationale'))setExpanded(current=>({...current,rationale:true}));onIssueSelect(field);};
 
   const applyKindChange = (kind: QuestionRevision["questionType"]) => {
     if (kind === "student_produced_response") {
@@ -122,169 +136,40 @@ export function SpineQuestionView({
 
   return (
     <article aria-labelledby="spine-question-heading">
-      <header className="mb-7 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 id="spine-question-heading" className="text-[22px] font-semibold tracking-tight text-foreground">
-            {questionNumber ? `Question ${questionNumber}` : "Edit question"}
-          </h2>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <SaveCluster status={saveStatus} lastSavedAt={lastSavedAt} onRetry={onRetrySave} />
-          <button
-            type="button"
-            onClick={onPreview}
-            aria-label="Preview question as students will see it"
-            title="Preview as students will see it (Space)"
-            className="flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold text-muted-foreground transition duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97]"
-          >
-            Preview
-          </button>
-          <button
-            type="button"
-            onClick={onDuplicate}
-            title="Duplicate question"
-            className="flex min-h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-semibold text-muted-foreground transition duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97]"
-          >
-            <Copy size={13} aria-hidden="true" />
-            Duplicate
-          </button>
-          <button
-            type="button"
-            onClick={onSaveNow}
-            disabled={saveStatus === "saving"}
-            aria-label="Save now"
-            title="Save now"
-            className="flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground transition duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-45"
-          >
-            <Save size={14} aria-hidden="true" />
-            {saveStatus === "saving" ? "Saving…" : "Save now"}
-          </button>
-        </div>
-      </header>
-
-      <div className="space-y-6">
-        <SpineStep step="01" title="Prompt" field="prompt">
-          <SpineFieldLabel label="Question prompt" required />
-          <FastQuestionComposer
-            label="Question prompt"
-            value={question.prompt}
-            onChange={(prompt) => onChange({ ...question, prompt })}
-            placeholder="Write the exact question students will see…"
-            assetOwnerId={question.id}
-            minHeightClassName="min-h-[112px]"
-          />
-        </SpineStep>
-
-        <SpineStep step="02" title="Supporting material" field="stimulus">
-          <SpineFieldLabel label="Supporting material" required={false} />
-          {stimulusEmpty ? (
-            <SpineSupportingStarters
-              sectionKey={question.metadata.sectionKey}
-              onSelect={(starter) =>
-                onChange({ ...question, stimulus: createSatSupportingMaterial(starter) })
-              }
-            />
-          ) : null}
-          <FastQuestionComposer
-            label="Supporting material"
-            value={question.stimulus}
-            onChange={(stimulus) => onChange({ ...question, stimulus })}
-            placeholder="Passage, context, data, equation, table, or visual…"
-            assetOwnerId={question.id}
-            minHeightClassName="min-h-[92px]"
-          />
-        </SpineStep>
-
-        <SpineStep step="03" title="Classification">
-          <ClassificationFieldset question={question} onChange={onChange} issues={issues} />
-        </SpineStep>
-
-        <SpineStep step="04" title="Answer key">
-        <div className="border-t border-border pt-5">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">
-              Set the response type and key without leaving the editing flow.
-            </p>
-            <AuthoringSegmented
-              ariaLabel="Response type"
-              value={isSpr ? "spr" : "choice"}
-              onChange={(kind) =>
-                changeKind(kind === "spr" ? "student_produced_response" : "single_choice")
-              }
-              options={[
-                { value: "choice", label: "Multiple choice" },
-                ...(question.metadata.sectionKey === "math"
-                  ? [{ value: "spr" as const, label: "Student response" }]
-                  : []),
-              ]}
-            />
-          </div>
-          {isSpr ? (
-            <SatStudentResponseEditor
-              acceptedResponses={answer.acceptedResponses}
-              onChange={(acceptedResponses) =>
-                onChange({
-                  ...question,
-                  answer: {
-                    kind: "student_produced_response",
-                    acceptedResponses,
-                    normalizeFraction: true,
-                    normalizeDecimal: true,
-                    numericTolerance: null,
-                  },
-                })
-              }
-            />
-          ) : (
-            <AnswerKeyField question={question} onChange={onChange} />
-          )}
-        </div>
-        </SpineStep>
-
-        <SpineStep step="05" title="Rationale">
-        <details className="group rounded-lg border border-border transition-colors duration-150 open:bg-muted/40">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground marker:hidden [&::-webkit-details-marker]:hidden">
-            <span className="flex items-center gap-2">
-              <ChevronRight size={14} aria-hidden="true" className="text-muted-foreground transition-transform duration-150 group-open:rotate-90" />
-              <span>Rationale</span>
-            </span>
-            <span className="text-xs font-normal text-muted-foreground">Internal · recommended</span>
-          </summary>
-          <div className="border-t border-border p-4" data-authoring-field="rationale">
-            <FastQuestionComposer
-              label="Question rationale"
-              value={question.rationale}
-              onChange={(rationale) => onChange({ ...question, rationale })}
-              placeholder="Explain why the keyed answer is correct and common traps…"
-              assetOwnerId={question.id}
-              minHeightClassName="min-h-[92px]"
-            />
-          </div>
-        </details>
-        </SpineStep>
-
-        <SpineStep step="06" title="Validation">
-        <ValidationChecklist
-          issues={issues}
-          onIssueSelect={(selected) => onIssueSelect(selected.field ?? selected.path)}
-        />
-        </SpineStep>
-
-        <SpineSaveFooter
-          status={saveStatus}
-          lastSavedAt={lastSavedAt}
-          keepMetadataForNext={keepMetadataForNext}
-          saveDisabled={saveStatus === "saving"}
-          onKeepMetadataForNextChange={onKeepMetadataForNextChange}
-          onSaveAndNext={onSaveAndNext}
-          onRetry={onRetrySave}
-        />
+      <QuestionHeader number={questionNumber} issues={issues} onIssueSelect={jump} onPreview={onPreview} onDuplicate={onDuplicate} onDelete={onRequestDelete??(()=>setDeleteOpen(true))} onSettings={onOpenSettings} onMove={onMove} canMoveUp={canMoveUp} canMoveDown={canMoveDown} busy={isMutating}/>
+      <div className="space-y-10">
+        <SectionRule title="Question" field="prompt" required issues={issuesForField(issues,'prompt')}>
+          <FastQuestionComposer label="Question prompt" value={question.prompt} onChange={prompt=>onChange({...question,prompt})} placeholder="Write the question students will see…" assetOwnerId={question.id} minHeightClassName="min-h-[112px]"/>
+        </SectionRule>
+        <SectionRule title="Supporting material" field="stimulus" issues={issuesForField(issues,'stimulus')} actions={showStimulus?<label htmlFor="supporting-type" className="flex items-center gap-2 text-xs text-muted-foreground">Type<select id="supporting-type" aria-label="Supporting material type" value="" className="min-h-11 max-w-44 rounded-md bg-transparent px-2 text-xs focus-visible:ring-2 focus-visible:ring-ring" onChange={e=>{const starter=e.target.value as SatSupportingMaterialStarter;if(!starter)return;if(stimulusEmpty)onChange({...question,stimulus:createSatSupportingMaterial(starter)});else setPendingStarter(starter);}}><option value="">{stimulusEmpty?'Choose a starter':'Change type…'}</option>{question.metadata.sectionKey==='reading-writing'?<><option value="paired_texts">Paired texts</option><option value="student_notes">Student notes</option></>:null}<option value="data_table">Data table</option></select></label>:undefined}>
+          {showStimulus?<FastQuestionComposer label="Supporting material" value={question.stimulus} onChange={stimulus=>onChange({...question,stimulus})} placeholder="Passage, context, data, equation, table, or visual…" assetOwnerId={question.id} minHeightClassName="min-h-[92px]"/>:<button type="button" className="sat-spine__add-content" onClick={()=>setExpanded(current=>({...current,stimulus:true}))}>+ Add supporting material</button>}
+        </SectionRule>
+        <SectionRule title="Answer" required field="answer" issues={issuesForField(issues,'answer')} actions={<AuthoringSegmented ariaLabel="Response type" value={isSpr?'spr':'choice'} onChange={kind=>changeKind(kind==='spr'?'student_produced_response':'single_choice')} options={[{value:'choice',label:'Multiple choice'},...(question.metadata.sectionKey==='math'?[{value:'spr' as const,label:'Student response'}]:[])]}/>}>
+          {isSpr?<SatStudentResponseEditor acceptedResponses={answer.acceptedResponses} onChange={acceptedResponses=>onChange({...question,answer:{...answer,acceptedResponses}})}/>:<AnswerKeyField question={question} onChange={onChange}/>}
+        </SectionRule>
+        <SectionRule title="Explanation" field="rationale" issues={issuesForField(issues,'rationale')}>
+          {showRationale?<FastQuestionComposer label="Question explanation" value={question.rationale} onChange={rationale=>onChange({...question,rationale})} placeholder="Explain why the answer is correct…" assetOwnerId={question.id} minHeightClassName="min-h-[92px]"/>:<button type="button" className="sat-spine__add-content" onClick={()=>setExpanded(current=>({...current,rationale:true}))}>+ Add an explanation…</button>}
+        </SectionRule>
+        <SpineSaveFooter status={saveStatus} lastSavedAt={lastSavedAt} keepMetadataForNext={keepMetadataForNext} saveDisabled={saveStatus==='saving'||Boolean(isMutating)} onKeepMetadataForNextChange={onKeepMetadataForNextChange} onSaveAndNext={onSaveAndNext} onRetry={onRetrySave} onReviewConflict={onReviewConflict}/>
       </div>
 
       <AuthoringConfirmDialog
+        open={pendingStarter !== null}
+        title="Replace supporting material?"
+        description="This replaces the current passage, notes, table, or visual with the starter layout. Your existing material cannot be recovered from the editor."
+        confirmLabel="Replace material"
+        destructive
+        onCancel={() => setPendingStarter(null)}
+        onConfirm={() => {
+          const starter = pendingStarter;
+          setPendingStarter(null);
+          if (starter) onChange({ ...question, stimulus: createSatSupportingMaterial(starter) });
+        }}
+      />
+      <AuthoringConfirmDialog
         open={pendingQuestionType !== null}
         title="Change response type?"
-        description="Changing the response type replaces the current answer key and response choices. This cannot be undone from the editor."
+        description="Only the answer key is replaced — prompt, supporting material, rationale, classification, and accessibility are kept. The current key cannot be recovered from the editor."
         confirmLabel="Change response type"
         destructive
         onCancel={() => setPendingQuestionType(null)}
@@ -318,38 +203,3 @@ export function SpineQuestionView({
   );
 }
 
-function SpineSupportingStarters({
-  sectionKey,
-  onSelect,
-}: {
-  sectionKey: string;
-  onSelect: (starter: SatSupportingMaterialStarter) => void;
-}) {
-  const starters: Array<{ key: SatSupportingMaterialStarter; label: string }> =
-    sectionKey === "reading-writing"
-      ? [
-          { key: "paired_texts", label: "Paired texts" },
-          { key: "student_notes", label: "Student notes" },
-          { key: "data_table", label: "Data table" },
-        ]
-      : [{ key: "data_table", label: "Data table" }];
-
-  return (
-    <div className="mb-2">
-    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Supporting material starters">
-      <span className="mr-1 text-xs font-medium text-muted-foreground">Quick start</span>
-      {starters.map((starter) => (
-        <button
-          key={starter.key}
-          type="button"
-          onClick={() => onSelect(starter.key)}
-          className="rounded-md bg-muted px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.95]"
-        >
-          {starter.label}
-        </button>
-      ))}
-    </div>
-    <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">Students see this above the question.</p>
-    </div>
-  );
-}

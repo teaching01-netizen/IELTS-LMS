@@ -20,6 +20,15 @@ import type { Transition } from 'motion/react';
 export const AUTHORING_EASE = [0.22, 1, 0.36, 1] as const;
 export const AUTHORING_EASE_STANDARD = [0.4, 0, 0.2, 1] as const;
 
+/** Scoped redesign timings; shared delivery motion remains unchanged. */
+export const spineMotion = {
+  hover:{duration:0.12,ease:AUTHORING_EASE_STANDARD},
+  focus:{duration:0.15,ease:AUTHORING_EASE_STANDARD},
+  menu:{duration:0.17,ease:AUTHORING_EASE_STANDARD},
+  panel:{duration:0.22,ease:AUTHORING_EASE_STANDARD},
+  question:{duration:0.12,ease:AUTHORING_EASE_STANDARD},
+} as const;
+
 export const authoringMotion = {
   /** Press feedback: subtle scale, never locks interaction. */
   press: { scale: 0.97 },

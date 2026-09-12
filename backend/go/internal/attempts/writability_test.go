@@ -59,6 +59,49 @@ func TestEnsureWritableMatrix(t *testing.T) {
 	}
 }
 
+func TestEnsureQuestionAdmittedMatrix(t *testing.T) {
+	gate := liveGate(time.Now().UTC())
+	cases := []struct {
+		name    string
+		owner   QuestionOwner
+		code    apperrors.Code
+		message string
+	}{
+		{"active", QuestionOwner{ModuleState: "active", SectionKey: "rw"}, "", ""},
+		{"review", QuestionOwner{ModuleState: "review", SectionKey: "rw"}, "", ""},
+		{"unassigned", QuestionOwner{ModuleState: "unassigned", SectionKey: "rw"}, apperrors.CodeAttemptNotWritable, "Question is not in an assigned module for this attempt."},
+		{"submitted", QuestionOwner{ModuleState: "submitted", SectionKey: "rw"}, apperrors.CodeAttemptNotWritable, "Question module is not active."},
+		{"locked", QuestionOwner{ModuleState: "locked", SectionKey: "rw"}, apperrors.CodeAttemptNotWritable, "Question module is not active."},
+		{"not_started", QuestionOwner{ModuleState: "not_started", SectionKey: "rw"}, apperrors.CodeAttemptNotWritable, "Question module is not active."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ensureQuestionAdmitted(tc.owner, gate, "q-1")
+			if tc.code == "" {
+				if err != nil {
+					t.Fatalf("expected admitted, got %v", err)
+				}
+				return
+			}
+			appErr, ok := apperrors.As(err)
+			if !ok || appErr.Code != tc.code || appErr.Message != tc.message {
+				t.Fatalf("expected %s %q, got %v", tc.code, tc.message, err)
+			}
+			if appErr.HTTPStatus != 422 {
+				t.Fatalf("expected 422, got %d", appErr.HTTPStatus)
+			}
+		})
+	}
+	// Section mismatch stays a distinct BAD_REQUEST.
+	sectionGate := gate
+	sectionGate.ActiveSectionKey = "math"
+	err := ensureQuestionAdmitted(QuestionOwner{ModuleState: "active", SectionKey: "reading-writing"}, sectionGate, "q-1")
+	appErr, ok := apperrors.As(err)
+	if !ok || appErr.Code != apperrors.CodeBadRequest || appErr.HTTPStatus != 400 {
+		t.Fatalf("expected section BAD_REQUEST, got %v", err)
+	}
+}
+
 func TestFencingErrorCodes(t *testing.T) {
 	if e := leaseFenced(); e.Code != apperrors.CodeLeaseFenced || e.HTTPStatus != 403 {
 		t.Fatalf("leaseFenced wrong: %+v", e)

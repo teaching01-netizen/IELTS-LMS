@@ -17,6 +17,10 @@ storybook-static
 e2e/.generated/
 e2e/prod-data/prod-creds.json
 
+# k6 load-test credentials (local only; commit only *.creds.example.json templates)
+k6/*creds.json
+!k6/*.creds.example.json
+
 # Cloudflare / Wrangler
 .cloudflare/
 .wrangler/
@@ -56,3 +60,9 @@ Thumbs.db
 vendor-private/desmos/
 public/vendor/desmos/*
 !public/vendor/desmos/.gitkeep
+
+# Compiled Go binaries dropped by a bare `go build ./cmd/<name>`
+# (backend/go is the CWD). Never commit these; CI builds to $GOBIN.
+/backend/go/api
+/backend/go/worker
+/backend/go/migrate

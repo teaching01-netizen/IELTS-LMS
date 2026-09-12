@@ -1,0 +1,54 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > renders the spine branch with header progress and queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > renders the spine branch with header progress and queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps paste import reachable from the spine queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens the jump palette with Ctrl+K in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > keeps paste import reachable from the spine queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > opens the jump palette with Ctrl+K in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens shortcut help with ? in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > opens shortcut help with ? in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > reviews module issues from the spine queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > reviews module issues from the spine queue
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps import, preview, and release actions reachable in the spine header
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens the student preview sheet from the spine question view
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > keeps import, preview, and release actions reachable in the spine header
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx (7 tests) 1256ms
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > opens the student preview sheet from the spine question view
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx (7 tests) 1377ms
+   ✓ SpineOverlays (Phase 9.1+9.4 parity) > keeps paste import reachable from the spine queue 380ms
+
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+   Start at  17:13:35
+   Duration  5.31s (transform 849ms, setup 688ms, collect 3.36s, tests 2.63s, environment 1.29s, prepare 320ms)
+

@@ -35,6 +35,9 @@ const (
 	CtxRouteTemplate ctxKey = "route"
 	// CtxActorClass carries a coarse actor label (auth middleware sets it).
 	CtxActorClass ctxKey = "actor_class"
+	// CtxRouteHolder carries the back-report channel an outer AccessLog
+	// installs so an inner WithRoute can publish its template outward.
+	CtxRouteHolder ctxKey = "route_holder"
 )
 
 // RequestID ensures every request has an id, echoes it, and stores it in ctx.
@@ -184,22 +187,35 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 // secrets, bearer tokens, answers or writing bodies — only metadata.
 // It also feeds the Prometheus HTTP series (plan 69): requests_total +
 // duration + in-flight, labelled by low-cardinality route template +
-// method + status class (never raw IDs; routeOf falls back to the raw
-// path only for unannotated probes like /healthz).
+// method + status class (never raw IDs; routeOf emits the fixed
+// "unknown" label when no WithRoute template is set, so unannotated
+// paths can never become unbounded series).
 // httpInFlight tracks live requests process-wide. The telemetry Registry
 // only exposes SetGauge (no Inc/Dec), so SetGauge(1)/SetGauge(0) per
 // request clobbers under concurrency; the atomic counter here restores
 // Inc/Dec semantics while staying within this file's ownership.
 var httpInFlight atomic.Int64
 
+// routeHolder lets an inner WithRoute report its template back out to an
+// outer AccessLog: WithRoute sets its template on a derived request that
+// never propagates back up, so without this holder the outer logger falls
+// back to the raw path (high cardinality) and template-filtered alerts
+// silently stop firing. AccessLog installs the holder; WithRoute fills it.
+type routeHolder struct{ template string }
+
 func AccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		method := r.Method
+		holder := &routeHolder{}
+		ctx := context.WithValue(r.Context(), CtxRouteHolder, holder)
 		telemetry.DefaultRegistry.SetGauge(telemetry.MHTTPInFlight, float64(httpInFlight.Add(1)), "route", "global")
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
-		route := routeOf(r)
+		next.ServeHTTP(rec, r.WithContext(ctx))
+		route := holder.template
+		if route == "" {
+			route = routeOf(r)
+		}
 		actor := "-"
 		if v, ok := r.Context().Value(CtxActorClass).(string); ok && v != "" {
 			actor = v
@@ -240,17 +256,26 @@ func statusClass(code int) string {
 	}
 }
 
+// routeOf resolves the low-cardinality route label. An unannotated path
+// (missed WithRoute, static/probe fallback) emits the fixed "unknown"
+// label — never the raw URL, whose attacker-shaped 404 segments would
+// become unbounded metric series.
 func routeOf(r *http.Request) string {
 	if v, ok := r.Context().Value(CtxRouteTemplate).(string); ok && v != "" {
 		return v
 	}
-	return r.URL.Path
+	return "unknown"
 }
 
 // WithRoute annotates ctx with the matched route template (call from router
-// wrappers) so access logs stay low-cardinality.
+// wrappers) so access logs stay low-cardinality. It also back-reports
+// through the holder an outer AccessLog installed, so template visibility
+// survives middleware nesting in either order.
 func WithRoute(next http.Handler, template string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if holder, ok := r.Context().Value(CtxRouteHolder).(*routeHolder); ok && holder != nil {
+			holder.template = template
+		}
 		ctx := context.WithValue(r.Context(), CtxRouteTemplate, template)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

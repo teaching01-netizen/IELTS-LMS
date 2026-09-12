@@ -10,8 +10,8 @@ import (
 	"context"
 	"testing"
 
-	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestFindByAttemptIDToleratesNullOrg(t *testing.T) {

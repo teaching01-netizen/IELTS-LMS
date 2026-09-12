@@ -1,9 +1,10 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"example.com/ielts-proctoring/internal/grading"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
 
 // Grading policy: reads, SaveDraft, OverrideObjectiveQuestion and
@@ -23,94 +25,47 @@ import (
 // Admin|Grader|Proctor; fetching one result additionally allows Student.
 
 // latestSubmissionForSchedule resolves the newest student_submissions row
-// for a schedule. sql.ErrNoRows surfaces when the schedule has none.
+// for a schedule (WS-05: thin shim over grading.Service; the SQL lives in
+// internal/grading/result_read.go). sql.ErrNoRows surfaces when the schedule
+// has none.
 func latestSubmissionForSchedule(r *http.Request, app *App, scheduleID string) (string, error) {
-	var id string
-	err := app.DB.QueryRowContext(r.Context(),
-		`SELECT id FROM student_submissions WHERE schedule_id = ? ORDER BY created_at DESC LIMIT 1`,
-		scheduleID).Scan(&id)
-	return id, err
+	if app.Grading == nil {
+		return "", apperrors.New(apperrors.CodeServiceUnavailable, "Grading service not configured.")
+	}
+	return app.Grading.LatestSubmissionForSchedule(r.Context(), scheduleID)
 }
 
-func latestGradingResult(ctx context.Context, db *sql.DB, submissionID string) (map[string]any, error) {
-	var (
-		id, submission, studentID, studentName, releaseStatus        string
-		releasedAt, releasedBy, scheduledAt                          sql.NullString
-		overallBand                                                  float64
-		sectionBands, listening, reading, writing, speaking, summary sql.NullString
-		version                                                      int
-		previousID, revisionReason, authorizedActor                  sql.NullString
-		createdAt, updatedAt                                         time.Time
-	)
-	err := db.QueryRowContext(ctx, `
-		SELECT id, submission_id, student_id, student_name, release_status,
-		       released_at, released_by, scheduled_release_date, overall_band,
-		       section_bands, listening_result, reading_result, writing_results,
-		       speaking_result, teacher_summary, version, previous_version_id,
-		       revision_reason, authorized_actor_id, created_at, updated_at
-		FROM student_results
-		WHERE submission_id = ?
-		ORDER BY version DESC, updated_at DESC
-		LIMIT 1`, submissionID).Scan(
-		&id, &submission, &studentID, &studentName, &releaseStatus,
-		&releasedAt, &releasedBy, &scheduledAt, &overallBand,
-		&sectionBands, &listening, &reading, &writing, &speaking, &summary,
-		&version, &previousID, &revisionReason, &authorizedActor, &createdAt, &updatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, apperrors.New(apperrors.CodeNotFound, "Result not found.")
+// latestGradingResult loads the newest student_results row for a submission
+// (WS-05: thin shim over grading.Service.LatestGradingResult; the 22-column
+// scan lives in internal/grading/result_read.go). Corrupt JSON columns
+// surface as *grading.ResultProjectionCorruptError — callers map it via
+// writeGradingResultError to the 502 corrupt-projection envelope.
+func latestGradingResult(r *http.Request, app *App, submissionID string) (map[string]any, error) {
+	if app.Grading == nil {
+		return nil, apperrors.New(apperrors.CodeServiceUnavailable, "Grading service not configured.")
 	}
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]any{
-		"id": id, "submissionId": submission, "studentId": studentID, "studentName": studentName,
-		"releaseStatus": releaseStatus, "overallBand": overallBand,
-		"sectionBands":    decodeGradingJSON(sectionBands, map[string]any{}),
-		"listeningResult": decodeNullableGradingJSON(listening),
-		"readingResult":   decodeNullableGradingJSON(reading),
-		"writingResults":  decodeGradingJSON(writing, map[string]any{}),
-		"speakingResult":  decodeNullableGradingJSON(speaking),
-		"teacherSummary":  decodeGradingJSON(summary, map[string]any{}),
-		"version":         version, "createdAt": createdAt.UTC(), "updatedAt": updatedAt.UTC(),
-	}
-	if releasedAt.Valid {
-		out["releasedAt"] = releasedAt.String
-	}
-	if releasedBy.Valid {
-		out["releasedBy"] = releasedBy.String
-	}
-	if scheduledAt.Valid {
-		out["scheduledReleaseDate"] = scheduledAt.String
-	}
-	if previousID.Valid {
-		out["previousVersionId"] = previousID.String
-	}
-	if revisionReason.Valid {
-		out["revisionReason"] = revisionReason.String
-	}
-	if authorizedActor.Valid {
-		out["authorizedActorId"] = authorizedActor.String
-	}
-	return out, nil
+	return app.Grading.LatestGradingResult(r.Context(), submissionID)
 }
 
-func decodeGradingJSON(raw sql.NullString, fallback any) any {
-	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
-		return fallback
+// writeGradingResultError maps result-read failures: corrupt projections
+// render the 502 corrupt-projection envelope plus a structured server-side
+// log (column + submission + request IDs; raw payloads never logged), every
+// other error keeps the stable envelope via httpx.WriteError.
+func writeGradingResultError(w http.ResponseWriter, r *http.Request, submissionID string, err error) {
+	var corrupt *grading.ResultProjectionCorruptError
+	if errors.As(err, &corrupt) {
+		telemetry.IncCounter(telemetry.MGradingProjectionCorrupt, "column", corrupt.Column)
+		log.Printf(`{"level":"error","msg":"grading projection corrupt","column":%q,"submissionId":%q,"requestId":%q}`,
+			corrupt.Column, submissionID, httpx.RequestIDOf(w, r))
+		httpx.WriteError(w, r, &apperrors.Error{
+			Code:       apperrors.Code("CORRUPT_PROJECTION"),
+			Message:    "Grading result projection is corrupt.",
+			Details:    map[string]any{"column": corrupt.Column, "submissionId": submissionID},
+			HTTPStatus: http.StatusBadGateway,
+		})
+		return
 	}
-	var value any
-	if err := json.Unmarshal([]byte(raw.String), &value); err != nil || value == nil {
-		return fallback
-	}
-	return value
-}
-
-func decodeNullableGradingJSON(raw sql.NullString) any {
-	if !raw.Valid || strings.TrimSpace(raw.String) == "" || strings.TrimSpace(raw.String) == "null" {
-		return nil
-	}
-	return decodeGradingJSON(raw, raw.String)
+	httpx.WriteError(w, r, err)
 }
 
 // gradingLimitParam parses ?limit= with default 100 capped at 500.
@@ -747,9 +702,9 @@ func gradingReleaseNowHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		result, err := latestGradingResult(r.Context(), app.DB, submissionID)
+		result, err := latestGradingResult(r, app, submissionID)
 		if err != nil {
-			httpx.WriteError(w, r, err)
+			writeGradingResultError(w, r, submissionID, err)
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, result)

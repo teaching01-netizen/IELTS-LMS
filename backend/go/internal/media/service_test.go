@@ -1,10 +1,14 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"hash/crc32"
+	"image"
+	"image/png"
 	"regexp"
 	"testing"
 
@@ -100,7 +104,12 @@ func TestUploadBytesPendingHappyPath(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
 		WillReturnRows(assetRow("asset-1", StatusPending, "media/asset-1/pic.png", "image/png"))
 	mock.ExpectCommit()
-	body := []byte("fake-png-bytes")
+	// Honest 1x1 PNG: magic sniff + decoded-limits gate run before the tx.
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	body := encoded.Bytes()
 	if err := s.UploadBytes(context.Background(), "asset-1", body, "image/png"); err != nil {
 		t.Fatalf("UploadBytes pending happy path must succeed: %v", err)
 	}
@@ -109,6 +118,101 @@ func TestUploadBytesPendingHappyPath(t *testing.T) {
 	}
 	if string(store.putBody) != string(body) || store.putContentType != "image/png" {
 		t.Fatalf("store.Put got wrong body/content-type: %q %q", store.putBody, store.putContentType)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// UploadBytes spoofed bytes (non-image masquerading as PNG) reject before
+// any database work: no tx begins and the store is never touched.
+func TestUploadBytesRejectsSpoofedMagicBeforeTx(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := &fakeStore{}
+	s, _ := svcWith(db, store)
+	if err := s.UploadBytes(context.Background(), "asset-1", []byte("MZ-executable-bytes"), "image/png"); codeOf(err) != apperrors.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR on spoofed magic, got %v", err)
+	}
+	if store.putKey != "" {
+		t.Fatalf("store.Put must not run on spoofed bytes, got key %q", store.putKey)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// UploadBytes rejects a header-claimed bomb (IHDR beyond the pixel/dimension
+// caps) after the magic gate: no tx begins and the store is never touched.
+func TestUploadBytesRejectsDecodedBombBeforeTx(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := &fakeStore{}
+	s, _ := svcWith(db, store)
+	// Honest 1x1 PNG with its IHDR width/height patched to 20000x20000 (CRC
+	// recomputed): magic passes, headers parse, the decoded-limits gate
+	// rejects before any database work.
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	body := encoded.Bytes()
+	if len(body) < 33 {
+		t.Fatalf("encoded PNG too short: %d bytes", len(body))
+	}
+	patched := append([]byte(nil), body...)
+	for _, off := range []int{16, 20} {
+		patched[off], patched[off+1], patched[off+2], patched[off+3] = 0x00, 0x00, 0x4E, 0x20
+	}
+	crc := crc32.ChecksumIEEE(patched[12:29])
+	patched[29], patched[30], patched[31], patched[32] = byte(crc>>24), byte(crc>>16), byte(crc>>8), byte(crc)
+	if err := s.UploadBytes(context.Background(), "asset-1", patched, "image/png"); codeOf(err) != apperrors.CodePayloadTooLarge {
+		t.Fatalf("expected PAYLOAD_TOO_LARGE on decoded bomb, got %v", err)
+	}
+	if store.putKey != "" {
+		t.Fatalf("store.Put must not run on decoded bomb, got key %q", store.putKey)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// UploadBytes rejects non-allowlisted types (SVG is active content) before
+// any database work.
+func TestUploadBytesRejectsSvgActiveContent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := &fakeStore{}
+	s, _ := svcWith(db, store)
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg"></svg>`)
+	if err := s.UploadBytes(context.Background(), "asset-1", svg, "image/svg+xml"); codeOf(err) != apperrors.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR on SVG, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// CreateUpload rejects non-allowlisted content types at intent time.
+func TestCreateUploadRejectsNonImageContentType(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := &fakeStore{}
+	s, _ := svcWith(db, store)
+	if _, err := s.CreateUpload(context.Background(), CreateRequest{OwnerKind: "assessment_question", OwnerID: "q-1", ContentType: "application/octet-stream", FileName: "evil.bin"}); codeOf(err) != apperrors.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR on octet-stream, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -129,7 +233,11 @@ func TestUploadBytesNonPendingValidationError(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
 		WillReturnRows(assetRow("asset-1", StatusFinalized, "media/asset-1/pic.png", "image/png"))
 	mock.ExpectRollback()
-	if err := s.UploadBytes(context.Background(), "asset-1", []byte("bytes"), "image/png"); codeOf(err) != apperrors.CodeValidation {
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UploadBytes(context.Background(), "asset-1", encoded.Bytes(), "image/png"); codeOf(err) != apperrors.CodeValidation {
 		t.Fatalf("expected VALIDATION_ERROR on non-pending upload, got %v", err)
 	}
 	if store.putKey != "" {

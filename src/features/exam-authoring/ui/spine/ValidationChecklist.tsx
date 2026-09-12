@@ -19,17 +19,23 @@ export function ValidationChecklist({ issues, onIssueSelect }: ValidationCheckli
   const ordered = [...blocking, ...warnings];
 
   return (
-    <section aria-label="Validation" className="rounded-lg border border-border bg-card p-4">
-      <h3 className="text-sm font-semibold text-foreground">Validation</h3>
+    <section aria-label="Validation" className="spine-card p-4">
+      <h3 className="text-sm font-semibold text-foreground">What&apos;s needed to release this question</h3>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        Resolve blocking issues before releasing this question.
+        {isReady
+          ? "Nothing blocking. Review warnings, then release."
+          : "Work through each blocking item — selecting it jumps to the field."}
       </p>
       <div
         role="status"
         className={`mt-3 flex items-start gap-2 rounded-md px-3 py-2.5 text-xs font-semibold ${isReady ? "bg-green-800/10 text-green-800" : "bg-destructive/10 text-destructive"}`}
       >
         {isReady ? <CheckCircle2 size={14} aria-hidden="true" /> : <AlertCircle size={14} aria-hidden="true" />}
-        <span>{isReady ? "Ready" : "Needs attention"}</span>
+        <span>
+          {isReady
+            ? "Ready to release"
+            : `${blocking.length} blocking issue${blocking.length === 1 ? "" : "s"} to fix`}
+        </span>
       </div>
       {ordered.length ? (
         <div className="mt-2 space-y-2" aria-label="Question validation issues">

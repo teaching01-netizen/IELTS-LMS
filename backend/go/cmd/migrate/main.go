@@ -202,6 +202,17 @@ func applyMigrations(ctx context.Context, conn *sql.Conn, dir string) error {
 	if err != nil {
 		return fmt.Errorf("detect database engine: %w", err)
 	}
+	// WS-07: TiDB cannot run the 0056 receipt-immutability triggers, so it
+	// must never serve production traffic (fail closed). MySQL 8.4 is the
+	// supported production engine.
+	if err := refuseTiDBProduction(tidb); err != nil {
+		return err
+	}
+	if version, err := databaseVersion(ctx, conn); err != nil {
+		return fmt.Errorf("detect database version: %w", err)
+	} else if err := requireSupportedEngine(version); err != nil {
+		return err
+	}
 	checksumGate := hasVersionsTable(ctx, conn)
 	if !checksumGate {
 		log.Printf("migrate: schema_migration_versions absent, using legacy schema_migrations history")
@@ -261,15 +272,77 @@ func applyMigrations(ctx context.Context, conn *sql.Conn, dir string) error {
 	return nil
 }
 
+// refuseTiDBProduction fails closed when the migrator runs against TiDB in
+// production: WS-07 receipt immutability is enforced by MySQL triggers
+// (0056_receipt_immutability.sql), which TiDB cannot run, so the
+// application transaction paths alone cannot guarantee the invariant there.
+// MySQL 8.4 is the supported production engine. Non-production TiDB stays
+// allowed (dev/test), where the skipped-trigger posture is documented.
+func refuseTiDBProduction(isTiDB bool) error {
+	if !isTiDB {
+		return nil
+	}
+	env := strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV")))
+	if env == "" {
+		env = strings.ToLower(strings.TrimSpace(os.Getenv("ENVIRONMENT")))
+	}
+	if env == "production" || env == "prod" {
+		return fmt.Errorf("refusing TiDB in production: receipt immutability requires MySQL 8.4 triggers (0056); migrate to MySQL 8.4 or leave APP_ENV/ENVIRONMENT out of production")
+	}
+	return nil
+}
+
 // databaseIsTiDB distinguishes TiDB from MySQL before applying DDL. TiDB
 // does not support triggers, so trigger DDL is skipped while the application
 // transaction paths remain the single owner of the terminalization invariant.
 func databaseIsTiDB(ctx context.Context, conn *sql.Conn) (bool, error) {
-	var version string
-	if err := conn.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version); err != nil {
+	version, err := databaseVersion(ctx, conn)
+	if err != nil {
 		return false, err
 	}
 	return strings.Contains(strings.ToLower(version), "tidb"), nil
+}
+
+func databaseVersion(ctx context.Context, conn *sql.Conn) (string, error) {
+	var version string
+	if err := conn.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version); err != nil {
+		return "", err
+	}
+	return version, nil
+}
+
+// requireSupportedEngine fails closed on engines the migration tree cannot
+// serve: MariaDB is unsupported (CHECK-constraint and trigger semantics
+// diverge), and MySQL below 8.0.16 cannot enforce the CHECKs the tree
+// relies on. TiDB stays allowed outside production (see
+// refuseTiDBProduction); production TiDB is refused there, not here.
+func requireSupportedEngine(version string) error {
+	lower := strings.ToLower(version)
+	if strings.Contains(lower, "mariadb") {
+		return fmt.Errorf("unsupported database engine %q: use MySQL 8.4 (MariaDB is unsupported)", version)
+	}
+	if strings.Contains(lower, "tidb") {
+		return nil
+	}
+	major, minor, patch := parseMySQLVersion(lower)
+	if major == 0 && minor == 0 && patch == 0 {
+		return fmt.Errorf("unrecognized MySQL version %q: refusing to migrate an unknown engine", version)
+	}
+	// Floor is 8.0.16 (CHECK enforcement); production target is 8.4.
+	supported := major > 8 || (major == 8 && (minor > 0 || patch >= 16))
+	if !supported {
+		return fmt.Errorf("unsupported MySQL version %q: need >= 8.0.16 (production: 8.4)", version)
+	}
+	return nil
+}
+
+func parseMySQLVersion(lower string) (major, minor, patch int) {
+	start := strings.IndexFunc(lower, func(r rune) bool { return r >= '0' && r <= '9' })
+	if start < 0 {
+		return 0, 0, 0
+	}
+	_, _ = fmt.Sscanf(lower[start:], "%d.%d.%d", &major, &minor, &patch)
+	return major, minor, patch
 }
 
 // isTriggerStatement recognizes trigger DDL even when a migration statement

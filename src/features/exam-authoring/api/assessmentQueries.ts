@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { hasBackendStatusCode, isBackendNotFound } from "../../../services/backendBridge";
 import { assessmentAuthoringApi } from "./assessmentAuthoringApi";
 import { assessmentReleaseApi } from "./assessmentReleaseApi";
 import type {
@@ -21,11 +22,64 @@ export const assessmentKeys = {
   question: (examQuestionId: string) => ["assessment-question", examQuestionId] as const,
 };
 
+export const AUTHORING_SHELL_STALE_TIME_MS = 30_000;
+
 export function useAuthoringShell(examId: string) {
   return useQuery({
     queryKey: assessmentKeys.shell(examId),
-    queryFn: () => assessmentAuthoringApi.openShell(examId),
-    staleTime: 30_000,
+    // Phase 04: refresh/remount/focus reads use GET /shell (5 stmts, no write Tx).
+    // POST /shell is reserved for the explicit draft-open in useEnsureDraftShell.
+    queryFn: () => assessmentAuthoringApi.getShell(examId),
+    staleTime: AUTHORING_SHELL_STALE_TIME_MS,
+  });
+}
+
+export type EnsureDraftShellErrorKind = "exam-missing" | "forbidden" | "conflict" | "unknown";
+
+export interface EnsureDraftShellErrorInfo {
+  kind: EnsureDraftShellErrorKind;
+  message: string;
+}
+
+export function toEnsureDraftShellErrorInfo(error: unknown): EnsureDraftShellErrorInfo {
+  const message =
+    error instanceof Error ? error.message : "The editable draft could not be opened.";
+  if (isBackendNotFound(error)) {
+    return { kind: "exam-missing", message };
+  }
+  if (hasBackendStatusCode(error, 403)) {
+    return { kind: "forbidden", message };
+  }
+  if (hasBackendStatusCode(error, 409)) {
+    return { kind: "conflict", message };
+  }
+  return { kind: "unknown", message };
+}
+
+/**
+ * Phase 04 explicit draft-open: the ONLY sanctioned POST /shell caller besides
+ * load-sample-style writes. Callers render an explicit CTA and invoke this
+ * mutation from a user gesture (or a single mount-time ensure when the shell
+ * query reports 404-no-draft AND the user holds an editing role).
+ *
+ * - retry:false: never blindly retry a write.
+ * - onSuccess installs the shell via setQueryData so the workspace renders
+ *   without waiting for a refetch, then marks readiness + release stale.
+ * - onError only classifies; the caller owns display and must NEVER auto-loop.
+ */
+export function useEnsureDraftShell(examId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => assessmentAuthoringApi.openShell(examId),
+    retry: false,
+    onSuccess: (shell) => {
+      queryClient.setQueryData<AssessmentAuthoringShell>(
+        assessmentKeys.shell(examId),
+        shell
+      );
+      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
+      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
+    },
   });
 }
 
@@ -35,7 +89,9 @@ export function useAssessmentReleaseState(examId: string) {
     queryFn: () => assessmentReleaseApi.get(examId),
     enabled: Boolean(examId),
     staleTime: 5_000,
-    refetchOnWindowFocus: true,
+    // The release page drives refreshes explicitly (publish/save/run-checks).
+    // Window-focus refetch caused publish-race refetch storms on this page.
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -137,8 +193,12 @@ export function useAssessmentReleaseReadiness(
         : [...assessmentKeys.readinessRoot(examId), "missing"],
     queryFn: () => assessmentAuthoringApi.validateExam(examId),
     enabled: enabled && Boolean(versionId) && versionRevision !== undefined,
-    staleTime: 0,
-    refetchOnWindowFocus: true,
+    // validateExam is expensive: manual "Run checks" is the source of truth.
+    // A short stale window plus no focus refetch avoids hammering it while
+    // still keeping the current draft's report reasonably fresh.
+    staleTime: 15_000,
+    retry: 1,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -216,7 +276,12 @@ export function useUpdateSectionDeliverySettings(examId: string) {
     }) => assessmentAuthoringApi.updateSectionDeliverySettings(examId, sectionId, request),
     onSuccess: (shell) => {
       queryClient.setQueryData(assessmentKeys.shell(examId), shell);
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
+      // Mark readiness stale without an active refetch storm: the page's
+      // explicit "Run checks" is the source of truth for validateExam.
+      void queryClient.invalidateQueries({
+        queryKey: assessmentKeys.readinessRoot(examId),
+        refetchType: "none",
+      });
       void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
     },
   });

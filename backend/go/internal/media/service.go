@@ -8,10 +8,15 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"strings"
 
 	"github.com/google/uuid"
@@ -23,6 +28,14 @@ import (
 
 // MaxUploadBytes caps a single media object at 16MB.
 const MaxUploadBytes = 16 << 20
+
+// Decoded-image limits bound decompression cost: magic bytes prove the file
+// TYPE, not its pixel cost. DecodeConfig reads headers only (no full
+// decode). WebP has no stdlib decoder, so it keeps the byte cap alone.
+const (
+	maxDecodedPixels  = 25_000_000
+	maxImageDimension = 8192
+)
 
 // Upload states (mirrors the media_assets CHECK + maintenance.RunMedia).
 const (
@@ -125,8 +138,8 @@ func (s *Service) CreateUpload(ctx context.Context, req CreateRequest) (UploadIn
 	if strings.TrimSpace(req.OwnerKind) == "" || strings.TrimSpace(req.OwnerID) == "" {
 		return UploadIntent{}, validationError("Upload owner is required.")
 	}
-	if strings.TrimSpace(req.ContentType) == "" {
-		return UploadIntent{}, validationError("Content type is required.")
+	if err := validateImageContentType(req.ContentType); err != nil {
+		return UploadIntent{}, err
 	}
 	if req.SizeBytes != nil && *req.SizeBytes > MaxUploadBytes {
 		return UploadIntent{}, apperrors.New(apperrors.CodePayloadTooLarge, fmt.Sprintf("Upload exceeds the %d byte limit.", MaxUploadBytes))
@@ -275,6 +288,18 @@ func (s *Service) UploadBytes(ctx context.Context, assetID string, body []byte, 
 	if len(body) > MaxUploadBytes {
 		return apperrors.New(apperrors.CodePayloadTooLarge, fmt.Sprintf("Upload exceeds the %d byte limit.", MaxUploadBytes))
 	}
+	// Magic-byte sniff runs before any persistence: the declared MIME must
+	// match the actual bytes, so a renamed .exe/.svg/.html can never pass as
+	// an image. Active image formats (SVG) and non-image content are rejected.
+	if err := validateImageContentType(contentType); err != nil {
+		return err
+	}
+	if err := validateImageMagic(body, contentType); err != nil {
+		return err
+	}
+	if err := validateDecodedImageLimits(body, contentType); err != nil {
+		return err
+	}
 	// SELECT ... FOR UPDATE on media_assets serializes upload vs janitor and
 	// captures the object key; the tx only guards the row, not the bytes.
 	var objectKey string
@@ -343,6 +368,69 @@ func (s *Service) checkOwner(ctx context.Context, ownerKind, ownerID string) err
 			return notFoundError("Upload owner not found.")
 		}
 		return err
+	}
+	return nil
+}
+
+// allowedImageTypes is the raster allowlist for question images. SVG is
+// deliberately excluded: it is active XML content, not a passive raster, and
+// has no audited sanitization path in this release.
+var allowedImageTypes = map[string]bool{
+	"image/png":  true,
+	"image/jpeg": true,
+	"image/gif":  true,
+	"image/webp": true,
+}
+
+func validateImageContentType(contentType string) error {
+	if !allowedImageTypes[strings.ToLower(strings.TrimSpace(contentType))] {
+		return validationError("Only PNG, JPEG, GIF, or WebP images can be uploaded.")
+	}
+	return nil
+}
+
+// validateImageMagic matches the declared image MIME against the actual file
+// signature so extension/MIME spoofing cannot smuggle executables, HTML, or
+// SVG through the upload path.
+func validateImageMagic(body []byte, contentType string) error {
+	switch strings.ToLower(strings.TrimSpace(contentType)) {
+	case "image/png":
+		if len(body) >= 8 && body[0] == 0x89 && body[1] == 'P' && body[2] == 'N' && body[3] == 'G' && body[4] == 0x0D && body[5] == 0x0A && body[6] == 0x1A && body[7] == 0x0A {
+			return nil
+		}
+	case "image/jpeg":
+		if len(body) >= 3 && body[0] == 0xFF && body[1] == 0xD8 && body[2] == 0xFF {
+			return nil
+		}
+	case "image/gif":
+		if len(body) >= 6 && body[0] == 'G' && body[1] == 'I' && body[2] == 'F' && body[3] == '8' && (body[4] == '7' || body[4] == '9') && body[5] == 'a' {
+			return nil
+		}
+	case "image/webp":
+		if len(body) >= 12 && body[0] == 'R' && body[1] == 'I' && body[2] == 'F' && body[3] == 'F' && body[8] == 'W' && body[9] == 'E' && body[10] == 'B' && body[11] == 'P' {
+			return nil
+		}
+	}
+	return validationError("The uploaded bytes do not match the declared image type.")
+}
+
+// validateDecodedImageLimits rejects decompression bombs whose headers
+// claim more than maxDecodedPixels or an 8192px side. Header-only decode:
+// no pixel buffer is allocated. Unknown/truncated headers fail closed.
+func validateDecodedImageLimits(body []byte, contentType string) error {
+	normalized := strings.ToLower(strings.TrimSpace(contentType))
+	if normalized == "image/webp" {
+		return nil
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(body))
+	if err != nil {
+		return validationError("The image headers could not be read.")
+	}
+	if config.Width <= 0 || config.Height <= 0 || config.Width > maxImageDimension || config.Height > maxImageDimension {
+		return apperrors.New(apperrors.CodePayloadTooLarge, "The image dimensions exceed the supported limit.")
+	}
+	if int64(config.Width)*int64(config.Height) > maxDecodedPixels {
+		return apperrors.New(apperrors.CodePayloadTooLarge, "The image pixel count exceeds the supported limit.")
 	}
 	return nil
 }

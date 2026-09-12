@@ -46,10 +46,10 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
   };
 
   return (
-    <fieldset className="rounded-lg border border-border bg-card p-4">
+    <fieldset className="min-w-0">
       <legend className="px-1 text-sm font-semibold text-foreground">Classification</legend>
       <p className="mb-4 text-xs leading-5 text-muted-foreground">
-        Required for validation readiness. Classify while you write — never after.
+        Organize this question for review and reuse.
       </p>
       <div className="space-y-4">
         <div data-authoring-field="domain" className="flex flex-col gap-1.5">
@@ -60,7 +60,7 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
             onChange={(event) => updateDomain(event.target.value || null)}
             aria-invalid={Boolean(domainError)}
             aria-describedby={domainError ? domainErrorId : undefined}
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25"
+            className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25"
           >
             <option value="">Choose domain…</option>
             {domains.map((domain) => (
@@ -90,7 +90,7 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
             disabled={skills.length === 0}
             aria-invalid={Boolean(skillError)}
             aria-describedby={skillError ? skillErrorId : undefined}
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <option value="">{skills.length > 0 ? "Choose skill…" : "Choose a domain first"}</option>
             {skills.map((skill) => (
@@ -106,7 +106,7 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
           ) : null}
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div data-authoring-field="difficulty" className="flex flex-col gap-1.5">
           <span id={`${baseId}-difficulty-label`} className="text-sm font-medium leading-none">
             Difficulty
           </span>
@@ -130,7 +130,7 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
                     const next = order[(current + (event.key === "ArrowRight" ? 1 : order.length - 1)) % order.length];
                     if (next) onChange({ ...question, metadata: { ...question.metadata, difficulty: next } });
                   }}
-                  className={`h-9 flex-1 rounded px-2 text-xs font-semibold capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${checked ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  className={`min-h-11 flex-1 rounded px-2 text-xs font-semibold capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${checked ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                 >
                   {difficulty}
                 </button>
@@ -139,7 +139,7 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
           </div>
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        <div data-authoring-field="tags" className="flex flex-col gap-1.5">
           <Label htmlFor={tagsId}>Tags</Label>
           <input
             id={tagsId}
@@ -158,7 +158,7 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
               })
             }
             placeholder="e.g. linear, no-calculator"
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/25"
+            className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/25"
           />
           <p className="text-xs leading-4 text-muted-foreground">
             Use commas to add searchable internal tags.

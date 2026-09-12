@@ -59,6 +59,7 @@ export function SatReadingSplitHandle({
     onChange(clampSatReadingSplitRatio(ratio + delta));
   };
 
+  // Bluebook hard divider: 2px track painted with the split-divider token.
   const passagePercent = Math.round(ratio * 100);
   return (
     <button
@@ -81,7 +82,7 @@ export function SatReadingSplitHandle({
     >
       <span
         aria-hidden="true"
-        className="pointer-events-none mx-auto w-px bg-[var(--sat-divider)] transition-colors group-hover:bg-[var(--sat-accent)] group-active:w-0.5 group-active:bg-[var(--sat-accent)] group-focus-visible:w-0.5 group-focus-visible:bg-[var(--sat-focus)]"
+        className="pointer-events-none mx-auto w-0.5 bg-[var(--sat-split-divider)] transition-colors group-hover:bg-[var(--sat-accent)] group-active:bg-[var(--sat-accent)] group-focus-visible:bg-[var(--sat-focus)]"
       />
     </button>
   );

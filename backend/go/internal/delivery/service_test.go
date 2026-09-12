@@ -51,6 +51,52 @@ func TestDeliveryBootstrapScheduleMismatchForbidden(t *testing.T) {
 	}
 }
 
+// P0: bootstrap responses prefer V2 rows per question, legacy fills gaps.
+func TestLoadResponsesV2WinsPerQuestion(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := deliverySvc(db)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_question_responses ar JOIN")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "module_attempt_id", "exam_question_id", "response", "marked_for_review", "eliminated_options", "annotations", "revision"}).
+			AddRow("legacy-1", "ma-1", "eq-shared", `"A"`, false, `[]`, `{}`, 1).
+			AddRow("legacy-2", "ma-1", "eq-legacy-only", `"B"`, false, `[]`, `{}`, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_responses_v2 v LEFT JOIN")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response", "server_revision", "module_attempt_id", "exam_question_id"}).
+			AddRow("eq-shared", "mod-1", `{"answer":"B","markedForReview":true,"eliminatedOptions":[],"annotations":[]}`, 7, "ma-1", "eq-shared"))
+	responses, err := svc.loadResponses(context.Background(), "att-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(responses) != 2 {
+		t.Fatalf("expected 2 merged responses, got %d", len(responses))
+	}
+	byQ := map[string]ResponseSnapshot{}
+	for _, r := range responses {
+		byQ[r.ExamQuestionID] = r
+	}
+	shared := byQ["eq-shared"]
+	if string(shared.Response) != `"B"` {
+		t.Fatalf("expected V2 answer B to win, got %s", string(shared.Response))
+	}
+	if !shared.MarkedForReview {
+		t.Fatal("expected V2 review flag to win")
+	}
+	if shared.ModuleAttemptID != "ma-1" || shared.Revision != 7 {
+		t.Fatalf("expected resolved module attempt + server revision, got %+v", shared)
+	}
+	if string(byQ["eq-legacy-only"].Response) != `"B"` {
+		t.Fatalf("expected legacy-only row preserved, got %+v", byQ["eq-legacy-only"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Missing schedule binding surfaces NOT_FOUND from the schedule_binding
 // query (no further queries run).
 func TestDeliveryBootstrapScheduleBindingNotFound(t *testing.T) {
@@ -87,6 +133,22 @@ func deliverySaveBinding(mock sqlmock.Sqlmock) {
 			AddRow("att-1", "sched-1", "exam-1"))
 }
 
+// deliveryWriterClaimTx mocks the in-tx writer-session fence: revocation
+// re-check + conditional claim UPDATE (no-op match) + SELECT FOR UPDATE
+// returning the same session. Every mutation-tx test needs it after the
+// writability probe.
+func deliveryWriterClaimTx(mock sqlmock.Sqlmock, session string) {
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id")).
+		WithArgs("tok-1").
+		WillReturnRows(sqlmock.NewRows([]string{"token_id", "revoked_at"}).AddRow("tok-1", nil))
+	mock.ExpectExec(regexp.QuoteMeta("SET active_client_session_id")).
+		WithArgs(session, "att-1", "sched-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT active_client_session_id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
+		WithArgs("att-1", "sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow(session))
+}
+
 func deliverySaveWorkableTx(mock sqlmock.Sqlmock, startedAt time.Time) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
@@ -95,6 +157,8 @@ func deliverySaveWorkableTx(mock sqlmock.Sqlmock, startedAt time.Time) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
+	// ensureAttemptCanWorkTx completes before the writer fence.
+	deliveryWriterClaimTx(mock, "sess-test")
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}).
@@ -128,7 +192,7 @@ func TestDeliverySaveResponseRevisionMismatch(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"client_write_id"}).AddRow(nil))
 	mock.ExpectRollback()
 	req := SaveResponseRequest{Revision: 1, Response: json.RawMessage(`"B"`), EliminatedOptions: []string{}, Annotations: json.RawMessage(`{}`)}
-	_, err = svc.SaveResponse(context.Background(), "sched-1", "att-1", "sched-1", "eq-1", req)
+	_, err = svc.SaveResponse(context.Background(), "sched-1", "att-1", "sched-1", "eq-1", req, "sess-test", "tok-1")
 	if deliveryCodeOf(err) != apperrors.CodeAssessmentConflict {
 		t.Fatalf("expected ASSESSMENT_CONFLICT on stale revision, got %v", err)
 	}
@@ -168,7 +232,7 @@ func TestDeliverySaveResponseExactReplay(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"client_write_id"}).AddRow(nil))
 	mock.ExpectCommit()
 	req := SaveResponseRequest{Revision: 3, Response: json.RawMessage(`"A"`), EliminatedOptions: []string{}, Annotations: json.RawMessage(`{}`)}
-	snap, err := svc.SaveResponse(context.Background(), "sched-1", "att-1", "sched-1", "eq-1", req)
+	snap, err := svc.SaveResponse(context.Background(), "sched-1", "att-1", "sched-1", "eq-1", req, "sess-test", "tok-1")
 	if err != nil {
 		t.Fatalf("expected exact replay to succeed, got %v", err)
 	}
@@ -361,8 +425,8 @@ func TestDeliveryReconcileLegacyExpiryFinalizes(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}).
 			AddRow("ma-1", "mod-1", "active", 3600, started, started, nil, 0, 0, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_question_revisions")).
-		WithArgs("ma-1", "mod-1").
-		WillReturnRows(sqlmock.NewRows([]string{"is_pretest", "answer_definition", "response"}))
+		WithArgs("ma-1", "ma-1", "mod-1").
+		WillReturnRows(sqlmock.NewRows([]string{"is_pretest", "answer_definition", "response", "response_v2"}))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = ?")).
 		WithArgs("locked", true, "time_expired", 0, 0, "ma-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))

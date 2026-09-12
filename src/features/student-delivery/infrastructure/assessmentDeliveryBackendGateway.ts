@@ -1,5 +1,9 @@
 export { backendPatch, backendPost, hasBackendStatusCode } from '@services/backendBridge';
-export { tryBuildAttemptAuthorizationHeader } from '@services/studentAttemptRepository';
+export {
+  ensureClientSessionIdForStudentKey,
+  satWriterStudentKey,
+  tryBuildAttemptAuthorizationHeader,
+} from '@services/studentAttemptRepository';
 export {
   isAttemptCredentialExpiringWithin,
   refreshAttemptCredential,

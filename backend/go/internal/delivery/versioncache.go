@@ -24,7 +24,7 @@ type versionEntry struct {
 type versionCall struct {
 	done     chan struct{}
 	sections []DeliverySection
-	revision  int64
+	revision int64
 	err      error
 }
 
@@ -37,11 +37,11 @@ type versionCall struct {
 // A minimal singleflight (no x/sync in go.mod) collapses an exam-day start
 // wave: N concurrent misses for one version = 1 loader call.
 type VersionCache struct {
-	mu      sync.Mutex
-	max     int
-	items   map[string]*versionEntry
+	mu       sync.Mutex
+	max      int
+	items    map[string]*versionEntry
 	inflight map[string]*versionCall
-	clock   func() int64
+	clock    func() int64
 }
 
 // NewVersionCache builds an empty cache; max<=0 falls back to

@@ -18,7 +18,7 @@ describe("ValidationChecklist", () => {
         onIssueSelect={vi.fn()}
       />,
     );
-    expect(screen.getByRole("status")).toHaveTextContent("Needs attention");
+    expect(screen.getByRole("status")).toHaveTextContent(/blocking issue/);
     const items = screen.getAllByRole("button");
     expect(items[0]).toHaveTextContent("Choose the SAT domain");
     expect(items[1]).toHaveTextContent("Style warning");
@@ -26,7 +26,7 @@ describe("ValidationChecklist", () => {
 
   it("announces Ready when there are no issues", () => {
     render(<ValidationChecklist issues={[]} onIssueSelect={vi.fn()} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Ready");
+    expect(screen.getByRole("status")).toHaveTextContent(/ready to release/i);
     expect(screen.getByText("No blocking issues")).toBeInTheDocument();
   });
 

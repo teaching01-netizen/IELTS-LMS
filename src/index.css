@@ -1498,6 +1498,19 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   transition-duration: 40ms;
 }
 
+/* Wave A R-01: unlayered .sat-ui-scoped reduced-motion guard. The global
+ * star guard lives inside a Tailwind cascade layer, so unlayered .sat-ui
+ * durations can win; this guard zeros .sat-ui animation + transitions when
+ * the OS Reduce Motion preference is on. Zero visual change otherwise. */
+@media (prefers-reduced-motion: reduce) {
+  .sat-ui *,
+  .sat-ui *::before,
+  .sat-ui *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* Bluebook answer focus (Phase 6, Lane 3): 3px focus-token outline via
  * :has(input:focus-visible) — the native radio stays sr-only while the
  * visible row carries the focus ring. Instant under reduced-motion (the
@@ -1590,6 +1603,95 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-accent-hover: #0077ed;
   --sat-warning: #8a4b00;
   --sat-danger: #b42318;
+  /* ── Staff foundation (Phase 01): fork-as-–sat-staff-*, never mutate
+   * shared .sat-ui / --color-au-* values. Glass always pairs with fallback.
+   * Token table: plans/phase-01-tokens.md §6.4. Components do NOT consume
+   * these yet (Phase 02/03 migrate call sites).
+   * Type scale (frozen Phase 01): H1 30 with -0.045; hero 52 with -0.045 tabular plus 36 clock;
+   * H2 16-17 with -0.025; title and body 13-14 with -0.012; control and hint 12 semibold;
+   * floor 11 medium; eyebrow 11 caps with 0.12 (primitive ships 10px bridge, do not go below).
+   * Contrast floor: text at least 4.5 to 1, dots at least 3 to 1. Neutral dot #6e6e73 (5.07 to 1). */
+  --sat-staff-canvas: var(--color-au-canvas);
+  --sat-staff-surface: var(--color-au-surface);
+  --sat-staff-surface-raised: var(--color-au-surface-raised);
+  --sat-staff-surface-solid-fallback: #ffffff;
+  /* Glass materials: translucent value + opaque twin for reduced-transparency
+   * + no-backdrop-filter environments. Values mirror current TSX alphas. */
+  --sat-staff-glass-sidebar: rgba(255, 255, 255, 0.82);
+  --sat-staff-glass-header: rgba(255, 255, 255, 0.88);
+  --sat-staff-glass-room: rgba(255, 255, 255, 0.9);
+  --sat-staff-glass-bottomnav: rgba(255, 255, 255, 0.92);
+  --sat-staff-glass-roster: rgba(255, 255, 255, 0.45);
+  --sat-staff-glass-fallback: var(--sat-surface);
+  --sat-staff-blur-nav: blur(24px) saturate(1.4);
+  --sat-staff-blur-scrim: blur(3px) saturate(1.2);
+  /* Borders / separators / fills: one token per audited alpha. */
+  --sat-staff-border-hairline: rgba(0, 0, 0, 0.06);
+  --sat-staff-border-header: rgba(0, 0, 0, 0.065);
+  --sat-staff-border-nav: rgba(0, 0, 0, 0.07);
+  --sat-staff-border-input: rgba(0, 0, 0, 0.075);
+  --sat-staff-border-strong: rgba(0, 0, 0, 0.09);
+  --sat-staff-separator: var(--sat-separator);
+  --sat-staff-separator-strong: var(--sat-separator-strong);
+  --sat-staff-fill: var(--sat-fill);
+  --sat-staff-fill-hover: var(--sat-fill-hover);
+  --sat-staff-fill-faint: rgba(0, 0, 0, 0.035);
+  --sat-staff-fill-active: rgba(0, 0, 0, 0.065);
+  --sat-staff-fill-avatar: rgba(0, 0, 0, 0.06);
+  --sat-staff-fill-chip: rgba(0, 0, 0, 0.04);
+  --sat-staff-fill-chip-hover: rgba(0, 0, 0, 0.07);
+  --sat-staff-skeleton-bar: rgba(0, 0, 0, 0.07);
+  --sat-staff-skeleton-bar-soft: rgba(0, 0, 0, 0.05);
+  /* Text: alias existing --sat-*-label so slate-remap stays consistent. */
+  --sat-staff-text-primary: var(--sat-label);
+  --sat-staff-text-secondary: var(--sat-secondary-label);
+  --sat-staff-text-tertiary: var(--sat-tertiary-label);
+  --sat-staff-text-faint: var(--sat-tertiary-label);
+  --sat-staff-text-inverse: #ffffff;
+  --sat-staff-text-disabled: #9b9a97;
+  /* Accent: alias au family; ring/soft for focus + search. */
+  --sat-staff-accent: var(--sat-accent-core);
+  --sat-staff-accent-hover: var(--color-au-accent-hover);
+  --sat-staff-accent-active: var(--color-au-accent-active);
+  --sat-staff-accent-text-on-tint: #0067c9;
+  --sat-staff-accent-tint: var(--color-au-accent-tint);
+  --sat-staff-accent-tint-strong: var(--color-au-accent-tint-strong);
+  --sat-staff-accent-ring: rgba(0, 113, 227, 0.4);
+  --sat-staff-accent-ring-soft: rgba(0, 113, 227, 0.1);
+  --sat-staff-accent-ring-button: rgba(0, 113, 227, 0.25);
+  --sat-staff-accent-glow-sm: 0 1px 2px rgba(0, 113, 227, 0.35);
+  --sat-staff-accent-glow-md: 0 4px 14px rgba(0, 113, 227, 0.35);
+  /* Destructive + status families: dot (≥3:1 non-text) vs text (≥4.5:1). */
+  --sat-staff-danger: var(--sat-danger);
+  --sat-staff-danger-strong: #d70015;
+  --sat-staff-danger-hover: #c00d10;
+  --sat-staff-danger-tint: var(--color-au-danger-tint);
+  --sat-staff-warning: var(--sat-warning);
+  --sat-staff-warning-text: #92400e;
+  --sat-staff-warning-dot: #d97706;
+  --sat-staff-warning-tint: var(--color-au-warning-tint);
+  --sat-staff-success-text: var(--color-au-success-text);
+  --sat-staff-success-dot: var(--color-au-success);
+  --sat-staff-success-tint: var(--color-au-success-tint);
+  --sat-staff-info-text: #0067c9;
+  --sat-staff-info-dot: #0071e3;
+  --sat-staff-neutral-dot: #6e6e73;
+  --sat-staff-neutral-text: var(--sat-secondary-label);
+  --sat-staff-form-error: #dc2626;
+  /* Focus ring. */
+  --sat-staff-focus-color: var(--sat-accent);
+  --sat-staff-focus-ring: color-mix(in srgb, var(--sat-accent) 72%, white);
+  --sat-staff-focus-width: 3px;
+  --sat-staff-focus-offset: 2px;
+  --sat-staff-focus-offset-tight: 1px;
+  /* Radii: one per role. */
+  --sat-staff-radius-chip: 999px;
+  --sat-staff-radius-control-sm: 8px;
+  --sat-staff-radius-control: 10px;
+  --sat-staff-radius-input: 12px;
+  --sat-staff-radius-menu: 13px;
+  --sat-staff-radius-card: 16px;
+  --sat-staff-radius-dialog: 22px;
   --authoring-sheet: var(--sat-surface);
   --authoring-hairline: var(--sat-separator);
   --au-elevation-menu: var(--sat-menu-elevation);
@@ -1628,6 +1730,17 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   .sat-product :is(button, a[href]) {
     min-inline-size: 44px;
   }
+}
+
+/* F-A6 search-clear fit: the in-field clear button stays vertically centered
+ * at a compact 28px target, explicitly exempted from the coarse 44px floor
+ * above (equal-specificity override placed after it) so it never overlaps
+ * the search glyph or clips the input edge. */
+.sat-product .sat-search-clear {
+  top: 50% !important;
+  transform: translateY(-50%);
+  min-block-size: 28px !important;
+  min-inline-size: 28px !important;
 }
 
 /* Hover belongs to pointer devices. Avoid sticky pseudo-hover feedback on touch. */
@@ -1670,7 +1783,18 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   .sat-product aside,
   .sat-product header,
   .sat-product nav[aria-label="Digital SAT"] {
-    background-color: var(--sat-surface) !important;
+    background-color: var(--sat-staff-glass-fallback, var(--sat-surface)) !important;
+  }
+  /* Staff glass (Phase 01): collapse every translucent shell onto its solid
+   * twin when transparency is reduced. No new selectors — token refs only. */
+  .sat-product {
+    --sat-staff-glass-sidebar: var(--sat-staff-glass-fallback);
+    --sat-staff-glass-header: var(--sat-staff-glass-fallback);
+    --sat-staff-glass-room: var(--sat-staff-glass-fallback);
+    --sat-staff-glass-bottomnav: var(--sat-staff-glass-fallback);
+    --sat-staff-glass-roster: var(--sat-staff-glass-fallback);
+    --sat-staff-blur-nav: none;
+    --sat-staff-blur-scrim: none;
   }
 }
 
@@ -1682,6 +1806,23 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     --sat-tertiary-label: #424245;
     --sat-separator: rgba(0, 0, 0, 0.42);
     --sat-separator-strong: rgba(0, 0, 0, 0.62);
+    /* Staff mirrors (Phase 01): text aliases resolve via the --sat-* lines
+     * above; borders/faint washes collapse onto the strengthened separators
+     * so no staff token vanishes at increased contrast. */
+    --sat-staff-text-secondary: #333336;
+    --sat-staff-text-tertiary: #424245;
+    --sat-staff-text-faint: #424245;
+    --sat-staff-neutral-text: #333336;
+    --sat-staff-separator: var(--sat-separator);
+    --sat-staff-separator-strong: var(--sat-separator-strong);
+    --sat-staff-border-hairline: var(--sat-separator);
+    --sat-staff-border-header: var(--sat-separator);
+    --sat-staff-border-nav: var(--sat-separator);
+    --sat-staff-border-input: var(--sat-separator-strong);
+    --sat-staff-border-strong: var(--sat-separator-strong);
+    --sat-staff-fill-faint: var(--sat-separator);
+    --sat-staff-fill-chip: var(--sat-separator);
+    --sat-staff-skeleton-bar-soft: var(--sat-separator);
   }
   .sat-product [class*="border-black/"] {
     border-color: var(--sat-separator) !important;
@@ -1700,6 +1841,71 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     --sat-surface: Canvas;
     --sat-canvas: Canvas;
     --sat-accent: Highlight;
+    /* Staff mirrors (Phase 01): hue never carries state alone — text maps to
+     * CanvasText, surfaces to Canvas, interactive/accent to Highlight, and
+     * dot+label weight carries status. Focus handled by existing Highlight
+     * fallback below. */
+    --sat-staff-canvas: Canvas;
+    --sat-staff-surface: Canvas;
+    --sat-staff-surface-raised: Canvas;
+    --sat-staff-surface-solid-fallback: Canvas;
+    --sat-staff-glass-sidebar: Canvas;
+    --sat-staff-glass-header: Canvas;
+    --sat-staff-glass-room: Canvas;
+    --sat-staff-glass-bottomnav: Canvas;
+    --sat-staff-glass-roster: Canvas;
+    --sat-staff-glass-fallback: Canvas;
+    --sat-staff-text-primary: CanvasText;
+    --sat-staff-text-secondary: CanvasText;
+    --sat-staff-text-tertiary: CanvasText;
+    --sat-staff-text-faint: GrayText;
+    --sat-staff-text-inverse: Canvas;
+    --sat-staff-text-disabled: GrayText;
+    --sat-staff-accent: Highlight;
+    --sat-staff-accent-hover: Highlight;
+    --sat-staff-accent-active: Highlight;
+    --sat-staff-accent-text-on-tint: CanvasText;
+    --sat-staff-accent-tint: Canvas;
+    --sat-staff-accent-tint-strong: Canvas;
+    --sat-staff-accent-ring: Highlight;
+    --sat-staff-accent-ring-soft: Highlight;
+    --sat-staff-accent-ring-button: Highlight;
+    --sat-staff-danger: CanvasText;
+    --sat-staff-danger-strong: CanvasText;
+    --sat-staff-danger-hover: Highlight;
+    --sat-staff-danger-tint: Canvas;
+    --sat-staff-warning: CanvasText;
+    --sat-staff-warning-text: CanvasText;
+    --sat-staff-warning-dot: CanvasText;
+    --sat-staff-warning-tint: Canvas;
+    --sat-staff-success-text: CanvasText;
+    --sat-staff-success-dot: CanvasText;
+    --sat-staff-success-tint: Canvas;
+    --sat-staff-info-text: CanvasText;
+    --sat-staff-info-dot: CanvasText;
+    --sat-staff-neutral-dot: GrayText;
+    --sat-staff-neutral-text: CanvasText;
+    --sat-staff-form-error: CanvasText;
+    --sat-staff-focus-color: Highlight;
+    --sat-staff-focus-ring: Highlight;
+    --sat-staff-border-hairline: CanvasText;
+    --sat-staff-border-header: CanvasText;
+    --sat-staff-border-nav: CanvasText;
+    --sat-staff-border-input: CanvasText;
+    --sat-staff-border-strong: CanvasText;
+    --sat-staff-separator: CanvasText;
+    --sat-staff-separator-strong: CanvasText;
+    --sat-staff-fill: Canvas;
+    --sat-staff-fill-hover: Canvas;
+    --sat-staff-fill-faint: Canvas;
+    --sat-staff-fill-active: Canvas;
+    --sat-staff-fill-avatar: Canvas;
+    --sat-staff-fill-chip: Canvas;
+    --sat-staff-fill-chip-hover: Canvas;
+    --sat-staff-skeleton-bar: GrayText;
+    --sat-staff-skeleton-bar-soft: GrayText;
+    --sat-staff-scrim: Canvas;
+    --sat-staff-scrim-solid: Canvas;
   }
   .sat-product :is(button, a[href], input, select, textarea):focus-visible {
     outline: 3px solid Highlight;
@@ -1726,6 +1932,35 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     0 0 0 0.5px rgba(0, 0, 0, 0.045),
     0 2px 6px rgba(0, 0, 0, 0.028),
     0 24px 68px rgba(0, 0, 0, 0.085);
+  /* Shadows: alias existing elevations; add soft + press twins from audit. */
+  --sat-staff-shadow-card: var(--au-elevation-card);
+  --sat-staff-shadow-card-soft: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --sat-staff-shadow-row-press: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --sat-staff-shadow-menu: var(--sat-menu-elevation);
+  --sat-staff-shadow-dialog: var(--sat-dialog-elevation);
+  --sat-staff-shadow-drag: var(--au-elevation-drag);
+  --sat-staff-shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  /* Motion: single ease, capped stagger, named durations.
+   * Dialog 220ms is grandfathered (matches shipped sat-dialog-enter);
+   * 2026 cap for new motion is 200ms — do not extend dialog timing here. */
+  --sat-staff-ease: cubic-bezier(0.2, 0, 0, 1);
+  --sat-staff-ease-press: cubic-bezier(0.4, 0, 0.2, 1);
+  --sat-staff-motion-hover: 120ms;
+  --sat-staff-motion-state: 130ms;
+  --sat-staff-motion-banner: 140ms;
+  --sat-staff-motion-row: 160ms;
+  --sat-staff-motion-press: 100ms;
+  --sat-staff-motion-dialog: 220ms;
+  --sat-staff-motion-dialog-max: 200ms;
+  --sat-staff-stagger-step: 60ms;
+  --sat-staff-stagger-cap: 5;
+  --sat-staff-shimmer-duration: 1.35s;
+  --sat-staff-shimmer-sweep: rgba(120, 120, 128, 0.14);
+  --sat-staff-skeleton-pulse-duration: 1.6s;
+  --sat-staff-spinner-duration: 0.8s;
+  --sat-staff-live-dot-duration: 1.6s;
+  --sat-staff-scrim: rgba(22, 22, 23, 0.36);
+  --sat-staff-scrim-solid: rgba(22, 22, 23, 0.55);
 }
 
 .au-elevation-card {
@@ -1930,6 +2165,20 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 .sat-product .sat-banner-enter {
   animation: sat-route-enter 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+/* F-A12 route fade gate (shell-lane hook): .sat-route-fade opts route chrome
+ * out of the enter animation entirely (animation: none); reduced-motion
+ * forces full opacity with no transition/animation so content is never
+ * stuck mid-fade. SatRoot.tsx itself is NOT touched by this lane. */
+.sat-route-fade {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sat-route-fade {
+    opacity: 1 !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
 /* Pending spinner: static ring + Working text carry meaning when motion
  * is reduced; rotation is decoration only. */
 .sat-product .sat-spinner {
@@ -2012,12 +2261,12 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   .sat-dialog-overlay.sat-product {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
-    background: rgba(22, 22, 23, 0.55) !important;
+    background: var(--sat-staff-scrim-solid, rgba(22, 22, 23, 0.55)) !important;
   }
   .sat-menu,
   .sat-product .sat-dialog,
   .sat-dialog.sat-product {
-    background: #ffffff !important;
+    background: var(--sat-staff-surface-solid-fallback, #ffffff) !important;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2478,27 +2727,27 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 .sat-rich-editor {
   overflow: visible;
-  border: 1px solid var(--color-au-separator-strong);
+  border: 1px solid transparent;
   border-radius: var(--radius-au-lg);
-  background: var(--color-au-surface);
-  box-shadow: var(--shadow-sm);
+  background: transparent;
+  box-shadow: none;
   font-family: var(--font-au-sans);
   transition:
     border-color var(--authoring-motion-fast) var(--authoring-ease-standard),
     box-shadow var(--authoring-motion-state) var(--authoring-ease);
 }
 
+.sat-rich-editor:hover { background: var(--color-au-surface-raised); }
 .sat-rich-editor:focus-within {
-  border-color: var(--color-au-accent);
-  box-shadow:
-    0 0 0 3px var(--color-au-accent-tint),
-    var(--shadow-sm);
+  background: var(--color-au-surface);
+  border-color: var(--color-au-separator-strong);
+  box-shadow: 0 0 0 3px var(--color-au-accent-tint);
 }
 
 .sat-rich-editor__toolbar {
   border-bottom: 1px solid var(--color-au-separator);
   border-radius: calc(var(--radius-au-lg) - 1px) calc(var(--radius-au-lg) - 1px) 0 0;
-  background: var(--color-au-surface-raised);
+  background: transparent;
 }
 
 .sat-rich-editor__toolbar-row,
@@ -2539,7 +2788,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 .sat-rich-editor__style-select,
 .sat-rich-editor__toolbar-button {
-  min-height: var(--spacing-10);
+  min-height: 44px;
   border-radius: var(--radius-au-sm);
   font-family: inherit;
   font-size: var(--text-au-12);
@@ -2571,7 +2820,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 .sat-rich-editor__toolbar-button {
   display: inline-flex;
-  min-width: var(--spacing-10);
+  min-width: 44px;
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
@@ -2603,7 +2852,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   box-shadow: 0 0 0 2px var(--color-au-accent-tint);
 }
 
-.sat-rich-editor__toolbar-button.is-active {
+.sat-rich-editor__toolbar-button.is-active,
+.sat-rich-editor__toolbar-button[aria-pressed="true"] {
   border-color: var(--color-au-accent-tint-strong);
   background: var(--color-au-accent-tint-strong);
   color: var(--color-au-accent-active);
@@ -2680,8 +2930,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   outline: none;
   color: var(--color-gray-900);
   font-family: var(--font-au-sans);
-  font-size: var(--text-au-15);
-  line-height: var(--text-au-15--line-height);
+  font-size: 1rem;
+  line-height: 1.6;
 }
 
 .sat-rich-editor [contenteditable="true"]::selection {
@@ -2693,7 +2943,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   pointer-events: none;
   float: left;
   height: 0;
-  color: var(--color-gray-400);
+  color: var(--color-gray-600);
   content: attr(data-placeholder);
 }
 
@@ -3077,6 +3327,126 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     --color-au-warning-tint: rgba(255, 189, 112, 0.16);
   }
 
+  /* ── Staff dark appearance (Phase 05): system-following only, no toggle.
+   * Every --sat-staff-* light value above resolves here to its dark twin.
+   * Alphas mirror light; only the RGB base flips (white→near-black,
+   * black-alpha→white-alpha) so elevation language stays identical. */
+  .sat-product {
+    /* Step 1 — Canvas / surfaces / solid fallback. */
+    --sat-staff-canvas: #111113;
+    --sat-staff-surface: #1c1c1e;
+    --sat-staff-surface-raised: #2c2c2e;
+    --sat-staff-surface-solid-fallback: #1c1c1e;
+    /* Step 2 — Glass materials + blurs. */
+    --sat-staff-glass-sidebar: rgba(28, 28, 30, 0.82);
+    --sat-staff-glass-header: rgba(28, 28, 30, 0.88);
+    --sat-staff-glass-room: rgba(28, 28, 30, 0.9);
+    --sat-staff-glass-bottomnav: rgba(28, 28, 30, 0.92);
+    --sat-staff-glass-roster: rgba(28, 28, 30, 0.45);
+    --sat-staff-glass-fallback: var(--sat-staff-surface);
+    --sat-staff-blur-nav: blur(24px) saturate(1.4);
+    --sat-staff-blur-scrim: blur(3px) saturate(1.2);
+    /* Step 3 — Borders / separators / fills / skeleton bars. */
+    --sat-staff-border-hairline: rgba(255, 255, 255, 0.08);
+    --sat-staff-border-header: rgba(255, 255, 255, 0.09);
+    --sat-staff-border-nav: rgba(255, 255, 255, 0.1);
+    --sat-staff-border-input: rgba(235, 235, 245, 0.38);
+    --sat-staff-border-strong: rgba(235, 235, 245, 0.3);
+    --sat-staff-separator: rgba(235, 235, 245, 0.24);
+    --sat-staff-separator-strong: rgba(235, 235, 245, 0.38);
+    --sat-staff-fill: rgba(235, 235, 245, 0.1);
+    --sat-staff-fill-hover: rgba(235, 235, 245, 0.16);
+    --sat-staff-fill-faint: rgba(235, 235, 245, 0.06);
+    --sat-staff-fill-active: rgba(235, 235, 245, 0.12);
+    --sat-staff-fill-avatar: rgba(235, 235, 245, 0.1);
+    --sat-staff-fill-chip: rgba(235, 235, 245, 0.1);
+    --sat-staff-fill-chip-hover: rgba(235, 235, 245, 0.16);
+    --sat-staff-skeleton-bar: rgba(235, 235, 245, 0.14);
+    --sat-staff-skeleton-bar-soft: rgba(235, 235, 245, 0.1);
+    /* Step 4 — Text + neutral family. */
+    --sat-staff-text-primary: #f5f5f7;
+    --sat-staff-text-secondary: #c7c7cc;
+    --sat-staff-text-tertiary: #a1a1a6;
+    --sat-staff-text-faint: #a1a1a6;
+    --sat-staff-text-inverse: #1c1c1e;
+    --sat-staff-text-disabled: #8e8e93;
+    --sat-staff-neutral-dot: #a1a1a6;
+    --sat-staff-neutral-text: #c7c7cc;
+    /* Step 5 — Accent + focus family. */
+    --sat-staff-accent: #0a72d8;
+    --sat-staff-accent-hover: #1680eb;
+    --sat-staff-accent-active: #075fb8;
+    --sat-staff-accent-text-on-tint: #8ac2ff;
+    --sat-staff-accent-tint: rgba(105, 173, 255, 0.18);
+    --sat-staff-accent-tint-strong: rgba(105, 173, 255, 0.28);
+    --sat-staff-accent-ring: rgba(105, 173, 255, 0.45);
+    --sat-staff-accent-ring-soft: rgba(105, 173, 255, 0.22);
+    --sat-staff-accent-ring-button: rgba(105, 173, 255, 0.35);
+    --sat-staff-accent-glow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --sat-staff-accent-glow-md: 0 4px 14px rgba(0, 0, 0, 0.5);
+    --sat-staff-focus-color: #8ac2ff;
+    --sat-staff-focus-ring: #8ac2ff;
+    --sat-staff-focus-width: 3px;
+    --sat-staff-focus-offset: 2px;
+    --sat-staff-focus-offset-tight: 1px;
+    /* Step 6 — Status families: danger / warning / success / info + form error. */
+    --sat-staff-danger: #ff8f85;
+    --sat-staff-danger-strong: #ff8f85;
+    --sat-staff-danger-hover: #ffaaa2;
+    --sat-staff-danger-tint: rgba(255, 143, 133, 0.16);
+    --sat-staff-warning: #ffbd70;
+    --sat-staff-warning-text: #ffd09a;
+    --sat-staff-warning-dot: #ffbd70;
+    --sat-staff-warning-tint: rgba(255, 189, 112, 0.16);
+    --sat-staff-success-text: #76e8b7;
+    --sat-staff-success-dot: #58d7a1;
+    --sat-staff-success-tint: rgba(88, 215, 161, 0.16);
+    --sat-staff-info-text: #8ac2ff;
+    --sat-staff-info-dot: #69adff;
+    --sat-staff-form-error: #ff8f85;
+    /* Step 7 — Shadows / scrim / shimmer. Radii + motion/ease/stagger untouched. */
+    --sat-staff-shadow-card: var(--au-elevation-card);
+    --sat-staff-shadow-card-soft: 0 1px 2px rgba(0, 0, 0, 0.45);
+    --sat-staff-shadow-row-press: 0 1px 2px rgba(0, 0, 0, 0.45);
+    --sat-staff-shadow-menu: var(--sat-menu-elevation);
+    --sat-staff-shadow-dialog: var(--sat-dialog-elevation);
+    --sat-staff-shadow-drag: var(--au-elevation-drag);
+    --sat-staff-shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+    --sat-staff-scrim: rgba(0, 0, 0, 0.55);
+    --sat-staff-scrim-solid: rgba(0, 0, 0, 0.7);
+    --sat-staff-shimmer-sweep: rgba(235, 235, 245, 0.14);
+    --sat-staff-shimmer-duration: 1.35s;
+    --sat-staff-skeleton-pulse-duration: 1.6s;
+    --sat-staff-spinner-duration: 0.8s;
+    --sat-staff-live-dot-duration: 1.6s;
+  }
+
+  /* Step 8 — Hard-surface dark overrides (no light edits). The light rules
+   * keep background:#ffffff / track rgba(120,120,128,0.12) / thumb #ffffff
+   * for light; these re-point the same surfaces at dark tokens. Menu + dialog
+   * carry both descendant and self selectors because Radix portals mount at
+   * the document root (the menu/dialog node itself carries .sat-product). */
+  .sat-product .sat-dialog,
+  .sat-dialog.sat-product {
+    background: var(--sat-staff-surface, #1c1c1e);
+    border-color: var(--sat-staff-separator, rgba(235, 235, 245, 0.24));
+  }
+  .sat-product .sat-segmented {
+    background: var(--sat-staff-fill, rgba(235, 235, 245, 0.1));
+  }
+  .sat-product .sat-segmented-thumb {
+    background: #2c2c2e;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  }
+  .sat-product .sat-menu,
+  .sat-menu.sat-product {
+    background: var(--sat-staff-surface, #1c1c1e);
+    border-color: var(--sat-staff-separator, rgba(235, 235, 245, 0.24));
+  }
+  .sat-product .sat-list-row:hover {
+    background-color: var(--sat-staff-fill-hover, rgba(235, 235, 245, 0.16));
+  }
+
   .sat-product {
     --au-tint: var(--color-au-section-rw);
     --au-tint-strong: var(--color-au-section-rw-strong);
@@ -3180,6 +3550,26 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   .sat-product {
     --color-au-separator: rgba(255, 255, 255, 0.36);
     --color-au-separator-strong: rgba(255, 255, 255, 0.58);
+    /* Staff dark+more mirrors (Phase 05 Step 9): strengthen text/borders
+     * without changing status hues. Mirrors the light+more pattern. */
+    --sat-staff-text-secondary: #f0f0f2;
+    --sat-staff-text-tertiary: #d1d1d6;
+    --sat-staff-text-faint: #d1d1d6;
+    --sat-staff-neutral-text: #f0f0f2;
+    --sat-staff-neutral-dot: #d1d1d6;
+    --sat-staff-separator: rgba(255, 255, 255, 0.5);
+    --sat-staff-separator-strong: rgba(255, 255, 255, 0.58);
+    --sat-staff-border-hairline: rgba(255, 255, 255, 0.36);
+    --sat-staff-border-header: rgba(255, 255, 255, 0.36);
+    --sat-staff-border-nav: rgba(255, 255, 255, 0.36);
+    --sat-staff-border-input: rgba(255, 255, 255, 0.58);
+    --sat-staff-border-strong: rgba(255, 255, 255, 0.58);
+    --sat-staff-fill-faint: rgba(255, 255, 255, 0.18);
+    --sat-staff-fill-chip: rgba(255, 255, 255, 0.18);
+    --sat-staff-skeleton-bar-soft: rgba(255, 255, 255, 0.22);
+  }
+  .sat-product :is(input, select, textarea) {
+    border-color: var(--sat-staff-border-input) !important;
   }
 }
 

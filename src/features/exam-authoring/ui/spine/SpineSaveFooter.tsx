@@ -10,6 +10,7 @@ export interface SpineSaveFooterProps {
   onKeepMetadataForNextChange: (value: boolean) => void;
   onSaveAndNext: () => void;
   onRetry: () => void;
+  onReviewConflict?: (() => void) | undefined;
 }
 
 /**
@@ -25,14 +26,15 @@ export function SpineSaveFooter({
   onKeepMetadataForNextChange,
   onSaveAndNext,
   onRetry,
+  onReviewConflict,
 }: SpineSaveFooterProps) {
   return (
-    <div className="mt-10 flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3.5 py-2.5">
-      <div className="flex min-w-0 items-center gap-3">
-        <SaveCluster status={status} lastSavedAt={lastSavedAt} onRetry={onRetry} />
+    <div className="sat-spine__save-footer mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-border py-5">
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <SaveCluster status={status} lastSavedAt={lastSavedAt} onRetry={onRetry} onReviewConflict={onReviewConflict} />
         <label
           htmlFor="sat-spine-carry-metadata"
-          className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground"
+          className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground"
           title="When Save & Next reaches an empty slot, carry Domain, Skill, and Difficulty into the new question."
         >
           <input
@@ -51,7 +53,7 @@ export function SpineSaveFooter({
         onClick={onSaveAndNext}
         disabled={saveDisabled}
         title="Save and move to the next question"
-        className="flex min-h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-45"
+        className="flex min-h-11 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-45"
       >
         Save & Next <ChevronRight size={13} aria-hidden="true" />
       </button>

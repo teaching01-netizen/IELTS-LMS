@@ -17,6 +17,11 @@ export interface ConfirmedResponseState {
   contentHash: string;
 }
 
+export interface BlockedResponseInfo {
+  reason: string;
+  blockedAt: string;
+}
+
 export interface PendingResponseState {
   payload: ResponsePayload;
   writeId: string;
@@ -24,6 +29,15 @@ export interface PendingResponseState {
   controlEpoch: number;
   clientVersion: number;
   durability: DurabilityTier;
+  /** Wall-clock accept time (ISO). Present on records written after the
+   *  durability repair; absent on older records, which sort as oldest. */
+  receivedAt?: string;
+  /** In-session accept order. Tiebreak for equal timestamps only. */
+  order?: number;
+  /** Present when the draft is visible but must never be sent without an
+   *  explicit reconcile or discard decision (control-epoch stall, version
+   *  collision, stale hydration). */
+  blocked?: BlockedResponseInfo;
 }
 
 export interface QuestionResponseState {
@@ -103,6 +117,7 @@ export type DurabilitySyncStatus =
   | 'synced'
   | 'saving'
   | 'saved_locally'
+  | 'blocked_attention'
   | 'durability_fault'
   | 'conflict_fenced'
   | 'conflict_terminal';

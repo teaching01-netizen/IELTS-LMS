@@ -354,7 +354,7 @@ func reconcileCohortStageExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runt
 		return false, err
 	}
 	if stage == nil {
-		return false, assessmentConflict("MODULE_MISMATCH", "SAT runtime stage `"+expectedStageKey+"` is missing.")
+		return false, assessmentConflict("RUNTIME_STAGE_MISSING", "SAT runtime stage `"+expectedStageKey+"` is missing.")
 	}
 	if currentStageKey.Valid && currentStageOrder != nil {
 		if stage.order < *currentStageOrder {
@@ -398,7 +398,7 @@ func reconcileCohortSectionExpiredTx(ctx context.Context, t tx.Tx, runtimeID, ru
 		return false, err
 	}
 	if stage == nil {
-		return false, assessmentConflict("MODULE_MISMATCH", "SAT section clock `"+sectionKey+"` is missing.")
+		return false, assessmentConflict("SECTION_CLOCK_MISSING", "SAT section clock `"+sectionKey+"` is missing.")
 	}
 	if currentStageKey.Valid && currentStageOrder != nil {
 		if stage.order < *currentStageOrder {

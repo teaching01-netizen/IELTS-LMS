@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"github.com/google/uuid"
 )
 
@@ -131,17 +132,22 @@ func (s *Service) RecordPrecheck(ctx context.Context, req PrecheckRequest) (map[
 // RecordHeartbeat persists the event and updates the attempt integrity
 // projection. mutation_id makes retries safe without suppressing distinct
 // heartbeat/disconnect events.
-func (s *Service) RecordHeartbeat(ctx context.Context, req HeartbeatRequest) (map[string]any, error) {
+// RecordHeartbeat records one heartbeat beat. It returns (projection,
+// deduped, err): deduped=true when the mutation was already recorded and
+// no new beat was written — callers count effective writes only.
+// Returning the flag (not inferring via a global counter delta) keeps the
+// decision race-free under concurrency.
+func (s *Service) RecordHeartbeat(ctx context.Context, req HeartbeatRequest) (map[string]any, bool, error) {
 	if s.db == nil {
-		return nil, apperrors.New(apperrors.CodeServiceUnavailable, "Student service is unavailable.")
+		return nil, false, apperrors.New(apperrors.CodeServiceUnavailable, "Student service is unavailable.")
 	}
 	if strings.TrimSpace(req.AttemptID) == "" || strings.TrimSpace(req.ScheduleID) == "" {
-		return nil, validationError("Attempt and schedule are required.")
+		return nil, false, validationError("Attempt and schedule are required.")
 	}
 	switch req.EventType {
 	case "heartbeat", "disconnect", "reconnect", "lost":
 	default:
-		return nil, validationError("Unsupported heartbeat event type.")
+		return nil, false, validationError("Unsupported heartbeat event type.")
 	}
 	if strings.TrimSpace(req.MutationID) == "" {
 		req.MutationID = uuid.NewString()
@@ -153,31 +159,36 @@ func (s *Service) RecordHeartbeat(ctx context.Context, req HeartbeatRequest) (ma
 	// B1: point-write tx on one attempt row (RC-safe; no snapshot dependency).
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	attempt, err := loadTelemetryAttempt(ctx, tx, req.AttemptID, req.ScheduleID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := authorizeTelemetryAttempt(ctx, tx, &attempt, req.StudentKey, req.ActorUserID); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	clientSessionID, err := ensureTelemetryClientSession(ctx, tx, attempt, req.ClientSessionID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	var existingID string
 	lookupErr := tx.QueryRowContext(ctx, "SELECT id FROM student_heartbeat_events WHERE attempt_id = ? AND mutation_id = ? FOR UPDATE", req.AttemptID, req.MutationID).Scan(&existingID)
 	if lookupErr == nil {
+		// Retry dedupe: the beat was already recorded; count the dedupe
+		// (not a new beat) so sat_heartbeat_total tracks effective
+		// writes and retry storms can't inflate it.
+		telemetry.IncCounter(telemetry.MPresenceDedupeHit)
 		if err := tx.Commit(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return s.GetAttemptProjection(ctx, req.AttemptID)
+		projection, err := s.GetAttemptProjection(ctx, req.AttemptID)
+		return projection, true, err
 	}
 	if lookupErr != sql.ErrNoRows {
-		return nil, lookupErr
+		return nil, false, lookupErr
 	}
 
 	payload := nullableTelemetryJSON(req.Payload)
@@ -185,7 +196,7 @@ func (s *Service) RecordHeartbeat(ctx context.Context, req HeartbeatRequest) (ma
 		INSERT INTO student_heartbeat_events
 		(id, attempt_id, schedule_id, mutation_id, event_type, payload, client_timestamp, server_received_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`, uuid.NewString(), req.AttemptID, req.ScheduleID, req.MutationID, req.EventType, payload, req.ClientTimestamp.UTC()); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	integrity := telemetryObject(attempt.Integrity)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -204,12 +215,13 @@ func (s *Service) RecordHeartbeat(ctx context.Context, req HeartbeatRequest) (ma
 		UPDATE student_attempts
 		SET integrity = ?, recovery = ?, active_client_session_id = ?, revision = revision + 1, updated_at = UTC_TIMESTAMP(6)
 		WHERE id = ? AND schedule_id = ?`, encodeTelemetryObject(integrity), encodeTelemetryObject(recovery), clientSessionID, req.AttemptID, req.ScheduleID); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return s.GetAttemptProjection(ctx, req.AttemptID)
+	projection, err := s.GetAttemptProjection(ctx, req.AttemptID)
+	return projection, false, err
 }
 
 func (s *Service) RecordAudit(ctx context.Context, req AuditRequest) error {

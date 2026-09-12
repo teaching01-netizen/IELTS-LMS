@@ -1136,6 +1136,68 @@ describe("useStudentSessionRouteData backend mode", () => {
     );
   });
 
+  it("emits a SAT bootstrap seed with identity + epochs once static+live settle", async () => {
+    vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
+    vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());
+    // Static carries the SAT provider key; live carries the reconciled attempt.
+    // NOTE: buildStaticSessionContext defaults to an IELTS-shaped snapshot
+    // (no providerKey -> hook default 'ielts'), so this test overrides the
+    // contentSnapshot providerKey to 'sat' to reach the SAT seed branch.
+    const satStatic = buildStaticSessionContext("ver-9");
+    (satStatic.version.contentSnapshot as Record<string, unknown>).providerKey = "sat";
+    const fetchMock = vi.fn((url: string) => {
+      if (url === "/api/v1/student/sessions/sched-1/static?candidateId=W250334") {
+        return Promise.resolve(jsonResponse(satStatic));
+      }
+      if (url === "/api/v1/student/sessions/sched-1/live?candidateId=W250334") {
+        return Promise.resolve(jsonResponse(buildLiveSessionContext(buildAttempt("ver-9"), "ver-9")));
+      }
+      return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt("ver-9"))));
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.providerKey).toBe("sat");
+    expect(result.current.isSatStaticReady).toBe(true);
+    expect(result.current.satBootstrapSeed).toMatchObject({
+      scheduleId: "sched-1",
+      attemptId: "attempt-1",
+      staticVersionId: "ver-9",
+      attemptRevision: 1,
+      runtimeRevision: 1,
+    });
+    expect(result.current.satBootstrapSeed?.attemptSnapshot?.id).toBe("attempt-1");
+    expect(result.current.satBootstrapSeed?.liveSnapshotReceivedAt).toEqual(expect.any(Number));
+  });
+
+  it("keeps the SAT seed null-safe on error with no attempt (no throw)", async () => {
+    vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
+    vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());
+    global.fetch = vi.fn(() =>
+      Promise.resolve(jsonErrorResponse("Transient backend outage")),
+    ) as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.error).not.toBeNull();
+    });
+
+    expect(() => result.current.satBootstrapSeed).not.toThrow();
+    expect(result.current.satBootstrapSeed).toBeNull();
+    expect(result.current.isSatStaticReady).toBe(false);
+  });
+
   it("logs published snapshot diagnostics when diagram blocks are missing imageUrl", async () => {
     vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
     vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());

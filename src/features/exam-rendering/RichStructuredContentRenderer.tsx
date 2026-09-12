@@ -8,6 +8,7 @@ import type {
   StructuredContent,
 } from "./api/assessmentContracts";
 import { getAssessmentMediaAsset } from "../exam-authoring/api/assessmentMediaApi";
+import type { SatImageEnlargeProps } from "./api/structuredContentEnlarge";
 import { documentFromStructuredContent } from "../exam-authoring/api/structuredContentPublic";
 
 const CONTENT_CLASS_NAME =
@@ -111,7 +112,11 @@ function applyMarks(node: RichTextNode, value: ReactNode): ReactNode {
   }, value);
 }
 
-function StaticStructuredImage({ node }: { node: RichTextNode }) {
+export interface StaticStructuredImageEnlargeApi {
+  renderEnlarge: import("./api/structuredContentEnlarge").SatImageEnlargeSlot | undefined;
+}
+
+function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?: StaticStructuredImageEnlargeApi | undefined }) {
   const assetId = stringAttribute(node, "assetId");
   const fallbackSource = stringAttribute(node, "src");
   const alt = stringAttribute(node, "alt");
@@ -120,6 +125,10 @@ function StaticStructuredImage({ node }: { node: RichTextNode }) {
   const height = positiveDimension(node, "height");
   const [source, setSource] = useState(() => initialImageSource(node));
   const [failed, setFailed] = useState(() => !assetId && !directSource(fallbackSource));
+  // Bluebook lightbox (Phase 10): transient per-image viewer state. No timer,
+  // answer, or persistence touch — pure presentation over the same source.
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const enlargeId = `sat-enlarge-${assetId || "inline"}-${width ?? 0}x${height ?? 0}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -151,6 +160,7 @@ function StaticStructuredImage({ node }: { node: RichTextNode }) {
   const aspectRatio = width && height ? `${width} / ${height}` : "16 / 9";
   const mediaStyle: CSSProperties = { aspectRatio };
 
+  const enlargeLabel = alt || caption || "question visual";
   return (
     <figure className="my-4 space-y-2" data-asset-id={assetId}>
       <div
@@ -179,6 +189,9 @@ function StaticStructuredImage({ node }: { node: RichTextNode }) {
         )}
       </div>
       {caption ? <figcaption className="text-center text-xs text-slate-500">{caption}</figcaption> : null}
+      {source && !failed && enlarge?.renderEnlarge ? (
+        <>{enlarge.renderEnlarge({ label: enlargeLabel, enlargeId, src: source, open: viewerOpen, onOpen: () => setViewerOpen(true), onClose: () => setViewerOpen(false), returnFocusSelector: `#${CSS.escape(enlargeId)}` })}</>
+      ) : null}
     </figure>
   );
 }
@@ -190,8 +203,8 @@ export type StructuredTextRenderer = (value: {
   startOffset: number;
 }) => ReactNode;
 
-function RichNode({ node, renderText }: { node: RichTextNode; renderText?: StructuredTextRenderer | undefined }): ReactNode {
-  const children = (key: string) => renderNodes(node.content, key, renderText);
+function RichNode({ node, renderText, enlarge }: { node: RichTextNode; renderText?: StructuredTextRenderer | undefined; enlarge?: StaticStructuredImageEnlargeApi | undefined }): ReactNode {
+  const children = (key: string) => renderNodes(node.content, key, renderText, enlarge);
   const nodeId = stringAttribute(node, 'id');
   const annotatable = Boolean(renderText && nodeId && (node.content ?? []).every((child) => child.type === 'text' || child.type === 'hardBreak'));
   const textAttributes = annotatable ? { 'data-content-text-node': nodeId } : {};
@@ -247,7 +260,7 @@ function RichNode({ node, renderText }: { node: RichTextNode; renderText?: Struc
     case "blockMath":
       return <div>{renderMath(stringAttribute(node, "latex"), true)}</div>;
     case "image":
-      return <StaticStructuredImage node={node} />;
+      return <StaticStructuredImage node={node} enlarge={enlarge} />;
     case "table":
       return <table><tbody>{children("table")}</tbody></table>;
     case "tableRow":
@@ -270,17 +283,19 @@ function cellSpanAttributes(node: RichTextNode): { colSpan?: number; rowSpan?: n
   };
 }
 
-function renderNodes(nodes: readonly RichTextNode[] | undefined, keyPrefix: string, renderText?: StructuredTextRenderer): ReactNode[] {
-  return (nodes ?? []).map((node, index) => <RichNode key={`${keyPrefix}-${index}`} node={node} renderText={renderText} />);
+function renderNodes(nodes: readonly RichTextNode[] | undefined, keyPrefix: string, renderText?: StructuredTextRenderer, enlarge?: StaticStructuredImageEnlargeApi): ReactNode[] {
+  return (nodes ?? []).map((node, index) => <RichNode key={`${keyPrefix}-${index}`} node={node} renderText={renderText} enlarge={enlarge} />);
 }
 
 export const RichStructuredContentRenderer = memo(function RichStructuredContentRenderer({
   content,
   renderText,
+  enlarge,
 }: {
   content: StructuredContent;
   renderText?: StructuredTextRenderer | undefined;
+  enlarge?: StaticStructuredImageEnlargeApi | undefined;
 }) {
   const document = documentFromStructuredContent(content) as RichTextDocument;
-  return <div className={CONTENT_CLASS_NAME}>{renderNodes(document.content, "content", renderText)}</div>;
+  return <div className={CONTENT_CLASS_NAME}>{renderNodes(document.content, "content", renderText, enlarge)}</div>;
 });

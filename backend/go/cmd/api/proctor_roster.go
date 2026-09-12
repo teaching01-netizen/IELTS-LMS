@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/platform/pagination"
 	"example.com/ielts-proctoring/internal/proctor"
 )
 
@@ -33,6 +33,21 @@ func proctorRosterInner(app *App, w http.ResponseWriter, r *http.Request) {
 		if sess == nil {
 			return
 		}
+		// Fail-closed ?limit= runs before service/DB gates: malformed
+		// input 400s even when dependencies are down.
+		q := r.URL.Query()
+		cur, cerr := pagination.ParseCursor(r)
+		if cerr != nil {
+			if writePaginationFieldError(w, r, cerr) {
+				return
+			}
+			httpx.WriteError(w, r, cerr)
+			return
+		}
+		rosterLimit := proctor.DefaultRosterPageLimit
+		if strings.TrimSpace(q.Get("limit")) != "" {
+			rosterLimit = cur.Limit
+		}
 		if app.Proctor == nil || app.DB == nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Proctor service is unavailable."))
 			return
@@ -53,13 +68,7 @@ func proctorRosterInner(app *App, w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		q := r.URL.Query()
-		limit := proctor.DefaultRosterPageLimit
-		if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
-			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-				limit = n
-			}
-		}
+		limit := rosterLimit
 		var cursor proctor.RosterCursor
 		if raw := strings.TrimSpace(q.Get("cursorUpdatedAt")); raw != "" {
 			if ts, err := time.Parse(time.RFC3339Nano, raw); err == nil {

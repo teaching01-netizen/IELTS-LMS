@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"example.com/ielts-proctoring/internal/platform/config"
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
 func testCfg() config.Config {

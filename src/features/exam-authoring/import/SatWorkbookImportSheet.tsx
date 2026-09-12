@@ -43,6 +43,10 @@ export function SatWorkbookImportSheet({
   onCommitted,
 }: SatWorkbookImportSheetProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Commit-scoped idempotency key: minted when a valid preview lands, reset
+  // when the sheet closes or a new file is chosen. A lost-response commit
+  // retry reuses it; committing a different workbook always mints a fresh one.
+  const commitKeyRef = useRef<string | null>(null);
   const [activity, setActivity] = useState<Activity>("idle");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<SatWorkbookPreview | null>(null);
@@ -55,6 +59,7 @@ export function SatWorkbookImportSheet({
 
   useEffect(() => {
     if (open) return;
+    commitKeyRef.current = null;
     setActivity("idle");
     setFile(null);
     setPreview(null);
@@ -95,6 +100,9 @@ export function SatWorkbookImportSheet({
     setSelectedModuleKey(null);
     try {
       const nextPreview = await assessmentAuthoringApi.previewSatWorkbook(examId, nextFile);
+      // New workbook, new commit identity: the previous key must never leak
+      // across workbooks, or a retry could replay the wrong replacement.
+      commitKeyRef.current = nextPreview.valid ? crypto.randomUUID() : null;
       setPreview(nextPreview);
       let nextRenderModules = nextPreview.modules;
       if (nextPreview.valid && nextPreview.assets.length > 0) {
@@ -138,12 +146,14 @@ export function SatWorkbookImportSheet({
     setActivity("importing");
     setError(null);
     try {
+      if (!commitKeyRef.current) commitKeyRef.current = crypto.randomUUID();
       const result = await assessmentAuthoringApi.commitSatWorkbook(examId, {
         importId: preview.importId,
         expectedVersionId: shell.versionId,
         expectedVersionRevision: shell.versionRevision,
         modules: preview.modules,
         assets: stagedAssets,
+        operationKey: commitKeyRef.current,
       });
       onCommitted(result);
     } catch (cause) {
@@ -167,8 +177,10 @@ export function SatWorkbookImportSheet({
                   Import SAT from Excel
                 </h2>
                 <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                  One workbook can replace the complete six-module SAT draft. Nothing changes until
-                  you choose Import.
+                  Replace mode: one workbook replaces the complete six-module draft pinned to the{" "}
+                  revision you inspected. If another author saves first, the import conflicts instead{" "}
+                  of overwriting. Undo stays available until you edit further or publish. Nothing{" "}
+                  changes until you choose Import.
                 </p>
               </div>
               <button

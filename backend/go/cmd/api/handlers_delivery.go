@@ -30,7 +30,11 @@ func deliveryBootstrapInner(app *App, w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		claims, err := verifyAttemptBearer(app, r, bearer)
+		// Bootstrap is a read (no in-tx fence downstream): the
+		// session-bound read verify runs in BOTH verify modes so a
+		// revoked or takeover-rotated bearer renders 401 even when
+		// ATTEMPT_VERIFY=stateless.
+		claims, err := verifyAttemptReadBearer(app, r, bearer)
 		if err != nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
@@ -66,8 +70,19 @@ func deliverySaveResponseHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		claims, err := verifyAttemptBearer(app, r, bearer)
+		// Security P0: delivery writes take the session-bound verify in
+		// BOTH modes — a revoked or takeover-rotated bearer must not
+		// write, even when ATTEMPT_VERIFY=stateless.
+		claims, err := verifyAttemptReadBearer(app, r, bearer)
 		if err != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+			return
+		}
+		// Empty writer identity gets edge-only binding with no in-tx
+		// writer-session fence (claimWriterSessionTx skips ""). Every
+		// minted bearer carries a clientSessionId — reject the empty
+		// case loudly instead of silently weakening the binding.
+		if claims.ClientSessionID == "" {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
 		}
@@ -80,9 +95,10 @@ func deliverySaveResponseHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx);
-		// no separate pre-tx round trip.
-		out, err := app.Delivery.SaveResponse(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "examQuestionID"), req, claims.ClientSessionID)
+		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx
+		// re-checks token revocation + writer session in-tx); no separate
+		// pre-tx round trip.
+		out, err := app.Delivery.SaveResponse(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "examQuestionID"), req, claims.ClientSessionID, claims.TokenID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -101,8 +117,13 @@ func deliveryStartModuleHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		claims, err := verifyAttemptBearer(app, r, bearer)
+		// Security P0: session-bound verify in both modes (see save).
+		claims, err := verifyAttemptReadBearer(app, r, bearer)
 		if err != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+			return
+		}
+		if claims.ClientSessionID == "" {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
 		}
@@ -115,9 +136,10 @@ func deliveryStartModuleHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx);
-		// no separate pre-tx round trip.
-		out, err := app.Delivery.StartModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, claims.ClientSessionID)
+		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx
+		// re-checks token revocation + writer session in-tx); no separate
+		// pre-tx round trip.
+		out, err := app.Delivery.StartModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, claims.ClientSessionID, claims.TokenID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -136,8 +158,13 @@ func deliverySubmitModuleHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		claims, err := verifyAttemptBearer(app, r, bearer)
+		// Security P0: session-bound verify in both modes (see save).
+		claims, err := verifyAttemptReadBearer(app, r, bearer)
 		if err != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+			return
+		}
+		if claims.ClientSessionID == "" {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
 		}
@@ -150,9 +177,10 @@ func deliverySubmitModuleHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx);
-		// no separate pre-tx round trip.
-		out, err := app.Delivery.SubmitModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, claims.ClientSessionID)
+		// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx
+		// re-checks token revocation + writer session in-tx); no separate
+		// pre-tx round trip.
+		out, err := app.Delivery.SubmitModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, claims.ClientSessionID, claims.TokenID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -171,7 +199,8 @@ func deliverySubmitAssessmentHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		claims, err := verifyAttemptBearer(app, r, bearer)
+		// Security P0: session-bound verify in both modes (see save).
+		claims, err := verifyAttemptReadBearer(app, r, bearer)
 		if err != nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return

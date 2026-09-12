@@ -81,25 +81,26 @@ describe('StudentLinksDashboard', () => {
     expect(screen.getByRole('button', { name: 'Create Version 5 Link' })).toBeInTheDocument();
   });
 
-  it('reconciles detail selection with the visible search result', () => {
+  it('reconciles detail selection with the visible search result', async () => {
     render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Search Student Links'), { target: { value: 'Monday' } });
 
+    // Search is debounced (150ms) to avoid re-sorting on every keystroke.
+    await waitFor(() => expect(screen.queryByText('Old Scholarship')).not.toBeInTheDocument());
     expect(screen.getAllByText('Monday Class').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Old Scholarship')).not.toBeInTheDocument();
     expect(screen.queryByText('No matching links')).not.toBeInTheDocument();
   });
 
   it('runs lifecycle and duplicate actions without mutating a published release', async () => {
     render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
 
-    fireEvent.click(screen.getByLabelText('More actions for Saturday Class'));
+    fireEvent.click(screen.getByLabelText('Actions for Saturday Class'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Pause Link' }));
     await waitFor(() => expect(mocks.lifecycle).toHaveBeenCalledWith({
       linkId: 'link-current', request: { revision: 3, state: 'paused' },
     }));
 
-    fireEvent.click(screen.getByLabelText('More actions for Saturday Class'));
+    fireEvent.click(screen.getByLabelText('Actions for Saturday Class'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate Link' }));
     await waitFor(() => expect(mocks.duplicate).toHaveBeenCalledWith({
       linkId: 'link-current', request: { revision: 3, name: 'Saturday Class Copy', releaseTarget: 'source' },
@@ -118,7 +119,9 @@ describe('StudentLinksDashboard', () => {
 
   it('makes Student Access creation the primary empty-state action', () => {
     render(<StudentLinksDashboard exam={exam} overview={{ ...overview, links: [] }} isLoading={false} error={null} onRefresh={vi.fn()} onBackToRelease={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'New Student Link' }));
+    // Header and empty state both offer the primary creation action.
+    expect(screen.getAllByRole('button', { name: 'New Student Link' }).length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(screen.getAllByRole('button', { name: 'New Student Link' })[0]!);
     expect(screen.getByTestId('link-editor')).toBeInTheDocument();
   });
 });

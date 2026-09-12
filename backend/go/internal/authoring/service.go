@@ -18,6 +18,7 @@ package authoring
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -57,11 +58,60 @@ const (
 type Service struct {
 	db     *sql.DB
 	runner *tx.Runner
+	// deliverySvc builds Preview's candidate-facing projection. Nil keeps the
+	// historical posture (derived per call from db/runner); production injects
+	// the shared graph service so Preview never mints a bare per-request
+	// service without the cache.
+	deliverySvc *delivery.Service
+	// previewCache is the revision-keyed delivery-tree cache Preview serves
+	// through (the shared delivery VersionCache; key is (versionID, revision)).
+	// Nil disables caching: Preview bulk-loads directly. No globals: tests
+	// inject a fresh cache or leave it nil.
+	previewCache *delivery.VersionCache
 }
 
 // NewService wires dependencies explicitly.
 func NewService(db *sql.DB, runner *tx.Runner) *Service {
 	return &Service{db: db, runner: runner}
+}
+
+// SetDeliveryService injects the shared delivery service Preview builds its
+// projection with (chainable, nil-safe: nil restores the derived default).
+// A setter — not a constructor change — so the existing NewService call sites
+// (app graph plus in-package tests) stay untouched.
+func (s *Service) SetDeliveryService(d *delivery.Service) *Service {
+	if s != nil {
+		s.deliverySvc = d
+	}
+	return s
+}
+
+// SetPreviewCache wires the revision-keyed delivery-tree cache Preview serves
+// through (chainable, nil-safe: nil disables caching and Preview bulk-loads
+// directly, which is also the VERSION_CACHE=off kill-switch posture).
+func (s *Service) SetPreviewCache(c *delivery.VersionCache) *Service {
+	if s != nil {
+		s.previewCache = c
+	}
+	return s
+}
+
+// PreviewCached reports whether Preview serves through the revision-keyed
+// cache (assertable without a pool).
+func (s *Service) PreviewCached() bool { return s != nil && s.previewCache != nil }
+
+// previewDelivery returns the injected delivery service, deriving one from
+// (db, runner) when none was injected (tests, worker, cache-off).
+func (s *Service) previewDelivery() *delivery.Service {
+	if s != nil && s.deliverySvc != nil {
+		return s.deliverySvc
+	}
+	var db *sql.DB
+	var runner *tx.Runner
+	if s != nil {
+		db, runner = s.db, s.runner
+	}
+	return delivery.NewService(db, runner)
 }
 
 // Shell is the editable-draft projection (exam + sections + modules +
@@ -277,31 +327,111 @@ func conflictError(msg string) *apperrors.Error {
 	return apperrors.New(apperrors.CodeConflict, msg)
 }
 
-// Shell loads the current-draft authoring projection (mirrors shell()).
-func (s *Service) Shell(ctx context.Context, examID string) (Shell, error) {
-	var providerKey string
-	var draftID sql.NullString
-	if err := s.db.QueryRowContext(ctx, "SELECT provider_key, current_draft_version_id FROM exam_entities WHERE id = ?", examID).Scan(&providerKey, &draftID); err != nil {
-		if err == sql.ErrNoRows {
-			return Shell{}, notFoundError("Exam not found.")
-		}
-		return Shell{}, err
+// normalizeOperationKey trims and validates a client-supplied idempotency
+// key: 1..128 chars of printable non-space content.
+func normalizeOperationKey(key string) (string, error) {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" || len(trimmed) > 128 {
+		return "", validationError("operationKey must contain between 1 and 128 characters.")
 	}
-	if !draftID.Valid || strings.TrimSpace(draftID.String) == "" {
-		return Shell{}, notFoundError("Draft version not found.")
-	}
-	var rev int
-	if err := s.db.QueryRowContext(ctx, "SELECT revision FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE", draftID.String, examID).Scan(&rev); err != nil {
-		if err == sql.ErrNoRows {
-			return Shell{}, notFoundError("Draft version not found.")
-		}
-		return Shell{}, err
-	}
-	sections, err := s.loadSections(ctx, s.db, draftID.String)
+	return trimmed, nil
+}
+
+// claimOperationKey inserts (actor, scope, key) with the request fingerprint.
+// First claim wins; a replay with the same fingerprint returns the stored
+// result, a reuse with a different fingerprint is a 409 so a retried
+// create/duplicate/commit can never silently mint a second effect.
+func claimOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, fingerprint string) (replay []byte, claimed bool, err error) {
+	res, err := q.ExecContext(ctx, "INSERT IGNORE INTO authoring_operation_keys (actor_id, scope, operation_key, request_hash, created_at, expires_at) VALUES (?, ?, ?, ?, NOW(6), DATE_ADD(NOW(6), INTERVAL 7 DAY))", actor, scope, key, fingerprint)
 	if err != nil {
-		return Shell{}, err
+		return nil, false, err
 	}
-	return Shell{ExamID: examID, ProviderKey: providerKey, VersionID: draftID.String, VersionRevision: rev, Sections: sections}, nil
+	n, _ := res.RowsAffected()
+	if n == 1 {
+		return nil, true, nil
+	}
+	var storedHash string
+	var storedResult []byte
+	if err := q.QueryRowContext(ctx, "SELECT request_hash, result_json FROM authoring_operation_keys WHERE actor_id = ? AND scope = ? AND operation_key = ?", actor, scope, key).Scan(&storedHash, &storedResult); err != nil {
+		return nil, false, err
+	}
+	if storedHash != fingerprint {
+		return nil, false, apperrors.New(apperrors.CodeConflict, "This operation key was already used with different content; use a new key.")
+	}
+	return storedResult, false, nil
+}
+
+// storeOperationResult persists the successful outcome for key replays.
+func storeOperationResult(ctx context.Context, q tx.Tx, actor, scope, key string, result any) error {
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx, "UPDATE authoring_operation_keys SET result_json = ? WHERE actor_id = ? AND scope = ? AND operation_key = ?", string(raw), actor, scope, key)
+	return err
+}
+
+// moduleCapacityFence loads one module FOR UPDATE and rejects an insert of
+// `additional` questions when it would exceed target_question_count.
+// Every insert path (create, batch, duplicate, bulk move/duplicate) must run
+// this inside its transaction after locking the destination module row, so
+// two concurrent authors racing the last slot produce exactly one winner.
+func moduleCapacityFence(ctx context.Context, q tx.Tx, moduleID string, additional int) error {
+	var target int
+	if err := q.QueryRowContext(ctx, "SELECT target_question_count FROM assessment_modules WHERE id = ? FOR UPDATE", moduleID).Scan(&target); err != nil {
+		if err == sql.ErrNoRows {
+			return notFoundError("Module not found.")
+		}
+		return err
+	}
+	var current int
+	if err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM assessment_exam_questions WHERE module_id = ?", moduleID).Scan(&current); err != nil {
+		return err
+	}
+	if current+additional > target {
+		return validationError(fmt.Sprintf("Module already has %d of %d questions; cannot add %d more.", current, target, additional))
+	}
+	return nil
+}
+
+// OperationOption carries optional retry-safety for mutating calls.
+type OperationOption func(*operationConfig)
+
+type operationConfig struct {
+	operationKey string
+}
+
+// WithOperationKey makes create/duplicate/commit replay-safe: a retry with
+// the same key and identical content returns the original outcome instead of
+// minting a second question set.
+func WithOperationKey(key string) OperationOption {
+	return func(c *operationConfig) {
+		c.operationKey = key
+	}
+}
+
+func operationFingerprint(v any) (string, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("%x", sum[:]), nil
+}
+
+// Shell loads the current-draft authoring projection (mirrors shell()).
+//
+// Phase 03 cutover: this is the bulk path (bulkShell) — one identity
+// statement plus four version-scoped tree reads inside a single read-only
+// snapshot. There is deliberately NO provider gate here, matching the
+// historical Shell(); OpenShell/Preview keep their sat gates. Error
+// codes/messages are unchanged ("Exam not found."/"Draft version not
+// found.", both 404). The nested per-section/per-module loaders
+// (loadSections/loadModules/loadSummaries/loadRouting) remain for the
+// in-tx post-commit shell (buildShellTx) and the equivalence harness's
+// old-path reference; the live read path no longer uses them.
+func (s *Service) Shell(ctx context.Context, examID string) (Shell, error) {
+	return s.bulkShell(ctx, examID)
 }
 
 // OpenShell opens the editable-draft authoring shell (mirrors open_shell:
@@ -553,26 +683,112 @@ type Preview struct {
 	Sections        []delivery.DeliverySection `json:"sections"`
 }
 
+// Preview loads the candidate-facing projection of the current draft
+// (identity + revision once, sat gate BEFORE any cache read, then exactly
+// the delivery projection via the bulk loader — never the discarded authoring
+// Shell() call the old implementation paid for).
+//
+// Single build: identity+revision resolve once (inside the snapshot when the
+// cache is off, via a single snapshot query when it is on), the sat 422 gate
+// runs BEFORE any cache lookup or population (non-sat drafts never touch the
+// cache), and the delivery tree comes from the injected loader:
+//   - cache on  -> deliverySvc.LoadSectionsBulkWithRevision loader through
+//     previewCache.GetChecked(versionID, probedRevision) — a revision
+//     mismatch reloads inside the same snapshot (never a stale tree);
+//   - cache off -> deliverySvc.LoadSectionsBulk directly (3 statements).
+//
+// Revision-keyed safety notes: every mutation path bumps
+// exam_versions.revision (touchModuleDraft/touchQuestionDraft cover
+// create/batch/update/delete/duplicate/bulk/reorder/save-revision;
+// UpdateDeliverySettings bumps directly; replaceCompleteSATDraft bumps), so a
+// revision mismatch always forces a reload. UndoSATWorkbook swaps the draft
+// pointer WITHOUT bumping exam_versions.revision — safe under the
+// (versionID, revision) key because the pointer change yields a different
+// versionID, whose probe+load describe the restored content. Authz ordering is
+// unchanged: handlers gate (role -> tenant GetForActor) before this service.
 func (s *Service) Preview(ctx context.Context, examID string) (Preview, error) {
-	shell, err := s.Shell(ctx, examID)
-	if err != nil {
+	if s == nil {
+		return Preview{}, errNoDatabase
+	}
+	deliver := s.previewDelivery()
+	// Identity+revision resolve once, inside one snapshot-backed query. The
+	// sat gate runs BEFORE any cache lookup or population: a non-sat draft
+	// returns 422 and never touches the cache.
+	var identity shellIdentity
+	if err := s.withReadSnapshot(ctx, func(ctx context.Context, q queryRowContexter) error {
+		id, err := resolveShellIdentity(ctx, q, examID)
+		if err != nil {
+			return err
+		}
+		identity = id
+		return nil
+	}); err != nil {
 		return Preview{}, err
 	}
-	if shell.ProviderKey != "sat" {
+	if identity.providerKey != "sat" {
 		return Preview{}, validationError("Assessment provider is not supported.")
 	}
-	sections, err := delivery.NewService(s.db, s.runner).LoadSections(ctx, shell.VersionID)
+	if s.previewCache == nil {
+		// Cache off (nil-safe default, also the VERSION_CACHE=off
+		// kill-switch posture): one bulk delivery build, 3 statements.
+		deliverySections, err := deliver.LoadSectionsBulk(ctx, identity.versionID)
+		if err != nil {
+			return Preview{}, err
+		}
+		return Preview{ExamID: examID, ProviderKey: identity.providerKey, VersionID: identity.versionID, VersionRevision: identity.revision, Sections: deliverySections}, nil
+	}
+	// Cache on: serve the delivery tree through GetChecked singleflight keyed
+	// on (versionID, probedRevision). Hit = zero tree statements; miss = the
+	// BulkSectionsLoader's 4 statements (3 tree + revision probe INSIDE the
+	// same snapshot, so the stored revision describes the stored tree).
+	probedRev := int64(identity.revision)
+	loader := deliver.BulkSectionsLoader(ctx, identity.versionID)
+	sections, err := s.previewCache.GetChecked(ctx, identity.versionID, probedRev, loader)
 	if err != nil {
 		return Preview{}, err
 	}
-	return Preview{ExamID: shell.ExamID, ProviderKey: shell.ProviderKey, VersionID: shell.VersionID, VersionRevision: shell.VersionRevision, Sections: sections}, nil
+	return Preview{ExamID: examID, ProviderKey: identity.providerKey, VersionID: identity.versionID, VersionRevision: identity.revision, Sections: sections}, nil
 }
 
 // CreateQuestion appends one question to a module under draft locks (mirrors
 // create_question: locks current draft for module, appends display_order).
-func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, draft QuestionDraft) (QuestionDetail, error) {
+func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, draft QuestionDraft, opts ...OperationOption) (QuestionDetail, error) {
+	cfg := operationConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	var operationKey string
+	var fingerprint string
+	if strings.TrimSpace(cfg.operationKey) != "" {
+		key, err := normalizeOperationKey(cfg.operationKey)
+		if err != nil {
+			return QuestionDetail{}, err
+		}
+		operationKey = key
+		fp, err := operationFingerprint(map[string]any{"module": moduleID, "draft": draft})
+		if err != nil {
+			return QuestionDetail{}, err
+		}
+		fingerprint = fp
+	}
+	scope := "create:" + moduleID
 	var out QuestionDetail
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if operationKey != "" {
+			replay, claimed, err := claimOperationKey(ctx, q, actorID, scope, operationKey, fingerprint)
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				if len(replay) == 0 {
+					return conflictError("This create is still being processed; retry with the same operation key.")
+				}
+				if err := json.Unmarshal(replay, &out); err != nil {
+					return err
+				}
+				return nil
+			}
+		}
 		if err := touchModuleDraft(ctx, q, moduleID); err != nil {
 			return err
 		}
@@ -589,6 +805,12 @@ func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, 
 		}
 		if strings.TrimSpace(draft.QuestionType) == "" {
 			return validationError("Question type is required.")
+		}
+		// Capacity gate inside the same tx that locked the module row: a
+		// second concurrent create racing the last slot loses here instead
+		// of silently overfilling the module past target_question_count.
+		if err := moduleCapacityFence(ctx, q, moduleID, 1); err != nil {
+			return err
 		}
 		var nextOrder sql.NullInt64
 		if err := q.QueryRowContext(ctx, "SELECT COALESCE(MAX(display_order), -1) + 1 FROM assessment_exam_questions WHERE module_id = ?", moduleID).Scan(&nextOrder); err != nil {
@@ -618,6 +840,11 @@ func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, 
 			return err
 		}
 		out = detail
+		if operationKey != "" {
+			if err := storeOperationResult(ctx, q, actorID, scope, operationKey, out); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return out, err
@@ -672,7 +899,7 @@ func defaultSATQuestionDraft(sectionKey string) QuestionDraft {
 // the module row is locked once and display orders are assigned
 // deterministically from the pre-batch MAX(display_order), so concurrent
 // batches cannot interleave or duplicate orders.
-func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID string, drafts []QuestionDraft) ([]QuestionSummary, error) {
+func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID string, drafts []QuestionDraft, opts ...OperationOption) ([]QuestionSummary, error) {
 	if len(drafts) == 0 {
 		return nil, validationError("At least one question is required.")
 	}
@@ -684,8 +911,43 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 			return nil, validationError("Question type is required.")
 		}
 	}
+	cfg := operationConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	var operationKey, fingerprint string
+	if strings.TrimSpace(cfg.operationKey) != "" {
+		key, err := normalizeOperationKey(cfg.operationKey)
+		if err != nil {
+			return nil, err
+		}
+		operationKey = key
+		fp, err := operationFingerprint(map[string]any{"module": moduleID, "drafts": drafts})
+		if err != nil {
+			return nil, err
+		}
+		fingerprint = fp
+	}
+	scope := "batch:" + moduleID
 	out := make([]QuestionSummary, 0, len(drafts))
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if operationKey != "" {
+			replay, claimed, err := claimOperationKey(ctx, q, actorID, scope, operationKey, fingerprint)
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				if len(replay) == 0 {
+					return conflictError("This batch create is still being processed; retry with the same operation key.")
+				}
+				var replayed []QuestionSummary
+				if err := json.Unmarshal(replay, &replayed); err != nil {
+					return err
+				}
+				out = replayed
+				return nil
+			}
+		}
 		if err := touchModuleDraft(ctx, q, moduleID); err != nil {
 			return err
 		}
@@ -695,6 +957,11 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 			if err == sql.ErrNoRows {
 				return notFoundError("Module not found.")
 			}
+			return err
+		}
+		// Batch capacity gate in the same tx that locked the module: the
+		// whole batch is rejected when it would exceed target_question_count.
+		if err := moduleCapacityFence(ctx, q, moduleID, len(drafts)); err != nil {
 			return err
 		}
 		var base sql.NullInt64
@@ -729,6 +996,11 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 				rationale: string(nonEmptyJSON(d.Rationale)), metadata: string(nonEmptyJSON(d.Metadata)),
 			}).summary())
 			order++
+		}
+		if operationKey != "" {
+			if err := storeOperationResult(ctx, q, actorID, scope, operationKey, out); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -902,9 +1174,43 @@ func (s *Service) ReorderQuestions(ctx context.Context, moduleID string, expecte
 
 // DuplicateQuestion copies one exam question into a module (mirrors
 // duplicate_question).
-func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, destModuleID *string, actorID string, insertAfter *string) (QuestionDetail, error) {
+func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, destModuleID *string, actorID string, insertAfter *string, opts ...OperationOption) (QuestionDetail, error) {
+	cfg := operationConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	var operationKey string
+	var fingerprint string
+	if strings.TrimSpace(cfg.operationKey) != "" {
+		key, err := normalizeOperationKey(cfg.operationKey)
+		if err != nil {
+			return QuestionDetail{}, err
+		}
+		operationKey = key
+		fp, err := operationFingerprint(map[string]any{"source": examQuestionID, "dest": destModuleID, "after": insertAfter})
+		if err != nil {
+			return QuestionDetail{}, err
+		}
+		fingerprint = fp
+	}
+	scope := "duplicate:" + examQuestionID
 	var out QuestionDetail
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if operationKey != "" {
+			replay, claimed, err := claimOperationKey(ctx, q, actorID, scope, operationKey, fingerprint)
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				if len(replay) == 0 {
+					return conflictError("This duplicate is still being processed; retry with the same operation key.")
+				}
+				if err := json.Unmarshal(replay, &out); err != nil {
+					return err
+				}
+				return nil
+			}
+		}
 		if err := touchQuestionDraft(ctx, q, examQuestionID); err != nil {
 			return err
 		}
@@ -926,6 +1232,11 @@ func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, 
 			if err := touchModuleDraft(ctx, q, dest); err != nil {
 				return err
 			}
+		}
+		// A cross-module duplicate is an insert into dest; same-module
+		// duplicate also grows the module by one. Fence both before the copy.
+		if err := moduleCapacityFence(ctx, q, dest, 1); err != nil {
+			return err
 		}
 		var nextOrder sql.NullInt64
 		if err := q.QueryRowContext(ctx, "SELECT COALESCE(MAX(display_order), -1) + 1 FROM assessment_exam_questions WHERE module_id = ?", dest).Scan(&nextOrder); err != nil {
@@ -957,13 +1268,17 @@ func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, 
 		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_exam_questions (id, module_id, question_id, question_revision_id, display_order, is_pretest, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(6), NOW(6))", newID, dest, questionID, revisionID, newOrder, pretest); err != nil {
 			return err
 		}
-		_ = actorID
 		_ = order
 		detail, err := scanQuestionDetail(q.QueryRowContext(ctx, questionDetailQuery, newID))
 		if err != nil {
 			return err
 		}
 		out = detail
+		if operationKey != "" {
+			if err := storeOperationResult(ctx, q, actorID, scope, operationKey, out); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return out, err
@@ -993,7 +1308,7 @@ func (s *Service) ExamQuestionIDForRevision(ctx context.Context, revisionID stri
 
 // BulkQuestions applies one move|duplicate|set_pretest|patch_metadata|delete
 // action to many questions under module locks (mirrors bulk_questions).
-func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, action BulkAction, actorID string, expectedRevisions map[string]int) (BulkResult, error) {
+func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, action BulkAction, actorID string, expectedRevisions map[string]int, opts ...OperationOption) (BulkResult, error) {
 	if len(questionIDs) == 0 {
 		return BulkResult{}, validationError("At least one question id is required.")
 	}
@@ -1014,9 +1329,44 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 			}
 		}
 	}
+	cfg := operationConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	var operationKey, fingerprint string
+	if strings.TrimSpace(cfg.operationKey) != "" {
+		key, err := normalizeOperationKey(cfg.operationKey)
+		if err != nil {
+			return BulkResult{}, err
+		}
+		operationKey = key
+		fp, err := operationFingerprint(map[string]any{"ids": questionIDs, "action": action, "revs": expectedRevisions})
+		if err != nil {
+			return BulkResult{}, err
+		}
+		fingerprint = fp
+	}
+	scope := "bulk:" + action.Type
 	result := BulkResult{AffectedQuestionIDs: []string{}, CreatedQuestionIDs: []string{}, UpdatedQuestions: []QuestionSummary{}}
 	affectedModules := map[string]bool{}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if operationKey != "" {
+			replay, claimed, err := claimOperationKey(ctx, q, actorID, scope, operationKey, fingerprint)
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				if len(replay) == 0 {
+					return conflictError("This bulk action is still being processed; retry with the same operation key.")
+				}
+				var replayed BulkResult
+				if err := json.Unmarshal(replay, &replayed); err != nil {
+					return err
+				}
+				result = replayed
+				return nil
+			}
+		}
 		// Validate every optimistic revision before applying any of the batch.
 		for _, id := range questionIDs {
 			if err := touchQuestionDraft(ctx, q, id); err != nil {
@@ -1035,6 +1385,38 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 		if action.DestinationModuleID != "" {
 			if err := touchModuleDraft(ctx, q, action.DestinationModuleID); err != nil {
 				return err
+			}
+		}
+		if action.Type == "move" || action.Type == "duplicate" {
+			if strings.TrimSpace(action.DestinationModuleID) == "" {
+				return validationError("Destination module is required for move.")
+			}
+			// Net inserts into dest = questions not already there, so moving
+			// within the same module never trips the fence spuriously.
+			placement := map[string]string{}
+			for _, id := range questionIDs {
+				var moduleID string
+				if err := q.QueryRowContext(ctx, "SELECT module_id FROM assessment_exam_questions WHERE id = ?", id).Scan(&moduleID); err != nil {
+					if err == sql.ErrNoRows {
+						return notFoundError("Question not found.")
+					}
+					return err
+				}
+				placement[id] = moduleID
+			}
+			netInserts := 0
+			for _, id := range questionIDs {
+				if placement[id] != action.DestinationModuleID {
+					netInserts++
+				}
+			}
+			if action.Type == "duplicate" {
+				netInserts = len(questionIDs)
+			}
+			if netInserts > 0 {
+				if err := moduleCapacityFence(ctx, q, action.DestinationModuleID, netInserts); err != nil {
+					return err
+				}
 			}
 		}
 		for _, id := range questionIDs {
@@ -1146,6 +1528,11 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 				for _, row := range rows {
 					result.UpdatedQuestions = append(result.UpdatedQuestions, row.summary())
 				}
+			}
+		}
+		if operationKey != "" {
+			if err := storeOperationResult(ctx, q, actorID, scope, operationKey, result); err != nil {
+				return err
 			}
 		}
 		return nil

@@ -27,6 +27,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/clock"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
@@ -217,7 +218,7 @@ type moduleRow struct {
 }
 
 // CompleteAssessment runs the true-terminal gate: proctor/receipt terminated
-// => ProctorBlocked; submission idempotency => re-seal sat_complete; require
+// => ProctorBlocked; submission idempotency => return bound result, no re-seal; require
 // all modules submitted|locked else Conflict; score, INSERT
 // student_submissions + assessment_results(scored/ready_to_release) +
 // sections, seal sat_complete.
@@ -228,7 +229,12 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 	if strings.TrimSpace(req.SubmissionID) == "" || len(req.SubmissionID) > 36 {
 		return nil, apperrors.New(apperrors.CodeBadRequest, "submissionId must contain between one and 36 characters.")
 	}
+	// Outcome is captured inside the closure and emitted once after the
+	// retry wrapper returns: WithTxRetry reruns the closure on transient
+	// infra errors (deadlock/lock-wait), so emitting inside would
+	// double-count one logical finalization (e.g. rejected then completed).
 	var out *AssessmentResult
+	var outcome string
 	err := s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		now, err := dbTime(ctx, t)
 		if err != nil {
@@ -241,9 +247,15 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 		if err := rejectIfTerminated(ctx, t, attempt); err != nil {
 			return err
 		}
-		// Submission idempotency: a bound SAT submission re-seals and returns
-		// the existing result instead of scoring twice.
+		// Submission idempotency: a bound SAT submission returns the
+		// existing result instead of scoring twice. No re-seal here: the
+		// first completion already terminalized the attempt (final_submission
+		// non-NULL), so sealAttemptTx's guarded UPDATE would match 0 rows
+		// and 409 every idempotent retry. A mismatched req.SubmissionID on
+		// a bound attempt still returns the bound result — the submission
+		// id is the client's idempotency key, not a selector.
 		if existingID, err := lockedSubmissionID(ctx, t, attempt.ID); err != nil {
+			outcome = telemetry.FinalizeRejected
 			return err
 		} else if existingID != "" {
 			res, err := loadResultTx(ctx, t, existingID)
@@ -253,23 +265,22 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 			if res == nil {
 				return apperrors.New(apperrors.CodeInternal, "SAT submission exists without an assessment result.")
 			}
-			if err := sealAttemptTx(ctx, t, attempt, "submitted", "sat_complete", "student", nil, map[string]any{
-				"submissionId":       res.SubmissionID,
-				"providerKey":        "sat",
-				"assessmentResultId": res.ID,
-			}, now, newRequestID(req.RequestID)); err != nil {
-				return err
-			}
 			out = res
+			outcome = telemetry.FinalizeReplayed
 			return nil
 		}
 		res, err := s.scoreAndPersist(ctx, t, attempt, req.SubmissionID, req.ActorKind, req.ActorID, newRequestID(req.RequestID), now)
 		if err != nil {
+			outcome = telemetry.FinalizeRejected
 			return err
 		}
 		out = res
+		outcome = telemetry.FinalizeCompleted
 		return nil
 	})
+	if outcome != "" {
+		telemetry.IncCounter(telemetry.MSATFinalizeTotal, "outcome", outcome)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -354,6 +365,7 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 
 func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (bool, error) {
 	var done bool
+	var outcome string
 	err := s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		now, err := dbTime(ctx, t)
 		if err != nil {
@@ -407,11 +419,18 @@ func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (
 		}
 		_, err = s.scoreAndPersist(ctx, t, attempt, submissionID, "system", "", uuid.NewString(), now)
 		if err != nil {
+			outcome = telemetry.FinalizeRejected
 			return err
 		}
 		done = true
+		outcome = telemetry.FinalizeCompleted
 		return nil
 	})
+	// Single emission after the retry wrapper (see CompleteAssessment): a
+	// transient retry must not double-count one logical repair.
+	if outcome != "" {
+		telemetry.IncCounter(telemetry.MSATFinalizeTotal, "outcome", outcome)
+	}
 	return done, err
 }
 
@@ -551,7 +570,17 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 		if maxRaw < 1 {
 			maxRaw = 1
 		}
+		// Live-rehearsal P0: partial module coverage (answered < placed <
+		// target) normalizes UP to the full base+branch target scale, so the
+		// index can exceed the per-module table max (practice tables stop at
+		// 27 RW / 22 math) and terminal submit fails closed with
+		// "configured score is missing". Clamp to the target scale: the
+		// table is authoritative in range, and above-scale means a
+		// perfect-or-better paper, which the table max scores at 800.
 		normalized := normalizedRaw(a.raw, a.operational, maxRaw)
+		if normalized > maxRaw {
+			normalized = maxRaw
+		}
 		route := "lower"
 		if a.route != nil {
 			route = *a.route
@@ -586,7 +615,7 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 	case err == nil && owner != attempt.ID:
 		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "submissionId is already bound to another attempt.", HTTPStatus: 409, Details: map[string]any{"code": "SUBMISSION_ID_MISUSE"}}
 	case err == sql.ErrNoRows:
-		candidate, email, name, cohort := attemptCandidate(ctx, t, attempt.ID)
+		candidate, name, email, cohort := attemptCandidate(ctx, t, attempt.ID)
 		sectionStatuses, _ := json.Marshal(map[string]string{SectionReadingWriting: "auto_graded", SectionMath: "auto_graded"})
 		if _, err := t.ExecContext(ctx, `
 			INSERT INTO student_submissions
@@ -598,21 +627,59 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 			candidate, name, email, cohort, now, string(sectionStatuses)); err != nil {
 			// The missing-row SELECT locks nothing, so a concurrent INSERT
 			// of the same id (or the UNIQUE attempt_id twin) surfaces as
-			// a duplicate key: re-read the winner in-tx and map to the
-			// stable 409 SUBMISSION_ID_MISUSE instead of a 500.
+			// a duplicate key: converge same-attempt twins to the winner's
+			// result (idempotent success), 409 only cross-attempt misuse.
 			if isDupSubmissionKey(err) {
-				var owner string
-				if rerr := t.QueryRowContext(ctx, "SELECT attempt_id FROM student_submissions WHERE id = ?", submissionID).Scan(&owner); rerr == nil {
-					if owner != attempt.ID {
+				var dupOwner string
+				// Current read: FOR UPDATE is load-bearing here. The
+				// tx runs at REPEATABLE READ, so a plain re-read could
+				// miss the just-committed winner and misroute a
+				// same-attempt twin to MISUSE below.
+				ownerErr := t.QueryRowContext(ctx, "SELECT attempt_id FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&dupOwner)
+				if ownerErr == nil {
+					if dupOwner != attempt.ID {
 						return nil, submissionMisuseError()
 					}
-					// Same-attempt twin (UNIQUE attempt_id race on the
-					// same id): the submission now belongs to us; fall
-					// through to result persistence below.
-				} else if rerr != sql.ErrNoRows {
-					return nil, rerr
+					// Same-attempt twin: the winner's submission row is
+					// ours. If it already scored, return its result;
+					// otherwise the winner is still persisting — tell
+					// the loser to retry rather than double-score.
+					wonRes, werr := loadResultTx(ctx, t, submissionID)
+					if werr != nil || wonRes == nil {
+						if werr != nil {
+							return nil, werr
+						}
+						return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "A concurrent finalization owns this submission; retry.", HTTPStatus: 409}
+					}
+					return wonRes, nil
 				}
-				return nil, submissionMisuseError()
+				if ownerErr != sql.ErrNoRows {
+					return nil, ownerErr
+				}
+				// Same id absent but a UNIQUE(attempt_id) twin won with
+				// a different id: the attempt already has a bound
+				// submission — return its result (idempotent success).
+				// Only reached when the same-id lookup missed AND no
+				// bound row locked: near-dead in InnoDB (a duplicate
+				// implies a winner row visible to current reads), so a
+				// miss here is a transient visibility gap — retry,
+				// never permanent MISUSE (which tells clients not to
+				// retry).
+				boundID, berr := lockedSubmissionID(ctx, t, attempt.ID)
+				if berr != nil {
+					return nil, berr
+				}
+				if boundID != "" {
+					boundRes, rerr := loadResultTx(ctx, t, boundID)
+					if rerr != nil || boundRes == nil {
+						if rerr != nil {
+							return nil, rerr
+						}
+						return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "A concurrent finalization owns this attempt; retry.", HTTPStatus: 409}
+					}
+					return boundRes, nil
+				}
+				return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "A concurrent finalization is in progress; retry.", HTTPStatus: 409}
 			}
 			return nil, err
 		}
@@ -892,6 +959,10 @@ func sealAttemptTx(ctx context.Context, t tx.Tx, a attemptCore, outcome, reason,
 	return nil
 }
 
+// attemptCandidate returns (id, name, email, cohort): SELECT order is
+// candidate_id, candidate_name, candidate_email, student_key. Callers bind
+// positionally (id→student_id, name→student_name, email→student_email), so
+// keep this order — swapping name/email silently misattributes results.
 func attemptCandidate(ctx context.Context, t tx.Tx, attemptID string) (id, name, email, cohort string) {
 	_ = t.QueryRowContext(ctx,
 		"SELECT candidate_id, candidate_name, candidate_email, COALESCE(student_key, '') FROM student_attempts WHERE id = ?",

@@ -1,0 +1,15 @@
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/spine/CommandPalette.tsx
+  14:328  warning  The autoFocus prop should not be used, as it can reduce usability and accessibility for users  jsx-a11y/no-autofocus
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/spine/QuestionQueueRail.tsx
+  245:7  warning  Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+
+/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/spine/RailResizer.tsx
+  62:5  warning  Non-interactive elements should not be assigned mouse or keyboard event listeners                                   jsx-a11y/no-noninteractive-element-interactions
+  69:7  warning  `tabIndex` should only be declared on interactive elements                                                          jsx-a11y/no-noninteractive-tabindex
+  72:7  warning  Unused eslint-disable directive (no problems were reported from 'jsx-a11y/no-noninteractive-element-interactions')
+
+✖ 5 problems (0 errors, 5 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+

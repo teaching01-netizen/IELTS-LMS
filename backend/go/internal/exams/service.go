@@ -10,6 +10,7 @@ package exams
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -240,11 +241,14 @@ type SaveDraftRequest struct {
 }
 
 // PublishRequest mirrors PublishExamRequest with revision fencing.
+// OperationKey makes a lost-response publish retry converge on the original
+// release instead of sealing a second published version.
 type PublishRequest struct {
 	PublishNotes           *string
 	Revision               int
 	ExpectedDraftVersionID *string
 	ExpectedDraftRevision  *int
+	OperationKey           string
 }
 
 func validationError(msg string) *apperrors.Error {
@@ -257,6 +261,28 @@ func notFoundError(msg string) *apperrors.Error {
 
 func conflictError(msg string) *apperrors.Error {
 	return apperrors.New(apperrors.CodeConflict, msg)
+}
+
+// claimPublishOperationKey mirrors authoring.claimOperationKey for the
+// publish path so a lost-response retry replays the sealed version.
+func claimPublishOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, fingerprint string) (replay []byte, claimed bool, err error) {
+	res, err := q.ExecContext(ctx, "INSERT IGNORE INTO authoring_operation_keys (actor_id, scope, operation_key, request_hash, created_at, expires_at) VALUES (?, ?, ?, ?, NOW(6), DATE_ADD(NOW(6), INTERVAL 7 DAY))", actor, scope, key, fingerprint)
+	if err != nil {
+		return nil, false, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 1 {
+		return nil, true, nil
+	}
+	var storedHash string
+	var storedResult []byte
+	if err := q.QueryRowContext(ctx, "SELECT request_hash, result_json FROM authoring_operation_keys WHERE actor_id = ? AND scope = ? AND operation_key = ?", actor, scope, key).Scan(&storedHash, &storedResult); err != nil {
+		return nil, false, err
+	}
+	if storedHash != fingerprint {
+		return nil, false, apperrors.New(apperrors.CodeConflict, "This operation key was already used with different content; use a new key.")
+	}
+	return storedResult, false, nil
 }
 
 const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at"
@@ -760,7 +786,40 @@ func (s *Service) SaveDraft(ctx context.Context, examID string, actorID string, 
 // draft id/revision fencing rejects stale consoles with CONFLICT.
 func (s *Service) Publish(ctx context.Context, examID string, actorID string, req PublishRequest) (Version, error) {
 	var out Version
+	normalizedKey := strings.TrimSpace(req.OperationKey)
+	if normalizedKey != "" && len(normalizedKey) > 128 {
+		return Version{}, validationError("operationKey must contain between 1 and 128 characters.")
+	}
+	publishScope := "publish:" + examID
+	var publishFingerprint string
+	if normalizedKey != "" {
+		raw, err := json.Marshal(map[string]any{"exam": examID, "rev": req.Revision, "draft": req.ExpectedDraftVersionID, "draftRev": req.ExpectedDraftRevision, "notes": req.PublishNotes})
+		if err != nil {
+			return Version{}, err
+		}
+		// Fingerprint mirrors authoring.operationFingerprint; exams must
+		// not import authoring, so the sha is computed inline.
+		sum := sha256.Sum256(raw)
+		publishFingerprint = fmt.Sprintf("%x", sum[:])
+	}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if normalizedKey != "" {
+			replay, claimed, err := claimPublishOperationKey(ctx, q, actorID, publishScope, normalizedKey, publishFingerprint)
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				if len(replay) == 0 {
+					return conflictError("This publish is still being processed; retry with the same operation key.")
+				}
+				var replayed Version
+				if err := json.Unmarshal(replay, &replayed); err != nil {
+					return err
+				}
+				out = replayed
+				return nil
+			}
+		}
 		var draftID string
 		var versionNumber int
 		var content, config string
@@ -817,6 +876,15 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 			return err
 		}
 		out = v
+		if normalizedKey != "" {
+			raw, err := json.Marshal(out)
+			if err != nil {
+				return err
+			}
+			if _, err := q.ExecContext(ctx, "UPDATE authoring_operation_keys SET result_json = ? WHERE actor_id = ? AND scope = ? AND operation_key = ?", string(raw), actorID, publishScope, normalizedKey); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return out, err

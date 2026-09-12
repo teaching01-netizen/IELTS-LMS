@@ -33,6 +33,42 @@ export function snapshotRemainingSeconds(
   return Math.max(0, (attempt.remainingSeconds ?? 0) - elapsedSinceSnapshot);
 }
 
+/**
+ * Personal module countdown that ticks between bootstraps (exam-day P1).
+ *
+ * The backend ships a server-computed `deadlineAt` per module attempt; when
+ * present it is authoritative and advanced with the same clock offset the
+ * cohort section clock uses, so the display tracks the server expiry instead
+ * of freezing at the last snapshot value. Falls back to
+ * snapshotRemainingSeconds when no deadline is available. A paused or
+ * unstarted module never ticks (frozen countdown).
+ *
+ * Exam-day re-audit defect 9: a cohort-stage pause freezes the authoritative
+ * section clock (`running` false in useAuthoritativeDeadlineClock), so the
+ * personal clock must freeze too — otherwise min(personal ticking,
+ * authoritative frozen) drains to a spurious auto-submit during a planned
+ * pause drill. Pass cohortRunning=false when the stage is not live.
+ */
+export function personalModuleRemainingSeconds(
+  attempt: AssessmentModuleAttemptSnapshot | undefined,
+  snapshotReceivedAt: number,
+  now: number,
+  clockOffsetMs = 0,
+  cohortRunning = true,
+): number {
+  if (!attempt) return 0;
+  if (attempt.pausedAt || !attempt.startedAt || !cohortRunning) {
+    return Math.max(0, attempt.remainingSeconds ?? 0);
+  }
+  if (attempt.deadlineAt) {
+    const deadlineMs = Date.parse(attempt.deadlineAt);
+    if (Number.isFinite(deadlineMs) && Number.isFinite(clockOffsetMs)) {
+      return Math.max(0, Math.ceil((deadlineMs - (now + clockOffsetMs)) / 1_000));
+    }
+  }
+  return snapshotRemainingSeconds(attempt, snapshotReceivedAt, now);
+}
+
 export function breakRemainingSeconds(
   data: AssessmentDeliveryBootstrap,
   attempt: AssessmentModuleAttemptSnapshot | undefined,

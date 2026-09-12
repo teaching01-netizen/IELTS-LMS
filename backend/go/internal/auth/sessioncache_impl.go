@@ -42,13 +42,13 @@ type sessionCacheEntry struct {
 // It is safe for concurrent use.
 type SessionCache struct {
 	mu       sync.Mutex
-	enabled   bool
+	enabled  bool
 	max      int
 	coalesce time.Duration
 	ll       *list.List // front = most recently used; element.Value = cacheKey
 	items    map[string]*list.Element
 	byUser   map[string]map[string]struct{}
-	hits       uint64
+	hits     uint64
 	misses   uint64
 }
 
@@ -68,12 +68,12 @@ func NewSessionCache(cfg SessionCacheConfig) *SessionCache {
 		coalesceSecs = defaultSessionTouchCoalesceSecs
 	}
 	return &SessionCache{
-		enabled:   cfg.Enabled,
-		max:       max,
-		coalesce:  time.Duration(coalesceSecs) * time.Second,
-		ll:        list.New(),
-		items:     make(map[string]*list.Element),
-		byUser:    make(map[string]map[string]struct{}),
+		enabled:  cfg.Enabled,
+		max:      max,
+		coalesce: time.Duration(coalesceSecs) * time.Second,
+		ll:       list.New(),
+		items:    make(map[string]*list.Element),
+		byUser:   make(map[string]map[string]struct{}),
 	}
 }
 

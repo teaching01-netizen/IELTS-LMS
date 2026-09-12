@@ -449,13 +449,11 @@ func (r *Repository) MarkFailed(ctx context.Context, claimToken, id string, atte
 	disp, delay := BackoffFor(attempts)
 	switch disp {
 	case Terminal:
-		_, err := r.db.ExecContext(ctx, `
-			UPDATE outbox_events
-			SET claimed_at = NOW(), claim_token = NULL, claimed_by = NULL,
-				claim_expires_at = DATE_ADD(NOW(), INTERVAL 365 DAY),
-				next_attempt_at = NULL, failed_at = NOW(), last_error = ?
-			WHERE id = ? AND claim_token = ?`, message, id, claimToken)
-		return Terminal, err
+		// WS-09: the terminal park UPDATE and the DLQ evidence INSERT
+		// commit in one transaction (markTerminal, dlq.go). The parked
+		// row keeps the exact pre-WS-09 column values so current readers
+		// see no behavior change; the DLQ row is the queryable evidence.
+		return Terminal, r.markTerminal(ctx, claimToken, id, attempts, message)
 	default:
 		secs := int64(delay / time.Second)
 		if secs < 1 {
@@ -473,10 +471,21 @@ func (r *Repository) MarkFailed(ctx context.Context, claimToken, id string, atte
 }
 
 // PurgePublished deletes published rows older than 72h, bounded by limit.
-// OldestPendingAgeSeconds reports the age of the oldest unclaimed, // executable pending event; NULL (no rows) returns 0 without error.
+// OldestPendingAgeSeconds reports the age of the oldest unclaimed, executable
+// pending event; NULL (no rows) returns 0 without error.
+//
+// WS-09c: the WHERE reuses duePredicate semantics for the failed/retry
+// dimensions (failed_at IS NULL + next_attempt_at due) so terminal corpses
+// and not-yet-due retries can never pin the gauge — but NOT the lease
+// clause: the gauge measures the unclaimed backlog, so it keeps
+// claim_token IS NULL instead of the claimed_at/claim_expires_at lease
+// check. Predicate order mirrors duePredicate (failed/retry first,
+// claim state last). NOW(6) only inside the next_attempt_at comparison
+// (fractional precision like the UTC_TIMESTAMP(6) age math); duePredicate
+// itself stays on NOW() for the claim paths, untouched.
 func (r *Repository) OldestPendingAgeSeconds(ctx context.Context) (int64, error) {
 	var age sql.NullInt64
-	if err := r.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(TIMESTAMPDIFF(SECOND, created_at, UTC_TIMESTAMP(6))), 0) FROM outbox_events WHERE published_at IS NULL AND claim_token IS NULL").Scan(&age); err != nil {
+	if err := r.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(TIMESTAMPDIFF(SECOND, created_at, UTC_TIMESTAMP(6))), 0) FROM outbox_events WHERE published_at IS NULL AND failed_at IS NULL AND (next_attempt_at IS NULL OR next_attempt_at <= NOW(6)) AND claim_token IS NULL").Scan(&age); err != nil {
 		return 0, err
 	}
 	if !age.Valid {

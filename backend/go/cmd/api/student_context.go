@@ -63,9 +63,12 @@ func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID stri
 		"plannedDurationMinutes": row.plannedDuration, "deliveryMode": row.deliveryMode,
 		"recurrenceType": row.recurrenceType, "recurrenceInterval": row.recurrenceInterval,
 		"autoStart": row.autoStart, "autoStop": row.autoStop, "status": row.status,
-		"createdAt": row.createdAt.UTC(), "createdBy": row.createdBy,
+		"createdAt": row.createdAt.UTC(),
 		"updatedAt": row.updatedAt.UTC(), "revision": row.revision,
 	}
+	// Staff identity never crosses to students: createdBy is dropped
+	// (version-level authorship was already redacted; schedule-level
+	// follows the same rule).
 	if row.institution.Valid {
 		schedule["institution"] = row.institution.String
 	}
@@ -98,24 +101,28 @@ func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID stri
 	if err != nil {
 		return nil, nil, "", err
 	}
-	content := decodeStudentSnapshot(contentRaw.String)
+	// Security P0: student-facing version payloads carry no authoring
+	// internals. content/config snapshots pass through the same allowlisted
+	// redaction as SAT bootstrap (deliveredAnswer); validation snapshots,
+	// publish notes, authorship and draft flags never cross to students.
+	content, err := redactStudentSnapshot(contentRaw.String)
+	if err != nil {
+		return nil, nil, "", err
+	}
 	if _, exists := content["providerKey"]; !exists {
 		content["providerKey"] = row.providerKey
 	}
+	config, err := redactStudentSnapshot(configRaw.String)
+	if err != nil {
+		return nil, nil, "", err
+	}
 	version := map[string]any{
 		"id": versionID.String, "examId": examID.String, "versionNumber": versionNumber,
-		"contentSnapshot": content, "configSnapshot": decodeStudentSnapshot(configRaw.String),
-		"createdBy": createdBy.String, "createdAt": createdAt.UTC(),
-		"isDraft": isDraft, "isPublished": isPublished, "revision": revision,
+		"contentSnapshot": content, "configSnapshot": config,
+		"createdAt": createdAt.UTC(), "revision": revision,
 	}
 	if parentVersionID.Valid {
 		version["parentVersionId"] = parentVersionID.String
-	}
-	if validationRaw.Valid && strings.TrimSpace(validationRaw.String) != "" && strings.TrimSpace(validationRaw.String) != "null" {
-		version["validationSnapshot"] = decodeStudentSnapshot(validationRaw.String)
-	}
-	if publishNotes.Valid {
-		version["publishNotes"] = publishNotes.String
 	}
 	return schedule, version, row.providerKey, nil
 }
@@ -126,6 +133,152 @@ func decodeStudentSnapshot(raw string) map[string]any {
 		return map[string]any{}
 	}
 	return value
+}
+
+// redactStudentSnapshot strips answer-key and authoring-internal fields from
+// a V1 snapshot tree before it crosses to students. Answer definitions keep
+// only the deliverable fields (same allowlist as delivery.deliveredAnswer:
+// kind + options for single_choice; kind + normalization fields for
+// student_produced_response). Validation metadata, rationales, internal
+// notes, and pretest markers are dropped — they are test-strategy signals.
+func redactStudentSnapshot(raw string) (map[string]any, error) {
+	root := decodeStudentSnapshot(raw)
+	redactSnapshotValue(root)
+	return root, nil
+}
+
+// redactSnapshotValue walks a decoded snapshot tree in place, redacting
+// every embedded answer definition it finds (sections/modules/questions
+// nesting varies by authoring version; key names are stable).
+//
+// Key-universe contract: the scorer accepts camelCase AND snake_case
+// twins, so deletion covers both spellings (normalized compare). An
+// authoring row carrying snake_case key material must not pass through.
+func redactSnapshotValue(node any) {
+	switch v := node.(type) {
+	case map[string]any:
+		if raw, ok := v["answer"]; ok {
+			if redacted, err := redactAnswerValue(raw); err == nil {
+				v["answer"] = redacted
+			} else {
+				delete(v, "answer")
+			}
+		}
+		if raw, ok := v["answerDefinition"]; ok {
+			if redacted, err := redactAnswerValue(raw); err == nil {
+				v["answerDefinition"] = redacted
+			} else {
+				delete(v, "answerDefinition")
+			}
+		}
+		if raw, ok := v["answer_definition"]; ok {
+			if redacted, err := redactAnswerValue(raw); err == nil {
+				v["answer_definition"] = redacted
+			} else {
+				delete(v, "answer_definition")
+			}
+		}
+		for key := range v {
+			switch normalizeAnswerKey(key) {
+			case "correctoptionid", "acceptedresponses", "rationale", "internalnote", "ispretest",
+				"explanation", "scoringnote", "authornote":
+				delete(v, key)
+			}
+		}
+		for _, child := range v {
+			redactSnapshotValue(child)
+		}
+	case []any:
+		for _, child := range v {
+			redactSnapshotValue(child)
+		}
+	}
+}
+
+// normalizeAnswerKey canonicalizes an answer-adjacent key for comparison:
+// lowercase, underscores removed. "correct_option_id" and
+// "CorrectOptionId" both normalize to "correctoptionid".
+func normalizeAnswerKey(key string) string {
+	var out []rune
+	for _, r := range key {
+		if r == '_' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			out = append(out, r+('a'-'A'))
+		} else {
+			out = append(out, r)
+		}
+	}
+	return string(out)
+}
+
+// redactAnswerValue keeps only the deliverable fields of one answer
+// definition, mirroring delivery.deliveredAnswer without importing the
+// delivery package (cmd/api must not depend on internal service packages).
+// Twin spellings accepted on input, canonical camelCase emitted; options
+// re-allowlisted per element ({id, content} only).
+func redactAnswerValue(raw any) (any, error) {
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var source map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &source); err != nil {
+		return nil, err
+	}
+	byNorm := map[string]json.RawMessage{}
+	for key, value := range source {
+		byNorm[normalizeAnswerKey(key)] = value
+	}
+	kind := ""
+	if rawKind, ok := byNorm["kind"]; ok {
+		_ = json.Unmarshal(rawKind, &kind)
+	}
+	out := map[string]any{}
+	if rawKind, ok := source["kind"]; ok {
+		var decoded any
+		if err := json.Unmarshal(rawKind, &decoded); err == nil {
+			out["kind"] = decoded
+		}
+	} else if kind != "" {
+		out["kind"] = kind
+	}
+	switch kind {
+	case "single_choice":
+		rawOptions, ok := byNorm["options"]
+		if !ok {
+			break
+		}
+		var options []map[string]any
+		if err := json.Unmarshal(rawOptions, &options); err != nil {
+			break
+		}
+		redacted := make([]map[string]any, 0, len(options))
+		for _, opt := range options {
+			keep := map[string]any{}
+			for key, value := range opt {
+				switch normalizeAnswerKey(key) {
+				case "id", "content":
+					keep[key] = value
+				}
+			}
+			redacted = append(redacted, keep)
+			}
+		out["options"] = redacted
+	case "student_produced_response":
+		for _, canonical := range []string{"normalizeFraction", "normalizeDecimal", "numericTolerance"} {
+			if value, ok := byNorm[normalizeAnswerKey(canonical)]; ok {
+				var decoded any
+				if err := json.Unmarshal(value, &decoded); err == nil {
+					out[canonical] = decoded
+				}
+			}
+		}
+	default:
+		return nil, apperrors.New(apperrors.CodeValidation, "Unsupported delivered answer kind.")
+	}
+	return out, nil
 }
 
 func loadStudentRuntimeContext(ctx context.Context, db *sql.DB, scheduleID string) (map[string]any, error) {
@@ -147,18 +300,70 @@ func loadStudentRuntimeContext(ctx context.Context, db *sql.DB, scheduleID strin
 	return out, nil
 }
 
+// resolveStudentAttemptIDForUser resolves the caller's attempt for the
+// cookie-session reads (v1SessionInner/v1LiveInner via
+// studentSessionContext). Fail-closed binding:
+//   - candidateID != "": resolve by candidate identity ONLY, then VERIFY
+//     the resolved row's user_id == userID; a cross-user candidate renders
+//     sql.ErrNoRows (callers 404, no cross-user leak).
+//   - candidateID == "": resolve by user_id; a miss renders ErrNoRows.
+//   - Either way, REQUIRE a live schedule_registrations row for
+//     (scheduleID, userID); without one the caller never checked in and
+//     gets ErrNoRows (attempt:nil shape in studentSessionContext).
+//
+// Bootstrap is unaffected: v1BootstrapInner mints via
+// bootstrapStudentAttempt (candidateID required, creates the registration)
+// and never calls this resolver.
 func resolveStudentAttemptIDForUser(ctx context.Context, db *sql.DB, scheduleID, candidateID, userID string) (string, error) {
 	candidateID = strings.TrimSpace(candidateID)
 	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return "", sql.ErrNoRows
+	}
+	if candidateID != "" {
+		var attemptID, ownerID string
+		err := db.QueryRowContext(ctx, `
+		SELECT id, COALESCE(user_id, '') FROM student_attempts
+		WHERE schedule_id = ?
+		  AND (candidate_id = ? OR wcode = ? OR student_key = ?)
+		ORDER BY updated_at DESC, id DESC LIMIT 1`,
+			scheduleID, candidateID, candidateID, candidateID).Scan(&attemptID, &ownerID)
+		if err != nil {
+			return "", err
+		}
+		if ownerID != userID {
+			return "", sql.ErrNoRows
+		}
+		if err := requireScheduleRegistration(ctx, db, scheduleID, userID); err != nil {
+			return "", err
+		}
+		return attemptID, nil
+	}
 	var attemptID string
 	err := db.QueryRowContext(ctx, `
 		SELECT id FROM student_attempts
-		WHERE schedule_id = ?
-		  AND ((? <> '' AND (candidate_id = ? OR wcode = ? OR student_key = ?))
-		       OR (? <> '' AND user_id = ?))
+		WHERE schedule_id = ? AND user_id = ?
 		ORDER BY updated_at DESC, id DESC LIMIT 1`,
-		scheduleID, candidateID, candidateID, candidateID, candidateID, userID, userID).Scan(&attemptID)
-	return attemptID, err
+		scheduleID, userID).Scan(&attemptID)
+	if err != nil {
+		return "", err
+	}
+	if err := requireScheduleRegistration(ctx, db, scheduleID, userID); err != nil {
+		return "", err
+	}
+	return attemptID, nil
+}
+
+// requireScheduleRegistration reports ErrNoRows when no registration row
+// binds (scheduleID, userID). Both user_id and actor_id count: entry binds
+// either column depending on the flow (see CreateRegistration).
+func requireScheduleRegistration(ctx context.Context, db *sql.DB, scheduleID, userID string) error {
+	var one int
+	err := db.QueryRowContext(ctx, `
+		SELECT 1 FROM schedule_registrations
+		WHERE schedule_id = ? AND (user_id = ? OR actor_id = ?)
+		LIMIT 1`, scheduleID, userID, userID).Scan(&one)
+	return err
 }
 
 func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, scheduleID, candidateID, clientSessionID string, includeCredential bool) (map[string]any, error) {

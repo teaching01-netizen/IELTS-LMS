@@ -8,18 +8,23 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"log"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"example.com/ielts-proctoring/internal/accesslinks"
 	"example.com/ielts-proctoring/internal/act"
 	"example.com/ielts-proctoring/internal/answerhistory"
+	shared "example.com/ielts-proctoring/internal/app"
 	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authoring"
+	"example.com/ielts-proctoring/internal/authz"
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/grading"
@@ -28,12 +33,10 @@ import (
 	"example.com/ielts-proctoring/internal/media"
 	"example.com/ielts-proctoring/internal/outbox"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
-	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/db"
 	"example.com/ielts-proctoring/internal/platform/httpx"
-	"example.com/ielts-proctoring/internal/platform/objectstore"
 	"example.com/ielts-proctoring/internal/platform/shutdown"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -53,38 +56,42 @@ import (
 // this struct explicitly (no globals); handlers nil-check only for
 // dependency outages and return the stable 503 envelope when required.
 type App struct {
-	Config          config.Config
-	DB              *sql.DB
-	Tx              *tx.Runner
-	Limiter         *httpx.BucketStore
-	Tiers           *httpx.TierSet
-	Attempts        *attempts.Service
-	Exams           *exams.Service
-	Schedules       *schedules.Service
-	Student         *student.Service
-	Proctor         *proctor.Service
-	Grading         *grading.Service
-	Results         *results.Service
-	Media           *media.Service
-	Library         *library.Service
-	AnswerHistory   *answerhistory.Service
-	Authoring       *authoring.Service
-	AccessLinks     *accesslinks.Service
-	SAT             *sat.Service
-	ACT             *act.Service
-	Delivery        *delivery.Service
-	Release         *release.Service
-	Runtime         *runtime.Service
-	Terminal        *terminalization.Service
-	LiveBus         *liveupdates.Bus
-	LiveHub         *liveupdates.Hub
-	Leases          *liveupdates.LeaseRepository
+	Config        config.Config
+	DB            *sql.DB
+	Tx            *tx.Runner
+	Limiter       *httpx.BucketStore
+	Tiers         *httpx.TierSet
+	Attempts      *attempts.Service
+	Exams         *exams.Service
+	Schedules     *schedules.Service
+	Student       *student.Service
+	Proctor       *proctor.Service
+	Grading       *grading.Service
+	Results       *results.Service
+	Media         *media.Service
+	Library       *library.Service
+	AnswerHistory *answerhistory.Service
+	Authoring     *authoring.Service
+	AccessLinks   *accesslinks.Service
+	SAT           *sat.Service
+	ACT           *act.Service
+	Delivery      *delivery.Service
+	Release       *release.Service
+	Runtime       *runtime.Service
+	Terminal      *terminalization.Service
+	LiveBus       *liveupdates.Bus
+	LiveHub       *liveupdates.Hub
+	Leases        *liveupdates.LeaseRepository
 	// Admission is the plan-C2 in-memory WS gate. Always non-nil (db mode
 	// leaves it unused; memory mode serves acquires with zero SQL).
-	Admission *liveupdates.Admission
+	Admission       *liveupdates.Admission
 	Outbox          *outbox.Repository
 	Secret          []byte
 	LiveForwardOnce sync.Once
+	// LiveForwardMu guards stopLiveForward (start/stop cross goroutines).
+	LiveForwardMu sync.Mutex
+	// stopLiveForward halts the bus poll loop; nil when never started.
+	stopLiveForward context.CancelFunc
 	// SessionCache is the plan-A2 in-process session LRU. Always non-nil
 	// (disabled cache = never stores, never hits = today's behavior).
 	// Wired in BuildApp so authMiddleware serves hits with zero SQL.
@@ -163,72 +170,57 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		Versions: delivery.NewVersionCache(delivery.VersionCacheMaxVersions),
 		// Plan D3: always non-nil (off = present-but-unused). Wired from
 		// ENTRY_PER_SEC_PER_SCHEDULE/ENTRY_BURST (clamped in config).
-		EntryGate: newEntryGate(entryGateConfig{PerSec: cfg.EntryPerSec, Burst: cfg.EntryBurst})}
-	if pool != nil {
-		app.Tx = tx.NewRunner(pool)
-		secret := []byte(cfg.AuthSecret)
-		app.Secret = secret
-		outbx := outbox.NewRepository(pool)
-		app.Outbox = outbx
-		app.Terminal = terminalization.NewService(app.Tx, nil, nil).SetOutboxExecOnly(cfg.OutboxExecOnly)
-		app.Attempts = attempts.NewService(app.Tx, clock.System{}, secret).SetRowFirst(cfg.RowFirstWrites)
-		app.Exams = exams.NewService(pool, app.Tx)
-		app.Schedules = schedules.NewService(pool, app.Tx)
-		app.Student = student.NewService(pool, nil).SetRowFirst(cfg.RowFirstWrites)
-		// Plan D2: memory presence (off/inline = untouched per-beat tx).
-		if cfg.PresenceMemory() {
-			app.Student.SetPresence(student.NewPresenceMap(student.DefaultPresenceTTL))
-		}
-		assign := proctor.SQLAssignmentChecker{}
-		app.Proctor = proctor.NewService(app.Tx, pool, app.Terminal, nil, assign).SetOutboxExecOnly(cfg.OutboxExecOnly)
-		app.Grading = grading.NewService(pool, app.Tx)
-		app.Results = results.NewService(pool)
-		app.Media = media.NewService(pool, app.Tx, objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot))
-		app.Library = library.NewService(pool, app.Tx)
-		app.AnswerHistory = answerhistory.NewService(pool)
-		app.Authoring = authoring.NewService(pool, app.Tx)
-		app.AccessLinks = accesslinks.NewService(pool, app.Tx)
-		app.SAT = sat.NewService(pool, app.Tx, clock.System{}, nil)
-		app.ACT = act.NewService(pool, app.Tx)
-		app.Terminal.SetAttemptScorer(app.ACT)
-		app.Release = release.NewService(pool)
-		app.Runtime = runtime.NewService(app.Tx, nil).SetOutboxExecOnly(cfg.OutboxExecOnly).SetSnapshotCache(app.RuntimeSnapshots)
-		// Each API process needs a distinct bus origin so the forwarder can
-		// distinguish local post-commit fanout from events written by peers.
-		app.LiveBus = liveupdates.NewBus(pool, uuid.NewString())
-		app.LiveHub = liveupdates.NewHub()
-		deliverySvc := delivery.NewService(pool, app.Tx).SetLive(app.LiveBus.Origin(), app.LiveHub).SetLiveDirect(cfg.IsDirect()).SetLiveSink(app.LiveBus, cfg.LiveBusSink)
-		if cfg.VersionCacheEnabled {
-			deliverySvc.SetVersionCache(app.Versions)
-		}
-		app.Delivery = deliverySvc.SetCompleter(func(ctx context.Context, scheduleID, attemptID string) error {
-			var providerKey string
-			if err := pool.QueryRowContext(ctx, "SELECT e.provider_key FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id WHERE a.id = ? AND a.schedule_id = ?", attemptID, scheduleID).Scan(&providerKey); err != nil {
-				return err
-			}
-			switch providerKey {
-			case "sat":
-				return app.SAT.ReconcileAdapter()(ctx, scheduleID, attemptID)
-			case "act":
-				_, err := app.Terminal.Terminalize(ctx, terminalization.SealCommand{
-					AttemptID: attemptID, ScheduleID: scheduleID,
-					Outcome: terminalization.OutcomeTerminated, Reason: terminalization.ReasonTimeExpired,
-					ActorKind: terminalization.ActorSystem,
-					RequestID: "timeout-" + attemptID,
-				})
-				return err
-			default:
-				return nil
-			}
-		})
-		app.Leases = liveupdates.NewLeaseRepository(pool)
-		app.Admission = liveupdates.NewAdmission(liveupdates.AdmissionCaps{
+		EntryGate: newEntryGate(entryGateConfig{PerSec: cfg.EntryPerSec, Burst: cfg.EntryBurst}),
+		// Plan C2: always non-nil (db mode leaves it unused; memory mode
+		// serves acquires with zero SQL). Built once here — never inside
+		// the pool branch — so no second reaper leaks.
+		Admission: liveupdates.NewAdmission(liveupdates.AdmissionCaps{
 			Total:       cfg.WSCapTotal,
 			PerUser:     cfg.WSCapUser,
 			PerSchedule: cfg.WSCapSchedule,
 			TTL:         liveupdates.LeaseTTL,
+		})}
+	if pool != nil {
+		// WS-04b: domain services come from the shared graph so the
+		// SAT/ACT provider switch, presence posture, and terminal scorer
+		// cannot drift from the worker's copy. HTTP-edge state (bus, hub,
+		// leases, admission) is per-process by design and stays here.
+		bus := liveupdates.NewBus(pool, uuid.NewString())
+		hub := liveupdates.NewHub()
+		svc := shared.Build(cfg, pool, shared.Deps{
+			Versions:         app.Versions,
+			RuntimeSnapshots: app.RuntimeSnapshots,
+			LiveBus:          bus,
+			LiveHub:          hub,
+			Leases:           liveupdates.NewLeaseRepository(pool),
+			Admission:        app.Admission,
 		})
+		app.Tx = svc.Tx
+		app.Secret = svc.Secret
+		app.Outbox = svc.Outbox
+		app.Terminal = svc.Terminal
+		app.Attempts = svc.Attempts
+		app.Exams = svc.Exams
+		app.Schedules = svc.Schedules
+		app.Student = svc.Student
+		app.Proctor = svc.Proctor
+		app.Grading = svc.Grading
+		app.Results = svc.Results
+		app.Media = svc.Media
+		app.Library = svc.Library
+		app.AnswerHistory = svc.AnswerHistory
+		app.Authoring = svc.Authoring
+		app.AccessLinks = svc.AccessLinks
+		app.SAT = svc.SAT
+		app.ACT = svc.ACT
+		app.Release = svc.Release
+		app.Runtime = svc.Runtime
+		app.Delivery = svc.Delivery
+		app.LiveBus = bus
+		app.LiveHub = hub
+		app.Leases = liveupdates.NewLeaseRepository(pool)
 	}
+
 	return app
 }
 
@@ -271,8 +263,8 @@ func main() {
 		ReadHeaderTimeout: srvCfg.ReadHeaderTimeout, // 5s
 		ReadTimeout:       srvCfg.ReadTimeout,       // 15s
 		WriteTimeout:      srvCfg.WriteTimeout,
-		IdleTimeout:       srvCfg.IdleTimeout,       // 120s
-		MaxHeaderBytes:    srvCfg.MaxHeaderBytes,    // 1MB
+		IdleTimeout:       srvCfg.IdleTimeout,    // 120s
+		MaxHeaderBytes:    srvCfg.MaxHeaderBytes, // 1MB
 	}
 
 	go func() {
@@ -285,6 +277,13 @@ func main() {
 	// Graceful shutdown: stop accepting HTTP, drain in-flight bounded by
 	// shutdown.DrainTimeout (30s), then close the pool.
 	shutdown.Wait(context.Background())
+	// Stop background loops before draining HTTP: no new hub publishes
+	// (forwarder) and no reaper ticks (admission) while in-flight
+	// requests finish.
+	app.stopLiveForwarder()
+	if app.Admission != nil {
+		app.Admission.Stop()
+	}
 	log.Printf("api: shutting down, draining up to %s", shutdown.DrainTimeout)
 	ctx, cancel := context.WithTimeout(context.Background(), shutdown.DrainTimeout)
 	defer cancel()
@@ -321,6 +320,11 @@ func BuildRouter(app *App) http.Handler {
 
 	buildTierSet(app)
 
+	// WS-13.6 CORS decision (behavior-pinned): same-origin-only. The
+	// middleware is mounted explicitly (outermost) with no extra origins:
+	// same-origin/non-browser pass, cross-origin preflights 403, and the
+	// posture is code rather than the absence of a mount.
+	r.Use(httpx.CORS(httpx.CORSOptions{}))
 	r.Use(httpx.Recovery)
 	r.Use(httpx.RequestID)
 	r.Use(httpx.Trace)
@@ -334,12 +338,33 @@ func BuildRouter(app *App) http.Handler {
 	// touches the distributed counters, so it cannot couple tiers together;
 	// per-tier quotas below are each independently authoritative.
 	r.Use(app.Tiers.Middleware(httpx.TierBackstop, httpx.ClientIPKey))
-	r.Use(authorizationPlaceholder)
+	// authorize wraps one route handler with the authz first-layer gate
+	// for its exact table key: Public/Bearer entries passthrough to
+	// their handler credential checks, session entries 401 anon and 403
+	// wrong-role, and anything unlisted denies closed (403). Scope
+	// (assignment/attempt-ownership/builder-preview) stays in handlers.
+	// The annotation (+route helper below) is load-bearing: it emits
+	// both the httpx route template (low-cardinality access logs) and
+	// the exact authz lookup key, so every gated route carries exactly
+	// one key and no wrapped route ever falls to path-match/404.
+	authorize := func(key string, h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			authz.MiddlewareFor(authz.Table, key, authzSessionOf)(httpx.WithRoute(h, key)).ServeHTTP(w, r)
+		}
+	}
+	authzRoute := func(r chi.Router, method, pattern string, h http.HandlerFunc) {
+		route(r, method, pattern, authorize(method+" "+pattern, h))
+	}
 	r.Use(httpx.AccessLog)
 
-	r.Get("/healthz", healthz(app))
-	r.Get("/readyz", readyz(app))
-	r.Get("/metrics", telemetry.DefaultRegistry.Handler())
+	r.Get("/healthz", authorize("GET /healthz", healthz(app)))
+	r.Get("/readyz", authorize("GET /readyz", readyz(app)))
+	// WS-10a: /metrics is private by default. METRICS_PUBLIC=1 exposes it
+	// (trusted-network scrapes); otherwise a bearer token is required
+	// (Authorization: Bearer $METRICS_TOKEN, constant-time compare). An
+	// empty METRICS_TOKEN with METRICS_PUBLIC unset denies every scrape
+	// (403 + log, never open): fail closed over fail open.
+	r.Get("/metrics", authorize("GET /metrics", metricsHandler(app)))
 
 	studentLimit := httpx.BodyLimit(httpx.MaxStudentBodyBytes) // 256KiB
 	adminLimit := httpx.BodyLimit(httpx.MaxAdminBodyBytes)     // 2MiB
@@ -351,94 +376,94 @@ func BuildRouter(app *App) http.Handler {
 		// stay on a strict per-IP quota (abuse surface).
 		r.With(adminLimit).Route("/auth", func(r chi.Router) {
 			r.With(limitTier(app, httpx.TierAuthCritical, userKey())).Group(func(r chi.Router) {
-				route(r, "GET", "/session", sessionHandler(app))
-				route(r, "POST", "/logout", logoutHandler(app))
-				route(r, "POST", "/logout-all", logoutAllHandler(app))
+				authzRoute(r, "GET", "/session", sessionHandler(app))
+				authzRoute(r, "POST", "/logout", logoutHandler(app))
+				authzRoute(r, "POST", "/logout-all", logoutAllHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
-				route(r, "POST", "/login", loginHandler(app))
-				route(r, "POST", "/student/entry", studentEntryHandler(app))
-				route(r, "GET", "/student/schedules/{id}", studentEntryScheduleHandler(app))
-				route(r, "POST", "/activate", activateHandler(app))
-				route(r, "POST", "/password/reset-request", passwordResetRequestHandler(app))
-				route(r, "POST", "/password/reset-complete", passwordResetCompleteHandler(app))
+				authzRoute(r, "POST", "/login", loginHandler(app))
+				authzRoute(r, "POST", "/student/entry", studentEntryHandler(app))
+				authzRoute(r, "GET", "/student/schedules/{id}", studentEntryScheduleHandler(app))
+				authzRoute(r, "POST", "/activate", activateHandler(app))
+				authzRoute(r, "POST", "/password/reset-request", passwordResetRequestHandler(app))
+				authzRoute(r, "POST", "/password/reset-complete", passwordResetCompleteHandler(app))
 			})
 		})
 		r.With(limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
-			route(r, "POST", "/public/access-links/{linkID}/resolve-entry", publicLinkResolveEntry(app))
+			authzRoute(r, "POST", "/public/access-links/{linkID}/resolve-entry", publicLinkResolveEntry(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/exams", func(r chi.Router) {
-			route(r, "GET", "/", examsListHandler(app))
-			route(r, "POST", "/", examsCreateHandler(app))
-			route(r, "GET", "/{id}", examsGetHandler(app))
-			route(r, "PATCH", "/{id}", examsUpdateHandler(app))
-			route(r, "DELETE", "/{id}", examsDeleteHandler(app))
-			route(r, "PATCH", "/{id}/draft", examsDraftHandler(app))
-			route(r, "POST", "/{id}/draft/reopen", examsDraftReopenHandler(app))
-			route(r, "POST", "/{id}/publish", examsPublishHandler(app))
-			route(r, "GET", "/{id}/events", examsEventsHandler(app))
-			route(r, "GET", "/{id}/validation", examsValidationHandler(app))
-			route(r, "GET", "/{id}/versions", examsVersionsHandler(app))
-			route(r, "GET", "/{id}/versions/summary", examsVersionSummariesHandler(app))
+			authzRoute(r, "GET", "/", examsListHandler(app))
+			authzRoute(r, "POST", "/", examsCreateHandler(app))
+			authzRoute(r, "GET", "/{id}", examsGetHandler(app))
+			authzRoute(r, "PATCH", "/{id}", examsUpdateHandler(app))
+			authzRoute(r, "DELETE", "/{id}", examsDeleteHandler(app))
+			authzRoute(r, "PATCH", "/{id}/draft", examsDraftHandler(app))
+			authzRoute(r, "POST", "/{id}/draft/reopen", examsDraftReopenHandler(app))
+			authzRoute(r, "POST", "/{id}/publish", examsPublishHandler(app))
+			authzRoute(r, "GET", "/{id}/events", examsEventsHandler(app))
+			authzRoute(r, "GET", "/{id}/validation", examsValidationHandler(app))
+			authzRoute(r, "GET", "/{id}/versions", examsVersionsHandler(app))
+			authzRoute(r, "GET", "/{id}/versions/summary", examsVersionSummariesHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/assessment-access", func(r chi.Router) {
-			route(r, "GET", "/exams/{examID}/overview", accessLinkOverview(app))
-			route(r, "GET", "/exams/{examID}/links", examLinksList(app))
-			route(r, "POST", "/exams/{examID}/links", examLinkCreate(app))
-			route(r, "GET", "/links/{linkID}", linkGet(app))
-			route(r, "PATCH", "/links/{linkID}", linkUpdate(app))
-			route(r, "POST", "/links/{linkID}/lifecycle", linkLifecycle(app))
-			route(r, "POST", "/links/{linkID}/duplicate", linkDuplicate(app))
-			route(r, "GET", "/links/{linkID}/members", linkMembers(app))
-			route(r, "GET", "/links/{linkID}/activity", linkActivity(app))
+			authzRoute(r, "GET", "/exams/{examID}/overview", accessLinkOverview(app))
+			authzRoute(r, "GET", "/exams/{examID}/links", examLinksList(app))
+			authzRoute(r, "POST", "/exams/{examID}/links", examLinkCreate(app))
+			authzRoute(r, "GET", "/links/{linkID}", linkGet(app))
+			authzRoute(r, "PATCH", "/links/{linkID}", linkUpdate(app))
+			authzRoute(r, "POST", "/links/{linkID}/lifecycle", linkLifecycle(app))
+			authzRoute(r, "POST", "/links/{linkID}/duplicate", linkDuplicate(app))
+			authzRoute(r, "GET", "/links/{linkID}/members", linkMembers(app))
+			authzRoute(r, "GET", "/links/{linkID}/activity", linkActivity(app))
 		})
 		r.With(limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
-			route(r, "GET", "/public/access-links/{linkID}", publicLinkGet(app))
+			authzRoute(r, "GET", "/public/access-links/{linkID}", publicLinkGet(app))
 		})
-		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Get("/assessment-release/exams/{examID}", releaseStateHandler(app))
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Get("/assessment-release/exams/{examID}", authorize("GET /api/v1/assessment-release/exams/{examID}", releaseStateHandler(app)))
 		r.With(limitTier(app, httpx.TierWrites, userKey())).Route("/assessment-authoring", func(r chi.Router) {
-			r.With(adminLimit).Get("/exams/{examID}/shell", authorShellHandler(app))
-			r.With(adminLimit).Post("/exams/{examID}/shell", authorOpenShellHandler(app))
-			r.With(adminLimit).Get("/exams/{examID}/preview", authorPreviewHandler(app))
-			r.With(adminLimit).Post("/exams/{examID}/load-sample", authorSampleHandler(app))
-			r.With(adminLimit).Get("/exams/{examID}/sat-workbook-template", authorSatWorkbookTemplateHandler(app))
+			r.With(adminLimit).Get("/exams/{examID}/shell", authorize("GET /api/v1/assessment-authoring/exams/{examID}/shell", authorShellHandler(app)))
+			r.With(adminLimit).Post("/exams/{examID}/shell", authorize("POST /api/v1/assessment-authoring/exams/{examID}/shell", authorOpenShellHandler(app)))
+			r.With(adminLimit).Get("/exams/{examID}/preview", authorize("GET /api/v1/assessment-authoring/exams/{examID}/preview", authorPreviewHandler(app)))
+			r.With(adminLimit).Post("/exams/{examID}/load-sample", authorize("POST /api/v1/assessment-authoring/exams/{examID}/load-sample", authorSampleHandler(app)))
+			r.With(adminLimit).Get("/exams/{examID}/sat-workbook-template", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-workbook-template", authorSatWorkbookTemplateHandler(app)))
 			// Workbook import tiers keep the 64MiB global ceiling.
-			route(r, "POST", "/exams/{examID}/sat-workbook-preview", authorPreviewImportHandler(app))
-			route(r, "POST", "/exams/{examID}/sat-workbook-commit", authorCommitImportHandler(app))
-			r.With(adminLimit).Get("/exams/{examID}/sat-workbook-undo", authorUndoStateHandler(app))
-			r.With(adminLimit).Post("/exams/{examID}/sat-workbook-imports/{importID}/undo", authorUndoImportHandler(app))
-			r.With(adminLimit).Get("/modules/{moduleID}/questions", authorListQuestionsHandler(app))
-			r.With(adminLimit).Post("/modules/{moduleID}/questions", authorCreateQuestionHandler(app))
-			r.With(adminLimit).Post("/modules/{moduleID}/questions/batch", authorBatchQuestionsHandler(app))
-			r.With(adminLimit).Patch("/modules/{moduleID}/question-order", authorReorderHandler(app))
-			r.With(adminLimit).Get("/exam-questions/{examQuestionID}", authorGetQuestionHandler(app))
-			r.With(adminLimit).Patch("/exam-questions/{examQuestionID}", authorUpdateQuestionHandler(app))
-			r.With(adminLimit).Delete("/exam-questions/{examQuestionID}", authorDeleteQuestionHandler(app))
-			r.With(adminLimit).Post("/exam-questions/{examQuestionID}/duplicate", authorDuplicateHandler(app))
-			r.With(adminLimit).Post("/questions/bulk", authorBulkHandler(app))
-			r.With(adminLimit).Patch("/question-revisions/{revisionID}", authorSaveRevisionHandler(app))
-			r.With(adminLimit).Patch("/exams/{examID}/sections/{sectionID}/delivery-settings", authorDeliverySettingsHandler(app))
-			r.With(adminLimit).Post("/exams/{examID}/validate", authorValidateHandler(app))
+			authzRoute(r, "POST", "/exams/{examID}/sat-workbook-preview", authorPreviewImportHandler(app))
+			authzRoute(r, "POST", "/exams/{examID}/sat-workbook-commit", authorCommitImportHandler(app))
+			r.With(adminLimit).Get("/exams/{examID}/sat-workbook-undo", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-workbook-undo", authorUndoStateHandler(app)))
+			r.With(adminLimit).Post("/exams/{examID}/sat-workbook-imports/{importID}/undo", authorize("POST /api/v1/assessment-authoring/exams/{examID}/sat-workbook-imports/{importID}/undo", authorUndoImportHandler(app)))
+			r.With(adminLimit).Get("/modules/{moduleID}/questions", authorize("GET /api/v1/assessment-authoring/modules/{moduleID}/questions", authorListQuestionsHandler(app)))
+			r.With(adminLimit).Post("/modules/{moduleID}/questions", authorize("POST /api/v1/assessment-authoring/modules/{moduleID}/questions", authorCreateQuestionHandler(app)))
+			r.With(adminLimit).Post("/modules/{moduleID}/questions/batch", authorize("POST /api/v1/assessment-authoring/modules/{moduleID}/questions/batch", authorBatchQuestionsHandler(app)))
+			r.With(adminLimit).Patch("/modules/{moduleID}/question-order", authorize("PATCH /api/v1/assessment-authoring/modules/{moduleID}/question-order", authorReorderHandler(app)))
+			r.With(adminLimit).Get("/exam-questions/{examQuestionID}", authorize("GET /api/v1/assessment-authoring/exam-questions/{examQuestionID}", authorGetQuestionHandler(app)))
+			r.With(adminLimit).Patch("/exam-questions/{examQuestionID}", authorize("PATCH /api/v1/assessment-authoring/exam-questions/{examQuestionID}", authorUpdateQuestionHandler(app)))
+			r.With(adminLimit).Delete("/exam-questions/{examQuestionID}", authorize("DELETE /api/v1/assessment-authoring/exam-questions/{examQuestionID}", authorDeleteQuestionHandler(app)))
+			r.With(adminLimit).Post("/exam-questions/{examQuestionID}/duplicate", authorize("POST /api/v1/assessment-authoring/exam-questions/{examQuestionID}/duplicate", authorDuplicateHandler(app)))
+			r.With(adminLimit).Post("/questions/bulk", authorize("POST /api/v1/assessment-authoring/questions/bulk", authorBulkHandler(app)))
+			r.With(adminLimit).Patch("/question-revisions/{revisionID}", authorize("PATCH /api/v1/assessment-authoring/question-revisions/{revisionID}", authorSaveRevisionHandler(app)))
+			r.With(adminLimit).Patch("/exams/{examID}/sections/{sectionID}/delivery-settings", authorize("PATCH /api/v1/assessment-authoring/exams/{examID}/sections/{sectionID}/delivery-settings", authorDeliverySettingsHandler(app)))
+			r.With(adminLimit).Post("/exams/{examID}/validate", authorize("POST /api/v1/assessment-authoring/exams/{examID}/validate", authorValidateHandler(app)))
 		})
 		r.With(limitTier(app, httpx.TierWrites, attemptKey())).With(studentLimit).Route("/assessment-delivery", func(r chi.Router) {
-			route(r, "POST", "/schedules/{scheduleID}/bootstrap", deliveryBootstrapHandler(app))
-			route(r, "PATCH", "/schedules/{scheduleID}/responses/{examQuestionID}", deliverySaveResponseHandler(app))
-			route(r, "POST", "/schedules/{scheduleID}/modules/start", deliveryStartModuleHandler(app))
-			route(r, "POST", "/schedules/{scheduleID}/modules/submit", deliverySubmitModuleHandler(app))
-			route(r, "POST", "/schedules/{scheduleID}/submit", deliverySubmitAssessmentHandler(app))
+			authzRoute(r, "POST", "/schedules/{scheduleID}/bootstrap", deliveryBootstrapHandler(app))
+			authzRoute(r, "PATCH", "/schedules/{scheduleID}/responses/{examQuestionID}", deliverySaveResponseHandler(app))
+			authzRoute(r, "POST", "/schedules/{scheduleID}/modules/start", deliveryStartModuleHandler(app))
+			authzRoute(r, "POST", "/schedules/{scheduleID}/modules/submit", deliverySubmitModuleHandler(app))
+			authzRoute(r, "POST", "/schedules/{scheduleID}/submit", deliverySubmitAssessmentHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Group(func(r chi.Router) {
-			route(r, "GET", "/versions/{versionID}", versionSummaryHandler(app))
+			authzRoute(r, "GET", "/versions/{versionID}", versionSummaryHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/schedules", func(r chi.Router) {
-			route(r, "GET", "/", schedulesListHandler(app))
-			route(r, "POST", "/", schedulesCreateHandler(app))
-			route(r, "GET", "/{id}", schedulesGetHandler(app))
-			route(r, "PATCH", "/{id}", schedulesUpdateHandler(app))
-			route(r, "DELETE", "/{id}", schedulesDeleteHandler(app))
-			route(r, "GET", "/{id}/runtime", schedulesRuntimeHandler(app))
-			route(r, "POST", "/{id}/runtime/commands", schedulesRuntimeCommandHandler(app))
-			route(r, "POST", "/{id}/register", schedulesRegisterHandler(app))
+			authzRoute(r, "GET", "/", schedulesListHandler(app))
+			authzRoute(r, "POST", "/", schedulesCreateHandler(app))
+			authzRoute(r, "GET", "/{id}", schedulesGetHandler(app))
+			authzRoute(r, "PATCH", "/{id}", schedulesUpdateHandler(app))
+			authzRoute(r, "DELETE", "/{id}", schedulesDeleteHandler(app))
+			authzRoute(r, "GET", "/{id}/runtime", schedulesRuntimeHandler(app))
+			authzRoute(r, "POST", "/{id}/runtime/commands", schedulesRuntimeCommandHandler(app))
+			authzRoute(r, "POST", "/{id}/register", schedulesRegisterHandler(app))
 		})
 		// Student sessions split by cost class: session/static reads stay in
 		// authed-reads, the polled live view gets its own polling budget,
@@ -446,133 +471,133 @@ func BuildRouter(app *App) http.Handler {
 		// are writes — so no student traffic class can starve the others.
 		r.With(studentLimit).Route("/student/sessions", func(r chi.Router) {
 			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
-				route(r, "GET", "/{scheduleID}", v1SessionHandler(app))
-				route(r, "GET", "/{scheduleID}/static", v1StaticHandler(app))
-				route(r, "POST", "/{scheduleID}/precheck", v1PrecheckHandler(app))
-				route(r, "POST", "/{scheduleID}/bootstrap", v1BootstrapHandler(app))
+				authzRoute(r, "GET", "/{scheduleID}", v1SessionHandler(app))
+				authzRoute(r, "GET", "/{scheduleID}/static", v1StaticHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/precheck", v1PrecheckHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/bootstrap", v1BootstrapHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierPolling, attemptKey())).Group(func(r chi.Router) {
-				route(r, "GET", "/{scheduleID}/live", v1LiveHandler(app))
+				authzRoute(r, "GET", "/{scheduleID}/live", v1LiveHandler(app))
 				// Plan C3: versioned runtime poll (the 1M enabler). 304 on
 				// steady state; adaptive pollAfterSecs (2s fast-lane 60s
 				// after control commands, 25s steady). Visibility bound:
 				// control effects land within pollAfterSecs; write gates
 				// enforce regardless of poll lag.
-				route(r, "GET", "/{scheduleID}/runtime", runtimePollHandler(app))
+				authzRoute(r, "GET", "/{scheduleID}/runtime", runtimePollHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierHeartbeat, attemptKey())).Group(func(r chi.Router) {
-				route(r, "POST", "/{scheduleID}/heartbeat", v1HeartbeatHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/heartbeat", v1HeartbeatHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Group(func(r chi.Router) {
-				r.Method("POST", "/{scheduleID}/mutations:batch", httpx.WithRoute(v1MutationHandler(app), "POST /{scheduleID}/mutations:batch"))
-				route(r, "POST", "/{scheduleID}/audit", v1AuditHandler(app))
-				r.Method("POST", "/{scheduleID}/submit", httpx.WithRoute(v1SubmitHandler(app), "POST /{scheduleID}/submit"))
+				authzRoute(r, "POST", "/{scheduleID}/mutations:batch", v1MutationHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/audit", v1AuditHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/submit", v1SubmitHandler(app))
 			})
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/proctor", func(r chi.Router) {
-			route(r, "GET", "/sessions", proctorSessionsHandler(app))
-			route(r, "GET", "/sessions/{scheduleID}", proctorSessionHandler(app))
+			authzRoute(r, "GET", "/sessions", proctorSessionsHandler(app))
+			authzRoute(r, "GET", "/sessions/{scheduleID}", proctorSessionHandler(app))
 			// Plan D4: paginated roster (?cursorUpdatedAt, ?cursorID,
 			// ?limit, ?status). Additive; the full detail endpoint stays.
-			route(r, "GET", "/sessions/{scheduleID}/roster", proctorRosterHandler(app))
-			route(r, "GET", "/notes", proctorAllSessionNotesHandler(app))
-			route(r, "DELETE", "/notes/{noteID}", proctorSessionNoteDeleteByIDHandler(app))
-			route(r, "GET", "/sessions/{scheduleID}/notes", proctorSessionNotesListHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/notes", proctorSessionNoteCreateHandler(app))
-			route(r, "PUT", "/sessions/{scheduleID}/notes/{noteID}", proctorSessionNoteSaveHandler(app))
-			route(r, "PATCH", "/sessions/{scheduleID}/notes/{noteID}", proctorSessionNoteSaveHandler(app))
-			route(r, "DELETE", "/sessions/{scheduleID}/notes/{noteID}", proctorSessionNoteDeleteHandler(app))
-			route(r, "GET", "/sessions/{scheduleID}/violation-rules", proctorViolationRulesListHandler(app))
-			route(r, "DELETE", "/violation-rules/{ruleID}", proctorViolationRuleDeleteByIDHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/violation-rules", proctorViolationRuleCreateHandler(app))
-			route(r, "PUT", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleSaveHandler(app))
-			route(r, "PATCH", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleSaveHandler(app))
-			route(r, "DELETE", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleDeleteHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/presence", withHeartbeatTier(app, proctorPresenceHandler(app)))
-			route(r, "POST", "/sessions/{scheduleID}/control/end-section-now", proctorEndSectionHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/control/extend-section", proctorExtendSectionHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/control/complete-exam", proctorCompleteExamHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/warn", proctorWarnHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/pause", proctorPauseAttemptHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/resume", proctorResumeAttemptHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/extend", proctorExtendAttemptHandler(app))
-			route(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/terminate", proctorTerminateHandler(app))
-			route(r, "POST", "/alerts/{alertID}/ack", proctorAckAlertHandler(app))
-			route(r, "GET", "/live-mode", proctorLiveModeHandler(app))
+			authzRoute(r, "GET", "/sessions/{scheduleID}/roster", proctorRosterHandler(app))
+			authzRoute(r, "GET", "/notes", proctorAllSessionNotesHandler(app))
+			authzRoute(r, "DELETE", "/notes/{noteID}", proctorSessionNoteDeleteByIDHandler(app))
+			authzRoute(r, "GET", "/sessions/{scheduleID}/notes", proctorSessionNotesListHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/notes", proctorSessionNoteCreateHandler(app))
+			authzRoute(r, "PUT", "/sessions/{scheduleID}/notes/{noteID}", proctorSessionNoteSaveHandler(app))
+			authzRoute(r, "PATCH", "/sessions/{scheduleID}/notes/{noteID}", proctorSessionNoteSaveHandler(app))
+			authzRoute(r, "DELETE", "/sessions/{scheduleID}/notes/{noteID}", proctorSessionNoteDeleteHandler(app))
+			authzRoute(r, "GET", "/sessions/{scheduleID}/violation-rules", proctorViolationRulesListHandler(app))
+			authzRoute(r, "DELETE", "/violation-rules/{ruleID}", proctorViolationRuleDeleteByIDHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/violation-rules", proctorViolationRuleCreateHandler(app))
+			authzRoute(r, "PUT", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleSaveHandler(app))
+			authzRoute(r, "PATCH", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleSaveHandler(app))
+			authzRoute(r, "DELETE", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleDeleteHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/presence", withHeartbeatTier(app, proctorPresenceHandler(app)))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/control/end-section-now", proctorEndSectionHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/control/extend-section", proctorExtendSectionHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/control/complete-exam", proctorCompleteExamHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/warn", proctorWarnHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/pause", proctorPauseAttemptHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/resume", proctorResumeAttemptHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/extend", proctorExtendAttemptHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/terminate", proctorTerminateHandler(app))
+			authzRoute(r, "POST", "/alerts/{alertID}/ack", proctorAckAlertHandler(app))
+			authzRoute(r, "GET", "/live-mode", proctorLiveModeHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/library", func(r chi.Router) {
-			route(r, "GET", "/passages", libraryPassagesListHandler(app))
-			route(r, "POST", "/passages", libraryPassageCreateHandler(app))
-			route(r, "GET", "/passages/{id}", libraryPassageGetHandler(app))
-			route(r, "PATCH", "/passages/{id}", libraryPassageUpdateHandler(app))
-			route(r, "DELETE", "/passages/{id}", libraryPassageDeleteHandler(app))
-			route(r, "POST", "/passages/{id}/increment-usage", libraryPassageIncrementUsageHandler(app))
-			route(r, "PATCH", "/passages/{id}/increment-usage", libraryPassageIncrementUsageHandler(app))
-			route(r, "GET", "/questions", libraryQuestionsListHandler(app))
-			route(r, "POST", "/questions", libraryQuestionCreateHandler(app))
-			route(r, "GET", "/questions/{id}", libraryQuestionGetHandler(app))
-			route(r, "PATCH", "/questions/{id}", libraryQuestionUpdateHandler(app))
-			route(r, "DELETE", "/questions/{id}", libraryQuestionDeleteHandler(app))
-			route(r, "POST", "/questions/{id}/increment-usage", libraryQuestionIncrementUsageHandler(app))
-			route(r, "PATCH", "/questions/{id}/increment-usage", libraryQuestionIncrementUsageHandler(app))
+			authzRoute(r, "GET", "/passages", libraryPassagesListHandler(app))
+			authzRoute(r, "POST", "/passages", libraryPassageCreateHandler(app))
+			authzRoute(r, "GET", "/passages/{id}", libraryPassageGetHandler(app))
+			authzRoute(r, "PATCH", "/passages/{id}", libraryPassageUpdateHandler(app))
+			authzRoute(r, "DELETE", "/passages/{id}", libraryPassageDeleteHandler(app))
+			authzRoute(r, "POST", "/passages/{id}/increment-usage", libraryPassageIncrementUsageHandler(app))
+			authzRoute(r, "PATCH", "/passages/{id}/increment-usage", libraryPassageIncrementUsageHandler(app))
+			authzRoute(r, "GET", "/questions", libraryQuestionsListHandler(app))
+			authzRoute(r, "POST", "/questions", libraryQuestionCreateHandler(app))
+			authzRoute(r, "GET", "/questions/{id}", libraryQuestionGetHandler(app))
+			authzRoute(r, "PATCH", "/questions/{id}", libraryQuestionUpdateHandler(app))
+			authzRoute(r, "DELETE", "/questions/{id}", libraryQuestionDeleteHandler(app))
+			authzRoute(r, "POST", "/questions/{id}/increment-usage", libraryQuestionIncrementUsageHandler(app))
+			authzRoute(r, "PATCH", "/questions/{id}/increment-usage", libraryQuestionIncrementUsageHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/settings", func(r chi.Router) {
-			route(r, "GET", "/exam-defaults", settingsExamDefaultsGetHandler(app))
-			route(r, "PUT", "/exam-defaults", settingsExamDefaultsPutHandler(app))
-			route(r, "GET", "/export-profiles", settingsExportProfilesListHandler(app))
-			route(r, "POST", "/export-profiles", settingsExportProfilesCreateHandler(app))
+			authzRoute(r, "GET", "/exam-defaults", settingsExamDefaultsGetHandler(app))
+			authzRoute(r, "PUT", "/exam-defaults", settingsExamDefaultsPutHandler(app))
+			authzRoute(r, "GET", "/export-profiles", settingsExportProfilesListHandler(app))
+			authzRoute(r, "POST", "/export-profiles", settingsExportProfilesCreateHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/grading", func(r chi.Router) {
-			route(r, "GET", "/sessions", gradingSessionsHandler(app))
-			route(r, "GET", "/sessions/{sessionID}", gradingSessionHandler(app))
-			route(r, "GET", "/schedules/{scheduleID}/objective-overrides", gradingOverridesHandler(app))
-			route(r, "GET", "/schedules/{scheduleID}/objective-grading-source", gradingSourceHandler(app))
-			route(r, "GET", "/schedules/{scheduleID}/objective-integrity", gradingIntegrityHandler(app))
-			route(r, "PUT", "/schedules/{scheduleID}/objective-overrides/{questionID}", gradingOverridePutHandler(app))
-			route(r, "DELETE", "/schedules/{scheduleID}/objective-overrides/{questionID}", gradingOverrideDeleteHandler(app))
-			route(r, "POST", "/schedules/{scheduleID}/objective-regrade-latest-draft", gradingRegradeHandler(app))
-			route(r, "GET", "/submissions/{submissionID}", gradingSubmissionHandler(app))
-			route(r, "GET", "/submissions/{submissionID}/sections", gradingSectionsHandler(app))
-			route(r, "PUT", "/submissions/{submissionID}/sections/{section}/questions/{questionID}/override", gradingOverrideQuestionHandler(app))
-			route(r, "GET", "/submissions/{submissionID}/writing-tasks", gradingWritingTasksHandler(app))
-			route(r, "POST", "/submissions/{submissionID}/start-review", gradingStartReviewHandler(app))
-			route(r, "GET", "/submissions/{submissionID}/review-draft", gradingReviewDraftGetHandler(app))
-			route(r, "PUT", "/submissions/{submissionID}/review-draft", gradingReviewDraftPutHandler(app))
-			route(r, "POST", "/submissions/{submissionID}/mark-grading-complete", gradingMarkCompleteHandler(app))
-			route(r, "POST", "/submissions/{submissionID}/mark-ready-to-release", gradingMarkReadyHandler(app))
-			route(r, "POST", "/submissions/{submissionID}/release-now", gradingReleaseNowHandler(app))
-			route(r, "POST", "/submissions/{submissionID}/schedule-release", gradingScheduleReleaseHandler(app))
-			route(r, "POST", "/submissions/{submissionID}/reopen-review", gradingReopenHandler(app))
-			route(r, "GET", "/results/{resultID}/events", gradingResultEventsHandler(app))
+			authzRoute(r, "GET", "/sessions", gradingSessionsHandler(app))
+			authzRoute(r, "GET", "/sessions/{sessionID}", gradingSessionHandler(app))
+			authzRoute(r, "GET", "/schedules/{scheduleID}/objective-overrides", gradingOverridesHandler(app))
+			authzRoute(r, "GET", "/schedules/{scheduleID}/objective-grading-source", gradingSourceHandler(app))
+			authzRoute(r, "GET", "/schedules/{scheduleID}/objective-integrity", gradingIntegrityHandler(app))
+			authzRoute(r, "PUT", "/schedules/{scheduleID}/objective-overrides/{questionID}", gradingOverridePutHandler(app))
+			authzRoute(r, "DELETE", "/schedules/{scheduleID}/objective-overrides/{questionID}", gradingOverrideDeleteHandler(app))
+			authzRoute(r, "POST", "/schedules/{scheduleID}/objective-regrade-latest-draft", gradingRegradeHandler(app))
+			authzRoute(r, "GET", "/submissions/{submissionID}", gradingSubmissionHandler(app))
+			authzRoute(r, "GET", "/submissions/{submissionID}/sections", gradingSectionsHandler(app))
+			authzRoute(r, "PUT", "/submissions/{submissionID}/sections/{section}/questions/{questionID}/override", gradingOverrideQuestionHandler(app))
+			authzRoute(r, "GET", "/submissions/{submissionID}/writing-tasks", gradingWritingTasksHandler(app))
+			authzRoute(r, "POST", "/submissions/{submissionID}/start-review", gradingStartReviewHandler(app))
+			authzRoute(r, "GET", "/submissions/{submissionID}/review-draft", gradingReviewDraftGetHandler(app))
+			authzRoute(r, "PUT", "/submissions/{submissionID}/review-draft", gradingReviewDraftPutHandler(app))
+			authzRoute(r, "POST", "/submissions/{submissionID}/mark-grading-complete", gradingMarkCompleteHandler(app))
+			authzRoute(r, "POST", "/submissions/{submissionID}/mark-ready-to-release", gradingMarkReadyHandler(app))
+			authzRoute(r, "POST", "/submissions/{submissionID}/release-now", gradingReleaseNowHandler(app))
+			authzRoute(r, "POST", "/submissions/{submissionID}/schedule-release", gradingScheduleReleaseHandler(app))
+			authzRoute(r, "POST", "/submissions/{submissionID}/reopen-review", gradingReopenHandler(app))
+			authzRoute(r, "GET", "/results/{resultID}/events", gradingResultEventsHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/results", func(r chi.Router) {
-			route(r, "GET", "/", resultsListHandler(app))
-			route(r, "GET", "/dashboard", resultsDashboardHandler(app))
-			route(r, "GET", "/analytics", resultsAnalyticsHandler(app))
-			route(r, "POST", "/export", resultsExportHandler(app))
-			route(r, "GET", "/sat", resultsSATListHandler(app))
-			route(r, "GET", "/sat/{resultID}", resultsSATGetHandler(app))
-			route(r, "GET", "/act-science", resultsACTScienceHandler(app))
-			route(r, "GET", "/act-science/{attemptID}", resultsACTScienceDetailHandler(app))
-			route(r, "GET", "/{resultID}/events", resultsEventsHandler(app))
-			route(r, "GET", "/{resultID}", resultsGetHandler(app))
+			authzRoute(r, "GET", "/", resultsListHandler(app))
+			authzRoute(r, "GET", "/dashboard", resultsDashboardHandler(app))
+			authzRoute(r, "GET", "/analytics", resultsAnalyticsHandler(app))
+			authzRoute(r, "POST", "/export", resultsExportHandler(app))
+			authzRoute(r, "GET", "/sat", resultsSATListHandler(app))
+			authzRoute(r, "GET", "/sat/{resultID}", resultsSATGetHandler(app))
+			authzRoute(r, "GET", "/act-science", resultsACTScienceHandler(app))
+			authzRoute(r, "GET", "/act-science/{attemptID}", resultsACTScienceDetailHandler(app))
+			authzRoute(r, "GET", "/{resultID}/events", resultsEventsHandler(app))
+			authzRoute(r, "GET", "/{resultID}", resultsGetHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierWrites, userKey())).With(adminLimit).Route("/media", func(r chi.Router) {
-			route(r, "POST", "/uploads", mediaUploadHandler(app))
-			route(r, "PUT", "/uploads/{assetID}", mediaUploadBytesHandler(app))
-			route(r, "POST", "/uploads/{assetID}/complete", mediaCompleteHandler(app))
-			route(r, "GET", "/assets/{assetID}", withAuthedReadsTier(app, mediaDownloadHandler(app)))
-			route(r, "GET", "/{assetID}", withAuthedReadsTier(app, mediaGetHandler(app)))
+			authzRoute(r, "POST", "/uploads", mediaUploadHandler(app))
+			authzRoute(r, "PUT", "/uploads/{assetID}", mediaUploadBytesHandler(app))
+			authzRoute(r, "POST", "/uploads/{assetID}/complete", mediaCompleteHandler(app))
+			authzRoute(r, "GET", "/assets/{assetID}", withAuthedReadsTier(app, mediaDownloadHandler(app)))
+			authzRoute(r, "GET", "/{assetID}", withAuthedReadsTier(app, mediaGetHandler(app)))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/answer-history", func(r chi.Router) {
-			route(r, "GET", "/submissions/{submissionID}/overview", answerHistoryOverviewHandler(app))
-			route(r, "GET", "/submissions/{submissionID}/targets/{targetID}", answerHistoryTargetDetailHandler(app))
-			route(r, "GET", "/submissions/{submissionID}/export", answerHistoryExportHandler(app))
-			route(r, "GET", "/attempts/{attemptID}/overview", answerHistoryOverviewByAttemptHandler(app))
-			route(r, "GET", "/attempts/{attemptID}/targets/{targetID}", answerHistoryTargetDetailByAttemptHandler(app))
+			authzRoute(r, "GET", "/submissions/{submissionID}/overview", answerHistoryOverviewHandler(app))
+			authzRoute(r, "GET", "/submissions/{submissionID}/targets/{targetID}", answerHistoryTargetDetailHandler(app))
+			authzRoute(r, "GET", "/submissions/{submissionID}/export", answerHistoryExportHandler(app))
+			authzRoute(r, "GET", "/attempts/{attemptID}/overview", answerHistoryOverviewByAttemptHandler(app))
+			authzRoute(r, "GET", "/attempts/{attemptID}/targets/{targetID}", answerHistoryTargetDetailByAttemptHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Group(func(r chi.Router) {
-			route(r, "GET", "/ws/live", liveWebSocketHandler(app))
+			authzRoute(r, "GET", "/ws/live", liveWebSocketHandler(app))
 		})
 	})
 
@@ -581,12 +606,12 @@ func BuildRouter(app *App) http.Handler {
 		prefix := prefix
 		r.With(studentLimit).Route(prefix+"/student/attempts", func(r chi.Router) {
 			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Group(func(r chi.Router) {
-				route(r, "POST", "/{attemptID}/responses:batch", v2BatchHandler(app))
-				route(r, "POST", "/{attemptID}/submit", v2SubmitHandler(app))
-				route(r, "POST", "/{attemptID}/takeover", v2TakeoverHandler(app))
+				authzRoute(r, "POST", "/{attemptID}/responses:batch", v2BatchHandler(app))
+				authzRoute(r, "POST", "/{attemptID}/submit", v2SubmitHandler(app))
+				authzRoute(r, "POST", "/{attemptID}/takeover", v2TakeoverHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
-				route(r, "GET", "/{attemptID}/responses", v2SnapshotHandler(app))
+				authzRoute(r, "GET", "/{attemptID}/responses", v2SnapshotHandler(app))
 			})
 		})
 	}
@@ -594,12 +619,13 @@ func BuildRouter(app *App) http.Handler {
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Route not found."))
 	})
-	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Method not allowed."))
+	mux := r
+	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Allow", allowedMethodsFor(mux, req.URL.Path))
+		httpx.WriteError(w, req, apperrors.New(apperrors.CodeMethodNotAllowed, "Method not allowed."))
 	})
 	return r
 }
-
 
 // buildTierSet wires the per-tier quotas for BuildRouter. Each tier gets its
 // own distributed-counter namespace (route_key = tier name), so bulk traffic
@@ -699,6 +725,88 @@ func ipKey() httpx.KeyFunc {
 // route registers one wired handler with its route-template annotation.
 func route(r chi.Router, method, pattern string, h http.HandlerFunc) {
 	r.Method(method, pattern, httpx.WithRoute(h, method+" "+pattern))
+}
+
+// allowedMethodsFor lists the registered methods for path by walking the
+// route tree (WS-06b: 405 responses carry an Allow header per RFC 9110
+// Section 15.5.6). Pattern segments in braces ({id}, {scheduleID}) match
+// any single path segment; everything else compares literally. A 405 is a
+// rare client error, so a per-405 walk is acceptable (never on hot paths).
+// It returns "" when no route matches (caller still renders 405, just
+// without a useful Allow value — never 404 from this path).
+func allowedMethodsFor(r chi.Router, path string) string {
+	seen := map[string]bool{}
+	var ordered []string
+	_ = chi.Walk(r, func(method, pattern string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if !sameRouteShape(pattern, path) {
+			return nil
+		}
+		if !seen[method] {
+			seen[method] = true
+			ordered = append(ordered, method)
+		}
+		return nil
+	})
+	sort.Strings(ordered)
+	return strings.Join(ordered, ", ")
+}
+
+// sameRouteShape reports whether a chi route pattern (with {param}
+// segments) matches a concrete request path.
+func sameRouteShape(pattern, path string) bool {
+	if pattern == path {
+		return true
+	}
+	trimmedPattern := strings.Trim(pattern, "/")
+	trimmedPath := strings.Trim(path, "/")
+	if trimmedPattern == "" || trimmedPath == "" {
+		return trimmedPattern == trimmedPath
+	}
+	patternSegs := strings.Split(trimmedPattern, "/")
+	pathSegs := strings.Split(trimmedPath, "/")
+	if len(patternSegs) != len(pathSegs) {
+		return false
+	}
+	for i, ps := range patternSegs {
+		if len(ps) >= 2 && ps[0] == '{' && ps[len(ps)-1] == '}' {
+			if pathSegs[i] == "" {
+				return false
+			}
+			continue
+		}
+		if ps != pathSegs[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// metricsHandler gates the Prometheus exposition (WS-10a): public only
+// when METRICS_PUBLIC=1, otherwise bearer-gated on METRICS_TOKEN. Denials
+// render the stable 403 envelope and log the scrape source without ever
+// logging the token (fail closed; missing/empty token config denies all).
+func metricsHandler(app *App) http.HandlerFunc {
+	inner := telemetry.DefaultRegistry.Handler()
+	return func(w http.ResponseWriter, r *http.Request) {
+		if app != nil && app.Config.MetricsPublic {
+			inner.ServeHTTP(w, r)
+			return
+		}
+		configured := ""
+		if app != nil {
+			configured = app.Config.MetricsToken
+		}
+		got := ""
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+			got = strings.TrimPrefix(auth, "Bearer ")
+		}
+		if configured == "" || got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(configured)) != 1 {
+			log.Printf(`{"level":"warn","msg":"metrics scrape denied","remote":%q}`, r.RemoteAddr)
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeForbidden, "Metrics are not publicly exposed."))
+			return
+		}
+		inner.ServeHTTP(w, r)
+	}
 }
 
 // healthz is the liveness probe: alive, no dependencies (never touches DB).
@@ -822,12 +930,21 @@ func csrfMiddleware(_ *App) func(http.Handler) http.Handler {
 	}
 }
 
-// authorizationPlaceholder marks the authorization layer position in the
-// chain. Real routes must re-check ActorContext at the data boundary via
-// (auth.ActorContext).RequireOneOf — no DB RLS — so this stays a
-// pass-through until per-route policies land with their handlers.
-func authorizationPlaceholder(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r)
-	})
+// authzSessionOf adapts SessionOf for authz.Middleware: authz cannot
+// import cmd/api (cycle) and stays dependency-free (stdlib only), so the
+// caller injects session resolution here. It runs after authMiddleware,
+// so the session is already loaded and cached on the request context.
+func authzSessionOf(r *http.Request) (string, string, bool) {
+	sess := SessionOf(r.Context())
+	if sess == nil || sess.UserID == "" {
+		return "", "", false
+	}
+	return sess.UserID, sess.Role, true
+}
+
+// init bridges the authz template key to httpx.CtxRouteTemplate once so
+// the middleware can read route() annotations without importing httpx
+// from the authz package (which must stay dependency-free).
+func init() {
+	authz.TemplateKey = httpx.CtxRouteTemplate
 }

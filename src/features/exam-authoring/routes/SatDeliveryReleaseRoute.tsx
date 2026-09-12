@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import type { ExamEntity } from "../../../types/domain";
 import {
@@ -8,8 +9,14 @@ import {
 } from "../api/assessmentQueries";
 import { useAccessDistributionOverview } from "../api/assessmentAccessLinkQueries";
 import type { AssessmentValidationIssue } from "../contracts/assessment";
+import { parseIssueLink } from "../ui/release/releaseSelectors";
 import { SatDeliveryReleasePage } from "../ui/SatDeliveryReleasePage";
-import { StudentLinksDashboard } from "../ui/access-links/StudentLinksDashboard";
+
+const StudentLinksDashboard = lazy(() =>
+  import("../ui/access-links/StudentLinksDashboard").then((module) => ({
+    default: module.StudentLinksDashboard,
+  })),
+);
 
 interface SatDeliveryReleaseRouteProps {
   exam: ExamEntity;
@@ -39,7 +46,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
 
   const openStudentAccess = () => {
     if (inSatWorkspace) {
-      navigate(`/sat/exams/${exam.id}/access`);
+      navigate(`/sat/exams/${encodeURIComponent(exam.id)}/access`);
       return;
     }
     const next = new URLSearchParams(searchParams);
@@ -71,36 +78,66 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       throw new Error("The SAT draft changed. Publish checks were refreshed; review them again.");
     }
 
+    const trimmedNotes = (publishNotes ?? "").trim();
+    // One key per publish confirmation: a double-click or lost response
+    // replays the same release instead of sealing a second version.
     await publishMutation.mutateAsync({
       revision: exam.revision,
       expectedDraftVersionId: shell.versionId,
       expectedDraftRevision: shell.versionRevision,
-      ...(publishNotes?.trim() ? { publishNotes: publishNotes.trim() } : {}),
+      ...(trimmedNotes ? { publishNotes: trimmedNotes.slice(0, 1000) } : {}),
+      operationKey: crypto.randomUUID(),
     });
-    await Promise.all([onExamRefresh(), releaseQuery.refetch(), distributionQuery.refetch()]);
+    // Refetch failures must never block navigation: the publish already
+    // succeeded, so settle every refresh independently and continue.
+    const settled = await Promise.allSettled([
+      onExamRefresh(),
+      releaseQuery.refetch(),
+      distributionQuery.refetch(),
+    ]);
+    for (const result of settled) {
+      if (result.status === "rejected") {
+        console.error("[sat-release] post-publish refresh failed", result.reason);
+      }
+    }
     openStudentAccess();
   };
 
   const handleIssue = (issue: AssessmentValidationIssue) => {
-    const match = /^examQuestion:([^:]+):(.*)$/.exec(issue.path);
+    const { questionId, field } = parseIssueLink(issue.path);
+    if (!questionId && !field) return;
     const params = new URLSearchParams();
-    if (match?.[1]) params.set("question", match[1]);
-    if (match?.[2]) params.set("field", match[2]);
-    navigate(`${inSatWorkspace ? `/sat/exams/${exam.id}` : `/builder/${exam.id}`}${params.toString() ? `?${params.toString()}` : ""}`);
+    if (questionId) params.set("question", questionId);
+    if (field) params.set("field", field);
+    const base = inSatWorkspace
+      ? `/sat/exams/${encodeURIComponent(exam.id)}`
+      : `/builder/${encodeURIComponent(exam.id)}`;
+    navigate(params.toString() ? `${base}?${params.toString()}` : base);
   };
 
 
 
   if (showStudentAccess) {
     return (
-      <StudentLinksDashboard
-        exam={exam}
-        overview={distributionQuery.data ?? null}
-        isLoading={distributionQuery.isLoading && !distributionQuery.data}
-        error={distributionQuery.error instanceof Error ? distributionQuery.error.message : null}
-        onRefresh={() => distributionQuery.refetch()}
-        onBackToRelease={openRelease}
-      />
+      <Suspense
+        fallback={
+          <div className="sat-product min-h-screen bg-background px-6 py-12" aria-busy="true" aria-label="Loading student access">
+            <div className="mx-auto max-w-2xl animate-pulse rounded-2xl bg-card p-6 motion-reduce:animate-none">
+              <div className="h-5 w-48 rounded-full bg-muted" />
+              <div className="mt-3 h-4 w-full rounded-full bg-muted" />
+            </div>
+          </div>
+        }
+      >
+        <StudentLinksDashboard
+          exam={exam}
+          overview={distributionQuery.data ?? null}
+          isLoading={distributionQuery.isLoading && !distributionQuery.data}
+          error={distributionQuery.error instanceof Error ? distributionQuery.error.message : null}
+          onRefresh={() => distributionQuery.refetch()}
+          onBackToRelease={openRelease}
+        />
+      </Suspense>
     );
   }
 
@@ -123,7 +160,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       onOpenStudentAccess={openStudentAccess}
       isPublishing={publishMutation.isPending}
       publishError={publishMutation.error instanceof Error ? publishMutation.error.message : null}
-      onBackToBuilder={() => navigate(inSatWorkspace ? `/sat/exams/${exam.id}` : `/builder/${exam.id}`)}
+      onBackToBuilder={() => navigate(inSatWorkspace ? `/sat/exams/${encodeURIComponent(exam.id)}` : `/builder/${encodeURIComponent(exam.id)}`)}
       onBackToExams={() => navigate(inSatWorkspace ? "/sat/exams" : "/admin/exams")}
       onRefreshReadiness={() => readinessQuery.refetch()}
       onPublish={handlePublish}

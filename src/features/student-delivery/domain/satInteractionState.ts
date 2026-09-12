@@ -13,9 +13,12 @@ import type { SatExamToolPolicy } from './satToolPolicy';
  *
  * Parallel regions (never one giant union — no combinatorial explosion):
  *   - surface:    exactly one exclusive surface (structural impossibility of two)
- *   - tools:      calculator + reference open/closed independently
  *   - annotation: persistent mode (off/highlight/underline/note/erase) + transient selection
  *   - scope:      module/question identity for explicit transition contracts
+ *
+ * Tool visibility is NOT a region here: the runner `activeTools`
+ * (satRunnerReducer + satTools.toggleSatActiveTool) is the single tool
+ * truth — the shell delegates tool buttons straight to runner commands.
  *
  * Deliberately NOT here (better owners exist): paused, terminated,
  * isSubmitting, phase, toolPolicy, responses, timer, save state, split ratio,
@@ -25,7 +28,7 @@ import type { SatExamToolPolicy } from './satToolPolicy';
 export type SatInteractionPhase = 'loading' | 'directions' | 'module' | 'review' | 'submitting' | 'break' | 'complete';
 
 export type SatInteractionFocusTarget =
-  | { type: 'topbar'; control: 'calculator' | 'reference' | 'reading' | 'notes' | 'directions' }
+  | { type: 'topbar'; control: 'calculator' | 'reference' | 'reading' | 'notes' | 'directions' | 'more' }
   | { type: 'footer'; control: 'navigator' }
   | { type: 'question'; questionId: string }
   | { type: 'answer'; questionId: string; answerId: string }
@@ -37,11 +40,11 @@ export type SatExclusiveSurface =
   | { kind: 'directions'; returnFocus: SatInteractionFocusTarget }
   | { kind: 'reading-settings'; returnFocus: SatInteractionFocusTarget }
   | { kind: 'question-notes'; returnFocus: SatInteractionFocusTarget }
+  | { kind: 'more-menu'; returnFocus: SatInteractionFocusTarget }
   | { kind: 'annotation-note-editor'; annotationId: string; returnFocus: SatInteractionFocusTarget };
 
 export type SatAnnotationInteractionMode = 'off' | 'highlight' | 'underline' | 'note' | 'erase';
 export type SatTextSelectionPhase = 'idle' | 'selecting' | 'captured';
-export type SatToolVisibility = 'closed' | 'open';
 
 /** Authoritative exam truth, passed IN — never stored as interaction state. */
 export interface SatInteractionContext {
@@ -58,10 +61,6 @@ export interface SatInteractionContext {
 
 export interface SatInteractionState {
   surface: SatExclusiveSurface;
-  tools: {
-    calculator: SatToolVisibility;
-    reference: SatToolVisibility;
-  };
   annotation: {
     mode: SatAnnotationInteractionMode;
     textSelection: SatTextSelectionPhase;
@@ -83,6 +82,7 @@ export type SatInteractionEvent =
   | { type: 'DIRECTIONS_OPENED'; returnFocus: SatInteractionFocusTarget }
   | { type: 'READING_SETTINGS_OPENED'; returnFocus: SatInteractionFocusTarget }
   | { type: 'QUESTION_NOTES_OPENED'; returnFocus: SatInteractionFocusTarget }
+  | { type: 'MORE_MENU_OPENED'; returnFocus: SatInteractionFocusTarget }
   | { type: 'ANNOTATION_NOTE_EDITOR_OPENED'; annotationId: string; returnFocus: SatInteractionFocusTarget }
   | { type: 'ANNOTATION_NOTE_EDITOR_CLOSED' }
   | { type: 'SURFACE_CLOSED' }
@@ -120,7 +120,6 @@ export function createSatInteractionState(
 ): SatInteractionState {
   return {
     surface: { kind: 'none' },
-    tools: { calculator: 'closed', reference: 'closed' },
     annotation: { mode: 'off', textSelection: 'idle' },
     scope: { moduleKey: scope.moduleKey ?? '', questionId: scope.questionId ?? '' },
   };
@@ -138,16 +137,15 @@ export function isAnnotationModeAllowed(
 }
 
 /**
- * Central normalization: tools/modes revoked by policy can never linger open
- * for more than one transition. Called after every guarded transition and on
+ * Central normalization: modes revoked by policy can never linger armed for
+ * more than one transition. Tool visibility is runner-owned (activeTools)
+ * and never normalized here. Called after every guarded transition and on
  * TOOL_POLICY_CHANGED.
  */
 export function normalizeSatInteractionState(
   state: SatInteractionState,
   ctx: SatInteractionContext,
 ): SatInteractionState {
-  const calculator = ctx.toolPolicy.calculator ? state.tools.calculator : 'closed';
-  const reference = ctx.toolPolicy.referenceSheet ? state.tools.reference : 'closed';
   const mode = isAnnotationModeAllowed(state.annotation.mode, ctx.toolPolicy)
     ? state.annotation.mode
     : 'off';
@@ -157,17 +155,11 @@ export function normalizeSatInteractionState(
     mode === 'off' ? ('idle' as const)
     : state.annotation.mode !== mode ? ('idle' as const)
     : state.annotation.textSelection;
-  if (
-    calculator === state.tools.calculator &&
-    reference === state.tools.reference &&
-    mode === state.annotation.mode &&
-    textSelection === state.annotation.textSelection
-  ) {
+  if (mode === state.annotation.mode && textSelection === state.annotation.textSelection) {
     return state;
   }
   return {
     ...state,
-    tools: { calculator, reference },
     annotation: { mode, textSelection },
   };
 }
@@ -241,6 +233,19 @@ export function satInteractionReducer(
         annotation: { ...state.annotation, textSelection: 'idle' },
       };
       break;
+    case 'MORE_MENU_OPENED':
+      // More is a read mostly utility center: it may open while blocked
+      // (Help/Shortcuts stay reachable read-only) but never over the
+      // annotation editor. Row-level guards (Line Reader / Break) handle
+      // their own disabled state.
+      if (ctx.terminated) return state;
+      if (state.surface.kind === 'annotation-note-editor') return state;
+      next = {
+        ...state,
+        surface: { kind: 'more-menu', returnFocus: event.returnFocus },
+        annotation: { ...state.annotation, textSelection: 'idle' },
+      };
+      break;
     case 'ANNOTATION_NOTE_EDITOR_OPENED':
       if (opensRefused) return state;
       next = {
@@ -260,42 +265,18 @@ export function satInteractionReducer(
       // "close the exclusive surface". Pure close keeps the reducer boring.
       next = { ...state, surface: { kind: 'none' } };
       break;
+    // Tool events are runner-owned (activeTools) and never reach this
+    // machine: tool buttons dispatch runner commands directly. These cases
+    // stay as acknowledged no-ops so stale in-flight intents keep reducing
+    // instead of hitting `default`. They must NEVER touch surface, scope,
+    // or annotation state.
     case 'CALCULATOR_OPENED':
-      if (opensRefused) return state;
-      if (!ctx.toolPolicy.calculator) return state;
-      next = {
-        ...state,
-        surface: { kind: 'none' },
-        tools: { ...state.tools, calculator: 'open' },
-      };
-      break;
     case 'CALCULATOR_CLOSED':
-      next = { ...state, tools: { ...state.tools, calculator: 'closed' } };
-      break;
     case 'CALCULATOR_TOGGLED':
-      next =
-        state.tools.calculator === 'open'
-          ? { ...state, tools: { ...state.tools, calculator: 'closed' } }
-          : satInteractionReducer(state, { type: 'CALCULATOR_OPENED' }, ctx);
-      return normalizeSatInteractionState(next, ctx);
     case 'REFERENCE_OPENED':
-      if (opensRefused) return state;
-      if (!ctx.toolPolicy.referenceSheet) return state;
-      next = {
-        ...state,
-        surface: { kind: 'none' },
-        tools: { ...state.tools, reference: 'open' },
-      };
-      break;
     case 'REFERENCE_CLOSED':
-      next = { ...state, tools: { ...state.tools, reference: 'closed' } };
-      break;
     case 'REFERENCE_TOGGLED':
-      next =
-        state.tools.reference === 'open'
-          ? { ...state, tools: { ...state.tools, reference: 'closed' } }
-          : satInteractionReducer(state, { type: 'REFERENCE_OPENED' }, ctx);
-      return normalizeSatInteractionState(next, ctx);
+      return state;
     case 'ANNOTATION_MODE_CHANGED':
       if (event.mode !== 'off' && opensRefused) return state;
       if (!isAnnotationModeAllowed(event.mode, ctx.toolPolicy)) return state;
@@ -326,14 +307,14 @@ export function satInteractionReducer(
       };
       break;
     case 'QUESTION_CHANGED':
-      // Explicit question contract: annotation mode + tools survive per
-      // policy; transient selection, editors, panels, navigator do not.
+      // Explicit question contract: annotation mode survives per policy;
+      // transient selection, editors, panels, navigator do not. Tool
+      // visibility is runner-owned and untouched here.
       next = resetScope(state, event.moduleKey, event.questionId);
       break;
     case 'MODULE_SCOPE_CHANGED':
       next = {
         ...resetScope(state, event.moduleKey, event.questionId),
-        tools: { calculator: 'closed', reference: 'closed' },
         annotation: { mode: 'off', textSelection: 'idle' },
       };
       break;
@@ -357,12 +338,6 @@ export function assertSatInteractionInvariants(
   ctx: SatInteractionContext,
 ): void {
   const failures: string[] = [];
-  if (!ctx.toolPolicy.calculator && state.tools.calculator !== 'closed') {
-    failures.push('Calculator cannot remain open when unavailable');
-  }
-  if (!ctx.toolPolicy.referenceSheet && state.tools.reference !== 'closed') {
-    failures.push('Reference sheet cannot remain open when unavailable');
-  }
   if (!isAnnotationModeAllowed(state.annotation.mode, ctx.toolPolicy)) {
     failures.push('Annotation mode active without capability');
   }

@@ -170,13 +170,13 @@ describe("SAT workbook import sheet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Import 147 Questions" }));
 
     await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
-    expect(commit).toHaveBeenCalledWith("exam-1", {
+    expect(commit).toHaveBeenCalledWith("exam-1", expect.objectContaining({
       importId: "import-1",
       expectedVersionId: "draft-v1",
       expectedVersionRevision: 7,
       modules: validPreview.modules,
       assets: [],
-    });
+    }));
     expect(onCommitted).toHaveBeenCalledWith(result);
   });
 

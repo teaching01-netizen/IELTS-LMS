@@ -135,11 +135,101 @@ func TestBulkRejectsIncompleteFencingAndDuplicateIDs(t *testing.T) {
 	}
 }
 
+func TestCreateQuestionRejectsOverCapacityInsideTransaction(t *testing.T) {
+	svc, mock := contractService(t)
+	begin(mock)
+	expectModuleDraft(mock, "mod-1")
+	mock.ExpectQuery("SELECT s.section_key, m.module_key FROM assessment_modules").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key"}).AddRow(SectionReadingWriting, "rw-m1"))
+	// Full 27-cap module: the fence rejects before any INSERT runs.
+	mock.ExpectQuery("SELECT target_question_count FROM assessment_modules WHERE").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"target_question_count"}).AddRow(27))
+	mock.ExpectQuery("SELECT COUNT").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(27))
+	mock.ExpectRollback()
+	if _, err := svc.CreateQuestion(context.Background(), "mod-1", "actor", QuestionDraft{QuestionType: "single_choice"}); codeOf(err) != apperrors.CodeValidation {
+		t.Fatalf("wanted over-capacity validation, got %v", err)
+	}
+}
+
+func TestDuplicateRejectsOverCapacityBeforeCopy(t *testing.T) {
+	svc, mock := contractService(t)
+	begin(mock)
+	expectQuestionDraft(mock, "eq-1")
+	mock.ExpectQuery("SELECT module_id, question_id, question_revision_id, display_order, is_pretest").WithArgs("eq-1").WillReturnRows(sqlmock.NewRows([]string{"module", "question", "revision", "order", "pretest"}).AddRow("mod-1", "original-q", "original-rev", 0, false))
+	mock.ExpectQuery("SELECT target_question_count FROM assessment_modules WHERE").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"target_question_count"}).AddRow(27))
+	mock.ExpectQuery("SELECT COUNT").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(27))
+	mock.ExpectRollback()
+	if _, err := svc.DuplicateQuestion(context.Background(), "eq-1", nil, "actor", nil); codeOf(err) != apperrors.CodeValidation {
+		t.Fatalf("wanted over-capacity validation, got %v", err)
+	}
+}
+
+func TestBatchCreateReplaysSameKeyWithoutSecondInsert(t *testing.T) {
+	svc, mock := contractService(t)
+	begin(mock)
+	mock.ExpectExec("INSERT IGNORE INTO authoring_operation_keys").WithArgs("actor", "batch:mod-1", "batch-key", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	expectModuleDraft(mock, "mod-1")
+	mock.ExpectQuery("SELECT s.section_key, m.module_key FROM assessment_modules").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key"}).AddRow(SectionReadingWriting, "rw-m1"))
+	mock.ExpectQuery("SELECT target_question_count FROM assessment_modules WHERE").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"target_question_count"}).AddRow(27))
+	mock.ExpectQuery("SELECT COUNT").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectQuery("SELECT COALESCE").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"next"}).AddRow(3))
+	mock.ExpectExec("INSERT INTO assessment_questions").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO assessment_question_revisions").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO assessment_exam_questions").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE authoring_operation_keys SET result_json").WithArgs(sqlmock.AnyArg(), "actor", "batch:mod-1", "batch-key").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	out, err := svc.BatchCreateQuestions(context.Background(), "mod-1", "actor", []QuestionDraft{{QuestionType: "single_choice"}}, WithOperationKey("batch-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected one batched question, got %d", len(out))
+	}
+}
+
+func TestBulkRejectsReusedKeyWithDifferentPayload(t *testing.T) {
+	svc, mock := contractService(t)
+	begin(mock)
+	mock.ExpectExec("INSERT IGNORE INTO authoring_operation_keys").WithArgs("actor", "bulk:delete", "bulk-key", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT request_hash, result_json FROM authoring_operation_keys").WithArgs("actor", "bulk:delete", "bulk-key").WillReturnRows(sqlmock.NewRows([]string{"request_hash", "result_json"}).AddRow("other-hash", nil))
+	mock.ExpectRollback()
+	_, err := svc.BulkQuestions(context.Background(), []string{"a"}, BulkAction{Type: "delete"}, "actor", nil, WithOperationKey("bulk-key"))
+	if codeOf(err) != apperrors.CodeConflict {
+		t.Fatalf("wanted key-reuse conflict, got %v", err)
+	}
+}
+
+func TestCreateQuestionReplaysSameKeyWithoutSecondInsert(t *testing.T) {
+	svc, mock := contractService(t)
+	begin(mock)
+	mock.ExpectExec("INSERT IGNORE INTO authoring_operation_keys").WithArgs("actor", "create:mod-1", "key-1", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	expectModuleDraft(mock, "mod-1")
+	mock.ExpectQuery("SELECT s.section_key, m.module_key FROM assessment_modules").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key"}).AddRow(SectionReadingWriting, "rw-m1"))
+	mock.ExpectQuery("SELECT target_question_count FROM assessment_modules WHERE").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"target_question_count"}).AddRow(27))
+	mock.ExpectQuery("SELECT COUNT").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectQuery("SELECT COALESCE").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"next"}).AddRow(3))
+	mock.ExpectExec("INSERT INTO assessment_questions").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO assessment_question_revisions").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO assessment_exam_questions").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(questionDetailQuery)).WillReturnRows(detailRows("created", 0))
+	mock.ExpectExec("UPDATE authoring_operation_keys SET result_json").WithArgs(sqlmock.AnyArg(), "actor", "create:mod-1", "key-1").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	first, err := svc.CreateQuestion(context.Background(), "mod-1", "actor", QuestionDraft{QuestionType: "single_choice"}, WithOperationKey("key-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ExamQuestionID == "" {
+		t.Fatal("expected created question identity")
+	}
+}
+
 func TestDuplicateHonorsInsertionAnchorAndCopiesContent(t *testing.T) {
 	svc, mock := contractService(t)
 	begin(mock)
 	expectQuestionDraft(mock, "eq-1")
 	mock.ExpectQuery("SELECT module_id, question_id, question_revision_id, display_order, is_pretest").WithArgs("eq-1").WillReturnRows(sqlmock.NewRows([]string{"module", "question", "revision", "order", "pretest"}).AddRow("mod-1", "original-q", "original-rev", 0, false))
+	// Duplicate is an insert: capacity fence runs before the copy (27-cap
+	// module currently holding 2 questions).
+	mock.ExpectQuery("SELECT target_question_count FROM assessment_modules WHERE").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"target_question_count"}).AddRow(27))
+	mock.ExpectQuery("SELECT COUNT").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 	mock.ExpectQuery("SELECT COALESCE").WithArgs("mod-1").WillReturnRows(sqlmock.NewRows([]string{"next"}).AddRow(3))
 	mock.ExpectQuery("SELECT display_order FROM assessment_exam_questions").WithArgs("eq-1", "mod-1").WillReturnRows(sqlmock.NewRows([]string{"order"}).AddRow(0))
 	mock.ExpectExec("UPDATE assessment_exam_questions SET display_order = display_order \\+ 1.*ORDER BY display_order DESC").WithArgs("mod-1", 1).WillReturnResult(sqlmock.NewResult(0, 2))

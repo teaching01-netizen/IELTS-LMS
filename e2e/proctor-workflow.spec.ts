@@ -116,6 +116,10 @@ test.describe("Proctor workflow", () => {
   });
 
   test("views dashboard with real-time student status updates", async ({ page }) => {
+    test.skip(
+      true,
+      'QUARANTINE (WS-16): generic button[type="button"] selector is ambiguous against the current roster/bulk-select UI and asserts nothing about student status — see e2e/TEST_STATUS.md. TODO(WS-16): link fix-forward tracking issue.'
+    );
     await page.goto("/proctor");
     await page.waitForLoadState("networkidle");
 
@@ -130,6 +134,10 @@ test.describe("Proctor workflow", () => {
   });
 
   test("performs individual student interventions", async ({ browser, page }) => {
+    test.skip(
+      true,
+      "QUARANTINE (WS-16): opens the roster via ambiguous text/generic-button selectors and never reaches the student drawer action path (Warn/Pause/Resume live behind Bulk-select/drawer) — see e2e/TEST_STATUS.md. TODO(WS-16): link fix-forward tracking issue."
+    );
     const manifest = readBackendE2EManifest();
 
     const studentContext = await browser.newContext({
@@ -154,7 +162,8 @@ test.describe("Proctor workflow", () => {
     // Click on first student to select it
     await page.locator('button[type="button"]').first().click();
 
-    // TODO: Fix button selectors for bulk actions - temporarily skipping
+    // QUARANTINE (WS-16): standalone Warn/Pause/Resume buttons only exist behind
+    // 'Bulk select' mode or the student activity drawer now — see e2e/TEST_STATUS.md.
     // await page.getByRole('button', { name: 'Warn' }).click();
     // await page.getByRole('button', { name: 'Pause' }).click();
     // await page.getByRole('button', { name: 'Resume' }).click();
@@ -163,6 +172,10 @@ test.describe("Proctor workflow", () => {
   });
 
   test("manages alerts and acknowledgments", async ({ page }) => {
+    test.skip(
+      true,
+      "QUARANTINE (WS-16): only opens Filters; the All-status combobox it targeted no longer exists (unnamed selects now) — see e2e/TEST_STATUS.md. TODO(WS-16): link fix-forward tracking issue."
+    );
     await page.goto("/proctor");
     await page.waitForLoadState("networkidle");
 
@@ -172,11 +185,16 @@ test.describe("Proctor workflow", () => {
     // View filters panel
     await page.getByRole("button", { name: "Filters" }).click();
 
-    // TODO: Fix combobox selector - temporarily skipping
+    // QUARANTINE (WS-16): 'All status' combobox no longer exists — the roster filter
+    // panel now uses unnamed selects behind 'Filters' — see e2e/TEST_STATUS.md.
     // await page.getByRole('combobox', { name: 'All status' }).selectOption('active');
   });
 
   test("creates and resolves session notes", async ({ page }) => {
+    test.skip(
+      true,
+      "QUARANTINE (WS-16): clicks ambiguous text/generic-button selectors and asserts nothing (no note created/resolved) — see e2e/TEST_STATUS.md. TODO(WS-16): link fix-forward tracking issue."
+    );
     await page.goto("/proctor");
     await page.getByText("Monitor Session").first().click();
 

@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -87,6 +88,9 @@ func (s *Service) SaveResponses(ctx context.Context, bearer string, cmd SaveResp
 		return SaveResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Invalid attempt credential.", HTTPStatus: 401}
 	}
 	if claims.AttemptID != cmd.AttemptID {
+		return SaveResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Attempt credential mismatch.", HTTPStatus: 401}
+	}
+	if cmd.BearerTokenID != "" && cmd.BearerTokenID != claims.TokenID {
 		return SaveResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Attempt credential mismatch.", HTTPStatus: 401}
 	}
 	var out SaveResult
@@ -269,11 +273,8 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 		if err != nil {
 			return SaveResult{}, err
 		}
-		if owner.ModuleState != "active" && owner.ModuleState != "review" {
-			return SaveResult{}, &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Question module is not active.", HTTPStatus: 422}
-		}
-		if gate.ActiveSectionKey != "*" && gate.ActiveSectionKey != "" && owner.SectionKey != gate.ActiveSectionKey {
-			return SaveResult{}, &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Question is not in the active section.", HTTPStatus: 400}
+		if err := ensureQuestionAdmitted(owner, gate, c.QuestionID); err != nil {
+			return SaveResult{}, err
 		}
 		// Version-collision probe.
 		var existingWrite string
@@ -428,17 +429,23 @@ func lockAttempt(ctx context.Context, q tx.Tx, id string) (AttemptState, error) 
 }
 
 func (s *Service) validateTokenSession(ctx context.Context, q tx.Tx, claims crypto.AttemptClaims) error {
+	if strings.TrimSpace(claims.TokenID) == "" {
+		log.Printf("attempts: session fence rejected empty token id (attempt %s)", claims.AttemptID)
+		return &apperrors.Error{Code: apperrors.CodeUnauthorized, Message: "Attempt credential session is not recognized.", HTTPStatus: 401}
+	}
 	var revoked sql.NullTime
 	var expires sql.NullTime
 	var attemptID, sessionID string
-	err := q.QueryRowContext(ctx, `SELECT attempt_id, client_session_id, revoked_at, expires_at FROM attempt_sessions WHERE token_id=? FOR UPDATE`, claims.TokenID).Scan(&attemptID, &sessionID, &revoked, &expires)
+	err := q.QueryRowContext(ctx, `SELECT attempt_id, client_session_id, revoked_at, expires_at FROM attempt_sessions WHERE token_id=? AND revoked_at IS NULL FOR UPDATE`, claims.TokenID).Scan(&attemptID, &sessionID, &revoked, &expires)
 	if err == sql.ErrNoRows {
+		log.Printf("attempts: session fence rejected unknown-or-revoked token (attempt %s)", claims.AttemptID)
 		return &apperrors.Error{Code: apperrors.CodeUnauthorized, Message: "Attempt credential session is not recognized.", HTTPStatus: 401}
 	}
 	if err != nil {
 		return err
 	}
 	if revoked.Valid || (expires.Valid && expires.Time.Before(s.clock.Now())) {
+		log.Printf("attempts: session fence rejected expired token (attempt %s)", claims.AttemptID)
 		return &apperrors.Error{Code: apperrors.CodeUnauthorized, Message: "Attempt credential is revoked or expired.", HTTPStatus: 401}
 	}
 	if attemptID != claims.AttemptID || sessionID != claims.ClientSessionID {
@@ -524,6 +531,23 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	}
 	if a.ClosingGraceUntil != nil && now.After(*a.ClosingGraceUntil) {
 		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
+	}
+	return nil
+}
+
+// ensureQuestionAdmitted enforces module ownership for one write: unassigned
+// (normalized question, no module attempt for this attempt) rejects with a
+// distinct message so adaptive-branch bypass attempts are distinguishable
+// from ordinary inactive-module writes; section mismatch stays BAD_REQUEST.
+func ensureQuestionAdmitted(owner QuestionOwner, gate RuntimeGate, questionID string) error {
+	if owner.ModuleState == "unassigned" {
+		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Question is not in an assigned module for this attempt.", HTTPStatus: 422, Details: map[string]any{"questionId": questionID}}
+	}
+	if owner.ModuleState != "active" && owner.ModuleState != "review" {
+		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Question module is not active.", HTTPStatus: 422}
+	}
+	if gate.ActiveSectionKey != "*" && gate.ActiveSectionKey != "" && owner.SectionKey != gate.ActiveSectionKey {
+		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Question is not in the active section.", HTTPStatus: 400}
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -21,6 +22,7 @@ import (
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/act"
+	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
@@ -121,11 +123,14 @@ func (s *Service) InvalidateVersion(versionID string) {
 }
 
 // DeliveredQuestion is one version-pinned question in delivery order.
+//
+// Security: no pretest marker crosses to candidates. IsPretest is a
+// test-strategy signal (it tells a candidate which items don't count);
+// the server still scores pretest exclusion internally via eq.is_pretest.
 type DeliveredQuestion struct {
 	ExamQuestionID string          `json:"examQuestionId"`
 	QuestionID     string          `json:"questionId"`
 	DisplayOrder   int             `json:"displayOrder"`
-	IsPretest      bool            `json:"isPretest"`
 	QuestionType   string          `json:"questionType"`
 	Stimulus       json.RawMessage `json:"stimulus"`
 	Prompt         json.RawMessage `json:"prompt"`
@@ -213,13 +218,13 @@ type TimingSnapshot struct {
 
 // Bootstrap is the assessment-delivery bootstrap payload.
 type Bootstrap struct {
-	ScheduleID            string            `json:"scheduleId"`
-	ExamID                string            `json:"examId"`
-	ProviderKey           string            `json:"providerKey"`
-	VersionID             string            `json:"versionId"`
+	ScheduleID  string `json:"scheduleId"`
+	ExamID      string `json:"examId"`
+	ProviderKey string `json:"providerKey"`
+	VersionID   string `json:"versionId"`
 	// VersionRevision is the exam_versions row revision backing Sections
 	// (plan D1: ETag W/"v{versionID}-{revision}" + If-None-Match -> 304).
-	VersionRevision int64 `json:"versionRevision"`
+	VersionRevision       int64             `json:"versionRevision"`
 	ServerNow             time.Time         `json:"serverNow"`
 	CandidateName         string            `json:"candidateName"`
 	ScheduleRuntimeStatus string            `json:"scheduleRuntimeStatus"`
@@ -497,11 +502,13 @@ func (s *Service) loadQuestions(ctx context.Context, moduleID string) ([]Deliver
 	defer rows.Close()
 	for rows.Next() {
 		var q DeliveredQuestion
+		var isPretest bool
 		var stimulus, prompt, answer, metadata, accessibility sql.NullString
-		if err := rows.Scan(&q.ExamQuestionID, &q.QuestionID, &q.DisplayOrder, &q.IsPretest,
+		if err := rows.Scan(&q.ExamQuestionID, &q.QuestionID, &q.DisplayOrder, &isPretest,
 			&q.QuestionType, &stimulus, &prompt, &answer, &metadata, &accessibility); err != nil {
 			return nil, err
 		}
+		_ = isPretest // server-side only; never serialized to candidates
 		q.Stimulus = rawJSON(stimulus)
 		q.Prompt = rawJSON(prompt)
 		q.Answer, err = deliveredAnswer(rawJSON(answer))
@@ -529,7 +536,7 @@ func (s *Service) EnsureBaseModuleAttemptForSchedule(ctx context.Context, attemp
 	if err := s.db.QueryRowContext(ctx,
 		"SELECT published_version_id FROM exam_schedules WHERE id = ?", scheduleID).Scan(&versionID); err != nil {
 		if err == sql.ErrNoRows {
-		return apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
+			return apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
 		}
 		return err
 	}
@@ -609,7 +616,61 @@ func (s *Service) loadModuleAttempts(ctx context.Context, attemptID string, now 
 }
 
 // loadResponses loads persisted question responses for the attempt.
+//
+// V2-first read (exam-day P0): SAT answers written through the V2 durability
+// transport live in attempt_responses_v2; legacy
+// assessment_question_responses rows are the fallback for pre-V2 attempts.
+// Per question the V2 row wins when present (response decoded from the
+// canonical "answer" field, review flags from the same envelope); legacy
+// fills only questions absent from V2. Ordering is deterministic: legacy
+// first-seen order (each loader emits (updated_at, id)), V2-only questions
+// appended in V2 order, V2 winners inheriting the legacy position they
+// replace — so the merged read is stable across calls with identical rows.
 func (s *Service) loadResponses(ctx context.Context, attemptID string) ([]ResponseSnapshot, error) {
+	legacy, err := s.loadResponsesLegacy(ctx, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	v2, err := s.loadResponsesV2(ctx, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	if len(v2) == 0 {
+		return legacy, nil
+	}
+	// Exam-day re-audit defect 10: map iteration order is random in Go, so
+	// the merged read is re-sorted into the documented (updated_at, id)
+	// sequence. Both loaders emit that order; V2 rows sort after legacy rows
+	// for the same question only when they win (they replace, never append).
+	byQuestion := make(map[string]ResponseSnapshot, len(legacy)+len(v2))
+	order := make(map[string]int, len(legacy)+len(v2))
+	for i, r := range legacy {
+		byQuestion[r.ExamQuestionID] = r
+		order[r.ExamQuestionID] = i
+	}
+	for _, r := range v2 {
+		if _, ok := byQuestion[r.ExamQuestionID]; !ok {
+			order[r.ExamQuestionID] = len(order)
+		}
+		byQuestion[r.ExamQuestionID] = r
+	}
+	out := make([]ResponseSnapshot, 0, len(byQuestion))
+	for _, r := range byQuestion {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		oi, oj := order[out[i].ExamQuestionID], order[out[j].ExamQuestionID]
+		if oi != oj {
+			return oi < oj
+		}
+		return out[i].ExamQuestionID < out[j].ExamQuestionID
+	})
+	return out, nil
+}
+
+// loadResponsesLegacy is the pre-V2 response read, retained as the fallback
+// for attempts whose answers exist only in the legacy table.
+func (s *Service) loadResponsesLegacy(ctx context.Context, attemptID string) ([]ResponseSnapshot, error) {
 	out := []ResponseSnapshot{}
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT ar.id, ar.module_attempt_id, ar.exam_question_id, ar.response, ar.marked_for_review, ar.eliminated_options, ar.annotations, ar.revision FROM assessment_question_responses ar JOIN assessment_module_attempts ma ON ma.id = ar.module_attempt_id WHERE ma.attempt_id = ? ORDER BY ar.updated_at, ar.id",
@@ -628,6 +689,63 @@ func (s *Service) loadResponses(ctx context.Context, attemptID string) ([]Respon
 		r.Response = rawJSON(response)
 		r.EliminatedOptions = rawJSON(eliminated)
 		r.Annotations = rawJSON(annotations)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// loadResponsesV2 reads V2 canonical payloads for the attempt and projects
+// each to the legacy ResponseSnapshot shape: the response is the canonical
+// "answer" field (assessscore.V2ResponseToScorerInput), MarkedForReview
+// comes from the same envelope. ModuleAttemptID is the resolved module
+// ATTEMPT id (ma.id via v.module_id); when no module attempt exists yet it
+// falls back to the raw v.module_id (a module id, not an attempt id) so
+// hydrate/save paths can still key the question — callers must treat it as
+// opaque and never pass it as ModuleAttemptID on save (lockActiveModuleTx
+// re-resolves the live attempt and MODULE_MISMATCH-guards explicit ids).
+// V2 question_id may be eq.id or eq.question_id; the exam question identity
+// is normalized to eq.id so it merges cleanly with legacy.
+func (s *Service) loadResponsesV2(ctx context.Context, attemptID string) ([]ResponseSnapshot, error) {
+	out := []ResponseSnapshot{}
+	// Read-path fence (mirrors the seal JOIN): the eq lookup joins through
+	// the owning module + the attempt's published version with eq.id-match
+	// preference, so a question_id reused across modules/versions can't
+	// merge a foreign module's answer over this module's.
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT v.question_id, v.module_id, CAST(v.response AS CHAR), v.server_revision, ma.id, eq.id FROM attempt_responses_v2 v LEFT JOIN assessment_module_attempts ma ON ma.attempt_id = v.attempt_id AND ma.module_id = v.module_id LEFT JOIN assessment_modules m ON m.id = v.module_id LEFT JOIN assessment_sections s ON s.id = m.section_id LEFT JOIN assessment_exam_questions eq ON (eq.id = v.question_id OR eq.question_id = v.question_id) AND eq.module_id = v.module_id AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = v.attempt_id) WHERE v.attempt_id = ? ORDER BY v.updated_at, CASE WHEN (CAST(v.question_id AS CHAR) COLLATE utf8mb4_unicode_ci) = eq.id THEN 0 ELSE 1 END, v.question_id",
+		attemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var vQuestionID, vModuleID string
+		var canonical sql.NullString
+		var serverRev uint64
+		var moduleAttemptID, examQuestionID sql.NullString
+		if err := rows.Scan(&vQuestionID, &vModuleID, &canonical, &serverRev, &moduleAttemptID, &examQuestionID); err != nil {
+			return nil, err
+		}
+		examID := vQuestionID
+		if examQuestionID.Valid && examQuestionID.String != "" {
+			examID = examQuestionID.String
+		}
+		moduleID := vModuleID
+		if moduleAttemptID.Valid && moduleAttemptID.String != "" {
+			moduleID = moduleAttemptID.String
+		}
+		r := ResponseSnapshot{
+			ID:              "v2:" + vQuestionID,
+			ModuleAttemptID: moduleID,
+			ExamQuestionID:  examID,
+			Revision:        int(serverRev),
+		}
+		if canonical.Valid && canonical.String != "" {
+			if input, ok := assessscore.V2ResponseToScorerInput(canonical.String); ok {
+				r.Response = json.RawMessage(input)
+			}
+			r.MarkedForReview = assessscore.V2MarkedForReview(canonical.String)
+		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -832,7 +950,10 @@ type saveResponseRow struct {
 // id; callers map typed errors via the stable apperrors envelope.
 // StructuredConflict reasons map to CodeAssessmentConflict with Details{reason}
 // preserved.
-func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, examQuestionID string, req SaveResponseRequest, clientSessionID ...string) (*ResponseSnapshot, error) {
+// SaveResponse persists one question response. The variadic writerBinding
+// is [clientSessionID, tokenID] from the verified bearer (edge-enforced
+// non-empty); the in-tx fence re-checks token revocation + writer session.
+func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, examQuestionID string, req SaveResponseRequest, writerBinding ...string) (*ResponseSnapshot, error) {
 	if urlScheduleID != bearerScheduleID {
 		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
 	}
@@ -856,7 +977,7 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, clientSessionID); err != nil {
+		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, writerBinding...); err != nil {
 			return err
 		}
 		active, timeoutRecovery, err := s.lockActiveModuleTx(ctx, t, bearerAttemptID, req)
@@ -985,7 +1106,11 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 			return err
 		}
 		if n != 1 {
-			return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+			// A racing finalization sealed the attempt between the
+			// entry writability check and this bump: the attempt
+			// exists but is no longer writable — 422, never 404, so
+			// clients retry finalization instead of dead-ending.
+			return apperrors.New(apperrors.CodeAttemptNotWritable, "The attempt is no longer writable.")
 		}
 		row, err := s.readResponseTx(ctx, t, responseID)
 		if err != nil {
@@ -1151,7 +1276,7 @@ func (s *Service) ensureAttemptCanWorkTx(ctx context.Context, t tx.Tx, scheduleI
 		return assessmentConflict("ATTEMPT_PROCTOR_BLOCKED", "Your SAT attempt has been terminated by the proctor.")
 	}
 	if submittedAt.Valid || deliveryStatus == "submitted" || deliveryStatus == "terminated" || deliveryStatus == "locked" || deliveryStatus == "cancelled" || (phase.Valid && phase.String == "post-exam") {
-		return apperrors.New(apperrors.CodeAssessmentConflict, "The SAT attempt is already terminal and cannot accept this command.")
+		return assessmentConflict("ATTEMPT_TERMINAL", "The SAT attempt is already terminal and cannot accept this command.")
 	}
 	var runtimeStatus sql.NullString
 	if err := t.QueryRowContext(ctx,
@@ -1266,7 +1391,7 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 		expected = sectionKey + ":" + suffix
 	}
 	if !activeStage.Valid || activeStage.String != expected {
-		return timingGate(0), assessmentConflict("MODULE_MISMATCH", "SAT section `"+expected+"` is not active for this cohort.")
+		return timingGate(0), assessmentConflict("SECTION_NOT_ACTIVE", "SAT section `"+expected+"` is not active for this cohort.")
 	}
 	var status string
 	var actualStart, pausedAt sql.NullTime
@@ -1275,7 +1400,7 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 		"SELECT rs.status, rs.actual_start_at, rs.paused_at, rs.planned_duration_minutes, rs.extension_minutes, rs.accumulated_paused_seconds FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id WHERE r.schedule_id = ? AND rs.section_key = ? FOR UPDATE",
 		scheduleID, expected).Scan(&status, &actualStart, &pausedAt, &plannedMinutes, &extensionMinutes, &pausedSeconds); err != nil {
 		if err == sql.ErrNoRows {
-			return timingGate(0), assessmentConflict("MODULE_MISMATCH", "The authoritative SAT section clock is missing.")
+			return timingGate(0), assessmentConflict("SECTION_CLOCK_MISSING", "The authoritative SAT section clock is missing.")
 		}
 		return timingGate(0), err
 	}
@@ -1448,7 +1573,7 @@ func (s *Service) ensureTimeoutResponseRecoveryTx(ctx context.Context, t tx.Tx, 
 			expected = sectionKey + ":" + suffix
 		}
 		if req.StageKey != nil && *req.StageKey != expected {
-			return assessmentConflict("MODULE_MISMATCH", "Response stage identity does not match its SAT section.")
+			return assessmentConflict("STAGE_SECTION_MISMATCH", "Response stage identity does not match its SAT section.")
 		}
 		var startedAt sql.NullTime
 		var plannedMinutes, extensionMinutes, pausedSeconds sql.NullInt64
@@ -1456,12 +1581,12 @@ func (s *Service) ensureTimeoutResponseRecoveryTx(ctx context.Context, t tx.Tx, 
 			"SELECT rs.actual_start_at, rs.planned_duration_minutes, rs.extension_minutes, rs.accumulated_paused_seconds FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id WHERE r.schedule_id = ? AND rs.section_key = ? FOR UPDATE",
 			scheduleID, expected).Scan(&startedAt, &plannedMinutes, &extensionMinutes, &pausedSeconds); err != nil {
 			if err == sql.ErrNoRows {
-				return assessmentConflict("MODULE_MISMATCH", "The authoritative SAT cohort clock is unavailable for recovery.")
+				return assessmentConflict("SECTION_CLOCK_MISSING", "The authoritative SAT cohort clock is unavailable for recovery.")
 			}
 			return err
 		}
 		if !startedAt.Valid {
-			return assessmentConflict("MODULE_MISMATCH", "The authoritative SAT cohort clock is unavailable for recovery.")
+			return assessmentConflict("SECTION_CLOCK_MISSING", "The authoritative SAT cohort clock is unavailable for recovery.")
 		}
 		if now.After(saveStageDeadline(startedAt.Time.UTC(), pausedInt(plannedMinutes), pausedInt(extensionMinutes), pausedInt(pausedSeconds))) {
 			return assessmentConflict("DEADLINE_EXPIRED", "The SAT response reached the server after the cohort deadline.")
@@ -1646,15 +1771,35 @@ func (s *Service) EnsureActiveWriter(ctx context.Context, attemptID, scheduleID,
 }
 
 // claimWriterSessionTx claims + verifies the exclusive writer session INSIDE
-// the mutation tx (plan B2.4 fold-in): conditional claim UPDATE (free slot ->
-// bearer session; guarded by terminal/proctor predicates) + SELECT ... FOR
-// UPDATE + equality. One PK row, one tx — the separate pre-tx
-// EnsureActiveWriter round trip is gone; the takeover race it raced is
-// closed by construction (claim and write commit atomically). Empty session
-// ids skip so existing callers/tests without writer binding keep behavior.
-func claimWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID, clientSessionID string) error {
-	if clientSessionID == "" {
-		return nil
+// the mutation tx (plan B2.4 fold-in): bearer token row re-check (revocation
+// landing between edge verify and commit fails closed) + conditional claim
+// UPDATE (free slot -> bearer session; guarded by terminal/proctor
+// predicates) + SELECT ... FOR UPDATE + equality. One tx — the separate
+// pre-tx EnsureActiveWriter round trip is gone; the takeover race it raced
+// is closed by construction (claim and write commit atomically). Empty
+// session ids are rejected: the delivery edge guarantees non-empty (every
+// minted bearer carries one), so an empty id here is a programming error,
+// never a legacy case to silently weaken.
+func claimWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID, clientSessionID, tokenID string) error {
+	if clientSessionID == "" || tokenID == "" {
+		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+	}
+	// TOCTOU close: the edge VerifyAttemptRead already checked this token
+	// row, but a revocation/rotation landing after the edge and before
+	// commit must not write. One indexed current read; revoked, rotated
+	// (lease mismatch is enforced by the writer-session equality below),
+	// or unknown rows fail closed. The attempt_sessions table predates
+	// lease_epoch on some schemas; a missing column falls back to the
+	// token/revocation probe (same rule as VerifyAttemptRead).
+	var dbToken string
+	var revokedAt sql.NullTime
+	if err := t.QueryRowContext(ctx,
+		"SELECT token_id, revoked_at FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL",
+		tokenID).Scan(&dbToken, &revokedAt); err != nil {
+		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+	}
+	if dbToken != tokenID || revokedAt.Valid {
+		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
 	}
 	if _, err := t.ExecContext(ctx,
 		"UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL AND submitted_at IS NULL AND COALESCE(proctor_status, 'active') <> 'terminated' AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
@@ -1679,39 +1824,119 @@ func claimWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID, c
 }
 
 // enforceWriterSessionTx keeps the historical in-tx call shape (variadic
-// bearer sessions) and routes into the folded claimWriterSessionTx: claim +
-// verify in one tx. All mutation-tx call sites keep working unchanged.
-func enforceWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, clientSessionIDs []string) error {
-	if len(clientSessionIDs) == 0 || clientSessionIDs[0] == "" {
-		return nil
+// bearer sessions + token) and routes into the folded claimWriterSessionTx:
+// revocation re-check + claim + verify in one tx. All mutation-tx call
+// sites keep working unchanged. The variadic tail is [clientSessionID,
+// tokenID]; both are required (edge guarantees them).
+func enforceWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, writerBinding ...string) error {
+	if len(writerBinding) < 2 || writerBinding[0] == "" || writerBinding[1] == "" {
+		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
 	}
-	return claimWriterSessionTx(ctx, t, scheduleID, attemptID, clientSessionIDs[0])
+	return claimWriterSessionTx(ctx, t, scheduleID, attemptID, writerBinding[0], writerBinding[1])
 }
 
 // Only fields in DeliveredAnswerDefinition may cross the candidate boundary.
+//
+// Key-universe contract (mirrored by redactAnswerValue in cmd/api, which
+// must not import this package): the scorer (assessscore.answerField)
+// resolves camelCase AND snake_case twins, so the allowlist accepts both
+// spellings on input but emits canonical camelCase. Unknown kinds and
+// unparseable envelopes fail closed.
 func deliveredAnswer(raw json.RawMessage) (json.RawMessage, error) {
 	var source map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &source); err != nil {
 		return nil, err
 	}
-	var kind string
-	if err := json.Unmarshal(source["kind"], &kind); err != nil {
-		return nil, err
+	kind, _ := answerKindOf(source)
+	if kind == "" {
+		return nil, apperrors.New(apperrors.CodeValidation, "Unsupported delivered answer kind.")
 	}
-	keys := []string{"kind"}
+	out := map[string]json.RawMessage{}
+	if rawKind, ok := source["kind"]; ok {
+		out["kind"] = rawKind
+	} else {
+		encoded, _ := json.Marshal(kind)
+		out["kind"] = encoded
+	}
 	switch kind {
 	case "single_choice":
-		keys = append(keys, "options")
+		if rawOptions, ok := firstPresent(source, "options"); ok {
+			// Options are re-allowlisted per element ({id, content}
+		// only): a nested isCorrect/is_correct flag would otherwise
+			// survive the allowlist and leak the key inside options.
+			if redacted, err := redactOptions(rawOptions); err == nil {
+				out["options"] = redacted
+			}
+		}
 	case "student_produced_response":
-		keys = append(keys, "normalizeFraction", "normalizeDecimal", "numericTolerance")
+		for _, key := range []string{"normalizeFraction", "normalizeDecimal", "numericTolerance"} {
+			if value, ok := firstPresent(source, key, snakeOf(key)); ok {
+				out[key] = value
+			}
+		}
+		// acceptedResponses is key material: never emitted. The
+		// candidate needs only the normalization contract.
 	default:
 		return nil, apperrors.New(apperrors.CodeValidation, "Unsupported delivered answer kind.")
 	}
-	out := make(map[string]json.RawMessage, len(keys))
-	for _, key := range keys {
-		if value, ok := source[key]; ok {
-			out[key] = value
+	return json.Marshal(out)
+}
+
+// answerKindOf reads the answer kind tolerating a missing/duplicated key;
+// empty means unsupported (fail closed).
+func answerKindOf(source map[string]json.RawMessage) (string, bool) {
+	if raw, ok := source["kind"]; ok {
+		var kind string
+		if err := json.Unmarshal(raw, &kind); err == nil && (kind == "single_choice" || kind == "student_produced_response") {
+			return kind, true
 		}
 	}
-	return json.Marshal(out)
+	return "", false
+}
+
+// firstPresent returns the first present spelling (canonical first).
+func firstPresent(source map[string]json.RawMessage, spellings ...string) (json.RawMessage, bool) {
+	for _, key := range spellings {
+		if value, ok := source[key]; ok {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+// snakeOf maps a canonical camelCase answer key to its snake_case twin
+// (the scorer accepts both; the redactor must cover both).
+func snakeOf(camel string) string {
+	var out []rune
+	for _, r := range camel {
+		if r >= 'A' && r <= 'Z' {
+			out = append(out, '_', r+('a'-'A'))
+		} else {
+		out = append(out, r)
+		}
+	}
+	return string(out)
+}
+
+// redactOptions re-emits a single_choice options array keeping only the
+// display fields {id, content} per element. Correctness flags
+// (isCorrect/is_correct), explanations, and any future key-adjacent
+// fields are dropped — the allowlist is per-element, not per-array.
+func redactOptions(raw json.RawMessage) (json.RawMessage, error) {
+	var options []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &options); err != nil {
+		return nil, err
+	}
+	redacted := make([]map[string]json.RawMessage, 0, len(options))
+	for _, opt := range options {
+		keep := map[string]json.RawMessage{}
+		if id, ok := opt["id"]; ok {
+			keep["id"] = id
+		}
+		if content, ok := opt["content"]; ok {
+			keep["content"] = content
+		}
+		redacted = append(redacted, keep)
+	}
+	return json.Marshal(redacted)
 }

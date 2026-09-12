@@ -123,4 +123,98 @@ describe('SAT V2 response persistence integration', () => {
     });
     expect(hook.result.current.visibleDrafts.q1).toBeUndefined();
   });
+
+  it('surfaces blocked drafts as visible + retryable exam-stress-safe failure and gates submit', async () => {
+    // Blocked flow WITHOUT mocking persistence: only the transport is
+    // mocked (fetchSnapshot/sendBatch/submit). The real DurableResponseEngine
+    // + real browser checkpoint path own durability. The control bump rides
+    // the initial recover(): the snapshot resolves AFTER the save, so
+    // recoverInternal adopts control 2 over the live control-1 draft and
+    // marks it blocked (visible, never sent) — same race the audit suite
+    // covers at engine level (I1/I3 deferred pattern, already used above).
+    const runningSnapshot = (controlEpoch: number) => ({
+      attemptId: 'attempt-blocked-live',
+      protocolVersion: 2,
+      deliveryStatus: 'running',
+      leaseEpoch: 1,
+      controlEpoch,
+      attemptRevision: 3,
+      responses: [],
+    });
+    const recoverySnapshot = deferred<ReturnType<typeof runningSnapshot>>();
+    // mockReset (not just clearAllMocks): the preceding identity test queues
+    // two Once fetchSnapshot values but only consumes one (its replacement
+    // engine never refetches), leaving a stale resolved [] Once entry behind
+    // — clearAllMocks preserves Once queues, and that stale [] would be
+    // consumed as this test's recovery snapshot (no authoritative epoch, so
+    // no control bump, so no block). Reset first, then install this test's
+    // gate: every fetch until the gate resolves gets the pending recovery
+    // promise; everything after gets the bumped snapshot.
+    mocks.transport.fetchSnapshot.mockReset();
+    let recoveryGate: Promise<ReturnType<typeof runningSnapshot>> | null = recoverySnapshot.promise;
+    mocks.transport.fetchSnapshot.mockImplementation(() => recoveryGate ?? runningSnapshot(2));
+    mocks.transport.sendBatch.mockResolvedValue({ attemptRevision: 3, serverTime: new Date().toISOString(), acknowledgements: [] });
+    const hook = renderHook(() =>
+      useSatResponsePersistence({
+        scheduleId: 'schedule',
+        attemptId: 'attempt-blocked-live',
+        gateway: gateway(),
+        onSavedRevision: vi.fn(),
+        leaseEpoch: 1,
+        controlEpoch: 1,
+      })
+    );
+    await waitFor(() => expect(mocks.transport.fetchSnapshot).toHaveBeenCalled());
+    // Save while recovery is still in flight (engine still at control 1).
+    act(() => {
+      hook.result.current.save({
+        questionId: 'q1',
+        answer: 'kept-answer',
+        markedForReview: false,
+        eliminatedOptionIds: [],
+        annotations: { version: 2, annotations: [], legacyQuestionNote: '' },
+      });
+    });
+    await waitFor(() => expect(Object.keys(hook.result.current.pendingDrafts).length).toBeGreaterThan(0), { timeout: 5000 });
+    // Timing-only control bump 1 -> 2 lands via the recovery snapshot: the
+    // live unsent draft is marked blocked (visible, never sent).
+    await act(async () => {
+      recoveryGate = null;
+      recoverySnapshot.resolve(runningSnapshot(2));
+      await recoverySnapshot.promise;
+    });
+    await waitFor(() => expect(hook.result.current.blockedDrafts).toContain('q1'), { timeout: 8000 });
+
+    // Visible-drafts flow assertion: the blocked draft stays VISIBLE (never
+    // silently dropped) and is named by blockedDrafts/blockedCount.
+    expect(hook.result.current.visibleDrafts.q1?.answer).toBe('kept-answer');
+    expect(hook.result.current.blockedCount).toBe(1);
+    expect(hook.result.current.blockedQuestionIds).toContain('q1');
+    // Banner copy: retryable failure with the exam-stress-safe wording.
+    await waitFor(() => expect(hook.result.current.failureKind).toBe('retryable'), { timeout: 5000 });
+    expect(hook.result.current.failure).toMatch(/kept on this device/i);
+
+    // Submit gate: blocked drafts refuse with the same gate copy (never a
+    // generic pending+retry message, never silent exclusion).
+    let submitError: unknown = null;
+    await act(async () => {
+      try {
+        await hook.result.current.submit();
+      } catch (error) {
+        submitError = error;
+      }
+    });
+    expect(submitError).toBeInstanceOf(Error);
+    expect((submitError as Error).message).toMatch(/needs attention before submit/i);
+    expect(hook.result.current.failureKind).toBe('retryable');
+
+    // Reconcile: reason union (never a bare boolean), and the draft stays
+    // visible throughout. Reconcile re-issues under the new epoch (the
+    // mocked snapshot above has no server-newer write), so expect
+    // 'reconciled'; accept 'refusal' only if the drain raced first.
+    const outcome = await hook.result.current.reconcileBlocked!('q1');
+    expect(['reconciled', 'refusal']).toContain(outcome);
+    expect(hook.result.current.visibleDrafts.q1?.answer).toBe('kept-answer');
+    hook.unmount();
+  });
 });

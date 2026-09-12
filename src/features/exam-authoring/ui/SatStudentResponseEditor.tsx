@@ -141,6 +141,10 @@ export function SatStudentResponseEditor({
         {equivalentError ? (
           <p role="alert" className="mt-1.5 text-[11px] text-au-danger-text">{equivalentError}</p>
         ) : null}
+        <p className="text-[11px] leading-4 text-slate-500">
+          Scoring compares numbers when both sides parse (fractions like 24/2 match 12); otherwise{" "}
+          answers must match exactly apart from spacing and letter case.
+        </p>
       </div>
     </div>
   );

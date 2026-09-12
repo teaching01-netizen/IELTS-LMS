@@ -38,7 +38,7 @@ func (c AdmissionCaps) normalized() AdmissionCaps {
 type admissionEntry struct {
 	userID     string
 	scheduleID string
-	expiresAt time.Time
+	expiresAt  time.Time
 }
 
 // Admission is the zero-SQL in-process websocket gate (plan C2). One RWMutex
@@ -56,7 +56,7 @@ type Admission struct {
 	perUser  map[string]int
 	perSched map[string]int
 
-	stopCh chan struct{}
+	stopCh   chan struct{}
 	stopOnce sync.Once
 }
 

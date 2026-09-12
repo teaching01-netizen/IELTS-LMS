@@ -158,3 +158,23 @@ func transient(err error) bool {
 		strings.Contains(s, "broken pipe") ||
 		strings.Contains(s, "bad connection")
 }
+
+// WithTxReadOnly runs fn in a read-only REPEATABLE READ transaction: every
+// statement observes one snapshot (no phantom splice across a multi-query
+// read) while guaranteeing the database refuses writes. It is the read
+// counterpart to WithTx and never takes row locks.
+//
+// The transaction always rolls back: read paths must not hold locks or
+// leave an open commit. Callers that need retries use WithTxRetry on the
+// write path; read snapshots are cheap to re-run at the caller.
+func (r *Runner) WithTxReadOnly(ctx context.Context, fn func(ctx context.Context, tx Tx) error) error {
+	sqlTx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sqlTx.Rollback() }()
+	if err := fn(ctx, sqlTx); err != nil {
+		return err
+	}
+	return nil
+}

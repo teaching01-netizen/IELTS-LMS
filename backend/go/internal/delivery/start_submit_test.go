@@ -67,6 +67,8 @@ func deliveryModuleWorkableTx(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
+	// ensureAttemptCanWorkTx completes before the writer fence.
+	deliveryWriterClaimTx(mock, "sess-test")
 }
 
 func deliveryModuleRow(mock sqlmock.Sqlmock, state string, at time.Time) {
@@ -108,6 +110,9 @@ func deliveryBootstrapLoads(mock sqlmock.Sqlmock, at time.Time) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_question_responses ar JOIN")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_attempt_id", "exam_question_id", "response", "marked_for_review", "eliminated_options", "annotations", "revision"}))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_responses_v2 v LEFT JOIN")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response", "server_revision", "module_attempt_id", "exam_question_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ?")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"candidate_name", "proctor_status", "proctor_note", "delivery_status", "submitted_at", "phase"}).
@@ -141,7 +146,7 @@ func TestDeliveryStartModuleIdempotent(t *testing.T) {
 	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
 	deliveryBootstrapLoads(mock, now.Add(-time.Minute))
-	out, err := svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1")
+	out, err := svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
 	if err != nil {
 		t.Fatalf("expected idempotent start to succeed, got %v", err)
 	}
@@ -172,7 +177,7 @@ func TestDeliverySubmitModuleNotActive(t *testing.T) {
 	deliveryModuleWorkableTx(mock)
 	deliveryModuleRow(mock, "paused", now.Add(-time.Minute))
 	mock.ExpectRollback()
-	_, err = svc.SubmitModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1")
+	_, err = svc.SubmitModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
 	if deliveryCodeOf(err) != apperrors.CodeAssessmentConflict {
 		t.Fatalf("expected CONFLICT on paused submit, got %v", err)
 	}

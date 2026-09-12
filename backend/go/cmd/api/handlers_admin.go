@@ -201,10 +201,18 @@ func examsPublishHandler(app *App) http.HandlerFunc {
 			Revision               int     `json:"revision"`
 			ExpectedDraftVersionID *string `json:"expectedDraftVersionId"`
 			ExpectedDraftRevision  *int    `json:"expectedDraftRevision"`
+			OperationKey           *string `json:"operationKey"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
 			return
+		}
+		operationKey := ""
+		if req.OperationKey != nil {
+			operationKey = strings.TrimSpace(*req.OperationKey)
+		}
+		if operationKey == "" {
+			operationKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 		}
 		id := chi.URLParam(r, "id")
 		out, err := app.Exams.PublishForActor(r.Context(), actorOf(r.Context()), id, exams.PublishRequest{
@@ -212,7 +220,9 @@ func examsPublishHandler(app *App) http.HandlerFunc {
 			Revision:               req.Revision,
 			ExpectedDraftVersionID: req.ExpectedDraftVersionID,
 			ExpectedDraftRevision:  req.ExpectedDraftRevision,
+			OperationKey:           operationKey,
 		})
+		observeAuthoringOp("publish", err)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

@@ -30,7 +30,10 @@ func requireV1StudentIdentity(app *App, r *http.Request, attemptID, scheduleID, 
 		return v1StudentIdentity{}, apperrors.New(apperrors.CodeValidation, "Attempt and schedule are required.")
 	}
 	if bearer := bearerOf(r); bearer != "" {
-		claims, err := verifyAttemptBearer(app, r, bearer)
+		// Session-bound verify in both modes (same rule as delivery
+		// writes): a revoked or takeover-rotated bearer must not
+		// write, even when ATTEMPT_VERIFY=stateless.
+		claims, err := verifyAttemptReadBearer(app, r, bearer)
 		if err != nil {
 			return v1StudentIdentity{}, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
 		}

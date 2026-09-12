@@ -104,10 +104,10 @@ export function SatNotesPanel(props: SatNotesPanelProps) {
           shadow live on the panel classes above (overlay contract owns
           geometry/backdrop — untouched). */}
       <div data-sat-note-header className="flex min-h-[38px] items-center bg-[var(--sat-note-header)] px-3">
-        <span className="text-[14px] font-semibold text-[var(--sat-text)]">{SAT_COPY.questionNote.fieldLabel}</span>
+        <span className="sat-type-control-secondary font-semibold text-[var(--sat-text)]">{SAT_COPY.questionNote.fieldLabel}</span>
       </div>
       <div className="p-3" style={panelStyle}>
-        <label htmlFor="sat-question-note" className="block text-[14px] font-normal text-[var(--sat-text-secondary)]">
+        <label htmlFor="sat-question-note" className="block sat-type-control-secondary font-normal text-[var(--sat-text-secondary)]">
           <span className="sr-only">{SAT_COPY.questionNote.fieldLabel}</span>
           {/* eslint-disable-next-line jsx-a11y/control-has-associated-label -- label text comes from the SAT_COPY table (non-literal); association is real via wrapping label + htmlFor. */}
           <textarea
@@ -118,22 +118,22 @@ export function SatNotesPanel(props: SatNotesPanelProps) {
             disabled={props.disabled}
             rows={6}
             aria-describedby="sat-question-note-count sat-question-note-hint"
-            className="sat-reading-copy w-full resize-y rounded-[6px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] p-3 text-[15px] font-normal leading-6 text-[var(--sat-text)] outline-none focus:border-[var(--sat-accent)] focus:ring-2 focus:ring-[var(--sat-focus)]/25 disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)]"
+            className="sat-reading-copy w-full resize-y rounded-[6px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] p-3 sat-type-control-primary font-normal leading-6 text-[var(--sat-text)] outline-none focus:border-[var(--sat-accent)] focus:ring-2 focus:ring-[var(--sat-focus)]/25 disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)]"
             placeholder={SAT_COPY.questionNote.placeholder}
           />
         </label>
-        <p id="sat-question-note-hint" className="mt-2 text-[13px] text-[var(--sat-text-secondary)]">
+        <p id="sat-question-note-hint" className="mt-2 sat-type-metadata text-[var(--sat-text-secondary)]">
           {SAT_COPY.questionNote.autoSaveHint}
         </p>
         <div className="mt-3 flex items-center justify-between gap-3">
-          <span id="sat-question-note-count" className="text-[13px] text-[var(--sat-text-secondary)]" aria-live="polite">
+          <span id="sat-question-note-count" className="sat-type-metadata text-[var(--sat-text-secondary)]" aria-live="polite">
             {draft.length}/2000
           </span>
           <button
             type="button"
             disabled={props.disabled}
             onClick={handleClose}
-            className="sat-touch-target sat-pressable rounded-full bg-[var(--sat-accent)] px-5 text-[14px] font-semibold text-[var(--sat-accent-text)] hover:bg-[var(--sat-accent-strong)] disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2"
+            className="sat-touch-target sat-pressable rounded-full bg-[var(--sat-accent)] px-5 sat-type-control-secondary font-semibold text-[var(--sat-accent-text)] hover:bg-[var(--sat-accent-strong)] disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2"
           >
             {SAT_COPY.questionNote.saveAndClose}
           </button>

@@ -200,7 +200,7 @@ describe("SatDeliveryReleasePage", () => {
     render(<SatDeliveryReleasePage {...pageProps({ onBackToBuilder })} />);
 
     fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
-    fireEvent.click(screen.getByRole("button", { name: "Questions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to builder" }));
 
     expect(onBackToBuilder).not.toHaveBeenCalled();
     expect(
@@ -293,5 +293,144 @@ describe("SatDeliveryReleasePage", () => {
     expect(screen.getByText("Unpublished changes")).toBeInTheDocument();
     expect(screen.getByText("Students still receive Version 4.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish Update" })).toBeEnabled();
+  });
+
+  it("blocks publishing with an explicit stale-checks banner and reason", () => {
+    render(
+      <SatDeliveryReleasePage
+        {...pageProps({
+          readiness: { ...readyReport, versionRevision: shell.versionRevision - 1 },
+        })}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(/Checks are for revision/);
+    expect(screen.getByRole("button", { name: "Publish" })).toHaveAttribute(
+      "aria-describedby",
+      "release-publish-reasons",
+    );
+    expect(screen.getByText(/Publish checks are stale/)).toBeInTheDocument();
+  });
+
+  it("keeps release checks visible in read-only mode once published", () => {
+    render(
+      <SatDeliveryReleasePage
+        {...pageProps({
+          releaseState: publishedCurrentRelease,
+          readiness: null,
+        })}
+      />
+    );
+
+    expect(screen.getByText(/Release checks passed for Version 4/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run checks" })).not.toBeInTheDocument();
+  });
+
+  it("blocks publishing without publish permission and names the reason", () => {
+    render(
+      <SatDeliveryReleasePage
+        {...pageProps({ exam: { ...exam, canPublish: false } })}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByText(/do not have permission to publish/)).toBeInTheDocument();
+  });
+
+  it("disables section save and explains read-only delivery settings", () => {
+    render(
+      <SatDeliveryReleasePage
+        {...pageProps({ exam: { ...exam, canEdit: false } })}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+    expect(
+      screen.getAllByText(/do not have permission to edit delivery settings/).length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("maps save conflicts to a user-safe alert", async () => {
+    updateMutation.mutateAsync.mockRejectedValueOnce(new Error("revision conflict 409"));
+    render(<SatDeliveryReleasePage {...pageProps()} />);
+
+    fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save section" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/draft changed/i);
+  });
+
+  it("submits the publish dialog only once on double click", async () => {
+    const onPublish = vi.fn().mockImplementation(() => new Promise(() => {}));
+    render(<SatDeliveryReleasePage {...pageProps({ onPublish })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    const publishButtons = screen.getAllByRole("button", { name: "Publish" });
+    const dialogButton = publishButtons[publishButtons.length - 1]!;
+    fireEvent.click(dialogButton);
+    fireEvent.click(dialogButton);
+
+    await waitFor(() => expect(onPublish).toHaveBeenCalledTimes(1));
+  });
+
+  it("maps publish failures to user-safe copy instead of raw errors", async () => {
+    const onPublish = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("publish 500 <html>internal stack</html>"));
+    render(<SatDeliveryReleasePage {...pageProps({ onPublish })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    const publishButtons = screen.getAllByRole("button", { name: "Publish" });
+    fireEvent.click(publishButtons[publishButtons.length - 1]!);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /could not be published/i,
+    );
+    expect(screen.queryByText(/internal stack/)).not.toBeInTheDocument();
+  });
+
+  it("expands long issue lists on demand instead of silently truncating", () => {
+    const errors = Array.from({ length: 25 }, (_, index) => ({
+      code: `sat.blocker.${index}`,
+      path: `section.${index}`,
+      message: `Blocking issue ${index}`,
+      blocking: true,
+    }));
+    render(
+      <SatDeliveryReleasePage
+        {...pageProps({
+          readiness: { ...readyReport, valid: false, errors },
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /show all 25 issues/i })).toBeInTheDocument();
+    expect(screen.queryByText("Blocking issue 24")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /show all 25 issues/i }));
+    expect(screen.getByText("Blocking issue 24")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /show fewer issues/i }));
+    expect(screen.queryByText("Blocking issue 24")).not.toBeInTheDocument();
+  });
+
+  it("keeps publish reachable by keyboard tab order", () => {
+    render(<SatDeliveryReleasePage {...pageProps()} />);
+
+    const publish = screen.getByRole("button", { name: "Publish" });
+    publish.focus();
+    expect(document.activeElement).toBe(publish);
+    expect(publish).toBeEnabled();
+  });
+
+  it("pauses publishing while offline with an explicit banner", () => {
+    const onlineSpy = vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      render(<SatDeliveryReleasePage {...pageProps()} />);
+
+      expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+      expect(screen.getAllByText(/you are offline/i).length).toBeGreaterThanOrEqual(1);
+    } finally {
+      onlineSpy.mockRestore();
+    }
   });
 });

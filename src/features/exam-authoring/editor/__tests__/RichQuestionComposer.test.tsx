@@ -1,10 +1,16 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { plainContentFromText } from "../richContent";
 import { FastQuestionComposer } from "../FastQuestionComposer";
 import { RichQuestionComposer, SAT_CHOICE_COMPOSER_CAPABILITIES } from "../RichQuestionComposer";
 
 describe("SAT rich question composer capabilities", () => {
+  it("shows only five default controls plus overflow", async () => {
+    render(<RichQuestionComposer value={plainContentFromText("Hello")} onChange={vi.fn()} label="Question" />);
+    const toolbar=await screen.findByRole("toolbar", {name:"Formatting tools"});
+    expect(within(toolbar).getAllByRole("button")).toHaveLength(5);
+    expect(within(toolbar).getByRole("combobox", {name:"Text style"})).toBeInTheDocument();
+  });
   it("retains a persisted text-block identity when the editor loads", async () => {
     render(<RichQuestionComposer value={{ version: 2, nodes: [], document: {
       type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'passage-evidence' }, content: [{ type: 'text', text: 'Evidence' }] }],
@@ -27,11 +33,13 @@ describe("SAT rich question composer capabilities", () => {
       expect(screen.getByRole("textbox", { name: "Answer choice A" })).toBeInTheDocument()
     );
     expect(screen.getByRole("toolbar", { name: "Formatting tools" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Underline (⌘U)" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Insert equation" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Insert image or graph" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Code block" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Insert table" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name:"More formatting"}));
+    expect(screen.getByRole("menuitem", {name:"Underline (⌘U)"})).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", {name:"Bulleted list"})).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("menu"), {key:"Escape"});
+    fireEvent.click(screen.getByRole("button", {name:"Insert content"}));
+    for(const name of ["Insert image or graph", "Code block", "Insert table"]) expect(screen.getByRole("menuitem",{name})).toBeInTheDocument();
   });
 
   it("applies the inline placement layout to the equation preview", async () => {

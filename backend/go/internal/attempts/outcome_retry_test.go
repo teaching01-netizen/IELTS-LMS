@@ -27,4 +27,3 @@ func TestRetriedOutcomeLabel(t *testing.T) {
 		t.Fatalf("replay stays exact_replay regardless of retries, got %q", got)
 	}
 }
-

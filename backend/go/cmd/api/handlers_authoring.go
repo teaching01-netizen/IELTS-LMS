@@ -15,7 +15,28 @@ import (
 	"example.com/ielts-proctoring/internal/media"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
+
+// observeAuthoringOp records authoring_operation_total{operation,outcome}
+// with bounded labels only: operation is the handler name, outcome is one of
+// accepted | version_collision | rejected. Idempotent replays converge on the
+// original success, so they count as accepted: the replay path returns the
+// stored outcome with a nil error, indistinguishable (by design) from a fresh
+// accept at the handler. IDs stay in logs.
+func observeAuthoringOp(operation string, err error) {
+	outcome := telemetry.OutcomeAccepted
+	if err != nil {
+		outcome = telemetry.OutcomeRejected
+		if appErr, ok := apperrors.As(err); ok {
+			switch appErr.Code {
+			case apperrors.CodeConflict, apperrors.CodeVersionCollision, apperrors.CodeControlEpochStale, apperrors.CodeAssessmentConflict:
+				outcome = telemetry.OutcomeVersionConflict
+			}
+		}
+	}
+	telemetry.IncCounter(telemetry.MAuthoringOpTotal, "operation", operation, "outcome", outcome)
+}
 
 // authorSatWorkbookTemplateHandler downloads the canonical SAT authoring
 // workbook. The shell lookup keeps this endpoint restricted to SAT exams and
@@ -292,7 +313,15 @@ func authorCommitImportHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		out, err := app.Authoring.CommitSATWorkbook(r.Context(), chi.URLParam(r, "examID"), req, sess.UserID)
+		operationKey := ""
+		if req.OperationKey != "" {
+			operationKey = req.OperationKey
+		}
+		if operationKey == "" {
+			operationKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		}
+		out, err := app.Authoring.CommitSATWorkbook(r.Context(), chi.URLParam(r, "examID"), req, sess.UserID, authoring.WithOperationKey(operationKey))
+		observeAuthoringOp("workbook_commit", err)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -403,6 +432,8 @@ func decodeDraft(r *http.Request) (authoring.QuestionDraft, error) {
 // authorCreateQuestionHandler creates one question in a module.
 // The frontend POSTs with no body; an explicit draft is also accepted for
 // API clients. Either way the service synthesizes a section-aware default.
+// An optional operationKey makes a lost-response retry replay the original
+// outcome instead of minting a second question.
 func authorCreateQuestionHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess := requireAuthoringModuleWrite(app, w, r, chi.URLParam(r, "moduleID"))
@@ -418,7 +449,9 @@ func authorCreateQuestionHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		out, err := app.Authoring.CreateQuestion(r.Context(), chi.URLParam(r, "moduleID"), sess.UserID, draft)
+		operationKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		out, err := app.Authoring.CreateQuestion(r.Context(), chi.URLParam(r, "moduleID"), sess.UserID, draft, authoring.WithOperationKey(operationKey))
+		observeAuthoringOp("create_question", err)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -439,8 +472,9 @@ func authorBatchQuestionsHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			Drafts    []draftPayload `json:"drafts"`
-			Questions []draftPayload `json:"questions"`
+			Drafts       []draftPayload `json:"drafts"`
+			Questions    []draftPayload `json:"questions"`
+			OperationKey *string        `json:"operationKey"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -463,7 +497,15 @@ func authorBatchQuestionsHandler(app *App) http.HandlerFunc {
 				IsPretest:     d.IsPretest,
 			})
 		}
-		out, err := app.Authoring.BatchCreateQuestions(r.Context(), chi.URLParam(r, "moduleID"), sess.UserID, drafts)
+		operationKey := ""
+		if req.OperationKey != nil {
+			operationKey = *req.OperationKey
+		}
+		if operationKey == "" {
+			operationKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		}
+		out, err := app.Authoring.BatchCreateQuestions(r.Context(), chi.URLParam(r, "moduleID"), sess.UserID, drafts, authoring.WithOperationKey(operationKey))
+		observeAuthoringOp("batch_create", err)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -615,6 +657,7 @@ func authorDuplicateHandler(app *App) http.HandlerFunc {
 		var req struct {
 			DestinationModuleID       *string `json:"destinationModuleId"`
 			InsertAfterExamQuestionID *string `json:"insertAfterExamQuestionId"`
+			OperationKey              *string `json:"operationKey"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -623,7 +666,15 @@ func authorDuplicateHandler(app *App) http.HandlerFunc {
 		if req.DestinationModuleID != nil && requireAuthoringModuleWrite(app, w, r, *req.DestinationModuleID) == nil {
 			return
 		}
-		out, err := app.Authoring.DuplicateQuestion(r.Context(), chi.URLParam(r, "examQuestionID"), req.DestinationModuleID, sess.UserID, req.InsertAfterExamQuestionID)
+		var operationKey string
+		if req.OperationKey != nil {
+			operationKey = *req.OperationKey
+		}
+		if operationKey == "" {
+			operationKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		}
+		out, err := app.Authoring.DuplicateQuestion(r.Context(), chi.URLParam(r, "examQuestionID"), req.DestinationModuleID, sess.UserID, req.InsertAfterExamQuestionID, authoring.WithOperationKey(operationKey))
+		observeAuthoringOp("duplicate_question", err)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -653,6 +704,7 @@ func authorBulkHandler(app *App) http.HandlerFunc {
 				Patch               map[string]any `json:"patch"`
 			} `json:"action"`
 			ExpectedRevisions map[string]int `json:"expectedRevisions"`
+			OperationKey      *string        `json:"operationKey"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -677,7 +729,15 @@ func authorBulkHandler(app *App) http.HandlerFunc {
 		if pretest != nil {
 			action.PretestValue = *pretest
 		}
-		result, err := app.Authoring.BulkQuestions(r.Context(), req.QuestionIDs, action, sess.UserID, req.ExpectedRevisions)
+		operationKey := ""
+		if req.OperationKey != nil {
+			operationKey = *req.OperationKey
+		}
+		if operationKey == "" {
+			operationKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		}
+		result, err := app.Authoring.BulkQuestions(r.Context(), req.QuestionIDs, action, sess.UserID, req.ExpectedRevisions, authoring.WithOperationKey(operationKey))
+		observeAuthoringOp("bulk", err)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -736,6 +796,7 @@ func authorSaveRevisionHandler(app *App) http.HandlerFunc {
 			Metadata:      req.Metadata,
 			Accessibility: req.Accessibility,
 		}, sess.UserID)
+		observeAuthoringOp("save_revision", err)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

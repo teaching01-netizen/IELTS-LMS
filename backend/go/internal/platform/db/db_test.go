@@ -46,7 +46,7 @@ func TestNormalizeMySQLDSNForcesParseTimeForBareNativeDSN(t *testing.T) {
 	}
 }
 
-func TestNormalizeMySQLDSNRejectsUnsupportedURI(t *testing.T) { 
+func TestNormalizeMySQLDSNRejectsUnsupportedURI(t *testing.T) {
 	if _, err := normalizeMySQLDSN("postgres://user:pass@db.example.test/ielts"); err == nil {
 		t.Fatal("expected unsupported URI scheme to fail")
 	}

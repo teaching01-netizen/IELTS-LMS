@@ -92,7 +92,14 @@ function normalizeStudentCode(value: string): string {
 
 function readProfile(linkId: string): AccessForm {
   if (typeof window === 'undefined') return { studentCode: '', studentName: '', email: '' };
-  const raw = window.localStorage.getItem(`${STUDENT_LINK_PROFILE_PREFIX}${linkId}`);
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(`${STUDENT_LINK_PROFILE_PREFIX}${linkId}`);
+  } catch {
+    // Storage-denied environments (blocked cookies, private mode) must still
+    // render the entry form with empty defaults — never crash on read.
+    return { studentCode: '', studentName: '', email: '' };
+  }
   if (!raw) return { studentCode: '', studentName: '', email: '' };
   try {
     const parsed = JSON.parse(raw) as Partial<AccessForm>;
@@ -108,7 +115,12 @@ function readProfile(linkId: string): AccessForm {
 
 function saveProfile(linkId: string, form: AccessForm): void {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(`${STUDENT_LINK_PROFILE_PREFIX}${linkId}`, JSON.stringify(form));
+  try {
+    window.localStorage.setItem(`${STUDENT_LINK_PROFILE_PREFIX}${linkId}`, JSON.stringify(form));
+  } catch {
+    // Profile recall is convenience-only (mirrors the best-effort queue
+    // storage above): a full or blocked store must never block admission.
+  }
 }
 
 function buildStudentRoute(scheduleId: string, code: string): string {
@@ -180,6 +192,8 @@ export function StudentAccessLinkEntryRoute() {
   const canEnter = link?.status === 'live';
 
   const finishEntry = useCallback((activeLink: PublicStudentAccessLink, submitted: AccessForm, result: { scheduleId: string; studentCode: string }) => {
+    // Navigation depends only on admission success: saveProfile is
+    // best-effort and never throws, so a full/blocked store still enters.
     const normalizedEmail = submitted.email.trim().toLocaleLowerCase();
     saveProfile(activeLink.id, {
       ...submitted,

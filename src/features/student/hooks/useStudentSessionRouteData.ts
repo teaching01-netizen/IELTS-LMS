@@ -45,6 +45,11 @@ import {
   normalizeCandidateId,
 } from './studentCandidateStorage';
 import { collectPublishedDiagramSnapshotIssues } from './studentSessionDiagnostics';
+import {
+  buildSatBootstrapSeed,
+  getCachedDeliveryEtag,
+  type SatBootstrapSeed,
+} from '../../student-delivery/bootstrap/satBootstrapSeed';
 
 export type { StudentAnswerInvariantRollout } from './studentSessionRouteUtils';
 
@@ -59,6 +64,8 @@ interface StudentSessionRouteData {
   satAttemptUpdateToken: number;
   schedule: ExamSchedule | null;
   state: ExamState | null;
+  satBootstrapSeed: SatBootstrapSeed | null;
+  isSatStaticReady: boolean;
   refreshRuntime: () => Promise<void>;
   retry: () => Promise<void>;
 }
@@ -106,7 +113,11 @@ export function useStudentSessionRouteData(
   const [schedule, setSchedule] = useState<ExamSchedule | null>(null);
   const [state, setState] = useState<ExamState | null>(null);
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<ExamSessionRuntime | null>(null);
-  const [providerKey, setProviderKey] = useState<'ielts' | 'sat' | 'act' | 'unknown'>('ielts');
+  // Unknown until the static snapshot resolves: the route must not assume a
+  // product skin before the provider is known (an 'ielts' default flashes the
+  // admin skeleton on every SAT cold open). Readers must treat 'unknown' as
+  // "not yet known" during loading; the load path throws on a settled unknown.
+  const [providerKey, setProviderKey] = useState<'ielts' | 'sat' | 'act' | 'unknown'>('unknown');
   const [liveSocketConnected, setLiveSocketConnected] = useState(false);
   const [satAttemptUpdateToken, setSatAttemptUpdateToken] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -115,6 +126,9 @@ export function useStudentSessionRouteData(
   const candidateId = useMemo(() => normalizeCandidateId(studentId), [studentId]);
   const staticVersionIdRef = useRef<string | null>(null);
   const refreshEpochRef = useRef(0);
+  // Phase 02 seed: wall-clock ms when the load path last applied a live
+  // attempt/runtime snapshot (staleness display only; never gates fetches).
+  const liveReceivedAtRef = useRef<number | null>(null);
   // Counts refreshes that have STARTED but not yet reached the freshness
   // gate. Two concurrent refresh() calls both observe the same
   // refreshEpochRef value, so the epoch comparison alone cannot separate
@@ -742,6 +756,7 @@ export function useStudentSessionRouteData(
       if (applyDecision.applyRuntime && nextRuntimeSnapshot !== previousRuntimeSnapshot) {
         runtimeSnapshotRef.current = nextRuntimeSnapshot;
         setRuntimeSnapshot(nextRuntimeSnapshot);
+        liveReceivedAtRef.current = Date.now();
       }
 
       if (live.attempt && applyDecision.applyAttempt) {
@@ -767,10 +782,12 @@ export function useStudentSessionRouteData(
           return;
         }
         setAttemptSnapshot(reconciledAttempt);
+        liveReceivedAtRef.current = Date.now();
       } else if (!live.attempt) {
         const cachedAttempt = await readCachedAttemptForCandidate();
         if (cachedAttempt) {
           setAttemptSnapshot(cachedAttempt);
+          liveReceivedAtRef.current = Date.now();
           appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
             appliedFreshnessRef.current,
             incomingFreshness,
@@ -800,6 +817,7 @@ export function useStudentSessionRouteData(
               : mappedRuntime?.currentSectionKey ?? firstEnabledModule,
         });
         setAttemptSnapshot(createdAttempt);
+        liveReceivedAtRef.current = Date.now();
       }
       appliedFreshnessRef.current = mergeLiveSnapshotFreshness(appliedFreshnessRef.current, incomingFreshness, {
         applyAttempt: applyDecision.applyAttempt,
@@ -944,6 +962,35 @@ export function useStudentSessionRouteData(
     },
   );
 
+  // Phase 02 seed (additive, memoized): non-null iff the SAT identity is
+  // fully known. Bytes are NEVER reused — the child still bootstraps via
+  // assessmentDeliveryApi.bootstrap; the seed only scopes that one call
+  // (identity/epochs/ETag) and lets the child skip re-fires (dedupe via
+  // singleflight + ETag/304, not byte reuse). Refs are read inside (stable,
+  // exempt from deps); every reactive input is listed so static re-resolve
+  // (new schedule/state objects) rebuilds the seed. Seed identity churn is
+  // harmless: the child bootstrap effect deps read seed scalars only.
+  const isSatStaticReady = providerKey === 'sat' && schedule !== null && state !== null;
+  const satBootstrapSeed = useMemo<SatBootstrapSeed | null>(() => {
+    if (providerKey !== 'sat' || schedule === null || state === null) {
+      return null;
+    }
+    if (!scheduleId || !candidateId || !attemptSnapshot?.id) {
+      return null;
+    }
+    return buildSatBootstrapSeed({
+      scheduleId,
+      attemptId: attemptSnapshot.id,
+      candidateId,
+      attemptSnapshot,
+      runtimeSnapshot,
+      liveSnapshotReceivedAt: liveReceivedAtRef.current,
+      staticVersionId: staticVersionIdRef.current,
+      deliveryEtag: getCachedDeliveryEtag(scheduleId, attemptSnapshot.id),
+      seedGeneration: refreshEpochRef.current,
+    });
+  }, [attemptSnapshot, candidateId, providerKey, runtimeSnapshot, schedule, scheduleId, state]);
+
   return {
     answerInvariantRollout,
     attemptSnapshot,
@@ -955,6 +1002,8 @@ export function useStudentSessionRouteData(
     satAttemptUpdateToken,
     schedule,
     state,
+    satBootstrapSeed,
+    isSatStaticReady,
     refreshRuntime: (...args: Parameters<typeof refreshBackendSessionSnapshot>) =>
       refreshBackendSessionSnapshot(...args).catch(() => {}),
     retry: () => loadStudentData('retry').catch(() => {}),

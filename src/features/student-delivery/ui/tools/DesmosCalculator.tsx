@@ -6,6 +6,11 @@ export interface DesmosCalculatorProps {
   mode: DesmosCalculatorMode;
   disabled?: boolean;
   prewarmInactiveModes?: boolean;
+  /**
+   * Phase 01 aria contract: set when this tree is hidden (tool closed or
+   * keepAlive prewarm). Strips live-region roles; visible output unchanged.
+   */
+  silenceLiveRegions?: boolean | undefined;
 }
 
 const DESMOS_MODES = ["scientific", "graphing"] as const;
@@ -19,6 +24,7 @@ export function DesmosCalculator({
   mode,
   disabled = false,
   prewarmInactiveModes = false,
+  silenceLiveRegions = false,
 }: DesmosCalculatorProps) {
   const [loadedModes, setLoadedModes] = useState<ReadonlySet<DesmosCalculatorMode>>(
     () => new Set()
@@ -84,7 +90,7 @@ export function DesmosCalculator({
           />
         );
       })}
-      {!activeReady ? (
+      {!activeReady && !silenceLiveRegions ? (
         <div
           className="pointer-events-none absolute inset-0 grid place-items-center bg-[var(--sat-surface)]"
           role="status"
@@ -102,12 +108,39 @@ export function DesmosCalculator({
           </div>
         </div>
       ) : null}
-      {disabled ? (
+      {!activeReady && silenceLiveRegions ? (
+        <div
+          className="pointer-events-none absolute inset-0 grid place-items-center bg-[var(--sat-surface)]"
+          aria-hidden="true"
+          data-desmos-loading
+        >
+          <div className="text-center">
+            <div
+              className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2 border-[var(--sat-divider-soft)] border-t-[var(--sat-text)] motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+            <p className="text-[14px] font-medium text-[var(--sat-text-secondary)]">
+              Loading calculator…
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {disabled && !silenceLiveRegions ? (
         <div
           className="absolute inset-0 z-10 grid place-items-center bg-[var(--sat-surface)]/85"
           role="status"
           aria-live="polite"
           aria-atomic="true"
+        >
+          <p className="rounded-full bg-[var(--sat-text)] px-4 py-2 text-[14px] font-semibold text-[var(--sat-background)]">
+            Paused by proctor
+          </p>
+        </div>
+      ) : null}
+      {disabled && silenceLiveRegions ? (
+        <div
+          className="absolute inset-0 z-10 grid place-items-center bg-[var(--sat-surface)]/85"
+          aria-hidden="true"
         >
           <p className="rounded-full bg-[var(--sat-text)] px-4 py-2 text-[14px] font-semibold text-[var(--sat-background)]">
             Paused by proctor

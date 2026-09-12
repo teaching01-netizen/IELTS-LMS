@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDurableLatestAutosave } from "../../../hooks/useDurableLatestAutosave";
 import { saveDurableDraft } from "../../../utils/durableDraftStore";
 import type { QuestionRevision } from "../contracts/assessment";
 
-export type QuestionSaveStatus = "saved" | "unsaved" | "saving" | "error" | "offline";
+export type QuestionSaveStatus =
+  | "saved"
+  | "unsaved"
+  | "saving"
+  | "error"
+  | "offline"
+  | "conflict";
 
 export interface UseQuestionAutosaveOptions {
   save: (revision: QuestionRevision) => Promise<QuestionRevision | void>;
@@ -164,14 +170,22 @@ export function useQuestionAutosave(
     retryAutosave(revision);
   }, [persistOffline, retryAutosave]);
 
-  return {
-    status: isOffline ? "offline" : autosaveStatus,
-    lastSavedAt,
-    isOffline,
-    hasPendingChanges,
-    scheduleAutosave,
-    flushNow,
-    commitAndAdvance,
-    retry,
-  };
+  const status = isOffline ? "offline" : autosaveStatus;
+  // Stable identity: callers thread `autosave` through useCallback deps
+  // (e.g. workspace handleChange). A fresh literal per render would
+  // re-create every dependent callback and re-render the editor + rail on
+  // each keystroke and status tick.
+  return useMemo(
+    () => ({
+      status,
+      lastSavedAt,
+      isOffline,
+      hasPendingChanges,
+      scheduleAutosave,
+      flushNow,
+      commitAndAdvance,
+      retry,
+    }),
+    [status, lastSavedAt, isOffline, hasPendingChanges, scheduleAutosave, flushNow, commitAndAdvance, retry],
+  );
 }

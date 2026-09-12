@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,22 +12,10 @@ import (
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/proctor"
 	"example.com/ielts-proctoring/internal/student"
 )
-
-// domainQueryInt reads a positive int query param or returns def.
-func domainQueryInt(r *http.Request, key string, def int) int {
-	raw := strings.TrimSpace(r.URL.Query().Get(key))
-	if raw == "" {
-		return def
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n <= 0 {
-		return def
-	}
-	return n
-}
 
 // proctorActorOf builds the verified proctor actor from a session.
 func proctorActorOf(sess *auth.Session) proctor.Actor {
@@ -109,7 +96,8 @@ func attemptIDFromStudentWire(app *App, r *http.Request, scheduleID, attemptID s
 	if bearer == "" {
 		return "", apperrors.New(apperrors.CodeValidation, "Attempt is required.")
 	}
-	claims, err := verifyAttemptBearer(app, r, bearer)
+	// Session-bound verify in both modes (same rule as delivery writes).
+	claims, err := verifyAttemptReadBearer(app, r, bearer)
 	if err != nil {
 		return "", apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
 	}
@@ -354,11 +342,16 @@ func v1HeartbeatHandler(app *App) http.HandlerFunc {
 		}
 		// Plan D2: memory path = Touch + dedupe with zero heartbeat-event
 		// SQL (projection re-read only); inline (default) = today's tx.
+		// Both return (projection, deduped): count effective writes only
+		// so retry storms can't inflate the series. The flag (not a
+		// global-counter delta) keeps the decision race-free.
+		path := telemetry.HeartbeatInline
 		record := app.Student.RecordHeartbeat
 		if app.Config.PresenceMemory() && app.Student.PresenceMap() != nil {
 			record = app.Student.RecordHeartbeatMemory
+			path = telemetry.HeartbeatMemory
 		}
-		attempt, err := record(r.Context(), student.HeartbeatRequest{
+		attempt, deduped, err := record(r.Context(), student.HeartbeatRequest{
 			AttemptID: attemptID, ScheduleID: chi.URLParam(r, "scheduleID"), StudentKey: body.StudentKey,
 			ClientSessionID: identity.ClientSessionID, ActorUserID: identity.UserID, MutationID: body.MutationID,
 			EventType: body.EventType, Payload: body.Payload, ClientTimestamp: body.ClientTimestamp,
@@ -366,6 +359,9 @@ func v1HeartbeatHandler(app *App) http.HandlerFunc {
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
+		}
+		if !deduped {
+			telemetry.IncCounter(telemetry.MSATHeartbeatTotal, "path", path)
 		}
 		ackOnly := r.URL.Query().Get("responseMode") != "full"
 		// Plan C5: every heartbeat ack echoes the presence window so
@@ -465,6 +461,33 @@ func requirePreviewSectionDeps(w http.ResponseWriter, r *http.Request, app *App)
 	}
 	actor := proctorActorOf(sess)
 	return sess, &actor
+}
+
+// requireProctorAttemptScope is the second-layer (DB-backed) scope check
+// for per-attempt proctor commands (warn/pause/resume/extend/terminate).
+// Admins bypass; proctors must hold a live schedule_staff_assignments row
+// for the schedule or the attempt 404-collapses (never a cross-schedule
+// leak). It runs after requireProctorDeps and before body decode (fail
+// fast, no oracle on body shape). A nil DB renders 503, mirroring
+// proctorSessionHandler's Proctor==nil||DB==nil guard.
+func requireProctorAttemptScope(w http.ResponseWriter, r *http.Request, app *App, sess *auth.Session, scheduleID string) bool {
+	if sess.Role != auth.RoleProctor {
+		return true
+	}
+	if app.DB == nil {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Proctor service is unavailable."))
+		return false
+	}
+	ok, err := proctorHasLiveAssignment(r.Context(), app.DB, scheduleID, sess.UserID)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return false
+	}
+	if !ok {
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Resource not found."))
+		return false
+	}
+	return true
 }
 
 // proctorPresenceHandler upserts proctor presence (join/heartbeat/leave).
@@ -589,8 +612,11 @@ func proctorCompleteExamHandler(app *App) http.HandlerFunc {
 // proctorWarnHandler issues a non-blocking warning on an attempt.
 func proctorWarnHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, actor := requireProctorDeps(w, r, app)
+		sess, actor := requireProctorDeps(w, r, app)
 		if actor == nil {
+			return
+		}
+		if !requireProctorAttemptScope(w, r, app, sess, chi.URLParam(r, "scheduleID")) {
 			return
 		}
 		cmd, err := readProctorCmd(r)
@@ -609,8 +635,11 @@ func proctorWarnHandler(app *App) http.HandlerFunc {
 // proctorPauseAttemptHandler moves an attempt to proctor paused.
 func proctorPauseAttemptHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, actor := requireProctorDeps(w, r, app)
+		sess, actor := requireProctorDeps(w, r, app)
 		if actor == nil {
+			return
+		}
+		if !requireProctorAttemptScope(w, r, app, sess, chi.URLParam(r, "scheduleID")) {
 			return
 		}
 		cmd, err := readProctorCmd(r)
@@ -629,8 +658,11 @@ func proctorPauseAttemptHandler(app *App) http.HandlerFunc {
 // proctorResumeAttemptHandler moves a proctor-paused attempt back to active.
 func proctorResumeAttemptHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, actor := requireProctorDeps(w, r, app)
+		sess, actor := requireProctorDeps(w, r, app)
 		if actor == nil {
+			return
+		}
+		if !requireProctorAttemptScope(w, r, app, sess, chi.URLParam(r, "scheduleID")) {
 			return
 		}
 		cmd, err := readProctorCmd(r)
@@ -649,8 +681,11 @@ func proctorResumeAttemptHandler(app *App) http.HandlerFunc {
 // proctorExtendAttemptHandler grants per-student minutes on SAT attempts.
 func proctorExtendAttemptHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, actor := requireProctorDeps(w, r, app)
+		sess, actor := requireProctorDeps(w, r, app)
 		if actor == nil {
+			return
+		}
+		if !requireProctorAttemptScope(w, r, app, sess, chi.URLParam(r, "scheduleID")) {
 			return
 		}
 		var body struct {
@@ -683,8 +718,11 @@ func proctorExtendAttemptHandler(app *App) http.HandlerFunc {
 // proctorTerminateHandler seals an attempt via terminalization.
 func proctorTerminateHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, actor := requireProctorDeps(w, r, app)
+		sess, actor := requireProctorDeps(w, r, app)
 		if actor == nil {
+			return
+		}
+		if !requireProctorAttemptScope(w, r, app, sess, chi.URLParam(r, "scheduleID")) {
 			return
 		}
 		var body struct {

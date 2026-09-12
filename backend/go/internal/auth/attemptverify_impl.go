@@ -6,11 +6,14 @@
 // Stateless (single-deploy target): HMAC + expiry only, zero SQL. Claim-to-
 // resource binding is enforced downstream against rows the business tx
 // already holds: attempts.saveInTx compares claims.ScheduleID/UserID (and
-// org when set) to the locked attempt row, validateTokenSession is dead
-// code there (Phase B removes the in-tx session SELECT), and every handler
-// below re-checks claims.AttemptID/ScheduleID against the URL. Revocation
-// rests on short TTL (15m) + lease-epoch fencing on next write — the same
-// window today's touch gap already allows. No new crypto (HMAC-SHA256).
+// org when set) to the locked attempt row, validateTokenSession still runs
+// its in-tx session SELECT there, and every handler below re-checks
+// claims.AttemptID/ScheduleID against the URL. Delivery write handlers
+// (save/start/submit-module/submit-assessment) call VerifyAttemptRead for
+// an explicit token_id/revoked_at/lease_epoch session touch in BOTH modes,
+// and in-tx claimWriterSessionTx fences the writer session — stateless
+// never skips the session-table touch on delivery writes. No new crypto
+// (HMAC-SHA256).
 package auth
 
 import (

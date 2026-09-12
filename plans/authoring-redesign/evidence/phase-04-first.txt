@@ -1,0 +1,1123 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/features/exam-authoring/ui/spine/__tests__/StageJumpExpands.test.tsx (1 test) 349ms
+   ✓ StageJumpExpands — collapse never strands a focus target > reveals empty explanation and keeps it mounted after one-shot focus clears 348ms
+ ❯ src/features/exam-authoring/ui/spine/__tests__/SpineStages.test.tsx (2 tests | 1 failed) 512ms
+   × Question canvas > uses content sections instead of stages and numbered cards 436ms
+     → Unable to find an accessible element with the role "heading" and name "Question"
+
+Here are the accessible roles:
+
+  article:
+
+  Name "Question 1":
+  [36m<article[39m
+    [33maria-labelledby[39m=[32m"spine-question-heading"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  banner:
+
+  Name "":
+  [36m<header[39m
+    [33mclass[39m=[32m"mb-12 flex flex-wrap items-start justify-between gap-3"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  heading:
+
+  Name "Question 1":
+  [36m<h2[39m
+    [33mclass[39m=[32m"text-[var(--spine-text-display)] font-semibold tracking-tight text-foreground"[39m
+    [33mid[39m=[32m"spine-question-heading"[39m
+  [36m/>[39m
+
+  Name "Question Required":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_2_-heading"[39m
+  [36m/>[39m
+
+  Name "Supporting material Optional":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_3_-heading"[39m
+  [36m/>[39m
+
+  Name "Answer Required":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_5_-heading"[39m
+  [36m/>[39m
+
+  Name "Answer key":
+  [36m<h3[39m
+    [33mclass[39m=[32m"sr-only"[39m
+    [33mid[39m=[32m"spine-answer-key-heading"[39m
+  [36m/>[39m
+
+  Name "Explanation Optional":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_6_-heading"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Question ready":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_0_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question ready"[39m
+    [33mclass[39m=[32m"flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-input,12px)] px-3 text-left transition-colors hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question actions":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_1_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question actions"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Bold (⌘B)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Bold (⌘B)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Italic (⌘I)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Italic (⌘I)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Insert equation":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Insert equation"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Insert content":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_g_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Insert content"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "More formatting":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_h_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"More formatting"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "+ Add supporting material":
+  [36m<button[39m
+    [33mclass[39m=[32m"sat-spine__add-content"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Multiple choice":
+  [36m<button[39m
+    [33maria-pressed[39m=[32m"true"[39m
+    [33mclass[39m=[32m"relative flex min-h-9 min-w-0 flex-1 items-center justify-center rounded-[8px] px-3 text-[12px] font-semibold transition-colors active:scale-[0.96] text-slate-950"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "+ Add an explanation…":
+  [36m<button[39m
+    [33mclass[39m=[32m"sat-spine__add-content"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Save & Next":
+  [36m<button[39m
+    [33mclass[39m=[32m"flex min-h-11 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-45"[39m
+    [33mtitle[39m=[32m"Save and move to the next question"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  region:
+
+  Name "Question Required":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_2_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"prompt"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Supporting material Optional":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_3_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"stimulus"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Answer Required":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_5_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"answer"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Answer key":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"spine-answer-key-heading"[39m
+    [33mdata-answer-options[39m=[32m"true"[39m
+  [36m/>[39m
+
+  Name "Explanation Optional":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_6_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"rationale"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  toolbar:
+
+  Name "Formatting tools":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Formatting tools"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar"[39m
+    [33mdata-composer-context[39m=[32m"text"[39m
+    [33mrole[39m=[32m"toolbar"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  combobox:
+
+  Name "Text style":
+  [36m<select[39m
+    [33maria-label[39m=[32m"Text style"[39m
+    [33mclass[39m=[32m"sat-rich-editor__style-select"[39m
+  [36m/>[39m
+
+  Name "Domain":
+  [36m<select[39m
+    [33maria-invalid[39m=[32m"false"[39m
+    [33mclass[39m=[32m"h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25"[39m
+    [33mid[39m=[32m"_r_4_-domain"[39m
+  [36m/>[39m
+
+  Name "Skill":
+  [36m<select[39m
+    [33maria-invalid[39m=[32m"false"[39m
+    [33mclass[39m=[32m"h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-40"[39m
+    [33mdisabled[39m=[32m""[39m
+    [33mid[39m=[32m"_r_4_-skill"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  option:
+
+  Name "Text":
+  [36m<option[39m
+    [33mvalue[39m=[32m"paragraph"[39m
+  [36m/>[39m
+
+  Name "Heading":
+  [36m<option[39m
+    [33mvalue[39m=[32m"heading2"[39m
+  [36m/>[39m
+
+  Name "Subheading":
+  [36m<option[39m
+    [33mvalue[39m=[32m"heading3"[39m
+  [36m/>[39m
+
+  Name "Choose domain…":
+  [36m<option[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  Name "Information and Ideas":
+  [36m<option[39m
+    [33mvalue[39m=[32m"information-and-ideas"[39m
+  [36m/>[39m
+
+  Name "Craft and Structure":
+  [36m<option[39m
+    [33mvalue[39m=[32m"craft-and-structure"[39m
+  [36m/>[39m
+
+  Name "Expression of Ideas":
+  [36m<option[39m
+    [33mvalue[39m=[32m"expression-of-ideas"[39m
+  [36m/>[39m
+
+  Name "Standard English Conventions":
+  [36m<option[39m
+    [33mvalue[39m=[32m"standard-english-conventions"[39m
+  [36m/>[39m
+
+  Name "Choose a domain first":
+  [36m<option[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  textbox:
+
+  Name "Question prompt":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Question prompt"[39m
+    [33mclass[39m=[32m"tiptap ProseMirror min-h-[112px] sat-rich-editor__input"[39m
+    [33mcontenteditable[39m=[32m"true"[39m
+    [33mdata-placeholder[39m=[32m"Write the question students will see…"[39m
+    [33mrole[39m=[32m"textbox"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtranslate[39m=[32m"no"[39m
+  [36m/>[39m
+
+  Name "Tags":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Tags"[39m
+    [33mclass[39m=[32m"h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/25"[39m
+    [33mid[39m=[32m"_r_4_-tags"[39m
+    [33mplaceholder[39m=[32m"e.g. linear, no-calculator"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"is-empty is-editor-empty"[39m
+    [33mdata-content-id[39m=[32m"content-4btqjl"[39m
+    [33mdata-placeholder[39m=[32m"Write the question students will see…"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mb-4 text-xs leading-5 text-muted-foreground"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"text-xs leading-4 text-muted-foreground"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mb-3 text-xs text-muted-foreground"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  group:
+
+  Name "Classification":
+  [36m<fieldset[39m
+    [33mclass[39m=[32m"spine-card p-4"[39m
+  [36m/>[39m
+
+  Name "Response type":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Response type"[39m
+    [33mclass[39m=[32m"authoring-segmented relative flex w-fit items-center rounded-[10px] p-0.5 "[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radiogroup:
+
+  Name "Difficulty":
+  [36m<div[39m
+    [33maria-labelledby[39m=[32m"_r_4_-difficulty-label"[39m
+    [33mclass[39m=[32m"flex gap-1 rounded-md border border-input bg-muted p-1"[39m
+    [33mrole[39m=[32m"radiogroup"[39m
+  [36m/>[39m
+
+  Name "Answer key choices":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Answer key choices"[39m
+    [33mclass[39m=[32m"space-y-2"[39m
+    [33mrole[39m=[32m"radiogroup"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radio:
+
+  Name "easy":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"false"[39m
+    [33mclass[39m=[32m"h-9 flex-1 rounded px-2 text-xs font-semibold capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-muted-foreground hover:text-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "medium":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"true"[39m
+    [33mclass[39m=[32m"h-9 flex-1 rounded px-2 text-xs font-semibold capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring bg-card text-foreground shadow-sm"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "hard":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"false"[39m
+    [33mclass[39m=[32m"h-9 flex-1 rounded px-2 text-xs font-semibold capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-muted-foreground hover:text-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  status:
+
+  Name "Saved":
+  [36m<span[39m
+    [33maria-label[39m=[32m"Saved"[39m
+    [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+    [33mrole[39m=[32m"status"[39m
+    [33mtitle[39m=[32m"Saved"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  checkbox:
+
+  Name "Carry metadata":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Carry metadata"[39m
+    [33mchecked[39m=[32m""[39m
+    [33mclass[39m=[32m"h-4 w-4 rounded border-input accent-primary"[39m
+    [33mid[39m=[32m"sat-spine-carry-metadata"[39m
+    [33mtype[39m=[32m"checkbox"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<article[39m
+      [33maria-labelledby[39m=[32m"spine-question-heading"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"mb-12 flex flex-wrap items-start justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2[39m
+          [33mclass[39m=[32m"text-[var(--spine-text-display)] font-semibold tracking-tight text-foreground"[39m
+          [33mid[39m=[32m"spine-question-heading"[39m
+        [36m>[39m
+          [0mQuestion 1[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex items-center gap-1"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"sat-spine__menu"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"relative"[39m
+              [33mdata-sat-menu-root[39m=[32m"true"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-controls[39m=[32m"_r_0_"[39m
+                [33maria-expanded[39m=[32m"false"[39m
+                [33maria-haspopup[39m=[32m"menu"[39m
+                [33maria-label[39m=[32m"Question ready"[39m
+                [33mclass[39m=[32m"flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-input,12px)] px-3 text-left transition-colors hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex items-center gap-1.5 text-xs text-muted-foreground"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [0mQuestion ready[0m
+                [36m</span>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-chevron-down sat-menu-trigger-chevron shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)]"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"14"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"14"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"m6 9 6 6 6-6"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"sat-spine__menu"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"relative"[39m
+              [33mdata-sat-menu-root[39m=[32m"true"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-controls[39m=[32m"_r_1_"[39m
+                [33maria-expanded[39m=[32m"false"[39m
+                [33maria-haspopup[39m=[32m"menu"[39m
+                [33maria-label[39m=[32m"Question actions"[39m
+                [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"12"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"19"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"5"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"space-y-10"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33maria-labelledby[39m=[32m"_r_2_-heading"[39m
+          [33mclass[39m=[32m"sat-spine__section"[39m
+          [33mdata-authoring-field[39m=[32m"prompt"[39m
+          [33mtabindex[39m=[32m"-1"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3"[39m
+          [36m>[39m
+            [36m<h3[39m
+              [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+              [33mid[39m=[32m"_r_2_-heading"[39m
+            [36m>[39m
+              [0mQuestion[0m
+              [36m<span[39m
+                [33mc...
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/features/exam-authoring/ui/spine/__tests__/SpineStages.test.tsx > Question canvas > uses content sections instead of stages and numbered cards
+TestingLibraryElementError: Unable to find an accessible element with the role "heading" and name "Question"
+
+Here are the accessible roles:
+
+  article:
+
+  Name "Question 1":
+  [36m<article[39m
+    [33maria-labelledby[39m=[32m"spine-question-heading"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  banner:
+
+  Name "":
+  [36m<header[39m
+    [33mclass[39m=[32m"mb-12 flex flex-wrap items-start justify-between gap-3"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  heading:
+
+  Name "Question 1":
+  [36m<h2[39m
+    [33mclass[39m=[32m"text-[var(--spine-text-display)] font-semibold tracking-tight text-foreground"[39m
+    [33mid[39m=[32m"spine-question-heading"[39m
+  [36m/>[39m
+
+  Name "Question Required":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_2_-heading"[39m
+  [36m/>[39m
+
+  Name "Supporting material Optional":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_3_-heading"[39m
+  [36m/>[39m
+
+  Name "Answer Required":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_5_-heading"[39m
+  [36m/>[39m
+
+  Name "Answer key":
+  [36m<h3[39m
+    [33mclass[39m=[32m"sr-only"[39m
+    [33mid[39m=[32m"spine-answer-key-heading"[39m
+  [36m/>[39m
+
+  Name "Explanation Optional":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+    [33mid[39m=[32m"_r_6_-heading"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Question ready":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_0_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question ready"[39m
+    [33mclass[39m=[32m"flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-input,12px)] px-3 text-left transition-colors hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Question actions":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_1_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Question actions"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Bold (⌘B)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Bold (⌘B)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Italic (⌘I)":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Italic (⌘I)"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Insert equation":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Insert equation"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar-button"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Insert content":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_g_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"Insert content"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "More formatting":
+  [36m<button[39m
+    [33maria-controls[39m=[32m"_r_h_"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"menu"[39m
+    [33maria-label[39m=[32m"More formatting"[39m
+    [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "+ Add supporting material":
+  [36m<button[39m
+    [33mclass[39m=[32m"sat-spine__add-content"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Multiple choice":
+  [36m<button[39m
+    [33maria-pressed[39m=[32m"true"[39m
+    [33mclass[39m=[32m"relative flex min-h-9 min-w-0 flex-1 items-center justify-center rounded-[8px] px-3 text-[12px] font-semibold transition-colors active:scale-[0.96] text-slate-950"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "+ Add an explanation…":
+  [36m<button[39m
+    [33mclass[39m=[32m"sat-spine__add-content"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Save & Next":
+  [36m<button[39m
+    [33mclass[39m=[32m"flex min-h-11 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-45"[39m
+    [33mtitle[39m=[32m"Save and move to the next question"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  region:
+
+  Name "Question Required":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_2_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"prompt"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Supporting material Optional":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_3_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"stimulus"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Answer Required":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_5_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"answer"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  Name "Answer key":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"spine-answer-key-heading"[39m
+    [33mdata-answer-options[39m=[32m"true"[39m
+  [36m/>[39m
+
+  Name "Explanation Optional":
+  [36m<section[39m
+    [33maria-labelledby[39m=[32m"_r_6_-heading"[39m
+    [33mclass[39m=[32m"sat-spine__section"[39m
+    [33mdata-authoring-field[39m=[32m"rationale"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  toolbar:
+
+  Name "Formatting tools":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Formatting tools"[39m
+    [33mclass[39m=[32m"sat-rich-editor__toolbar"[39m
+    [33mdata-composer-context[39m=[32m"text"[39m
+    [33mrole[39m=[32m"toolbar"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  combobox:
+
+  Name "Text style":
+  [36m<select[39m
+    [33maria-label[39m=[32m"Text style"[39m
+    [33mclass[39m=[32m"sat-rich-editor__style-select"[39m
+  [36m/>[39m
+
+  Name "Domain":
+  [36m<select[39m
+    [33maria-invalid[39m=[32m"false"[39m
+    [33mclass[39m=[32m"h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25"[39m
+    [33mid[39m=[32m"_r_4_-domain"[39m
+  [36m/>[39m
+
+  Name "Skill":
+  [36m<select[39m
+    [33maria-invalid[39m=[32m"false"[39m
+    [33mclass[39m=[32m"h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-40"[39m
+    [33mdisabled[39m=[32m""[39m
+    [33mid[39m=[32m"_r_4_-skill"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  option:
+
+  Name "Text":
+  [36m<option[39m
+    [33mvalue[39m=[32m"paragraph"[39m
+  [36m/>[39m
+
+  Name "Heading":
+  [36m<option[39m
+    [33mvalue[39m=[32m"heading2"[39m
+  [36m/>[39m
+
+  Name "Subheading":
+  [36m<option[39m
+    [33mvalue[39m=[32m"heading3"[39m
+  [36m/>[39m
+
+  Name "Choose domain…":
+  [36m<option[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  Name "Information and Ideas":
+  [36m<option[39m
+    [33mvalue[39m=[32m"information-and-ideas"[39m
+  [36m/>[39m
+
+  Name "Craft and Structure":
+  [36m<option[39m
+    [33mvalue[39m=[32m"craft-and-structure"[39m
+  [36m/>[39m
+
+  Name "Expression of Ideas":
+  [36m<option[39m
+    [33mvalue[39m=[32m"expression-of-ideas"[39m
+  [36m/>[39m
+
+  Name "Standard English Conventions":
+  [36m<option[39m
+    [33mvalue[39m=[32m"standard-english-conventions"[39m
+  [36m/>[39m
+
+  Name "Choose a domain first":
+  [36m<option[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  textbox:
+
+  Name "Question prompt":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Question prompt"[39m
+    [33mclass[39m=[32m"tiptap ProseMirror min-h-[112px] sat-rich-editor__input"[39m
+    [33mcontenteditable[39m=[32m"true"[39m
+    [33mdata-placeholder[39m=[32m"Write the question students will see…"[39m
+    [33mrole[39m=[32m"textbox"[39m
+    [33mtabindex[39m=[32m"0"[39m
+    [33mtranslate[39m=[32m"no"[39m
+  [36m/>[39m
+
+  Name "Tags":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Tags"[39m
+    [33mclass[39m=[32m"h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/25"[39m
+    [33mid[39m=[32m"_r_4_-tags"[39m
+    [33mplaceholder[39m=[32m"e.g. linear, no-calculator"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"is-empty is-editor-empty"[39m
+    [33mdata-content-id[39m=[32m"content-4btqjl"[39m
+    [33mdata-placeholder[39m=[32m"Write the question students will see…"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mb-4 text-xs leading-5 text-muted-foreground"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"text-xs leading-4 text-muted-foreground"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"mb-3 text-xs text-muted-foreground"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  group:
+
+  Name "Classification":
+  [36m<fieldset[39m
+    [33mclass[39m=[32m"spine-card p-4"[39m
+  [36m/>[39m
+
+  Name "Response type":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Response type"[39m
+    [33mclass[39m=[32m"authoring-segmented relative flex w-fit items-center rounded-[10px] p-0.5 "[39m
+    [33mrole[39m=[32m"group"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radiogroup:
+
+  Name "Difficulty":
+  [36m<div[39m
+    [33maria-labelledby[39m=[32m"_r_4_-difficulty-label"[39m
+    [33mclass[39m=[32m"flex gap-1 rounded-md border border-input bg-muted p-1"[39m
+    [33mrole[39m=[32m"radiogroup"[39m
+  [36m/>[39m
+
+  Name "Answer key choices":
+  [36m<div[39m
+    [33maria-label[39m=[32m"Answer key choices"[39m
+    [33mclass[39m=[32m"space-y-2"[39m
+    [33mrole[39m=[32m"radiogroup"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  radio:
+
+  Name "easy":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"false"[39m
+    [33mclass[39m=[32m"h-9 flex-1 rounded px-2 text-xs font-semibold capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-muted-foreground hover:text-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "medium":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"true"[39m
+    [33mclass[39m=[32m"h-9 flex-1 rounded px-2 text-xs font-semibold capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring bg-card text-foreground shadow-sm"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "hard":
+  [36m<button[39m
+    [33maria-checked[39m=[32m"false"[39m
+    [33mclass[39m=[32m"h-9 flex-1 rounded px-2 text-xs font-semibold capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-muted-foreground hover:text-foreground"[39m
+    [33mrole[39m=[32m"radio"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  status:
+
+  Name "Saved":
+  [36m<span[39m
+    [33maria-label[39m=[32m"Saved"[39m
+    [33mclass[39m=[32m"flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 motion-safe:transition-opacity opacity-100"[39m
+    [33mrole[39m=[32m"status"[39m
+    [33mtitle[39m=[32m"Saved"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  checkbox:
+
+  Name "Carry metadata":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Carry metadata"[39m
+    [33mchecked[39m=[32m""[39m
+    [33mclass[39m=[32m"h-4 w-4 rounded border-input accent-primary"[39m
+    [33mid[39m=[32m"sat-spine-carry-metadata"[39m
+    [33mtype[39m=[32m"checkbox"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<article[39m
+      [33maria-labelledby[39m=[32m"spine-question-heading"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"mb-12 flex flex-wrap items-start justify-between gap-3"[39m
+      [36m>[39m
+        [36m<h2[39m
+          [33mclass[39m=[32m"text-[var(--spine-text-display)] font-semibold tracking-tight text-foreground"[39m
+          [33mid[39m=[32m"spine-question-heading"[39m
+        [36m>[39m
+          [0mQuestion 1[0m
+        [36m</h2>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex items-center gap-1"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"sat-spine__menu"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"relative"[39m
+              [33mdata-sat-menu-root[39m=[32m"true"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-controls[39m=[32m"_r_0_"[39m
+                [33maria-expanded[39m=[32m"false"[39m
+                [33maria-haspopup[39m=[32m"menu"[39m
+                [33maria-label[39m=[32m"Question ready"[39m
+                [33mclass[39m=[32m"flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-input,12px)] px-3 text-left transition-colors hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"flex items-center gap-1.5 text-xs text-muted-foreground"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-check"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"14"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"14"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M20 6 9 17l-5-5"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [0mQuestion ready[0m
+                [36m</span>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-chevron-down sat-menu-trigger-chevron shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)]"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"14"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"14"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"m6 9 6 6 6-6"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"sat-spine__menu"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"relative"[39m
+              [33mdata-sat-menu-root[39m=[32m"true"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-controls[39m=[32m"_r_1_"[39m
+                [33maria-expanded[39m=[32m"false"[39m
+                [33maria-haspopup[39m=[32m"menu"[39m
+                [33maria-label[39m=[32m"Question actions"[39m
+                [33mclass[39m=[32m"flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-ellipsis"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"12"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"19"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                  [36m<circle[39m
+                    [33mcx[39m=[32m"5"[39m
+                    [33mcy[39m=[32m"12"[39m
+                    [33mr[39m=[32m"1"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"space-y-10"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33maria-labelledby[39m=[32m"_r_2_-heading"[39m
+          [33mclass[39m=[32m"sat-spine__section"[39m
+          [33mdata-authoring-field[39m=[32m"prompt"[39m
+          [33mtabindex[39m=[32m"-1"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3"[39m
+          [36m>[39m
+            [36m<h3[39m
+              [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+              [33mid[39m=[32m"_r_2_-heading"[39m
+            [36m>[39m
+              [0mQuestion[0m
+              [36m<span[39m
+                [33mc...
+ ❯ Object.getElementError node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/.pnpm/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/features/exam-authoring/ui/spine/__tests__/SpineStages.test.tsx:45:191
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 2 passed (3)
+   Start at  00:29:50
+   Duration  3.78s (transform 427ms, setup 572ms, collect 2.37s, tests 861ms, environment 1.29s, prepare 464ms)
+

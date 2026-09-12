@@ -33,13 +33,43 @@ export function isSatToolAvailable(
   return tool === 'calculator' ? capabilities.calculator : capabilities.referenceSheet;
 }
 
-export function nextSatActiveTool(
+export interface SatActiveTools {
+  calculator: boolean;
+  referenceSheet: boolean;
+}
+
+export const EMPTY_SAT_ACTIVE_TOOLS: SatActiveTools = {
+  calculator: false,
+  referenceSheet: false,
+};
+
+/**
+ * Bluebook coexistence (Phase 9): calculator and reference are independent
+ * flags. Toggling one never closes the other. Unavailable tools stay shut.
+ * Legacy `activeTool` (compat-only, calculator wins ties) migrates via
+ * satActiveToolsFromLegacy / toLegacy.
+ */
+export function toggleSatActiveTool(
   capabilities: SatToolCapabilities,
-  current: SatActiveTool,
+  current: SatActiveTools,
   requested: SatToolId,
-): SatActiveTool {
-  if (!isSatToolAvailable(capabilities, requested)) return null;
-  return current === requested ? null : requested;
+): SatActiveTools {
+  if (!isSatToolAvailable(capabilities, requested)) return current;
+  if (requested === 'calculator') return { ...current, calculator: !current.calculator };
+  return { ...current, referenceSheet: !current.referenceSheet };
+}
+
+export function satActiveToolsFromLegacy(tool: SatActiveTool): SatActiveTools {
+  return {
+    calculator: tool === 'calculator',
+    referenceSheet: tool === 'reference_sheet',
+  };
+}
+
+export function satActiveToolsToLegacy(tools: SatActiveTools): SatActiveTool {
+  if (tools.calculator) return 'calculator';
+  if (tools.referenceSheet) return 'reference_sheet';
+  return null;
 }
 
 export function emptySatToolCapabilities(): SatToolCapabilities {

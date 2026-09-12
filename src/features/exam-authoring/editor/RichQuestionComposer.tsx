@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { JSONContent } from "@tiptap/core";
-import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
+import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { TableKit } from "@tiptap/extension-table";
 import Subscript from "@tiptap/extension-subscript";
@@ -9,21 +9,7 @@ import Superscript from "@tiptap/extension-superscript";
 import Placeholder from "@tiptap/extension-placeholder";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import {
-  Bold,
-  Code2,
-  ImagePlus,
-  Italic,
-  List,
-  ListOrdered,
-  Redo2,
-  Sigma,
-  Subscript as SubscriptIcon,
-  Superscript as SuperscriptIcon,
-  Table2,
-  Underline as UnderlineIcon,
-  Undo2,
-} from "lucide-react";
+import { Sigma } from "lucide-react";
 import type { StructuredContent } from "../contracts/assessment";
 import {
   assetSource,
@@ -36,6 +22,8 @@ import { uploadAssessmentAsset } from "../api/assessmentMediaApi";
 import { AuthoringDialog } from "../ui/authoringPrimitives";
 import { authoringMotion } from "../ui/authoringMotion";
 import { RichContentIdentity } from './RichContentIdentityExtension';
+import { ComposerToolbar } from './ComposerToolbar';
+import type { ComposerContext } from './composerContext';
 
 const baseExtensions = [
   RichContentIdentity,
@@ -111,6 +99,7 @@ export function RichQuestionComposer({
   capabilities = SAT_RICH_COMPOSER_CAPABILITIES,
 }: RichQuestionComposerProps) {
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [dialogContext, setDialogContext] = useState<ComposerContext>({kind:"text"});
   const [tableFeedback, setTableFeedback] = useState(false);
   const [initialContent] = useState(() => documentFromStructuredContent(value));
   const editorExtensions = useMemo(
@@ -169,9 +158,8 @@ export function RichQuestionComposer({
     >
       <ComposerToolbar
         editor={editor}
-        compact={compact}
         capabilities={capabilities}
-        onOpenDialog={setDialog}
+        onOpenDialog={(next, context) => {setDialogContext(context ?? {kind:"text"}); setDialog(next);}}
         onTableMutation={flashTableFeedback}
       />
       <EditorContent
@@ -182,306 +170,20 @@ export function RichQuestionComposer({
         {dialog === "math" ? (
           <MathDialog
             editor={editor}
-            target={{ mode: "insert", display: false, latex: "" }}
+            target={dialogContext.kind === "equation" ? {mode:"edit", display:dialogContext.display,latex:dialogContext.latex,pos:dialogContext.pos} : {mode:"insert",display:false,latex:""}}
             onClose={() => setDialog(null)}
           />
         ) : null}
         {dialog === "image" ? (
           <ImageDialog
             editor={editor}
+            target={dialogContext.kind === "image" ? dialogContext : undefined}
             {...(assetOwnerId ? { ownerId: assetOwnerId } : {})}
             onClose={() => setDialog(null)}
           />
         ) : null}
       </AnimatePresence>
     </div>
-  );
-}
-
-function ComposerToolbar({
-  editor,
-  compact,
-  capabilities,
-  onOpenDialog,
-  onTableMutation,
-}: {
-  editor: Editor;
-  compact: boolean;
-  capabilities: Readonly<RichComposerCapabilities>;
-  onOpenDialog: (dialog: Dialog) => void;
-  onTableMutation: () => void;
-}) {
-  const reduceMotion = useReducedMotion();
-  const state = useEditorState({
-    editor,
-    selector: ({ editor: current }) => ({
-      bold: current?.isActive("bold") ?? false,
-      italic: current?.isActive("italic") ?? false,
-      underline: current?.isActive("underline") ?? false,
-      superscript: current?.isActive("superscript") ?? false,
-      subscript: current?.isActive("subscript") ?? false,
-      bulletList: current?.isActive("bulletList") ?? false,
-      orderedList: current?.isActive("orderedList") ?? false,
-      table: current?.isActive("table") ?? false,
-      codeBlock: current?.isActive("codeBlock") ?? false,
-      blockStyle: current?.isActive("heading", { level: 2 })
-        ? "heading2"
-        : current?.isActive("heading", { level: 3 })
-          ? "heading3"
-          : "paragraph",
-      canUndo: current?.can().undo() ?? false,
-      canRedo: current?.can().redo() ?? false,
-    }),
-  });
-
-  const mutateTable = (command: () => void) => {
-    command();
-    onTableMutation();
-  };
-
-  const setBlockStyle = (style: string) => {
-    const chain = editor.chain().focus();
-    if (style === "heading2") chain.setHeading({ level: 2 }).run();
-    else if (style === "heading3") chain.setHeading({ level: 3 }).run();
-    else chain.setParagraph().run();
-  };
-
-  return (
-    <div className="sat-rich-editor__toolbar" role="toolbar" aria-label="Formatting tools">
-      <div className="sat-rich-editor__toolbar-row">
-        {!compact && (capabilities.blockStyles || capabilities.lists) ? (
-          <div className="sat-rich-editor__toolbar-group" role="group" aria-label="Block formatting">
-            {capabilities.blockStyles ? (
-              <select
-                aria-label="Text style"
-                value={state?.blockStyle ?? "paragraph"}
-                onChange={(event) => setBlockStyle(event.target.value)}
-                className="sat-rich-editor__style-select"
-              >
-                <option value="paragraph">Body</option>
-                <option value="heading2">Heading</option>
-                <option value="heading3">Subheading</option>
-              </select>
-            ) : null}
-            {capabilities.lists ? (
-              <>
-                <ToolbarButton
-                  title="Bulleted list (⇧⌘8)"
-                  active={state?.bulletList}
-                  onClick={() => editor.chain().focus().toggleBulletList().run()}
-                >
-                  <List size={16} aria-hidden="true" />
-                </ToolbarButton>
-                <ToolbarButton
-                  title="Numbered list (⇧⌘7)"
-                  active={state?.orderedList}
-                  onClick={() => editor.chain().focus().toggleOrderedList().run()}
-                >
-                  <ListOrdered size={16} aria-hidden="true" />
-                </ToolbarButton>
-              </>
-            ) : null}
-            <ToolbarDivider />
-          </div>
-        ) : null}
-
-        <div className="sat-rich-editor__toolbar-group" role="group" aria-label="Text formatting">
-          <ToolbarButton
-            title="Bold (⌘B)"
-            active={state?.bold}
-            onClick={() => editor.chain().focus().toggleBold().run()}
-          >
-            <Bold size={16} aria-hidden="true" />
-          </ToolbarButton>
-          <ToolbarButton
-            title="Italic (⌘I)"
-            active={state?.italic}
-            onClick={() => editor.chain().focus().toggleItalic().run()}
-          >
-            <Italic size={16} aria-hidden="true" />
-          </ToolbarButton>
-          {capabilities.underline ? (
-            <ToolbarButton
-              title="Underline (⌘U)"
-              active={state?.underline}
-              onClick={() => editor.chain().focus().toggleUnderline().run()}
-            >
-              <UnderlineIcon size={16} aria-hidden="true" />
-            </ToolbarButton>
-          ) : null}
-          <ToolbarButton
-            title="Superscript"
-            active={state?.superscript}
-            onClick={() => editor.chain().focus().toggleSuperscript().run()}
-          >
-            <SuperscriptIcon size={16} aria-hidden="true" />
-          </ToolbarButton>
-          <ToolbarButton
-            title="Subscript"
-            active={state?.subscript}
-            onClick={() => editor.chain().focus().toggleSubscript().run()}
-          >
-            <SubscriptIcon size={16} aria-hidden="true" />
-          </ToolbarButton>
-        </div>
-
-        {capabilities.equation || capabilities.image || capabilities.table || capabilities.code ? (
-          <ToolbarDivider />
-        ) : null}
-        <div className="sat-rich-editor__toolbar-group" role="group" aria-label="Insert content">
-          {capabilities.equation ? (
-            <ToolbarButton title="Insert equation" onClick={() => onOpenDialog("math")}>
-              <Sigma size={16} aria-hidden="true" />
-            </ToolbarButton>
-          ) : null}
-          {capabilities.image ? (
-            <ToolbarButton title="Insert image or graph" onClick={() => onOpenDialog("image")}>
-              <ImagePlus size={16} aria-hidden="true" />
-            </ToolbarButton>
-          ) : null}
-          {capabilities.code ? (
-            <ToolbarButton
-              title="Code block"
-              active={state?.codeBlock}
-              onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-            >
-              <Code2 size={16} aria-hidden="true" />
-            </ToolbarButton>
-          ) : null}
-          {capabilities.table ? (
-            <ToolbarButton
-              title="Insert table"
-              active={state?.table}
-              onClick={() =>
-                mutateTable(() => {
-                  editor
-                    .chain()
-                    .focus()
-                    .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-                    .run();
-                })
-              }
-            >
-              <Table2 size={16} aria-hidden="true" />
-            </ToolbarButton>
-          ) : null}
-        </div>
-
-        {capabilities.history ? (
-          <div className="sat-rich-editor__toolbar-group sat-rich-editor__toolbar-group--history" role="group" aria-label="History">
-            <ToolbarButton
-              title="Undo (⌘Z)"
-              disabled={!state?.canUndo}
-              onClick={() => editor.chain().focus().undo().run()}
-            >
-              <Undo2 size={16} aria-hidden="true" />
-            </ToolbarButton>
-            <ToolbarButton
-              title="Redo (⇧⌘Z)"
-              disabled={!state?.canRedo}
-              onClick={() => editor.chain().focus().redo().run()}
-            >
-              <Redo2 size={16} aria-hidden="true" />
-            </ToolbarButton>
-          </div>
-        ) : null}
-      </div>
-
-      <AnimatePresence initial={false}>
-        {capabilities.table && state?.table ? (
-          <motion.div
-            initial={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
-            transition={reduceMotion ? { duration: 0.01 } : authoringMotion.state}
-            className="sat-rich-editor__table-toolbar"
-          >
-            <div className="sat-rich-editor__table-toolbar-row">
-              <span className="sat-rich-editor__table-label">Table</span>
-              <TableAction
-                label="Add row"
-                onClick={() => mutateTable(() => void editor.chain().focus().addRowAfter().run())}
-              />
-              <TableAction
-                label="Delete row"
-                onClick={() => mutateTable(() => void editor.chain().focus().deleteRow().run())}
-              />
-              <TableAction
-                label="Add column"
-                onClick={() =>
-                  mutateTable(() => void editor.chain().focus().addColumnAfter().run())
-                }
-              />
-              <TableAction
-                label="Delete column"
-                onClick={() => mutateTable(() => void editor.chain().focus().deleteColumn().run())}
-              />
-              <span className="sat-rich-editor__table-divider" aria-hidden="true" />
-              <TableAction
-                danger
-                label="Delete table"
-                onClick={() => mutateTable(() => void editor.chain().focus().deleteTable().run())}
-              />
-            </div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function ToolbarDivider() {
-  return <span className="sat-rich-editor__toolbar-divider" aria-hidden="true" />;
-}
-
-function TableAction({
-  label,
-  danger = false,
-  onClick,
-}: {
-  label: string;
-  danger?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`sat-rich-editor__table-action${danger ? " sat-rich-editor__table-action--danger" : ""}`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function ToolbarButton({
-  title,
-  active = false,
-  disabled = false,
-  onClick,
-  children,
-}: {
-  title: string;
-  active?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  const reduceMotion = useReducedMotion();
-  return (
-    <motion.button
-      type="button"
-      title={title}
-      aria-label={title}
-      aria-pressed={active}
-      disabled={disabled}
-      whileTap={reduceMotion ? {} : authoringMotion.press}
-      transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
-      onClick={onClick}
-      className={`sat-rich-editor__toolbar-button${active ? " is-active" : ""}`}
-    >
-      <span className="relative z-10">{children}</span>
-    </motion.button>
   );
 }
 
@@ -805,16 +507,18 @@ function EquationChip({
 function ImageDialog({
   editor,
   ownerId,
+  target,
   onClose,
 }: {
   editor: Editor;
   ownerId?: string;
+  target?: Extract<ComposerContext, {kind:'image'}> | undefined;
   onClose: () => void;
 }) {
   const reduceMotion = useReducedMotion();
-  const [assetId, setAssetId] = useState("");
-  const [alt, setAlt] = useState("");
-  const [caption, setCaption] = useState("");
+  const [assetId, setAssetId] = useState(String(target?.attrs["assetId"] || target?.attrs["src"] || ""));
+  const [alt, setAlt] = useState(String(target?.attrs["alt"] ?? ""));
+  const [caption, setCaption] = useState(String(target?.attrs["caption"] ?? ""));
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -1006,24 +710,17 @@ function ImageDialog({
           transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
           disabled={uploading || !assetId.trim() || !alt.trim()}
           onClick={() => {
-            editor
-              .chain()
-              .focus()
-              .insertContent({
-                type: "image",
-                attrs: {
-                  src: assetSource(assetId.trim()),
-                  alt: alt.trim(),
-                  assetId: assetId.trim(),
-                  caption: caption.trim() || null,
-                },
-              })
-              .run();
+            const attrs = {...target?.attrs, src: assetSource(assetId.trim()), alt:alt.trim(), assetId:assetId.trim(), caption:caption.trim()||null};
+            if(target && editor.state.doc.nodeAt(target.pos)?.type.name === "image") {
+              editor.chain().focus().setNodeSelection(target.pos).updateAttributes("image",attrs).run();
+            } else if (!target) {
+              editor.chain().focus().insertContent({type:"image",attrs}).run();
+            }
             onClose();
           }}
           className="rounded-lg bg-au-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
         >
-          Insert visual
+          {target ? "Update visual" : "Insert visual"}
         </motion.button>
       </div>
     </DialogFrame>

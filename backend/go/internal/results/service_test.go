@@ -196,12 +196,13 @@ func TestSATQuestionsApplyNullVerdictRule(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"section_key", "module_key", "module_display_order", "question_display_order",
 			"question_id", "is_pretest", "marked_for_review", "response", "answer_definition",
+			"response_v2", "v2_present", "v_question_id",
 		}).
-			AddRow("reading-writing", "rw-base", 1, 1, "q-scored", false, false, `"B"`, singleChoice).
-			AddRow("reading-writing", "rw-base", 1, 2, "q-wrong", false, true, `"A"`, singleChoice).
-			AddRow("reading-writing", "rw-base", 1, 3, "q-blank", false, false, nil, singleChoice).
-			AddRow("math", "m-base", 1, 1, "q-pre", true, false, `"B"`, singleChoice).
-			AddRow("math", "m-base", 1, 2, "q-nokey", false, false, `"B"`, `{"kind":"single_choice"}`))
+			AddRow("reading-writing", "rw-base", 1, 1, "q-scored", false, false, `"B"`, singleChoice, nil, false, nil).
+			AddRow("reading-writing", "rw-base", 1, 2, "q-wrong", false, true, `"A"`, singleChoice, nil, false, nil).
+			AddRow("reading-writing", "rw-base", 1, 3, "q-blank", false, false, nil, singleChoice, nil, false, nil).
+			AddRow("math", "m-base", 1, 1, "q-pre", true, false, `"B"`, singleChoice, nil, false, nil).
+			AddRow("math", "m-base", 1, 2, "q-nokey", false, false, `"B"`, `{"kind":"single_choice"}`, nil, false, nil))
 	svc := NewService(db)
 	questions, err := svc.satQuestions(context.Background(), "attempt-1")
 	if err != nil {
@@ -230,6 +231,51 @@ func TestSATQuestionsApplyNullVerdictRule(t *testing.T) {
 	}
 	if byID["q-nokey"].CorrectAnswer != nil {
 		t.Fatalf("expected key-less row without correct answer, got %+v", byID["q-nokey"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSATQuestionsV2WinsOverLegacy(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	singleChoice := `{"kind":"single_choice","correctOptionId":"B"}`
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).
+		WithArgs("attempt-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"section_key", "module_key", "module_display_order", "question_display_order",
+			"question_id", "is_pretest", "marked_for_review", "response", "answer_definition",
+			"response_v2", "v2_present", "v_question_id",
+		}).
+			AddRow("reading-writing", "rw-base", 1, 1, "q-v2correct", false, false, `"A"`, singleChoice, `{"answer":"B","markedForReview":true}`, true, "q-v2correct").
+			AddRow("reading-writing", "rw-base", 1, 2, "q-v2stale", false, false, `"B"`, singleChoice, `{"answer":null}`, true, "q-v2stale"))
+	svc := NewService(db)
+	questions, err := svc.satQuestions(context.Background(), "attempt-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(questions) != 2 {
+		t.Fatalf("expected 2 question rows, got %d", len(questions))
+	}
+	byID := map[string]SATQuestion{}
+	for _, question := range questions {
+		byID[question.QuestionID] = question
+	}
+	if byID["q-v2correct"].IsCorrect == nil || !*byID["q-v2correct"].IsCorrect {
+		t.Fatalf("expected V2-correct verdict true, got %+v", byID["q-v2correct"])
+	}
+	if !byID["q-v2correct"].MarkedForReview {
+		t.Fatal("expected marked_for_review from V2 envelope")
+	}
+	if resp, _ := byID["q-v2correct"].Response.(string); resp != "B" {
+		t.Fatalf("expected V2 response B, got %#v", byID["q-v2correct"].Response)
+	}
+	if byID["q-v2stale"].IsCorrect != nil {
+		t.Fatalf("expected null verdict when V2 owns with unusable answer, got %+v", byID["q-v2stale"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

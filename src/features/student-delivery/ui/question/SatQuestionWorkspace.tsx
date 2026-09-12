@@ -56,17 +56,19 @@ export function SatQuestionWorkspace({
   const questionRatio = 1 - readingPreferences.splitRatio;
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div role="group" aria-label="Reading layout" className="flex shrink-0 items-center gap-2 border-b border-[var(--sat-divider)] bg-[var(--sat-surface)] px-3 py-1">
+      {/* One segmented control everywhere (Phase 4): Split view | Passage only
+          | Question only. "Expand" (which hid a pane) is now honest "Focus"
+          language; mobile tabs and desktop buttons share one vocabulary. */}
+      <div role="group" aria-label="Passage and question layout" className="flex shrink-0 items-center gap-2 border-b border-[var(--sat-divider)] bg-[var(--sat-surface)] px-3 py-1">
         {compact ? <>
           <button type="button" aria-pressed={mobilePane === 'passage'} aria-controls={passageId} onClick={() => setMobilePane('passage')}
-            className="sat-touch-target flex-1 rounded px-3 aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2">Passage</button>
+            className="sat-touch-target flex-1 rounded px-3 aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2">Passage only</button>
           <button type="button" aria-pressed={mobilePane === 'question'} aria-controls={questionId} onClick={() => setMobilePane('question')}
-            className="sat-touch-target flex-1 rounded px-3 aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2">Question</button>
+            className="sat-touch-target flex-1 rounded px-3 aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2">Question only</button>
         </> : <>
-          <button type="button" onClick={() => expand('passage')} className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">Expand passage</button>
-          <button type="button" onClick={() => expand('question')} className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">Expand question</button>
-          {focus !== 'split' ? <button type="button" onClick={() => { onSplitRatioChange(previousRatio.current); setFocus('split'); }}
-            className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">Return to split</button> : null}
+          <button type="button" aria-pressed={focus === 'split'} onClick={() => { onSplitRatioChange(previousRatio.current); setFocus('split'); }} className="sat-touch-target rounded px-3 aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2">Split view</button>
+          <button type="button" aria-pressed={focus === 'passage'} onClick={() => expand('passage')} className="sat-touch-target rounded px-3 aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2">Passage only</button>
+          <button type="button" aria-pressed={focus === 'question'} onClick={() => expand('question')} className="sat-touch-target rounded px-3 aria-pressed:bg-[var(--sat-accent-soft)] focus-visible:outline focus-visible:outline-2">Question only</button>
         </>}
       </div>
     <div
@@ -75,14 +77,15 @@ export function SatQuestionWorkspace({
       data-sat-reading-split
       style={{
         ...readingStyle,
-        gridTemplateColumns: !compact && focus === 'split' ? `minmax(0, ${readingPreferences.splitRatio}fr) 1px minmax(0, ${questionRatio}fr)` : 'minmax(0, 1fr)',
+        // Bluebook 2px hard divider between passage and question.
+        gridTemplateColumns: !compact && focus === 'split' ? `minmax(0, ${readingPreferences.splitRatio}fr) 2px minmax(0, ${questionRatio}fr)` : 'minmax(0, 1fr)',
       }}
     >
       <section
         ref={passageRef} id={passageId} hidden={!showPassage}
         onScroll={(event) => { if (showPassage) scroll.current.passage = event.currentTarget.scrollTop; }}
-        className="min-h-0 overflow-y-auto px-5 py-6 md:px-8 md:py-8"
-        aria-label="Passage or source"
+        className="min-h-0 overflow-y-auto px-5 py-6 md:px-10 md:py-8"
+        aria-label="Passage"
         data-sat-passage-scroll
       >
         <div className="mx-auto max-w-[660px] sat-exam-prose sat-type-body text-[var(--sat-text)]">
@@ -97,7 +100,7 @@ export function SatQuestionWorkspace({
       <section
         ref={questionRef} id={questionId} hidden={!showQuestion}
         onScroll={(event) => { if (showQuestion) scroll.current.question = event.currentTarget.scrollTop; }}
-        className="min-h-0 overflow-y-auto px-5 py-5 md:px-8 md:py-8"
+        className="min-h-0 overflow-y-auto px-5 py-5 md:px-10 md:py-8"
         aria-label="Question"
         data-sat-question-scroll
       >

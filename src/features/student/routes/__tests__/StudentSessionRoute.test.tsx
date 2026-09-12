@@ -26,6 +26,11 @@ vi.mock('@components/student/StudentAppWrapper', () => ({
   StudentAppWrapper: (props: any) => StudentAppWrapperMock(props),
 }));
 
+const SatStudentSessionRouteMock = vi.fn();
+vi.mock('../../../student-delivery/routes/SatStudentSessionRoute', () => ({
+  SatStudentSessionRoute: (props: any) => SatStudentSessionRouteMock(props),
+}));
+
 function renderRoute(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
@@ -43,6 +48,7 @@ describe('StudentSessionRoute', () => {
     navigateMock.mockReset();
     useStudentSessionRouteDataMock.mockReset();
     StudentAppWrapperMock.mockReset();
+    SatStudentSessionRouteMock.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -124,6 +130,162 @@ describe('StudentSessionRoute', () => {
       expect(logoutAllMock).toHaveBeenCalledTimes(1);
     });
     expect(navigateMock).toHaveBeenCalledWith('/student/sched-1');
+  });
+
+  it('renders the SAT skin (never the admin skeleton) while a SAT load is pending', async () => {
+    // Auth window excluded from the flicker assertion: settle auth to
+    // 'unauthenticated' so the route reads the provider-known-SAT branch.
+    vi.spyOn(authService, 'getSession').mockResolvedValue(null);
+    vi.spyOn(authService, 'logoutAll').mockResolvedValue();
+    useStudentSessionRouteDataMock.mockReturnValue({
+      attemptSnapshot: null,
+      error: null,
+      isLoading: true,
+      providerKey: 'sat',
+      retry: vi.fn(),
+      runtimeSnapshot: null,
+      state: null,
+      refreshRuntime: vi.fn(),
+      satBootstrapSeed: null,
+      isSatStaticReady: false,
+    });
+
+    renderRoute('/student/sched-1/alice');
+
+    // Auth window excluded: wait for auth to settle past 'loading' so the
+    // provider-known-SAT branch (not the auth-window admin skeleton) renders.
+    await waitFor(() => {
+      expect(screen.queryByText('Loading Digital SAT…')).toBeInTheDocument();
+    });
+    // Single SAT skin: SAT loader present with the kind probe …
+    expect(screen.getByText('Loading Digital SAT…')).toBeInTheDocument();
+    expect(screen.getByRole('status').getAttribute('data-sat-loading-kind')).toBe('initial');
+    // … and the admin skeleton absent (bg-gray-50 shell + admin sr-only label).
+    expect(screen.queryByText('Loading Exam…')).not.toBeInTheDocument();
+    expect(document.querySelector('.bg-gray-50')).toBeNull();
+    expect(SatStudentSessionRouteMock).not.toHaveBeenCalled();
+  });
+
+  it('renders a neutral blank (neither skeleton nor SAT skin) while the provider is unknown', async () => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue(null);
+    vi.spyOn(authService, 'logoutAll').mockResolvedValue();
+    useStudentSessionRouteDataMock.mockReturnValue({
+      attemptSnapshot: null,
+      error: null,
+      isLoading: true,
+      providerKey: 'unknown',
+      retry: vi.fn(),
+      runtimeSnapshot: null,
+      state: null,
+      refreshRuntime: vi.fn(),
+      satBootstrapSeed: null,
+      isSatStaticReady: false,
+    });
+
+    renderRoute('/student/sched-1/alice');
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toBeInTheDocument();
+    });
+    // Neutral blank: no admin skeleton grey, no SAT spinner, no admin label.
+    expect(document.querySelector('.bg-gray-50')).toBeNull();
+    expect(screen.queryByText('Loading Digital SAT…')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading Exam…')).not.toBeInTheDocument();
+    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(SatStudentSessionRouteMock).not.toHaveBeenCalled();
+  });
+
+  it('renders the admin skeleton (never the SAT skin) while an IELTS load is pending', () => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue(null);
+    useStudentSessionRouteDataMock.mockReturnValue({
+      attemptSnapshot: null,
+      error: null,
+      isLoading: true,
+      providerKey: 'ielts',
+      retry: vi.fn(),
+      runtimeSnapshot: null,
+      state: null,
+      refreshRuntime: vi.fn(),
+      satBootstrapSeed: null,
+      isSatStaticReady: false,
+    });
+
+    renderRoute('/student/sched-1/alice');
+
+    expect(screen.getByText('Loading Exam…')).toBeInTheDocument();
+    expect(document.querySelector('.bg-gray-50')).not.toBeNull();
+    expect(screen.queryByText('Loading Digital SAT…')).not.toBeInTheDocument();
+    expect(SatStudentSessionRouteMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps SAT attempt-missing on Back to Check-in after the load settles', async () => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue(null);
+    vi.spyOn(authService, 'logoutAll').mockResolvedValue();
+    useStudentSessionRouteDataMock.mockReturnValue({
+      attemptSnapshot: null,
+      error: null,
+      isLoading: false,
+      providerKey: 'sat',
+      retry: vi.fn(),
+      runtimeSnapshot: null,
+      state: {},
+      refreshRuntime: vi.fn(),
+      satBootstrapSeed: null,
+      isSatStaticReady: true,
+    });
+
+    renderRoute('/student/sched-1/alice');
+    fireEvent.click(screen.getByRole('button', { name: /back to check-in/i }));
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith('/student/sched-1');
+    });
+    expect(SatStudentSessionRouteMock).not.toHaveBeenCalled();
+  });
+
+  it('passes bootstrapSeed + initialIsLoading through to the mounted SAT child', () => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue(null);
+    SatStudentSessionRouteMock.mockImplementation(() => <div>sat child</div>);
+    const seed = {
+      scheduleId: 'sched-1',
+      attemptId: 'attempt-1',
+      candidateId: 'alice',
+      attemptSnapshot: { id: 'attempt-1' },
+      runtimeSnapshot: null,
+      liveSnapshotReceivedAt: 1,
+      staticVersionId: 'ver-1',
+      attemptRevision: 1,
+      runtimeRevision: null,
+      deliveryEtag: null,
+      seedGeneration: 1,
+    };
+    useStudentSessionRouteDataMock.mockReturnValue({
+      attemptSnapshot: { id: 'attempt-1', candidateId: 'alice', leaseEpoch: 0, controlEpoch: 0 },
+      error: null,
+      isLoading: false,
+      providerKey: 'sat',
+      retry: vi.fn(),
+      runtimeSnapshot: null,
+      liveSocketConnected: false,
+      satAttemptUpdateToken: 3,
+      state: {},
+      refreshRuntime: vi.fn(),
+      satBootstrapSeed: seed,
+      isSatStaticReady: true,
+    });
+
+    renderRoute('/student/sched-1/alice');
+
+    expect(screen.getByText('sat child')).toBeInTheDocument();
+    expect(SatStudentSessionRouteMock).toHaveBeenCalledTimes(1);
+    const props = SatStudentSessionRouteMock.mock.calls[0]?.[0] as {
+      bootstrapSeed?: unknown;
+      initialIsLoading?: unknown;
+      attemptId?: unknown;
+    };
+    expect(props.attemptId).toBe('attempt-1');
+    expect(props.bootstrapSeed).toBe(seed);
+    expect(props.initialIsLoading).toBe(false);
   });
 
   it('does not render Loading Error during non-fatal reconnect sync conflict recovery', () => {

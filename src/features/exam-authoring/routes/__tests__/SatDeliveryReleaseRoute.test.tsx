@@ -99,6 +99,19 @@ vi.mock("../../ui/SatDeliveryReleasePage", () => ({
       >
         Open issue
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          onIssueClick({
+            code: "sat.delivery.nonstandard_timing",
+            path: "reading-writing.rw-m1.duration",
+            message: "Non-standard timing",
+            blocking: false,
+          })
+        }
+      >
+        Open malformed issue
+      </button>
       <button type="button" onClick={onOpenStudentAccess}>
         Student Access
       </button>
@@ -188,6 +201,7 @@ describe("SatDeliveryReleaseRoute", () => {
         expectedDraftVersionId: "draft-v5",
         expectedDraftRevision: 42,
         publishNotes: "Release notes",
+        operationKey: expect.any(String),
       })
     );
     expect(onExamRefresh).toHaveBeenCalledTimes(1);
@@ -211,6 +225,27 @@ describe("SatDeliveryReleaseRoute", () => {
     renderRoute();
     fireEvent.click(screen.getByRole("button", { name: "Student Access" }));
     expect(screen.getByText("student-links-dashboard")).toBeInTheDocument();
+  });
+
+  it("ignores malformed issue paths instead of navigating with empty params", () => {
+    renderRoute();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open malformed issue" }));
+
+    // No navigation happens: the review page stays mounted and the builder
+    // location probe never appears.
+    expect(screen.queryByTestId("location")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument();
+  });
+
+  it("still opens student access when a post-publish refetch fails", async () => {
+    mocks.refetchDistribution.mockRejectedValueOnce(new Error("boom"));
+    const { onExamRefresh } = renderRoute();
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    expect(await screen.findByText("student-links-dashboard")).toBeInTheDocument();
+    expect(onExamRefresh).toHaveBeenCalledTimes(1);
   });
 
   it("accepts legacy Student Links URLs and returns to Release", () => {

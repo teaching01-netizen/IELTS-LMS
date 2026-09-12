@@ -1,7 +1,8 @@
 // Package migrate_test pins the migration lineage contract (plan 112):
-// lexically continuous 0001..0052 numbering with no gaps or
-// duplicates, every file non-empty with parseable statements, and the
-// Go loader seeing exactly the same file set as the directory scan.
+// exact file count + max sequence with no gaps (except explicitly reserved
+// in-flight lane numbers) and no duplicates, every file non-empty with
+// parseable statements, and the Go loader seeing exactly the same file set
+// as the directory scan.
 // These run without a database; the DB-backed lineage cases (empty,
 // shared-0031, epic, ACT fork, hybrid, production snapshot) stay in the
 // TEST_MYSQL_DSN-gated integration suite.
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -21,13 +23,39 @@ var seqRe = regexp.MustCompile(`^(\d{4})_[a-z0-9_]+\.sql$`)
 
 func migDir(t *testing.T) string {
 	t.Helper()
-	// cmd/migrate -> go/migrations.
-	dir := filepath.Join("..", "migrations")
+	// Resolve backend/go/migrations independent of the test working
+	// directory: runtime.Callers gives this file's dir even when go test
+	// runs from backend/go (where "../migrations" would miss).
+	_, thisFile, _, ok := runtime.Caller(0)
+	if ok {
+		if dir := filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations"); dirExists(dir) {
+			return dir
+		}
+	}
+	// cmd/migrate -> go -> migrations (relative fallback when run with the
+	// package dir as working directory).
+	dir := filepath.Join("..", "..", "migrations")
 	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-		t.Skip("migrations dir not found from cmd/migrate")
+		t.Fatalf("migrations dir not found (tried %s and %s): failing closed so the lineage pin cannot silently skip", dir, filepath.Join("..", "migrations"))
 	}
 	return dir
 }
+
+// Pinned lineage: update these numbers if and only if a migration file is
+// added or removed. WS-09 lane D landed 0055 (outbox DLQ) + 0056 (receipt
+// immutability), previously reserved for lanes B/D — count bumped 55->57
+// and the reservation cleared. SAT authoring lane landed 0058 (operation
+// keys) — count/max bumped 57->58. Any other count/max/gap change fails
+// loudly.
+const (
+	pinnedMigrationFiles = 58
+	pinnedMigrationMax   = 58
+)
+
+// reservedSequences holds sequence numbers claimed by concurrent lanes but
+// not yet present in the tree. Gaps are tolerated ONLY at these numbers.
+// Empty: no lane currently holds a reservation.
+var reservedSequences = map[int]string{}
 
 func TestMigrationSequenceContinuous(t *testing.T) {
 	dir := migDir(t)
@@ -35,8 +63,8 @@ func TestMigrationSequenceContinuous(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) < 52 {
-		t.Fatalf("expected >=52 migration files, got %d", len(files))
+	if len(files) != pinnedMigrationFiles {
+		t.Fatalf("migration lineage drift: expected exactly %d files, got %d (update pinnedMigrationFiles iff a migration was added/removed)", pinnedMigrationFiles, len(files))
 	}
 	seen := map[int]bool{}
 	max := 0
@@ -57,14 +85,25 @@ func TestMigrationSequenceContinuous(t *testing.T) {
 			max = n
 		}
 	}
+	if max != pinnedMigrationMax {
+		t.Fatalf("migration lineage drift: expected max sequence %04d, got %04d (update pinnedMigrationMax iff a migration was added/removed)", pinnedMigrationMax, max)
+	}
 	var missing []int
 	for n := 1; n <= max; n++ {
 		if !seen[n] {
+			if _, ok := reservedSequences[n]; ok {
+				continue
+			}
 			missing = append(missing, n)
 		}
 	}
 	if len(missing) > 0 {
 		t.Fatalf("migration sequence gaps: %v (max %04d)", missing, max)
+	}
+	for n := range reservedSequences {
+		if seen[n] {
+			t.Fatalf("reserved sequence %04d (%s) has landed: bump pinnedMigrationFiles and remove it from reservedSequences", n, reservedSequences[n])
+		}
 	}
 }
 

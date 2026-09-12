@@ -58,4 +58,67 @@ describe('SatMenu', () => {
     renderMenu(vi.fn());
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
+
+  it('animates the menu surface on open with an origin-aware enter', () => {
+    renderMenu(vi.fn());
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    const menu = screen.getByRole('menu');
+    expect(menu).toHaveAttribute('data-sat-menu-animate');
+  });
+
+  it('marks the current item with aria-current while keeping it clickable', () => {
+    const onSelect = vi.fn();
+    render(
+      <SatMenu
+        label="Workspace"
+        compact
+        items={[
+          { id: 'a', label: 'Morning cohort', onSelect: () => onSelect('a'), current: true },
+          { id: 'b', label: 'Evening cohort', onSelect: () => onSelect('b') },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace' }));
+    const current = screen.getByRole('menuitem', { name: 'Morning cohort' });
+    expect(current).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('menuitem', { name: 'Evening cohort' })).not.toHaveAttribute('aria-current');
+    fireEvent.click(current);
+    expect(onSelect).toHaveBeenCalledWith('a');
+  });
+
+  it('keeps the non-compact trigger name on the label in every branch', () => {
+    render(<SatMenu label="Workspace switcher" items={buildItems(vi.fn())} />);
+    expect(screen.getByRole('button', { name: 'Workspace switcher' })).toHaveAttribute('aria-label', 'Workspace switcher');
+  });
+
+  it('renders a disabled item as disabled and never fires onSelect', () => {
+    const onSelect = vi.fn();
+    render(
+      <SatMenu
+        label="Session actions"
+        compact
+        items={[
+          { id: 'only', label: 'Locked action', onSelect: () => onSelect('only'), disabled: true },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    const item = screen.getByRole('menuitem', { name: 'Locked action' });
+    expect(item).toBeDisabled();
+    fireEvent.click(item);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('renders no separator when separatorBefore is set on the first item (index guard)', () => {
+    render(
+      <SatMenu
+        label="Session actions"
+        compact
+        items={[{ id: 'first', label: 'First', onSelect: vi.fn(), separatorBefore: true }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    expect(screen.getByRole('menuitem', { name: 'First' })).toBeInTheDocument();
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+  });
 });

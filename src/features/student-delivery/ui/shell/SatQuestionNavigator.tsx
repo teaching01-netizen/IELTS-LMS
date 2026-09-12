@@ -54,7 +54,9 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
         ?.focus();
     });
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      // Yield when a higher-priority surface (e.g. the 5-minute warning,
+      // Wave B R-16) already claimed this press in the capture phase.
+      if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         onClose();
         return;
@@ -84,10 +86,10 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
       role="dialog"
       aria-labelledby={titleId}
       data-sat-navigator-presentation={compact ? "compact" : "anchored"}
-      className={`${compact ? "relative max-h-[min(70dvh,560px)] w-[min(620px,calc(100vw-16px))] rounded-[12px] border" : "relative max-h-[min(54dvh,460px)] w-[min(620px,calc(100vw-32px))] rounded-[10px] border"} overflow-y-auto border-[var(--sat-divider)] bg-[var(--sat-surface)] px-4 py-4 shadow-[0_18px_48px_rgba(0,0,0,0.20)] sm:px-7 sm:py-5`}
+      className={`${compact ? "relative max-h-[min(70dvh,560px)] w-[min(620px,calc(100vw-16px))] rounded-[12px] border" : "relative max-h-[min(54dvh,460px)] w-[min(620px,calc(100vw-32px))] rounded-[10px] border"} overflow-y-auto border-[var(--sat-divider)] bg-[var(--sat-surface)] px-4 py-4 shadow-[var(--sat-shadow-modal)] sm:px-7 sm:py-5`}
     >
       <div className="flex items-start justify-between gap-4 border-b border-[var(--sat-divider)] pb-3">
-        <h2 id={titleId} className="text-[18px] font-semibold text-[var(--sat-text)]">
+        <h2 id={titleId} className="sat-type-input font-semibold text-[var(--sat-text)]">
           {props.sectionLabel} Questions
         </h2>
         <button
@@ -101,7 +103,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-b border-[var(--sat-divider-soft)] py-3 text-[13px] text-[var(--sat-text)]">
+      <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-b border-[var(--sat-divider-soft)] py-3 sat-type-metadata text-[var(--sat-text)]">
         <span className="inline-flex items-center gap-1.5">
           <MapPin className="h-4 w-4" aria-hidden="true" /> Current
         </span>
@@ -146,7 +148,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
               }}
               aria-current={current ? "step" : undefined}
               aria-label={`Question ${item.number}${answered ? ", answered" : ", unanswered"}${item.markedForReview ? ", flagged" : ""}${current ? ", current question" : ""}`}
-              className={`sat-pressable relative h-11 min-w-11 border text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2 ${stateClass}`}
+              className={`sat-pressable relative h-11 min-w-11 border sat-type-control-secondary font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2 ${stateClass}`}
             >
               <span className="inline-flex items-center gap-1">
                 {answered ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : null}
@@ -154,7 +156,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
               </span>
               {item.markedForReview ? (
                 <Bookmark
-                  className="absolute -right-2 -top-2 h-5 w-5 rounded-full bg-[var(--sat-surface)] fill-[var(--sat-review)] p-[2px] text-[var(--sat-review)] shadow-sm"
+                  className="absolute -right-2 -top-2 h-5 w-5 rounded-full bg-[var(--sat-surface)] fill-[var(--sat-review)] p-[2px] text-[var(--sat-review)]"
                   aria-hidden="true"
                 />
               ) : null}
@@ -170,7 +172,7 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
             props.onReviewModule();
             props.onClose();
           }}
-          className="sat-touch-target sat-pressable rounded-full border border-[var(--sat-accent)] px-5 text-[14px] font-semibold text-[var(--sat-accent-strong)] hover:bg-[var(--sat-accent-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+          className="sat-touch-target sat-pressable rounded-full border border-[var(--sat-accent)] px-5 sat-type-control-secondary font-semibold text-[var(--sat-accent-strong)] hover:bg-[var(--sat-accent-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
         >
           {SAT_COPY.navigation.reviewAnswers}
         </button>

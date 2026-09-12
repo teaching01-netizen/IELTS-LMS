@@ -51,7 +51,7 @@ func TestReconcileCompleterFailureEmitsAndRetries(t *testing.T) {
 	// finalizeModuleTx: scoring rows (none), UPDATE 1 row, section lookup,
 	// next module none (last open -> arms completion).
 	mock.ExpectQuery("FROM assessment_exam_questions eq").
-		WillReturnRows(sqlmock.NewRows([]string{"is_pretest", "answer_definition", "response"}))
+		WillReturnRows(sqlmock.NewRows([]string{"is_pretest", "answer_definition", "response", "response_v2"}))
 	mock.ExpectExec("UPDATE assessment_module_attempts SET state").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("FROM assessment_modules m JOIN assessment_sections").

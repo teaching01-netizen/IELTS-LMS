@@ -3,59 +3,65 @@
 package telemetry
 
 var metricHelpText = map[string]string{
-	MHTTPRequestsTotal: "Total HTTP requests by method, route, and status class.",
-	MHTTPRequestDur:    "HTTP request duration in seconds.",
-	MHTTPInFlight:      "Current number of in-flight HTTP requests.",
-	MPoolOpen:          "Number of open database connections.",
-	MPoolInUse:         "Number of database connections currently in use.",
-	MPoolWait:          "Total number of waits for a database connection.",
-	MQueryDur:          "Database query duration in seconds.",
-	MTxDur:             "Database transaction duration in seconds.",
-	MDeadlocks:         "Total number of database deadlocks.",
-	MV2BatchTotal:      "Total v2 response batches by outcome.",
-	MV2CommandsTotal:   "Total v2 response commands by outcome.",
-	MV1MutationTotal:   "Total v1 mutation requests by outcome.",
-	MV1SubmitTotal:     "Total v1 submit requests by outcome.",
-	MLeaseFencedTotal:  "Total v2 responses rejected by lease fencing.",
-	MControlStaleTotal: "Total v2 responses rejected for a stale control epoch.",
-	MVersionCollTotal:  "Total v2 responses rejected for a version collision.",
-	MSubmitReplayTotal: "Total replayed v2 submissions.",
-	MTerminalCreated:   "Total terminalization receipts created.",
-	MTerminalReplay:    "Total terminalization replays.",
-	MTerminalConflict:  "Total terminalization conflicts.",
-	MRepairMissing:     "Total missing terminal receipts repaired.",
-	MInvariantViol:     "Total terminal-state invariant violations observed.",
-	MOutboxPending:     "Current number of pending outbox events.",
-	MOutboxOldestAge:   "Age in seconds of the oldest pending outbox event.",
-	MJobDuration:       "Worker job duration in seconds.",
-	MJobFailures:       "Total worker job failures.",
-	MSATPendingAge:     "Age in seconds of the oldest provisional SAT result.",
-	MProjectionLag:     "Grading projection lag in seconds.",
-	MRatelimitDeniedTotal: "Total rate-limit denials by tier and key class.",
-	MWSConnections:        "Current number of WebSocket connections.",
-	MWSLeaseFailures:   "Total WebSocket lease acquisition failures.",
-	MWSSlowDisconnect:  "Total WebSocket disconnects caused by slow clients.",
-	MVersionCacheHit:   "Total version-cache hits (D1 bootstrap fast path).",
-	MVersionCacheMiss:  "Total version-cache misses (D1 full N+1 loads).",
-	MPresenceTouch:     "Total presence memory touches (D2 zero-SQL beats).",
-	MPresenceFlush:     "Total presence flush batches (D2 60s drain).",
-	MEntryGateAdmit:    "Total entry-gate admissions (D3 check-ins).",
-	MEntryGateQueued:   "Total entry-gate 429s with queue position (D3).",
-	MRollupRefresh:     "Total proctor rollup refreshes (D4 worker).",
-	MRollupLag:         "Freshness in seconds of the proctor rollup row (D4 lag).",
-	MShedExam:          "Total requests served under exam shed budgets (E2).",
-	MQueryTimeout:      "Total hot-path budget short-circuits (E1 503s).",
-	MSessionCacheHit:   "Total session-cache hits (A2 DB-touch skip).",
-	MSessionCacheMiss:  "Total session-cache misses (A2 DB reload).",
-	MSnapshotCacheHit:  "Total runtime-snapshot cache hits (B2 zero-SQL gate).",
-	MSnapshotCacheMiss: "Total runtime-snapshot cache misses (B2 DB load).",
-	MRuntimePollTotal:  "Total runtime polls by result (200 delta vs 304 not-modified).",
-	MAttemptVerify:     "Total attempt-bearer verifications by mode and result.",
-	MDupAttemptReplay:  "Total check-in replays served from the existing attempt row (D3).",
-	MPresenceDedupeHit: "Total presence in-memory mutation dedupe hits (D2).",
-	MPresenceFlushRows: "Total presence rows flushed to the DB (D2 drain size).",
-	MOutboxClaimed:     "Total outbox events claimed by the worker.",
-	MOutboxAcked:       "Total outbox events acknowledged by the worker.",
+	MHTTPRequestsTotal:        "Total HTTP requests by method, route, and status class.",
+	MHTTPRequestDur:           "HTTP request duration in seconds.",
+	MHTTPInFlight:             "Current number of in-flight HTTP requests.",
+	MPoolOpen:                 "Number of open database connections.",
+	MPoolInUse:                "Number of database connections currently in use.",
+	MPoolWait:                 "Total number of waits for a database connection.",
+	MQueryDur:                 "Database query duration in seconds.",
+	MTxDur:                    "Database transaction duration in seconds.",
+	MDeadlocks:                "Total number of database deadlocks.",
+	MV2BatchTotal:             "Total v2 response batches by outcome.",
+	MV2CommandsTotal:          "Total v2 response commands by outcome.",
+	MSATScoreSource:           "Total SAT scoring passes by response source (v2 vs legacy fallback).",
+	MSATScoreFallbackRows:     "Total SAT scoring rows answered from legacy gaps inside V2-owned passes.",
+	MSATFinalizeTotal:         "Total SAT terminal finalizations by outcome (completed vs replayed vs rejected).",
+	MSATHeartbeatTotal:        "Total SAT student heartbeats recorded by path (memory vs inline).",
+	MV1MutationTotal:          "Total v1 mutation requests by outcome.",
+	MV1SubmitTotal:            "Total v1 submit requests by outcome.",
+	MLeaseFencedTotal:         "Total v2 responses rejected by lease fencing.",
+	MControlStaleTotal:        "Total v2 responses rejected for a stale control epoch.",
+	MVersionCollTotal:         "Total v2 responses rejected for a version collision.",
+	MSubmitReplayTotal:        "Total replayed v2 submissions.",
+	MTerminalCreated:          "Total terminalization receipts created.",
+	MTerminalReplay:           "Total terminalization replays.",
+	MTerminalConflict:         "Total terminalization conflicts.",
+	MRepairMissing:            "Total missing terminal receipts repaired.",
+	MInvariantViol:            "Total terminal-state invariant violations observed.",
+	MOutboxPending:            "Current number of pending outbox events.",
+	MOutboxOldestAge:          "Age in seconds of the oldest pending outbox event.",
+	MJobDuration:              "Worker job duration in seconds.",
+	MJobFailures:              "Total worker job failures.",
+	MSATPendingAge:            "Age in seconds of the oldest provisional SAT result.",
+	MProjectionLag:            "Grading projection lag in seconds.",
+	MGradingProjectionCorrupt: "Total corrupt grading result projections by column.",
+	MRatelimitDeniedTotal:     "Total rate-limit denials by tier and key class.",
+	MAuthoringOpTotal:         "Total authoring mutations by operation and outcome (save, create, batch, bulk, commit, publish).",
+	MWSConnections:            "Current number of WebSocket connections.",
+	MWSLeaseFailures:          "Total WebSocket lease acquisition failures.",
+	MWSSlowDisconnect:         "Total WebSocket disconnects caused by slow clients.",
+	MVersionCacheHit:          "Total version-cache hits (D1 bootstrap fast path).",
+	MVersionCacheMiss:         "Total version-cache misses (D1 full N+1 loads).",
+	MPresenceTouch:            "Total presence memory touches (D2 zero-SQL beats).",
+	MPresenceFlush:            "Total presence flush batches (D2 60s drain).",
+	MEntryGateAdmit:           "Total entry-gate admissions (D3 check-ins).",
+	MEntryGateQueued:          "Total entry-gate 429s with queue position (D3).",
+	MRollupRefresh:            "Total proctor rollup refreshes (D4 worker).",
+	MRollupLag:                "Freshness in seconds of the proctor rollup row (D4 lag).",
+	MShedExam:                 "Total requests served under exam shed budgets (E2).",
+	MQueryTimeout:             "Total hot-path budget short-circuits (E1 503s).",
+	MSessionCacheHit:          "Total session-cache hits (A2 DB-touch skip).",
+	MSessionCacheMiss:         "Total session-cache misses (A2 DB reload).",
+	MSnapshotCacheHit:         "Total runtime-snapshot cache hits (B2 zero-SQL gate).",
+	MSnapshotCacheMiss:        "Total runtime-snapshot cache misses (B2 DB load).",
+	MRuntimePollTotal:         "Total runtime polls by result (200 delta vs 304 not-modified).",
+	MAttemptVerify:            "Total attempt-bearer verifications by mode and result.",
+	MDupAttemptReplay:         "Total check-in replays served from the existing attempt row (D3).",
+	MPresenceDedupeHit:        "Total presence in-memory mutation dedupe hits (D2).",
+	MPresenceFlushRows:        "Total presence rows flushed to the DB (D2 drain size).",
+	MOutboxClaimed:            "Total outbox events claimed by the worker.",
+	MOutboxAcked:              "Total outbox events acknowledged by the worker.",
 }
 
 // Metric name constants (plan 69).
@@ -73,6 +79,15 @@ const (
 
 	MV2BatchTotal      = "v2_response_batch_total"
 	MV2CommandsTotal   = "v2_response_commands_total"
+	MSATScoreSource    = "sat_score_source_total"
+	// Exam-day re-audit defect 5: per-row legacy-gap counter so mixed
+	// V2/legacy passes page instead of hiding under the v2 pass series.
+	MSATScoreFallbackRows = "sat_score_fallback_rows_total"
+	// Backend finalize/heartbeat series (exam-day re-audit observability
+	// residual): the release must page on server-observed terminal outcomes,
+	// not on frontend-emitted beacons that never arrive during an outage.
+	MSATFinalizeTotal  = "sat_finalize_total"
+	MSATHeartbeatTotal = "sat_heartbeat_total"
 	MV1MutationTotal   = "v1_mutation_requests_total"
 	MV1SubmitTotal     = "v1_submit_requests_total"
 	MLeaseFencedTotal  = "v2_lease_fenced_total"
@@ -86,45 +101,60 @@ const (
 	MRepairMissing    = "missing_receipt_repair_total"
 	MInvariantViol    = "terminal_invariant_violation_total"
 
-	MOutboxPending   = "outbox_pending"
-	MOutboxOldestAge = "outbox_oldest_age_seconds"
-	MJobDuration     = "worker_job_duration_seconds"
-	MJobFailures     = "worker_job_failures_total"
-	MSATPendingAge   = "sat_provisional_pending_age_seconds"
-	MProjectionLag   = "grading_projection_lag_seconds"
+	MOutboxPending            = "outbox_pending"
+	MOutboxOldestAge          = "outbox_oldest_age_seconds"
+	MJobDuration              = "worker_job_duration_seconds"
+	MJobFailures              = "worker_job_failures_total"
+	MSATPendingAge            = "sat_provisional_pending_age_seconds"
+	MProjectionLag            = "grading_projection_lag_seconds"
+	MGradingProjectionCorrupt = "grading_projection_corrupt_total"
 
 	MWSConnections    = "websocket_connections"
 	MWSLeaseFailures  = "websocket_lease_acquire_failures_total"
 	MWSSlowDisconnect = "websocket_slow_client_disconnects_total"
 
-	MVersionCacheHit = "version_cache_hit_total"
+	MVersionCacheHit  = "version_cache_hit_total"
 	MVersionCacheMiss = "version_cache_miss_total"
-	MPresenceTouch   = "presence_touch_total"
-	MPresenceFlush   = "presence_flush_total"
-	MEntryGateAdmit  = "entry_gate_admit_total"
-	MEntryGateQueued = "entry_gate_queued_total"
-	MRollupRefresh   = "proctor_rollup_refresh_total"
-	MRollupLag       = "proctor_rollup_lag_seconds"
-	MShedExam        = "shed_exam_requests_total"
-	MQueryTimeout    = "query_budget_exhausted_total"
+	MPresenceTouch    = "presence_touch_total"
+	MPresenceFlush    = "presence_flush_total"
+	MEntryGateAdmit   = "entry_gate_admit_total"
+	MEntryGateQueued  = "entry_gate_queued_total"
+	MRollupRefresh    = "proctor_rollup_refresh_total"
+	MRollupLag        = "proctor_rollup_lag_seconds"
+	MShedExam         = "shed_exam_requests_total"
+	MQueryTimeout     = "query_budget_exhausted_total"
 
-	MSessionCacheHit  = "session_cache_hit_total"
-	MSessionCacheMiss = "session_cache_miss_total"
-	MSnapshotCacheHit = "runtime_snapshot_hit_total"
+	MSessionCacheHit   = "session_cache_hit_total"
+	MSessionCacheMiss  = "session_cache_miss_total"
+	MSnapshotCacheHit  = "runtime_snapshot_hit_total"
 	MSnapshotCacheMiss = "runtime_snapshot_miss_total"
-	MRuntimePollTotal = "runtime_poll_total"
-	MAttemptVerify    = "attempt_verify_total"
-	MDupAttemptReplay = "duplicate_attempt_replay_total"
+	MRuntimePollTotal  = "runtime_poll_total"
+	MAttemptVerify     = "attempt_verify_total"
+	MDupAttemptReplay  = "duplicate_attempt_replay_total"
 	MPresenceDedupeHit = "presence_dedupe_hit_total"
 	MPresenceFlushRows = "presence_flush_rows_total"
-	MOutboxClaimed    = "outbox_claimed_total"
-	MOutboxAcked      = "outbox_acked_total"
+	MOutboxClaimed     = "outbox_claimed_total"
+	MOutboxAcked       = "outbox_acked_total"
 
 	MRatelimitDeniedTotal = "http_ratelimit_denied_total"
+
+	MAuthoringOpTotal = "authoring_operation_total"
 )
 
 // V2 batch outcome label values.
 const (
+	SATScoreV2             = "v2"
+	SATScoreLegacy         = "legacy"
+	FinalizeCompleted      = "completed"
+	FinalizeReplayed       = "replayed"
+	FinalizeRejected       = "rejected"
+	HeartbeatMemory        = "memory"
+	HeartbeatInline        = "inline"
+	// SATScoreZero labels zero-answer scoring silence: a pass with questions
+	// but no response row from either source. Pages on the same fallback
+	// series so one alert covers both gap classes.
+	SATScoreZero           = "zero"
+
 	OutcomeAccepted        = "accepted"
 	OutcomeExactReplay     = "exact_replay"
 	OutcomeLeaseFenced     = "lease_fenced"
@@ -151,3 +181,73 @@ const (
 	FLatencyMs = "latency_ms"
 	FActor     = "actor_class"
 )
+
+// Names returns every metric series name the backend can emit (WS-10a:
+// alert-parity registry of record). The alert-parity test asserts every
+// metric referenced in backend/monitoring/prometheus-alert-rules.yml
+// appears here, so a rule can never again point at a series nothing
+// emits. Keep in sync when adding a series: declare the M* constant
+// above AND append it here (the test fails otherwise).
+func Names() []string {
+	return []string{
+		MHTTPRequestsTotal,
+		MHTTPRequestDur,
+		MHTTPInFlight,
+		MPoolOpen,
+		MPoolInUse,
+		MPoolWait,
+		MQueryDur,
+		MTxDur,
+		MDeadlocks,
+		MV2BatchTotal,
+		MV2CommandsTotal,
+		MSATScoreSource,
+		MSATScoreFallbackRows,
+		MSATFinalizeTotal,
+		MSATHeartbeatTotal,
+		MV1MutationTotal,
+		MV1SubmitTotal,
+		MLeaseFencedTotal,
+		MControlStaleTotal,
+		MVersionCollTotal,
+		MSubmitReplayTotal,
+		MTerminalCreated,
+		MTerminalReplay,
+		MTerminalConflict,
+		MRepairMissing,
+		MInvariantViol,
+		MOutboxPending,
+		MOutboxOldestAge,
+		MJobDuration,
+		MJobFailures,
+		MSATPendingAge,
+		MProjectionLag,
+		MGradingProjectionCorrupt,
+		MWSConnections,
+		MWSLeaseFailures,
+		MWSSlowDisconnect,
+		MVersionCacheHit,
+		MVersionCacheMiss,
+		MPresenceTouch,
+		MPresenceFlush,
+		MEntryGateAdmit,
+		MEntryGateQueued,
+		MRollupRefresh,
+		MRollupLag,
+		MShedExam,
+		MQueryTimeout,
+		MSessionCacheHit,
+		MSessionCacheMiss,
+		MSnapshotCacheHit,
+		MSnapshotCacheMiss,
+		MRuntimePollTotal,
+		MAttemptVerify,
+		MDupAttemptReplay,
+		MPresenceDedupeHit,
+		MPresenceFlushRows,
+		MOutboxClaimed,
+		MOutboxAcked,
+		MRatelimitDeniedTotal,
+		MAuthoringOpTotal,
+	}
+}

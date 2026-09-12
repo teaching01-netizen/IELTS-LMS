@@ -333,16 +333,16 @@ type ScienceQuestion struct {
 // the same key comparison as seal time (ComputeScienceScore) without ever
 // recomputing the stored total.
 type ScienceDetail struct {
-	AttemptID   string           `json:"attemptId"`
-	ScheduleID  string           `json:"scheduleId"`
-	StudentID   string           `json:"studentId"`
-	StudentName string           `json:"studentName"`
-	TotalScore  int              `json:"totalScore"`
-	MaxScore    int              `json:"maxScore"`
-	Percentage  float64          `json:"percentage"`
-	Outcome     string           `json:"outcomeStatus"`
-	Release     string           `json:"releaseStatus"`
-	SubmittedAt *time.Time       `json:"submittedAt,omitempty"`
+	AttemptID   string            `json:"attemptId"`
+	ScheduleID  string            `json:"scheduleId"`
+	StudentID   string            `json:"studentId"`
+	StudentName string            `json:"studentName"`
+	TotalScore  int               `json:"totalScore"`
+	MaxScore    int               `json:"maxScore"`
+	Percentage  float64           `json:"percentage"`
+	Outcome     string            `json:"outcomeStatus"`
+	Release     string            `json:"releaseStatus"`
+	SubmittedAt *time.Time        `json:"submittedAt,omitempty"`
 	Questions   []ScienceQuestion `json:"questions"`
 }
 
@@ -417,7 +417,7 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 	var (
 		scheduleID, studentID, studentName string
 		finalSub                           sql.NullString
-		submittedAt                          sql.NullTime
+		submittedAt                        sql.NullTime
 		outcome, release                   sql.NullString
 	)
 	scope, scopeArgs := actResultScope(actor)

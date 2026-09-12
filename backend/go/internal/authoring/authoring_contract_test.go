@@ -59,7 +59,7 @@ func TestQuestionDetailSerializesNestedFrontendShape(t *testing.T) {
 			ID: "rev-1", QuestionID: "q-1", SemanticRevision: 1, Revision: 3,
 			State: "draft", QuestionType: "single_choice",
 			Stimulus: json.RawMessage(`{}`), Prompt: json.RawMessage(`{}`),
-			Answer: json.RawMessage(`{"kind":"single_choice"}`),
+			Answer:    json.RawMessage(`{"kind":"single_choice"}`),
 			Rationale: json.RawMessage(`{}`), Metadata: json.RawMessage(`{}`),
 			Accessibility: json.RawMessage(`{}`),
 		},

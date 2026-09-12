@@ -50,6 +50,7 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
       backdropClassName="sat-dialog-backdrop fixed inset-0 z-[83] flex items-end justify-center bg-black/20"
     >
       <div className="px-4 pb-2 pt-1">
+        {/* scale-exception: text-[12px] display subtitle has no 12px type token; literal kept intentionally. */}
         <p className="text-[12px] leading-4 text-[var(--sat-text-secondary)]">{SAT_COPY.displaySettings.subtitle}</p>
       </div>
       <div className="space-y-5 px-4 py-4">
@@ -57,11 +58,12 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
           <div className="flex items-center justify-between gap-3">
             <h3
               id="sat-display-text-size-label"
-              className="text-[14px] font-semibold text-[var(--sat-text)]"
+              className="sat-type-control-secondary font-semibold text-[var(--sat-text)]"
             >
               {SAT_COPY.displaySettings.textSize}
               <span className="ml-1 font-normal text-[var(--sat-text-secondary)]">({SAT_COPY.displaySettings.textSizeHint})</span>
             </h3>
+            {/* scale-exception: text-[12px] zoom/output numeral has no 12px type token; literal kept intentionally. */}
             <output className="sat-tabular text-[12px] text-[var(--sat-text-secondary)]" aria-live="polite">
               {percent}%
             </output>
@@ -94,7 +96,7 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
         </section>
 
         <section aria-labelledby="sat-display-line-spacing-label">
-          <h3 id="sat-display-line-spacing-label" className="text-[14px] font-semibold text-[var(--sat-text)]">
+          <h3 id="sat-display-line-spacing-label" className="sat-type-control-secondary font-semibold text-[var(--sat-text)]">
             {SAT_COPY.displaySettings.lineSpacing}
           </h3>
           <div className="mt-2 grid grid-cols-2 rounded-[9px] bg-[var(--sat-surface-subtle)] p-1" role="group" aria-label={SAT_COPY.displaySettings.lineSpacing}>
@@ -105,7 +107,7 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
                 disabled={disabled}
                 aria-pressed={preferences.lineSpacing === spacing}
                 onClick={() => update({ lineSpacing: spacing })}
-                className={"sat-touch-target sat-pressable sat-state-transition rounded-[7px] px-3 text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] " + (preferences.lineSpacing === spacing ? "bg-[var(--sat-surface)] text-[var(--sat-text)] shadow-sm" : "text-[var(--sat-text-secondary)] hover:text-[var(--sat-text)]")}
+                className={"sat-touch-target sat-pressable sat-state-transition rounded-[7px] px-3 sat-type-control-secondary font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] " + (preferences.lineSpacing === spacing ? "bg-[var(--sat-surface)] text-[var(--sat-text)] shadow-sm" : "text-[var(--sat-text-secondary)] hover:text-[var(--sat-text)]")}
               >
                 {spacing === "standard" ? "Standard" : "Relaxed"}
               </button>
@@ -152,7 +154,7 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
             type="button"
             disabled={disabled || isDefaultSatReadingPreferences(preferences)}
             onClick={() => onChange(createSatReadingPreferences())}
-            className="sat-touch-target sat-pressable rounded-full px-4 text-[14px] font-semibold text-[var(--sat-accent-strong)] hover:bg-[var(--sat-accent-soft)] disabled:text-[var(--sat-disabled-text)] disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+            className="sat-touch-target sat-pressable rounded-full px-4 sat-type-control-secondary font-semibold text-[var(--sat-accent-strong)] hover:bg-[var(--sat-accent-soft)] disabled:text-[var(--sat-disabled-text)] disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
           >
             {SAT_COPY.displaySettings.reset}
           </button>

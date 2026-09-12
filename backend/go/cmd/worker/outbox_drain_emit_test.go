@@ -39,7 +39,7 @@ func TestDrainOutboxEmitsClaimed(t *testing.T) {
 	cols := []string{"id", "aggregate_kind", "aggregate_id", "revision", "event_family", "payload", "created_at", "publish_attempts", "last_error", "claim_token", "next_attempt_at", "failed_at"}
 	mock.ExpectQuery("SELECT id, aggregate_kind").
 		WillReturnRows(sqlmock.NewRows(cols).
-			AddRow("ev-1", "schedule_runtime", "sched-1", 1, "runtime_changed", `{}` , time.Now().UTC(), 1, nil, "tok-1", nil, nil))
+			AddRow("ev-1", "schedule_runtime", "sched-1", 1, "runtime_changed", `{}`, time.Now().UTC(), 1, nil, "tok-1", nil, nil))
 	mock.ExpectCommit()
 	mock.ExpectExec("UPDATE outbox_events SET claimed_at").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "ev-1", sqlmock.AnyArg()).

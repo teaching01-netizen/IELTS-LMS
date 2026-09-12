@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -12,6 +12,7 @@ import (
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/platform/pagination"
 )
 
 // Grading session reads (GET /grading/sessions, GET /grading/sessions/{id}).
@@ -37,43 +38,33 @@ import (
 // the Rust service enforces via ensure_can_grade_schedule), not to the raw
 // {sessionID} path value.
 
-// gradingSessionsLimitParam parses ?limit= with default 200 clamped 1..500,
-// mirroring the Rust legacy list clamp.
-func gradingSessionsLimitParam(r *http.Request) int {
-	s := strings.TrimSpace(r.URL.Query().Get("limit"))
-	if s == "" {
-		return 200
+// writePaginationFieldError renders a pagination.FieldError fail-closed:
+// 400 + details.fields[{path,reason}] (WS-13.4), keeping strict parsing.
+func writePaginationFieldError(w http.ResponseWriter, r *http.Request, err error) bool {
+	var fe pagination.FieldError
+	if !errors.As(err, &fe) {
+		return false
 	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return 200
-	}
-	if n < 1 {
-		return 1
-	}
-	if n > 500 {
-		return 500
-	}
-	return n
+	appErr := apperrors.New(apperrors.CodeBadRequest, "Invalid query parameter.")
+	appErr.Details = fe.ToDetails()
+	httpx.WriteError(w, r, appErr)
+	return true
 }
 
-// gradingPageParam parses a 1-based ?page=/?pageSize= value; absent, blank,
-// or non-numeric values yield def (Rust handler defaults: page 1, pageSize
-// 10 for the queue and 25 for detail). Numeric values below 1 yield 1; the
-// service clamps pageSize to 1..100.
-func gradingPageParam(r *http.Request, key string, def uint64) uint64 {
-	s := strings.TrimSpace(r.URL.Query().Get(key))
-	if s == "" {
-		return def
-	}
-	n, err := strconv.ParseUint(s, 10, 64)
+// parseGradingQueueLimit parses ?limit= fail-closed (WS-13.1): absent
+// yields legacy default 200, malformed yields FieldError (400), numeric
+// clamps 1..500 as the Rust legacy list clamp.
+func parseGradingQueueLimit(r *http.Request) (int, error) {
+	cur, err := pagination.ParseCursor(r)
 	if err != nil {
-		return def
+		return 0, err
 	}
-	if n < 1 {
-		return 1
+	// ParseCursor defaults limit 100; the queue legacy default is 200:
+	// rescale only when the client sent no ?limit=.
+	if strings.TrimSpace(r.URL.Query().Get("limit")) == "" {
+		return 200, nil
 	}
-	return n
+	return cur.Limit, nil
 }
 
 // gradingAssignedScheduleIDs loads the grader's live assignment set
@@ -132,6 +123,40 @@ func gradingSessionsHandler(app *App) http.HandlerFunc {
 		if sess == nil {
 			return
 		}
+		// Fail-closed query parsing runs BEFORE service/DB gates: malformed
+		// ?limit/?page/?pageSize 400 even when dependencies are down.
+		q := r.URL.Query()
+		_, hasPage := q["page"]
+		_, hasPageSize := q["pageSize"]
+		search := strings.TrimSpace(q.Get("search"))
+		var queuePage *pagination.Page
+		var queueLimit int
+		var pageSizeOverride uint64
+		if hasPage || hasPageSize || search != "" {
+			page, err := pagination.ParsePage(r)
+			if err != nil {
+				if writePaginationFieldError(w, r, err) {
+					return
+				}
+				httpx.WriteError(w, r, err)
+				return
+			}
+			queuePage = &page
+			pageSizeOverride = uint64(page.Size)
+			if strings.TrimSpace(q.Get("pageSize")) == "" {
+				pageSizeOverride = 10
+			}
+		} else {
+			limit, err := parseGradingQueueLimit(r)
+			if err != nil {
+				if writePaginationFieldError(w, r, err) {
+					return
+				}
+				httpx.WriteError(w, r, err)
+				return
+			}
+			queueLimit = limit
+		}
 		if !requireGradingDB(w, r, app) {
 			return
 		}
@@ -150,13 +175,9 @@ func gradingSessionsHandler(app *App) http.HandlerFunc {
 			allowed = ids
 		}
 		scope := gradingSessionScope(ctx)
-		q := r.URL.Query()
-		_, hasPage := q["page"]
-		_, hasPageSize := q["pageSize"]
-		search := strings.TrimSpace(q.Get("search"))
-		if hasPage || hasPageSize || search != "" {
+		if queuePage != nil {
 			out, err := app.Grading.ListSessionsPage(ctx, sess.Role, allowed, scope,
-				gradingPageParam(r, "page", 1), gradingPageParam(r, "pageSize", 10), search)
+				uint64(queuePage.Number), pageSizeOverride, search)
 			if err != nil {
 				httpx.WriteError(w, r, err)
 				return
@@ -164,7 +185,7 @@ func gradingSessionsHandler(app *App) http.HandlerFunc {
 			httpx.WriteJSON(w, http.StatusOK, out)
 			return
 		}
-		out, err := app.Grading.ListSessions(ctx, sess.Role, allowed, scope, gradingSessionsLimitParam(r))
+		out, err := app.Grading.ListSessions(ctx, sess.Role, allowed, scope, queueLimit)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -185,6 +206,21 @@ func gradingSessionHandler(app *App) http.HandlerFunc {
 		sess := requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader)
 		if sess == nil {
 			return
+		}
+		// Fail-closed page/pageSize before service/DB gates (legacy
+		// detail defaults 1/25; malformed 400s).
+		page, perr := pagination.ParsePage(r)
+		if perr != nil {
+			if writePaginationFieldError(w, r, perr) {
+				return
+			}
+			httpx.WriteError(w, r, perr)
+			return
+		}
+		detailPage := uint64(page.Number)
+		detailSize := uint64(page.Size)
+		if strings.TrimSpace(r.URL.Query().Get("pageSize")) == "" {
+			detailSize = 25
 		}
 		if !requireGradingDB(w, r, app) {
 			return
@@ -209,7 +245,7 @@ func gradingSessionHandler(app *App) http.HandlerFunc {
 			allowed = ids
 		}
 		out, err := app.Grading.GetSessionDetail(ctx, sess.Role, allowed, gradingSessionScope(ctx),
-			sessionID, gradingPageParam(r, "page", 1), gradingPageParam(r, "pageSize", 25))
+			sessionID, detailPage, detailSize)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

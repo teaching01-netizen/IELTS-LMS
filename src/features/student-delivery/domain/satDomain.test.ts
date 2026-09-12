@@ -3,7 +3,7 @@ import { emptySatQuestionResponse } from './satResponses';
 import { buildSatQuestionNavigationItems } from './satSelectors';
 import { breakRemainingSeconds, formatSatTime, mergeAuthoritativeTiming, snapshotRemainingSeconds, timingForAttempt } from './satTiming';
 import { resolveAuthoritativeRemainingSeconds } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
-import { nextSatActiveTool, resolveSatToolCapabilities } from './satTools';
+import { resolveSatToolCapabilities, toggleSatActiveTool } from './satTools';
 import type { AssessmentDeliveryBootstrap, AssessmentDeliveryModule, AssessmentModuleAttemptSnapshot } from '../contracts/assessmentDelivery';
 import { shouldAutoStartInitialModule, shouldAutoStartNextSectionAfterBreak } from '../application/satRuntimeSelectors';
 
@@ -13,9 +13,10 @@ describe('SAT delivery domain', () => {
     const fromObject = resolveSatToolCapabilities({ calculator: true, reference_sheet: true });
     expect(fromArray).toEqual({ calculator: true, referenceSheet: true });
     expect(fromObject).toEqual(fromArray);
-    expect(nextSatActiveTool(fromArray, null, 'calculator')).toBe('calculator');
-    expect(nextSatActiveTool(fromArray, 'calculator', 'reference_sheet')).toBe('reference_sheet');
-    expect(nextSatActiveTool({ calculator: false, referenceSheet: false }, null, 'calculator')).toBeNull();
+    // Coexistence (Phase 9): toggling one tool never closes the other.
+    expect(toggleSatActiveTool(fromArray, { calculator: false, referenceSheet: false }, 'calculator')).toEqual({ calculator: true, referenceSheet: false });
+    expect(toggleSatActiveTool(fromArray, { calculator: true, referenceSheet: false }, 'reference_sheet')).toEqual({ calculator: true, referenceSheet: true });
+    expect(toggleSatActiveTool({ calculator: false, referenceSheet: false }, { calculator: false, referenceSheet: false }, 'calculator')).toEqual({ calculator: false, referenceSheet: false });
   });
 
   it('keeps current and answer status independent in the shared navigator model', () => {

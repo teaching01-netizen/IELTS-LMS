@@ -28,6 +28,11 @@ import {
   takeOverResponseDurabilityLease,
 } from "@student/api/responseDurabilityTransport";
 import { getVisibleResponse, type ResponsePayload } from "@shared/durability/types";
+import {
+  blockedSubmitGateMessage,
+  mapEngineStatus,
+  type ReconcileBlockedResult,
+} from "@shared/durability/useResponseDurabilityStatus";
 import { queryClient } from "../../../app/data/queryClient";
 import {
   emitStudentObservabilityMetric,
@@ -59,6 +64,10 @@ interface StudentAttemptState {
   lastPersistedAt: string | null;
   pendingMutationCount: number;
   durabilityLeaseConflict: boolean;
+  /** Question ids whose visible drafts need attention (blocked, never sent). */
+  blockedQuestionIds: string[];
+  /** Count of quarantined writes awaiting resolve-or-discard at submit time. */
+  quarantinedCount: number;
 }
 
 interface StudentAttemptActions {
@@ -83,6 +92,15 @@ interface StudentAttemptActions {
   takeOverDurabilityLease: (reason?: string) => Promise<boolean>;
   setDeviceFingerprintHash: (hash: string) => Promise<void>;
   flushPending: () => Promise<boolean>;
+  /**
+   * Best-effort reconcile of one blocked question; see implementation notes.
+   * Returns a reason union: "reconciled" | "not-blocked" | "refusal" |
+   * `error:${string}`. Awaiting callers can treat "reconciled" as success;
+   * boolean `true` still means reconciled for `=== true`/`=== false` checks
+   * via the companion boolean (the union string "reconciled" is NOT `true` —
+   * update call sites to compare against "reconciled").
+   */
+  reconcileBlockedResponse: (questionId: string) => Promise<ReconcileBlockedResult>;
   flushAnswerDurabilityNow: () => void;
   flushHeartbeatEvents: () => Promise<void>;
   dismissDroppedMutationsBanner: () => Promise<void>;
@@ -252,6 +270,11 @@ export function StudentAttemptProvider({
   // attempt.recovery.pendingMutationCount is persisted for recovery but not used for badge display.
   const [pendingMutationCount, setPendingMutationCount] = useState(0);
   const [durabilityLeaseConflict, setDurabilityLeaseConflict] = useState(false);
+  // Per-question "needs attention" source for the blocked banner/badge.
+  // Refreshed from the engine on every status/state publish; recovered via
+  // publish path (no restructure of publishV2EngineState).
+  const [blockedQuestionIds, setBlockedQuestionIds] = useState<string[]>([]);
+  const [quarantinedCount, setQuarantinedCount] = useState(0);
   const attemptRef = useRef<StudentAttempt | null>(attemptSnapshot);
   const controlScheduleIdRef = useRef<string | undefined>(
     scheduleId ?? attemptSnapshot?.scheduleId
@@ -340,7 +363,13 @@ export function StudentAttemptProvider({
       const flagPatch: Record<string, boolean> = {};
       let pending = 0;
 
+      // Blocked ids are derived from the publish itself (metadata only:
+      // question ids + blocked flags, never snapshot answers), so the
+      // "needs attention" badge stays live even between status changes.
+      // Do NOT restructure this publish: blocked ids piggyback on it.
+      const blocked: string[] = [];
       for (const [questionId, state] of states) {
+        if (state.pending?.blocked) blocked.push(questionId);
         if (state.pending) pending += 1;
         const visible = getVisibleResponse(state);
         if (!visible) continue;
@@ -368,6 +397,9 @@ export function StudentAttemptProvider({
       }
 
       setPendingMutationCount(pending);
+      // Keep blocked ids fresh even when there is no visible patch to merge
+      // (e.g. a quarantine publish that only clears visible state).
+      setBlockedQuestionIds(blocked);
       if (
         Object.keys(answerPatch).length === 0 &&
         Object.keys(writingPatch).length === 0 &&
@@ -397,6 +429,8 @@ export function StudentAttemptProvider({
       v2EngineRef.current = null;
       v2ReadyRef.current = null;
       setDurabilityLeaseConflict(false);
+      setBlockedQuestionIds([]);
+      setQuarantinedCount(0);
       return;
     }
 
@@ -410,6 +444,16 @@ export function StudentAttemptProvider({
         scheduleId ?? snapshot?.scheduleId ?? "unknown",
         snapshot ?? undefined
       ),
+      // WP7 reason-coded counters (telemetry only; never answer content).
+      onDurabilityEvent: (name, fields) =>
+        emitStudentObservabilityMetric(
+          name,
+          withStudentObservabilityDimensions({
+            scheduleId: scheduleId ?? snapshot?.scheduleId,
+            attemptId: snapshot?.id,
+            ...fields,
+          })
+        ),
       onStateChange: (states) => {
         if (v2EngineRef.current !== engine || v2IdentityGenerationRef.current !== generation)
           return;
@@ -418,6 +462,25 @@ export function StudentAttemptProvider({
       onStatusChange: (status, error) => {
         if (v2EngineRef.current !== engine || v2IdentityGenerationRef.current !== generation)
           return;
+        // Shared WP4/WP5 vocabulary: blocked_attention is honest-but-not-saved
+        // work that must stay visible. Map through the shared mapper so IELTS
+        // and SAT cannot drift. "blocked_attention" => AttemptSyncState "offline"
+        // (kept, visible, needs attention) and explicitly NOT the
+        // lease-conflict overlay (no setDurabilityLeaseConflict(true) here).
+        const display = mapEngineStatus(status, engine.getBlockedCount());
+        const blockedIds = (() => {
+          try {
+            return engine.getBlockedQuestionIds();
+          } catch {
+            return [];
+          }
+        })();
+        setBlockedQuestionIds(blockedIds);
+        try {
+          setQuarantinedCount(engine.getQuarantined().length);
+        } catch {
+          setQuarantinedCount(0);
+        }
         const currentAttempt = attemptRef.current;
         if (currentAttempt) {
           const terminalState = isVerifiedTerminalStudentState({
@@ -431,19 +494,27 @@ export function StudentAttemptProvider({
                 syncState:
                   terminalState !== "not_terminal"
                     ? "saved"
-                    : status === "synced"
+                    : status === "synced" && display === "saved"
                       ? "saved"
                       : status === "saving"
                         ? "saving"
                         : status === "saved_locally"
                           ? "offline"
-                          : "error",
+                          : display === "blocked_attention"
+                            ? "offline"
+                            : "error",
               },
             })
           );
         }
         if (status === "durability_fault") {
           setStorageDurabilityBlocking(true);
+        }
+        if (status === "blocked_attention") {
+          // Drafts are kept on this device and visible; they are not
+          // acknowledged, so never report "saved" and never raise the
+          // lease-takeover overlay. "offline" syncState above keeps them
+          // honest; do not touch durabilityLeaseConflict here.
         }
         if (status === "conflict_fenced") {
           setDurabilityLeaseConflict(true);
@@ -453,7 +524,7 @@ export function StudentAttemptProvider({
           setDurabilityLeaseConflict(false);
           setRuntimeAttemptSyncState("error");
         }
-        if (status === "synced") {
+        if (status === "synced" && display === "saved") {
           setDurabilityLeaseConflict(false);
           setStorageDurabilityBlocking(false);
         }
@@ -480,6 +551,11 @@ export function StudentAttemptProvider({
       engine.destroy();
       if (v2EngineRef.current === engine) v2EngineRef.current = null;
       if (v2ReadyRef.current === recovery) v2ReadyRef.current = null;
+      // Mirror the persistenceEnabled=false branch: a destroyed engine owns
+      // no blocked/quarantined drafts, so clear both ids + count. Without
+      // this the "needs attention" badge can stick after teardown.
+      setBlockedQuestionIds([]);
+      setQuarantinedCount(0);
     };
   }, [
     attemptSnapshot?.id,
@@ -1702,6 +1778,54 @@ export function StudentAttemptProvider({
         engine.scheduleId !== currentAttempt.scheduleId
       )
         return false;
+      // Submit gate (WP4/WP5): blocked/quarantined drafts must be resolved
+      // or explicitly discarded before submit completes. engine.submit() also
+      // enforces this provider-independently; surface the exam-stress-safe
+      // warning here and refuse silent exclusion of drafts.
+      // NOTE: the engine now provides reconcileBlocked(questionId),
+      // discardBlocked(questionId), and getTombstonedQuestionIds(). The
+      // recovery-panel buttons can call them via reconcileBlockedResponse
+      // below; remaining work is future recovery-panel UI wiring only. The
+      // gate stays: this provider-level failure message plus engine-side guard.
+      let blockedCount = 0;
+      let quarantined = 0;
+      try {
+        blockedCount = engine.getBlockedCount();
+      } catch {
+        blockedCount = 0;
+      }
+      try {
+        quarantined = engine.getQuarantined().length;
+      } catch {
+        quarantined = 0;
+      }
+      if (blockedCount > 0 || quarantined > 0) {
+        const blockedIds = (() => {
+          try {
+            return engine.getBlockedQuestionIds();
+          } catch {
+            return [];
+          }
+        })();
+        setBlockedQuestionIds(blockedIds);
+        setQuarantinedCount(quarantined);
+        syncAttemptState(
+          mergeAttempt(attemptRef.current ?? latestAttempt, {
+            recovery: {
+              pendingMutationCount: engine.getPendingCount(),
+              syncState: "offline",
+            },
+          })
+        );
+        void saveStudentAuditEvent(currentAttempt.scheduleId, "SUBMIT_BLOCKED_NEEDS_ATTENTION", {
+          blockedCount,
+          quarantinedCount: quarantined,
+        }, currentAttempt.id);
+        // Shared exam-stress-safe gate copy (same function SAT uses). The
+        // engine's own "Blocked drafts need attention before submit. ..."
+        // guard stays as the provider-independent backstop below.
+        throw new Error(blockedSubmitGateMessage(blockedCount, quarantined));
+      }
       const submitted = await engine.submit(latestAttempt.id, engine.getAttemptRevision());
       if (!isCurrent()) return false;
       const submittedAt =
@@ -1727,6 +1851,48 @@ export function StudentAttemptProvider({
       return true;
     } catch (error) {
       if (!isCurrent()) return false;
+
+      // Engine-gate backstop: if the provider-level gate above raced (a
+      // control bump blocked a draft between the check and engine.submit),
+      // the engine throws "Blocked drafts need attention before submit. ...".
+      // Match that gate error and force the shared exam-stress-safe gate
+      // copy — never a generic pending+retry failure — so the student sees
+      // the actionable "kept on this device / ask your proctor" message.
+      // The engine guard stays the provider-independent backstop.
+      if (error instanceof Error && error.message.includes("Blocked drafts need attention")) {
+        let backstopBlocked = 0;
+        let backstopQuarantined = 0;
+        const backstopEngine = v2EngineRef.current;
+        try {
+          backstopBlocked = backstopEngine?.getBlockedCount() ?? 0;
+        } catch {
+          backstopBlocked = 0;
+        }
+        try {
+          backstopQuarantined = backstopEngine?.getQuarantined().length ?? 0;
+        } catch {
+          backstopQuarantined = 0;
+        }
+        try {
+          setBlockedQuestionIds(backstopEngine?.getBlockedQuestionIds() ?? []);
+        } catch {
+          // Keep the last published ids; next publish refreshes them.
+        }
+        setQuarantinedCount(backstopQuarantined);
+        syncAttemptState(
+          mergeAttempt(attemptRef.current ?? latestAttempt, {
+            recovery: {
+              pendingMutationCount: backstopEngine?.getPendingCount() ?? 0,
+              syncState: "offline",
+            },
+          })
+        );
+        void saveStudentAuditEvent(currentAttempt.scheduleId, "SUBMIT_BLOCKED_NEEDS_ATTENTION", {
+          blockedCount: backstopBlocked,
+          quarantinedCount: backstopQuarantined,
+        }, currentAttempt.id);
+        throw new Error(blockedSubmitGateMessage(backstopBlocked, backstopQuarantined));
+      }
 
       // A proctor or worker may seal the attempt after the student's final
       // flush but before this submit request reaches the server. The V2
@@ -1888,6 +2054,71 @@ export function StudentAttemptProvider({
     await studentAttemptRepository.saveAttempt(nextAttempt).catch(() => {});
   }, [persistenceEnabled, syncAttemptState]);
 
+  // Best-effort reconcile of one blocked question. Returns a reason union
+  // ("reconciled" | "not-blocked" | "refusal" | `error:${string}`) so
+  // callers can distinguish refusal (lease fence / terminal / server-newer /
+  // superseded / in-progress) from a thrown exception. The engine provides
+  // reconcileBlocked(questionId): boolean; call it directly and keep the
+  // recover() fallback only under a typeof check — the engine is expected to
+  // always provide reconcileBlocked, so the fallback is defensive only.
+  // Never crashes and never imports storage internals (type-only engine
+  // import at the top; no runtime/storage imports).
+  const reconcileBlockedResponse = useCallback(
+    async (questionId: string): Promise<ReconcileBlockedResult> => {
+      const engine = v2EngineRef.current;
+      if (!engine) return "not-blocked";
+      if (!questionId.trim()) return "not-blocked";
+      // Not blocked: nothing to do (covers already-reconciled/discarded).
+      try {
+        if (engine.getBlockedQuestionIds().includes(questionId) === false) return "not-blocked";
+      } catch {
+        // Reader threw: fall through and let the reconcile attempt decide.
+      }
+      const candidate = engine as unknown as {
+        reconcileBlocked?: (id: string) => Promise<boolean>;
+      };
+      let reconciled: boolean;
+      try {
+        if (typeof candidate.reconcileBlocked === "function") {
+          reconciled = await candidate.reconcileBlocked(questionId);
+        } else {
+          // Defensive fallback (engine always provides reconcileBlocked);
+          // re-run recovery so a fresh snapshot re-seeds + re-publishes state.
+          await engine.recover();
+          reconciled = false;
+        }
+      } catch (error) {
+        try {
+          setBlockedQuestionIds(engine.getBlockedQuestionIds());
+        } catch {
+          // Keep the last published ids; next publish refreshes them.
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return `error:${message}`;
+      }
+      // Refresh blocked ids on every outcome (including refusal) so the
+      // badge cannot stick on stale ids.
+      let remaining: string[] = [];
+      try {
+        remaining = engine.getBlockedQuestionIds();
+        setBlockedQuestionIds(remaining);
+      } catch {
+        // Keep the last published ids; next publish refreshes them.
+      }
+      try {
+        setQuarantinedCount(engine.getQuarantined().length);
+      } catch {
+        // Quarantine count is advisory only.
+      }
+      if (remaining.includes(questionId) === false) return "reconciled";
+      // Still blocked afterwards: engine refused (returned false) or the
+      // recover() fallback could not clear it.
+      void reconciled;
+      return "refusal";
+    },
+    []
+  );
+
   const value = useMemo<StudentAttemptContextValue>(
     () => ({
       state: {
@@ -1897,6 +2128,8 @@ export function StudentAttemptProvider({
         lastPersistedAt: attempt?.recovery.lastPersistedAt ?? null,
         pendingMutationCount,
         durabilityLeaseConflict,
+        blockedQuestionIds,
+        quarantinedCount,
       },
       actions: {
         persistAnswer,
@@ -1912,6 +2145,7 @@ export function StudentAttemptProvider({
         takeOverDurabilityLease,
         setDeviceFingerprintHash,
         flushPending,
+        reconcileBlockedResponse,
         flushAnswerDurabilityNow,
         flushHeartbeatEvents,
         dismissDroppedMutationsBanner,
@@ -1920,7 +2154,10 @@ export function StudentAttemptProvider({
     [
       acknowledgeProctorWarning,
       attempt,
+      blockedQuestionIds,
+      quarantinedCount,
       flushPending,
+      reconcileBlockedResponse,
       pendingMutationCount,
       durabilityLeaseConflict,
       persistAnswer,
@@ -1962,6 +2199,28 @@ export function useStudentAttempt() {
     throw new Error("useStudentAttempt must be used within StudentAttemptProvider");
   }
   return context;
+}
+
+/**
+ * Per-question "needs attention" source for banners/badges. Returns the live
+ * blocked question ids from provider state (refreshed from the engine on
+ * every status/state publish; recovered via the publish path). Minimal
+ * additive hook: no publish restructure, no storage imports.
+ */
+export function useStudentBlockedResponses(): {
+  blockedQuestionIds: string[];
+  quarantinedCount: number;
+  reconcileBlockedResponse: (questionId: string) => Promise<ReconcileBlockedResult>;
+} {
+  const context = useContext(StudentAttemptContext);
+  if (!context) {
+    throw new Error("useStudentBlockedResponses must be used within StudentAttemptProvider");
+  }
+  return {
+    blockedQuestionIds: context.state.blockedQuestionIds,
+    quarantinedCount: context.state.quarantinedCount,
+    reconcileBlockedResponse: context.actions.reconcileBlockedResponse,
+  };
 }
 
 export function useOptionalStudentAttempt(): StudentAttemptContextValue | null {

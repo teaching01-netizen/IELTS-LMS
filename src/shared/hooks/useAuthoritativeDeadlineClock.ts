@@ -1,36 +1,72 @@
 import { useMemo, useSyncExternalStore } from 'react';
 
-let sharedNowMs = Date.now();
-let sharedTimer: number | null = null;
-const subscribers = new Set<() => void>();
+/**
+ * Two shared clocks: precise (1s) for urgent surfaces (stage header, detail
+ * view, sub-5-minute rows) and coarse (15s) for idle roster rows. Both
+ * clocks share one subscriber set each, so a 300-row room costs ~20
+ * renders/sec at rest instead of 300. Server-authoritative math below is
+ * untouched — only the tick cadence adapts.
+ */
+export const COARSE_CLOCK_MS = 15_000;
+export const URGENT_THRESHOLD_SECONDS = 300;
 
-function startSharedClock() {
-  if (sharedTimer !== null || typeof window === 'undefined') return;
-  sharedNowMs = Date.now();
-  sharedTimer = window.setInterval(() => {
-    sharedNowMs = Date.now();
-    for (const subscriber of subscribers) subscriber();
-  }, 1_000);
+type ClockBand = 'precise' | 'coarse';
+
+const clockState: Record<ClockBand, { nowMs: number; timer: number | null; subscribers: Set<() => void>; intervalMs: number }> = {
+  precise: { nowMs: Date.now(), timer: null, subscribers: new Set(), intervalMs: 1_000 },
+  coarse: { nowMs: Date.now(), timer: null, subscribers: new Set(), intervalMs: COARSE_CLOCK_MS },
+};
+
+function startSharedClock(band: ClockBand) {
+  const state = clockState[band];
+  if (state.timer !== null || typeof window === 'undefined') return;
+  state.nowMs = Date.now();
+  state.timer = window.setInterval(() => {
+    state.nowMs = Date.now();
+    for (const subscriber of state.subscribers) subscriber();
+  }, state.intervalMs);
 }
 
-function stopSharedClock() {
-  if (sharedTimer === null || subscribers.size > 0 || typeof window === 'undefined') return;
-  window.clearInterval(sharedTimer);
-  sharedTimer = null;
+function stopSharedClock(band: ClockBand) {
+  const state = clockState[band];
+  if (state.timer === null || state.subscribers.size > 0 || typeof window === 'undefined') return;
+  window.clearInterval(state.timer);
+  state.timer = null;
 }
 
-function subscribeSharedClock(subscriber: () => void) {
-  subscribers.add(subscriber);
-  startSharedClock();
-  return () => {
-    subscribers.delete(subscriber);
-    stopSharedClock();
+function subscribeToBand(band: ClockBand) {
+  return (subscriber: () => void) => {
+    clockState[band].subscribers.add(subscriber);
+    startSharedClock(band);
+    return () => {
+      clockState[band].subscribers.delete(subscriber);
+      stopSharedClock(band);
+    };
   };
 }
 
-function getSharedNow() {
-  return sharedNowMs;
+const subscribePreciseClock = subscribeToBand('precise');
+const subscribeCoarseClock = subscribeToBand('coarse');
+
+function getPreciseNow() {
+  return clockState.precise.nowMs;
 }
+
+function getCoarseNow() {
+  return clockState.coarse.nowMs;
+}
+
+// Back-compat aliases for existing precise subscribers.
+const subscribers = clockState.precise.subscribers;
+function subscribeSharedClock(subscriber: () => void) {
+  return subscribePreciseClock(subscriber);
+}
+function getSharedNow() {
+  return getPreciseNow();
+}
+void subscribers;
+void subscribeSharedClock;
+void getSharedNow;
 
 export function resolveAuthoritativeRemainingSeconds(options: {
   deadlineAt?: string | null;
@@ -52,8 +88,16 @@ export function useAuthoritativeDeadlineClock(options: {
   serverNow?: string | null;
   fallbackSeconds: number;
   running: boolean;
+  /**
+   * Opt a far-from-deadline surface into the 15s coarse tick. Urgent
+   * surfaces (headers, detail views, sub-5-minute rows) omit it and stay
+   * on the 1s precise clock.
+   */
+  coarse?: boolean;
 }) {
-  const nowMs = useSyncExternalStore(subscribeSharedClock, getSharedNow, getSharedNow);
+  const subscribe = options.coarse ? subscribeCoarseClock : subscribePreciseClock;
+  const getNow = options.coarse ? getCoarseNow : getPreciseNow;
+  const nowMs = useSyncExternalStore(subscribe, getNow, getNow);
   const clockOffsetMs = useMemo(() => {
     if (!options.serverNow) return 0;
     const serverNowMs = Date.parse(options.serverNow);

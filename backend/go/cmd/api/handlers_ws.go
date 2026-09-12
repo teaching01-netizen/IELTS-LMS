@@ -56,6 +56,23 @@ func liveForwarderEnabled(cfg config.Config) bool {
 // excludes this process's unique origin and avoids duplicate local frames.
 // Under the C1 direct posture there are no peers and no bus rows: the
 // forwarder stays down (zero poll SQL). Never call with direct mode.
+// stopLiveForwarder halts the bus poll loop started by
+// startLiveBusForwarder (idempotent; nil-safe). main() defers it after
+// BuildRouter so graceful shutdown stops the ticker instead of leaking it
+// until process exit; test routers each own their App so stopping is local.
+func (a *App) stopLiveForwarder() {
+	if a == nil {
+		return
+	}
+	a.LiveForwardMu.Lock()
+	stop := a.stopLiveForward
+	a.stopLiveForward = nil
+	a.LiveForwardMu.Unlock()
+	if stop != nil {
+		stop()
+	}
+}
+
 func startLiveBusForwarder(app *App) {
 	if app == nil || app.LiveBus == nil || app.LiveHub == nil || app.DB == nil {
 		return
@@ -64,8 +81,13 @@ func startLiveBusForwarder(app *App) {
 		return
 	}
 	app.LiveForwardOnce.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		app.LiveForwardMu.Lock()
+		app.stopLiveForward = cancel
+		app.LiveForwardMu.Unlock()
 		go func() {
-			cursor, err := app.LiveBus.LatestSequence(context.Background())
+			defer cancel()
+			cursor, err := app.LiveBus.LatestSequence(ctx)
 			if err != nil {
 				log.Printf("api: live-update cursor initialization failed: %v", err)
 				cursor = 0
@@ -76,9 +98,17 @@ func startLiveBusForwarder(app *App) {
 			}
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
-			for range ticker.C {
-				events, err := app.LiveBus.PollNew(context.Background(), cursor, liveupdates.PollLimit)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+				events, err := app.LiveBus.PollNew(ctx, cursor, liveupdates.PollLimit)
 				if err != nil {
+					if ctx.Err() != nil {
+						return
+					}
 					continue
 				}
 				for _, event := range events {

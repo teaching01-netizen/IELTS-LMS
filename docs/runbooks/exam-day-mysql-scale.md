@@ -93,7 +93,29 @@ A backup that has never restored is not a backup.
 | `ROLLUP` | off | on |
 | `SHED_MODE` | off | exam (windows) |
 
-## 8. Game day (quarterly, prod-shaped 100k+ attempts)
+## 8. Dead-letter requeue (WS-09)
+
+Terminally-parked outbox rows carry queryable evidence in `outbox_dead_letters` (counter `outbox_terminal_total{family}`). After fixing the root cause, requeue one letter as a fresh outbox event (same idempotency key) and watch it seal:
+
+```bash
+go run ./cmd/worker requeue-dead-letter --id <dlq-id>   # prints the new event id
+```
+
+## 9. Finalize telemetry semantics (`sat_finalize_total`)
+
+- `completed` covers first-time scoring AND twin-converged returns (a
+  loser that converges to the winner's result counts `completed`, not
+  `replayed` — the attempt scored exactly once).
+- `replayed` covers idempotent replays against an already-bound
+  submission (no re-seal, same result).
+- `rejected` covers scoring failures only (student path + watchdog
+  `repairOne`). Watchdog skips (lock/termination/predicate miss) emit
+  nothing — no finalization was performed.
+- Alert on `rejected` rate, not `completed` dips: a twin storm shows as
+  flat `completed` with elevated 409-retry responses, which is healthy
+  convergence, not loss.
+
+## 10. Game day (quarterly, prod-shaped 100k+ attempts)
 
 Chaos items: process restart mid-exam (cache-cold behavior), MySQL
 slow-disk 2x, submit storm at deadline, every-flag-off rollback drill.

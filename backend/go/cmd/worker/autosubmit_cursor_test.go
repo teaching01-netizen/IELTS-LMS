@@ -16,7 +16,7 @@ func TestListAutoSubmitAttemptsPages(t *testing.T) {
 	}
 	defer db.Close()
 	w := &worker{db: db}
-	mock.ExpectQuery(regexp.QuoteMeta("WHERE schedule_id = ? AND submitted_at IS NULL") + ".*" + regexp.QuoteMeta("AND a.id > ?") + ".*" + regexp.QuoteMeta("ORDER BY a.id") + ".*" + regexp.QuoteMeta("LIMIT ?")).
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE schedule_id = ? AND submitted_at IS NULL")+".*"+regexp.QuoteMeta("AND a.id > ?")+".*"+regexp.QuoteMeta("ORDER BY a.id")+".*"+regexp.QuoteMeta("LIMIT ?")).
 		WithArgs("sched-1", "", 2).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1").AddRow("att-2"))
 	mock.ExpectQuery("ORDER BY a.id").

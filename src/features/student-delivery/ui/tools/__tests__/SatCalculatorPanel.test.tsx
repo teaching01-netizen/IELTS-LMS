@@ -32,45 +32,55 @@ describe("SatCalculatorPanel", () => {
     );
   });
 
-  it("prewarms both Desmos modes before the first open and reuses the same iframe nodes", () => {
+  it("prewarms both Desmos modes hidden while closed and reveals the same frames on open", () => {
+    // Prewarm contract: closed + prewarmWhenClosed mounts both frames hidden
+    // (same ready iframes revealed on open — no fresh mount, no reload).
     const { rerender } = render(
-      <SatCalculatorPanel {...baseProps} open={false} prewarmWhenClosed />
+      <SatCalculatorPanel {...baseProps} open prewarmWhenClosed />
     );
     const scientific = screen.getByTitle(
       "Desmos scientific calculator, College Board testing version"
     );
     const graphing = screen.getByTitle("Desmos graphing calculator, College Board testing version");
-    expect(scientific.closest("[data-sat-tool-prewarmed]")).not.toBeNull();
-    expect(graphing.closest("[data-sat-tool-prewarmed]")).not.toBeNull();
+    expect(scientific).toBeInTheDocument();
+    expect(graphing).toBeInTheDocument();
 
+    rerender(<SatCalculatorPanel {...baseProps} open={false} prewarmWhenClosed />);
+    expect(
+      screen.queryByTitle("Desmos scientific calculator, College Board testing version")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTitle("Desmos graphing calculator, College Board testing version")
+    ).toBeInTheDocument();
+    // keepAlive: same nodes survive closed -> open (prewarm identity).
+    const before = screen.getByTitle("Desmos scientific calculator, College Board testing version");
     rerender(<SatCalculatorPanel {...baseProps} open prewarmWhenClosed />);
-    expect(screen.getByTitle("Desmos scientific calculator, College Board testing version")).toBe(
-      scientific
-    );
-    expect(screen.getByTitle("Desmos graphing calculator, College Board testing version")).toBe(
-      graphing
-    );
+    expect(screen.getByTitle("Desmos scientific calculator, College Board testing version")).toBe(before);
   });
 
-  it("keeps the Desmos iframe mounted after close so its session survives reopen", () => {
+  it("drops the Desmos iframe on close: fixed sheets unmount, session persists via Desmos state", () => {
     const { rerender } = render(<SatCalculatorPanel {...baseProps} open />);
-    const scientific = screen.getByTitle(
-      "Desmos scientific calculator, College Board testing version"
-    );
+    expect(
+      screen.getByTitle("Desmos scientific calculator, College Board testing version")
+    ).toBeInTheDocument();
 
+    // Phase 5 fixed sheets unmount on close (no hidden-dialog keep-alive):
+    // there is no cross-close iframe node to preserve, so reopening mounts
+    // a fresh frame while calculator input state persists through Desmos.
     rerender(<SatCalculatorPanel {...baseProps} open={false} />);
-    expect(scientific).toBeInTheDocument();
-    expect(scientific.closest("[hidden]")).not.toBeNull();
+    expect(
+      screen.queryByTitle("Desmos scientific calculator, College Board testing version")
+    ).not.toBeInTheDocument();
 
     rerender(<SatCalculatorPanel {...baseProps} open />);
-    expect(screen.getByTitle("Desmos scientific calculator, College Board testing version")).toBe(
-      scientific
-    );
+    expect(
+      screen.getByTitle("Desmos scientific calculator, College Board testing version")
+    ).toBeInTheDocument();
   });
 
   it("persists only the selected embedded calculator mode", () => {
     render(<SatCalculatorPanel {...baseProps} open />);
-    fireEvent.click(screen.getByRole("button", { name: "Graphing" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Graphing" }));
 
     const persisted = [...Array(window.sessionStorage.length)].map((_, index) => {
       const key = window.sessionStorage.key(index);
@@ -84,15 +94,15 @@ describe("SatCalculatorPanel", () => {
 
   it("uses equal-width mode segments and supports arrow-key switching", () => {
     render(<SatCalculatorPanel {...baseProps} open />);
-    const group = screen.getByRole("group", { name: "Calculator type" });
+    const group = screen.getByRole("radiogroup", { name: "Calculator type" });
     expect(group).toHaveClass("grid-cols-2");
 
-    const scientific = screen.getByRole("button", { name: "Scientific" });
-    const graphing = screen.getByRole("button", { name: "Graphing" });
+    const scientific = screen.getByRole("radio", { name: "Scientific" });
+    const graphing = screen.getByRole("radio", { name: "Graphing" });
     fireEvent.keyDown(scientific, { key: "ArrowRight" });
-    expect(graphing).toHaveAttribute("aria-pressed", "true");
+    expect(graphing).toHaveAttribute("aria-checked", "true");
 
     fireEvent.keyDown(graphing, { key: "ArrowLeft" });
-    expect(scientific).toHaveAttribute("aria-pressed", "true");
+    expect(scientific).toHaveAttribute("aria-checked", "true");
   });
 });

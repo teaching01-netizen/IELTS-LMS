@@ -20,13 +20,12 @@ import (
 	"sync"
 	"time"
 
-	"example.com/ielts-proctoring/internal/act"
+	shared "example.com/ielts-proctoring/internal/app"
 	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/maintenance"
 	"example.com/ielts-proctoring/internal/outbox"
-	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/db"
 	"example.com/ielts-proctoring/internal/platform/shutdown"
@@ -56,6 +55,13 @@ var Jobs = []string{
 
 // worker carries the handles every background job needs. Dependencies are
 // wired once in main and passed explicitly; there is no package-level state.
+// terminalSealer is the Terminalize surface executeOutboxEvent needs.
+// *terminalization.Service satisfies it; tests inject a capture fake via
+// setTerminalSealer. Production wiring (main) keeps the concrete service.
+type terminalSealer interface {
+	Terminalize(ctx context.Context, cmd terminalization.SealCommand) (*terminalization.SealResult, error)
+}
+
 type worker struct {
 	cfg      config.Config
 	db       *sql.DB
@@ -65,11 +71,37 @@ type worker struct {
 	proctor  *proctor.Service
 	student  *student.Service
 	terminal *terminalization.Service
+	// sealer overrides terminal when set (tests only; nil = production).
+	sealer   terminalSealer
 	liveBus  *liveupdates.Bus
 	workerID string
 }
 
+// setTerminalSealer injects a fake sealer (tests only).
+func (w *worker) setTerminalSealer(s terminalSealer) *worker {
+	w.sealer = s
+	return w
+}
+
+// sealerFor resolves the effective sealer: the test fake when set,
+// otherwise the production terminalization service.
+func (w *worker) sealerFor() terminalSealer {
+	if w.sealer != nil {
+		return w.sealer
+	}
+	return w.terminal
+}
+
 func main() {
+	// WS-09 operator command: requeue one dead letter as a fresh outbox
+	// event (same idempotency key) and print the new event id. Fail
+	// closed on a missing/unresolvable id instead of inventing work.
+	if id := requeueDeadLetterID(os.Args[1:]); id != "" {
+		if err := runRequeueDeadLetter(id); err != nil {
+			log.Fatalf("worker: requeue-dead-letter: %v", err)
+		}
+		return
+	}
 	cfg := config.Load()
 	if err := cfg.ValidateForRuntime(); err != nil {
 		log.Fatalf("worker: invalid config: %v", err)
@@ -91,47 +123,34 @@ func main() {
 		}
 		telemetry.IncCounter(telemetry.MDeadlocks, "kind", kind)
 	})()
-	runner := tx.NewRunner(pool)
-	actService := act.NewService(pool, runner)
-	satService := sat.NewService(pool, runner, clock.System{}, nil)
-	terminal := terminalization.NewService(runner, nil, nil).SetAttemptScorer(actService).SetOutboxExecOnly(cfg.OutboxExecOnly)
+	// WS-04b: domain services come from the shared graph (same provider
+	// switch, presence posture, and terminal scorer as the API). The worker
+	// refuses a half-migrated DB before claiming anything (same gate the
+	// API runs before serving).
+	if verr := db.VerifyRuntimeSchema(context.Background(), pool); verr != nil {
+		log.Fatalf("worker: runtime schema guard: %v", verr)
+	}
 	workerID := newWorkerID()
+	svc := shared.Build(cfg, pool, shared.Deps{
+		LiveBus: liveupdates.NewBus(pool, workerID),
+		LiveHub: liveupdates.NewHub(),
+	})
 	claimMode := outbox.ClaimUpdate
 	if cfg.OutboxClaimMode == config.OutboxClaimSkipLocked {
 		claimMode = outbox.ClaimSkipLocked
 	}
 	w := &worker{
-		cfg:    cfg,
-		db:     pool,
-		outbox: outbox.NewRepository(pool).WithClaim(cfg.WorkerClaimPartitions, 0, claimMode),
-		sat:    satService,
-		delivery: delivery.NewService(pool, runner).SetCompleter(func(ctx context.Context, scheduleID, attemptID string) error {
-			var providerKey string
-			if err := pool.QueryRowContext(ctx, "SELECT e.provider_key FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id WHERE a.id = ? AND a.schedule_id = ?", attemptID, scheduleID).Scan(&providerKey); err != nil {
-				return err
-			}
-			switch providerKey {
-			case "sat":
-				return satService.ReconcileAdapter()(ctx, scheduleID, attemptID)
-			case "act":
-				_, err := terminal.Terminalize(ctx, terminalization.SealCommand{
-					AttemptID: attemptID, ScheduleID: scheduleID,
-					Outcome: terminalization.OutcomeTerminated, Reason: terminalization.ReasonTimeExpired,
-					ActorKind: terminalization.ActorSystem,
-					RequestID: "timeout-" + attemptID,
-				})
-				return err
-			default:
-				return nil
-			}
-		}),
-		proctor:  proctor.NewService(runner, pool, terminal, nil, proctor.SQLAssignmentChecker{}).SetOutboxExecOnly(cfg.OutboxExecOnly),
-		student:  student.NewService(pool, nil).SetPresence(student.NewPresenceMap(student.DefaultPresenceTTL)),
-		terminal: terminal,
+		cfg:      cfg,
+		db:       pool,
+		outbox:   outbox.NewRepository(pool).WithClaim(cfg.WorkerClaimPartitions, 0, claimMode),
+		sat:      svc.SAT,
+		delivery: delivery.NewService(pool, svc.Tx).SetCompleter(shared.Completer(pool, svc)),
+		proctor:  svc.Proctor,
+		student:  svc.Student,
+		terminal: svc.Terminal,
 		liveBus:  liveupdates.NewBus(pool, workerID),
 		workerID: workerID,
 	}
-
 	log.Printf("worker: starting job set=%v fallback_interval=%ds maintenance_interval=%ds",
 		Jobs, cfg.WorkerFallbackIntervalSecs, cfg.WorkerMaintenanceIntervalSecs)
 
@@ -167,6 +186,55 @@ func main() {
 			w.runMaintenanceCycle(ctx, t)
 		}
 	}
+}
+
+// requeueDeadLetterID parses the WS-09 operator requeue flags from raw
+// args (flag-style, matching the repo's FlagSet CLI posture):
+// requeue-dead-letter --id <dlq-id> (alias: --requeue <id>).
+// Returns "" when no requeue command is present.
+func requeueDeadLetterID(args []string) string {
+	for i, a := range args {
+		if a != "requeue-dead-letter" && a != "requeue" {
+			continue
+		}
+		for _, rest := range args[i+1:] {
+			if rest == "--id" || rest == "--requeue" {
+				continue
+			}
+			if v, ok := strings.CutPrefix(rest, "--id="); ok && strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v)
+			}
+			if v, ok := strings.CutPrefix(rest, "--requeue="); ok && strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v)
+			}
+			if !strings.HasPrefix(rest, "-") && strings.TrimSpace(rest) != "" {
+				return strings.TrimSpace(rest)
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
+// runRequeueDeadLetter loads config, opens the worker pool, requeues one
+// dead letter, and prints the new event id (operator evidence).
+func runRequeueDeadLetter(dlqID string) error {
+	cfg := config.Load()
+	if err := cfg.ValidateForRuntime(); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+	pool, err := db.OpenRole(cfg, db.RoleWorker)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer func() { _ = pool.Close() }()
+	repo := outbox.NewRepository(pool)
+	newID, err := repo.RequeueDeadLetter(context.Background(), dlqID)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("requeued dead letter %s as event %s\n", dlqID, newID)
+	return nil
 }
 
 // newWorkerID identifies this process in outbox claimed_by so concurrent
@@ -237,6 +305,10 @@ func (w *worker) drainOutbox(ctx context.Context, repo *outbox.Repository, limit
 				telemetry.IncCounter(telemetry.MOutboxAcked, "family", e.Family)
 				continue
 			}
+			// WS-09: per-attempt try/continue lives inside executeOutboxEvent
+			// (poison attempts land in their own DLQ rows while good attempts
+			// seal). An error here means zero seals + transient failure —
+			// retry with backoff, never a whole-batch burn.
 			if err := w.executeOutboxEvent(ctx, e); err != nil {
 				log.Printf("worker: DrainOutbox executable event id=%s aggregate=%s/%s revision=%d attempts=%d failed: %v",
 					e.ID, e.AggregateKind, e.AggregateID, e.Revision, e.PublishAttempts, err)
@@ -380,6 +452,21 @@ func (w *worker) publishWakeup(ctx context.Context, event outbox.Event) error {
 	return w.liveBus.Append(ctx, kind, event.AggregateID, event.Revision, event.Family, payload)
 }
 
+// isTerminalConflict classifies settled terminalization conflicts as
+// permanent fan-out failures: TERMINALIZATION_CONFLICT (cross-outcome seal
+// raced and lost) and ATTEMPT_PROCTOR_BLOCKED (the claim fence refused a
+// stale submitted seal after a proctor termination) both mean the attempt
+// already owns its terminal fact. Anything else (load errors, transient
+// seal failures, validation) stays retryable.
+func isTerminalConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, terminalization.ReasonTerminalizationConflict) ||
+		strings.Contains(msg, terminalization.ReasonAttemptProctorBlocked)
+}
+
 // markFailed records a publish failure; the retry disposition and delay come
 // from BackoffFor via MarkFailed (terminal at >= MaxAttempts).
 func (w *worker) markFailed(ctx context.Context, token string, e outbox.Event, msg string) {
@@ -403,9 +490,28 @@ type autoSubmitEvent struct {
 	Reason     string   `json:"reason"`
 }
 
+// failureDetail is one poisoned fan-out attempt: it is quarantined to the
+// DLQ individually so the rest of the batch still seals. Permanent
+// terminalization conflicts (outcome decided elsewhere) are business facts,
+// not operational failures — they are recorded without the error text.
+type failureDetail struct {
+	attemptID string
+	permanent bool
+	err       error
+}
+
 // executeOutboxEvent applies executable application work before the outbox
 // row is acknowledged. Sealing is idempotent, so a retry after a worker
 // crash replays the receipt instead of creating a second terminal fact.
+//
+// WS-09 per-attempt semantics: every attempt gets its own try/continue —
+// the per-attempt error list is collected, failed attempts are quarantined
+// to individual DLQ rows (never whole-batch burn), good attempts seal, and
+// nil is returned whenever at least one attempt sealed OR every failure is
+// permanent (a terminal conflict means the attempt already has its terminal
+// fact; failing the event would pointlessly retry it to the terminal park).
+// Only a batch with zero seals and at least one transient failure returns
+// an error, so the event retries with backoff.
 func (w *worker) executeOutboxEvent(ctx context.Context, event outbox.Event) error {
 	if event.Family != outbox.FamilyAutoSubmitScheduleAttempts {
 		return fmt.Errorf("unsupported executable outbox family %q", event.Family)
@@ -445,51 +551,180 @@ func (w *worker) executeOutboxEvent(ctx context.Context, event outbox.Event) err
 		reason = payload.Reason
 	}
 	sealed := 0
+	var failures []failureDetail
 	for _, attemptID := range payload.AttemptIDs {
-		var providerKey, proctorStatus string
-		if err := w.db.QueryRowContext(ctx, `
-			SELECT e.provider_key, COALESCE(a.proctor_status, 'active')
-			FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id
-			WHERE a.id = ? AND a.schedule_id = ?`, attemptID, payload.ScheduleID).Scan(&providerKey, &proctorStatus); err != nil {
-			if sealed > 0 {
-				log.Printf("worker: auto-submit schedule=%s sealed=%d then error (resume on retry): %v", payload.ScheduleID, sealed, err)
-			}
-			return fmt.Errorf("load auto-submit attempt %s: %w", attemptID, err)
-		}
-		actorKind := terminalization.ActorSystem
-		var actorID *string
-		if payload.ActorID != "" {
-			actorKind = terminalization.ActorProctor
-			id := payload.ActorID
-			actorID = &id
-		}
-		outcome := terminalization.OutcomeSubmitted
-		if providerKey == "sat" || proctorStatus == "terminated" {
-			outcome = terminalization.OutcomeTerminated
-		}
-		finalSubmission, _ := json.Marshal(map[string]any{
-			"autoSubmission":   true,
-			"completionReason": reason,
-			"proctorStatus":    proctorStatus,
-		})
-		if _, err := w.terminal.Terminalize(ctx, terminalization.SealCommand{
-			AttemptID: attemptID, ScheduleID: payload.ScheduleID,
-			Outcome: outcome, Reason: reason,
-			ActorKind: actorKind, ActorID: actorID, FinalSubmission: finalSubmission,
-			RequestID: event.ID,
-		}); err != nil {
-			if sealed > 0 {
-				log.Printf("worker: auto-submit schedule=%s sealed=%d then error (resume on retry): %v", payload.ScheduleID, sealed, err)
-			}
-			return fmt.Errorf("auto-submit attempt %s: %w", attemptID, err)
+		if serr := w.sealAutoSubmitAttempt(ctx, event, payload, reason, attemptID); serr != nil {
+			failures = append(failures, *serr)
+			continue
 		}
 		sealed++
 		if sealed%autoSubmitCursorBatch == 0 {
 			log.Printf("worker: auto-submit schedule=%s sealed=%d (progress)", payload.ScheduleID, sealed)
 		}
 	}
-	log.Printf("worker: auto-submit schedule=%s sealed=%d done", payload.ScheduleID, sealed)
+	for _, f := range failures {
+		if qerr := w.outbox.QuarantineAttempt(ctx, event, f.attemptID, "seal", f.err); qerr != nil {
+			log.Printf("worker: auto-submit schedule=%s attempt=%s quarantine failed: %v", payload.ScheduleID, f.attemptID, qerr)
+		}
+	}
+	log.Printf("worker: auto-submit schedule=%s sealed=%d failed=%d done", payload.ScheduleID, sealed, len(failures))
+	// One-shot fan-out: attempts that arrived mid-seal must not be left
+	// behind on a consumed event. Re-list eligible IDs and seal the delta
+	// in the same claim; overflow beyond one delta page enqueues a
+	// follow-up scan event.
+	if sealed > 0 || allPermanent(failures) {
+		if rerr := w.rescanAutoSubmitDelta(ctx, event, payload, reason, payload.AttemptIDs); rerr != nil {
+			log.Printf("worker: auto-submit schedule=%s rescan: %v", payload.ScheduleID, rerr)
+		}
+	}
+	if sealed == 0 && hasTransientFailure(failures) {
+		first := failures[0]
+		return fmt.Errorf("auto-submit schedule %s: 0 sealed, %d transient failure(s); first attempt %s: %w", payload.ScheduleID, len(failures), first.attemptID, first.err)
+	}
 	return nil
+}
+
+// allPermanent reports whether every collected failure is a settled
+// terminalization conflict (the attempt already owns its terminal fact).
+func allPermanent(failures []failureDetail) bool {
+	if len(failures) == 0 {
+		return true
+	}
+	for _, f := range failures {
+		if !f.permanent {
+			return false
+		}
+	}
+	return true
+}
+
+// hasTransientFailure reports whether any collected failure deserves a
+// retry (anything that is not a settled terminalization conflict).
+func hasTransientFailure(failures []failureDetail) bool {
+	for _, f := range failures {
+		if !f.permanent {
+			return true
+		}
+	}
+	return false
+}
+
+// sealAutoSubmitAttempt seals one fan-out attempt. The terminalization
+// RequestID reuses the batch-shared event.ID (idempotency key): every
+// reseal of this event replays the same receipt instead of minting a second
+// terminal fact. Load-bearing — pinned by TestExecuteOutboxEventReusesID.
+func (w *worker) sealAutoSubmitAttempt(ctx context.Context, event outbox.Event, payload autoSubmitEvent, reason, attemptID string) *failureDetail {
+	var providerKey, proctorStatus string
+	if err := w.db.QueryRowContext(ctx, `
+		SELECT e.provider_key, COALESCE(a.proctor_status, 'active')
+		FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id
+		WHERE a.id = ? AND a.schedule_id = ?`, attemptID, payload.ScheduleID).Scan(&providerKey, &proctorStatus); err != nil {
+		return &failureDetail{attemptID: attemptID, err: fmt.Errorf("load auto-submit attempt %s: %w", attemptID, err)}
+	}
+	actorKind := terminalization.ActorSystem
+	var actorID *string
+	if payload.ActorID != "" {
+		actorKind = terminalization.ActorProctor
+		id := payload.ActorID
+		actorID = &id
+	}
+	outcome := terminalization.OutcomeSubmitted
+	if providerKey == "sat" || proctorStatus == "terminated" {
+		outcome = terminalization.OutcomeTerminated
+	}
+	finalSubmission, _ := json.Marshal(map[string]any{
+		"autoSubmission":   true,
+		"completionReason": reason,
+		"proctorStatus":    proctorStatus,
+	})
+	if _, err := w.sealerFor().Terminalize(ctx, terminalization.SealCommand{
+		AttemptID: attemptID, ScheduleID: payload.ScheduleID,
+		Outcome: outcome, Reason: reason,
+		ActorKind: actorKind, ActorID: actorID, FinalSubmission: finalSubmission,
+		RequestID: event.ID,
+	}); err != nil {
+		return &failureDetail{attemptID: attemptID, permanent: isTerminalConflict(err), err: fmt.Errorf("auto-submit attempt %s: %w", attemptID, err)}
+	}
+	return nil
+}
+
+// rescanAutoSubmitDelta seals late arrivals that became eligible mid-seal
+// (compare max seen id, then seal the delta in this claim). A delta page
+// that itself overflows enqueues one bounded follow-up scan event so no
+// eligible attempt is left behind on a consumed event.
+func (w *worker) rescanAutoSubmitDelta(ctx context.Context, event outbox.Event, payload autoSubmitEvent, reason string, seen []string) error {
+	maxSeen := ""
+	for _, id := range seen {
+		if id > maxSeen {
+			maxSeen = id
+		}
+	}
+	rows, err := w.db.QueryContext(ctx, `
+		SELECT a.id FROM student_attempts a
+		WHERE schedule_id = ? AND submitted_at IS NULL
+		  AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+		  AND COALESCE(proctor_status, 'active') <> 'terminated'
+		  AND a.id > ?
+		ORDER BY a.id LIMIT ?`, payload.ScheduleID, maxSeen, autoSubmitCursorBatch+1)
+	if err != nil {
+		return fmt.Errorf("rescan eligible: %w", err)
+	}
+	var delta []string
+	func() {
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return
+			}
+			delta = append(delta, id)
+		}
+	}()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("rescan eligible: %w", err)
+	}
+	if len(delta) == 0 {
+		return nil
+	}
+	overflow := false
+	if len(delta) > autoSubmitCursorBatch {
+		overflow = true
+		delta = delta[:autoSubmitCursorBatch]
+	}
+	sealed := 0
+	for _, attemptID := range delta {
+		if serr := w.sealAutoSubmitAttempt(ctx, event, payload, reason, attemptID); serr != nil {
+			if qerr := w.outbox.QuarantineAttempt(ctx, event, attemptID, "rescan", serr.err); qerr != nil {
+				log.Printf("worker: auto-submit schedule=%s rescan attempt=%s quarantine failed: %v", payload.ScheduleID, attemptID, qerr)
+			}
+			continue
+		}
+		sealed++
+	}
+	log.Printf("worker: auto-submit schedule=%s rescan sealed=%d overflow=%v", payload.ScheduleID, sealed, overflow)
+	if overflow {
+		return w.enqueueAutoSubmitFollowUp(ctx, payload.ScheduleID, payload.ActorID, reason)
+	}
+	return nil
+}
+
+// enqueueAutoSubmitFollowUp enqueues one bounded scan event so a rescan
+// overflow is drained by a later claim instead of growing this one.
+func (w *worker) enqueueAutoSubmitFollowUp(ctx context.Context, scheduleID, actorID, reason string) error {
+	payload, err := json.Marshal(map[string]any{
+		"scheduleId": scheduleID,
+		"actorId":    actorID,
+		"reason":     reason,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = w.db.ExecContext(ctx, `
+		INSERT INTO outbox_events
+			(id, aggregate_kind, aggregate_id, revision, event_family, payload, created_at, publish_attempts)
+		VALUES (UUID(), 'schedule_runtime', ?, 0, 'auto_submit_schedule_attempts_requested', ?, NOW(), 0)`,
+		scheduleID, string(payload))
+	return err
 }
 
 // autoSubmitCursorBatch bounds one fan-out page (plan B4.4).
@@ -651,8 +886,8 @@ func (w *worker) runMaintenanceCycle(ctx context.Context, at time.Time) {
 	if rep, err := maintenance.RunRetention(ctx, w.db, maintenance.BudgetNormal); err != nil {
 		log.Printf("worker: RunRetention error: %v", err)
 	} else {
-		log.Printf("worker: RunRetention total=%d cache=%d idempotency=%d sessions=%d heartbeats=%d mutations=%d outbox=%d ratelimit=%d live=%d leases=%d",
-			rep.Total(), rep.CacheRows, rep.IdempotencyRows, rep.UserSessionRows, rep.HeartbeatRows,
+		log.Printf("worker: RunRetention total=%d cache=%d idempotency=%d authoringKeys=%d sessions=%d heartbeats=%d mutations=%d outbox=%d ratelimit=%d live=%d leases=%d",
+			rep.Total(), rep.CacheRows, rep.IdempotencyRows, rep.AuthoringOpKeyRows, rep.UserSessionRows, rep.HeartbeatRows,
 			rep.MutationRows, rep.OutboxRows, rep.RateLimitRows, rep.LiveUpdateRows, rep.LeaseRows)
 	}
 	if rep, err := maintenance.RunMedia(ctx, w.db); err != nil {

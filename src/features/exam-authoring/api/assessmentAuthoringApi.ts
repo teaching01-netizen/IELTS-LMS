@@ -4,6 +4,7 @@ import {
   backendPatch,
   backendPost,
 } from "../infrastructure/examAuthoringBackendGateway";
+import type { ApiRequestConfig } from "../../../services/backendBridge";
 import type {
   AssessmentAuthoringShell,
   AssessmentPreviewProjection,
@@ -27,6 +28,18 @@ import type {
   SaveQuestionRevisionRequest,
   UpdateSectionDeliverySettingsRequest,
 } from "../contracts/assessment";
+
+/**
+ * Idempotency wiring: effect-creating routes accept `operationKey` in the
+ * body AND an `Idempotency-Key` header. The header covers clients that do
+ * not echo unknown body fields; the body field covers proxies that strip
+ * unknown headers. Both carry the same value; the backend prefers the body.
+ */
+function withIdempotency(operationKey: string | undefined, base?: ApiRequestConfig): ApiRequestConfig | undefined {
+  const key = operationKey?.trim();
+  if (!key) return base;
+  return { ...base, headers: { ...base?.headers, "Idempotency-Key": key } };
+}
 
 export const assessmentAuthoringApi = {
   getShell(examId: string): Promise<AssessmentAuthoringShell> {
@@ -81,7 +94,7 @@ export const assessmentAuthoringApi = {
     return backendPost<SatWorkbookCommitResult, SatWorkbookCommitRequest>(
       `/v1/assessment-authoring/exams/${examId}/sat-workbook-commit`,
       request,
-      { timeout: 45_000, retries: 0 }
+      withIdempotency(request.operationKey, { timeout: 45_000, retries: 0 })
     );
   },
 
@@ -115,7 +128,8 @@ export const assessmentAuthoringApi = {
   ): Promise<BatchCreateQuestionsResult> {
     return backendPost<BatchCreateQuestionsResult, BatchCreateQuestionsRequest>(
       `/v1/assessment-authoring/modules/${moduleId}/questions/batch`,
-      request
+      request,
+      withIdempotency(request.operationKey)
     );
   },
 
@@ -145,7 +159,8 @@ export const assessmentAuthoringApi = {
   ): Promise<AssessmentQuestionDetail> {
     return backendPost<AssessmentQuestionDetail>(
       `/v1/assessment-authoring/exam-questions/${examQuestionId}/duplicate`,
-      request
+      request,
+      withIdempotency(request.operationKey)
     );
   },
 
@@ -162,7 +177,8 @@ export const assessmentAuthoringApi = {
   bulkQuestions(request: BulkQuestionRequest): Promise<BulkQuestionResult> {
     return backendPost<BulkQuestionResult, BulkQuestionRequest>(
       `/v1/assessment-authoring/questions/bulk`,
-      request
+      request,
+      withIdempotency(request.operationKey)
     );
   },
 
@@ -189,7 +205,8 @@ export const assessmentAuthoringApi = {
   ): Promise<PublishedAssessmentVersion> {
     return backendPost<PublishedAssessmentVersion, PublishAssessmentRequest>(
       `/v1/exams/${examId}/publish`,
-      request
+      request,
+      withIdempotency(request.operationKey)
     );
   },
 };

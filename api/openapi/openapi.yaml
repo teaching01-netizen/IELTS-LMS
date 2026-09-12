@@ -56,7 +56,17 @@ paths:
     post:
       security: []
       tags: [auth]
-      summary: Student entry by access code (free by default; any active account, any non-empty code)
+      summary: Student entry by invite code (closed by default; open entry only via an access link)
+      description: |-
+        Invite code required by default: link-less (direct schedule) entry
+        must present a live selected-student invite code for the schedule
+        (bound name/email rows bind identity; codes cannot be shared).
+        The only open-entry path is the link branch (accessLinkId +
+        ResolveEntry): open links admit without a per-student code, gated
+        by link lifecycle/window. Wrong/unknown code, unknown schedule,
+        and unknown/expired/paused link all collapse to 404
+        NOT_FOUND "Resource not found." (indistinguishable by design).
+        The gate runs before any user/registration/attempt mint.
       parameters:
         - $ref: "#/components/parameters/RequestId"
       requestBody:
@@ -67,7 +77,7 @@ paths:
               type: object
               required: [wcode, email]
               properties:
-                wcode: { type: string, description: 'Free-form access code (still required): W123456, alice, guest-alpha_01, ...', example: alice }
+                wcode: { type: string, description: 'Live invite code for the schedule (selected-student code on an active access link); empty only on the access-link branch for open links.', example: alice }
                 email: { type: string, format: email }
       responses:
         "200":
@@ -83,6 +93,8 @@ paths:
                   attemptId: { type: string }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /auth/student/schedules/{id}:
     get:
       security: []
@@ -245,6 +257,11 @@ paths:
         - attemptBearer: []
       tags: [student-v2]
       summary: V2 snapshot recovery
+      description: |-
+        Read path: the bearer is verified HMAC + expiry plus a live
+        attempt_sessions touch (token_id/revoked_at/lease_epoch) in both
+        verify modes, so revoked or takeover-rotated bearers render 401
+        even when ATTEMPT_VERIFY=stateless.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/AttemptId"
@@ -268,6 +285,8 @@ paths:
         Attempt-bearer route. The bearer schedule claim must match the URL
         scheduleId else 403. Provider must be sat else 422. Returns the
         content tree plus attempt snapshot, control, timing, and result.
+        Read path: revoked or takeover-rotated bearers render 401 in both
+        verify modes (live attempt_sessions touch, never skipped on reads).
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - name: scheduleId
@@ -297,7 +316,15 @@ paths:
         Attempt-bearer route. Revision CAS: exact-replay of the stored
         row returns 200; stale revision returns 409
         RESPONSE_REVISION_MISMATCH; superseded writer session returns
-        409 ACTIVE_SESSION_SUPERSEDED.
+        409 ACTIVE_SESSION_SUPERSEDED. Conflict reasons ride
+        details.reason on code ASSESSMENT_CONFLICT (409): ATTEMPT_TERMINAL
+        (attempt already submitted/terminated/locked/cancelled or
+        post-exam — stop retrying, re-bootstrap), SECTION_CLOCK_MISSING
+        (authoritative cohort section clock row missing or unstarted —
+        operator/data issue, safe to retry after cohort start), plus
+        RUNTIME_PAUSED / RUNTIME_NOT_LIVE / DEADLINE_EXPIRED /
+        MODULE_MISMATCH / STAGE_SECTION_MISMATCH /
+        RESPONSE_REVISION_MISMATCH / ATTEMPT_PROCTOR_BLOCKED.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - name: scheduleId
@@ -397,6 +424,9 @@ paths:
         Proctor/receipt terminated => ATTEMPT_PROCTOR_BLOCKED; submission
         idempotency re-seals submitted/sat_complete; all modules must be
         submitted|locked else 409; scores and seals sat_complete.
+        Terminal-attempt writes render 409 ASSESSMENT_CONFLICT with
+        details.reason ATTEMPT_TERMINAL; a missing cohort section clock
+        renders details.reason SECTION_CLOCK_MISSING.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - name: scheduleId
@@ -1729,6 +1759,7 @@ paths:
       summary: Commit SAT workbook import
       parameters:
         - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: examId
           in: path
           required: true
@@ -1812,6 +1843,7 @@ paths:
       summary: Create module question
       parameters:
         - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: moduleId
           in: path
           required: true
@@ -1832,6 +1864,7 @@ paths:
       summary: Batch create questions (max 200)
       parameters:
         - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: moduleId
           in: path
           required: true
@@ -1933,6 +1966,7 @@ paths:
       summary: Duplicate exam question
       parameters:
         - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: examQuestionId
           in: path
           required: true
@@ -1953,6 +1987,7 @@ paths:
       summary: Bulk question operations
       parameters:
         - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: Applied
@@ -2921,6 +2956,7 @@ paths:
       summary: Publish exam
       parameters:
         - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -3500,6 +3536,15 @@ components:
       required: false
       description: Client-supplied request id; server mints a UUID when absent and always echoes it.
       schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Retry-safety key for create/duplicate/batch/bulk/workbook-commit/publish.
+        A retry with the same key and identical content replays the original
+        outcome; reuse with different content is a 409. An `operationKey` body
+        field is accepted as an equivalent on the same routes. 1-128 chars.
     AttemptId:
       name: attemptId
       in: path

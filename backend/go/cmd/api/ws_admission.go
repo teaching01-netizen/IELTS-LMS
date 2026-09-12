@@ -19,7 +19,7 @@ func (a *App) acquireWSLease(ctx context.Context, origin, userID string, schedul
 	if a != nil && a.Config.WSAdmissionMemory() && a.Admission != nil {
 		token, ok, reason := a.Admission.Acquire(userID, scheduleID)
 		if !ok {
-		_ = reason
+			_ = reason
 			return "", false, nil
 		}
 		return token, true, nil
