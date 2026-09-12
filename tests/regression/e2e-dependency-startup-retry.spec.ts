@@ -84,4 +84,31 @@ describe("E2E dependency startup", () => {
       rmSync(fakeDocker.temporaryDirectory, { recursive: true, force: true });
     }
   });
+
+  it("passes a CI-only compose override to dependency startup", () => {
+    const fakeDocker = createFakeDocker(0);
+    const overrideFile = join(fakeDocker.temporaryDirectory, "compose.override.yml");
+    writeFileSync(overrideFile, "services: {}\n");
+
+    try {
+      execFileSync("bash", [startupScript], {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          PATH: `${fakeDocker.temporaryDirectory}:${process.env["PATH"] ?? ""}`,
+          E2E_COMPOSE_OVERRIDE_FILE: overrideFile,
+          E2E_COMPOSE_ATTEMPTS: "1",
+          E2E_COMPOSE_RETRY_DELAY_SECONDS: "0",
+        },
+        stdio: "pipe",
+      });
+
+      const commands = readFileSync(fakeDocker.commandFile, "utf8");
+      expect(commands).toContain(
+        `compose -f backend/docker-compose.yml -f ${overrideFile} up -d --wait tidb minio`
+      );
+    } finally {
+      rmSync(fakeDocker.temporaryDirectory, { recursive: true, force: true });
+    }
+  });
 });
