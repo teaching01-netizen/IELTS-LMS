@@ -368,6 +368,11 @@ export function QuestionRenderer({
   const renderMultiMCQ = (mcqBlock: MultiMCQBlock, blockNum: number) => {
     const selectedOptions = Array.isArray(answer) ? answer : [];
     const selectionLimit = getMultiSelectSelectionLimit(mcqBlock);
+    const limitReached = selectedOptions.length >= selectionLimit;
+    // P3.2.3: the limit must be discoverable, not a silent discard — the
+    // counter is a programmatic description of every option, and options
+    // stay tab-reachable so the reached state is announced on focus.
+    const limitStatusId = `${mcqBlock.id}-selection-limit-status`;
 
     const toggleOption = (optionId: string) => {
       if (selectedOptions.includes(optionId)) {
@@ -423,6 +428,7 @@ export function QuestionRenderer({
                   onChange={() => toggleOption(option.id)}
                   className="peer sr-only"
                   aria-label={`Option ${letter}. ${stripBoldMarkdown(option.text)}`}
+                  aria-describedby={limitStatusId}
                 />
                 <div
                   className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border ${
@@ -462,9 +468,12 @@ export function QuestionRenderer({
           })}
         </div>
         <div
-          className={`${fieldIndentClass} text-[length:var(--student-meta-font-size)] font-medium text-gray-500`}
+          id={limitStatusId}
+          aria-live="polite"
+          className={`${fieldIndentClass} text-[length:var(--student-meta-font-size,0.875rem)] font-medium text-gray-500`}
         >
           Selections: {selectedOptions.length}/{selectionLimit} required
+          {limitReached ? " — limit reached. Deselect an option to choose another." : ""}
         </div>
       </fieldset>
     );
@@ -618,7 +627,7 @@ export function QuestionRenderer({
                     aria-pressed={isEliminated}
                     aria-label={`${isEliminated ? "Restore" : "Eliminate"} option ${letter}`}
                     title={isEliminated ? "Restore option" : "Eliminate option"}
-                    className={`shrink-0 rounded px-2 py-1 text-xs font-semibold transition-colors ${
+                    className={`student-touch-target shrink-0 rounded px-2 py-1 text-xs font-semibold transition-colors ${
                       isEliminated
                         ? "bg-gray-200 text-gray-700 hover:bg-gray-300"
                         : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
@@ -712,7 +721,7 @@ export function QuestionRenderer({
                           onChange={(event) =>
                             updateIndexedAnswer(index, event.target.value, blanks, slotId)
                           }
-                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
+                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-[length:var(--student-control-font-size,1rem)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
                           placeholder="Answer..."
                           security={security}
                           sessionId={sessionId}
@@ -771,7 +780,7 @@ export function QuestionRenderer({
                           onChange={(event) =>
                             updateIndexedAnswer(index, event.target.value, blanks, slotId)
                           }
-                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
+                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-[length:var(--student-control-font-size,1rem)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
                           placeholder="Answer..."
                           security={security}
                           sessionId={sessionId}

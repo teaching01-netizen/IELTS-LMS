@@ -149,7 +149,7 @@ export function SubAnswerTreeQuestionList({
                       <button
                         type="button"
                         onClick={() => onToggleFlag(slotId)}
-                        className={`inline-flex ${tabletMode ? "h-8 w-8" : "h-9 w-9"} items-center justify-center rounded-full border transition-colors ${
+                        className={`inline-flex flex-shrink-0 ${tabletMode ? "h-8 w-8" : "h-9 w-9"} items-center justify-center rounded-full border transition-colors ${
                           isFlagged
                             ? "border-amber-700 bg-amber-700 text-white"
                             : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700"

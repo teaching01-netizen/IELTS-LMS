@@ -293,6 +293,37 @@ describe('student question experience', () => {
     expect(answerInput).not.toHaveClass('text-sm');
   });
 
+  it('sizes inline passage blanks with the shared control typography token (P3.2.4)', () => {
+    const question = {
+      id: 'inline-blank-q',
+      sentence: 'Storage at _______ for best results.',
+      blanks: [{ id: 'note-typo-1', correctAnswer: 'room temperature', position: 0 }],
+      answerRule: 'ONE_WORD' as const,
+    };
+
+    const block: SentenceCompletionBlock = {
+      id: 'note-inline-typography',
+      type: 'SENTENCE_COMPLETION',
+      instruction: 'Complete the sentences.',
+      questions: [question],
+    };
+
+    render(
+      <QuestionRenderer
+        question={question as never}
+        block={block}
+        number={31}
+        answer={['']}
+        onChange={() => {}}
+        slotIds={['note-inline-typography:0']}
+      />,
+    );
+
+    const inlineBlank = screen.getByRole('textbox', { name: 'Answer for question 31' });
+    expect(inlineBlank).toHaveClass('text-[length:var(--student-control-font-size,1rem)]');
+    expect(inlineBlank).not.toHaveClass('text-sm');
+  });
+
   it('renders table placeholder token as inline numbered input and preserves surrounding text', () => {
     const block: TableCompletionBlock = {
       id: 'table-prompt',
@@ -626,10 +657,87 @@ describe('student question experience', () => {
 
     expect(onChange).toHaveBeenLastCalledWith(['real-a', 'real-b']);
     expect(optionC).toBeDisabled();
-    expect(screen.getByText('Selections: 2/2 required')).toBeInTheDocument();
+    expect(screen.getByText(/Selections: 2\/2 required/)).toBeInTheDocument();
 
     fireEvent.click(optionC);
     expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('explains the multi-select limit instead of silently discarding (P3.2.3)', () => {
+    const onChange = vi.fn();
+    const block: MultiMCQBlock = {
+      id: 'multi-limit-explained',
+      type: 'MULTI_MCQ',
+      instruction: 'Choose the correct options.',
+      stem: 'Pick two answers',
+      requiredSelections: 2,
+      options: [
+        { id: 'exp-a', text: 'Answer A', isCorrect: true },
+        { id: 'exp-b', text: 'Answer B', isCorrect: true },
+        { id: 'exp-c', text: 'Answer C', isCorrect: false },
+      ],
+    };
+
+    function Harness() {
+      const [answer, setAnswer] = React.useState<string[]>([]);
+      return (
+        <QuestionRenderer
+          question={null}
+          block={block}
+          number={1}
+          answer={answer}
+          onChange={(next) => setAnswer(next as string[])}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const status = screen.getByText(/Selections: 0\/2 required/);
+
+    // The counter is a programmatic description of every option.
+    expect(screen.getByRole('checkbox', { name: 'Option C. Answer C' })).toHaveAttribute(
+      'aria-describedby',
+      status.id
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Option A. Answer A' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Option B. Answer B' }));
+
+    // Limit reached: explained in text (live region) — the remaining option
+    // keeps its disabled-state cap but never silently discards a click:
+    expect(screen.getByText(/Selections: 2\/2 required/)).toHaveTextContent(
+      'limit reached. Deselect an option to choose another.'
+    );
+    expect(screen.getByRole('checkbox', { name: 'Option C. Answer C' })).toBeDisabled();
+  });
+
+  it('gives the elimination toggle the touch-target contract (P3.2.2)', () => {
+    const block: SingleMCQBlock = {
+      id: 'elim-target-mcq',
+      type: 'SINGLE_MCQ',
+      instruction: 'Choose one answer.',
+      stem: 'Which option is correct?',
+      options: [
+        { id: 'elim-a', text: 'Alpha', isCorrect: true },
+        { id: 'elim-b', text: 'Beta', isCorrect: false },
+      ],
+    } as unknown as SingleMCQBlock;
+
+    render(
+      <QuestionRenderer
+        question={null}
+        block={block}
+        number={3}
+        answer=""
+        onChange={() => {}}
+        onToggleOptionElimination={vi.fn()}
+      />,
+    );
+
+    const eliminate = screen.getByRole('button', { name: 'Eliminate option A' });
+    expect(eliminate).toHaveClass('student-touch-target');
+    expect(eliminate.className).toContain('shrink-0');
   });
 
   it('replaces the multi-select set when an option is unselected', () => {

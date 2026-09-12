@@ -150,4 +150,38 @@ describe('SubAnswerTreeQuestionList', () => {
     expect(screen.getByRole('textbox', { name: 'Answer for question 31.1' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Answer for question 31.2' })).toBeInTheDocument();
   });
+
+  it('keeps the leaf flag button from compressing as text wraps (P3.2.2)', () => {
+    const leafOne = buildTreeDescriptor({
+      id: 'tree-block::tree::root-a::leaf-a',
+      rootId: 'tree-block::tree::root::root-a',
+      rootNumber: 41,
+      numberLabel: '41.1',
+      treePrompt: 'Long leaf prompt that wraps',
+      rootLeafQuestionIds: ['tree-block::tree::root-a::leaf-a', 'tree-block::tree::root-a::leaf-b'],
+    });
+    const leafTwo = buildTreeDescriptor({
+      id: 'tree-block::tree::root-a::leaf-b',
+      rootId: 'tree-block::tree::root::root-a',
+      rootNumber: 41,
+      numberLabel: '41.2',
+      treePrompt: 'Long leaf prompt that wraps',
+      rootLeafQuestionIds: ['tree-block::tree::root-a::leaf-a', 'tree-block::tree::root-a::leaf-b'],
+    });
+
+    const { container } = render(
+      <SubAnswerTreeQuestionList
+        questions={[leafOne, leafTwo]}
+        answers={{ [leafOne.id]: '', [leafTwo.id]: '' }}
+        currentQuestionId={leafOne.id}
+        flags={{ [leafTwo.id]: true }}
+        onToggleFlag={vi.fn()}
+        onAnswerChange={vi.fn()}
+      />,
+    );
+
+    const flagButton = container.querySelector('button[aria-label="Unflag question"]');
+    expect(flagButton).not.toBeNull();
+    expect(flagButton).toHaveClass('flex-shrink-0');
+  });
 });
