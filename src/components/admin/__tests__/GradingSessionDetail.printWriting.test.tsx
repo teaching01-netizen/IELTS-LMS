@@ -301,6 +301,10 @@ describe("GradingSessionDetail print writing", () => {
         expect.stringContaining("B. water decreased")
       )
     );
+    const csvContent = vi.mocked(downloadCsvFile).mock.calls.at(-1)?.[1];
+    const csvHeader = typeof csvContent === "string" ? csvContent.split("\r\n", 1)[0] : "";
+    expect(csvHeader).toContain("Course");
+    expect(csvHeader).not.toContain("IELTS Course");
   });
 
   test("keeps the IELTS section statuses for an IELTS submission", async () => {

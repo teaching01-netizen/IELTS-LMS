@@ -47,9 +47,15 @@ const ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS: Record<ActScienceSkillCategory, 
 export const ACT_SCIENCE_CATEGORY_CORRECT_COLUMNS: CsvColumn[] = ACT_SCIENCE_SKILL_CATEGORIES.map(
   (category) => ({
     key: `scienceCategory:${category.value}`,
-    label: `${category.label} (${ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS[category.value]}) Correct`,
+    label: `${ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS[category.value]} correct`,
   })
 );
+
+export const ACT_SCIENCE_CATEGORY_QUESTION_COUNT_COLUMNS: CsvColumn[] =
+  ACT_SCIENCE_SKILL_CATEGORIES.map((category) => ({
+    key: `scienceCategoryQuestionCount:${category.value}`,
+    label: `${category.label} (${ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS[category.value]})`,
+  }));
 
 export const ACT_SCIENCE_CATEGORY_PERCENTAGE_COLUMNS: CsvColumn[] =
   ACT_SCIENCE_SKILL_CATEGORIES.map((category) => ({
@@ -980,6 +986,14 @@ export function buildWideObjectiveExport({
       ...(moduleType === "science"
         ? Object.fromEntries(
             ACT_SCIENCE_SKILL_CATEGORIES.map((category) => [
+              `scienceCategoryQuestionCount:${category.value}`,
+              scienceCategoryQuestionCounts[category.value] ?? 0,
+            ])
+          )
+        : {}),
+      ...(moduleType === "science"
+        ? Object.fromEntries(
+            ACT_SCIENCE_SKILL_CATEGORIES.map((category) => [
               `scienceCategory:${category.value}`,
               scienceCategoryCorrectCounts[category.value] ?? 0,
             ])
@@ -1063,11 +1077,19 @@ export function buildWideObjectiveExport({
     mode === "auto"
       ? OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS
       : OBJECTIVE_WIDE_MANUAL_EXPORT_BASE_COLUMNS;
+  const moduleBaseColumns =
+    moduleType === "science"
+      ? baseColumns.map((column) =>
+          column.key === "ieltsCourse" ? { ...column, label: "Course" } : column
+        )
+      : baseColumns;
   const summaryColumns =
-    mode === "auto" && moduleType === "science" ? ACT_SCIENCE_CATEGORY_CORRECT_COLUMNS : [];
+    mode === "auto" && moduleType === "science"
+      ? [...ACT_SCIENCE_CATEGORY_QUESTION_COUNT_COLUMNS, ...ACT_SCIENCE_CATEGORY_CORRECT_COLUMNS]
+      : [];
   const percentageColumns =
     mode === "auto" && moduleType === "science" ? ACT_SCIENCE_CATEGORY_PERCENTAGE_COLUMNS : [];
-  const exportBaseColumns = baseColumns.flatMap((column) =>
+  const exportBaseColumns = moduleBaseColumns.flatMap((column) =>
     column.key === "totalScore"
       ? [column, ...summaryColumns]
       : column.key === "percentage"

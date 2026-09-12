@@ -249,14 +249,17 @@ describe("gradingReviewUtils", () => {
       "Student ID",
       "Student Email",
       "Nickname",
-      "IELTS Course",
+      "Course",
       "Cohort Name",
       "Section",
       "Submitted At",
       "Total Score",
-      "Interpretation of Data (IOD) Correct",
-      "Scientific Investigation (SIN) Correct",
-      "Evaluating Scientific Arguments and Models with Evidence (ESA) Correct",
+      "Interpretation of Data (IOD)",
+      "Scientific Investigation (SIN)",
+      "Evaluating Scientific Arguments and Models with Evidence (ESA)",
+      "IOD correct",
+      "SIN correct",
+      "ESA correct",
       "Max Score",
       "Percentage",
       "IOD Percentage",
@@ -272,6 +275,20 @@ describe("gradingReviewUtils", () => {
     ]);
     expect(exportData.rows[0]?.section).toBe("science");
     expect(exportData.rows[0]?.totalScore).toBe(1);
+    expect(exportData.rows[0]?.["scienceCategoryQuestionCount:interpretation_of_data"]).toBe(1);
+    expect(exportData.rows[0]?.["scienceCategoryQuestionCount:scientific_investigation"]).toBe(1);
+    expect(
+      exportData.rows[0]?.[
+        "scienceCategoryQuestionCount:evaluating_scientific_arguments_and_models_with_evidence"
+      ]
+    ).toBe(0);
+    expect(exportData.rows[0]?.["scienceCategory:interpretation_of_data"]).toBe(0);
+    expect(exportData.rows[0]?.["scienceCategory:scientific_investigation"]).toBe(1);
+    expect(
+      exportData.rows[0]?.[
+        "scienceCategory:evaluating_scientific_arguments_and_models_with_evidence"
+      ]
+    ).toBe(0);
     expect(exportData.rows[0]?.maxScore).toBe(2);
     expect(exportData.rows[0]?.percentage).toBe(50);
     expect(exportData.rows[0]?.["answer:science-q1"]).toBe("B. water decreased");
@@ -281,7 +298,7 @@ describe("gradingReviewUtils", () => {
     expect(exportData.rows[0]?.["score:science-q2"]).toBe(1);
   });
 
-  test("adds ACT Science correct counts by skill category after total score", () => {
+  test("adds ACT Science category totals and correct counts after total score", () => {
     const examState = createInitialExamState("ACT Science Practice", "ACT", "ACT Science");
     examState.science.stimuli = [
       {
@@ -365,12 +382,15 @@ describe("gradingReviewUtils", () => {
     });
 
     const columnLabels = exportData.columns.map((column) => column.label);
-    expect(columnLabels.slice(11, 22)).toEqual([
+    expect(columnLabels.slice(11, 25)).toEqual([
       "Submitted At",
       "Total Score",
-      "Interpretation of Data (IOD) Correct",
-      "Scientific Investigation (SIN) Correct",
-      "Evaluating Scientific Arguments and Models with Evidence (ESA) Correct",
+      "Interpretation of Data (IOD)",
+      "Scientific Investigation (SIN)",
+      "Evaluating Scientific Arguments and Models with Evidence (ESA)",
+      "IOD correct",
+      "SIN correct",
+      "ESA correct",
       "Max Score",
       "Percentage",
       "IOD Percentage",
@@ -381,6 +401,11 @@ describe("gradingReviewUtils", () => {
 
     const row = exportData.rows[0];
     expect(row?.totalScore).toBe(2);
+    expect(row?.["scienceCategoryQuestionCount:interpretation_of_data"]).toBe(1);
+    expect(row?.["scienceCategoryQuestionCount:scientific_investigation"]).toBe(1);
+    expect(
+      row?.["scienceCategoryQuestionCount:evaluating_scientific_arguments_and_models_with_evidence"]
+    ).toBe(1);
     expect(row?.["scienceCategory:interpretation_of_data"]).toBe(1);
     expect(row?.["scienceCategory:scientific_investigation"]).toBe(0);
     expect(row?.["scienceCategory:evaluating_scientific_arguments_and_models_with_evidence"]).toBe(
