@@ -3,16 +3,18 @@ import { Button } from '../ui/Button';
 import {
   countAnsweredQuestions,
   countQuestionSlots,
-  getQuestionNumberLabel,
-  isQuestionAnswered,
   type StudentQuestionDescriptor,
 } from '@student/application/studentExamContentFacade';
+import {
+  getStudentQuestionNavigationViewModel,
+  type StudentQuestionNavigationItem,
+} from './layout/studentQuestionNavigation';
 import type { StudentAnswer } from './providers/StudentRuntimeProvider';
 import type { StudentLayoutMode } from './layout/studentLayoutMode';
 import { CompactQuestionNavigation } from './layout/CompactQuestionNavigation';
 
 const pressClassName =
-  'transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]';
+  'transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out';
 
 interface StudentFooterProps {
   questions: StudentQuestionDescriptor[];
@@ -40,24 +42,6 @@ export function StudentFooter({
   layoutMode,
   onOpenNavigator,
 }: StudentFooterProps) {
-  const dedupeGroupedScoringSlots = React.useCallback(
-    (items: StudentQuestionDescriptor[]) => {
-      const seen = new Set<string>();
-      const out: StudentQuestionDescriptor[] = [];
-      for (const item of items) {
-        const key =
-          typeof item.rootId === 'string' && item.rootId.includes('::group::')
-            ? item.rootId
-            : item.id;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push(item);
-      }
-      return out;
-    },
-    [],
-  );
-
   const groupedQuestions = questions.reduce<Record<string, StudentQuestionDescriptor[]>>(
     (groups, question) => {
       const existingGroup = groups[question.groupId];
@@ -81,7 +65,25 @@ export function StudentFooter({
   const answeredCount = countAnsweredQuestions(questions, answers);
   const hasUnanswered = totalQuestions > 0 && answeredCount < totalQuestions;
 
-  if (layoutMode === 'compact') {
+  // P3.5: chips, compact previous/current/next, and the question sheet all
+  // read the same derived view model.
+  const navigationViewModel = getStudentQuestionNavigationViewModel({
+    questions,
+    answers,
+    flags,
+    currentQuestionId,
+  });
+  const itemsByGroup = new Map<string, StudentQuestionNavigationItem[]>();
+  for (const item of navigationViewModel.items) {
+    const list = itemsByGroup.get(item.groupId);
+    if (list) {
+      list.push(item);
+    } else {
+      itemsByGroup.set(item.groupId, [item]);
+    }
+  }
+
+  if (layoutMode === 'compact' || layoutMode === 'phone') {
     return (
       <CompactQuestionNavigation
         questions={questions}
@@ -90,6 +92,8 @@ export function StudentFooter({
         onOpenNavigator={onOpenNavigator}
         onSubmit={onSubmit}
         showSubmitButton={showSubmitButton}
+        answers={answers}
+        flags={flags}
       />
     );
   }
@@ -125,17 +129,16 @@ export function StudentFooter({
             >
               {isActiveGroup ? (
                 <div className="flex items-center gap-0.5 md:gap-1">
-                  {dedupeGroupedScoringSlots(groupQuestions).map((question) => {
-                    const isCurrent = question.id === currentQuestionId;
-                    const isFlagged = Boolean(flags[question.id]);
-                    const isAnswered = isQuestionAnswered(question, answers);
-                    const displayLabel = getQuestionNumberLabel(questions, question.id);
-                    const targetQuestionId = question.id;
+                  {(itemsByGroup.get(groupId) ?? []).map((item) => {
+                    const isCurrent = item.current;
+                    const isFlagged = item.flagged;
+                    const isAnswered = item.answered;
+                    const displayLabel = item.label;
 
                     return (
                       <button
-                        key={targetQuestionId}
-                        onClick={() => onNavigate(targetQuestionId)}
+                        key={item.navigationId}
+                        onClick={() => onNavigate(item.navigationId)}
                         className={`${pressClassName} relative text-[length:var(--student-chip-font-size)] flex items-center justify-center min-w-[1.6rem] min-h-6 md:min-w-[1.8rem] lg:min-w-[2rem] h-6 md:h-7 lg:h-8 px-1 md:px-1.5 rounded-sm font-bold border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 ${
                           isCurrent
                             ? 'bg-blue-800 border-blue-800 text-white hover:bg-blue-700'

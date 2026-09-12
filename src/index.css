@@ -519,12 +519,13 @@
     }
   }
 
-  .student-exam-shell[data-student-layout-mode='compact'] {
+  .student-exam-shell[data-student-layout-mode='compact'],
+  .student-exam-shell[data-student-layout-mode='phone'] {
     --student-header-height: var(--student-header-height-compact);
     --student-bottom-bar-height: var(--student-bottom-bar-height-compact);
   }
 
-  .student-exam-shell[data-student-layout-mode='medium'] {
+  .student-exam-shell[data-student-layout-mode='standard'] {
     --student-header-height: var(--student-header-height-medium);
     --student-bottom-bar-height: var(--student-bottom-bar-height-medium);
   }
@@ -558,9 +559,12 @@
 
   .student-compact-question-navigation [data-student-primary-touch-target] {
     touch-action: manipulation;
+  }  .student-exam-shell[data-student-layout-mode='compact'] :is(button, [role="button"], input, select, textarea, a[href]) {
+    min-block-size: var(--student-touch-target-preferred);
+    min-inline-size: var(--student-touch-target-preferred);
   }
-  .student-exam-shell[data-student-layout-mode='compact']
-    :is(button, [role="button"], input, select, textarea, a[href]) {
+  /* Phone mode (P2.1) shares the compact touch-target floor. */
+  .student-exam-shell[data-student-layout-mode='phone'] :is(button, [role="button"], input, select, textarea, a[href]) {
     min-block-size: var(--student-touch-target-preferred);
     min-inline-size: var(--student-touch-target-preferred);
   }
@@ -580,11 +584,13 @@
     padding-bottom: max(1rem, var(--student-safe-bottom));
   }
 
-  .student-exam-shell[data-student-layout-mode='compact'] .student-exam-footer {
+  .student-exam-shell[data-student-layout-mode='compact'] .student-exam-footer,
+  .student-exam-shell[data-student-layout-mode='phone'] .student-exam-footer {
     border-radius: 0.375rem;
   }
 
-  .student-exam-shell[data-student-layout-mode='compact'] .student-exam-main {
+  .student-exam-shell[data-student-layout-mode='compact'] .student-exam-main,
+  .student-exam-shell[data-student-layout-mode='phone'] .student-exam-main {
     overflow: hidden;
   }
 
@@ -757,38 +763,30 @@
   }
 
   .student-question-navigator[open] {
-    animation: student-surface-in 200ms ease-out;
+    animation: student-surface-in 130ms ease-out;
   }
 
   .student-confirmation-surface {
-    animation: student-surface-in 200ms ease-out;
+    animation: student-surface-in 130ms ease-out;
   }
 
   .student-tools-sheet[open] {
-    animation: student-sheet-in 200ms ease-out;
+    animation: student-sheet-in 130ms ease-out;
   }
 
   .student-question-navigator[open]::backdrop {
-    animation: student-backdrop-in 200ms ease-out;
+    animation: student-backdrop-in 130ms ease-out;
   }
 
   .student-tools-sheet[open]::backdrop {
-    animation: student-backdrop-in 200ms ease-out;
+    animation: student-backdrop-in 130ms ease-out;
   }
 
-  /* One-shot urgency cue for the exam timer under five minutes. */
-  @keyframes student-urgent-cue {
-    0%,
-    100% {
-      box-shadow: 0 0 0 0 rgba(212, 76, 71, 0);
-    }
-    50% {
-      box-shadow: 0 0 0 4px rgba(212, 76, 71, 0.12);
-    }
-  }
-
+  /* Urgency treatment for the exam timer under five minutes: a static
+     emphasis ring/border, no pulsing or movement (P1.4). */
   .student-timer-urgent {
-    animation: student-urgent-cue 2s ease-out 1;
+    box-shadow: inset 0 0 0 2px rgba(212, 76, 71, 0.55);
+    border-color: rgba(212, 76, 71, 0.55);
   }
 
   .student-translation-guard-active [data-student-highlightable="true"],
@@ -1294,6 +1292,78 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-shadow-floating: 0 4px 12px rgb(0 0 0 / 22%);
   --sat-shadow-modal: 0 8px 24px rgb(0 0 0 / 24%);
   --sat-tool-border: #5D6268;
+  /* Tool window system (Phase 01): one token block for the floating-tool
+   * primitive. Elevation reuses shadow shapes (C5: no literal shadow
+   * utilities on tools); motion durations live here so exam TSX carries
+   * no duration literals (C4). */
+  --sat-tool-header-height: 48px;
+  --sat-tool-radius: 6px;
+  --sat-tool-safe-inset: 16px;
+  --sat-tool-elevation-inactive: 0 3px 12px rgb(0 0 0 / 12%);
+  --sat-tool-elevation-active: 0 8px 24px rgb(0 0 0 / 18%);
+  --sat-tool-elevation-drag: 0 12px 28px rgb(0 0 0 / 22%);
+  --sat-tool-grip-opacity: .55;
+  --sat-tool-grip-opacity-hover: .8;
+  --sat-tool-grip-opacity-drag: 1;
+  --sat-tool-motion-open: 160ms;
+  --sat-tool-motion-close: 110ms;
+  --sat-tool-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --sat-tool-scrollbar-size: 8px;
+  --sat-tool-scrollbar-thumb: 6px;
+  --sat-tool-scrollbar-min-thumb: 40px;
+  /* Tool window direct manipulation (Phase 07): grab wash, generous resize
+   * reach, reveal/assist/settle pacing, hint life, tooltip delay. Shadow and
+   * border values reuse the Phase-01 elevation tokens above; durations live
+   * here so exam TSX carries no duration literals. */
+  --sat-tool-grab-hover-bg: var(--sat-surface-hover);
+  --sat-tool-edge-zone: 10px;
+  --sat-tool-edge-outside: 4px;
+  --sat-tool-corner-zone: 24px;
+  --sat-tool-corner-glyph: 12px;
+  --sat-tool-edge-reveal: 80ms;
+  --sat-tool-align-settle: 110ms;
+  --sat-tool-lift-settle: 120ms;
+  --sat-tool-press-settle: 90ms;
+  --sat-tool-hint-life: 4s;
+  --sat-tool-tip-delay: 400ms;
+  --sat-tool-edge-rest: transparent;
+  --sat-tool-edge-hover: var(--sat-divider);
+  --sat-tool-align-max: 8px;
+  /* Reference sheet frame (R-01, Bluebook parity): Reference-only variant
+   * tokens. Shared --sat-tool-* tokens above are frozen; Calculator consumes
+   * them unchanged. Open/close motion reuses --sat-tool-motion-*; collapse
+   * motion is R-03 (no duration literal here or in TSX). */
+  --sat-ref-header-height: 32px;
+  --sat-ref-header-bg: #171717;
+  --sat-ref-header-fg: #ffffff;
+  --sat-ref-title-size: 12px;
+  --sat-ref-radius: 0;
+  --sat-ref-border: #6e6e73;
+  /* R-06 B2: 32px hit fits the 32px header (D2 carve-out stands — still
+   * above the 24px WCAG floor; Calculator untouched). */
+  --sat-ref-control-hit: 32px;
+  --sat-ref-control-visual: 24px;
+  --sat-ref-dot-size: 3px;
+  --sat-ref-dot-gap: 3px;
+  --sat-ref-dot-opacity: .55;
+  --sat-ref-resize-opacity: .28;
+  --sat-ref-resize-opacity-hover: .65;
+  --sat-ref-resize-opacity-active: 1;
+  /* R-03 Reference collapse motion (D9: durations in tokens; TSX carries none).
+   * Staged fade-then-clip: outer .sat-ref-fade runs the fade phase, inner
+   * .sat-ref-clip starts clipped via animation-delay (allowlisted). Height on
+   * the dialog is committed instantly (no height transition — avoids fighting
+   * the drag/resize 1:1 no-transition guard); the *perceived* collapse motion
+   * is fade + clip, which is transform-free (D4). */
+  --sat-ref-collapse: 180ms;
+  --sat-ref-collapse-fade: 90ms;
+  --sat-ref-collapse-clip: 90ms;
+  --sat-ref-collapse-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Exam chrome heights (mirror SatExamTopBar sm:h-[96px] and SatExamFooter
+   * min-h-[70px]): single source of truth for the Phase 02 safe-area clamp.
+   * Update together if the chrome heights change. */
+  --sat-exam-header-height: 96px;
+  --sat-exam-footer-height: 70px;
   font-family:
     system-ui,
     -apple-system,
@@ -1486,6 +1556,317 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 }
 
+/* Tool window system (Phase 01): quiet scrollbar with stable gutter so body
+ * content never shifts when the bar appears. Phase 04 applies
+ * data-sat-tool-scroll to the Reference body. */
+.sat-ui [data-sat-tool-scroll] {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--sat-divider) transparent;
+}
+.sat-ui [data-sat-tool-scroll]::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.sat-ui [data-sat-tool-scroll]::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sat-ui [data-sat-tool-scroll]::-webkit-scrollbar-thumb {
+  background-color: var(--sat-divider);
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background-clip: content-box;
+  min-height: 40px;
+}
+.sat-ui [data-sat-tool-scroll]::-webkit-scrollbar-thumb:hover {
+  background-color: var(--sat-text-secondary);
+}
+
+/* Tool window motion (Phase 01): open/close keyed to --sat-tool-motion-*
+ * tokens (C4: no duration literals in exam TSX). The exit animation holds
+ * its final frame; it is observable only when keepAlive keeps the node
+ * mounted (Calculator) — non-keepAlive tools close instantly. This is
+ * expected. Drag/resize stay 1:1: no transition targets
+ * left/top/width/height. */
+.sat-tool-enter {
+  animation: sat-tool-enter var(--sat-tool-motion-open) var(--sat-tool-motion-ease);
+}
+.sat-tool-exit {
+  animation: sat-tool-exit var(--sat-tool-motion-close) var(--sat-tool-motion-ease) forwards;
+}
+@keyframes sat-tool-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes sat-tool-exit {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(.995);
+  }
+}
+.sat-tool-dragging {
+  box-shadow: var(--sat-tool-elevation-drag);
+}
+.sat-tool-active {
+  box-shadow: var(--sat-tool-elevation-active);
+  border-color: var(--sat-divider);
+}
+.sat-tool-inactive {
+  box-shadow: var(--sat-tool-elevation-inactive);
+}
+.sat-tool-grip {
+  opacity: var(--sat-tool-grip-opacity);
+}
+.sat-tool-grip:hover {
+  opacity: var(--sat-tool-grip-opacity-hover);
+}
+[data-dragging="true"] .sat-tool-grip {
+  opacity: var(--sat-tool-grip-opacity-drag);
+}
+
+/* Tool window direct manipulation (Phase 07): generous resize reach,
+ * hover edge reveal, restrained corner glyph, hover wash, lift pacing,
+ * alignment correction, first-open hint, and local Move/Resize tooltips.
+ * Drag and resize stay 1:1: no transition targets left, top, width, or
+ * height during a gesture; the align class is the only exception. */
+.sat-tool-header-drag {
+  cursor: grab;
+}
+.sat-tool-header-drag:hover {
+  background-color: var(--sat-tool-grab-hover-bg);
+}
+.sat-tool-header-drag:active,
+[data-dragging="true"] .sat-tool-header-drag {
+  cursor: grabbing;
+}
+.sat-tool-noselect,
+.sat-tool-noselect * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sat-tool-window-lift {
+  border-color: var(--sat-divider);
+  transition: border-color var(--sat-tool-press-settle) var(--sat-tool-motion-ease);
+}
+.sat-tool-window-settle {
+  transition: border-color var(--sat-tool-lift-settle) var(--sat-tool-motion-ease);
+}
+.sat-tool-aligning {
+  transition: left var(--sat-tool-align-settle) var(--sat-tool-motion-ease), top var(--sat-tool-align-settle) var(--sat-tool-motion-ease);
+}
+.sat-tool-resizing [data-sat-resize-edge],
+.sat-tool-resizing [data-sat-resize-handle] {
+  transition-property: none;
+}
+.sat-tool-resize-edge {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+  background: var(--sat-tool-edge-rest);
+}
+.sat-tool-resize-edge-n {
+  top: calc(var(--sat-tool-edge-outside) * -1);
+  right: var(--sat-tool-corner-zone);
+  left: var(--sat-tool-corner-zone);
+  height: calc(var(--sat-tool-edge-zone) + var(--sat-tool-edge-outside));
+  cursor: ns-resize;
+}
+.sat-tool-resize-edge-s {
+  right: var(--sat-tool-corner-zone);
+  bottom: calc(var(--sat-tool-edge-outside) * -1);
+  left: var(--sat-tool-corner-zone);
+  height: calc(var(--sat-tool-edge-zone) + var(--sat-tool-edge-outside));
+  cursor: ns-resize;
+}
+.sat-tool-resize-edge-e {
+  top: var(--sat-tool-corner-zone);
+  right: calc(var(--sat-tool-edge-outside) * -1);
+  bottom: var(--sat-tool-corner-zone);
+  width: calc(var(--sat-tool-edge-zone) + var(--sat-tool-edge-outside));
+  cursor: ew-resize;
+}
+.sat-tool-resize-edge-w {
+  top: var(--sat-tool-corner-zone);
+  bottom: var(--sat-tool-corner-zone);
+  left: calc(var(--sat-tool-edge-outside) * -1);
+  width: calc(var(--sat-tool-edge-zone) + var(--sat-tool-edge-outside));
+  cursor: ew-resize;
+}
+.sat-tool-resize-edge-ne,
+.sat-tool-resize-edge-nw,
+.sat-tool-resize-edge-sw {
+  width: var(--sat-tool-corner-zone);
+  height: var(--sat-tool-corner-zone);
+}
+.sat-tool-resize-edge-ne {
+  top: calc(var(--sat-tool-edge-outside) * -1);
+  right: calc(var(--sat-tool-edge-outside) * -1);
+  cursor: nesw-resize;
+}
+.sat-tool-resize-edge-nw {
+  top: calc(var(--sat-tool-edge-outside) * -1);
+  left: calc(var(--sat-tool-edge-outside) * -1);
+  cursor: nwse-resize;
+}
+.sat-tool-resize-edge-sw {
+  bottom: calc(var(--sat-tool-edge-outside) * -1);
+  left: calc(var(--sat-tool-edge-outside) * -1);
+  cursor: nesw-resize;
+}
+.sat-tool-window {
+  transition: border-color var(--sat-tool-edge-reveal) var(--sat-tool-motion-ease);
+}
+.sat-tool-resize-edge:hover {
+  background: var(--sat-tool-edge-hover);
+  opacity: .35;
+}
+.sat-tool-resize-glyph {
+  width: var(--sat-tool-corner-glyph);
+  height: var(--sat-tool-corner-glyph);
+  opacity: .35;
+}
+.sat-tool-resize-edge:hover .sat-tool-resize-glyph,
+[data-sat-resize-handle]:hover .sat-tool-resize-glyph {
+  opacity: .7;
+}
+[data-sat-resizing="true"] .sat-tool-resize-glyph {
+  opacity: 1;
+}
+.sat-tool-hint {
+  animation: sat-tool-hint-life var(--sat-tool-hint-life) forwards;
+}
+@keyframes sat-tool-hint-life {
+  0% {
+    opacity: 1;
+    visibility: visible;
+  }
+  80% {
+    opacity: 1;
+    visibility: visible;
+  }
+  100% {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+.sat-tool-tip {
+  position: absolute;
+  z-index: 6;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  border-radius: 6px;
+  border: 1px solid var(--sat-divider-soft);
+  background: var(--sat-surface);
+  color: var(--sat-text-secondary);
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 4px 8px;
+  box-shadow: var(--sat-tool-elevation-inactive);
+}
+.sat-tool-tip-anchor {
+  position: relative;
+}
+.sat-tool-tip-anchor:hover .sat-tool-tip {
+  opacity: 1;
+  transition: opacity var(--sat-tool-edge-reveal) var(--sat-tool-motion-ease);
+  transition-delay: var(--sat-tool-tip-delay);
+}
+.sat-tool-tip-anchor:focus-within .sat-tool-tip,
+.sat-tool-tip-anchor:focus-visible .sat-tool-tip {
+  opacity: 1;
+  transition: none;
+}
+[data-dragging="true"] .sat-tool-tip,
+[data-sat-resizing="true"] .sat-tool-tip {
+  display: none;
+}
+
+/* Reference sheet frame (R-01, Bluebook parity): every selector is scoped to
+ * .sat-tool-ref / the reference variant attr; shared selectors above are
+ * frozen. Square white paper, 32px black header, centered 3x3 dot cue,
+ * bottom-right-only visible resize cue. Elevation reuses the shared
+ * sat-tool-active/inactive/dragging tokens; focus reuses --sat-focus. */
+.sat-tool-ref {
+  border-radius: var(--sat-ref-radius);
+  border-color: var(--sat-ref-border);
+  background-color: #ffffff;
+}
+.sat-tool-ref [data-sat-tool-header] {
+  height: var(--sat-ref-header-height);
+  min-height: var(--sat-ref-header-height);
+  background-color: var(--sat-ref-header-bg);
+  color: var(--sat-ref-header-fg);
+  border-color: var(--sat-ref-border);
+}
+.sat-tool-ref [data-sat-tool-header]:hover {
+  background-color: var(--sat-ref-header-bg);
+}
+.sat-tool-ref .sat-ref-dotgrip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: var(--sat-ref-dot-gap);
+  opacity: var(--sat-ref-dot-opacity);
+  pointer-events: none;
+}
+.sat-tool-ref .sat-ref-dotgrip i {
+  width: var(--sat-ref-dot-size);
+  height: var(--sat-ref-dot-size);
+  border-radius: 9999px;
+  background-color: currentColor;
+}
+.sat-tool-ref .sat-tool-resize-edge:hover {
+  background: transparent;
+  opacity: 1;
+}
+.sat-tool-ref .sat-tool-resize-glyph {
+  opacity: var(--sat-ref-resize-opacity);
+}
+.sat-tool-ref [data-sat-resize-handle]:hover .sat-tool-resize-glyph {
+  opacity: var(--sat-ref-resize-opacity-hover);
+}
+.sat-tool-ref[data-sat-resizing="true"] .sat-tool-resize-glyph {
+  opacity: var(--sat-ref-resize-opacity-active);
+}
+
+/* R-03 Reference collapse motion (D4/D9: height/clip/opacity only, never
+ * left/top/width, never transform on the window node). Dialog height commits
+ * instantly to the header strip; eyes track the fade + clip, which reads as
+ * a 180ms collapse. Collapse classes are isReference-gated in TSX; compact
+ * never carries them (C8). Edge-only feedback unchanged (no new glow/scale). */
+.sat-ref-collapsible { overflow: hidden; }
+.sat-ref-fade { opacity: 1; }
+.sat-ref-clip { clip-path: inset(0 0 0 0); }
+
+.sat-ref-collapsing .sat-ref-fade { animation: sat-ref-fade-out var(--sat-ref-collapse-fade) var(--sat-ref-collapse-ease) forwards; }
+.sat-ref-collapsing .sat-ref-clip { animation: sat-ref-clip-out var(--sat-ref-collapse-clip) var(--sat-ref-collapse-ease) forwards; animation-delay: var(--sat-ref-collapse-fade); }
+.sat-ref-expanding .sat-ref-fade { animation: sat-ref-fade-in var(--sat-ref-collapse-fade) var(--sat-ref-collapse-ease) forwards; animation-delay: var(--sat-ref-collapse-clip); }
+.sat-ref-expanding .sat-ref-clip { animation: sat-ref-clip-in var(--sat-ref-collapse-clip) var(--sat-ref-collapse-ease) forwards; }
+.sat-ref-collapsed .sat-ref-collapsible { height: 0; visibility: hidden; }
+
+@keyframes sat-ref-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes sat-ref-clip-out { from { clip-path: inset(0 0 0 0); } to { clip-path: inset(0 0 100% 0); } }
+@keyframes sat-ref-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sat-ref-clip-in { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* 1:1 guard: never transition position/size mid-gesture, collapse included. */
+.sat-tool-dragging .sat-ref-collapsible,
+.sat-tool-resizing .sat-ref-collapsible { transition: none; animation: none; }
+
 .sat-answer-choice {
   transition-property: background-color, border-color, box-shadow;
   transition-duration: var(--sat-motion-state);
@@ -1509,6 +1890,18 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     animation: none !important;
     transition-duration: 0.01ms !important;
   }
+  /* Tool windows appear instantly: the enter/exit animation lives on the
+   * .sat-ui root itself, which the descendant selector above does not match. */
+  .sat-ui.sat-tool-enter,
+  .sat-ui.sat-tool-exit {
+    animation: none !important;
+  }
+  /* R-03 collapse instant path (D9): short fade only, clip cut is instant.
+   * The descendant star guard already zeroes transitions above. */
+  .sat-ui .sat-ref-collapsing .sat-ref-fade,
+  .sat-ui .sat-ref-expanding .sat-ref-fade { animation-duration: 0.01ms !important; }
+  .sat-ui .sat-ref-collapsing .sat-ref-clip,
+  .sat-ui .sat-ref-expanding .sat-ref-clip { animation: none !important; }
 }
 
 /* Bluebook answer focus (Phase 6, Lane 3): 3px focus-token outline via

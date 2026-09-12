@@ -37,6 +37,8 @@ export interface StudentQuestionBlockSectionProps {
   hideDiagramReferenceForBlock?: ((blockId: string) => boolean) | undefined;
   eliminatedOptionIdsByQuestion?: Readonly<Record<string, readonly string[]>> | undefined;
   onToggleOptionElimination?: ((questionId: string, optionId: string) => void) | undefined;
+  /** P3.4: render selects as the phone choice sheet (compact/phone). */
+  selectSheetPresentation?: boolean | undefined;
 }
 
 function FlagButton({
@@ -54,7 +56,7 @@ function FlagButton({
         <button
           onClick={onClick}
           aria-pressed={flagged}
-          className={`inline-flex h-10 w-10 items-center justify-center rounded-full border shadow-sm transition-[scale,background-color,border-color] duration-150 ease-out active:scale-[0.96] ${
+          className={`inline-flex h-10 w-10 items-center justify-center rounded-full border shadow-sm ${
             flagged
               ? 'bg-amber-700 text-white border-amber-700'
               : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
@@ -71,7 +73,7 @@ function FlagButton({
     <button
       onClick={onClick}
       aria-pressed={flagged}
-      className={`absolute top-0 right-0 w-10 h-10 rounded-full flex items-center justify-center transition-[scale,background-color,border-color] duration-150 ease-out active:scale-[0.96] z-10 shadow-sm ${
+      className={`absolute top-0 right-0 w-10 h-10 rounded-full flex items-center justify-center z-10 shadow-sm ${
         flagged
           ? 'bg-amber-700 text-white'
           : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
@@ -118,7 +120,8 @@ function areBlockPropsEqual(
     previous.expandedQuestionGapClassName !== next.expandedQuestionGapClassName ||
     previous.hideDiagramReferenceForBlock !== next.hideDiagramReferenceForBlock ||
     previous.eliminatedOptionIdsByQuestion !== next.eliminatedOptionIdsByQuestion ||
-    previous.onToggleOptionElimination !== next.onToggleOptionElimination
+    previous.onToggleOptionElimination !== next.onToggleOptionElimination ||
+    previous.selectSheetPresentation !== next.selectSheetPresentation
   ) {
     return false;
   }
@@ -159,6 +162,7 @@ export const StudentQuestionBlockSection = React.memo(
     hideDiagramReferenceForBlock,
     eliminatedOptionIdsByQuestion,
     onToggleOptionElimination,
+    selectSheetPresentation,
   }: StudentQuestionBlockSectionProps) {
     const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
     const treeQuestions = blockQuestions.filter((question) => question.isSubAnswerTreeLeaf);
@@ -267,6 +271,7 @@ export const StudentQuestionBlockSection = React.memo(
                     highlightColor={highlightColor}
                     hideDiagramReference={hideDiagramReferenceForBlock?.(block.id)}
                     eliminatedOptionIds={eliminatedOptionIdsByQuestion?.[question.id]}
+                    selectSheetPresentation={selectSheetPresentation}
                     onToggleOptionElimination={
                       onToggleOptionElimination
                         ? (optionId) => onToggleOptionElimination(question.id, optionId)
@@ -314,6 +319,7 @@ export const StudentQuestionBlockSection = React.memo(
                 eliminatedOptionIds={
                   eliminatedOptionIdsByQuestion?.[singleBlockQuestion?.id ?? block.id]
                 }
+                selectSheetPresentation={selectSheetPresentation}
                 onToggleOptionElimination={
                   onToggleOptionElimination
                     ? (optionId) =>

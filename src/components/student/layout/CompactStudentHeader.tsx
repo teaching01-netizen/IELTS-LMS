@@ -43,7 +43,7 @@ function formatTime(seconds: number): string {
   return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
-const sheetActionClassName = `student-touch-target flex items-center gap-3 rounded-sm border border-gray-200 px-3 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50 transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]`;
+const sheetActionClassName = `student-touch-target flex items-center gap-3 rounded-sm border border-gray-200 px-3 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50 transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out`;
 
 export function CompactStudentHeader({
   examType = "Academic",
@@ -150,7 +150,7 @@ export function CompactStudentHeader({
       <button
         ref={toolsTriggerRef}
         type="button"
-        className="student-touch-target flex flex-shrink-0 items-center justify-center rounded-sm bg-gray-50 text-gray-900 transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] hover:bg-gray-100"
+        className="student-touch-target flex flex-shrink-0 items-center justify-center rounded-sm bg-gray-50 text-gray-900 transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out hover:bg-gray-100"
         aria-label="Open exam tools"
         aria-expanded={toolsOpen}
         onClick={() => setToolsOpen((open) => !open)}
@@ -213,7 +213,7 @@ export function CompactStudentHeader({
                 <button
                   key={entry.id}
                   type="button"
-                  className="student-touch-target flex items-center gap-2 rounded-sm border border-gray-200 px-3 text-sm font-semibold text-gray-800 transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] hover:bg-gray-50"
+                  className="student-touch-target flex items-center gap-2 rounded-sm border border-gray-200 px-3 text-sm font-semibold text-gray-800 transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out hover:bg-gray-50"
                   aria-label={entry.label}
                   onClick={() => onSelectHighlightColor?.(entry.id)}
                   data-student-primary-touch-target

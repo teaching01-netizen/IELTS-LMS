@@ -153,7 +153,7 @@ test.describe('Student LRW workflow', () => {
     await page.setViewportSize({ width: 800, height: 360 });
     await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
       'data-student-layout-mode',
-      'medium',
+      'compact',
     );
     await expect(page.getByLabel('Answer for question 1')).toBeVisible();
     await page.setViewportSize({ width: 360, height: 800 });
@@ -208,12 +208,14 @@ test.describe('Student LRW workflow', () => {
     const isPortraitProject = testInfo.project.name === 'tablet-portrait';
     expect(testInfo.project.use.hasTouch).toBe(true);
     expect(viewport.width < viewport.height).toBe(isPortraitProject);
+    // P2.1: mode follows geometry, not device identity. Portrait tablet
+    // (768x1024) is compact; landscape tablet (1080x810) is standard.
     await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
       'data-student-layout-mode',
-      'medium',
+      isPortraitProject ? 'compact' : 'standard',
     );
-    await expect(page.getByTestId('student-compact-header')).not.toBeVisible();
-    await expect(page.getByRole('button', { name: 'Questions', exact: true })).toHaveCount(0);
+    await expect(page.getByTestId('student-compact-header')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Questions', exact: true })).toBeVisible();
     await expectCompactTouchTargets(page);
 
     const geometry = await page.evaluate(() => ({

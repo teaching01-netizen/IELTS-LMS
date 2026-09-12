@@ -5,10 +5,10 @@ import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
 import type { StudentHighlightColor } from "./highlightPalette";
 import type { StudentLayoutMode } from "./layout/studentLayoutMode";
 import { StudentQuestionPanel } from "./StudentQuestionPanel";
-import { StudentSplitPaneResizer } from "./StudentSplitPaneResizer";
+import { StudentSplitPaneResizer, type StudentSplitResizeCommands } from "./StudentSplitPaneResizer";
 
 const paneTabClassName =
-  "student-touch-target flex-1 rounded-sm border px-3 text-sm font-semibold transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]";
+  "student-touch-target flex-1 rounded-sm border px-3 text-sm font-semibold transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out";
 
 interface StudentMaterialWithQuestionPaneProps {
   isTabletMode: boolean;
@@ -18,10 +18,15 @@ interface StudentMaterialWithQuestionPaneProps {
   leftWidth: number;
   splitMinWidth?: number;
   splitMaxWidth?: number;
+  /** P2.4: false when readable pane minimums cannot fit (focus override) — hides the separator. */
+  splitSplittable?: boolean;
   onDividerPointerDown: (
-    event: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
+    event: React.PointerEvent<HTMLDivElement>
   ) => void;
+  onDividerPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onDividerPointerEnd: (event: React.PointerEvent<HTMLDivElement>) => void;
   onDividerKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
+  resizeCommands?: StudentSplitResizeCommands | undefined;
   workspaceTestId: string;
   dividerAriaLabel: string;
   dividerTestId: string;
@@ -87,8 +92,12 @@ export function StudentMaterialWithQuestionPane({
   leftWidth,
   splitMinWidth,
   splitMaxWidth,
+  splitSplittable = true,
   onDividerPointerDown,
+  onDividerPointerMove,
+  onDividerPointerEnd,
   onDividerKeyDown,
+  resizeCommands,
   workspaceTestId,
   dividerAriaLabel,
   dividerTestId,
@@ -96,7 +105,7 @@ export function StudentMaterialWithQuestionPane({
   persistenceKey,
   questionPanel,
 }: StudentMaterialWithQuestionPaneProps) {
-  const isCompact = layoutMode === "compact";
+  const isCompact = layoutMode === "compact" || layoutMode === "phone";
   // S1-C3: lazy-init from sessionStorage so a remount restores the tab.
   const [activeCompactPane, setActiveCompactPane] = useState<CompactPane>(() =>
     readPersistedCompactPane(persistenceKey)
@@ -221,6 +230,7 @@ export function StudentMaterialWithQuestionPane({
       expandedQuestionGapClassName={questionPanel.expandedQuestionGapClassName}
       hideDiagramReferenceForBlock={questionPanel.hideDiagramReferenceForBlock}
       hideStepper={questionPanel.hideStepper ?? isCompact}
+      selectSheetPresentation={isCompact}
       shouldFocusQuestion={questionPanel.shouldFocusQuestion}
       eliminatedOptionIdsByQuestion={questionPanel.eliminatedOptionIdsByQuestion}
       onToggleOptionElimination={questionPanel.onToggleOptionElimination}
@@ -261,27 +271,33 @@ export function StudentMaterialWithQuestionPane({
               Questions
             </button>
           </div>
-          {activeCompactPane === "material" ? (
-            <div
-              ref={materialPaneRef}
-              className="min-h-0 flex-1 overflow-hidden"
-              onFocusCapture={() => {
-                lastFocusedPaneRef.current = "material";
-              }}
-            >
-              {materialPane}
-            </div>
-          ) : (
-            <div
-              ref={questionPaneRef}
-              className="min-h-0 flex-1 overflow-hidden"
-              onFocusCapture={() => {
-                lastFocusedPaneRef.current = "questions";
-              }}
-            >
-              {questionPanelElement}
-            </div>
-          )}
+          {/* P2.3: both panes stay mounted across tab switches. The hidden
+              pane is removed from interaction and assistive navigation via
+              the hidden attribute + inert, while its React state (textarea,
+              selection, answer tree) remains alive. A resize alone never
+              swaps pane identity or creates a new answer value. */}
+          <div
+            ref={materialPaneRef}
+            className="min-h-0 flex-1 overflow-hidden"
+            hidden={activeCompactPane !== "material"}
+            inert={activeCompactPane !== "material" ? true : undefined}
+            onFocusCapture={() => {
+              lastFocusedPaneRef.current = "material";
+            }}
+          >
+            {materialPane}
+          </div>
+          <div
+            ref={questionPaneRef}
+            className="min-h-0 flex-1 overflow-hidden"
+            hidden={activeCompactPane !== "questions"}
+            inert={activeCompactPane !== "questions" ? true : undefined}
+            onFocusCapture={() => {
+              lastFocusedPaneRef.current = "questions";
+            }}
+          >
+            {questionPanelElement}
+          </div>
         </div>
       ) : (
         <div
@@ -300,16 +316,21 @@ export function StudentMaterialWithQuestionPane({
           >
             {materialPane}
           </div>
-          <StudentSplitPaneResizer
-            isTabletMode={isTabletMode}
-            leftWidth={leftWidth}
-            minWidth={splitMinWidth}
-            maxWidth={splitMaxWidth}
-            onDividerPointerDown={onDividerPointerDown}
-            onDividerKeyDown={onDividerKeyDown}
-            ariaLabel={dividerAriaLabel}
-            testId={dividerTestId}
-          />
+          {splitSplittable ? (
+            <StudentSplitPaneResizer
+              isTabletMode={isTabletMode}
+              leftWidth={leftWidth}
+              minWidth={splitMinWidth}
+              maxWidth={splitMaxWidth}
+              onDividerPointerDown={onDividerPointerDown}
+              onDividerPointerMove={onDividerPointerMove}
+              onDividerPointerEnd={onDividerPointerEnd}
+              onDividerKeyDown={onDividerKeyDown}
+              resizeCommands={resizeCommands}
+              ariaLabel={dividerAriaLabel}
+              testId={dividerTestId}
+            />
+          ) : null}
           <div
             className="contents"
             onFocusCapture={() => {

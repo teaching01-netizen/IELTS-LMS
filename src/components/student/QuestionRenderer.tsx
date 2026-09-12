@@ -25,6 +25,7 @@ import {
   TFNGQuestion,
 } from "../../types";
 import { ProtectedInput } from "./ProtectedInput";
+import { ProtectedExamSelect } from "./ProtectedExamSelect";
 import { StudentQuestionText } from "./StudentQuestionText";
 import { StudentQuestionNumber } from "./StudentQuestionNumber";
 import { Check, Flag } from "lucide-react";
@@ -36,6 +37,9 @@ import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
 import { TableCompletionSlotCell } from "./TableCompletionSlotCell";
 import { emitAnswerMutationDebugLog } from "./answerMutationDebug";
 import { getMultiSelectSelectionLimit } from "../../utils/multiSelectMcq";
+
+/** Roman labels for matching headings; index = heading index. */
+const HEADING_ROMAN_LABELS = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"] as const;
 
 interface QuestionRendererProps {
   question:
@@ -75,6 +79,8 @@ interface QuestionRendererProps {
   registerLiveAnswer?: ((payload: { value: QuestionAnswer }) => void) | undefined;
   eliminatedOptionIds?: readonly string[] | undefined;
   onToggleOptionElimination?: ((optionId: string) => void) | undefined;
+  /** P3.4: render selects as the phone choice sheet (compact/phone). */
+  selectSheetPresentation?: boolean | undefined;
 }
 
 export function QuestionRenderer({
@@ -100,6 +106,7 @@ export function QuestionRenderer({
   registerLiveAnswer,
   eliminatedOptionIds = [],
   onToggleOptionElimination,
+  selectSheetPresentation = false,
 }: QuestionRendererProps) {
   const stringArrayAnswer = Array.isArray(answer) ? answer : [];
   const isCompactPane = tabletMode && compactPane;
@@ -147,7 +154,7 @@ export function QuestionRenderer({
       <button
         type="button"
         onClick={() => onToggleFlag(slotId)}
-        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border transition-[scale,background-color,border-color] duration-150 ease-out active:scale-[0.96] ${
+        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border ${
           flags[slotId]
             ? "border-amber-700 bg-amber-700 text-white"
             : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700"
@@ -322,6 +329,8 @@ export function QuestionRenderer({
   };
 
   const renderMatching = (matchingBlock: MatchingBlock, q: MatchingQuestion) => (
+    // P3.3/P3.4: the heading select is now a protected value adapter — the
+    // raw <select> previously here bypassed the lifecycle registry entirely.
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-4">
         <StudentQuestionNumber number={number} />
@@ -334,22 +343,24 @@ export function QuestionRenderer({
           highlightSurfaceId={getHighlightSurfaceId(q.id, "paragraph-label")}
         />
 
-        <select
+        <ProtectedExamSelect
+          ariaLabel={`Heading selection for question ${number}`}
           value={typeof answer === "string" ? answer : ""}
-          onChange={(event) => commitAnswerChange(event.target.value)}
-          className={`flex-1 rounded-md border border-gray-300 px-3 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0 max-w-full" : tabletMode ? "max-w-full" : "max-w-xs"}`}
-          aria-label={`Heading selection for question ${number}`}
-        >
-          <option value="">Choose heading…</option>
-          {matchingBlock.headings?.map((heading, index) => {
-            const roman = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"][index];
-            return (
-              <option key={heading.id} value={roman}>
-                {roman}. {stripBoldMarkdown(heading.text)}
-              </option>
-            );
-          })}
-        </select>
+          placeholder="Choose heading…"
+          options={(matchingBlock.headings ?? []).map((heading, index) => ({
+            value: HEADING_ROMAN_LABELS[index] ?? heading.id,
+            label: `${HEADING_ROMAN_LABELS[index] ?? "?"}. ${stripBoldMarkdown(heading.text)}`,
+          }))}
+          onValueChange={(value) => commitAnswerChange(value)}
+          compact={selectSheetPresentation}
+          className={
+            isCompactPane
+              ? "w-full min-w-0 max-w-full"
+              : tabletMode
+                ? "max-w-full"
+                : "max-w-xs"
+          }
+        />
       </div>
     </div>
   );
@@ -508,6 +519,10 @@ export function QuestionRenderer({
         ? questionLevel.options
         : (mcqBlock.options ?? []);
     const inputGroupName = questionLevel ? `q-${questionLevel.id}` : `q-${mcqBlock.id}`;
+    // ACT Science question-level figure (SingleMCQQuestion.imageUrl). Drive-tolerant
+    // candidates; unsafe schemes resolve to [] so nothing mounts. Broken images fall
+    // back inside StudentZoomableMedia (alternate sources) and never remove controls.
+    const questionImageSources = getImageUrlCandidates(questionLevel?.imageUrl ?? "");
 
     return (
       <fieldset className="flex flex-col gap-4">
@@ -522,10 +537,24 @@ export function QuestionRenderer({
             highlightSurfaceId={getHighlightSurfaceId(questionLevel?.id ?? mcqBlock.id, "stem")}
           />
         </legend>
+        {questionImageSources.length > 0 ? (
+          <div className={`${fieldIndentClass}`}>
+            <StudentZoomableMedia
+              sources={questionImageSources}
+              alt={`Question ${blockNum} figure`}
+              label={`Question ${blockNum} figure`}
+              hint="Tap to zoom the question image"
+              className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50"
+            />
+          </div>
+        ) : null}
         <div className={`${fieldIndentClass} space-y-3`}>
           {options.map((option, index) => {
             const letter = String.fromCharCode(65 + index);
             const isEliminated = eliminatedOptionIds.includes(option.id);
+            // ACT Science choice-level figure (MCQOption.imageUrl). Drive-tolerant;
+            // unsafe schemes resolve to [] so nothing mounts for that option.
+            const optionImageSources = getImageUrlCandidates(option.imageUrl ?? "");
             return (
               <div
                 key={option.id}
@@ -546,7 +575,8 @@ export function QuestionRenderer({
                     onChange={() => commitAnswerChange(option.id)}
                     className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
-                  <div className={`flex min-w-0 gap-2 ${isEliminated ? "text-gray-400 line-through" : ""}`}>
+                  <div className={`flex min-w-0 flex-1 flex-col gap-2 ${isEliminated ? "text-gray-400 line-through" : ""}`}>
+                    <div className="flex min-w-0 gap-2">
                     <StudentQuestionText
                       as="span"
                       className="font-bold text-gray-700"
@@ -569,6 +599,16 @@ export function QuestionRenderer({
                         "option-text"
                       )}
                     />
+                    </div>
+                    {optionImageSources.length > 0 ? (
+                      <StudentZoomableMedia
+                        sources={optionImageSources}
+                        alt={`Option ${letter} figure`}
+                        label={`Option ${letter} figure for question ${blockNum}`}
+                        hint="Tap to zoom the option image"
+                        className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50"
+                      />
+                    ) : null}
                   </div>
                 </label>
                 {onToggleOptionElimination ? (
@@ -1124,28 +1164,29 @@ export function QuestionRenderer({
                       : "flex items-center gap-3"
                   }
                 >
-                  <select
+                  <ProtectedExamSelect
+                    ariaLabel={`Category selection for question ${slotNumber}`}
                     value={
                       typeof stringArrayAnswer[index] === "string" ? stringArrayAnswer[index] : ""
                     }
-                    onChange={(event) =>
+                    placeholder="Choose category…"
+                    options={classificationBlock.categories.map((category) => ({
+                      value: category,
+                      label: stripBoldMarkdown(category),
+                    }))}
+                    onValueChange={(value) =>
                       updateIndexedAnswer(
                         index,
-                        event.target.value,
+                        value,
                         classificationBlock.items.length,
                         slotId
                       )
                     }
-                    className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"}`}
-                    aria-label={`Category selection for question ${slotNumber}`}
-                  >
-                    <option value="">Choose category…</option>
-                    {classificationBlock.categories.map((category) => (
-                      <option key={category} value={category}>
-                        {stripBoldMarkdown(category)}
-                      </option>
-                    ))}
-                  </select>
+                    compact={selectSheetPresentation}
+                    className={
+                      isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"
+                    }
+                  />
                   {renderFlagButton(slotId)}
                 </div>
               </div>
@@ -1193,28 +1234,29 @@ export function QuestionRenderer({
                       : "flex items-center gap-3"
                   }
                 >
-                  <select
+                  <ProtectedExamSelect
+                    ariaLabel={`Matching selection for question ${slotNumber}`}
                     value={
                       typeof stringArrayAnswer[index] === "string" ? stringArrayAnswer[index] : ""
                     }
-                    onChange={(event) =>
+                    placeholder="Choose match…"
+                    options={matchingFeaturesBlock.options.map((option) => ({
+                      value: option,
+                      label: stripBoldMarkdown(option),
+                    }))}
+                    onValueChange={(value) =>
                       updateIndexedAnswer(
                         index,
-                        event.target.value,
+                        value,
                         matchingFeaturesBlock.features.length,
                         slotId
                       )
                     }
-                    className={`rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"}`}
-                    aria-label={`Matching selection for question ${slotNumber}`}
-                  >
-                    <option value="">Choose match…</option>
-                    {matchingFeaturesBlock.options.map((option) => (
-                      <option key={option} value={option}>
-                        {stripBoldMarkdown(option)}
-                      </option>
-                    ))}
-                  </select>
+                    compact={selectSheetPresentation}
+                    className={
+                      isCompactPane ? "w-full min-w-0" : "min-w-[11rem]"
+                    }
+                  />
                   {renderFlagButton(slotId)}
                 </div>
               </div>

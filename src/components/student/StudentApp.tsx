@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import "./styles/exam.css";
 import {
   countAnsweredQuestions,
   countQuestionSlots,
@@ -167,7 +168,8 @@ export function StudentApp({
   const layoutEnvironment = useStudentLayoutEnvironment();
   const layoutMode = layoutEnvironment.layoutMode;
   const tabletMode =
-    layoutMode === "medium" &&
+    layoutMode !== "phone" &&
+    layoutMode !== "wide" &&
     (layoutEnvironment.hasTouch || layoutEnvironment.primaryPointer === "coarse");
   const autoSaveStatus =
     runtimeState.attemptSyncState === "syncing_reconnect"
@@ -230,6 +232,12 @@ export function StudentApp({
         ["--student-passage-measure" as string]: passageReadabilityGeometry.measure,
         ["--student-question-font-size" as string]: studentTypography.questionFontSize,
         ["--student-question-line-height" as string]: studentTypography.questionLineHeight,
+        ["--student-answer-font-size" as string]: studentTypography.answerFontSize,
+        ["--student-answer-line-height" as string]: studentTypography.answerLineHeight,
+        ["--student-writing-editor-font-size" as string]: studentTypography.writingEditorFontSize,
+        ["--student-writing-editor-line-height" as string]: studentTypography.writingEditorLineHeight,
+        ["--student-writing-prompt-font-size" as string]: studentTypography.writingPromptFontSize,
+        ["--student-writing-prompt-line-height" as string]: studentTypography.writingPromptLineHeight,
       }) as React.CSSProperties,
     [passageReadabilityGeometry, studentTypography, uiState.accessibilitySettings.zoom]
   );
@@ -901,7 +909,7 @@ export function StudentApp({
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
-      {layoutMode === "compact" ? (
+      {layoutMode === "compact" || layoutMode === "phone" ? (
         <StudentExamHeaderClock
           compact={true}
           examType={examState.type}
@@ -948,9 +956,16 @@ export function StudentApp({
         <StudentHighlightSelectionManagerProvider>
           <StudentExamWorkspaceSession
             examState={examState}
-            // S1-C3: per-exam sessionStorage namespace for split ratio + tab
-            // persistence (exam title is the only stable per-exam id on ExamState).
-            persistenceKeyBase={`ielts-split-pane:${examState.title}`}
+            // P2.5: per-attempt sessionStorage namespace for split ratio + tab
+            // persistence. A title is a display value, not an identifier; the
+            // attempt/version/module identity scopes candidate view state.
+            // Preview (no attempt ID) falls back to a display-only key so
+            // preview state never merges with live attempts.
+            persistenceKeyBase={
+              attemptState.attemptId
+                ? `student-workspace:${attemptState.attemptId}:${attemptState.attempt?.publishedVersionId ?? 'live'}:${runtimeState.currentModule}`
+                : `student-workspace:preview:${examState.title}`
+            }
             allQuestions={runtimeState.allQuestions}
             tabletMode={tabletMode}
             layoutMode={layoutMode}

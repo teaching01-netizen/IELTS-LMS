@@ -111,7 +111,7 @@ test.describe('student viewport layout acceptance', () => {
       await openActiveStudentExam(page, testInfo.project.name);
       await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
         'data-student-layout-mode',
-        'medium',
+        'compact',
       );
       await expect(page.getByRole('banner')).toBeVisible();
       await expect(page.getByRole('timer', { name: 'Time remaining' })).toBeVisible();
@@ -151,7 +151,7 @@ test.describe('student viewport layout acceptance', () => {
       await openActiveStudentExam(page, testInfo.project.name);
       await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
         'data-student-layout-mode',
-        'medium',
+        'standard',
       );
       await expect(page.getByRole('timer', { name: 'Time remaining' })).toBeVisible();
       await expect(page.locator('.student-exam-main')).toBeVisible();
@@ -184,7 +184,7 @@ test.describe('student viewport layout acceptance', () => {
         await openActiveStudentExam(page, `${testInfo.project.name}:${viewportCase.name}`);
         await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
           'data-student-layout-mode',
-          'medium',
+          viewportCase.expectedLayoutMode,
         );
         await expectContainedExamLayout(page);
       } finally {
@@ -202,7 +202,8 @@ test.describe('student viewport layout acceptance', () => {
     );
     const context = await browser.newContext({
       ...testInfo.project.use,
-      viewport: { width: 1199, height: 900 },
+      // P2.1: wide begins at 1180px, so the boundary pair is 1179 → 1180.
+      viewport: { width: 1179, height: 900 },
     });
 
     try {
@@ -213,7 +214,7 @@ test.describe('student viewport layout acceptance', () => {
       await openActiveStudentExam(page, `${testInfo.project.name}:wide-breakpoint`);
       await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
         'data-student-layout-mode',
-        'medium',
+        'standard',
       );
       const answer = page.getByLabel('Answer for question 1');
       await answer.fill(manifest.student.expectedAnswer);
@@ -222,7 +223,7 @@ test.describe('student viewport layout acceptance', () => {
       await flagStudentQuestion(page, 1);
       await selectStudentQuestion(page, 3);
 
-      await page.setViewportSize({ width: 1200, height: 900 });
+      await page.setViewportSize({ width: 1180, height: 900 });
       await waitForStudentViewportHeight(page);
       await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
         'data-student-layout-mode',
@@ -268,7 +269,7 @@ test.describe('student viewport layout acceptance', () => {
       await waitForStudentViewportHeight(page);
       await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
         'data-student-layout-mode',
-        'medium',
+        'standard',
       );
       await expect(answer).toHaveValue(manifest.student.expectedAnswer);
       await expect(page.getByTitle('Unflag question')).toHaveCount(1);
@@ -309,7 +310,7 @@ test.describe('student viewport layout acceptance', () => {
       await waitForStudentViewportHeight(page);
       await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
         'data-student-layout-mode',
-        'medium',
+        'compact',
       );
       await expect(answer).toHaveValue(manifest.student.expectedAnswer);
       const landscape = await expectContainedExamLayout(page);
@@ -319,7 +320,7 @@ test.describe('student viewport layout acceptance', () => {
       await waitForStudentViewportHeight(page);
       await expect(page.getByTestId('student-exam-shell')).toHaveAttribute(
         'data-student-layout-mode',
-        'compact',
+        'phone',
       );
       await expect(answer).toHaveValue(manifest.student.expectedAnswer);
       await expectContainedExamLayout(page);

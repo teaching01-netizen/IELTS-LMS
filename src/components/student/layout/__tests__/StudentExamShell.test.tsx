@@ -6,13 +6,13 @@ import { StudentExamShell } from '../StudentExamShell';
 describe('StudentExamShell', () => {
   it('publishes the responsive layout and touch mode without mutating children', () => {
     render(
-      <StudentExamShell layoutMode="medium" touchMode highContrast>
+      <StudentExamShell layoutMode="standard" touchMode highContrast>
         <input aria-label="answer" defaultValue="preserved answer" />
       </StudentExamShell>,
     );
 
     const shell = screen.getByTestId('student-exam-shell');
-    expect(shell).toHaveAttribute('data-student-layout-mode', 'medium');
+    expect(shell).toHaveAttribute('data-student-layout-mode', 'standard');
     expect(shell).toHaveAttribute('data-student-touch-mode', 'true');
     expect(shell).toHaveClass('high-contrast');
     expect(screen.getByRole('textbox', { name: 'answer' })).toHaveValue('preserved answer');
@@ -36,7 +36,7 @@ describe('StudentExamShell', () => {
 
   it('publishes the keyboard state attribute with a visible default', () => {
     const { rerender } = render(
-      <StudentExamShell layoutMode="medium">
+      <StudentExamShell layoutMode="standard">
         <span>content</span>
       </StudentExamShell>,
     );
@@ -45,7 +45,7 @@ describe('StudentExamShell', () => {
     expect(shell).toHaveAttribute('data-student-keyboard-open', 'false');
 
     rerender(
-      <StudentExamShell layoutMode="medium" keyboardOpen>
+      <StudentExamShell layoutMode="standard" keyboardOpen>
         <span>content</span>
       </StudentExamShell>,
     );
@@ -57,7 +57,7 @@ describe('StudentExamShell', () => {
 
   it('publishes the stable exam height as the single viewport CSS variable', () => {
     render(
-      <StudentExamShell layoutMode="medium" examHeight={1024}>
+      <StudentExamShell layoutMode="standard" examHeight={1024}>
         <span>content</span>
       </StudentExamShell>,
     );
@@ -69,7 +69,7 @@ describe('StudentExamShell', () => {
   it('does not overwrite existing typography CSS variables when publishing height', () => {
     render(
       <StudentExamShell
-        layoutMode="medium"
+        layoutMode="standard"
         examHeight={1024}
         style={{ '--student-passage-font-size': '1.125rem' } as React.CSSProperties}
       >
@@ -84,7 +84,7 @@ describe('StudentExamShell', () => {
 
   it('leaves the height variable to the CSS fallback until a height is measured', () => {
     render(
-      <StudentExamShell layoutMode="medium" examHeight={null}>
+      <StudentExamShell layoutMode="standard" examHeight={null}>
         <span>content</span>
       </StudentExamShell>,
     );
@@ -95,7 +95,7 @@ describe('StudentExamShell', () => {
 
   it('never remounts children when the keyboard state changes', () => {
     const { rerender } = render(
-      <StudentExamShell layoutMode="medium" keyboardOpen={false}>
+      <StudentExamShell layoutMode="standard" keyboardOpen={false}>
         <input aria-label="answer" defaultValue="durable" />
       </StudentExamShell>,
     );
@@ -103,7 +103,7 @@ describe('StudentExamShell', () => {
     const answerBefore = screen.getByRole('textbox', { name: 'answer' });
 
     rerender(
-      <StudentExamShell layoutMode="medium" keyboardOpen examHeight={1024}>
+      <StudentExamShell layoutMode="standard" keyboardOpen examHeight={1024}>
         <input aria-label="answer" defaultValue="durable" />
       </StudentExamShell>,
     );
@@ -119,19 +119,19 @@ describe('StudentExamShell', () => {
 
   it('preserves an answer input value across viewport transitions', () => {
     const { rerender } = render(
-      <StudentExamShell layoutMode="medium" examHeight={1024}>
+      <StudentExamShell layoutMode="standard" examHeight={1024}>
         <input aria-label="answer" defaultValue="typed answer" />
       </StudentExamShell>,
     );
 
     rerender(
-      <StudentExamShell layoutMode="medium" examHeight={1024} keyboardOpen>
+      <StudentExamShell layoutMode="standard" examHeight={1024} keyboardOpen>
         <input aria-label="answer" defaultValue="typed answer" />
       </StudentExamShell>,
     );
 
     rerender(
-      <StudentExamShell layoutMode="medium" examHeight={1024}>
+      <StudentExamShell layoutMode="standard" examHeight={1024}>
         <input aria-label="answer" defaultValue="typed answer" />
       </StudentExamShell>,
     );

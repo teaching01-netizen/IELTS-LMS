@@ -1,4 +1,11 @@
-import { getStudentLayoutMode, type StudentLayoutMode } from './studentLayoutMode';
+import {
+  STUDENT_MIN_ANSWER_PANE_WIDTH_PX,
+  STUDENT_MIN_MATERIAL_PANE_WIDTH_PX,
+  STUDENT_SPLIT_RAIL_WIDTH_PX,
+  getStudentLayoutMode,
+  resolveStudentLayoutMode,
+  type StudentLayoutMode,
+} from './studentLayoutMode';
 
 export interface StudentCapabilitySnapshot {
   readonly width: number;
@@ -20,7 +27,19 @@ export function getStudentInteractionCapabilities(
   snapshot: StudentCapabilitySnapshot,
 ): StudentInteractionCapabilities {
   return {
-    layoutMode: getStudentLayoutMode(snapshot.width),
+    // P2.1: mode is a policy over shell geometry, not width alone. The
+    // window's inner height IS the outer stable shell in the browser (safe
+    // areas are subtracted by the exam height policy), so it feeds the
+    // height gate directly. Invalid/unmeasured geometry still resolves
+    // through the same policy's safe fallbacks.
+    layoutMode: resolveStudentLayoutMode({
+      containerWidth: snapshot.width,
+      stableShellHeight: Number.isFinite(snapshot.height) && snapshot.height > 0 ? snapshot.height : null,
+      workspaceHeight: null,
+      minMaterialWidth: STUDENT_MIN_MATERIAL_PANE_WIDTH_PX,
+      minAnswerWidth: STUDENT_MIN_ANSWER_PANE_WIDTH_PX,
+      railWidth: STUDENT_SPLIT_RAIL_WIDTH_PX,
+    }).layoutMode,
     primaryPointer: snapshot.hasCoarsePointer ? 'coarse' : 'fine',
     hasTouch: snapshot.hasTouchSupport,
     hasHover: snapshot.hasHover,

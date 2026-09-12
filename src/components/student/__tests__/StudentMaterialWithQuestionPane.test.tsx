@@ -15,6 +15,8 @@ function renderPane(
       splitPaneStyle={undefined}
       leftWidth={50}
       onDividerPointerDown={() => undefined}
+      onDividerPointerMove={() => undefined}
+      onDividerPointerEnd={() => undefined}
       onDividerKeyDown={() => undefined}
       workspaceTestId="student-material-workspace"
       dividerAriaLabel="Resize panes"
@@ -46,18 +48,21 @@ describe('StudentMaterialWithQuestionPane', () => {
     renderPane();
 
     expect(screen.getByTestId('material-content')).toBeVisible();
-    expect(screen.queryByTestId('question-content')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('question-content')).not.toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Questions' }));
 
-    expect(screen.queryByTestId('material-content')).not.toBeInTheDocument();
+    // P2.3: the material pane stays MOUNTED (stable DOM identity) but hidden
+    // and inert — no unmount/remount on tab switch.
+    expect(screen.queryByTestId('material-content')).not.toBeVisible();
+    expect(screen.getByTestId('material-content').closest('[inert]')).not.toBeNull();
     expect(screen.getByTestId('question-content')).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'Passage' }));
     expect(screen.getByTestId('material-content')).toBeVisible();
   });
 
-  it('restores material scroll position after compact pane switching', () => {
+  it('keeps the material scroll owner mounted with identical DOM identity across pane switches', () => {
     const materialScrollNodes: HTMLDivElement[] = [];
 
     renderPane(
@@ -80,9 +85,11 @@ describe('StudentMaterialWithQuestionPane', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Questions' }));
     fireEvent.click(screen.getByRole('button', { name: 'Passage' }));
 
-    const restoredMaterialScroll = materialScrollNodes[materialScrollNodes.length - 1];
-    expect(restoredMaterialScroll).not.toBe(initialMaterialScroll);
-    expect(restoredMaterialScroll.scrollTop).toBe(137);
+    // P2.3: exactly one mounted material scroll owner — the SAME node before
+    // and after switching tabs (identity preserved, no remount).
+    expect(materialScrollNodes).toHaveLength(1);
+    expect(materialScrollNodes[0]).toBe(initialMaterialScroll);
+    expect(initialMaterialScroll.scrollTop).toBe(137);
   });
 
   it('keeps the existing split presentation outside compact mode', () => {

@@ -36,6 +36,8 @@ interface StudentQuestionPanelProps {
   shouldFocusQuestion?: (() => boolean) | undefined;
   eliminatedOptionIdsByQuestion?: Readonly<Record<string, readonly string[]>> | undefined;
   onToggleOptionElimination?: ((questionId: string, optionId: string) => void) | undefined;
+  /** P3.4: render selects as the phone choice sheet (compact/phone). */
+  selectSheetPresentation?: boolean | undefined;
 }
 
 export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
@@ -63,6 +65,7 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
   shouldFocusQuestion,
   eliminatedOptionIdsByQuestion,
   onToggleOptionElimination,
+  selectSheetPresentation = false,
 }: StudentQuestionPanelProps) {
   const currentIndex = allQuestions.findIndex((question) => question.id === currentQuestionId);
   const hasPrev = currentIndex > 0;
@@ -154,6 +157,7 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
               hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
               eliminatedOptionIdsByQuestion={eliminatedOptionIdsByQuestion}
               onToggleOptionElimination={onToggleOptionElimination}
+              selectSheetPresentation={selectSheetPresentation}
         />
       );
     },
@@ -172,6 +176,7 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
       onAnswerChange,
       onToggleFlag,
       onToggleOptionElimination,
+      selectSheetPresentation,
       questionsByBlockId,
       registerLiveAnswer,
       renderBlockInstruction,

@@ -53,13 +53,15 @@ describe("StudentExamPreview", () => {
     );
 
     const shell = container.querySelector(".student-exam-shell") as HTMLElement;
-    const initialFontSize = shell.style.fontSize;
+    const initialPassageSize = shell.style.getPropertyValue("--student-passage-font-size");
 
     fireEvent.click(screen.getByRole("button", { name: /open accessibility settings/i }));
     fireEvent.click(screen.getByTestId("font-size-option-large"));
 
-    expect(shell.style.fontSize).not.toBe(initialFontSize);
-    expect(shell.style.fontSize).toContain("clamp");
+    // P1.1: the shell fontSize stays at the browser default; the text-size
+    // preference moves the semantic role variables instead.
+    expect(shell.style.getPropertyValue("--student-passage-font-size")).not.toBe(initialPassageSize);
+    expect(shell.style.getPropertyValue("--student-passage-font-size")).not.toContain("clamp");
   });
 
   it("keeps long objective typing in preview without clearing the value", () => {

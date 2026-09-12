@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getStudentInteractionCapabilities } from '../studentCapabilities';
 
 describe('student interaction capabilities', () => {
-  it('keeps compact layout independent from pointer and touch capabilities', () => {
+  it('keeps layout mode independent from pointer and touch capabilities (393px is phone, not compact)', () => {
     expect(
       getStudentInteractionCapabilities({
         width: 393,
@@ -12,7 +12,7 @@ describe('student interaction capabilities', () => {
         hasHover: false,
       }),
     ).toEqual({
-      layoutMode: 'compact',
+      layoutMode: 'phone',
       primaryPointer: 'fine',
       hasTouch: true,
       hasHover: false,
@@ -20,7 +20,7 @@ describe('student interaction capabilities', () => {
     });
   });
 
-  it('recognizes a medium touch tablet without treating it as a device identity', () => {
+  it('recognizes a standard touch tablet without treating it as a device identity', () => {
     expect(
       getStudentInteractionCapabilities({
         width: 1024,
@@ -30,7 +30,9 @@ describe('student interaction capabilities', () => {
         hasHover: false,
       }),
     ).toMatchObject({
-      layoutMode: 'medium',
+      // Height-aware policy: 1024 >= 900 width and 1366 >= 600 shell height
+      // resolve standard through resolveStudentLayoutMode.
+      layoutMode: 'standard',
       primaryPointer: 'coarse',
       hasTouch: true,
       hasHover: false,
@@ -54,5 +56,17 @@ describe('student interaction capabilities', () => {
       hasHover: true,
       orientation: 'landscape',
     });
+  });
+
+  it('downgrades wide width to standard when the shell is too short (P2.1 height gate)', () => {
+    expect(
+      getStudentInteractionCapabilities({
+        width: 1440,
+        height: 500,
+        hasCoarsePointer: false,
+        hasTouchSupport: false,
+        hasHover: true,
+      }).layoutMode,
+    ).toBe('standard');
   });
 });

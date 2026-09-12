@@ -30,9 +30,13 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
   const [confirmComplete, setConfirmComplete] = useState(false);
   const {
     handleDrag,
+    handlePointerMove,
+    handlePointerEnd,
     handleKeyboardResize,
     leftWidth,
+    resizeCommands,
     splitBounds,
+    splittable,
     workspaceRef,
   } = useSplitPaneResize({
     isTabletMode: false,
@@ -174,16 +178,21 @@ export function StudentSpeaking({ state, onSubmit, currentQuestionId, onNavigate
           </div>
         </div>
 
+        {splittable ? (
         <StudentSplitPaneResizer
           isTabletMode={false}
           leftWidth={leftWidth}
           minWidth={splitBounds.min}
           maxWidth={splitBounds.max}
           onDividerPointerDown={handleDrag}
+          onDividerPointerMove={handlePointerMove}
+          onDividerPointerEnd={handlePointerEnd}
           onDividerKeyDown={handleKeyboardResize}
+          resizeCommands={resizeCommands}
           ariaLabel="Resize speaking camera and questions panels"
           testId="speaking-pane-resizer"
         />
+        ) : null}
 
         <div style={{ width: `calc(${100 - leftWidth}% - 16px)` }} className="h-full flex flex-col relative p-4 md:p-6 lg:p-8 bg-gray-50 overflow-y-auto no-scrollbar min-w-[280px] md:min-w-[320px] pb-20 md:pb-24">
           <div className="max-w-xl mx-auto w-full h-full flex flex-col">

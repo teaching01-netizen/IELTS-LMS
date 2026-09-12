@@ -204,7 +204,11 @@ describe('StudentFooter', () => {
     );
 
     expect(screen.getByText('0/1')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /question 1, not answered/i })).toHaveLength(1);
+    // P3.5: the shared view model marks the whole grouped slot current when
+    // any of its leaves is active, so the chip reads "current" here.
+    expect(
+      screen.getAllByRole('button', { name: /question 1, current, not answered/i }),
+    ).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: /question 1/i }));
     expect(onNavigate).toHaveBeenCalledWith('sentence-q1:blank-1');

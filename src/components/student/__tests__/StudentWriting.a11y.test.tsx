@@ -196,31 +196,43 @@ describe('StudentWriting a11y', () => {
 
     const workspace = screen.getByTestId('writing-split-workspace');
     const resizer = screen.getByTestId('writing-pane-resizer');
+    // P2.4: one 10px desktop rail; the separator role replaces slider.
     expect(workspace).toHaveStyle({
       '--writing-prompt-pane-width': '50%',
       '--writing-editor-pane-width': 'calc(50% - var(--split-divider-width))',
-      '--split-divider-width': '16px',
+      '--split-divider-width': '10px',
     });
-    expect(resizer.querySelector('.h-10.w-8')).toBeInTheDocument();
+    expect(resizer.querySelector('.h-12.w-8')).toBeInTheDocument();
 
     vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,
       height: 600,
       left: 100,
-      right: 1100,
+      right: 1830,
       top: 0,
-      width: 1000,
+      width: 1730,
       x: 100,
       y: 0,
       toJSON: () => ({}),
     });
-    fireEvent.mouseDown(screen.getByTestId('writing-pane-resizer'), { clientX: 600 });
-    fireEvent.mouseMove(document, { clientX: 700 });
-    fireEvent.mouseUp(document);
+    // P2.4: pointer-capture gesture path; drag +10% of the usable width
+    // (1730 - 10 rail = 1720 → +172px). Bounds at this width are 32..68%.
+    fireEvent.pointerDown(screen.getByTestId('writing-pane-resizer'), { pointerId: 1, clientX: 965 });
+    fireEvent.pointerMove(screen.getByTestId('writing-pane-resizer'), { pointerId: 1, clientX: 1137 });
+    fireEvent.pointerUp(screen.getByTestId('writing-pane-resizer'), { pointerId: 1 });
 
     expect(workspace).toHaveStyle({
       '--writing-prompt-pane-width': '60%',
       '--writing-editor-pane-width': 'calc(40% - var(--split-divider-width))',
+    });
+
+    fireEvent.pointerDown(screen.getByTestId('writing-pane-resizer'), { pointerId: 1, clientX: 1137 });
+    fireEvent.pointerMove(screen.getByTestId('writing-pane-resizer'), { pointerId: 1, clientX: 793 });
+    fireEvent.pointerUp(screen.getByTestId('writing-pane-resizer'), { pointerId: 1 });
+
+    expect(workspace).toHaveStyle({
+      '--writing-prompt-pane-width': '40%',
+      '--writing-editor-pane-width': 'calc(60% - var(--split-divider-width))',
     });
   });
 
@@ -260,13 +272,13 @@ describe('StudentWriting a11y', () => {
       '--writing-editor-pane-width': 'calc(50%)',
       '--split-divider-width': '8px',
     });
-    expect(resizer).toHaveAttribute('role', 'slider');
+    expect(resizer).toHaveAttribute('role', 'separator');
     expect(resizer).toHaveAttribute('aria-valuenow', '50');
     expect(resizer).toHaveClass('w-8');
     expect(resizer).toHaveClass('absolute');
-    expect(resizer.querySelector('.w-2')).toBeInTheDocument();
-    expect(resizer.querySelector('.w-8')).toBeInTheDocument();
+    expect(resizer.querySelector('.w-0\\.5')).toBeInTheDocument();
     expect(resizer.querySelector('.h-16')).toBeInTheDocument();
+    expect(resizer.querySelector('.w-8')).toBeInTheDocument();
   });
 
   it('offsets tablet writing header and placeholder away from the splitter overlay', () => {
@@ -344,36 +356,6 @@ describe('StudentWriting a11y', () => {
     fireEvent.change(editor, { target: { value: '' } });
     fireEvent.blur(editor);
     expect(screen.getAllByText('Write your answer here…')).toHaveLength(1);
-  });
-
-  it('matches tablet resizer dimensions used in reading and listening', () => {
-    render(
-      <StudentWriting
-        state={createExamState()}
-        writingAnswers={{}}
-        onWritingChange={() => undefined}
-        onSubmit={() => undefined}
-        currentQuestionId={null}
-        onNavigate={() => undefined}
-        tabletMode
-      />,
-    );
-
-    const workspace = screen.getByTestId('writing-split-workspace');
-    const resizer = screen.getByTestId('writing-pane-resizer');
-
-    expect(workspace).toHaveStyle({
-      '--writing-prompt-pane-width': '50%',
-      '--writing-editor-pane-width': 'calc(50%)',
-      '--split-divider-width': '8px',
-    });
-    expect(resizer).toHaveAttribute('role', 'slider');
-    expect(resizer).toHaveAttribute('aria-valuenow', '50');
-    expect(resizer).toHaveClass('w-8');
-    expect(resizer).toHaveClass('absolute');
-    expect(resizer.querySelector('.w-2')).toBeInTheDocument();
-    expect(resizer.querySelector('.w-8')).toBeInTheDocument();
-    expect(resizer.querySelector('.h-16')).toBeInTheDocument();
   });
 
   it('offsets tablet writing header and editor content away from the splitter overlay', () => {

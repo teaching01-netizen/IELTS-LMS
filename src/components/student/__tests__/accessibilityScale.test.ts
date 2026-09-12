@@ -14,12 +14,43 @@ describe('student accessibility scale', () => {
 
     expect(small.fontScale).toBeLessThan(normal.fontScale);
     expect(normal.fontScale).toBeLessThan(large.fontScale);
-    expect(small.rootFontSize).toContain('clamp');
-    expect(normal.rootFontSize).toContain('clamp');
-    expect(large.rootFontSize).toContain('clamp');
     expect(small.controlFontSize).not.toBe(large.controlFontSize);
     expect(normal.chipFontSize).not.toBe(small.chipFontSize);
     expect(getStudentFontSizeLabel('normal')).toBe('Medium');
+  });
+
+  it('uses fixed rem values with no viewport-dependent units (P1.1)', () => {
+    const sizes = ['small', 'normal', 'large'] as const;
+    const viewportDependent = /vw|vmin|vmax|clamp\(/;
+    for (const size of sizes) {
+      const scale = getStudentTypographyScale(size);
+      for (const [key, value] of Object.entries(scale)) {
+        if (typeof value !== 'string' || key === 'rootFontSize') continue;
+        expect(value, `${size}.${key} must not depend on viewport width`).not.toMatch(viewportDependent);
+      }
+    }
+  });
+
+  it('resolves the design-contract role targets at normal size', () => {
+    const normal = getStudentTypographyScale('normal');
+    // 18px passage, 16px answer, 15px control, 26px title, 17px question stem.
+    expect(normal.passageFontSize).toBe('1.125rem');
+    expect(normal.answerFontSize).toBe('1rem');
+    expect(normal.answerLineHeight).toBe('1.45');
+    expect(normal.controlFontSize).toBe('0.9375rem');
+    expect(normal.passageTitleFontSize).toBe('1.625rem');
+    expect(normal.questionFontSize).toBe('1.0625rem');
+    // Writing editor and prompt share the passage family target (18/1.68).
+    expect(normal.writingEditorFontSize).toBe('1.125rem');
+    expect(normal.writingEditorLineHeight).toBe('1.68');
+    expect(normal.writingPromptFontSize).toBe('1.125rem');
+    expect(normal.writingPromptLineHeight).toBe('1.68');
+  });
+
+  it('keeps the root font size at the browser default so zoom stays independent', () => {
+    for (const size of ['small', 'normal', 'large'] as const) {
+      expect(getStudentTypographyScale(size).rootFontSize).toBe('1rem');
+    }
   });
 
   it('maps passage readability levels to orthogonal line-height and measure geometry', () => {

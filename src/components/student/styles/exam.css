@@ -1,0 +1,167 @@
+/*
+ * Exam design tokens and control-state recipe (Phase 1, P1.2/P1.3).
+ *
+ * Scope: everything here is namespaced under .student-exam-shell, so staff,
+ * SAT, and authoring surfaces are unaffected. This file is imported by
+ * StudentApp (the common student entry) — after index.css so these
+ * declarations win without !important escalation.
+ *
+ * Sources: plans/ielts-act-ux-production/design-contract.md
+ *   - palette: near-white surfaces, text #292927/#555550, restrained blue,
+ *     muted yellow highlight
+ *   - radii: 4-6px controls, 8px overlays; elevation reserved for overlays
+ *   - motion: immediate press (~90-100ms), overlays capped 120-140ms
+ *   - states: rest/hover/pressed/focus-visible/selected/disabled/pending/error
+ */
+
+.student-exam-shell {
+  /* Palette (design contract). Accessible pairs, not copied greys. */
+  --exam-surface: #fbfbfa;
+  --exam-surface-raised: #ffffff;
+  --exam-text-primary: #292927;
+  --exam-text-secondary: #555550;
+  --exam-accent: #2f5fd0;
+  --exam-accent-strong: #2549a8;
+  --exam-accent-soft: rgba(47, 95, 208, 0.12);
+  --exam-highlight: rgba(246, 206, 84, 0.55);
+  --exam-danger: #b4362f;
+  --exam-divider-subtle: rgba(41, 41, 39, 0.08);
+  --exam-divider: rgba(41, 41, 39, 0.18);
+  --exam-control-border: rgba(41, 41, 39, 0.24);
+  --exam-focus: #2f5fd0;
+
+  /* Geometry */
+  --exam-control-radius: 5px;
+  --exam-overlay-radius: 8px;
+  --exam-target-min: 2.75rem; /* 44px primary targets */
+  --exam-target-touch: 3rem; /* 48px touch targets */
+  --exam-border-width: 1px;
+  --exam-focus-outline-width: 2px;
+
+  /* Motion: immediate feedback; overlays inside the 120-140ms cap. */
+  --exam-motion-press: 100ms;
+  --exam-motion-overlay: 130ms;
+
+  /* Elevation is reserved for overlays; ordinary controls stay flat. */
+  --exam-overlay-shadow: 0 8px 24px rgba(41, 41, 39, 0.16), 0 2px 6px rgba(41, 41, 39, 0.08);
+
+  color-scheme: light;
+}
+
+/* Overlay portals created by the exam (selectors, sheets, dialogs) inherit
+   the exam tokens even when portalled outside the shell DOM subtree. */
+.student-exam-portal {
+  font-family: var(--exam-font-stack, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif);
+  font-size: var(--student-control-font-size, 0.9375rem);
+  color: var(--exam-text-primary);
+  color-scheme: light;
+}
+
+/*
+ * One control-state recipe (P1.3). State changes alter fill/outline/icon/text
+ * but never geometry: no scale, no vertical movement, no size-animating
+ * borders. Borders keep a constant reserved width across every state.
+ */
+.student-exam-shell .exam-control {
+  border: var(--exam-border-width) solid var(--exam-control-border);
+  border-radius: var(--exam-control-radius);
+  color: var(--exam-text-primary);
+  background: var(--exam-surface-raised);
+  transition:
+    background-color var(--exam-motion-press) ease-out,
+    border-color var(--exam-motion-press) ease-out,
+    box-shadow var(--exam-motion-press) ease-out,
+    opacity var(--exam-motion-press) ease-out;
+}
+
+.student-exam-shell .exam-control:hover {
+  border-color: var(--exam-text-secondary);
+  background: #f4f4f2;
+}
+
+.student-exam-shell .exam-control:active {
+  background: #ececea; /* immediate fill change; no movement */
+}
+
+.student-exam-shell .exam-control:focus-visible {
+  outline: var(--exam-focus-outline-width) solid var(--exam-focus);
+  outline-offset: 2px;
+}
+
+.student-exam-shell .exam-control[aria-pressed='true'],
+.student-exam-shell .exam-control[aria-selected='true'],
+.student-exam-shell .exam-control[aria-checked='true'] {
+  border-color: var(--exam-accent-strong);
+  background: var(--exam-accent-soft);
+}
+
+.student-exam-shell .exam-control:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  /* No hover affordance while disabled. */
+  pointer-events: none;
+}
+
+.student-exam-shell .exam-control[data-pending='true'] {
+  opacity: 0.8;
+  cursor: progress;
+}
+
+.student-exam-shell .exam-control[aria-invalid='true'] {
+  border-color: var(--exam-danger);
+}
+
+/* Pending/status slot: digits, save messages, flags, and progress never move
+   adjacent controls (P1.5). Tabular numerals with reserved width. */
+.student-exam-shell .exam-numeric-slot {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  min-width: 4.5ch;
+  text-align: right;
+}
+
+/* Overlays (dialogs/sheets/portaled menus) use the larger radius and the
+   reserved elevation; their fade is capped at --exam-motion-overlay. */
+.student-exam-shell .exam-overlay,
+.student-exam-portal .exam-overlay {
+  border-radius: var(--exam-overlay-radius);
+  box-shadow: var(--exam-overlay-shadow);
+  animation: exam-overlay-in var(--exam-motion-overlay) ease-out;
+}
+
+@keyframes exam-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Reduced motion disables nonessential transitions inside the exam scope. */
+@media (prefers-reduced-motion: reduce) {
+  .student-exam-shell .exam-control,
+  .student-exam-shell .exam-overlay,
+  .student-exam-portal .exam-overlay {
+    transition-duration: 0.01ms;
+    animation-duration: 0.01ms;
+  }
+}
+
+/* Forced colors keep boundaries, controls, and state indicators visible. */
+@media (forced-colors: active) {
+  .student-exam-shell .exam-control {
+    border-color: CanvasText;
+  }
+
+  .student-exam-shell .exam-control:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .student-exam-shell .exam-control[aria-pressed='true'],
+  .student-exam-shell .exam-control[aria-selected='true'],
+  .student-exam-shell .exam-control[aria-checked='true'] {
+    border-color: Highlight;
+    background: SelectedItem;
+  }
+}

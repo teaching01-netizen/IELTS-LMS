@@ -91,8 +91,11 @@ describe('student question experience', () => {
 
     expect(container.querySelector('.rounded-full.bg-blue-50')).toBeNull();
     expect(screen.getByRole('combobox', { name: 'Category selection for question 1' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Category A' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Category B' })).toBeInTheDocument();
+    // P3.3: the protected adapter renders options when open; the values are
+    // queryable through the deterministic per-option test ids.
+    fireEvent.click(screen.getByRole('combobox', { name: 'Category selection for question 1' }));
+    expect(screen.getByTestId('protected-exam-select-item-Category A')).toBeInTheDocument();
+    expect(screen.getByTestId('protected-exam-select-item-Category B')).toBeInTheDocument();
   });
 
   it('marks selectable question copy for callout suppression without marking the answer control', () => {
@@ -244,9 +247,11 @@ describe('student question experience', () => {
       />,
     );
 
+    // P3.4: compact presentation is carried by the control root wrapper.
+    const root = screen.getByTestId('protected-exam-select');
+    expect(root).toHaveClass('w-full');
+    expect(root).toHaveClass('min-w-0');
     const select = screen.getByRole('combobox', { name: 'Category selection for question 1' });
-    expect(select).toHaveClass('w-full');
-    expect(select).toHaveClass('min-w-0');
     expect(select).not.toHaveClass('min-w-[11rem]');
   });
 
@@ -508,8 +513,10 @@ describe('student question experience', () => {
 
     expect(container.querySelector('.rounded-full.bg-gray-100')).toBeNull();
     expect(screen.getByRole('combobox', { name: 'Matching selection for question 1' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Writer A' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Writer B' })).toBeInTheDocument();
+    // P3.3: options are exposed through the protected adapter's sheet/menu.
+    fireEvent.click(screen.getByRole('combobox', { name: 'Matching selection for question 1' }));
+    expect(screen.getByTestId('protected-exam-select-item-Writer A')).toBeInTheDocument();
+    expect(screen.getByTestId('protected-exam-select-item-Writer B')).toBeInTheDocument();
   });
 
   it('allows jumping to another part from the footer progress pill', () => {
@@ -1214,17 +1221,17 @@ describe('student question experience', () => {
     const workspace = screen.getByTestId('reading-split-workspace');
     expect(workspace).toHaveClass('flex-row');
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '40%',
-      '--question-pane-width': 'calc(60%)',
+      '--reading-pane-width': '50%',
+      '--question-pane-width': 'calc(50%)',
       '--split-divider-width': '8px',
     });
     const readingResizer = screen.getByTestId('reading-pane-resizer');
     expect(readingResizer).toBeInTheDocument();
-    expect(readingResizer).toHaveAttribute('role', 'slider');
-    expect(readingResizer).toHaveAttribute('aria-valuenow', '40');
+    expect(readingResizer).toHaveAttribute('role', 'separator');
+    expect(readingResizer).toHaveAttribute('aria-valuenow', '50');
     expect(readingResizer).toHaveClass('w-8');
     expect(readingResizer).toHaveClass('absolute');
-    expect(readingResizer.querySelector('.w-2')).toBeInTheDocument();
+    expect(readingResizer.querySelector('.w-0\\.5')).toBeInTheDocument();
     expect(readingResizer.querySelector('.h-16')).toBeInTheDocument();
     expect(readingResizer.querySelector('.w-8')).toBeInTheDocument();
     expect(workspace.querySelector('.min-w-\\[48px\\]')).toBeInTheDocument();
@@ -1240,59 +1247,51 @@ describe('student question experience', () => {
 
     fireEvent.keyDown(readingResizer, { key: 'ArrowRight' });
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '45%',
-      '--question-pane-width': 'calc(55%)',
+      '--reading-pane-width': '52%',
+      '--question-pane-width': 'calc(48%)',
     });
     fireEvent.keyDown(readingResizer, { key: 'ArrowLeft' });
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '40%',
-      '--question-pane-width': 'calc(60%)',
+      '--reading-pane-width': '50%',
+      '--question-pane-width': 'calc(50%)',
     });
 
-    const readingWorkspaceRect = vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
+    // P2.4: 1730px workspace → usable 1720px after the 10px rail; readable
+    // bounds land exactly at 32%/68%. Grip offset is captured from the
+    // rendered 50% position (leftPx = 860 → grip = 965 - (100 + 860) = 5).
+    vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,
       height: 600,
       left: 100,
-      right: 900,
+      right: 1830,
       top: 0,
-      width: 800,
+      width: 1730,
       x: 100,
       y: 0,
       toJSON: () => ({}),
     });
-    fireEvent.mouseDown(screen.getByTestId('reading-pane-resizer'), { clientX: 420 });
-    fireEvent.mouseMove(document, { clientX: 580 });
-    fireEvent.mouseUp(document);
+    fireEvent.pointerDown(screen.getByTestId('reading-pane-resizer'), { pointerId: 1, clientX: 965 });
+    fireEvent.pointerMove(screen.getByTestId('reading-pane-resizer'), { pointerId: 1, clientX: 1137 });
+    fireEvent.pointerUp(screen.getByTestId('reading-pane-resizer'), { pointerId: 1 });
     expect(workspace).toHaveStyle({
       '--reading-pane-width': '60%',
       '--question-pane-width': 'calc(40%)',
     });
 
-    fireEvent.mouseDown(screen.getByTestId('reading-pane-resizer'), { clientX: 580 });
-    fireEvent.mouseMove(document, { clientX: 0 });
-    fireEvent.mouseUp(document);
+    fireEvent.pointerDown(screen.getByTestId('reading-pane-resizer'), { pointerId: 1, clientX: 1137 });
+    fireEvent.pointerMove(screen.getByTestId('reading-pane-resizer'), { pointerId: 1, clientX: 0 });
+    fireEvent.pointerUp(screen.getByTestId('reading-pane-resizer'), { pointerId: 1 });
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '6%',
-      '--question-pane-width': 'calc(94%)',
+      '--reading-pane-width': '32%',
+      '--question-pane-width': 'calc(68%)',
     });
 
-    readingWorkspaceRect.mockReturnValue({
-      bottom: 600,
-      height: 600,
-      left: 100,
-      right: 1700,
-      top: 0,
-      width: 1600,
-      x: 100,
-      y: 0,
-      toJSON: () => ({}),
-    });
-    fireEvent.mouseDown(screen.getByTestId('reading-pane-resizer'), { clientX: 200 });
-    fireEvent.mouseMove(document, { clientX: 1800 });
-    fireEvent.mouseUp(document);
+    fireEvent.pointerDown(screen.getByTestId('reading-pane-resizer'), { pointerId: 1, clientX: 965 });
+    fireEvent.pointerMove(screen.getByTestId('reading-pane-resizer'), { pointerId: 1, clientX: 99999 });
+    fireEvent.pointerUp(screen.getByTestId('reading-pane-resizer'), { pointerId: 1 });
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '97%',
-      '--question-pane-width': 'calc(3%)',
+      '--reading-pane-width': '68%',
+      '--question-pane-width': 'calc(32%)',
     });
     expect(screen.getByTestId('reading-question-scroll')).toHaveClass('p-2.5');
     expect(screen.getByTestId('reading-question-scroll')).toHaveClass('md:p-3');
@@ -1355,37 +1354,39 @@ describe('student question experience', () => {
     const workspace = screen.getByTestId('reading-split-workspace');
     const resizer = screen.getByTestId('reading-pane-resizer');
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '40%',
-      '--question-pane-width': 'calc(60% - var(--split-divider-width))',
-      '--split-divider-width': '16px',
+      '--reading-pane-width': '50%',
+      '--question-pane-width': 'calc(50% - var(--split-divider-width))',
+      '--split-divider-width': '10px',
     });
 
+    // P2.4: pointer-capture drags clamp to the readable 32%/68% bounds at a
+    // 1730px workspace instead of the old unbounded 6%/92% widths.
     vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,
       height: 600,
       left: 100,
-      right: 900,
+      right: 1830,
       top: 0,
-      width: 800,
+      width: 1730,
       x: 100,
       y: 0,
       toJSON: () => ({}),
     });
 
-    fireEvent.mouseDown(resizer, { clientX: 420 });
-    fireEvent.mouseMove(document, { clientX: 0 });
-    fireEvent.mouseUp(document);
+    fireEvent.pointerDown(resizer, { pointerId: 1, clientX: 965 });
+    fireEvent.pointerMove(resizer, { pointerId: 1, clientX: 0 });
+    fireEvent.pointerUp(resizer, { pointerId: 1 });
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '6%',
-      '--question-pane-width': 'calc(94% - var(--split-divider-width))',
+      '--reading-pane-width': '32%',
+      '--question-pane-width': 'calc(68% - var(--split-divider-width))',
     });
 
-    fireEvent.mouseDown(resizer, { clientX: 200 });
-    fireEvent.mouseMove(document, { clientX: 1800 });
-    fireEvent.mouseUp(document);
+    fireEvent.pointerDown(resizer, { pointerId: 1, clientX: 965 });
+    fireEvent.pointerMove(resizer, { pointerId: 1, clientX: 1830 });
+    fireEvent.pointerUp(resizer, { pointerId: 1 });
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '92%',
-      '--question-pane-width': 'calc(8% - var(--split-divider-width))',
+      '--reading-pane-width': '68%',
+      '--question-pane-width': 'calc(32% - var(--split-divider-width))',
     });
   });
 
@@ -2087,8 +2088,8 @@ describe('student question experience', () => {
     const workspace = screen.getByTestId('listening-split-workspace');
     expect(workspace).toHaveClass('flex-row');
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '40%',
-      '--question-pane-width': 'calc(60%)',
+      '--listening-pane-width': '50%',
+      '--question-pane-width': 'calc(50%)',
       '--split-divider-width': '8px',
     });
     const scrollOwners = workspace.querySelectorAll<HTMLElement>('[data-student-zoom-scroll]');
@@ -2100,14 +2101,14 @@ describe('student question experience', () => {
     });
     const listeningResizer = screen.getByTestId('listening-pane-resizer');
     expect(listeningResizer).toBeInTheDocument();
-    expect(listeningResizer).toHaveAttribute('role', 'slider');
-    expect(listeningResizer).toHaveAttribute('aria-valuenow', '40');
+    expect(listeningResizer).toHaveAttribute('role', 'separator');
+    expect(listeningResizer).toHaveAttribute('aria-valuenow', '50');
     expect(screen.queryByText(/staff instructions/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/use the invigilator audio system/i)).not.toBeInTheDocument();
     expect(screen.getByText(/answer the question using the words you hear/i)).toBeInTheDocument();
     expect(listeningResizer).toHaveClass('w-8');
     expect(listeningResizer).toHaveClass('absolute');
-    expect(listeningResizer.querySelector('.w-2')).toBeInTheDocument();
+    expect(listeningResizer.querySelector('.w-0\\.5')).toBeInTheDocument();
     expect(listeningResizer.querySelector('.h-16')).toBeInTheDocument();
     expect(listeningResizer.querySelector('.w-8')).toBeInTheDocument();
     expect(workspace.querySelector('.min-w-\\[48px\\]')).toBeInTheDocument();
@@ -2123,59 +2124,49 @@ describe('student question experience', () => {
 
     fireEvent.keyDown(listeningResizer, { key: 'ArrowRight' });
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '45%',
-      '--question-pane-width': 'calc(55%)',
+      '--listening-pane-width': '52%',
+      '--question-pane-width': 'calc(48%)',
     });
     fireEvent.keyDown(listeningResizer, { key: 'ArrowLeft' });
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '40%',
-      '--question-pane-width': 'calc(60%)',
+      '--listening-pane-width': '50%',
+      '--question-pane-width': 'calc(50%)',
     });
 
-    const listeningWorkspaceRect = vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
+    // P2.4: pointer-capture drag at a 1730px workspace (bounds 32%/68%).
+    vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,
       height: 600,
       left: 100,
-      right: 900,
+      right: 1830,
       top: 0,
-      width: 800,
+      width: 1730,
       x: 100,
       y: 0,
       toJSON: () => ({}),
     });
-    fireEvent.mouseDown(screen.getByTestId('listening-pane-resizer'), { clientX: 420 });
-    fireEvent.mouseMove(document, { clientX: 580 });
-    fireEvent.mouseUp(document);
+    fireEvent.pointerDown(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 965 });
+    fireEvent.pointerMove(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 1137 });
+    fireEvent.pointerUp(screen.getByTestId('listening-pane-resizer'), { pointerId: 1 });
     expect(workspace).toHaveStyle({
       '--listening-pane-width': '60%',
       '--question-pane-width': 'calc(40%)',
     });
 
-    fireEvent.mouseDown(screen.getByTestId('listening-pane-resizer'), { clientX: 580 });
-    fireEvent.mouseMove(document, { clientX: 0 });
-    fireEvent.mouseUp(document);
+    fireEvent.pointerDown(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 1137 });
+    fireEvent.pointerMove(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 0 });
+    fireEvent.pointerUp(screen.getByTestId('listening-pane-resizer'), { pointerId: 1 });
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '6%',
-      '--question-pane-width': 'calc(94%)',
+      '--listening-pane-width': '32%',
+      '--question-pane-width': 'calc(68%)',
     });
 
-    listeningWorkspaceRect.mockReturnValue({
-      bottom: 600,
-      height: 600,
-      left: 100,
-      right: 1700,
-      top: 0,
-      width: 1600,
-      x: 100,
-      y: 0,
-      toJSON: () => ({}),
-    });
-    fireEvent.mouseDown(screen.getByTestId('listening-pane-resizer'), { clientX: 200 });
-    fireEvent.mouseMove(document, { clientX: 1800 });
-    fireEvent.mouseUp(document);
+    fireEvent.pointerDown(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 965 });
+    fireEvent.pointerMove(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 99999 });
+    fireEvent.pointerUp(screen.getByTestId('listening-pane-resizer'), { pointerId: 1 });
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '97%',
-      '--question-pane-width': 'calc(3%)',
+      '--listening-pane-width': '68%',
+      '--question-pane-width': 'calc(32%)',
     });
     expect(screen.getByTestId('listening-question-scroll')).toHaveClass('p-2.5');
     expect(screen.getByTestId('listening-question-scroll')).toHaveClass('md:p-3');
@@ -2246,37 +2237,38 @@ describe('student question experience', () => {
     const workspace = screen.getByTestId('listening-split-workspace');
     const resizer = screen.getByTestId('listening-pane-resizer');
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '40%',
-      '--question-pane-width': 'calc(60% - var(--split-divider-width))',
-      '--split-divider-width': '16px',
+      '--listening-pane-width': '50%',
+      '--question-pane-width': 'calc(50% - var(--split-divider-width))',
+      '--split-divider-width': '10px',
     });
 
+    // P2.4: pointer-capture drags clamp to the readable 32%/68% bounds.
     vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,
       height: 600,
       left: 100,
-      right: 900,
+      right: 1830,
       top: 0,
-      width: 800,
+      width: 1730,
       x: 100,
       y: 0,
       toJSON: () => ({}),
     });
 
-    fireEvent.mouseDown(resizer, { clientX: 420 });
-    fireEvent.mouseMove(document, { clientX: 0 });
-    fireEvent.mouseUp(document);
+    fireEvent.pointerDown(resizer, { pointerId: 1, clientX: 965 });
+    fireEvent.pointerMove(resizer, { pointerId: 1, clientX: 0 });
+    fireEvent.pointerUp(resizer, { pointerId: 1 });
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '6%',
-      '--question-pane-width': 'calc(94% - var(--split-divider-width))',
+      '--listening-pane-width': '32%',
+      '--question-pane-width': 'calc(68% - var(--split-divider-width))',
     });
 
-    fireEvent.mouseDown(resizer, { clientX: 200 });
-    fireEvent.mouseMove(document, { clientX: 1800 });
-    fireEvent.mouseUp(document);
+    fireEvent.pointerDown(resizer, { pointerId: 1, clientX: 965 });
+    fireEvent.pointerMove(resizer, { pointerId: 1, clientX: 1830 });
+    fireEvent.pointerUp(resizer, { pointerId: 1 });
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '92%',
-      '--question-pane-width': 'calc(8% - var(--split-divider-width))',
+      '--listening-pane-width': '68%',
+      '--question-pane-width': 'calc(32% - var(--split-divider-width))',
     });
   });
 
@@ -2489,6 +2481,72 @@ describe('student question experience', () => {
     expect(screen.getAllByAltText('Diagram reference')).toHaveLength(1);
     fireEvent.click(within(materialPane).getByRole('button', { name: /^diagram reference$/i }));
     expect(screen.getByRole('dialog', { name: /diagram reference zoomed view/i })).toBeInTheDocument();
+  });
+
+  it('renders instruction-placed listening diagrams between instruction and questions, not in the left pane', () => {
+    const state: ExamState = {
+      title: 'Listening Test',
+      type: 'Academic',
+      activeModule: 'listening',
+      activePassageId: 'passage-1',
+      activeListeningPartId: 'part-1',
+      config: {
+        type: 'Academic',
+        delivery: {
+          launchMode: 'proctor_start',
+          transitionMode: 'auto_with_proctor_override',
+          allowedExtensionMinutes: [5],
+        },
+        sections: {
+          listening: { enabled: true, order: 1, duration: 30, autoContinue: true, allowedQuestionTypes: ['DIAGRAM_LABELING'], audioPlaybackEnabled: false },
+          reading: { enabled: false, order: 2, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          writing: { enabled: false, order: 3, duration: 60, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+          speaking: { enabled: false, order: 4, duration: 15, autoContinue: true, allowedQuestionTypes: ['SHORT_ANSWER'] },
+        },
+      },
+      reading: { passages: [] },
+      listening: {
+        parts: [
+          {
+            id: 'part-1',
+            title: 'Part 1',
+            audioUrl: '',
+            pins: [],
+            blocks: [
+              {
+                id: 'diagram-1',
+                type: 'DIAGRAM_LABELING',
+                instruction: 'Label the diagram.',
+                imageUrl: '/diagram.jpg',
+                referenceImagePlacement: 'instruction',
+                labels: [
+                  { id: 'label-a', x: 25, y: 35, correctAnswer: 'engine' },
+                  { id: 'label-b', x: 70, y: 62, correctAnswer: 'wheel' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      writing: { task1Prompt: '', task2Prompt: '' },
+      speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    };
+
+    render(
+      <StudentListening
+        state={state}
+        answers={{}}
+        onAnswerChange={() => {}}
+        currentQuestionId="diagram-1:label-a"
+        onNavigate={() => {}}
+        tabletMode
+      />,
+    );
+
+    expect(screen.queryByTestId('listening-material-pane')).not.toBeInTheDocument();
+    expect(screen.getByTestId('diagram-sticky-reference')).toBeInTheDocument();
+    expect(screen.getByTestId('diagram-answer-panel')).toBeInTheDocument();
+    expect(screen.getAllByAltText('Diagram reference')).toHaveLength(1);
   });
 
   it('renders instruction-placed listening diagrams between instruction and questions, not in the left pane', () => {

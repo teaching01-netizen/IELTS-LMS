@@ -56,59 +56,96 @@ export interface StudentTypographyScale {
   passageLineHeight: string;
   questionFontSize: string;
   questionLineHeight: string;
+  /** Answer label / editable answer role (16px normal target). */
+  answerFontSize: string;
+  answerLineHeight: string;
+  /** Writing editor role (18px/1.68 normal target, same family as passage). */
+  writingEditorFontSize: string;
+  writingEditorLineHeight: string;
+  /** Writing prompt role (18px/1.68 normal target). */
+  writingPromptFontSize: string;
+  writingPromptLineHeight: string;
 }
 
+/**
+ * Discrete rem-based role table (P1.1). Values never depend on viewport
+ * width: resizing the window changes wrapping and available space, not the
+ * chosen content font size. Rem values assume the normal 16px browser root;
+ * browser text zoom and the existing Small/Medium/Large preference remain
+ * the supported enlargement mechanisms. Normal-level targets come from
+ * plans/ielts-act-ux-production/design-contract.md:
+ * passage 18/1.68, title 26/1.22, question stem 17/1.52, answer 16/1.45,
+ * writing editor/prompt 18/1.68, toolbar control 15/1.25, meta 12–13/1.35.
+ */
 const STUDENT_TYPOGRAPHY_SCALE: Record<StudentFontSize, StudentTypographyScale> = {
   small: {
-    rootFontSize: 'clamp(15.25px, 0.95rem + 0.14vw, 16.75px)',
+    rootFontSize: '1rem',
     lineHeight: 1.64,
     fontScale: 0.92,
-    controlFontSize: 'clamp(0.9rem, 0.87rem + 0.08vw, 0.98rem)',
-    chipFontSize: 'clamp(0.82rem, 0.79rem + 0.08vw, 0.9rem)',
-    metaFontSize: 'clamp(0.76rem, 0.74rem + 0.05vw, 0.82rem)',
-    previewFontSize: 'clamp(0.98rem, 0.96rem + 0.08vw, 1.04rem)',
-    passageFontSize: 'clamp(0.98rem, 0.96rem + 0.08vw, 1.06rem)',
-    passageTitleFontSize: 'clamp(1.35rem, 1.28rem + 0.2vw, 1.55rem)',
-    passageH1FontSize: 'clamp(1.22rem, 1.16rem + 0.18vw, 1.42rem)',
-    passageH2FontSize: 'clamp(1.1rem, 1.05rem + 0.14vw, 1.26rem)',
-    passageH3FontSize: 'clamp(1rem, 0.96rem + 0.12vw, 1.14rem)',
-    passageLineHeight: '1.62',
-    questionFontSize: 'clamp(0.98rem, 0.96rem + 0.08vw, 1.06rem)',
-    questionLineHeight: '1.62',
+    controlFontSize: '0.875rem',
+    chipFontSize: '0.8125rem',
+    metaFontSize: '0.75rem',
+    previewFontSize: '0.9375rem',
+    passageFontSize: '1.0625rem',
+    passageTitleFontSize: '1.5rem',
+    passageH1FontSize: '1.125rem',
+    passageH2FontSize: '1.0625rem',
+    passageH3FontSize: '1rem',
+    passageLineHeight: '1.64',
+    questionFontSize: '1rem',
+    questionLineHeight: '1.5',
+    answerFontSize: '0.9375rem',
+    answerLineHeight: '1.45',
+    writingEditorFontSize: '1.0625rem',
+    writingEditorLineHeight: '1.64',
+    writingPromptFontSize: '1.0625rem',
+    writingPromptLineHeight: '1.64',
   },
   normal: {
-    rootFontSize: 'clamp(16.5px, 1.03rem + 0.18vw, 18.25px)',
-    lineHeight: 1.72,
+    rootFontSize: '1rem',
+    lineHeight: 1.68,
     fontScale: 1,
-    controlFontSize: 'clamp(0.98rem, 0.95rem + 0.08vw, 1.05rem)',
-    chipFontSize: 'clamp(0.88rem, 0.85rem + 0.08vw, 0.96rem)',
-    metaFontSize: 'clamp(0.84rem, 0.82rem + 0.05vw, 0.9rem)',
-    previewFontSize: 'clamp(1.03rem, 1rem + 0.08vw, 1.1rem)',
-    passageFontSize: 'clamp(1.08rem, 1.04rem + 0.12vw, 1.22rem)',
-    passageTitleFontSize: 'clamp(1.5rem, 1.42rem + 0.22vw, 1.74rem)',
-    passageH1FontSize: 'clamp(1.34rem, 1.27rem + 0.2vw, 1.58rem)',
-    passageH2FontSize: 'clamp(1.2rem, 1.15rem + 0.16vw, 1.38rem)',
-    passageH3FontSize: 'clamp(1.08rem, 1.03rem + 0.13vw, 1.24rem)',
-    passageLineHeight: '1.72',
-    questionFontSize: 'clamp(1.08rem, 1.04rem + 0.12vw, 1.22rem)',
-    questionLineHeight: '1.72',
+    controlFontSize: '0.9375rem',
+    chipFontSize: '0.875rem',
+    metaFontSize: '0.78125rem',
+    previewFontSize: '1rem',
+    passageFontSize: '1.125rem',
+    passageTitleFontSize: '1.625rem',
+    passageH1FontSize: '1.1875rem',
+    passageH2FontSize: '1.125rem',
+    passageH3FontSize: '1.0625rem',
+    passageLineHeight: '1.68',
+    questionFontSize: '1.0625rem',
+    questionLineHeight: '1.52',
+    answerFontSize: '1rem',
+    answerLineHeight: '1.45',
+    writingEditorFontSize: '1.125rem',
+    writingEditorLineHeight: '1.68',
+    writingPromptFontSize: '1.125rem',
+    writingPromptLineHeight: '1.68',
   },
   large: {
-    rootFontSize: 'clamp(18.5px, 1.14rem + 0.22vw, 21px)',
-    lineHeight: 1.82,
+    rootFontSize: '1rem',
+    lineHeight: 1.68,
     fontScale: 1.16,
-    controlFontSize: 'clamp(1.04rem, 1rem + 0.08vw, 1.14rem)',
-    chipFontSize: 'clamp(0.96rem, 0.93rem + 0.08vw, 1.04rem)',
-    metaFontSize: 'clamp(0.9rem, 0.88rem + 0.05vw, 0.98rem)',
-    previewFontSize: 'clamp(1.12rem, 1.08rem + 0.08vw, 1.2rem)',
-    passageFontSize: 'clamp(1.2rem, 1.14rem + 0.14vw, 1.36rem)',
-    passageTitleFontSize: 'clamp(1.72rem, 1.62rem + 0.26vw, 2rem)',
-    passageH1FontSize: 'clamp(1.52rem, 1.43rem + 0.23vw, 1.8rem)',
-    passageH2FontSize: 'clamp(1.36rem, 1.29rem + 0.19vw, 1.58rem)',
-    passageH3FontSize: 'clamp(1.22rem, 1.16rem + 0.15vw, 1.4rem)',
-    passageLineHeight: '1.82',
-    questionFontSize: 'clamp(1.2rem, 1.14rem + 0.14vw, 1.36rem)',
-    questionLineHeight: '1.82',
+    controlFontSize: '1.0625rem',
+    chipFontSize: '1rem',
+    metaFontSize: '0.875rem',
+    previewFontSize: '1.0625rem',
+    passageFontSize: '1.3125rem',
+    passageTitleFontSize: '1.8125rem',
+    passageH1FontSize: '1.3125rem',
+    passageH2FontSize: '1.1875rem',
+    passageH3FontSize: '1.125rem',
+    passageLineHeight: '1.68',
+    questionFontSize: '1.1875rem',
+    questionLineHeight: '1.54',
+    answerFontSize: '1.0625rem',
+    answerLineHeight: '1.45',
+    writingEditorFontSize: '1.3125rem',
+    writingEditorLineHeight: '1.68',
+    writingPromptFontSize: '1.3125rem',
+    writingPromptLineHeight: '1.68',
   },
 };
 

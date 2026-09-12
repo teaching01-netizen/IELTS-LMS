@@ -12,7 +12,7 @@ import { CompactStudentHeader } from '../layout/CompactStudentHeader';
 import { CompactQuestionNavigation } from '../layout/CompactQuestionNavigation';
 
 const pressRecipe =
-  'transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]';
+  'transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out';
 
 function question(id: string, groupId = 'group-1'): any {
   return {
@@ -51,6 +51,11 @@ function renderHeader(props: Record<string, unknown> = {}) {
   );
 }
 
+// P1.4: pressing must give immediate fill/color feedback without scaling or
+// moving the control. The old press recipe (active:scale) is intentionally
+// gone; the pressRecipe constant pins the replacement so regressions fail here.
+const scaleRecipePattern = /active:scale-|transition-\[scale/;
+
 describe('student interaction motion class contracts', () => {
   describe('StudentFooter', () => {
     it('gives every question chip the press recipe and a per-state hover', () => {
@@ -85,6 +90,11 @@ describe('student interaction motion class contracts', () => {
 
       expect(unanswered).toHaveClass(pressRecipe);
       expect(unanswered).toHaveClass('bg-white', 'border-gray-200', 'hover:bg-gray-100');
+
+      // No chip may scale or transition the scale property on press.
+      for (const chip of [current, answered, answered2, flagged, unanswered]) {
+        expect(chip.className).not.toMatch(scaleRecipePattern);
+      }
     });
 
     it('keeps the state color contract while adding motion (regression guard)', () => {
@@ -140,7 +150,7 @@ describe('student interaction motion class contracts', () => {
 
       expect(fill).not.toBeNull();
       expect(fill).toHaveClass('transition-[width]', 'duration-300', 'ease-out');
-      expect(fill).not.toHaveClass('active:scale-[0.96]');
+      expect(fill.className).not.toMatch(scaleRecipePattern);
     });
 
     it('leaves pure display elements (counter, progress track) without press feedback', () => {
@@ -158,10 +168,10 @@ describe('student interaction motion class contracts', () => {
       const jump = within(row).getByRole('button', { name: /jump to part 2/i });
       const track = jump.querySelector('.bg-gray-50');
 
-      expect(counter.parentElement).not.toHaveClass('active:scale-[0.96]');
+      expect(counter.parentElement!.className).not.toMatch(scaleRecipePattern);
       expect(counter.parentElement).toHaveClass('bg-gray-50');
       expect(track).not.toBeNull();
-      expect(track).not.toHaveClass('active:scale-[0.96]');
+      expect(track!.className).not.toMatch(scaleRecipePattern);
     });
   });
 
@@ -212,7 +222,9 @@ describe('student interaction motion class contracts', () => {
       expect(urgentPill).not.toBeNull();
       expect(urgentPill).toHaveClass('student-timer-urgent');
       expect(urgentPill).toHaveClass('transition-colors');
-      expect(urgentPill).not.toHaveClass('active:scale-[0.96]');
+      expect(urgentPill!.className).not.toMatch(scaleRecipePattern);
+      // Urgency is a static treatment: no animation and no scale movement.
+      expect(urgentPill!.className).not.toMatch(scaleRecipePattern);
 
       unmount();
       renderHeader({ timeRemaining: 300 });
@@ -258,7 +270,7 @@ describe('student interaction motion class contracts', () => {
       const urgentPill = screen.getByTestId('student-header-timer-slot');
       expect(urgentPill).toHaveClass('student-timer-urgent');
       expect(urgentPill).toHaveClass('transition-colors');
-      expect(urgentPill).not.toHaveClass('active:scale-[0.96]');
+      expect(urgentPill!.className).not.toMatch(scaleRecipePattern);
 
       unmount();
       render(<CompactStudentHeader moduleLabel="Reading" testTakerId="t1" timeRemaining={300} />);
@@ -416,7 +428,7 @@ describe('student interaction motion class contracts', () => {
   describe('display elements never get press feedback', () => {
     it('keeps StudentQuestionNumber and the footer progress fill free of active scale', () => {
       const { container } = render(<StudentQuestionNumber number={1} isActive />);
-      expect(container.firstElementChild).not.toHaveClass('active:scale-[0.96]');
+      expect(container.firstElementChild!.className).not.toMatch(scaleRecipePattern);
       expect(container.firstElementChild).not.toHaveClass(pressRecipe);
     });
   });

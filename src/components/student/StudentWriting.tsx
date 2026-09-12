@@ -132,7 +132,7 @@ export function StudentWriting({
   highlightClassName,
 }: StudentWritingProps) {
   const isTabletMode = Boolean(tabletMode);
-  const isCompactLayout = layoutMode === 'compact';
+  const isCompactLayout = layoutMode === 'compact' || layoutMode === 'phone';
   const attemptContext = useOptionalStudentAttempt();
   const resolvedSessionId = sessionId ?? attemptContext?.state.attempt?.scheduleId;
   const resolvedStudentId = studentId ?? attemptContext?.state.attemptId ?? undefined;
@@ -182,7 +182,7 @@ export function StudentWriting({
   const promptPaneRef = useRef<HTMLDivElement>(null);
   const promptScrollTopRef = useRef(0);
   const responseScrollTopRef = useRef(0);
-  const { handleDrag, handleKeyboardResize, leftWidth, splitBounds, splitPaneStyle, workspaceRef } = useSplitPaneResize({
+  const { handleDrag, handlePointerMove, handlePointerEnd, handleKeyboardResize, leftWidth, resizeCommands, splitBounds, splittable, splitPaneStyle, workspaceRef } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: '--writing-prompt-pane-width',
     answerPaneWidthProperty: '--writing-editor-pane-width',
@@ -752,14 +752,17 @@ export function StudentWriting({
   lastFocusedPaneRef={lastFocusedPaneRef}
 />
               ) : null}
-        {!isCompactLayout ? (
+        {!isCompactLayout && splittable ? (
           <StudentSplitPaneResizer
             isTabletMode={isTabletMode}
             leftWidth={leftWidth}
             minWidth={splitBounds.min}
             maxWidth={splitBounds.max}
             onDividerPointerDown={handleDrag}
+            onDividerPointerMove={handlePointerMove}
+            onDividerPointerEnd={handlePointerEnd}
             onDividerKeyDown={handleKeyboardResize}
+            resizeCommands={resizeCommands}
             ariaLabel="Resize writing prompt and answer panels"
             testId="writing-pane-resizer"
           />

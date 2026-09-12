@@ -184,10 +184,14 @@ export function StudentReading({
   const {
     answerCompact,
     handleDrag,
+    handlePointerMove,
+    handlePointerEnd,
     handleKeyboardResize,
+    resizeCommands,
     leftWidth,
     materialCompact,
     splitBounds,
+    splittable,
     splitPaneStyle,
     workspaceRef,
   } = useSplitPaneResize({
@@ -344,8 +348,12 @@ export function StudentReading({
       leftWidth={leftWidth}
       splitMinWidth={splitBounds.min}
       splitMaxWidth={splitBounds.max}
+      splitSplittable={splittable}
       onDividerPointerDown={handleDrag}
+      onDividerPointerMove={handlePointerMove}
+      onDividerPointerEnd={handlePointerEnd}
       onDividerKeyDown={handleKeyboardResize}
+      resizeCommands={resizeCommands}
       workspaceTestId="reading-split-workspace"
       dividerAriaLabel="Resize reading passage and answer panels"
       dividerTestId="reading-pane-resizer"

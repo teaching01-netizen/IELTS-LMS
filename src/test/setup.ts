@@ -48,11 +48,57 @@ if (typeof (globalThis as Record<string, unknown>)["ResizeObserver"] === "undefi
   }
 }
 
+// jsdom (as shipped) lacks window.PointerEvent, so `fireEvent.pointerDown`
+// dispatches a plain Event and pointer properties (pointerId, clientX) never
+// reach React handlers. Production code follows the real Pointer Events
+// contract (pointer capture, pointerId de-duplication), so tests get a
+// faithful MouseEvent-based polyfill instead of forcing components to keep
+// legacy mouse listeners.
+if (typeof window !== "undefined" && (window as unknown as Record<string, unknown>)["PointerEvent"] === undefined) {
+  class PointerEventPolyfill extends MouseEvent {
+    public pointerId: number;
+    public pointerType: string;
+    public isPrimary: boolean;
+    public pressure: number;
+    constructor(type: string, params: PointerEventInit = {}) {
+      super(type, params);
+      this.pointerId = params.pointerId ?? 0;
+      this.pointerType = params.pointerType ?? "";
+      this.isPrimary = params.isPrimary ?? false;
+      this.pressure = params.pressure ?? 0;
+    }
+  }
+  (window as unknown as Record<string, unknown>)["PointerEvent"] = PointerEventPolyfill;
+}
+
 if (typeof Element !== "undefined") {
   Object.defineProperty(Element.prototype, "scrollIntoView", {
     configurable: true,
     value: () => {},
   });
+}
+
+// jsdom has no Pointer Capture API. Production components (splitter, Radix
+// Select) call hasPointerCapture/setPointerCapture/releasePointerCapture;
+// stub them browser-faithfully (nothing ever holds capture) instead of
+// forcing components to guard every call.
+if (typeof Element !== "undefined") {
+  const captureStub = { configurable: true } as PropertyDescriptor;
+  for (const method of [
+    "hasPointerCapture",
+    "setPointerCapture",
+    "releasePointerCapture",
+  ] as const) {
+    if (!(method in Element.prototype)) {
+      Object.defineProperty(Element.prototype, method, {
+        ...captureStub,
+        value:
+          method === "hasPointerCapture"
+            ? () => false
+            : () => {},
+      });
+    }
+  }
 }
 
 if (typeof window !== "undefined") {

@@ -5,21 +5,42 @@ answers, timer state, flags, submission state, or persistence state.
 
 ## Policy
 
-- `compact`: fewer than 700 effective CSS pixels.
-- `medium`: 700 through 1199 effective CSS pixels.
-- `wide`: 1200 pixels or wider.
-- `primaryPointer`, `hasTouch`, `hasHover`, and `orientation` are independent facts.
+Layout mode is a pure decision over shell geometry facts (`studentLayoutMode.ts`),
+not device identity. The four modes (P2.1) resolve in this order:
+
+1. Invalid/unmeasured geometry → `compact` (safe default; the UI stays mounted).
+2. Width <600px → `phone`: one primary pane, previous/current/next navigation.
+3. Width >=1180px, stable shell height >=650px, and pane-fit → `wide`:
+   draggable split, full toolbar, grouped navigator.
+4. Width >=900px, stable shell height >=600px, and pane-fit → `standard`:
+   draggable split, condensed toolbar.
+5. Otherwise → `compact`: Passage/Questions (or Task/Response) switch.
+
+Pane-fit requires both readable outer pane minimums (≈380px material +
+≈430px questions at normal text size, including each pane's own padding)
+plus one rail to fit the width, and an initial 360px of usable workspace
+height. Enlarged text scales the minimums up. If the minimums cannot fit,
+the presentation collapses to one pane (focus override) — never 48px panes.
+The 650px/600px thresholds refer to the OUTER stable shell height after
+safe-area clearance; the remaining workspace height is checked separately.
+Software-keyboard opening changes the visible edit region, not the core mode.
+
+`primaryPointer`, `hasTouch`, `hasHover`, and `orientation` are independent
+facts and never select a mode by themselves.
 
 ## Invariants
 
 1. A viewport resize or orientation change may change presentation, but never owns or
    reinterprets an answer control's value.
-2. Compact presentation must keep the timer visible and expose every enabled tool
+2. Compact and phone presentation keep BOTH pane trees mounted; the inactive pane
+   is `hidden` + `inert` (absent from focus and assistive navigation) while its
+   state stays alive. Exactly one textarea and one answer tree exist per task.
+3. Compact presentation must keep the timer visible and expose every enabled tool
    without horizontal toolbar scrolling.
-3. Primary exam actions use a 44px minimum hit area and target 48px where space allows.
-4. The shell owns safe-area clearance and the primary scroll boundary; child panels may
+4. Primary exam actions use a 44px minimum hit area and target 48px where space allows.
+5. The shell owns safe-area clearance and the primary scroll boundary; child panels may
    own their deliberate content scroll regions.
-5. Next/previous navigation is separate from submit and cannot submit at the boundary.
+6. Next/previous navigation is separate from submit and cannot submit at the boundary.
 
 ## Viewport ownership
 

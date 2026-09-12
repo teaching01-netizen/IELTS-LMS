@@ -110,10 +110,14 @@ export function StudentListening({
   const {
     answerCompact,
     handleDrag,
+    handlePointerMove,
+    handlePointerEnd,
     handleKeyboardResize,
+    resizeCommands,
     leftWidth,
     materialCompact,
     splitBounds,
+    splittable,
     splitPaneStyle,
     workspaceRef,
   } = useSplitPaneResize({
@@ -376,8 +380,12 @@ export function StudentListening({
       leftWidth={leftWidth}
       splitMinWidth={splitBounds.min}
       splitMaxWidth={splitBounds.max}
+      splitSplittable={splittable}
       onDividerPointerDown={handleDrag}
+      onDividerPointerMove={handlePointerMove}
+      onDividerPointerEnd={handlePointerEnd}
       onDividerKeyDown={handleKeyboardResize}
+      resizeCommands={resizeCommands}
       workspaceTestId="listening-split-workspace"
       dividerAriaLabel="Resize listening material and answer panels"
       dividerTestId="listening-pane-resizer"
@@ -449,7 +457,7 @@ export function StudentListening({
                   type="button"
                   onClick={() => void togglePlayback()}
                   disabled={!canPlayAudio}
-                  className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-blue-600 text-white flex items-center justify-center transition-[scale,background-color,opacity] duration-150 ease-out hover:bg-blue-700 active:scale-[0.96] shadow-md flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+                  className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-blue-600 text-white flex items-center justify-center transition-[background-color,opacity] duration-150 ease-out hover:bg-blue-700 shadow-md flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                   aria-label={isPlaying ? "Pause audio" : "Play audio"}
                 >
                   {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-1" />}
@@ -487,7 +495,7 @@ export function StudentListening({
                   <button
                     type="button"
                     onClick={() => adjustCurrentTime(-10)}
-                    className="p-2 md:p-2.5 rounded-full transition-[scale,background-color,opacity] duration-150 ease-out hover:bg-gray-200 active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+                    className="p-2 md:p-2.5 rounded-full transition-[background-color,opacity] duration-150 ease-out hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Rewind 10s"
                     disabled={!canPlayAudio}
                     aria-label="Rewind 10 seconds"
@@ -497,7 +505,7 @@ export function StudentListening({
                   <button
                     type="button"
                     onClick={() => adjustCurrentTime(10)}
-                    className="p-2 md:p-2.5 rounded-full transition-[scale,background-color,opacity] duration-150 ease-out hover:bg-gray-200 active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+                    className="p-2 md:p-2.5 rounded-full transition-[background-color,opacity] duration-150 ease-out hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Forward 10s"
                     disabled={!canPlayAudio}
                     aria-label="Forward 10 seconds"
@@ -530,7 +538,7 @@ export function StudentListening({
                         onClick={() => onPlaybackRateChange?.(rate)}
                         aria-pressed={isActive}
                         disabled={!canPlayAudio}
-                        className={`px-2 py-1 rounded-md text-[length:var(--student-meta-font-size)] font-semibold border transition-[scale,background-color,border-color,opacity] duration-150 ease-out active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 ${
+                        className={`px-2 py-1 rounded-md text-[length:var(--student-meta-font-size)] font-semibold border transition-[scale,background-color,border-color,opacity] duration-150 ease-out disabled:opacity-40 disabled:cursor-not-allowed ${
                           isActive
                             ? "bg-blue-50 text-blue-900 border-blue-600"
                             : "border-transparent text-gray-600 hover:bg-gray-200"

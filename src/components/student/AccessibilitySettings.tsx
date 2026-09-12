@@ -159,7 +159,7 @@ export function AccessibilitySettings({
                 onClick={() => onFontSizeChange(size.value)}
                 aria-pressed={fontSize === size.value}
                 data-testid={`font-size-option-${size.value}`}
-                className={`rounded-lg border p-4 text-left transition-[scale,background-color,border-color] duration-150 ease-out active:scale-[0.96] ${
+                className={`rounded-lg border p-4 text-left ${
                   fontSize === size.value
                     ? 'bg-blue-50 border-blue-600 text-gray-900'
                     : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50'
@@ -197,7 +197,7 @@ export function AccessibilitySettings({
                   onClick={() => onPassageReadabilityChange(layout.value)}
                   aria-pressed={isActive}
                   data-testid={`passage-layout-option-${layout.value}`}
-                  className={`rounded-lg border p-4 text-left transition-[scale,background-color,border-color] duration-150 ease-out active:scale-[0.96] ${
+                  className={`rounded-lg border p-4 text-left ${
                     isActive
                       ? 'bg-blue-50 border-blue-600 text-gray-900'
                       : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50'
@@ -268,7 +268,7 @@ export function AccessibilitySettings({
                 disabled={zoomAtMin}
                 data-testid="zoom-decrease"
                 aria-label="Zoom out"
-                className="w-8 h-8 rounded-md border border-gray-200 bg-white flex items-center justify-center text-gray-700 transition-[scale,background-color,opacity] duration-150 ease-out hover:bg-gray-100 active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+                className="w-8 h-8 rounded-md border border-gray-200 bg-white flex items-center justify-center text-gray-700 transition-[background-color,opacity] duration-150 ease-out hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Minus size={14} />
               </button>
@@ -288,7 +288,7 @@ export function AccessibilitySettings({
                 disabled={zoomAtMax}
                 data-testid="zoom-increase"
                 aria-label="Zoom in"
-                className="w-8 h-8 rounded-md border border-gray-200 bg-white flex items-center justify-center text-gray-700 transition-[scale,background-color,opacity] duration-150 ease-out hover:bg-gray-100 active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+                className="w-8 h-8 rounded-md border border-gray-200 bg-white flex items-center justify-center text-gray-700 transition-[background-color,opacity] duration-150 ease-out hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Plus size={14} />
               </button>
@@ -324,7 +324,7 @@ export function AccessibilitySettings({
                       onClick={() => onPlaybackRateChange(rate)}
                       aria-pressed={isActive}
                       data-testid={`playback-rate-${rate}`}
-                      className={`px-2.5 py-1.5 rounded-md border text-sm font-semibold transition-[scale,background-color,border-color] duration-150 ease-out active:scale-[0.96] ${
+                      className={`px-2.5 py-1.5 rounded-md border text-sm font-semibold ${
                         isActive
                           ? 'bg-blue-50 text-blue-900 border-blue-600'
                           : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'

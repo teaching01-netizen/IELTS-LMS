@@ -23,7 +23,7 @@ import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 import type { ExamType } from '../../types';
 
 const pressClassName =
-  'transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96]';
+  'transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out';
 
 interface StudentHeaderProps {
   examType?: ExamType | undefined;
@@ -344,7 +344,7 @@ export function StudentHeader({
                 <span className="text-xs md:text-sm font-bold uppercase tracking-wider">Low time</span>
               ) : null}
               <span
-                className="font-mono"
+                className="inline-block text-right font-mono tabular-nums min-w-[4.5ch]"
                 role="timer"
                 aria-label="Time remaining"
                 data-testid="student-time-remaining"

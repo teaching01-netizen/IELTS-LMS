@@ -1,7 +1,8 @@
 export const STUDENT_LAYOUT_TOKENS = {
   headerHeight: {
+    phone: 'var(--student-header-height-compact)',
     compact: 'var(--student-header-height-compact)',
-    medium: 'var(--student-header-height-medium)',
+    standard: 'var(--student-header-height-medium)',
     wide: 'var(--student-header-height-wide)',
   },
   bottomBarMinHeight: 'var(--student-bottom-bar-height)',

@@ -1,13 +1,12 @@
 import { ChevronLeft, ChevronRight, LayoutGrid } from 'lucide-react';
 import {
   countQuestionSlots,
-  getQuestionNumberLabel,
   type StudentQuestionDescriptor,
 } from '@student/application/studentExamContentFacade';
 import {
-  getStudentNavigableQuestions,
-  getStudentQuestionNavigationKey,
+  getStudentQuestionNavigationViewModel,
 } from './studentQuestionNavigation';
+import type { StudentAnswer } from '../providers/StudentRuntimeProvider';
 
 interface CompactQuestionNavigationProps {
   readonly questions: StudentQuestionDescriptor[];
@@ -16,9 +15,12 @@ interface CompactQuestionNavigationProps {
   readonly onOpenNavigator?: (() => void) | undefined;
   readonly onSubmit: () => void;
   readonly showSubmitButton: boolean;
+  /** P3.5: answers/flags feed the shared view model (aria states, future badge). */
+  readonly answers?: Record<string, StudentAnswer | undefined> | undefined;
+  readonly flags?: Record<string, boolean> | undefined;
 }
 
-const navigationButtonClassName = `student-touch-target flex items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-900 hover:bg-gray-50 transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700`;
+const navigationButtonClassName = `student-touch-target flex items-center justify-center rounded-sm border border-gray-200 bg-white text-gray-900 transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700`;
 
 export function CompactQuestionNavigation({
   questions,
@@ -27,23 +29,22 @@ export function CompactQuestionNavigation({
   onOpenNavigator,
   onSubmit,
   showSubmitButton,
+  answers,
+  flags,
 }: CompactQuestionNavigationProps) {
-  const navigableQuestions = getStudentNavigableQuestions(questions);
-  const currentQuestion = questions.find((question) => question.id === currentQuestionId);
-  const currentNavigationKey = currentQuestion
-    ? getStudentQuestionNavigationKey(currentQuestion)
-    : currentQuestionId;
-  const currentIndex = Math.max(
-    0,
-    navigableQuestions.findIndex(
-      (question) => getStudentQuestionNavigationKey(question) === currentNavigationKey,
-    ),
-  );
-  const activeQuestion = navigableQuestions[currentIndex];
+  // P3.5: same derived view model as footer chips and the question sheet.
+  const viewModel = getStudentQuestionNavigationViewModel({
+    questions,
+    answers: answers ?? {},
+    flags: flags ?? {},
+    currentQuestionId,
+  });
+  const { items, currentIndex, canGoPrevious, canGoNext } = viewModel;
+  const activeItem = items[currentIndex];
   const totalQuestions = countQuestionSlots(questions);
-  const currentLabel = activeQuestion ? getQuestionNumberLabel(questions, activeQuestion.id) : '—';
-  const canGoPrevious = currentIndex > 0;
-  const canGoNext = currentIndex >= 0 && currentIndex < navigableQuestions.length - 1;
+  const currentLabel = activeItem ? activeItem.label : '—';
+  const previousItem = canGoPrevious ? items[currentIndex - 1] : undefined;
+  const nextItem = canGoNext ? items[currentIndex + 1] : undefined;
 
   return (
     <nav
@@ -57,8 +58,7 @@ export function CompactQuestionNavigation({
         disabled={!canGoPrevious}
         aria-label="Previous question"
         onClick={() => {
-          const previousQuestion = navigableQuestions[currentIndex - 1];
-          if (previousQuestion) onNavigate(previousQuestion.id);
+          if (previousItem) onNavigate(previousItem.navigationId);
         }}
         data-student-primary-touch-target
       >
@@ -67,7 +67,7 @@ export function CompactQuestionNavigation({
 
       <button
         type="button"
-        className="student-touch-target flex min-w-0 flex-1 items-center justify-center gap-2 rounded-sm px-2 text-sm font-semibold text-gray-900 transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
+        className="student-touch-target flex min-w-0 flex-1 items-center justify-center gap-2 rounded-sm px-2 text-sm font-semibold text-gray-900 transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
         onClick={(event) => {
           event.currentTarget.focus();
           onOpenNavigator?.();
@@ -86,8 +86,7 @@ export function CompactQuestionNavigation({
         disabled={!canGoNext}
         aria-label="Next question"
         onClick={() => {
-          const nextQuestion = navigableQuestions[currentIndex + 1];
-          if (nextQuestion) onNavigate(nextQuestion.id);
+          if (nextItem) onNavigate(nextItem.navigationId);
         }}
         data-student-primary-touch-target
       >
@@ -97,7 +96,7 @@ export function CompactQuestionNavigation({
       {showSubmitButton ? (
         <button
           type="button"
-          className="student-touch-target rounded-sm bg-primary px-3 text-sm font-semibold text-primary-foreground transition-[scale,background-color,border-color,box-shadow,opacity] duration-150 ease-out active:scale-[0.96] hover:bg-primary-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
+          className="student-touch-target rounded-sm bg-primary px-3 text-sm font-semibold text-primary-foreground transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out hover:bg-primary-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
           onClick={onSubmit}
           data-student-primary-touch-target
         >
