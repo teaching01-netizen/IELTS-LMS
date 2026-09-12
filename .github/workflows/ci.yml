@@ -98,7 +98,7 @@ jobs:
         run: npx playwright install --with-deps
 
       - name: Start E2E dependencies
-        run: docker compose -f backend/docker-compose.yml up -d --wait tidb minio
+        run: bash .github/scripts/start-e2e-dependencies.sh
 
       - name: Create E2E database
         run: docker run --rm --network host mysql:8 mysql -h 127.0.0.1 -P 4000 -uroot -e "CREATE DATABASE IF NOT EXISTS ielts;"
@@ -174,10 +174,10 @@ jobs:
           # Wait for deployment to be healthy
           echo "Waiting for Railway deployment to be healthy..."
           sleep 30
-          
+
           # Get the deployment URL
           DEPLOYMENT_URL=$(railway domain --service)
           echo "Testing against: $DEPLOYMENT_URL"
-          
+
           # Run unit tests with production environment
           VITE_API_BASE_URL=https://$DEPLOYMENT_URL npm run test:run
