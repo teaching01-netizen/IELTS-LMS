@@ -8,6 +8,7 @@ import type { AssessmentReleaseState } from "../../../contracts/release";
 import {
   candidateSecondsForSection,
   candidateSecondsForShell,
+  operationalCountForSection,
   canPublishFromBlockers,
   formatDuration,
   formatPublishedDate,
@@ -269,6 +270,70 @@ describe("candidate duration", () => {
     expect(
       candidateSecondsForSection({ breakAfterSeconds: 0, modules: [] }),
     ).toBe(0);
+  });
+});
+
+describe("operationalCountForSection", () => {
+  const baseModule = (overrides = {}) => ({
+    moduleKey: "rw-m1",
+    adaptiveRole: "base" as const,
+    targetQuestionCount: 27,
+    questions: Array.from({ length: 27 }, (_, index) => ({
+      isPretest: index >= 25,
+    })),
+    ...overrides,
+  });
+  it("uses the live stored count when it is positive", () => {
+    expect(
+      operationalCountForSection({
+        sectionKey: "reading-writing",
+        routingPolicy: { operationalQuestionCount: 25 },
+        modules: [baseModule()],
+      }),
+    ).toBe(25);
+  });
+  it("falls back to the SAT blueprint on threshold-only rows (the stuck-at-1 repro)", () => {
+    // Real policy_config is threshold-only, so the shell arrives with
+    // operationalQuestionCount: 0 — the page must still offer RW 25.
+    expect(
+      operationalCountForSection({
+        sectionKey: "reading-writing",
+        routingPolicy: { operationalQuestionCount: 0 },
+        modules: [baseModule()],
+      }),
+    ).toBe(25);
+    expect(
+      operationalCountForSection({
+        sectionKey: "math",
+        routingPolicy: { operationalQuestionCount: 0 },
+        modules: [
+          baseModule({
+            moduleKey: "math-m1",
+            targetQuestionCount: 22,
+            questions: Array.from({ length: 22 }, (_, index) => ({
+              isPretest: index >= 20,
+            })),
+          }),
+        ],
+      }),
+    ).toBe(20);
+  });
+  it("derives target-minus-pretest for non-blueprint sections and floors at 1", () => {
+    expect(
+      operationalCountForSection({
+        sectionKey: "custom",
+        routingPolicy: { operationalQuestionCount: 0 },
+        modules: [
+          {
+            moduleKey: "custom-m1",
+            adaptiveRole: "base",
+            targetQuestionCount: 10,
+            questions: [{ isPretest: false }, { isPretest: true }],
+          },
+        ],
+      }),
+    ).toBe(9);
+    expect(operationalCountForSection({ sectionKey: "custom", routingPolicy: null, modules: [] })).toBe(1);
   });
 });
 

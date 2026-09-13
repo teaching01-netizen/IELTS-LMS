@@ -2,7 +2,8 @@ import { StrictMode } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { QuestionSaveStatus } from "../../../hooks/useQuestionAutosave";
-import { SAVE_CLUSTER_LABELS, SaveCluster } from "../SaveCluster";
+import { saveStatusCopy } from "../../../realtime/connectionCopy";
+import { SaveCluster } from "../SaveCluster";
 
 const statuses: QuestionSaveStatus[] = ["saved", "unsaved", "saving", "offline", "error", "conflict"];
 
@@ -16,13 +17,17 @@ describe("SaveCluster", () => {
       for (const status of ["offline", "error", "conflict"] as const) {
         rerender(<SaveCluster status={status} lastSavedAt={null} transientSaved />);
         expect(container.querySelector('[data-save-hidden="true"]')).not.toBeInTheDocument();
-        expect(screen.getByRole("status")).toHaveTextContent(SAVE_CLUSTER_LABELS[status]);
+        expect(screen.getByRole("status")).toHaveTextContent(
+          saveStatusCopy({ status, diverged: false }),
+        );
       }
     } finally { vi.useRealTimers(); }
   });
   it.each(statuses)("announces a single vocabulary label for status %s", (status) => {
     render(<SaveCluster status={status} lastSavedAt={null} />);
-    expect(screen.getByRole("status")).toHaveTextContent(SAVE_CLUSTER_LABELS[status]);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      saveStatusCopy({ status, diverged: false }),
+    );
   });
 
   it("retries a failed save with one click", () => {

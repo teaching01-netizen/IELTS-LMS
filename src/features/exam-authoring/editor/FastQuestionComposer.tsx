@@ -1,5 +1,9 @@
 import type { StructuredContent } from "../contracts/assessment";
-import { RichQuestionComposer, type RichComposerCapabilities } from "./RichQuestionComposer";
+import {
+  RichQuestionComposer,
+  type RichComposerCapabilities,
+  type SmartPasteStatus,
+} from "./RichQuestionComposer";
 
 export interface FastQuestionComposerProps {
   value: StructuredContent;
@@ -10,6 +14,8 @@ export interface FastQuestionComposerProps {
   minHeightClassName?: string;
   assetOwnerId?: string;
   capabilities?: Readonly<RichComposerCapabilities>;
+  smartPaste?: boolean;
+  onSmartPaste?: ((info: SmartPasteStatus) => void) | undefined;
 }
 
 export function FastQuestionComposer({
@@ -21,6 +27,8 @@ export function FastQuestionComposer({
   minHeightClassName = "min-h-[112px]",
   assetOwnerId,
   capabilities,
+  smartPaste,
+  onSmartPaste,
 }: FastQuestionComposerProps) {
   return (
     <RichQuestionComposer
@@ -32,6 +40,8 @@ export function FastQuestionComposer({
       minHeightClassName={minHeightClassName}
       {...(assetOwnerId ? { assetOwnerId } : {})}
       {...(capabilities ? { capabilities } : {})}
+      {...(smartPaste !== undefined ? { smartPaste } : {})}
+      {...(onSmartPaste ? { onSmartPaste } : {})}
     />
   );
 }

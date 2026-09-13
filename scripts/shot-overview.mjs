@@ -9,7 +9,7 @@ const storyName = process.argv[2] ?? 'populated';
 const outPath = `${outDir}/${storyName}.png`;
 
 const child = execFile(
-  'npm',
+  'bun',
   ['run', 'storybook', '--', '--no-open'],
   {
     cwd: process.cwd(),

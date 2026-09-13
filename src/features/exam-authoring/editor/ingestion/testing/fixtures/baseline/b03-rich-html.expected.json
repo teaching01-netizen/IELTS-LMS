@@ -1,0 +1,125 @@
+{
+  "probe": "B3",
+  "inputKind": "text/html clipboard (Docs/Word-style inline marks)",
+  "targetField": "prompt vs choice",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML (ProseMirror clipboard parser -> schema; StarterKit defaults)",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Hello "
+          },
+          {
+            "type": "text",
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "text": "bold"
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "text",
+            "marks": [
+              {
+                "type": "italic"
+              }
+            ],
+            "text": "italic"
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "text",
+            "marks": [
+              {
+                "type": "underline"
+              }
+            ],
+            "text": "under"
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "text",
+            "marks": [
+              {
+                "type": "strike"
+              }
+            ],
+            "text": "strike"
+          },
+          {
+            "type": "text",
+            "text": " "
+          },
+          {
+            "type": "text",
+            "marks": [
+              {
+                "type": "code"
+              }
+            ],
+            "text": "code"
+          },
+          {
+            "type": "text",
+            "text": " x"
+          },
+          {
+            "type": "text",
+            "marks": [
+              {
+                "type": "superscript"
+              }
+            ],
+            "text": "2"
+          },
+          {
+            "type": "text",
+            "text": " and H"
+          },
+          {
+            "type": "text",
+            "marks": [
+              {
+                "type": "subscript"
+              }
+            ],
+            "text": "2"
+          },
+          {
+            "type": "text",
+            "text": "O"
+          }
+        ]
+      }
+    ]
+  },
+  "marksSurviving": [
+    "bold",
+    "italic",
+    "underline",
+    "strike",
+    "code",
+    "superscript",
+    "subscript"
+  ],
+  "linkNote": "anchor tags survive as link marks (href/rel/target preserved) - see B3b link fixture",
+  "validatorOutcome": "valid (marks do not affect SAT validation; choice-targeted paste is UNFILTERED today - see B10)"
+}

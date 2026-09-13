@@ -45,7 +45,8 @@ export type SatRunnerAction =
   | { type: 'toggleEliminatedOption'; questionId: string; optionId: string }
   | { type: 'setAnnotations'; questionId: string; annotations: SatQuestionAnnotations }
   | { type: 'toggleTool'; tool: SatToolId }
-  | { type: 'closeTool' }
+  | { type: 'closeTool'; tool: SatToolId }
+  | { type: 'closeAllTools' }
   | { type: 'selectQuestion'; questionIndex: number }
   | { type: 'reviewModule' }
   | { type: 'returnToModule' }
@@ -124,7 +125,16 @@ function workingState(
       const activeTools = toggleSatActiveTool(state.toolCapabilities, state.activeTools, action.tool);
       return { ...state, activeTools, activeTool: satActiveToolsToLegacy(activeTools) };
     }
-    case 'closeTool':
+    case 'closeTool': {
+      // Coexistence close (Phase 05): closing one tool leaves the other open.
+      // Legacy activeTool is re-derived from the new flags (calculator wins ties).
+      const activeTools: SatActiveTools =
+        action.tool === 'calculator'
+          ? { ...state.activeTools, calculator: false }
+          : { ...state.activeTools, referenceSheet: false };
+      return { ...state, activeTools, activeTool: satActiveToolsToLegacy(activeTools) };
+    }
+    case 'closeAllTools':
       return { ...state, activeTool: null, activeTools: EMPTY_SAT_ACTIVE_TOOLS };
     case 'selectQuestion':
       return {

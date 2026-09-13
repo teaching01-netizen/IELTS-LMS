@@ -1,0 +1,70 @@
+[
+  {
+    "input": "plain text only",
+    "kinds": [
+      "text"
+    ],
+    "warnings": []
+  },
+  {
+    "input": "inline \\(x^2\\) here",
+    "kinds": [
+      "text",
+      "inlineMath",
+      "text"
+    ],
+    "warnings": []
+  },
+  {
+    "input": "block $$\\frac{a}{b}$$ done",
+    "kinds": [
+      "text",
+      "blockMath",
+      "text"
+    ],
+    "warnings": []
+  },
+  {
+    "input": "display \\[y+1\\] end",
+    "kinds": [
+      "text",
+      "blockMath",
+      "text"
+    ],
+    "warnings": []
+  },
+  {
+    "input": "empty $$  $$ stays",
+    "kinds": [
+      "text"
+    ],
+    "warnings": []
+  },
+  {
+    "input": "unclosed \\(never here",
+    "kinds": [
+      "text"
+    ],
+    "warnings": [
+      "import.latex.invalid"
+    ]
+  },
+  {
+    "input": "bad $$\\frac{1\\invalid}$$ kept",
+    "kinds": [
+      "text",
+      "text",
+      "text"
+    ],
+    "warnings": [
+      "import.latex.invalid"
+    ]
+  },
+  {
+    "input": "prices $5 and $19.99 stay",
+    "kinds": [
+      "text"
+    ],
+    "warnings": []
+  }
+]

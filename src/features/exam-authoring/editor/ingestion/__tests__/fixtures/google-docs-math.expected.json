@@ -1,0 +1,54 @@
+{
+  "nodes": [
+    [
+      {
+        "kind": "text",
+        "text": "If "
+      },
+      {
+        "kind": "inlineMath",
+        "latex": "f(x)=2x+3",
+        "meta": {
+          "source": "html",
+          "confidence": 2,
+          "transformations": []
+        }
+      },
+      {
+        "kind": "text",
+        "text": ", what is the value of "
+      },
+      {
+        "kind": "inlineMath",
+        "latex": "f(4)",
+        "meta": {
+          "source": "html",
+          "confidence": 2,
+          "transformations": []
+        }
+      },
+      {
+        "kind": "text",
+        "text": "?"
+      }
+    ],
+    [
+      {
+        "kind": "blockMath",
+        "latex": "\\frac{a}{b}",
+        "meta": {
+          "source": "html",
+          "confidence": 2,
+          "transformations": []
+        }
+      }
+    ],
+    [
+      {
+        "kind": "text",
+        "text": "Prices stay $5 and $19.99 here."
+      }
+    ]
+  ],
+  "warnings": []
+}

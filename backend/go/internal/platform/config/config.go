@@ -232,6 +232,16 @@ const (
 	DefaultWSCapTotal    = 30000
 	DefaultWSCapUser     = 5
 	DefaultWSCapSchedule = 20000
+
+	// DefaultAuthoringWSMaxFrameBytes bounds one inbound authoring frame.
+	// Client frames are tiny (a subscribe with an optional cursor); 64 KiB is
+	// generous headroom while still refusing a hostile payload.
+	DefaultAuthoringWSMaxFrameBytes = 64 * 1024
+
+	// DefaultAuthoringWSReplayBound caps rows streamed per subscribe. Kept in
+	// lockstep with authoringrealtime.ReplayBound (asserted by a test) rather
+	// than imported, so this package keeps its zero-internal-dependency rule.
+	DefaultAuthoringWSReplayBound = 200
 )
 
 // wsCapFromEnv reads a cap env with default fallback: unset/unparseable/
@@ -418,6 +428,12 @@ type Config struct {
 	WSCapUser     int
 	WSCapSchedule int
 
+	// Authoring realtime WS knobs (Phase 03, additive). ReplayBound caps
+	// rows streamed per subscribe; MaxFrameBytes caps one inbound frame.
+	// Non-positive env values clamp to the defaults (mirrors WSCap*).
+	AuthoringWSReplayBound  int
+	AuthoringWSMaxFrameSize int
+
 	RateLimitGlobalPerMin int
 	RateLimitBucketCap    int
 
@@ -475,6 +491,31 @@ type Config struct {
 	LiveBus LiveBusMode
 	// LiveBusSink selects the async debug sink (default off = no writes).
 	LiveBusSink LiveBusSinkMode
+	// AuthoringRealtimeEvents gates the Phase 02 SAT authoring realtime
+	// event rows on the durable live-update bus (AUTHORING_REALTIME_EVENTS,
+	// default off). Off = byte-identical legacy authoring behavior: no bus
+	// INSERT and no extra read. Rollback = unset/off.
+	AuthoringRealtimeEvents bool
+	// AuthoringRealtimeDelivery gates the Phase 03 SAT authoring realtime
+	// WebSocket delivery (AUTHORING_REALTIME_DELIVERY, default off). Off =
+	// subscriptions are refused as subscription_forbidden; HTTP authoring is
+	// completely unaffected (progressive degradation: the flag disables a
+	// capability, it never degrades correctness). Rollback = unset/off.
+	AuthoringRealtimeDelivery bool
+	// AuthoringRealtimePresence gates the Phase 05 ephemeral presence channel
+	// on the authoring socket (AUTHORING_REALTIME_PRESENCE, default off). It
+	// is a NARROWING flag only: the capability is advertised as false unless
+	// delivery is also on, because presence rides the delivery socket. Off =
+	// the capabilities frame says presence:false and any client presence
+	// frame is refused as an unsupported frame. Rollback = unset/off.
+	AuthoringRealtimePresence bool
+	// AuthoringRealtimeConflictCompare advertises whether clients may run the
+	// Phase 05 field-level Compare/ConflictResolver affordance
+	// (AUTHORING_REALTIME_CONFLICT_COMPARE, default off). The comparison is
+	// computed entirely client-side from HTTP-fetched revisions; this flag only
+	// lets the server withhold the affordance during rollout. Rollback =
+	// unset/off.
+	AuthoringRealtimeConflictCompare bool
 
 	// EntryGateEnabled gates the plan-D3 per-schedule check-in bucket. Off
 	// (default) = today's shape (only the email+IP limiter). On = in-memory
@@ -700,27 +741,33 @@ func Load() Config {
 		AutoSubmitBatchSize:   getenvInt("AUTO_SUBMIT_BATCH_SIZE", 100),
 		HeartbeatMinWriteSecs: getenvInt("HEARTBEAT_PRESENCE_MIN_WRITE_INTERVAL_SECS", 5),
 
-		WorkerFallbackIntervalSecs:    getenvInt("WORKER_FALLBACK_INTERVAL_SECS", 5),
-		WorkerMaintenanceIntervalSecs: getenvInt("WORKER_MAINTENANCE_INTERVAL_SECS", 300),
-		LiveUpdatePollIntervalMs:      getenvInt("LIVE_UPDATE_POLL_INTERVAL_MS", 1000),
-		OutboxBatchSize:               getenvInt("OUTBOX_BATCH_SIZE", 100),
-		LiveBus:                       parseLiveBusMode(os.Getenv("LIVE_BUS")),
-		StudentWS:                     parseStudentWSMode(os.Getenv("STUDENT_WS")),
-		ShedMode:                      parseShedMode(os.Getenv("SHED_MODE")),
-		WSAdmission:                   parseWSAdmissionMode(os.Getenv("WS_ADMISSION")),
-		WSCapTotal:                    wsCapFromEnv("WS_CAP_TOTAL", DefaultWSCapTotal),
-		WSCapUser:                     wsCapFromEnv("WS_CAP_USER", DefaultWSCapUser),
-		WSCapSchedule:                 wsCapFromEnv("WS_CAP_SCHEDULE", DefaultWSCapSchedule),
-		LiveBusSink:                   parseLiveBusSink(os.Getenv("LIVE_BUS_SINK")),
-		RollupEnabled:                 getenvBool("ROLLUP", false),
-		PresenceMode:                  parsePresenceMode(os.Getenv("PRESENCE_MODE")),
-		OutboxExecOnly:                getenvBool("OUTBOX_EXEC_ONLY", false),
-		DBPoolMaxAPI:                  poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_API", 0)),
-		DBPoolMaxWorker:               poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_WORKER", 0)),
-		WorkerClaimPartitions:         claimPartitionsFromEnv(),
-		OutboxClaimMode:               parseOutboxClaimMode(os.Getenv("OUTBOX_CLAIM_MODE")),
-		OutboxMaxAttempts:             getenvInt("OUTBOX_MAX_ATTEMPTS", 10),
-		GradingProjectionIntervalSecs: getenvInt("GRADING_PROJECTION_INTERVAL_SECS", 5),
+		WorkerFallbackIntervalSecs:       getenvInt("WORKER_FALLBACK_INTERVAL_SECS", 5),
+		WorkerMaintenanceIntervalSecs:    getenvInt("WORKER_MAINTENANCE_INTERVAL_SECS", 300),
+		LiveUpdatePollIntervalMs:         getenvInt("LIVE_UPDATE_POLL_INTERVAL_MS", 1000),
+		OutboxBatchSize:                  getenvInt("OUTBOX_BATCH_SIZE", 100),
+		LiveBus:                          parseLiveBusMode(os.Getenv("LIVE_BUS")),
+		StudentWS:                        parseStudentWSMode(os.Getenv("STUDENT_WS")),
+		ShedMode:                         parseShedMode(os.Getenv("SHED_MODE")),
+		WSAdmission:                      parseWSAdmissionMode(os.Getenv("WS_ADMISSION")),
+		WSCapTotal:                       wsCapFromEnv("WS_CAP_TOTAL", DefaultWSCapTotal),
+		AuthoringWSReplayBound:           wsCapFromEnv("AUTHORING_WS_REPLAY_BOUND", DefaultAuthoringWSReplayBound),
+		AuthoringWSMaxFrameSize:          wsCapFromEnv("AUTHORING_WS_MAX_FRAME_BYTES", DefaultAuthoringWSMaxFrameBytes),
+		WSCapUser:                        wsCapFromEnv("WS_CAP_USER", DefaultWSCapUser),
+		WSCapSchedule:                    wsCapFromEnv("WS_CAP_SCHEDULE", DefaultWSCapSchedule),
+		LiveBusSink:                      parseLiveBusSink(os.Getenv("LIVE_BUS_SINK")),
+		AuthoringRealtimeEvents:          getenvBool("AUTHORING_REALTIME_EVENTS", false),
+		AuthoringRealtimeDelivery:        getenvBool("AUTHORING_REALTIME_DELIVERY", false),
+		AuthoringRealtimePresence:        getenvBool("AUTHORING_REALTIME_PRESENCE", false),
+		AuthoringRealtimeConflictCompare: getenvBool("AUTHORING_REALTIME_CONFLICT_COMPARE", false),
+		RollupEnabled:                    getenvBool("ROLLUP", false),
+		PresenceMode:                     parsePresenceMode(os.Getenv("PRESENCE_MODE")),
+		OutboxExecOnly:                   getenvBool("OUTBOX_EXEC_ONLY", false),
+		DBPoolMaxAPI:                     poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_API", 0)),
+		DBPoolMaxWorker:                  poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_WORKER", 0)),
+		WorkerClaimPartitions:            claimPartitionsFromEnv(),
+		OutboxClaimMode:                  parseOutboxClaimMode(os.Getenv("OUTBOX_CLAIM_MODE")),
+		OutboxMaxAttempts:                getenvInt("OUTBOX_MAX_ATTEMPTS", 10),
+		GradingProjectionIntervalSecs:    getenvInt("GRADING_PROJECTION_INTERVAL_SECS", 5),
 
 		RateLimitGlobalPerMin: getenvInt("RATE_LIMIT_GLOBAL", 600),
 		RateLimitBucketCap:    getenvInt("RATE_LIMIT_BUCKET_CAP", 120),

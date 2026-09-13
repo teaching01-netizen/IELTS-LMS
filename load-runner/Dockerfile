@@ -11,8 +11,11 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends k6 \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json* ./
-RUN npm install
+# Bun is the package manager; Node (from the Playwright base image) remains the runtime.
+COPY --from=oven/bun:1.3.14-debian /usr/local/bin/bun /usr/local/bin/bun
+
+COPY package.json bun.lock* ./
+RUN bun install
 
 COPY . .
 
@@ -22,4 +25,4 @@ ENV PORT=3366
 
 EXPOSE 3366
 
-CMD ["npm", "run", "ui"]
+CMD ["bun", "run", "ui"]

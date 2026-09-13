@@ -16,6 +16,7 @@ import { StudentModuleEmptyState } from './StudentModuleEmptyState';
 import { useSplitPaneResize } from './useSplitPaneResize';
 import { hasHtmlMarkup, normalizeReadingPlainTextForDisplay } from './normalizeReadingPassageText';
 import { sanitizeReadingPassageHtml } from './sanitizeReadingPassageHtml';
+import { getImageUrlCandidates } from '../../utils/imageUrl';
 
 export interface StudentScienceProps {
   state: ExamState;
@@ -136,7 +137,7 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
 
   return (
     <div
-      className={`student-science-stimulus-pane h-full overflow-y-auto font-sans text-gray-900 ${
+      className={`student-science-stimulus-pane student-scroll-breathe h-full overflow-y-auto font-sans text-gray-900 ${
         materialCompact ? 'p-2 md:p-3' : 'p-4 md:p-6 lg:p-8'
       } ${isTabletMode ? 'w-[var(--science-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--science-pane-width)] lg:min-w-[300px]'}`}
       data-student-highlightable="true"
@@ -168,7 +169,7 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
         {(stimulus.images ?? []).map((image) => (
           <StudentZoomableMedia
             key={image.id}
-            sources={[image.src]}
+            sources={getImageUrlCandidates(image.src ?? '')}
             alt={image.alt}
             label={image.alt || 'Stimulus image'}
             hint="Tap to zoom the stimulus image"
@@ -246,10 +247,14 @@ export function StudentScience({
   const {
     answerCompact,
     handleDrag,
+    handlePointerMove,
+    handlePointerEnd,
     handleKeyboardResize,
+    resizeCommands,
     leftWidth,
     materialCompact,
     splitBounds,
+    splittable,
     splitPaneStyle,
     workspaceRef,
   } = useSplitPaneResize({
@@ -314,8 +319,12 @@ export function StudentScience({
       leftWidth={leftWidth}
       splitMinWidth={splitBounds.min}
       splitMaxWidth={splitBounds.max}
+      splitSplittable={splittable}
       onDividerPointerDown={handleDrag}
+      onDividerPointerMove={handlePointerMove}
+      onDividerPointerEnd={handlePointerEnd}
       onDividerKeyDown={handleKeyboardResize}
+      resizeCommands={resizeCommands}
       workspaceTestId="science-split-workspace"
       dividerAriaLabel="Resize ACT Science stimulus and answer panels"
       dividerTestId="science-pane-resizer"

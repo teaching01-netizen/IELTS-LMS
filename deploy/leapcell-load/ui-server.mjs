@@ -205,7 +205,7 @@ app.post('/api/start', (req, res) => {
     env.HEADED_USERS = '0';
   }
 
-  let cmd = runWithK6 ? ['npm', 'run', 'e2e:live-with-k6'] : ['npm', 'run', 'e2e:live-runner'];
+  let cmd = runWithK6 ? ['bun', 'run', 'e2e:live-with-k6'] : ['bun', 'run', 'e2e:live-runner'];
   if (testMode === 'k6') {
     cmd = ['k6', 'run', String(env.K6_SCRIPT || 'k6/prod-start-exam-200.js')];
   }

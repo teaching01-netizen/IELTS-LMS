@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '../ui/Button';
 import {
   countAnsweredQuestions,
@@ -15,6 +16,17 @@ import { CompactQuestionNavigation } from './layout/CompactQuestionNavigation';
 
 const pressClassName =
   'transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out';
+
+// P4: Previous/Next live in the ONE global navigator. Forward movement reads
+// slightly easier than backward movement; neither scales or moves on press
+// (the exam control recipe forbids geometry change), which is why these are not
+// the shared Button — its press is a scale animation.
+const navButtonBase =
+  `${pressClassName} inline-flex flex-shrink-0 items-center justify-center gap-1 rounded-sm border px-2.5 h-8 md:h-9 text-[length:var(--student-control-font-size,0.9375rem)] font-semibold ` +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 ' +
+  'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-inherit';
+const navButtonSecondaryClassName = `${navButtonBase} border-gray-300 bg-white text-gray-800 hover:bg-gray-50 active:bg-gray-100`;
+const navButtonPrimaryClassName = `${navButtonBase} border-gray-900 bg-gray-900 text-white hover:bg-gray-800 active:bg-gray-950`;
 
 interface StudentFooterProps {
   questions: StudentQuestionDescriptor[];
@@ -73,6 +85,14 @@ export function StudentFooter({
     flags,
     currentQuestionId,
   });
+  // P4: the same derived view model feeds the chips, the position readout, and
+  // Previous/Next — one active question, one source of truth.
+  const { items: navigationItems, currentIndex, canGoPrevious, canGoNext } = navigationViewModel;
+  // The readout must never invent a position: it reports the question the
+  // shared view model actually marks current.
+  const currentItem = navigationItems.find((item) => item.current);
+  const previousItem = canGoPrevious ? navigationItems[currentIndex - 1] : undefined;
+  const nextItem = canGoNext ? navigationItems[currentIndex + 1] : undefined;
   const itemsByGroup = new Map<string, StudentQuestionNavigationItem[]>();
   for (const item of navigationViewModel.items) {
     const list = itemsByGroup.get(item.groupId);
@@ -202,6 +222,40 @@ export function StudentFooter({
             {answeredCount}/{totalQuestions}
           </span>
         </div>
+        {/* P4: the global navigator is the single navigation authority. The
+            position readout and the two arrows read from the same active
+            question as the chip rail, so the bar can never disagree with
+            itself. */}
+        {navigationViewModel.items.length > 0 ? (
+          <div className="flex flex-shrink-0 items-center gap-1 md:gap-1.5">
+            <span className="hidden whitespace-nowrap text-[length:var(--student-chip-font-size)] font-semibold tabular-nums text-gray-500 sm:inline">
+              <span className="sr-only">Current question </span>
+              {currentItem ? currentItem.label : '—'} of {totalQuestions}
+            </span>
+            <button
+              type="button"
+              className={navButtonSecondaryClassName}
+              aria-label="Previous question"
+              disabled={!canGoPrevious}
+              onClick={() => {
+                if (previousItem) onNavigate(previousItem.navigationId);
+              }}
+            >
+              <ChevronLeft size={18} aria-hidden="true" /> Previous
+            </button>
+            <button
+              type="button"
+              className={navButtonPrimaryClassName}
+              aria-label="Next question"
+              disabled={!canGoNext}
+              onClick={() => {
+                if (nextItem) onNavigate(nextItem.navigationId);
+              }}
+            >
+              Next <ChevronRight size={18} aria-hidden="true" />
+            </button>
+          </div>
+        ) : null}
         {showSubmitButton ? (
           <Button
             variant={hasUnanswered ? 'warning' : 'primary'}

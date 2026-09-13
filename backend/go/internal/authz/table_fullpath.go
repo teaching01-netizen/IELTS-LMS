@@ -16,6 +16,9 @@ func init() {
 		// authoring reads (admin/observer/builder) vs writes
 		// (admin/builder). authorValidateHandler gates READ
 		// (requireAuthoringExamRead).
+		// SAT authoring realtime subscription (Phase 03): the authoring read
+		// set may subscribe; the handler re-verifies tenant scope + draft.
+		"GET /api/v1/ws/authoring":                                                                 {MinRoles: readStaff},
 		"GET /api/v1/assessment-authoring/exams/{examID}/shell":                                    {MinRoles: readStaff},
 		"POST /api/v1/assessment-authoring/exams/{examID}/shell":                                   {MinRoles: writeStaff},
 		"GET /api/v1/assessment-authoring/exams/{examID}/preview":                                  {MinRoles: readStaff},

@@ -1120,6 +1120,7 @@ export class ExamLifecycleService {
     if (config.sections.listening.enabled) enabledModules.push('listening');
     if (config.sections.writing.enabled) enabledModules.push('writing');
     if (config.sections.speaking.enabled) enabledModules.push('speaking');
+    if (config.sections.science.enabled) enabledModules.push('science');
 
     if (enabledModules.length === 0) {
       errors.push({ field: 'modules', message: 'At least one module must be enabled', severity: 'error' });

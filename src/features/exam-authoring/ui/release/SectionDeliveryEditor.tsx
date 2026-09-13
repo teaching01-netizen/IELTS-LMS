@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, GitBranch, LoaderCircle, Save } from "lucide-react";
 import { useUpdateSectionDeliverySettings } from "../../api/assessmentQueries";
 import type { AssessmentSectionShell } from "../../contracts/assessment";
-import { secondsToMinutes, toUserFacingReleaseError } from "./releaseSelectors";
+import { operationalCountForSection, secondsToMinutes, toUserFacingReleaseError } from "./releaseSelectors";
 import { releaseDisabledButtonClass } from "./releaseUi";
 import { NumericField } from "./NumericField";
 
@@ -71,7 +71,10 @@ function SectionDeliveryEditorInner({
     routing?.revision,
   ]);
 
-  const operationalCount = Math.max(1, routing?.operationalQuestionCount ?? 1);
+  // Derived bound (stored value -> SAT blueprint -> target-minus-pretest),
+  // so threshold-only policy rows (the real DB shape) still edit against
+  // the provider contract (RW 25 / Math 20) instead of clamping to 1.
+  const operationalCount = operationalCountForSection(section);
   const structureValid = Boolean(base && lower && higher && routing);
   const dirty =
     structureValid &&

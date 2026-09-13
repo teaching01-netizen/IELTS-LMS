@@ -1,0 +1,28 @@
+{
+  "segments": [
+    {
+      "text": "The study showed two groups.",
+      "kind": "text"
+    },
+    {
+      "text": "Both improved over time.",
+      "kind": "text"
+    },
+    {
+      "text": "A. Group one improved most.",
+      "kind": "choice"
+    },
+    {
+      "text": "B. Group two improved most.",
+      "kind": "choice"
+    },
+    {
+      "text": "C. Neither group improved.",
+      "kind": "choice"
+    },
+    {
+      "text": "D. Both groups declined.",
+      "kind": "choice"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "probe": "B10",
+  "inputKind": "block-rich HTML pasted into an MCQ choice composer (SAT_CHOICE_COMPOSER_CAPABILITIES blockStyles:false lists:false)",
+  "targetField": "choice (AnswerKeyField -> FastQuestionComposer capabilities=SAT_CHOICE)",
+  "harness": "jsdom + real composer extensions (SAME schema as prompt composer - capabilities only gate the TOOLBAR, never the schema/parse path); insertContent of heading+bulletList proves schema accepts them",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "heading",
+        "attrs": {
+          "id": "content-<stable>",
+          "level": 2
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Pasted H2"
+          }
+        ]
+      },
+      {
+        "type": "bulletList",
+        "content": [
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "attrs": {
+                  "id": "content-<stable>"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "li"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "verdict": "UNFILTERED (confirmed): pasted headings/lists/codeBlock/horizontalRule LAND in choice content - toolbar gating (ComposerToolbar hides style select, lists, divider when blockStyles/lists false) does NOT constrain paste/insertContent. Phase-07 MUST add per-capability filtering on the paste/drop applicator path; record-only in this phase, NO fix.",
+  "capabilityConstants": "SAT_RICH all-true; SAT_CHOICE blockStyles:false lists:false, rest true (frozen by baselineContracts snapshot)"
+}

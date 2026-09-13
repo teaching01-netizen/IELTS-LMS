@@ -1,0 +1,75 @@
+{
+  "science": {
+    "stimuli": [
+      {
+        "id": "stim-1",
+        "title": "Ecology experiment",
+        "content": "Plants were grown under four light conditions.",
+        "wordCount": 8,
+        "images": [
+          {
+            "id": "img-growth-chart",
+            "alt": "Bar chart of plant growth by light condition",
+            "annotations": [],
+            "crop": { "x": 0, "y": 0, "width": 800, "height": 600 },
+            "height": 600,
+            "src": "assets/act/stim-1/growth-chart.png",
+            "width": 800,
+            "zoom": 1
+          }
+        ],
+        "blocks": [
+          {
+            "id": "block-1",
+            "type": "SINGLE_MCQ",
+            "instruction": "Use the stimulus to answer the questions.",
+            "questions": [
+              {
+                "id": "q1",
+                "stem": "Which condition produced the greatest growth?",
+                "skillCategory": "interpretation_of_data",
+                "options": [
+                  { "id": "q1-A", "text": "Darkness", "isCorrect": false },
+                  { "id": "q1-B", "text": "Full sun", "isCorrect": true },
+                  { "id": "q1-C", "text": "Shade", "isCorrect": false },
+                  { "id": "q1-D", "text": "Red light only", "isCorrect": false }
+                ]
+              },
+              {
+                "id": "q2",
+                "stem": "Which variable was controlled?",
+                "skillCategory": "scientific_investigation",
+                "options": [
+                  { "id": "q2-A", "text": "Water volume", "isCorrect": true },
+                  { "id": "q2-B", "text": "Light condition", "isCorrect": false },
+                  { "id": "q2-C", "text": "Growth rate", "isCorrect": false },
+                  { "id": "q2-D", "text": "None", "isCorrect": false }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "stim-2",
+        "title": "Titration",
+        "content": "An acid-base titration curve is shown.",
+        "blocks": [
+          {
+            "id": "q3",
+            "type": "SINGLE_MCQ",
+            "instruction": "Answer the question.",
+            "stem": "The equivalence point is nearest to which pH?",
+            "skillCategory": "evaluating_scientific_arguments_and_models_with_evidence",
+            "options": [
+              { "id": "q3-A", "text": "3", "isCorrect": false },
+              { "id": "q3-B", "text": "5", "isCorrect": false },
+              { "id": "q3-C", "text": "7", "isCorrect": true },
+              { "id": "q3-D", "text": "11", "isCorrect": false }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "source": "html",
+  "headerRow": true,
+  "tooLarge": false,
+  "message": null,
+  "document": {
+    "version": 1,
+    "nodes": [
+      {
+        "kind": "table",
+        "rows": [
+          [
+            {
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Year",
+                  "marks": [],
+                  "meta": {
+                    "source": "spreadsheet",
+                    "confidence": 2,
+                    "transformations": []
+                  }
+                }
+              ]
+            },
+            {
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "Score",
+                  "marks": [],
+                  "meta": {
+                    "source": "spreadsheet",
+                    "confidence": 2,
+                    "transformations": []
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "2024",
+                  "marks": [],
+                  "meta": {
+                    "source": "spreadsheet",
+                    "confidence": 2,
+                    "transformations": []
+                  }
+                }
+              ]
+            },
+            {
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "680",
+                  "marks": [],
+                  "meta": {
+                    "source": "spreadsheet",
+                    "confidence": 2,
+                    "transformations": []
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "2025",
+                  "marks": [],
+                  "meta": {
+                    "source": "spreadsheet",
+                    "confidence": 2,
+                    "transformations": []
+                  }
+                }
+              ]
+            },
+            {
+              "children": [
+                {
+                  "kind": "text",
+                  "text": "710",
+                  "marks": [],
+                  "meta": {
+                    "source": "spreadsheet",
+                    "confidence": 2,
+                    "transformations": []
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "headerRow": true,
+        "meta": {
+          "source": "spreadsheet",
+          "confidence": 2,
+          "transformations": []
+        }
+      }
+    ],
+    "sourceMeta": {
+      "source": "spreadsheet",
+      "confidence": 2,
+      "transformations": [
+        "spreadsheet.html"
+      ]
+    }
+  }
+}

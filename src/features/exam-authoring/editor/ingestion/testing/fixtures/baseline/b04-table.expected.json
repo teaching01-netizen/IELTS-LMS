@@ -1,0 +1,186 @@
+{
+  "probe": "B4",
+  "inputKind": "text/html 3x3 table with header row",
+  "targetField": "stimulus",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML (TableKit resizable schema)",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "table",
+        "content": [
+          {
+            "type": "tableRow",
+            "content": [
+              {
+                "type": "tableHeader",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "content-<stable>"
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "H1"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "tableHeader",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "content-<stable>"
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "H2"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "tableHeader",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "content-<stable>"
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "H3"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "tableRow",
+            "content": [
+              {
+                "type": "tableCell",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "content-<stable>"
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "r1c1"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "tableCell",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "content-<stable>"
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "r1c2"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "tableCell",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "content-<stable>"
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "r1c3"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "tableRow",
+            "content": [
+              {
+                "type": "tableCell",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "content-<stable>"
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "r2c1"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "tableCell",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "content-<stable>"
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "r2c2"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "tableCell",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "attrs": {
+                      "id": "content-<stable>"
+                    },
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "r2c3"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "observed": "th -> tableHeader preserved; each cell keeps paragraph wrapper with content-* id backfill; NO row/col/cell caps exist today (250x50x5000 cap is a phase-05 requirement, not current behavior)",
+  "validatorOutcome": "valid (tables invisible to SAT validators; hasStructuredContent treats any table node as meaningful content)"
+}

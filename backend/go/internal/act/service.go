@@ -9,14 +9,18 @@ package act
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
@@ -104,12 +108,18 @@ func NewService(db *sql.DB, runner *tx.Runner) *Service {
 // and tests that already own a final_submission row.
 func SealScienceScore(ctx context.Context, t tx.Tx, attemptID string, config, content map[string]any, answers []Answer, clientScorePresent bool) (Score, error) {
 	if clientScorePresent {
+		// Phase 02 observability: forged client scores are rejected before
+		// any seal write; the rejection emits only a safe counter (no
+		// answer contents, no attempt/user ids in labels).
+		telemetry.IncCounter(telemetry.MACTScoreFailure, "provider", "act", "section", SectionScience, "outcome", "client_score_rejected")
 		return Score{}, &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Client-supplied ACT scores are rejected; scoring is server-authoritative.", HTTPStatus: 400}
 	}
 	score, err := ComputeScienceScore(config, content, answers, time.Now().UTC())
 	if err != nil {
+		telemetry.IncCounter(telemetry.MACTScoreFailure, "provider", "act", "section", SectionScience, "outcome", "score_error")
 		return Score{}, err
 	}
+	telemetry.IncCounter(telemetry.MACTScoreTotal, "provider", "act", "section", SectionScience, "outcome", "scored")
 	scoreJSON, _ := json.Marshal(score)
 	// Lock the attempt row, then merge score into final_submission.score.
 	var finalSub sql.NullString
@@ -134,6 +144,18 @@ func SealScienceScore(ctx context.Context, t tx.Tx, attemptID string, config, co
 	return score, nil
 }
 
+// Canonical sealed content (Phase 02 blocker 2 resolution): the immutable
+// exam_versions.content_snapshot row is the single source of truth at seal
+// time. ScoreAttempt reads it under the terminal attempt lock and returns
+// ONLY the redacted server-owned projection (score/providerKey/section —
+// pinned by TestContractScoreAttemptRedactedProjection, never keys or
+// student payloads). The seal step embeds the sealed content copy separately
+// via SealedContent (same tx, same version row): the embedded
+// final_submission.content copy — content-addressed by contentHash — is what
+// detail replay (buildScienceQuestions) reads, never a fresh exam_versions
+// read. Later authoring edits mint new version rows and can never change a
+// sealed result: the seal carries its own content + hash.
+//
 // ScoreAttempt implements terminalization.AttemptScorer without importing the
 // terminalization package. It loads the published ACT snapshots in the same
 // transaction that owns the terminal attempt lock, flattens the canonical
@@ -158,8 +180,10 @@ func (s *Service) ScoreAttempt(ctx context.Context, q tx.Tx, _ string, versionID
 	answers := decodeAnswers(answersRaw)
 	score, err := ComputeScienceScore(config, content, answers, time.Now().UTC())
 	if err != nil {
+		telemetry.IncCounter(telemetry.MACTScoreFailure, "provider", "act", "section", SectionScience, "outcome", "score_error")
 		return nil, err
 	}
+	telemetry.IncCounter(telemetry.MACTScoreTotal, "provider", "act", "section", SectionScience, "outcome", "scored")
 	return map[string]any{
 		"score":       score,
 		"providerKey": "act",
@@ -167,6 +191,63 @@ func (s *Service) ScoreAttempt(ctx context.Context, q tx.Tx, _ string, versionID
 	}, nil
 }
 
+// SealedContent loads the canonical sealed ACT content for a published
+// version under the caller's terminal lock and returns the normalized copy
+// plus its SealedContentHash. The seal step (terminalization + V2 direct
+// sealer) embeds both into the sealed artifacts so detail replay is
+// byte-deterministic without re-reading exam_versions after commit.
+func (s *Service) SealedContent(ctx context.Context, q tx.Tx, versionID string) (map[string]any, string, error) {
+	var contentRaw sql.NullString
+	if err := q.QueryRowContext(ctx,
+		"SELECT content_snapshot FROM exam_versions WHERE id = ?",
+		versionID).Scan(&contentRaw); err != nil {
+		return nil, "", err
+	}
+	content, err := decodeObject(contentRaw)
+	if err != nil {
+		return nil, "", fmt.Errorf("ACT sealed content is invalid: %w", err)
+	}
+	content = normalizeScienceContent(content)
+	return content, SealedContentHash(content), nil
+}
+
+// SealedContentHash is the deterministic identity of sealed ACT content: the
+// SHA-256 hex of the canonical question sequence
+// "questionId\x00<canonical-correct-json>" joined per ordered question.
+// Seal and detail-replay compare this hash to prove the embedded copy is the
+// version-row content at seal time. Deterministic: map iteration is sorted,
+// JSON encoding is canonical (encoding/json with sorted keys for the
+// single correct value).
+func SealedContentHash(content map[string]any) string {
+	normalized := normalizeScienceContent(content)
+	key := answerKeyFromContent(normalized)
+	order := orderedQuestions(normalized)
+	ids := append([]string(nil), order...)
+	sort.Strings(ids)
+	h := sha256.New()
+	for _, id := range ids {
+		encoded, _ := json.Marshal(key[id])
+		h.Write([]byte(id))
+		h.Write([]byte{0})
+		h.Write(encoded)
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Canonical result store (Phase 02 blocker 1 resolution):
+// assessment_results is the single source of truth for terminal ACT reads.
+// final_submission.score is the write-time compatibility projection stamped
+// inside the seal transaction (same tx that inserts the receipt); the
+// terminalization materializer then copies that sealed score into
+// assessment_results.score_payload + total_score atomically. After commit,
+// every reader — ListScienceReports (aggregate), GetScienceDetail (aggregate
+// + embedded-copy replay), LoadResultForAttempt (bootstrap) — reads the
+// persisted assessment_results row (or the final_submission copy of the same
+// sealed bytes for list/detail aggregates). Scores are never recomputed on
+// read; SealScienceScore and ScoreAttempt are the only writers, both inside
+// the seal transaction.
+//
 // LoadResultForAttempt returns the persisted ACT result for a terminal
 // attempt. Delivery reads this after the terminalization transaction commits;
 // it never recomputes a score during bootstrap.
@@ -355,7 +436,10 @@ type ReportFilter struct {
 
 // ListScienceReports queries sealed ACT science outcomes. It reads the score
 // persisted at seal time (never recomputing client-side) and joins the
-// release state from assessment_results when present.
+// release state from assessment_results when present. Identity uses the
+// central effective-provider predicate (exam_type ACT heals legacy
+// provider_key='ielts' rows, Phase 02 blocker 4); genuine IELTS rows
+// (exam_type != 'ACT') never match.
 func (s *Service) ListScienceReports(ctx context.Context, f ReportFilter) ([]ScienceReport, error) {
 	limit := f.Limit
 	if limit <= 0 || limit > 500 {
@@ -371,7 +455,7 @@ func (s *Service) ListScienceReports(ctx context.Context, f ReportFilter) ([]Sci
 		JOIN exam_entities e ON e.id = a.exam_id
 		LEFT JOIN assessment_results ar
 			ON ar.attempt_id = a.id AND ar.provider_key = 'act'
-		WHERE e.provider_key = 'act'
+		WHERE (e.provider_key = 'act' OR e.exam_type = 'ACT')
 		  AND JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.section')) = 'science'
 		  AND a.submitted_at IS NOT NULL`
 	args := []any{}
@@ -383,6 +467,7 @@ func (s *Service) ListScienceReports(ctx context.Context, f ReportFilter) ([]Sci
 	args = append(args, limit, maxInt(f.Offset, 0))
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
+		telemetry.IncCounter(telemetry.MACTResultFailure, "provider", "act", "section", SectionScience, "outcome", "list_error")
 		return nil, err
 	}
 	defer rows.Close()
@@ -399,17 +484,24 @@ func (s *Service) ListScienceReports(ctx context.Context, f ReportFilter) ([]Sci
 		r.Percentage = atof(pctStr)
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		telemetry.IncCounter(telemetry.MACTResultFailure, "provider", "act", "section", SectionScience, "outcome", "list_error")
+		return nil, err
+	}
+	telemetry.IncCounter(telemetry.MACTResultTotal, "provider", "act", "section", SectionScience, "outcome", "listed")
+	return out, nil
 }
 
 // GetScienceDetail loads one sealed ACT science attempt with per-question
 // rows for the results detail surface. The stored score is authoritative;
 // per-question verdicts replay answersEqual against the sealed content key.
 // Unsealed (pending) or missing attempts return NOT_FOUND so the UI renders
-// its pending empty state instead of a fabricated table. The actor scope
-// mirrors the science list intent: platform readers see all rows; tenant
-// actors narrow to their organization plus a live staff assignment; actors
-// with neither see NOT_FOUND, so graders cannot probe other schedules.
+// its pending empty state instead of a fabricated table. Identity uses the
+// central effective-provider predicate (exam_type ACT heals legacy rows).
+// The actor scope mirrors the science list intent: platform readers see all
+// rows; tenant actors narrow to their organization plus a live staff
+// assignment; actors with neither see NOT_FOUND, so graders cannot probe
+// other schedules.
 func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext, attemptID string) (*ScienceDetail, error) {
 	if strings.TrimSpace(attemptID) == "" {
 		return nil, apperrors.New(apperrors.CodeBadRequest, "Attempt id is required.")
@@ -430,15 +522,17 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
 		LEFT JOIN assessment_results ar
 			ON ar.attempt_id = a.id AND ar.provider_key = 'act'
-		WHERE a.id = ? AND e.provider_key = 'act'
+		WHERE a.id = ? AND (e.provider_key = 'act' OR e.exam_type = 'ACT')
 		  AND a.submitted_at IS NOT NULL` + scope
 	args := append([]any{attemptID}, scopeArgs...)
 	err := s.db.QueryRowContext(ctx, query, args...).
 		Scan(&scheduleID, &studentID, &studentName, &finalSub, &submittedAt, &outcome, &release)
 	if err == sql.ErrNoRows {
+		telemetry.IncCounter(telemetry.MACTResultTotal, "provider", "act", "section", SectionScience, "outcome", "not_found")
 		return nil, apperrors.New(apperrors.CodeNotFound, "ACT result not found.")
 	}
 	if err != nil {
+		telemetry.IncCounter(telemetry.MACTResultFailure, "provider", "act", "section", SectionScience, "outcome", "detail_error")
 		return nil, err
 	}
 	snap := map[string]any{}
@@ -469,12 +563,21 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 	if detail.Outcome == "scored" {
 		detail.Questions = buildScienceQuestions(snap)
 	}
+	telemetry.IncCounter(telemetry.MACTResultTotal, "provider", "act", "section", SectionScience, "outcome", "detailed")
 	return detail, nil
 }
 
 // buildScienceQuestions replays the sealed answers against the sealed
 // content key embedded in final_submission (falling back to the content
 // snapshot shape). Ordering follows the sealed key order, capped at 500.
+//
+// Single source of truth (Phase 02 blocker 2): the embedded
+// final_submission.content copy written by ScoreAttempt at seal time —
+// content-addressed by final_submission.contentHash — is authoritative for
+// detail replay. exam_versions is NEVER re-read here: the seal carries its
+// own content so later authoring edits cannot move the replay. The
+// contentSnapshot alias exists only for pre-Phase-02 seals that embedded
+// the raw snapshot shape.
 func buildScienceQuestions(snap map[string]any) []ScienceQuestion {
 	out := []ScienceQuestion{}
 	content, _ := snap["content"].(map[string]any)

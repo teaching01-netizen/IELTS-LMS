@@ -1363,7 +1363,7 @@ export function studentFlow(data)
 ```
 FROM mcr.microsoft.com/playwright:v1.59.1-noble
 EXPOSE 3366
-CMD ["npm", "run", "ui"]
+CMD ["bun", "run", "ui"]
 ENV NODE_ENV
 ENV HOST
 ENV PORT

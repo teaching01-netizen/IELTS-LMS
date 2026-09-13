@@ -12,8 +12,11 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends k6 \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json ./
-RUN npm ci
+# Bun is the package manager; Node (from the Playwright base image) remains the runtime.
+COPY --from=oven/bun:1.3.14-debian /usr/local/bin/bun /usr/local/bin/bun
+
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY . .
 
@@ -23,4 +26,4 @@ ENV PORT=3366
 
 EXPOSE 3366
 
-CMD ["npm", "run", "e2e:leapcell-ui"]
+CMD ["bun", "run", "e2e:leapcell-ui"]

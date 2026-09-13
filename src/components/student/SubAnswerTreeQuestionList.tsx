@@ -3,7 +3,7 @@ import type { QuestionAnswer } from "../../types";
 import type { StudentAnswerMutationMeta } from "../../types/studentAttempt";
 import type { StudentQuestionDescriptor } from "@student/application/studentExamContentFacade";
 import { ProtectedInput } from "./ProtectedInput";
-import { Flag } from "lucide-react";
+import { StudentFlagButton } from "./StudentFlagButton";
 import { StudentQuestionText } from "./StudentQuestionText";
 import { StudentQuestionNumber } from "./StudentQuestionNumber";
 import type { StudentHighlightColor } from "./highlightPalette";
@@ -22,6 +22,12 @@ interface SubAnswerTreeQuestionListProps {
     answer: QuestionAnswer,
     meta?: StudentAnswerMutationMeta
   ) => void;
+  /**
+   * P4: working in a leaf makes it THE active question, so the single global
+   * navigator can never point at a question the student has moved on from.
+   * Optional so existing callers keep compiling unchanged.
+   */
+  onActivate?: ((id: string) => void) | undefined;
 }
 
 export function SubAnswerTreeQuestionList({
@@ -34,6 +40,7 @@ export function SubAnswerTreeQuestionList({
   highlightEnabled = false,
   highlightColor,
   onAnswerChange,
+  onActivate,
 }: SubAnswerTreeQuestionListProps) {
   const rootOrder = new Map<string, number>();
   const groups: Array<{
@@ -117,6 +124,14 @@ export function SubAnswerTreeQuestionList({
                   key={slotId}
                   id={`question-${slotId}`}
                   tabIndex={-1}
+                  // Focus capture covers both clicking into the input and
+                  // tabbing to it, so answering activates without a separate
+                  // click handler racing the input's own focus.
+                  onFocusCapture={() => {
+                    if (!isCurrent) {
+                      onActivate?.(slotId);
+                    }
+                  }}
                   className={`rounded-lg p-1 transition-colors ${
                     isCurrent ? "ring-2 ring-blue-800 ring-offset-2" : ""
                   } ${isFlagged ? "bg-amber-50" : ""}`}
@@ -146,18 +161,11 @@ export function SubAnswerTreeQuestionList({
                       />
                     </div>
                     {onToggleFlag ? (
-                      <button
-                        type="button"
-                        onClick={() => onToggleFlag(slotId)}
-                        className={`inline-flex flex-shrink-0 ${tabletMode ? "h-8 w-8" : "h-9 w-9"} items-center justify-center rounded-full border transition-colors ${
-                          isFlagged
-                            ? "border-amber-700 bg-amber-700 text-white"
-                            : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700"
-                        }`}
-                        aria-label={isFlagged ? "Unflag question" : "Flag question"}
-                      >
-                        <Flag size={14} className={isFlagged ? "fill-current" : ""} />
-                      </button>
+                      <StudentFlagButton
+                        flagged={isFlagged}
+                        size="compact"
+                        onToggle={() => onToggleFlag(slotId)}
+                      />
                     ) : null}
                   </div>
                 </div>

@@ -27,6 +27,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -68,6 +69,12 @@ type Service struct {
 	// Nil disables caching: Preview bulk-loads directly. No globals: tests
 	// inject a fresh cache or leave it nil.
 	previewCache *delivery.VersionCache
+	// liveOrigin is this instance's bus origin id (mirrors delivery.Service).
+	// Empty = no bus (tests, or a nil deps.LiveBus): eventsOn() stays false.
+	liveOrigin string
+	// eventsEnabled is the AUTHORING_REALTIME_EVENTS gate (Phase 02). Off by
+	// default: byte-identical legacy behavior with no bus INSERT.
+	eventsEnabled bool
 }
 
 // NewService wires dependencies explicitly.
@@ -439,6 +446,7 @@ func (s *Service) Shell(ctx context.Context, examID string) (Shell, error) {
 // otherwise clone_published_sat_to_draft_tx + conditional pointer CAS +
 // version_created event, commit then Shell).
 func (s *Service) OpenShell(ctx context.Context, examID, actorID string) (Shell, error) {
+	emission := &eventEmission{}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		// SELECT ... FOR UPDATE on exam_entities locks the authoring owner first.
 		var providerKey string
@@ -473,8 +481,29 @@ func (s *Service) OpenShell(ctx context.Context, examID, actorID string) (Shell,
 		if _, err := q.ExecContext(ctx, "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, created_at) VALUES (?, ?, ?, ?, 'version_created', CURRENT_TIMESTAMP(6))", uuid.NewString(), examID, draftVersionID, actorID); err != nil {
 			return err
 		}
+		// Phase 02: draft.opened, emitted only on the clone path (the existing-
+		// draft shortcut above returns early with no state change and no event).
+		if s.eventsOn() {
+			scope, err := resolveDraftScopeTx(ctx, q, draftVersionID)
+			if err != nil {
+				return err
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, "open_shell", scope, authoringrealtime.EventInput{
+				Kind:    authoringrealtime.KindDraftOpened,
+				ActorID: actorID,
+				Entity: authoringrealtime.Entity{
+					Kind:           authoringrealtime.EntityDraft,
+					ExamID:         examID,
+					DraftVersionID: draftVersionID,
+				},
+				ChangedFields: authoringrealtime.NewChangedFields(string(authoringrealtime.FieldDraftRevision)),
+			}); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+	emission.flush(err)
 	if err != nil {
 		return Shell{}, err
 	}
@@ -773,6 +802,7 @@ func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, 
 	}
 	scope := "create:" + moduleID
 	var out QuestionDetail
+	emission := &eventEmission{}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if operationKey != "" {
 			replay, claimed, err := claimOperationKey(ctx, q, actorID, scope, operationKey, fingerprint)
@@ -840,6 +870,32 @@ func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, 
 			return err
 		}
 		out = detail
+		// Phase 02: question.created carries the NEW placement. A fresh
+		// revision row starts at revision 0, while draftRevision is the
+		// post-bump working-draft generation.
+		if s.eventsOn() {
+			scope, err := resolveModuleScopeTx(ctx, q, moduleID)
+			if err != nil {
+				return err
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, "create", scope, authoringrealtime.EventInput{
+				Kind:    authoringrealtime.KindQuestionCreated,
+				ActorID: actorID,
+				Entity: authoringrealtime.Entity{
+					Kind:           authoringrealtime.EntityQuestion,
+					ExamQuestionID: examQuestionID,
+					QuestionID:     strPtr(questionID),
+					ModuleID:       strPtr(moduleID),
+				},
+				ChangedFields: authoringrealtime.NewChangedFields(
+					string(authoringrealtime.FieldDisplayOrder),
+					string(authoringrealtime.FieldQuestionType),
+				),
+				CausationID: operationKey,
+			}); err != nil {
+				return err
+			}
+		}
 		if operationKey != "" {
 			if err := storeOperationResult(ctx, q, actorID, scope, operationKey, out); err != nil {
 				return err
@@ -847,6 +903,7 @@ func (s *Service) CreateQuestion(ctx context.Context, moduleID, actorID string, 
 		}
 		return nil
 	})
+	emission.flush(err)
 	return out, err
 }
 
@@ -930,6 +987,7 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 	}
 	scope := "batch:" + moduleID
 	out := make([]QuestionSummary, 0, len(drafts))
+	emission := &eventEmission{}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if operationKey != "" {
 			replay, claimed, err := claimOperationKey(ctx, q, actorID, scope, operationKey, fingerprint)
@@ -997,6 +1055,26 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 			}).summary())
 			order++
 		}
+		// Phase 02: one coarse event per batch (never N) — receivers refetch.
+		if s.eventsOn() {
+			scope, err := resolveModuleScopeTx(ctx, q, moduleID)
+			if err != nil {
+				return err
+			}
+			ids := make([]string, 0, len(out))
+			for _, summary := range out {
+				ids = append(ids, summary.ExamQuestionID)
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, "batch", scope, authoringrealtime.EventInput{
+				Kind:                    authoringrealtime.KindQuestionBulkChanged,
+				ActorID:                 actorID,
+				Entity:                  authoringrealtime.Entity{Kind: authoringrealtime.EntityModule, ModuleID: strPtr(moduleID)},
+				AffectedExamQuestionIDs: boundedIDs(ids),
+				ChangedFields:           authoringrealtime.NewChangedFields("displayOrder"),
+			}); err != nil {
+				return err
+			}
+		}
 		if operationKey != "" {
 			if err := storeOperationResult(ctx, q, actorID, scope, operationKey, out); err != nil {
 				return err
@@ -1004,6 +1082,7 @@ func (s *Service) BatchCreateQuestions(ctx context.Context, moduleID, actorID st
 		}
 		return nil
 	})
+	emission.flush(err)
 	if err != nil {
 		return nil, err
 	}
@@ -1056,6 +1135,7 @@ func scanQuestionDetail(row *sql.Row) (QuestionDetail, error) {
 // save_question; bumps semantic_revision + revision under locks).
 func (s *Service) UpdateQuestion(ctx context.Context, examQuestionID, actorID string, expectedRevision int, draft QuestionDraft) (QuestionDetail, error) {
 	var out QuestionDetail
+	emission := &eventEmission{}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := touchQuestionDraft(ctx, q, examQuestionID); err != nil {
 			return err
@@ -1085,14 +1165,39 @@ func (s *Service) UpdateQuestion(ctx context.Context, examQuestionID, actorID st
 			return err
 		}
 		out = detail
+		// Phase 02: one question.changed carrying the NEW revision (read from
+		// the re-read detail), in-tx with the revision insert.
+		if s.eventsOn() {
+			scope, err := resolveQuestionScopeTx(ctx, q, examQuestionID)
+			if err != nil {
+				return err
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, "save", scope, authoringrealtime.EventInput{
+				Kind:    authoringrealtime.KindQuestionChanged,
+				ActorID: actorID,
+				Entity: authoringrealtime.Entity{
+					Kind:           authoringrealtime.EntityQuestion,
+					ExamQuestionID: examQuestionID,
+					QuestionID:     strPtr(questionID),
+					ModuleID:       strPtr(detail.ModuleID),
+				},
+				ChangedFields: authoringrealtime.NewChangedFields("prompt", "stimulus", "answer", "rationale", "metadata.domain", "metadata.skill", "metadata.difficulty", "metadata.tags", "accessibility", "isPretest", "questionType"),
+			}); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+	emission.flush(err)
 	return out, err
 }
 
 // DeleteQuestion removes one exam question (mirrors delete_question).
-func (s *Service) DeleteQuestion(ctx context.Context, examQuestionID string) error {
-	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+// actorID is the server-resolved staff user recorded on the tombstone event;
+// it is never accepted from the request body.
+func (s *Service) DeleteQuestion(ctx context.Context, examQuestionID, actorID string) error {
+	emission := &eventEmission{}
+	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := touchQuestionDraft(ctx, q, examQuestionID); err != nil {
 			return err
 		}
@@ -1107,18 +1212,41 @@ func (s *Service) DeleteQuestion(ctx context.Context, examQuestionID string) err
 		if _, err := q.ExecContext(ctx, "DELETE FROM assessment_exam_questions WHERE id = ?", examQuestionID); err != nil {
 			return err
 		}
-		_ = moduleID
+		// Phase 02: tombstone event. questionId is null by contract; receivers
+		// must not dereference it and keep local unsaved work.
+		if s.eventsOn() {
+			scope, err := resolveModuleScopeTx(ctx, q, moduleID)
+			if err != nil {
+				return err
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, "delete", scope, authoringrealtime.EventInput{
+				Kind:    authoringrealtime.KindQuestionDeleted,
+				ActorID: actorID,
+				Entity: authoringrealtime.Entity{
+					Kind:           authoringrealtime.EntityQuestion,
+					ExamQuestionID: examQuestionID,
+					QuestionID:     nil,
+					ModuleID:       strPtr(moduleID),
+				},
+			}); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+	emission.flush(err)
+	return err
 }
 
 // ReorderQuestions rewrites display_order under module locks (mirrors
-// reorder_questions; expected ids fence stale consoles).
-func (s *Service) ReorderQuestions(ctx context.Context, moduleID string, expectedIDs, orderedIDs []string) error {
+// reorder_questions; expected ids fence stale consoles). actorID is the
+// server-resolved staff user recorded on the moved event.
+func (s *Service) ReorderQuestions(ctx context.Context, moduleID string, expectedIDs, orderedIDs []string, actorID string) error {
 	if len(orderedIDs) == 0 {
 		return validationError("At least one question id is required.")
 	}
-	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	emission := &eventEmission{}
+	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := touchModuleDraft(ctx, q, moduleID); err != nil {
 			return err
 		}
@@ -1168,8 +1296,30 @@ func (s *Service) ReorderQuestions(ctx context.Context, moduleID string, expecte
 				return err
 			}
 		}
+		// Phase 02: one question.moved for the whole module rewrite. Receivers
+		// refetch authoritative order instead of replaying the permutation.
+		if s.eventsOn() {
+			scope, err := resolveModuleScopeTx(ctx, q, moduleID)
+			if err != nil {
+				return err
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, "reorder", scope, authoringrealtime.EventInput{
+				Kind:    authoringrealtime.KindQuestionMoved,
+				ActorID: actorID,
+				Entity: authoringrealtime.Entity{
+					Kind:     authoringrealtime.EntityModule,
+					ModuleID: strPtr(moduleID),
+				},
+				AffectedExamQuestionIDs: boundedIDs(orderedIDs),
+				ChangedFields:           authoringrealtime.NewChangedFields("displayOrder"),
+			}); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+	emission.flush(err)
+	return err
 }
 
 // DuplicateQuestion copies one exam question into a module (mirrors
@@ -1195,6 +1345,7 @@ func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, 
 	}
 	scope := "duplicate:" + examQuestionID
 	var out QuestionDetail
+	emission := &eventEmission{}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if operationKey != "" {
 			replay, claimed, err := claimOperationKey(ctx, q, actorID, scope, operationKey, fingerprint)
@@ -1274,6 +1425,26 @@ func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, 
 			return err
 		}
 		out = detail
+		// Phase 02: one question.duplicated naming the NEW placement.
+		if s.eventsOn() {
+			scope, err := resolveModuleScopeTx(ctx, q, dest)
+			if err != nil {
+				return err
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, "duplicate", scope, authoringrealtime.EventInput{
+				Kind:    authoringrealtime.KindQuestionDuplicated,
+				ActorID: actorID,
+				Entity: authoringrealtime.Entity{
+					Kind:           authoringrealtime.EntityQuestion,
+					ExamQuestionID: newID,
+					QuestionID:     strPtr(questionID),
+					ModuleID:       strPtr(dest),
+				},
+				CausationID: operationKey,
+			}); err != nil {
+				return err
+			}
+		}
 		if operationKey != "" {
 			if err := storeOperationResult(ctx, q, actorID, scope, operationKey, out); err != nil {
 				return err
@@ -1281,6 +1452,7 @@ func (s *Service) DuplicateQuestion(ctx context.Context, examQuestionID string, 
 		}
 		return nil
 	})
+	emission.flush(err)
 	return out, err
 }
 
@@ -1349,6 +1521,7 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 	scope := "bulk:" + action.Type
 	result := BulkResult{AffectedQuestionIDs: []string{}, CreatedQuestionIDs: []string{}, UpdatedQuestions: []QuestionSummary{}}
 	affectedModules := map[string]bool{}
+	emission := &eventEmission{}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if operationKey != "" {
 			replay, claimed, err := claimOperationKey(ctx, q, actorID, scope, operationKey, fingerprint)
@@ -1530,6 +1703,43 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 				}
 			}
 		}
+		// Phase 02: ONE coarse event per bulk call regardless of N, keyed to the
+		// first affected module (receivers refetch shell + tree authoritatively).
+		if s.eventsOn() && len(result.AffectedQuestionIDs) > 0 {
+			primaryModule := ""
+			if len(questionIDs) > 0 {
+				if err := q.QueryRowContext(ctx, "SELECT module_id FROM assessment_exam_questions WHERE id = ?", questionIDs[0]).Scan(&primaryModule); err != nil {
+					if err == sql.ErrNoRows {
+						primaryModule = ""
+					} else {
+						return err
+					}
+				}
+			}
+			if primaryModule == "" {
+				for moduleID := range affectedModules {
+					primaryModule = moduleID
+					break
+				}
+			}
+			if primaryModule != "" {
+				scope, err := resolveModuleScopeTx(ctx, q, primaryModule)
+				if err != nil {
+					return err
+				}
+				changed := []string{"displayOrder", "moduleId", "isPretest", "metadata.domain", "metadata.skill", "metadata.difficulty", "metadata.tags"}
+				if err := s.appendAuthoringEventTx(ctx, q, emission, "bulk", scope, authoringrealtime.EventInput{
+					Kind:                    authoringrealtime.KindQuestionBulkChanged,
+					ActorID:                 actorID,
+					Entity:                  authoringrealtime.Entity{Kind: authoringrealtime.EntityModule, ModuleID: strPtr(primaryModule)},
+					AffectedExamQuestionIDs: boundedIDs(append(append([]string{}, result.AffectedQuestionIDs...), result.CreatedQuestionIDs...)),
+					ChangedFields:           authoringrealtime.NewChangedFields(changed...),
+					CausationID:             operationKey,
+				}); err != nil {
+					return err
+				}
+			}
+		}
 		if operationKey != "" {
 			if err := storeOperationResult(ctx, q, actorID, scope, operationKey, result); err != nil {
 				return err
@@ -1537,6 +1747,7 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 		}
 		return nil
 	})
+	emission.flush(err)
 	if err != nil {
 		return BulkResult{}, err
 	}
@@ -1547,6 +1758,7 @@ func (s *Service) BulkQuestions(ctx context.Context, questionIDs []string, actio
 // counter. The response is the QuestionRevision the editor installs in its cache.
 func (s *Service) SaveRevision(ctx context.Context, examQuestionID, revisionID string, expectedRevision int, draft QuestionDraft, actorID string) (QuestionRevisionDetail, error) {
 	var out QuestionDetail
+	emission := &eventEmission{}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if err := touchQuestionDraft(ctx, q, examQuestionID); err != nil {
 			return err
@@ -1588,8 +1800,29 @@ func (s *Service) SaveRevision(ctx context.Context, examQuestionID, revisionID s
 			return err
 		}
 		out = detail
+		// Phase 02: one question.changed per revision save (in-tx with the bump).
+		if s.eventsOn() {
+			scope, err := resolveQuestionScopeTx(ctx, q, examQuestionID)
+			if err != nil {
+				return err
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, "save_revision", scope, authoringrealtime.EventInput{
+				Kind:    authoringrealtime.KindQuestionChanged,
+				ActorID: actorID,
+				Entity: authoringrealtime.Entity{
+					Kind:           authoringrealtime.EntityQuestion,
+					ExamQuestionID: examQuestionID,
+					QuestionID:     strPtr(detail.Question.ID),
+					ModuleID:       strPtr(detail.ModuleID),
+				},
+				ChangedFields: authoringrealtime.NewChangedFields("prompt", "stimulus", "answer", "rationale", "metadata.domain", "metadata.skill", "metadata.difficulty", "metadata.tags", "accessibility", "questionType"),
+			}); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+	emission.flush(err)
 	return out.Question, err
 }
 
@@ -1815,6 +2048,7 @@ func (s *Service) loadSections(ctx context.Context, q sectionQuerier, versionID 
 		if err != nil {
 			return nil, err
 		}
+		deriveRoutingOperational(rp, sr.key, mods)
 		out = append(out, Section{ID: sr.id, SectionKey: sr.key, Title: sr.title, DisplayOrder: sr.order, DurationSeconds: sr.dur, BreakAfterSecs: sr.brk, Revision: sr.rev, RoutingPolicy: rp, Modules: mods})
 	}
 	return out, nil
@@ -1883,11 +2117,37 @@ func (s *Service) loadRouting(ctx context.Context, q interface {
 		if v, ok := parsed["minimumCorrectForHigher"].(float64); ok {
 			rp.MinimumCorrectForHigher = int(v)
 		}
-		if v, ok := parsed["operationalQuestionCount"].(float64); ok {
-			rp.OperationalCount = int(v)
-		}
+		// NOTE: operationalQuestionCount is NOT parsed from policy_config
+		// (see assembleShellTree): real rows are threshold-only, so parsing
+		// projected 0 and stuck the release page at 1. The nested path is
+		// only used by buildShellTx and the equivalence harness; both set it
+		// via deriveRoutingOperational below.
 	}
 	return &rp, nil
+}
+
+// deriveRoutingOperational sets rp.OperationalCount from the live base module
+// shape (see derivedOperationalCount in bulk_read.go). Callers that assemble
+// a Section outside assembleShellTree must call this so both read paths
+// project the same derived value.
+func deriveRoutingOperational(rp *RoutingPolicy, sectionKey string, mods []Module) {
+	if rp == nil {
+		return
+	}
+	for _, m := range mods {
+		if m.ID != rp.BaseModuleID {
+			continue
+		}
+		pretest := 0
+		for _, qs := range m.Questions {
+			if qs.IsPretest {
+				pretest++
+			}
+		}
+		rp.OperationalCount = derivedOperationalCount(sectionKey, m.ModuleKey, m.TargetQuestionCount, pretest)
+		return
+	}
+	rp.OperationalCount = 1
 }
 
 func nonEmptyJSON(b json.RawMessage) json.RawMessage {

@@ -57,6 +57,7 @@ function sameAttempts(
   if (a.length !== b.length) return false;
   return a.every((m, i) => {
     const n = b[i];
+    if (n === undefined) return false;
     return (
       m.id === n.id &&
       m.moduleId === n.moduleId &&
@@ -79,7 +80,9 @@ function sameResponseRevisions(
   const a = prev.attempt.responses;
   const b = next.attempt.responses;
   if (a.length !== b.length) return false;
-  return a.every(
-    (r, i) => r.examQuestionId === b[i].examQuestionId && r.revision === b[i].revision,
-  );
+  return a.every((r, i) => {
+    const other = b[i];
+    if (other === undefined) return false;
+    return r.examQuestionId === other.examQuestionId && r.revision === other.revision;
+  });
 }

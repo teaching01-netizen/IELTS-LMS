@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useDurableLatestAutosave } from "../../../hooks/useDurableLatestAutosave";
 import { saveDurableDraft } from "../../../utils/durableDraftStore";
 import type { QuestionRevision } from "../contracts/assessment";
@@ -18,6 +18,22 @@ export interface UseQuestionAutosaveOptions {
   onRecover?: ((revision: QuestionRevision) => void) | undefined;
   autoSaveRecovered?: boolean | undefined;
   onError?: ((error: Error) => void) | undefined;
+  /**
+   * When `current` is true the question is known-obsolete server-side (another
+   * author saved a newer revision), so NETWORK writes pause while the DURABLE
+   * local write continues unchanged.
+   *
+   * The motivation is not to avoid a 409 — revision fencing remains the
+   * backend safety net. It is that repeatedly POSTing a known-stale base is
+   * pure noise, and letting the request SUCCEED (because a refetch moved the
+   * fence forward) would silently overwrite a collaborator's work without the
+   * author ever choosing to.
+   *
+   * A REF, not a boolean: the caller computes divergence from the same autosave
+   * this hook feeds, so a reactive option would close a render loop. Read at
+   * call time, exactly like the offline flag.
+   */
+  networkPausedRef?: RefObject<boolean> | undefined;
 }
 
 export interface QuestionFlushResult {
@@ -30,12 +46,23 @@ export interface UseQuestionAutosaveResult {
   lastSavedAt: Date | null;
   /** True when the browser cannot reach the server; edits are still durable locally. */
   isOffline: boolean;
+  /**
+   * True when network writes are held back by divergence (not by connectivity).
+   * The durable draft is already written; only the HTTP write waits.
+   */
+  isNetworkPaused: boolean;
   /** True when the selected question has changes that are not server-acknowledged. */
   hasPendingChanges: boolean;
   scheduleAutosave: (revision: QuestionRevision) => void;
   flushNow: (revision: QuestionRevision) => Promise<QuestionFlushResult>;
   commitAndAdvance: (revision: QuestionRevision) => Promise<QuestionFlushResult>;
   retry: (revision: QuestionRevision) => void;
+  /**
+   * The author explicitly took the server's revision (Review -> Use latest).
+   * Clears the held write, the fenced status, and the device copy: there is
+   * nothing left to send and nothing left to recover.
+   */
+  acknowledgeServerRevision: () => void;
 }
 
 function browserIsOffline(): boolean {
@@ -54,7 +81,18 @@ export function useQuestionAutosave(
     onError: onErrorOption,
     onRecover: onRecoverOption,
     autoSaveRecovered,
+    networkPausedRef,
   } = options;
+  /**
+   * One predicate for "this write may not go to the network", shared by every
+   * outbound path so a paused question can never leak a request through the
+   * debounced, flush, or retry door. Offline and divergent both mean: keep the
+   * durable local copy, hold the HTTP write.
+   */
+  const networkWriteBlocked = useCallback(
+    () => offlineRef.current || networkPausedRef?.current === true,
+    [networkPausedRef],
+  );
   const offlineRef = useRef(isOffline);
   const offlineDraftRef = useRef<QuestionRevision | null>(null);
   const latestRevisionRef = useRef<QuestionRevision | null>(null);
@@ -82,6 +120,7 @@ export function useQuestionAutosave(
     schedule: scheduleAutosaveInternal,
     flush: flushAutosave,
     retry: retryAutosave,
+    adoptServerRevision,
   } = autosave;
   const durableKeyRef = useRef(durableKey ?? null);
 
@@ -118,7 +157,13 @@ export function useQuestionAutosave(
       setIsOffline(false);
       const pending = offlineDraftRef.current;
       offlineDraftRef.current = null;
-      if (pending) scheduleAutosaveInternal(pending);
+      if (!pending) return;
+      // Reconnecting must not become a backdoor for a stale write. If the
+      // question is still diverged the flush stays paused; the durable copy is
+      // already on the device and the author's explicit resolution is what
+      // moves the fence, not the network coming back.
+      if (networkPausedRef?.current === true) return;
+      scheduleAutosaveInternal(pending);
     };
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
@@ -126,7 +171,7 @@ export function useQuestionAutosave(
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online", handleOnline);
     };
-  }, [scheduleAutosaveInternal]);
+  }, [scheduleAutosaveInternal, networkPausedRef]);
 
   const persistOffline = useCallback((revision: QuestionRevision) => {
     const durableKey = durableKeyRef.current;
@@ -137,22 +182,26 @@ export function useQuestionAutosave(
   const scheduleAutosave = useCallback((revision: QuestionRevision) => {
     latestRevisionRef.current = revision;
     setHasPendingChanges(true);
-    if (!offlineRef.current) {
+    if (!networkWriteBlocked()) {
       scheduleAutosaveInternal(revision);
       return;
     }
     offlineDraftRef.current = revision;
     persistOffline(revision);
-  }, [persistOffline, scheduleAutosaveInternal]);
+  }, [networkWriteBlocked, persistOffline, scheduleAutosaveInternal]);
 
   const flushNow = useCallback(async (revision: QuestionRevision): Promise<QuestionFlushResult> => {
     latestRevisionRef.current = revision;
     setHasPendingChanges(true);
-    if (!offlineRef.current) return flushAutosave(revision);
+    if (!networkWriteBlocked()) return flushAutosave(revision);
+    // Deliberately NOT ok: the caller must know the server does not have this
+    // content yet, even though the device does. `isLatest` stays true because
+    // this revision IS the newest local one — there is just nowhere safe to
+    // send it yet.
     offlineDraftRef.current = revision;
     persistOffline(revision);
     return { ok: false, isLatest: true };
-  }, [flushAutosave, persistOffline]);
+  }, [flushAutosave, networkWriteBlocked, persistOffline]);
 
   const commitAndAdvance = useCallback(
     async (revision: QuestionRevision) => flushNow(revision),
@@ -162,15 +211,27 @@ export function useQuestionAutosave(
   const retry = useCallback((revision: QuestionRevision) => {
     latestRevisionRef.current = revision;
     setHasPendingChanges(true);
-    if (offlineRef.current) {
+    if (networkWriteBlocked()) {
       offlineDraftRef.current = revision;
       persistOffline(revision);
       return;
     }
     retryAutosave(revision);
-  }, [persistOffline, retryAutosave]);
+  }, [networkWriteBlocked, persistOffline, retryAutosave]);
+
+  const acknowledgeServerRevision = useCallback(() => {
+    offlineDraftRef.current = null;
+    latestRevisionRef.current = null;
+    setHasPendingChanges(false);
+    adoptServerRevision();
+  }, [adoptServerRevision]);
 
   const status = isOffline ? "offline" : autosaveStatus;
+  // Reads the ref at render time. The workspace owns the divergence state that
+  // sets it, so a divergence change re-renders this hook's consumer anyway and
+  // the value is never meaningfully stale. Only used for MESSAGING; the actual
+  // write gate above always reads the ref at call time.
+  const isNetworkPaused = networkPausedRef?.current === true;
   // Stable identity: callers thread `autosave` through useCallback deps
   // (e.g. workspace handleChange). A fresh literal per render would
   // re-create every dependent callback and re-render the editor + rail on
@@ -180,12 +241,14 @@ export function useQuestionAutosave(
       status,
       lastSavedAt,
       isOffline,
+      isNetworkPaused,
       hasPendingChanges,
       scheduleAutosave,
       flushNow,
       commitAndAdvance,
       retry,
+      acknowledgeServerRevision,
     }),
-    [status, lastSavedAt, isOffline, hasPendingChanges, scheduleAutosave, flushNow, commitAndAdvance, retry],
+    [status, lastSavedAt, isOffline, isNetworkPaused, hasPendingChanges, scheduleAutosave, flushNow, commitAndAdvance, retry, acknowledgeServerRevision],
   );
 }

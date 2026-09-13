@@ -1,0 +1,2 @@
+If x \u00b2 + y \u00b2 = 25 then \u03c0 applies.
+Check that x \u2264 3 and y \u2265 0.

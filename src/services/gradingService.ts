@@ -13,6 +13,7 @@ import {
   backendGet,
   backendPost,
   backendPut,
+  isBackendGradingEnabled,
 } from './backendBridge';
 import { getReviewDraftRevision, gradingRepository } from './gradingRepository';
 import { examRepository } from './examRepository';
@@ -43,6 +44,7 @@ import {
   ObjectiveOverrideUpsertRequest,
   ObjectiveQuestionOverrideRequest,
   ObjectiveIntegrityOverview,
+  ActScienceScoreReport,
 } from '../types/grading';
 
 /**
@@ -250,6 +252,19 @@ export class GradingService {
       return { success: true, data: overview };
     } catch (error) {
       return { success: false, error: `Failed to load objective integrity: ${error}` };
+    }
+  }
+
+  async getActScienceReports(): Promise<GradingServiceResult<ActScienceScoreReport[]>> {
+    try {
+      if (!isBackendGradingEnabled()) {
+        return { success: false, error: 'ACT Science reports require backend grading.' };
+      }
+
+      const reports = await backendGet<ActScienceScoreReport[]>('/v1/results/act-science');
+      return { success: true, data: reports };
+    } catch (error) {
+      return { success: false, error: `Failed to load ACT Science reports: ${error}` };
     }
   }
 

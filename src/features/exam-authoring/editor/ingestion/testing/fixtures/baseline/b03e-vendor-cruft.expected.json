@@ -1,0 +1,66 @@
+{
+  "probe": "B3e",
+  "inputKind": "text/html vendor cruft (Google Docs inline styles + Word MsoNormal/o:p + script/event-handler attack)",
+  "targetField": "prompt",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML (ProseMirror DOMParser; script/style elements dropped, event-handler attrs dropped)",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Docs "
+          },
+          {
+            "type": "text",
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "text": "bold"
+          },
+          {
+            "type": "text",
+            "text": " text"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Word"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "hi"
+          }
+        ]
+      }
+    ]
+  },
+  "observed": [
+    "inline font-size/font-family/class/meta/o:p cruft collapsed away (only bold mark survives)",
+    "script element content dropped, onclick attribute dropped (parser-level, NOT a sanitizer policy - no ingestion sanitizer exists yet)",
+    "bold-inside-span-with-font-weight:normal still parsed as bold (style NOT honored)"
+  ],
+  "validatorOutcome": "valid"
+}

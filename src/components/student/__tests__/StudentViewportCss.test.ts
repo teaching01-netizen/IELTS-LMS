@@ -52,11 +52,49 @@ describe('student exam viewport shell CSS', () => {
     expect(keyboardRule).not.toMatch(/display:\s*none\s*;/);
   });
 
-  it('keeps question stepper clearance local to its workspace', () => {
-    const stepperRule = css.match(/\.student-question-stepper\s*\{([^}]*)\}/s)?.[1];
+  it('keeps exactly one navigation rail, so no second footer can creep back', () => {
+    // The pane once grew its own Previous/Next rail. Two navigation authorities
+    // duplicated the hierarchy and stole ~60px of reading height, so the pane
+    // rail is deliberately gone: the global navigator owns Previous/Next.
+    expect(css).not.toContain('.student-question-stepper');
+    expect(css).not.toContain('--student-exam-footer-clearance');
+  });
 
-    expect(stepperRule).toBeDefined();
-    expect(stepperRule).toMatch(/bottom:\s*1rem\s*;/);
-    expect(stepperRule).not.toContain('--student-exam-footer-clearance');
+  it('reserves reading breathing room above the global navigator', () => {
+    // Content is never underneath the footer (it owns a grid row); this is the
+    // separate gap that keeps the last line from ending flush against the bar.
+    const breatheRule = css.match(/\.student-scroll-breathe\s*\{([^}]*)\}/s)?.[1];
+
+    expect(breatheRule).toBeDefined();
+    expect(breatheRule).toMatch(/padding-bottom:\s*calc\(/);
+    expect(breatheRule).toMatch(/--student-bottom-bar-height/);
+  });
+
+  it('centers the passage reading column inside its pane', () => {
+    const measureRule = css.match(/\.student-passage-measure\s*\{([^}]*)\}/s)?.[1];
+
+    expect(measureRule).toMatch(/max-width:\s*var\(--student-passage-measure\)\s*;/);
+    expect(measureRule).toMatch(/margin-inline:\s*auto\s*;/);
+  });
+
+  it('gives the question flag a real action column instead of an overlay', () => {
+    const flaggedRowRule = css.match(/\.student-question-row--flagged\s*\{([^}]*)\}/s)?.[1];
+    const stackedRowRule = css.match(/\.student-question-row--stacked\s*\{([^}]*)\}/s)?.[1];
+
+    // The trailing action column is a real grid track, never an overlay.
+    expect(flaggedRowRule).toMatch(/display:\s*grid\s*;/);
+    expect(flaggedRowRule).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s*;/);
+    // Compact composition reflows to a single track (flag moves, never floats).
+    expect(stackedRowRule).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/);
+  });
+
+  it('keeps the question pane free of container-type so fixed overlays stay viewport-anchored', () => {
+    const paneRule = css.match(/\.student-question-pane\s*\{([^}]*)\}/s)?.[1];
+
+    expect(paneRule).toBeDefined();
+    // container-type would make the pane a containing block for the inline
+    // fixed overlays (zoomed media, highlight hint) it contains.
+    expect(paneRule).not.toMatch(/container-type\s*:/);
+    expect(css).not.toMatch(/@container \(/);
   });
 });

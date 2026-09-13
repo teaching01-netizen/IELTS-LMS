@@ -3,18 +3,18 @@ import { motion } from "motion/react";
 import { Check, CircleAlert, Cloud, LoaderCircle } from "lucide-react";
 import { authoringMotion } from "@/src/shared/motion";
 import type { QuestionSaveStatus } from "../../hooks/useQuestionAutosave";
-
-export const SAVE_CLUSTER_LABELS: Record<QuestionSaveStatus, string> = {
-  saved: "Saved",
-  unsaved: "Editing",
-  saving: "Saving…",
-  offline: "Offline · saved on this device",
-  error: "Not saved — Retry",
-  conflict: "Changed elsewhere — Review",
-};
+import { SAVE_CONFLICT_COPY, saveBlockedCopy, saveStatusCopy } from "../../realtime/connectionCopy";
 
 export interface SaveClusterProps {
   status: QuestionSaveStatus;
+  /**
+   * Phase 05: the open question has unsaved work AND a newer remote revision.
+   * Swaps the status copy to `Newer version available` without inventing a new
+   * save status — the draft is still saveable, it is just behind. The 409
+   * `conflict` status keeps its own, different wording (a fenced write is not
+   * the same condition as a known-newer revision).
+   */
+  diverged?: boolean;
   lastSavedAt: Date | null;
   onRetry?: (() => void) | undefined;
   onReviewConflict?: (() => void) | undefined;
@@ -43,7 +43,7 @@ function usePrevious<T>(value: T): T | undefined {
  * autosave object. Error is a Retry button; everything else is read-only
  * status text with a polite live region.
  */
-export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, transientSaved = false, announce = true }: SaveClusterProps) {
+export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, diverged = false, transientSaved = false, announce = true }: SaveClusterProps) {
   const [hidden, setHidden] = useState(false);
   useEffect(() => {
     setHidden(false);
@@ -53,28 +53,36 @@ export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, tr
   }, [status, lastSavedAt, transientSaved]);
   const hideSuccess = transientSaved && status === 'saved' && hidden;
   const statusRole = announce ? 'status' : undefined;
-  const label = SAVE_CLUSTER_LABELS[status];
+  const label = saveStatusCopy({ status, diverged });
   const Icon =
     status === "saving"
       ? LoaderCircle
-      : status === "error" || status === "conflict"
+      : !diverged && (status === "error" || status === "conflict")
         ? CircleAlert
-        : status === "saved"
+        : status === "saved" && !diverged
           ? Check
           : Cloud;
   const tone =
-    status === "error" || status === "conflict"
-      ? "text-destructive"
+    diverged
+      ? // Divergence is not a failure: neutral attention, never the
+        // destructive palette (that stays reserved for a fenced/failed write).
+        "text-amber-800"
+      : status === "error" || status === "conflict"
+        ? "text-destructive"
+        : status === "offline"
+          ? "text-amber-800"
+          : status === "saved"
+            ? "text-green-800"
+            : "text-muted-foreground";
+  // One source for this vocabulary: `connectionCopy.ts`. The fenced branch is
+  // the same product condition the socket delivers, so it says the same thing
+  // and points at Review instead of at a manual reload.
+  const title = diverged
+    ? SAVE_CONFLICT_COPY.diverged
+    : status === "conflict"
+      ? saveBlockedCopy(false)
       : status === "offline"
-        ? "text-amber-800"
-        : status === "saved"
-          ? "text-green-800"
-          : "text-muted-foreground";
-  const title =
-    status === "conflict"
-      ? "Another author saved this question first. Your edits are kept on this device — reload the latest version, then reapply your changes."
-      : status === "offline"
-        ? "Offline. Changes are stored on this device and will retry when you reconnect."
+        ? SAVE_CONFLICT_COPY.offline
         : lastSavedAt
           ? `Last saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
           : label;
@@ -136,16 +144,20 @@ export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, tr
       </button>
     );
   }
-  // Conflict is actionable: surface the resolution path instead of stranding
-  // the author on a read-only warning. Without a handler it stays status text.
-  if (status === "conflict" && onReviewConflict) {
+  // Conflict AND divergence are actionable: surface the resolution path
+  // instead of stranding the author on a read-only status. Without a handler
+  // it stays status text.
+  if ((diverged || status === "conflict") && onReviewConflict) {
     return (
       <button
         type="button"
         title={title}
-        aria-label={`${title}. Review changes`}
+        aria-label={`${title}. ${diverged ? "Review newer version" : "Review changes"}`}
         onClick={onReviewConflict}
-        className="flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={
+          "flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
+          (diverged ? "hover:bg-amber-50" : "hover:bg-destructive/10")
+        }
       >
         <span role={statusRole}>{face}</span>
       </button>

@@ -95,7 +95,10 @@ export function SatAccessibilityDebugRoute() {
       : params.get("tool") === "reference"
         ? "reference"
         : null;
-  const [activeTool, setActiveTool] = useState<"calculator" | "reference" | null>(initialTool);
+  const [activeTools, setActiveTools] = useState<{ calculator: boolean; referenceSheet: boolean }>(() => ({
+    calculator: initialTool === "calculator",
+    referenceSheet: initialTool === "reference",
+  }));
   const [questionIndex, setQuestionIndex] = useState(0);
   const [eliminationMode, setEliminationMode] = useState(false);
   const reading = useSatReadingPreferences("debug-schedule", "debug-attempt");
@@ -132,9 +135,9 @@ export function SatAccessibilityDebugRoute() {
         questionCount={3}
         navigationItems={navigationItems}
         calculatorAvailable={math}
-        calculatorOpen={activeTool === "calculator"}
+        calculatorOpen={activeTools.calculator}
         referenceAvailable={math}
-        referenceOpen={activeTool === "reference"}
+        referenceOpen={activeTools.referenceSheet}
         notesAvailable={!math}
         blocked={paused}
         saveState="idle"
@@ -143,10 +146,10 @@ export function SatAccessibilityDebugRoute() {
         onReadingPreferencesChange={reading.setPreferences}
         onSelectQuestion={setQuestionIndex}
         onToggleCalculator={() =>
-          setActiveTool((current) => (current === "calculator" ? null : "calculator"))
+          setActiveTools((current) => ({ ...current, calculator: !current.calculator }))
         }
         onToggleReference={() =>
-          setActiveTool((current) => (current === "reference" ? null : "reference"))
+          setActiveTools((current) => ({ ...current, referenceSheet: !current.referenceSheet }))
         }
         onPrevious={() => setQuestionIndex((current) => Math.max(0, current - 1))}
         onNext={() => setQuestionIndex((current) => Math.min(2, current + 1))}
@@ -185,18 +188,18 @@ export function SatAccessibilityDebugRoute() {
       {math ? (
         <>
           <SatCalculatorPanel
-            open={activeTool === "calculator"}
+            open={activeTools.calculator}
             scheduleId="debug-schedule"
             attemptId="debug-attempt"
             moduleAttemptId="debug-module"
             disabled={paused}
             prewarmWhenClosed
-            onClose={() => setActiveTool(null)}
+            onClose={() => setActiveTools((current) => ({ ...current, calculator: false }))}
           />
           <SatReferenceSheetPanel
-            open={activeTool === "reference"}
+            open={activeTools.referenceSheet}
             disabled={paused}
-            onClose={() => setActiveTool(null)}
+            onClose={() => setActiveTools((current) => ({ ...current, referenceSheet: false }))}
           />
         </>
       ) : null}

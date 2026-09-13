@@ -283,13 +283,23 @@ describe('SAT Phase 02 copy contracts', () => {
   });
 
   it('placeholders name their filter scope', () => {
+    // Drill-down design (group-by-exam): the list view searches exams only;
+    // student search lives on the inside page at /sat/results?exam=<id>.
     const { unmount: unmountResults } = render(
       <MemoryRouter>
         <SatResultsRoute />
       </MemoryRouter>,
     );
-    expect(screen.getByPlaceholderText('Search name, ID, exam, cohort')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search exams')).toBeInTheDocument();
     expect(screen.queryByPlaceholderText('Search results')).not.toBeInTheDocument();
+    unmountResults();
+
+    render(
+      <MemoryRouter initialEntries={['/sat/results?exam=sat-1']}>
+        <SatResultsRoute />
+      </MemoryRouter>,
+    );
+    expect(screen.getByPlaceholderText('Search name, ID, cohort')).toBeInTheDocument();
     unmountResults();
 
     renderLibrary();
@@ -355,15 +365,44 @@ describe('SAT Phase 02 copy contracts', () => {
         <SatResultsRoute />
       </MemoryRouter>,
     );
+    // Drill-down design (group-by-exam): the list shows one exam-group row
+    // (all three attempts share examId sat-1) with one roll-up pill; student
+    // pills live on the inside page at ?exam=<id>. Both keep single-signal.
+    const groupRows = container.querySelectorAll('.sat-list-row');
+    expect(groupRows.length).toBe(1);
+    // One pill per row: the pill is the inline-flex rounded-full tone element.
+    groupRows.forEach((row) => {
+      expect(row.querySelectorAll('span[class*="rounded-full"][class*="inline-flex"]').length).toBe(1);
+    });
+    expect(screen.queryByText(/\u00B7 Practice \u00B7/)).not.toBeInTheDocument();
+  });
+
+  it('inside-page attempt rows expose a single status signal', () => {
+    useSatResultsQueryMock.mockReturnValue({
+      data: [
+        resultSummary,
+        { ...resultSummary, id: 'result-pending', studentName: 'Pending Student', outcomeStatus: 'pending', totalScore: null },
+        { ...resultSummary, id: 'result-terminated', studentName: 'Terminated Student', outcomeStatus: 'invalidated_proctor', totalScore: null },
+      ],
+      isLoading: false,
+      error: null,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+    const { container } = render(
+      <MemoryRouter initialEntries={['/sat/results?exam=sat-1']}>
+        <SatResultsRoute />
+      </MemoryRouter>,
+    );
     const rows = container.querySelectorAll('.sat-list-row');
     expect(rows.length).toBe(3);
-    // One pill per row: the pill is the inline-flex rounded-full tone element.
     rows.forEach((row) => {
       expect(row.querySelectorAll('span[class*="rounded-full"][class*="inline-flex"]').length).toBe(1);
     });
-    expect(screen.getByText('Scoring pending')).toBeInTheDocument();
+    // Mixed group: roll-up pill is pending (pending > 0) plus the pending row's
+    // own pill — two 'Scoring pending' nodes, one pill per row each.
+    expect(screen.getAllByText('Scoring pending')).toHaveLength(2);
     expect(screen.getByText('Exam terminated by proctor')).toBeInTheDocument();
-    expect(screen.queryByText(/\u00B7 Practice \u00B7/)).not.toBeInTheDocument();
   });
 
   it('jargon footnote is gone; module scores stay', () => {

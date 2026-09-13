@@ -1,0 +1,29 @@
+{
+  "probe": "B5b",
+  "inputKind": "text/html LaTeX delimiters / MathML / OMML-ish pasted from PDF/Office/Docs",
+  "targetField": "prompt",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Solve \\\\(x^2\\\\) and $$\\\\frac{a}{b}$$ and "
+          }
+        ]
+      }
+    ]
+  },
+  "observed": [
+    "NO delimiter detection: \\\\(..) and $$..$$ paste as literal text (phase-03 must add detection)",
+    "MathML <math>/<mi> content VANISHES (no MathML parser registered) - silent-loss case phase-03 must rescue",
+    "Office OMML HTML likewise has no parser today"
+  ],
+  "validatorOutcome": "valid (but semantically wrong - equation became plain text / vanished)"
+}

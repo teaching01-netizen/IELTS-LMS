@@ -4,9 +4,14 @@ import {
   STUDENT_MIN_ANSWER_PANE_WIDTH_PX,
   STUDENT_MIN_MATERIAL_PANE_WIDTH_PX,
   STUDENT_SPLIT_RAIL_WIDTH_PX,
+  STUDENT_WIDE_MIN_WIDTH_PX,
   scalePaneMinimumsForFontScale,
 } from './layout/studentLayoutMode';
 import {
+  STUDENT_SPLIT_KEYBOARD_LARGE_STEP_PX,
+  STUDENT_SPLIT_KEYBOARD_STEP_PX,
+  STUDENT_SPLIT_RESET_DURATION_MS,
+  STUDENT_SPLIT_SNAP_THRESHOLD_PERCENT,
   STUDENT_TABLET_SPLIT_DIVIDER_WIDTH_PX,
   STUDENT_TABLET_SPLIT_HIT_TARGET_WIDTH_PX,
 } from './splitPaneDimensions';
@@ -34,6 +39,21 @@ import {
  * valid layout. No document listeners are left behind on any exit path.
  * The persisted value is written at drag/keyboard completion, never on
  * every move.
+ *
+ * Interaction model (P2.4 revision): direct manipulation only. Dragging
+ * resizes continuously, a completed gesture settles magnetically onto the
+ * recommended split when it lands within a couple of percent of it, and
+ * reset (double-click / Enter) eases back over ~200ms instead of jumping.
+ * Keyboard nudges move real pixels rather than percentages so a press feels
+ * the same on a narrow iPad and a wide desktop workspace.
+ *
+ * Recommended split (P2.4b): on a touch tablet that is narrower than the
+ * wide breakpoint the two panes are cramped, so the canonical layout leans
+ * question-first (`crampedDefaultLeftWidth` — Reading keeps the material
+ * wider than Listening does, because passage reading is the work there).
+ * Wide layouts keep the even split. The recommended split is a pure function
+ * of the live workspace width, so it is also what reset and the magnetic
+ * settle return to.
  */
 
 const PREFERRED_TRAVEL_MIN = 0.32;
@@ -127,6 +147,12 @@ interface UseSplitPaneResizeOptions {
   answerPaneWidthProperty?: '--question-pane-width' | '--writing-editor-pane-width';
   /** Initial preferred ratio in [0,1]; old persisted percentages are normalized once. */
   defaultLeftWidth?: number;
+  /**
+   * Recommended material share (percent or ratio) for cramped touch-tablet
+   * workspaces (narrower than the wide breakpoint). Falls back to
+   * `defaultLeftWidth` when omitted.
+   */
+  crampedDefaultLeftWidth?: number | undefined;
   dividerMode?: 'overlay' | 'consumes-space';
   /** P2.5: sessionStorage key scoped to attempt/version/module. Omit to disable. */
   persistenceKey?: string | undefined;
@@ -134,11 +160,17 @@ interface UseSplitPaneResizeOptions {
   fontScale?: number | undefined;
 }
 
+function normalizeRatio(value: number, fallback: number): number {
+  const normalized = value > 1 ? value / 100 : value;
+  return Number.isFinite(normalized) ? Math.min(1, Math.max(0, normalized)) : fallback;
+}
+
 export function useSplitPaneResize({
   isTabletMode,
   materialPaneWidthProperty,
   answerPaneWidthProperty = '--question-pane-width',
   defaultLeftWidth = DEFAULT_PREFERRED_RATIO * 100,
+  crampedDefaultLeftWidth,
   dividerMode = 'consumes-space',
   persistenceKey,
   fontScale = 1,
@@ -165,17 +197,60 @@ export function useSplitPaneResize({
     return typeof window !== 'undefined' ? window.innerWidth : 0;
   }, []);
 
+  // The canonical split for the CURRENT workspace width: cramped touch
+  // tablets lean question-first, everything else uses the module default.
+  const resolveRecommendedRatio = useCallback(
+    (usableWidth: number) => {
+      const cramped =
+        isTabletMode && usableWidth > 0 && usableWidth < STUDENT_WIDE_MIN_WIDTH_PX;
+      const source =
+        cramped && crampedDefaultLeftWidth !== undefined ? crampedDefaultLeftWidth : defaultLeftWidth;
+      return normalizeRatio(source, DEFAULT_PREFERRED_RATIO);
+    },
+    [crampedDefaultLeftWidth, defaultLeftWidth, isTabletMode],
+  );
+
   // P2.5: read valid old preferences once, normalize units (percent → ratio),
   // and clamp. Old title-keyed percentages (0..100) are interpreted as ratios.
   const [preferredRatio, setPreferredRatio] = useState(() => {
-    const fallback = defaultLeftWidth > 1 ? defaultLeftWidth / 100 : defaultLeftWidth;
+    const recommended = resolveRecommendedRatio(readContainerWidth());
     const persisted = persistenceKey ? readPersistedSplitRatio(persistenceKey) : null;
     if (persisted === null) {
-      return Number.isFinite(fallback) ? Math.min(1, Math.max(0, fallback)) : DEFAULT_PREFERRED_RATIO;
+      return recommended;
     }
-    const normalized = persisted > 1 ? persisted / 100 : persisted;
-    return Number.isFinite(normalized) ? Math.min(1, Math.max(0, normalized)) : DEFAULT_PREFERRED_RATIO;
+    return normalizeRatio(persisted, recommended);
   });
+
+  // Container geometry changes (rotation, Stage Manager, split view, a window
+  // drag) must re-clamp the rendered split immediately while leaving the
+  // student's chosen ratio alone, so rotating back restores their intent
+  // instead of destroying it. The observed width is only a re-render trigger;
+  // the bounds still read the live rect.
+  const [containerResizeTick, setContainerResizeTick] = useState(0);
+  const lastObservedWidthRef = useRef<number | null>(null);
+  useEffect(() => {
+    const element = workspaceRef.current;
+    const measure = () => {
+      const width = element?.getBoundingClientRect().width ?? 0;
+      const previous = lastObservedWidthRef.current;
+      lastObservedWidthRef.current = width;
+      if (previous !== null && previous !== width) {
+        setContainerResizeTick((tick) => tick + 1);
+      }
+    };
+    measure();
+    const observer = element ? new ResizeObserver(measure) : null;
+    if (element && observer) {
+      observer.observe(element);
+    }
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
+  }, [workspaceRef]);
 
   const bounds = useMemo(
     () =>
@@ -185,14 +260,38 @@ export function useSplitPaneResize({
         minMaterialWidth,
         minAnswerWidth,
       ),
-    // preferredRatio re-runs the read after drags/keyboard moves so ARIA and
-    // the rendered split always describe the current container.
+    // preferredRatio re-runs the read after drags/keyboard moves, and
+    // containerResizeTick after rotations/window changes, so ARIA and the
+    // rendered split always describe the current container.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [preferredRatio, dividerConsumesSpace, dividerWidth, minMaterialWidth, minAnswerWidth, readContainerWidth],
+    [
+      preferredRatio,
+      containerResizeTick,
+      dividerConsumesSpace,
+      dividerWidth,
+      minMaterialWidth,
+      minAnswerWidth,
+      readContainerWidth,
+    ],
   );
 
   const renderedRatio = renderSplitRatio(preferredRatio, bounds);
   const splittable = renderedRatio !== null;
+
+  // Normalized recommended split for the live workspace: reset and the
+  // magnetic settle both return here, so each exam (and each orientation)
+  // keeps its own canonical layout.
+  const defaultRatio = useMemo(
+    () => resolveRecommendedRatio(bounds.usableWidth),
+    [bounds.usableWidth, resolveRecommendedRatio],
+  );
+
+  // The reset animation starts from whatever is currently rendered. Kept in a
+  // ref so the animation frames do not re-create the callback every render.
+  const renderedRatioRef = useRef<number | null>(renderedRatio);
+  useEffect(() => {
+    renderedRatioRef.current = renderedRatio;
+  }, [renderedRatio]);
 
   // P2.4: persist at drag/keyboard completion, not synchronously on every move.
   const commitPreferredRatio = useCallback(
@@ -215,23 +314,95 @@ export function useSplitPaneResize({
     pendingRatio: number | null;
   } | null>(null);
 
+  // Magnetic settle: a gesture that ends within a hair of the recommended
+  // split lands exactly on it. Applied on release only — never mid-drag, so
+  // the divider always tracks the pointer one-to-one.
+  const settleRatio = useCallback(
+    (ratio: number) => {
+      if (bounds.lower === null || bounds.upper === null) {
+        return ratio;
+      }
+      if (defaultRatio < bounds.lower || defaultRatio > bounds.upper) {
+        return ratio;
+      }
+      const threshold = STUDENT_SPLIT_SNAP_THRESHOLD_PERCENT / 100;
+      return Math.abs(ratio - defaultRatio) <= threshold ? defaultRatio : ratio;
+    },
+    [bounds.lower, bounds.upper, defaultRatio],
+  );
+
   const endDrag = useCallback(() => {
     const drag = dragStateRef.current;
     if (!drag) return;
     if (drag.pendingRatio !== null) {
-      commitPreferredRatio(drag.pendingRatio);
+      commitPreferredRatio(settleRatio(drag.pendingRatio));
     }
     dragStateRef.current = null;
     if (typeof document !== 'undefined') {
       document.body.style.removeProperty('cursor');
       document.body.style.removeProperty('user-select');
     }
-  }, [commitPreferredRatio]);
+  }, [commitPreferredRatio, settleRatio]);
+
+  // Quiet ~200ms ease-out settle back to the recommended split. Only reset
+  // animates: dragging writes the ratio per pointermove with no transition.
+  const resetAnimationRef = useRef<number | null>(null);
+  const cancelResetAnimation = useCallback(() => {
+    if (resetAnimationRef.current !== null) {
+      cancelAnimationFrame(resetAnimationRef.current);
+      resetAnimationRef.current = null;
+    }
+  }, []);
+
+  const animateRatioTo = useCallback(
+    (target: number) => {
+      cancelResetAnimation();
+      const start = renderedRatioRef.current;
+      const from = start === null || !Number.isFinite(start) ? target : start;
+      if (
+        from === target ||
+        typeof requestAnimationFrame !== 'function' ||
+        STUDENT_SPLIT_RESET_DURATION_MS <= 0
+      ) {
+        commitPreferredRatio(target);
+        return;
+      }
+      // The first frame's own timestamp is the origin: rAF timestamps and
+      // performance.now() are not guaranteed to share a clock, and a
+      // negative progress would push the divider the wrong way. If the
+      // environment hands back a frozen timestamp, a 60fps frame budget
+      // keeps the settle finishing instead of stalling mid-flight.
+      let startedAt: number | null = null;
+      let frames = 0;
+      const step = (now: number) => {
+        if (startedAt === null) {
+          startedAt = now;
+        }
+        const elapsed = now > startedAt ? now - startedAt : frames * 16;
+        frames += 1;
+        const progress = Math.min(1, Math.max(0, elapsed / STUDENT_SPLIT_RESET_DURATION_MS));
+        const eased = 1 - (1 - progress) ** 3;
+        if (progress >= 1) {
+          resetAnimationRef.current = null;
+          commitPreferredRatio(target);
+          return;
+        }
+        setPreferredRatio(from + (target - from) * eased);
+        resetAnimationRef.current = requestAnimationFrame(step);
+      };
+      resetAnimationRef.current = requestAnimationFrame(step);
+    },
+    [cancelResetAnimation, commitPreferredRatio],
+  );
 
   useEffect(() => {
-    // Cleanup on unmount covers any gesture still in flight.
+    // Cleanup on unmount covers any gesture or reset animation still in flight.
     return () => {
       dragStateRef.current = null;
+      if (resetAnimationRef.current !== null) {
+        cancelAnimationFrame(resetAnimationRef.current);
+        resetAnimationRef.current = null;
+      }
     };
   }, []);
 
@@ -240,6 +411,7 @@ export function useSplitPaneResize({
       if (dragStateRef.current) {
         return; // Ignore unrelated pointers while a gesture is active.
       }
+      cancelResetAnimation();
       const workspaceRect = workspaceRef.current?.getBoundingClientRect();
       if (!workspaceRect || workspaceRect.width <= 0) {
         return;
@@ -272,7 +444,7 @@ export function useSplitPaneResize({
         document.body.style.setProperty('user-select', 'none');
       }
     },
-    [dividerConsumesSpace, dividerWidth, renderedRatio],
+    [cancelResetAnimation, dividerConsumesSpace, dividerWidth, renderedRatio],
   );
 
   const handlePointerMove = useCallback(
@@ -317,10 +489,14 @@ export function useSplitPaneResize({
 
   const handleKeyboardResize = useCallback(
     (event: React.KeyboardEvent) => {
-      // Left/Right adjust 2%, Shift+arrow 5% (of the usable width).
-      const baseStep = 0.02;
-      const shiftStep = 0.05;
-      const step = event.shiftKey ? shiftStep : baseStep;
+      // Arrow nudges move real pixels (8–16px per press, larger with Shift)
+      // so a keypress feels identical on every workspace width. Percentage
+      // steps fall back only while the container is still unmeasured.
+      const pixelsToRatio = (pixels: number) =>
+        bounds.usableWidth > 0 ? pixels / bounds.usableWidth : 0.02;
+      const step = event.shiftKey
+        ? pixelsToRatio(STUDENT_SPLIT_KEYBOARD_LARGE_STEP_PX)
+        : pixelsToRatio(STUDENT_SPLIT_KEYBOARD_STEP_PX);
       const keyDeltas: Record<string, number> = {
         ArrowLeft: -step,
         ArrowDown: -step,
@@ -348,9 +524,15 @@ export function useSplitPaneResize({
         if (bounds.upper !== null) {
           commitPreferredRatio(bounds.upper);
         }
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        animateRatioTo(defaultRatio);
       }
     },
-    [bounds.lower, bounds.upper, commitPreferredRatio, renderedRatio],
+    [animateRatioTo, bounds.lower, bounds.upper, bounds.usableWidth, commitPreferredRatio, defaultRatio, renderedRatio],
   );
 
   // P2.4: keyboard-free resize alternatives for users who cannot drag
@@ -366,8 +548,8 @@ export function useSplitPaneResize({
     [commitPreferredRatio, renderedRatio],
   );
   const resetSplit = useCallback(() => {
-    commitPreferredRatio(DEFAULT_PREFERRED_RATIO);
-  }, [commitPreferredRatio]);
+    animateRatioTo(defaultRatio);
+  }, [animateRatioTo, defaultRatio]);
   const resizeCommands = useMemo(
     () => ({
       narrower: () => adjustSplitByStep(-1, true),

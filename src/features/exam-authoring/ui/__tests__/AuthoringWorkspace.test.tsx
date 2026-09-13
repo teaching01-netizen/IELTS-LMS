@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -83,6 +83,7 @@ vi.mock("../../editor/RichQuestionComposer", () => ({ SAT_CHOICE_COMPOSER_CAPABI
 vi.mock("../../providers/sat/contentTemplates", () => ({
   createSatSupportingMaterial: (kind: string) => ({ version: 2 as const, nodes: [], document: { type: "doc" as const, content: [{ type: "paragraph", text: kind }] } }),
 }));
+import { SAVE_CONFLICT_COPY } from "../../realtime/connectionCopy";
 import { AuthoringWorkspace } from "../AuthoringWorkspace";
 
 function structuredText(id: string, text: string) {
@@ -271,5 +272,137 @@ describe("AuthoringWorkspace (spine-only)", () => {
     fireEvent.click(await screen.findByRole("button", {name:"Question actions"}));
     fireEvent.click(screen.getByRole("menuitem", {name:/preview question as students/i}));
     expect(await screen.findByText(/local unsaved edits included|saved draft revision/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * Phase 05 parity: the fence (HTTP 409) and the socket event are the same
+ * product condition, so they must reach the same surface with the same words.
+ * These run with EVERY capability OFF (the harness leaves the VITE kill
+ * switches unset), which is exactly the degraded case that used to strand the
+ * author on "reload the latest version, then reapply your changes".
+ */
+describe("AuthoringWorkspace conflict routing without a socket", () => {
+  beforeEach(() => { setupDefaults(); });
+
+  function tree() {
+    return (
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}
+      >
+        <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
+          <AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("turns a fenced write into divergence and opens Review", async () => {
+    const attempted = harness.details["eq-1"]!.question;
+    harness.autosave.status = "conflict";
+    harness.autosave.hasPendingChanges = true;
+    // The fence is the only signal: HTTP is authoritative, so the newer
+    // revision is learned by fetching, never by arithmetic on the error.
+    harness.api.getQuestion.mockResolvedValue({
+      ...harness.details["eq-1"],
+      question: { ...attempted, revision: attempted.revision + 1 },
+    });
+
+    renderWorkspace();
+    await screen.findByRole("heading", { name: "SAT Practice 1" });
+    await waitFor(() => expect(harness.api.getQuestion).toHaveBeenCalledWith("eq-1"));
+    expect(await screen.findByTestId("conflict-resolver")).toBeInTheDocument();
+    // Diverged, not failed: the notice carries the calm wording and the
+    // mandatory promise that the local work is safe.
+    expect(await screen.findByTestId("remote-update-notice")).toBeInTheDocument();
+    expect(screen.getByTestId("remote-update-notice")).toHaveTextContent(
+      /new changes available/i,
+    );
+  });
+
+  it("speaks one conflict vocabulary in the header and the footer", async () => {
+    harness.autosave.status = "conflict";
+    harness.autosave.hasPendingChanges = true;
+    // The server is NOT ahead, so nothing is routed: this is purely about the
+    // two save-cluster sites agreeing with each other.
+    harness.api.getQuestion.mockResolvedValue({ ...harness.details["eq-1"] });
+
+    renderWorkspace();
+    // The save area only exists once a draft is open (the header slot and the
+    // spine footer both render from it).
+    await screen.findByLabelText("Question prompt");
+    const reviews = await screen.findAllByRole("button", { name: /review changes/i });
+    expect(reviews).toHaveLength(2);
+    // Both sites derive from the same copy module: they say exactly the same
+    // thing. The footer used to speak its own dialect and tell the author to
+    // reload and retype work the app was already holding.
+    const titles = reviews.map((button) => button.getAttribute("title"));
+    expect(new Set(titles).size).toBe(1);
+    expect(titles[0]).toBe(`${SAVE_CONFLICT_COPY.fenced} ${SAVE_CONFLICT_COPY.keptOnDevice}`);
+    expect(document.body.textContent ?? "").not.toMatch(/reload the latest version/i);
+
+    // Both sites open the SAME surface, including the footer directly under the
+    // editor — the one the author actually reads while typing.
+    fireEvent.click(reviews[reviews.length - 1]!);
+    expect(await screen.findByTestId("conflict-resolver")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("conflict-resolver")).not.toBeInTheDocument();
+    fireEvent.click(reviews[0]!);
+    expect(await screen.findByTestId("conflict-resolver")).toBeInTheDocument();
+  });
+
+  /**
+   * What the editor would actually send: the draft, never the query cache. Each
+   * case gets its own render so no divergence history leaks between them.
+   */
+  async function flushDraftPromptAfterRefetch(args: {
+    dirty: boolean;
+    text: string;
+  }): Promise<string> {
+    const view = render(tree());
+    await screen.findByLabelText("Question prompt");
+    harness.autosave.hasPendingChanges = args.dirty;
+    harness.details["eq-1"] = {
+      ...harness.details["eq-1"]!,
+      question: { ...makeDraft("rev-1", args.text), revision: 2 },
+    };
+    view.rerender(tree());
+    const prompt = await screen.findByLabelText("Question prompt");
+    fireEvent.keyDown(prompt, { key: "s", ctrlKey: true });
+    await waitFor(() => expect(harness.autosave.flushNow).toHaveBeenCalledOnce());
+    const payload = (harness.autosave.flushNow as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![0] as { prompt: { nodes: { text?: string }[] } };
+    return payload.prompt.nodes.map((node) => node.text ?? "").join(" ");
+  }
+
+  it("never replaces a DIRTY editor from a refetch", async () => {
+    // Otherwise the very fetch that reveals a newer revision discards the draft
+    // the notice beside it promises to keep, and the device copy becomes the
+    // only survivor — which resurfaces as "recovered unsaved changes" on the
+    // next reload, exactly what this surface exists to prevent.
+    expect(
+      await flushDraftPromptAfterRefetch({ dirty: true, text: "Rewritten on the server" }),
+    ).toBe("First prompt");
+  });
+
+  it("still replaces a CLEAN editor from a refetch", async () => {
+    // The guard protects local work; it must not freeze the freshness path.
+    expect(
+      await flushDraftPromptAfterRefetch({ dirty: false, text: "Rewritten on the server" }),
+    ).toBe("Rewritten on the server");
+  });
+
+  it("reports a recovered device draft as a device fact, never as a conflict", async () => {
+    renderWorkspace();
+    await screen.findByLabelText("Question prompt");
+    // The LAST call, not the first: each render passes a fresh options object,
+    // and only the current one closes over a selected question.
+    const calls = (harness.useQuestionAutosave as { mock: { calls: unknown[][] } }).mock.calls;
+    const options = calls[calls.length - 1]![0] as { onRecover: (revision: QuestionRevision) => void };
+    act(() => { options.onRecover(makeDraft("rev-1", "Typed while offline")); });
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/recovered unsaved changes from this device/i);
+    expect(banner).toHaveTextContent(/not saved on the server yet/i);
+    expect(banner.textContent ?? "").not.toMatch(/another author|reload/i);
   });
 });

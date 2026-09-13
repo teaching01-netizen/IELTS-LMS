@@ -11,6 +11,7 @@ export const gradingGateway = {
     getSessionQueueSummary: () => gradingService.getSessionQueueSummary(),
     getSessionStudentSubmissions: (sessionId: string, filters?: SessionDetailFilters) =>
       gradingService.getSessionStudentSubmissions(sessionId, filters),
+    getActScienceReports: () => gradingService.getActScienceReports(),
     startReview: (submissionId: string, teacherId: string, teacherName: string) =>
       gradingService.startReview(submissionId, teacherId, teacherName),
     saveReviewDraft: (draft: ReviewDraft, teacherId: string, teacherName: string) =>

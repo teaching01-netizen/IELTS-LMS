@@ -14,9 +14,14 @@ export function StudentQuestionNumber({
   isActive = false,
   className,
 }: StudentQuestionNumberProps) {
+  // The number is orientation, not a state: at rest it stays neutral so the
+  // accent is reserved for meaningful state (the focused question, the
+  // selected answer, keyboard focus, the flagged state). A page where every
+  // question number shouts in blue leaves nothing for the current question
+  // to say.
   const stateClassName = isActive
     ? 'border-blue-800 bg-blue-800 text-white'
-    : 'border-blue-500 bg-white text-blue-600';
+    : 'border-gray-300 bg-white text-gray-700';
 
   return (
     <span

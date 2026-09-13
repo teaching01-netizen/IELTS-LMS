@@ -12,6 +12,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authoring"
+	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/media"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
@@ -36,6 +37,17 @@ func observeAuthoringOp(operation string, err error) {
 		}
 	}
 	telemetry.IncCounter(telemetry.MAuthoringOpTotal, "operation", operation, "outcome", outcome)
+	// Phase 06 revision-fence series. Only a genuine fence collision counts: a
+	// validation rejection is a different condition and must not inflate the
+	// number operators read as "editors are fighting over the same question".
+	//
+	// Note what this does NOT do: it never claims that because the fence
+	// rejected, no stale write ever won. Fencing is the correctness control and
+	// is proven by constraints and property tests, not by an absence of metric
+	// increments.
+	if outcome == telemetry.OutcomeVersionConflict {
+		authoringrealtime.EmitConflict(authoringrealtime.ConflictOperationFor(operation))
+	}
 }
 
 // authorSatWorkbookTemplateHandler downloads the canonical SAT authoring
@@ -580,14 +592,15 @@ func authorUpdateQuestionHandler(app *App) http.HandlerFunc {
 // authorDeleteQuestionHandler deletes one exam question.
 func authorDeleteQuestionHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireAuthoringQuestionWrite(app, w, r, chi.URLParam(r, "examQuestionID")) == nil {
+		sess := requireAuthoringQuestionWrite(app, w, r, chi.URLParam(r, "examQuestionID"))
+		if sess == nil {
 			return
 		}
 		if app.Authoring == nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring service is unavailable."))
 			return
 		}
-		if err := app.Authoring.DeleteQuestion(r.Context(), chi.URLParam(r, "examQuestionID")); err != nil {
+		if err := app.Authoring.DeleteQuestion(r.Context(), chi.URLParam(r, "examQuestionID"), sess.UserID); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
@@ -598,7 +611,8 @@ func authorDeleteQuestionHandler(app *App) http.HandlerFunc {
 // authorReorderHandler reorders questions within a module.
 func authorReorderHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireAuthoringModuleWrite(app, w, r, chi.URLParam(r, "moduleID")) == nil {
+		sess := requireAuthoringModuleWrite(app, w, r, chi.URLParam(r, "moduleID"))
+		if sess == nil {
 			return
 		}
 		if app.Authoring == nil {
@@ -627,7 +641,7 @@ func authorReorderHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "orderedIds and questionIds are required."))
 			return
 		}
-		if err := app.Authoring.ReorderQuestions(r.Context(), chi.URLParam(r, "moduleID"), expected, ordered); err != nil {
+		if err := app.Authoring.ReorderQuestions(r.Context(), chi.URLParam(r, "moduleID"), expected, ordered, sess.UserID); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}

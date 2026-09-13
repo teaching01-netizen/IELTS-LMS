@@ -1,0 +1,34 @@
+{
+  "probe": "B6c",
+  "inputKind": "text/html img with blob: src (Safari copy / canvas flavor)",
+  "targetField": "stimulus",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "x"
+          }
+        ]
+      },
+      {
+        "type": "image",
+        "attrs": {
+          "src": "blob:https://example.test/uuid",
+          "alt": null,
+          "assetId": null,
+          "caption": null
+        }
+      }
+    ]
+  },
+  "observed": "blob: URL is NOT filtered by the allowBase64 parse rule (only data: is), so an image node IS created; SatImageNodeView isDirectSource(blob:...) is false and assetId empty -> missing-visual placeholder (Loading visual...), never resolvable after paste; object-URL lifetime leaks into the draft if saved",
+  "validatorOutcome": "BLOCKING: sat.media.source.required? NO - src non-empty so source check passes on rich path... actually validateRichDocument requires assetId OR src non-empty (src=blob: passes) BUT sat.accessibility.alt.required FIRES (alt null). Blob persistence violates the future no-blob-persistence invariant - phase-06 must stage-upload instead."
+}

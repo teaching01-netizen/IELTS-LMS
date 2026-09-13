@@ -32,7 +32,7 @@
     "k6:submit-storm": "k6 run k6/prod-submit-storm-200.js",
     "k6:resume": "k6 run k6/prod-resume-100.js",
     "k6:auto-submit": "k6 run k6/prod-auto-submit-200.js",
-    "e2e:live-with-k6": "sh -c 'TS=$(date +%s); LOG_DIR=\"${LOG_DIR:-e2e/.generated/live-runner}\"; mkdir -p \"$LOG_DIR\"; K6_LOG_FILE=\"${K6_LOG_FILE:-$LOG_DIR/k6-$TS.log}\"; LIVE_RUN_LOG_FILE=\"${LIVE_RUN_LOG_FILE:-$LOG_DIR/live-runner-$TS.log}\"; echo \"[combo] k6 log: $K6_LOG_FILE\"; echo \"[combo] live log: $LIVE_RUN_LOG_FILE\"; k6 run \"${K6_SCRIPT:-k6/prod-start-exam-200.js}\" > \"$K6_LOG_FILE\" 2>&1 & K6_PID=$!; LIVE_RUN_LOG_FILE=\"$LIVE_RUN_LOG_FILE\" npm run e2e:live-runner; STATUS=$?; kill $K6_PID >/dev/null 2>&1 || true; wait $K6_PID >/dev/null 2>&1 || true; exit $STATUS'",
+    "e2e:live-with-k6": "sh -c 'TS=$(date +%s); LOG_DIR=\"${LOG_DIR:-e2e/.generated/live-runner}\"; mkdir -p \"$LOG_DIR\"; K6_LOG_FILE=\"${K6_LOG_FILE:-$LOG_DIR/k6-$TS.log}\"; LIVE_RUN_LOG_FILE=\"${LIVE_RUN_LOG_FILE:-$LOG_DIR/live-runner-$TS.log}\"; echo \"[combo] k6 log: $K6_LOG_FILE\"; echo \"[combo] live log: $LIVE_RUN_LOG_FILE\"; k6 run \"${K6_SCRIPT:-k6/prod-start-exam-200.js}\" > \"$K6_LOG_FILE\" 2>&1 & K6_PID=$!; LIVE_RUN_LOG_FILE=\"$LIVE_RUN_LOG_FILE\" bun run e2e:live-runner; STATUS=$?; kill $K6_PID >/dev/null 2>&1 || true; wait $K6_PID >/dev/null 2>&1 || true; exit $STATUS'",
     "e2e:leapcell-ui": "node deploy/leapcell-load/ui-server.mjs"
   },
   "dependencies": {
@@ -55,6 +55,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "dompurify": "3.4.15",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "jspdf": "^4.2.1",

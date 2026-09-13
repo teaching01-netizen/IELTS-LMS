@@ -115,6 +115,9 @@ export function StudentExamPhaseRenderer({
       { label: 'Exam', value: attemptState.attempt?.examTitle ?? examState.title },
     ].filter((item): item is { label: string; value: string } => Boolean(item.value));
 
+    // Phase 04 ACT reconciliation: provider-aware completion copy. examState.type
+    // is the display type ("ACT" for ACT Science); anything else keeps IELTS copy.
+    const postExamProvider = examState.type === "ACT" ? "act" : "ielts";
     return (
       <StudentPostExamView
         isProctorTerminated={verifiedTerminalState === 'terminated'}
@@ -122,6 +125,7 @@ export function StudentExamPhaseRenderer({
         studentInfo={studentInfo}
         onExit={onExit}
         finalSubmitOverlay={finalSubmitOverlay}
+        provider={postExamProvider}
       />
     );
   }

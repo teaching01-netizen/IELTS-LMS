@@ -59,6 +59,9 @@ const (
 	KindScheduleRoster  = "schedule_roster"
 	KindScheduleAlert   = "schedule_alert"
 	KindAttempt         = "attempt"
+	// KindAuthoring carries SAT authoring rows (Phase 02). The generic bus
+	// treats kind as data, so no runtime branch changes because of it.
+	KindAuthoring = "authoring"
 )
 
 // Roles understood by the role filter.
@@ -77,6 +80,11 @@ type Event struct {
 	Revision   int64           `json:"revision"`
 	Name       string          `json:"event"`
 	Payload    json.RawMessage `json:"payload,omitempty"`
+	// CreatedAt is when the row was committed. Phase 06 samples delivery
+	// latency as (fan-out time - CreatedAt), which is the freshness the SLO is
+	// actually written in. Without it the latency histogram could never be fed,
+	// and a metric nothing feeds is worse than no metric.
+	CreatedAt time.Time `json:"createdAt,omitempty"`
 }
 
 // Bus owns bus SQL. Poll state (cursor) is held by the caller, never global.
@@ -137,7 +145,7 @@ func (b *Bus) PollNew(ctx context.Context, cursor int64, limit int) ([]Event, er
 	}
 	rows, err := b.db.QueryContext(ctx, `
 		SELECT sequence_id, origin_instance_id, event_kind, event_target_id,
-			event_revision, event_name, event_payload
+			event_revision, event_name, event_payload, created_at
 		FROM live_update_events
 		WHERE sequence_id > ? AND origin_instance_id <> ?
 		ORDER BY sequence_id ASC
@@ -150,7 +158,7 @@ func (b *Bus) PollNew(ctx context.Context, cursor int64, limit int) ([]Event, er
 	for rows.Next() {
 		var e Event
 		var payload sql.NullString
-		if err := rows.Scan(&e.SequenceID, &e.Origin, &e.Kind, &e.ID, &e.Revision, &e.Name, &payload); err != nil {
+		if err := rows.Scan(&e.SequenceID, &e.Origin, &e.Kind, &e.ID, &e.Revision, &e.Name, &payload, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		if payload.Valid && strings.TrimSpace(payload.String) != "" && payload.String != "null" {
@@ -201,6 +209,12 @@ type Subscription struct {
 	role       string
 	allowed    map[string]struct{}
 	dropped    int64
+
+	// authoringExamID + matcher drive the authoring topic. The matcher is
+	// supplied by the authoringrealtime package (exam + draft + tenant scope),
+	// so this package stays free of a domain import cycle.
+	authoringExamID string
+	matcher         func(Event) bool
 }
 
 // Channel exposes the event stream.
@@ -220,6 +234,9 @@ type Hub struct {
 	subs       map[*Subscription]struct{}
 	bySchedule map[string]map[*Subscription]struct{}
 	byAttempt  map[string]map[*Subscription]struct{}
+	// byExam indexes authoring subscriptions by EXAM id, so an authoring
+	// event touches O(subscribers-of-that-exam), not O(all conns).
+	byExam map[string]map[*Subscription]struct{}
 }
 
 // NewHub builds an empty hub; callers own its lifetime explicitly.
@@ -228,6 +245,7 @@ func NewHub() *Hub {
 		subs:       map[*Subscription]struct{}{},
 		bySchedule: map[string]map[*Subscription]struct{}{},
 		byAttempt:  map[string]map[*Subscription]struct{}{},
+		byExam:     map[string]map[*Subscription]struct{}{},
 	}
 }
 
@@ -268,6 +286,56 @@ func (h *Hub) Subscribe(role string, scheduleID, attemptID *string, allowedSched
 	return sub
 }
 
+// SubscribeAuthoring registers an EXAM-scoped authoring subscriber.
+//
+// The matcher is injected by the caller (authoringrealtime) so this package
+// never imports a domain package. Routing is exam-scoped on purpose: a draft
+// is replaceable state, so a collaborator must keep receiving frames while
+// Undo swaps the working draft underneath them — a draft-scoped stream would
+// go silent exactly when the replacement must be announced.
+//
+// A nil matcher or empty examID registers a subscriber that never matches
+// (fail closed: a wiring mistake must not broadcast another exam's content).
+func (h *Hub) SubscribeAuthoring(examID string, matcher func(Event) bool) *Subscription {
+	sub := &Subscription{
+		ch:              make(chan Event, QueueCap),
+		role:            RoleAdmin,
+		authoringExamID: strings.TrimSpace(examID),
+		matcher:         matcher,
+	}
+	h.mu.Lock()
+	h.subs[sub] = struct{}{}
+	if sub.authoringExamID != "" {
+		set := h.byExam[sub.authoringExamID]
+		if set == nil {
+			set = map[*Subscription]struct{}{}
+			h.byExam[sub.authoringExamID] = set
+		}
+		set[sub] = struct{}{}
+	}
+	n := len(h.subs)
+	h.mu.Unlock()
+	telemetry.SetGauge(telemetry.MWSConnections, float64(n))
+	return sub
+}
+
+// AuthoringSubscriberCount reports how many exam-scoped authoring subscribers
+// are currently registered. Phase 06 exposes it as its own gauge, separate from
+// MWSConnections, because the authoring number is the one the rollout watches:
+// `MWSConnections` also carries runtime/proctor subscribers, so it cannot answer
+// "how many authoring editors are connected right now".
+func (h *Hub) AuthoringSubscriberCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	n := 0
+	for sub := range h.subs {
+		if sub.authoringExamID != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // Unsubscribe removes a subscriber and closes its channel.
 func (h *Hub) Unsubscribe(sub *Subscription) {
 	h.mu.Lock()
@@ -289,6 +357,14 @@ func (h *Hub) Unsubscribe(sub *Subscription) {
 				}
 			}
 		}
+		if sub.authoringExamID != "" {
+			if set := h.byExam[sub.authoringExamID]; set != nil {
+				delete(set, sub)
+				if len(set) == 0 {
+					delete(h.byExam, sub.authoringExamID)
+				}
+			}
+		}
 		close(sub.ch)
 	}
 	n := len(h.subs)
@@ -305,6 +381,27 @@ func (h *Hub) Publish(e Event) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	seen := map[*Subscription]struct{}{}
+	if e.Kind == KindAuthoring {
+		// Authoring frames are indexed by exam and filtered by the injected
+		// matcher (exam + draft + tenant). Runtime subscribers are NOT candidates
+		// for these, and authoring subscribers are not candidates for runtime
+		// frames: the two topics never cross.
+		for sub := range h.byExam[e.ID] {
+			seen[sub] = struct{}{}
+		}
+		for sub := range seen {
+			if sub.matcher == nil || !sub.matcher(e) {
+				continue
+			}
+			select {
+			case sub.ch <- e:
+			default:
+				sub.dropped++
+				telemetry.IncCounter(telemetry.MWSSlowDisconnect)
+			}
+		}
+		return
+	}
 	if set := h.bySchedule[e.ID]; set != nil {
 		for sub := range set {
 			seen[sub] = struct{}{}
@@ -316,7 +413,7 @@ func (h *Hub) Publish(e Event) {
 		}
 	}
 	for sub := range h.subs {
-		if sub.scheduleID == nil && sub.attemptID == nil {
+		if sub.scheduleID == nil && sub.attemptID == nil && sub.authoringExamID == "" {
 			seen[sub] = struct{}{}
 		}
 	}

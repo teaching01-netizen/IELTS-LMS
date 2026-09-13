@@ -16,6 +16,7 @@ import (
 	"example.com/ielts-proctoring/internal/answerhistory"
 	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/authoring"
+	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/grading"
@@ -61,6 +62,10 @@ type Services struct {
 	Terminal      *terminalization.Service
 	Outbox        *outbox.Repository
 	Secret        []byte
+	// AuthoringConfigErr is a fail-closed startup check: non-nil means the
+	// events flag was enabled without a configured live bus. Entrypoints must
+	// refuse to boot rather than silently serve flag-off authoring.
+	AuthoringConfigErr error
 }
 
 // Deps are the process-edge hooks Build takes so domain wiring stays
@@ -126,7 +131,14 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	// cache (single-build, no bare per-request service). Cache off
 	// (VERSION_CACHE unset or nil Versions) leaves a nil cache: Preview
 	// bulk-loads directly, which is the kill-switch posture.
-	s.Authoring = authoring.NewService(pool, s.Tx).SetDeliveryService(deliverySvc).SetPreviewCache(previewCacheOrNil(cfg, deps))
+	s.Authoring = authoring.NewService(pool, s.Tx).SetDeliveryService(deliverySvc).SetPreviewCache(previewCacheOrNil(cfg, deps)).
+		SetLive(liveOrigin).SetEventsEnabled(cfg.AuthoringRealtimeEvents)
+	// Phase 02: the publish path emits through the same gate.
+	s.Exams = s.Exams.SetLive(liveOrigin).SetEventsEnabled(cfg.AuthoringRealtimeEvents)
+	// Fail startup when the flag is on but no bus origin resolved: the flag
+	// must disable the capability deliberately, never mask broken wiring by
+	// silently degrading to flag-off authoring.
+	s.AuthoringConfigErr = authoringrealtime.ValidateEmitterConfig(cfg.AuthoringRealtimeEvents, liveOrigin)
 	return s
 }
 
@@ -142,14 +154,18 @@ func previewCacheOrNil(cfg config.Config, deps Deps) *delivery.VersionCache {
 
 // Completer is the single SAT/ACT provider switch: timeout-driven
 // completions route to the SAT reconciler or the ACT terminalizer by the
-// attempt's provider_key. Both API (delivery service) and worker share
-// it, so provider routing cannot diverge between processes.
+// attempt's effective provider key. Both API (delivery service) and worker
+// share it, so provider routing cannot diverge between processes. Legacy ACT
+// rows (provider_key='ielts', exam_type='ACT') heal to act here via the
+// central exams.EffectiveProviderKey rule (Phase 02 blocker 4); stored
+// identity is healed forward by migration 0054.
 func Completer(pool *sql.DB, s *Services) func(ctx context.Context, scheduleID, attemptID string) error {
 	return func(ctx context.Context, scheduleID, attemptID string) error {
-		var providerKey string
-		if err := pool.QueryRowContext(ctx, "SELECT e.provider_key FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id WHERE a.id = ? AND a.schedule_id = ?", attemptID, scheduleID).Scan(&providerKey); err != nil {
+		var providerKey, examType string
+		if err := pool.QueryRowContext(ctx, "SELECT e.provider_key, e.exam_type FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id WHERE a.id = ? AND a.schedule_id = ?", attemptID, scheduleID).Scan(&providerKey, &examType); err != nil {
 			return err
 		}
+		providerKey = exams.EffectiveProviderKey(providerKey, examType)
 		switch providerKey {
 		case "sat":
 			return s.SAT.ReconcileAdapter()(ctx, scheduleID, attemptID)

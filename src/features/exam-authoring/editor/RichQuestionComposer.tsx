@@ -10,7 +10,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import { Sigma } from "lucide-react";
-import type { StructuredContent } from "../contracts/assessment";
+import type { RichTextDocument, StructuredContent } from "../contracts/assessment";
 import {
   assetSource,
   documentFromStructuredContent,
@@ -21,9 +21,17 @@ import { EditableBlockMath, EditableInlineMath } from "./EditableMathExtension";
 import { uploadAssessmentAsset } from "../api/assessmentMediaApi";
 import { AuthoringDialog } from "../ui/authoringPrimitives";
 import { authoringMotion } from "../ui/authoringMotion";
-import { RichContentIdentity } from './RichContentIdentityExtension';
-import { ComposerToolbar } from './ComposerToolbar';
-import type { ComposerContext } from './composerContext';
+import { RichContentIdentity } from "./RichContentIdentityExtension";
+import { ComposerToolbar } from "./ComposerToolbar";
+import type { ComposerContext } from "./composerContext";
+import { SmartPastePlugin } from "./plugins/smartPastePlugin";
+import { SmartDropPlugin } from "./plugins/smartDropPlugin";
+import { LatexPasteRule } from "./plugins/latexPasteRule";
+import { insertIngestResult } from "./plugins/insertIngestResult";
+import { ingestClipboard } from "./ingestion/application/ingestClipboard";
+import { createPipelineContext } from "./ingestion/application/pipelineContext";
+import { PasteStatus } from "./PasteStatus";
+import { stripTransientImages } from "./ingestion/adapters/imageValidation";
 
 const baseExtensions = [
   RichContentIdentity,
@@ -77,6 +85,20 @@ export const SAT_CHOICE_COMPOSER_CAPABILITIES: Readonly<RichComposerCapabilities
   history: true,
 });
 
+export interface SmartPasteStatus {
+  visible: boolean;
+  source: string | null;
+  imageCount: number;
+  mathCount: number;
+  needsAltText: boolean;
+  canUndo?: boolean;
+  rejectedImageCount?: number;
+  /** Normalized canonical paste (Phase-08 analysis input). */
+  document?: import("./ingestion/domain/importDocument").ImportDocument | undefined;
+  /** Plain-text projection of the paste for detector convenience. */
+  pastedPlainText?: string | undefined;
+}
+
 export interface RichQuestionComposerProps {
   value: StructuredContent;
   onChange: (value: StructuredContent) => void;
@@ -86,6 +108,8 @@ export interface RichQuestionComposerProps {
   minHeightClassName?: string;
   assetOwnerId?: string;
   capabilities?: Readonly<RichComposerCapabilities>;
+  smartPaste?: boolean;
+  onSmartPaste?: ((info: SmartPasteStatus) => void) | undefined;
 }
 
 export function RichQuestionComposer({
@@ -97,11 +121,29 @@ export function RichQuestionComposer({
   minHeightClassName = "min-h-[132px]",
   assetOwnerId,
   capabilities = SAT_RICH_COMPOSER_CAPABILITIES,
+  smartPaste = true,
+  onSmartPaste,
 }: RichQuestionComposerProps) {
   const [dialog, setDialog] = useState<Dialog>(null);
-  const [dialogContext, setDialogContext] = useState<ComposerContext>({kind:"text"});
+  const [dialogContext, setDialogContext] = useState<ComposerContext>({ kind: "text" });
   const [tableFeedback, setTableFeedback] = useState(false);
+  const [pasteStatus, setPasteStatus] = useState<SmartPasteStatus>({
+    visible: false,
+    source: null,
+    imageCount: 0,
+    mathCount: 0,
+    needsAltText: false,
+  });
   const [initialContent] = useState(() => documentFromStructuredContent(value));
+  const ingestRef = useRef(ingestClipboard);
+  const capabilitiesRef = useRef(capabilities);
+  capabilitiesRef.current = capabilities;
+  const assetOwnerRef = useRef(assetOwnerId);
+  assetOwnerRef.current = assetOwnerId;
+  const smartPasteRef = useRef(smartPaste);
+  smartPasteRef.current = smartPaste;
+  const onSmartPasteRef = useRef(onSmartPaste);
+  onSmartPasteRef.current = onSmartPaste;
   const editorExtensions = useMemo(
     () => [
       ...baseExtensions,
@@ -109,7 +151,92 @@ export function RichQuestionComposer({
         placeholder,
         emptyEditorClass: "is-editor-empty",
       }),
+      SmartPastePlugin.configure({
+        capabilities,
+        ...(assetOwnerId ? { assetOwnerId } : {}),
+        ingest: (req) =>
+          smartPasteRef.current
+            ? ingestRef.current(
+                req,
+                createPipelineContext({
+                  field: capabilitiesRef.current.lists ? "prompt" : "choice",
+                  capabilities: { ...capabilitiesRef.current },
+                })
+              )
+            : Promise.resolve({
+                document: {
+                  version: 1 as const,
+                  nodes: [],
+                  sourceMeta: {
+                    source: "text" as const,
+                    confidence: 0 as const,
+                    transformations: [],
+                  },
+                },
+                source: "empty" as const,
+                pendingImages: [],
+                warnings: [],
+                transformations: [],
+                pendingImageAlts: [],
+                rejectedImages: 0,
+                stats: { blockCount: 0, imageCount: 0, mathCount: 0, tableCount: 0 },
+              }),
+        insert: (editor, result, target) =>
+          insertIngestResult(editor, result, target, {
+            capabilities: capabilitiesRef.current,
+            ...(assetOwnerRef.current ? { assetOwnerId: assetOwnerRef.current } : {}),
+          }),
+        onSmartPaste: (info) => {
+          const status: SmartPasteStatus = {
+            visible: true,
+            source: info.source,
+            imageCount: info.imageCount,
+            mathCount: info.mathCount,
+            needsAltText: info.needsAltText,
+            canUndo: info.canUndo,
+            ...(info.rejectedImageCount !== undefined
+              ? { rejectedImageCount: info.rejectedImageCount }
+              : {}),
+            ...(info.document ? { document: info.document } : {}),
+            ...(info.pastedPlainText ? { pastedPlainText: info.pastedPlainText } : {}),
+          };
+          setPasteStatus(status);
+          onSmartPasteRef.current?.(status);
+        },
+      }),
+      SmartDropPlugin.configure({
+        capabilities,
+        ...(assetOwnerId ? { assetOwnerId } : {}),
+        ingest: (req) =>
+          ingestRef.current(
+            req,
+            createPipelineContext({
+              field: capabilitiesRef.current.lists ? "prompt" : "choice",
+              capabilities: { ...capabilitiesRef.current },
+            })
+          ),
+        insert: (editor, result, target) =>
+          insertIngestResult(editor, result, target, {
+            capabilities: capabilitiesRef.current,
+            ...(assetOwnerRef.current ? { assetOwnerId: assetOwnerRef.current } : {}),
+          }),
+        onSmartPaste: (info) => {
+          const status: SmartPasteStatus = {
+            visible: true,
+            source: info.source,
+            imageCount: info.imageCount,
+            mathCount: 0,
+            needsAltText: info.imageCount > 0,
+            canUndo: info.canUndo,
+            ...(info.rejectedImageCount > 0 ? { rejectedImageCount: info.rejectedImageCount } : {}),
+          };
+          setPasteStatus(status);
+          onSmartPasteRef.current?.(status);
+        },
+      }),
+      LatexPasteRule.configure({ enabled: capabilities.equation }),
     ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable plugin identity; runtime opts flow via refs
     [placeholder]
   );
   const editor = useEditor({
@@ -125,14 +252,17 @@ export function RichQuestionComposer({
       },
     },
     onUpdate: ({ editor: current }) => {
-      onChange(structuredContentFromDocument(current.getJSON()));
+      // Keep upload placeholders in the live editor, never in autosave data.
+      const { doc } = stripTransientImages(current.getJSON() as RichTextDocument);
+      onChange(structuredContentFromDocument(doc));
     },
   });
 
   useEffect(() => {
     if (!editor || editor.isFocused) return;
     const next = documentFromStructuredContent(value);
-    if (JSON.stringify(editor.getJSON()) !== JSON.stringify(next)) {
+    const { doc } = stripTransientImages(editor.getJSON() as RichTextDocument);
+    if (JSON.stringify(doc) !== JSON.stringify(next)) {
       editor.commands.setContent(next as JSONContent, { emitUpdate: false });
     }
   }, [editor, value]);
@@ -159,18 +289,32 @@ export function RichQuestionComposer({
       <ComposerToolbar
         editor={editor}
         capabilities={capabilities}
-        onOpenDialog={(next, context) => {setDialogContext(context ?? {kind:"text"}); setDialog(next);}}
+        onOpenDialog={(next, context) => {
+          setDialogContext(context ?? { kind: "text" });
+          setDialog(next);
+        }}
         onTableMutation={flashTableFeedback}
       />
-      <EditorContent
-        editor={editor}
-        className="sat-rich-editor__content"
+      <EditorContent editor={editor} className="sat-rich-editor__content" />
+      <PasteStatus
+        status={pasteStatus}
+        onUndo={() => editor.commands.undo()}
+        onDismiss={() => setPasteStatus((s) => ({ ...s, visible: false }))}
       />
       <AnimatePresence>
         {dialog === "math" ? (
           <MathDialog
             editor={editor}
-            target={dialogContext.kind === "equation" ? {mode:"edit", display:dialogContext.display,latex:dialogContext.latex,pos:dialogContext.pos} : {mode:"insert",display:false,latex:""}}
+            target={
+              dialogContext.kind === "equation"
+                ? {
+                    mode: "edit",
+                    display: dialogContext.display,
+                    latex: dialogContext.latex,
+                    pos: dialogContext.pos,
+                  }
+                : { mode: "insert", display: false, latex: "" }
+            }
             onClose={() => setDialog(null)}
           />
         ) : null}
@@ -471,9 +615,7 @@ function EquationPlacementButton({
       disabled={disabled}
       onClick={onClick}
       className={`min-h-8 rounded-full px-3.5 text-[12px] font-semibold transition disabled:cursor-default disabled:opacity-30 ${
-        active
-          ? "bg-au-surface text-slate-950 shadow-sm"
-          : "text-slate-500 hover:text-slate-900"
+        active ? "bg-au-surface text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-900"
       }`}
     >
       {children}
@@ -512,11 +654,13 @@ function ImageDialog({
 }: {
   editor: Editor;
   ownerId?: string;
-  target?: Extract<ComposerContext, {kind:'image'}> | undefined;
+  target?: Extract<ComposerContext, { kind: "image" }> | undefined;
   onClose: () => void;
 }) {
   const reduceMotion = useReducedMotion();
-  const [assetId, setAssetId] = useState(String(target?.attrs["assetId"] || target?.attrs["src"] || ""));
+  const [assetId, setAssetId] = useState(
+    String(target?.attrs["assetId"] || target?.attrs["src"] || "")
+  );
   const [alt, setAlt] = useState(String(target?.attrs["alt"] ?? ""));
   const [caption, setCaption] = useState(String(target?.attrs["caption"] ?? ""));
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -604,7 +748,11 @@ function ImageDialog({
                   <motion.span
                     initial={{ x: "-100%" }}
                     animate={reduceMotion ? { x: "0%" } : { x: "260%" }}
-                    transition={reduceMotion ? { duration: 0.01 } : { duration: 1.05, ease: "easeInOut", repeat: Infinity }}
+                    transition={
+                      reduceMotion
+                        ? { duration: 0.01 }
+                        : { duration: 1.05, ease: "easeInOut", repeat: Infinity }
+                    }
                     className="block h-full w-1/3 bg-au-accent"
                   />
                 </motion.div>
@@ -625,7 +773,10 @@ function ImageDialog({
       </AnimatePresence>
 
       {uploadError ? (
-        <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-au-danger-tint px-3 py-2 text-xs font-medium text-au-danger-text">
+        <div
+          role="alert"
+          className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-au-danger-tint px-3 py-2 text-xs font-medium text-au-danger-text"
+        >
           <span>{uploadError}</span>
           {selectedFile ? (
             <button
@@ -710,11 +861,22 @@ function ImageDialog({
           transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
           disabled={uploading || !assetId.trim() || !alt.trim()}
           onClick={() => {
-            const attrs = {...target?.attrs, src: assetSource(assetId.trim()), alt:alt.trim(), assetId:assetId.trim(), caption:caption.trim()||null};
-            if(target && editor.state.doc.nodeAt(target.pos)?.type.name === "image") {
-              editor.chain().focus().setNodeSelection(target.pos).updateAttributes("image",attrs).run();
+            const attrs = {
+              ...target?.attrs,
+              src: assetSource(assetId.trim()),
+              alt: alt.trim(),
+              assetId: assetId.trim(),
+              caption: caption.trim() || null,
+            };
+            if (target && editor.state.doc.nodeAt(target.pos)?.type.name === "image") {
+              editor
+                .chain()
+                .focus()
+                .setNodeSelection(target.pos)
+                .updateAttributes("image", attrs)
+                .run();
             } else if (!target) {
-              editor.chain().focus().insertContent({type:"image",attrs}).run();
+              editor.chain().focus().insertContent({ type: "image", attrs }).run();
             }
             onClose();
           }}

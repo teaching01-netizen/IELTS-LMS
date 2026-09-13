@@ -353,7 +353,7 @@ it('rerenders only the blocks whose active question changes', () => {
   expect(renderCounts).toEqual({ q1: 2, q2: 2 });
 });
 
-it('keeps unchanged blocks isolated during same-block navigation and exposes native stepper semantics', () => {
+it('keeps unchanged blocks isolated during same-block navigation without pane-local navigation', () => {
   const block = {
     id: 'shared',
     type: 'SHORT_ANSWER',
@@ -398,11 +398,13 @@ it('keeps unchanged blocks isolated during same-block navigation and exposes nat
   };
   const rendered = render(<StudentQuestionPanel {...props} />);
   expect(renderCounts.shared).toBe(1);
-  expect(screen.getByRole('button', { name: 'Previous question' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Next question' })).toBeEnabled();
+  // P4: navigation lives in the ONE global navigator. The pane must not render
+  // a second rail — not even arrow controls that would duplicate its state.
+  expect(screen.queryByRole('button', { name: 'Previous question' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Next question' })).toBeNull();
 
   rendered.rerender(<StudentQuestionPanel {...props} currentQuestionId="q2" />);
   expect(renderCounts.shared).toBe(2);
-  expect(screen.getByRole('button', { name: 'Previous question' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Next question' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Previous question' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Next question' })).toBeNull();
 });

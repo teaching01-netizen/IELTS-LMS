@@ -1,6 +1,6 @@
 import { useMemo, type CSSProperties } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { SatPageError, SatPageLoading } from '../ui/SatPage';
 import { QuestionRawTable } from '../../../components/results/QuestionRawTable';
 import type { SatQuestionResult, SatSectionResult } from '../../../features/results/api/satResultsQueries';
@@ -58,6 +58,11 @@ function outcomeLabel(outcomeStatus: string): string {
 export function SatResultDetailRoute() {
   const { resultId } = useParams<{ resultId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const backTarget = (() => {
+    const from = (location.state as { from?: unknown } | null)?.from;
+    return typeof from === 'string' && from.startsWith('/sat/results') ? from : '/sat/results';
+  })();
   const query = useSatResultQuery(resultId);
   // Hooks must run unconditionally before any early return: the query
   // transitions loading -> data across renders, and hooks after a return
@@ -84,7 +89,7 @@ export function SatResultDetailRoute() {
 
   return (
     <div className="mx-auto w-full max-w-[900px] px-4 pb-16 pt-6 sm:px-6 md:pt-9 lg:px-10">
-      <button type="button" onClick={() => navigate('/sat/results')} aria-label="Back to SAT results" className="-ml-2 flex min-h-10 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-2 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] hover:text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><ArrowLeft size={15} />Results</button>
+      <button type="button" onClick={() => navigate(backTarget)} aria-label="Back to SAT results" className="-ml-2 flex min-h-10 items-center gap-1.5 rounded-[var(--sat-staff-radius-control,10px)] px-2 text-[12px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] hover:text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><ArrowLeft size={15} />Results</button>
 
       <div className="mt-5 border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] pb-7">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{summary.examTitle} · Version {summary.versionNumber}</p>

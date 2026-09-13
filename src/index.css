@@ -638,8 +638,66 @@
     pointer-events: none;
   }
 
-  .student-question-stepper {
-    bottom: 1rem;
+  /*
+   * Question pane root. Composition is decided by the pane's MEASURED usable
+   * width (useStudentQuestionPaneComposition) rather than a CSS container
+   * query: `container-type` would make this element a containing block for
+   * `position: fixed` descendants, and the pane hosts inline fixed overlays
+   * (zoomed media, highlight hint) that must stay viewport-anchored.
+   */
+  .student-question-pane {
+    position: relative;
+  }
+
+  /*
+   * Question header architecture (P4): the flag owns a real trailing action
+   * column instead of floating at top-right, so it can never overlap the
+   * prompt however many lines the stem wraps to. The prompt column keeps
+   * min-width: 0 so long text shrinks instead of pushing the action column.
+   */
+  .student-question-row {
+    display: block;
+  }
+
+  .student-question-row--flagged {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: 0.5rem;
+  }
+
+  .student-question-row--flagged > .student-question-row-body {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .student-question-row--flagged > .student-question-row-action {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  /*
+   * Compact composition: below a comfortable text measure the horizontal
+   * number|prompt|flag arrangement stops paying for itself, so the flag moves
+   * into a metadata row above the prompt and the prompt takes the full width.
+   * The flag stays a real grid item — it moves, it never floats.
+   */
+  .student-question-row--stacked {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.25rem;
+  }
+
+  .student-question-row--stacked > .student-question-row-action {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .student-question-row--stacked > .student-question-row-body {
+    grid-column: 1;
+    grid-row: 2;
   }
 
   .student-pane-separator {
@@ -654,9 +712,12 @@
   }
 
   /* Reading measure: passage and question columns never exceed a comfortable
-     line length, even on wide panes or after resizing the split. */
+     line length, even on wide panes or after resizing the split. The passage
+     column centers itself inside the pane so a wide passage pane reads as a
+     reading surface rather than a left-anchored panel with dead space. */
   .student-exam-shell .student-passage-measure {
     max-width: var(--student-passage-measure);
+    margin-inline: auto;
   }
 
   .student-exam-shell .student-question-scroll > * {
@@ -4019,5 +4080,24 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     background-color: Highlight;
     color: HighlightText;
     outline: 1px solid CanvasText;
+  }
+}
+
+/*
+ * P4 — reading breathing room above the ONE global navigator.
+ *
+ * The exam footer already owns its own grid row, so exam content is never
+ * underneath it. This is the separate concern the screenshot exposed: the last
+ * line of a scroll surface ending flush against the bar, which reads as content
+ * being cut off even though it is merely scrollable. Reserving footer height
+ * plus a fixed reading gap keeps the final line comfortably clear of the bar.
+ *
+ * Declared in the utilities layer (after Tailwind's own utilities) so it
+ * composes with each surface's existing padding utilities instead of losing to
+ * their breakpoint variants.
+ */
+@layer utilities {
+  .student-scroll-breathe {
+    padding-bottom: calc(var(--student-bottom-bar-height, 3rem) + 1.5rem);
   }
 }

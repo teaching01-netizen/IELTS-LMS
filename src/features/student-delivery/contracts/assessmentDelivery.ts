@@ -62,10 +62,22 @@ export interface AssessmentTimingSnapshot {
   runtimeRevision: number;
 }
 
+/**
+ * Phase 04 ACT reconciliation: provider union for the delivery bootstrap.
+ * SAT remains the deployed provider; "act" is accepted so ACT Science
+ * bootstraps validate without SAT regressions. Unknown providers stay
+ * rejected by narrowing guards at consumption sites.
+ */
+export type AssessmentDeliveryProviderKey = "sat" | "act";
+
+export function isAssessmentDeliveryProviderKey(value: unknown): value is AssessmentDeliveryProviderKey {
+  return value === "sat" || value === "act";
+}
+
 export interface AssessmentDeliveryBootstrap {
   scheduleId: string;
   examId: string;
-  providerKey: "sat";
+  providerKey: AssessmentDeliveryProviderKey;
   versionId: string;
   serverNow: string;
   candidateName: string;
@@ -115,7 +127,7 @@ export interface AssessmentSectionResult {
 export interface AssessmentResult {
   id: string;
   submissionId: string;
-  providerKey: "sat";
+  providerKey: AssessmentDeliveryProviderKey;
   totalScore: number | null;
   scorePayload: Record<string, unknown>;
   scoreKind: "practice";

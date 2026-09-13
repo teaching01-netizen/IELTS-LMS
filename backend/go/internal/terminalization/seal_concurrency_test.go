@@ -50,8 +50,15 @@ func sealBeginUTC(mock sqlmock.Sqlmock) {
 }
 
 func sealExpectProvider(mock sqlmock.Sqlmock, key string) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT provider_key FROM exam_entities")).
-		WillReturnRows(sqlmock.NewRows([]string{"provider_key"}).AddRow(key))
+	sealExpectProviderForExam(mock, key, "Academic")
+}
+
+// sealExpectProviderForExam stages the healed provider+exam_type read:
+// legacy ACT rows return provider_key='ielts' with exam_type='ACT' and
+// must seal through the ACT scorer/materializer (Phase 02 blocker 4).
+func sealExpectProviderForExam(mock sqlmock.Sqlmock, key, examType string) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT provider_key, exam_type FROM exam_entities")).
+		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "exam_type"}).AddRow(key, examType))
 }
 
 func sealExpectRecordedAt(mock sqlmock.Sqlmock) {

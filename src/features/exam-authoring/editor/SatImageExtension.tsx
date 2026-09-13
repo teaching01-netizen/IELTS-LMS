@@ -68,6 +68,17 @@ export const SatImage = Image.extend({
       ...this.parent?.(),
       assetId: { default: null },
       caption: { default: null },
+      // Phase 06 carve-out (attrs only, no render change): transient upload
+      // state for clipboard image paste. The pipe inserts a temp node with
+      // uploadId/uploading set, then swaps attrs with addToHistory:false so
+      // the paste stays one undo step. Undeclared attrs are dropped by the
+      // schema, so these must be declared or the state vanishes silently.
+      // The node view below is UNCHANGED: blob: previews are never rendered
+      // (existing loading placeholder covers uploading); data: stays
+      // unrendarable; allowBase64:false untouched.
+      uploadId: { default: null },
+      uploading: { default: false },
+      uploadError: { default: null },
     };
   },
   addNodeView() {

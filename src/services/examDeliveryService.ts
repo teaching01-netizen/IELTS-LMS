@@ -49,7 +49,7 @@ export interface RuntimeMutationResult {
   error?: string;
 }
 
-const MODULE_ORDER: ModuleType[] = ['listening', 'reading', 'writing', 'speaking'];
+const MODULE_ORDER: ModuleType[] = ['listening', 'reading', 'writing', 'speaking', 'science'];
 
 function toMs(value: string | null | undefined): number | null {
   if (!value) return null;

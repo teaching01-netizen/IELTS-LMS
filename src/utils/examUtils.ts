@@ -773,7 +773,9 @@ export const validateListeningModule = (parts: ListeningPart[]): ValidationError
 
 export const getActScienceTotalQuestions = (stimuli: ActScienceStimulus[]): number =>
   stimuli.reduce(
-    (total, stimulus) => total + stimulus.blocks.reduce((count, block) => count + (block.questions?.length || 1), 0),
+    (total, stimulus) =>
+      total +
+      stimulus.blocks.reduce((blockTotal, block) => blockTotal + getBlockQuestionCount(block), 0),
     0,
   );
 
@@ -791,55 +793,75 @@ export const validateActScienceModule = (stimuli: ActScienceStimulus[]): Validat
     if (!stimulus.title.trim()) {
       errors.push({ field: `${stimulusPath}.title`, message: `Stimulus ${stimulusIndex + 1} title is required`, type: 'error' });
     }
-    if (!stimulus.content.trim()) {
+    if (!stimulus.content.replace(/<[^>]*>/g, '').trim()) {
       errors.push({ field: `${stimulusPath}.content`, message: `Stimulus ${stimulusIndex + 1} content is required`, type: 'error' });
     }
     if (stimulus.blocks.length === 0) {
-      errors.push({ field: `${stimulusPath}.blocks`, message: `Stimulus ${stimulusIndex + 1} needs at least one question`, type: 'error' });
+      errors.push({ field: `${stimulusPath}.blocks`, message: `Stimulus ${stimulusIndex + 1} must have at least one question set`, type: 'error' });
       return;
     }
 
     stimulus.blocks.forEach((block, blockIndex) => {
-      const questions = block.questions?.length
-        ? block.questions
-        : [{ id: block.id, stem: block.stem, options: block.options }];
+      const blockPath = `${stimulusPath}.blocks[${blockIndex}]`;
+      if (block.type !== 'SINGLE_MCQ') {
+        errors.push({ field: `${blockPath}.type`, message: 'ACT Science supports single-choice questions only', type: 'error' });
+        return;
+      }
+      const questions = block.questions ?? [];
+      if (questions.length === 0) {
+        errors.push({ field: `${blockPath}.questions`, message: 'At least one question is required', type: 'error' });
+        return;
+      }
       questions.forEach((question, questionIndex) => {
-        const questionPath = `${stimulusPath}.blocks[${blockIndex}].questions[${questionIndex}]`;
+        const questionPath = `${blockPath}.questions[${questionIndex}]`;
         if (!question.stem.trim()) {
           errors.push({ field: `${questionPath}.stem`, message: `Question ${questionIndex + 1} stem is required`, type: 'error' });
         }
+        if (!question.skillCategory || !allowedSkills.has(question.skillCategory)) {
+          errors.push({ field: `${questionPath}.skillCategory`, message: `Question ${questionIndex + 1} must have an ACT Science skill category`, type: 'error' });
+        }
         if (question.options.length !== 4) {
-          errors.push({ field: `${questionPath}.options`, message: `Question ${questionIndex + 1} must have exactly four options`, type: 'error' });
+          errors.push({ field: `${questionPath}.options`, message: `Question ${questionIndex + 1} must have exactly 4 options`, type: 'error' });
         }
         const correctCount = question.options.filter((option) => option.isCorrect).length;
         if (correctCount !== 1) {
-          errors.push({ field: `${questionPath}.options`, message: `Question ${questionIndex + 1} must have exactly one correct option`, type: 'error' });
+          errors.push({ field: `${questionPath}.options`, message: `Question ${questionIndex + 1} must have exactly 1 correct option`, type: 'error' });
         }
         question.options.forEach((option, optionIndex) => {
           if (!option.text.trim()) {
-            errors.push({ field: `${questionPath}.options[${optionIndex}].text`, message: `Option ${optionIndex + 1} in question ${questionIndex + 1} is required`, type: 'error' });
+            errors.push({ field: `${questionPath}.options[${optionIndex}].text`, message: `Option ${optionIndex + 1} in question ${questionIndex + 1} is empty`, type: 'error' });
           }
         });
-        if (!question.skillCategory || !allowedSkills.has(question.skillCategory)) {
-          errors.push({ field: `${questionPath}.skillCategory`, message: `Question ${questionIndex + 1} needs a valid ACT Science skill category`, type: 'error' });
-        }
       });
     });
   });
+
+  const totalQuestions = getActScienceTotalQuestions(stimuli);
+  if (totalQuestions > 0 && totalQuestions !== 40) {
+    errors.push({
+      field: 'science.questions',
+      message: `ACT Science has ${totalQuestions} questions. The full-set target is 40; publishing is allowed for testing.`,
+      type: 'warning',
+    });
+  }
 
   return errors;
 };
 
 export const canPublishExam = (exam: Exam): { canPublish: boolean; errors: ValidationError[] } => {
   const errors: ValidationError[] = [];
-  
+
   if (!exam.title.trim()) {
     errors.push({ field: 'title', message: 'Exam title is required', type: 'error' });
   }
-  
-  errors.push(...validateReadingModule(exam.content.reading.passages));
-  errors.push(...validateListeningModule(exam.content.listening.parts));
-  
+
+  if (exam.type === 'ACT') {
+    errors.push(...validateActScienceModule(exam.content.science?.stimuli ?? []));
+  } else {
+    errors.push(...validateReadingModule(exam.content.reading.passages));
+    errors.push(...validateListeningModule(exam.content.listening.parts));
+  }
+
   return {
     canPublish: errors.filter(e => e.type === 'error').length === 0,
     errors

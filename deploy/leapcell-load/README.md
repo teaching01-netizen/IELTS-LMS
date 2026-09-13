@@ -19,7 +19,7 @@ Edit `deploy/leapcell-load/.env` with your schedule URL and desired shard.
 ## 3) Run (Web UI)
 
 ```bash
-npm run e2e:leapcell-ui
+bun run e2e:leapcell-ui
 ```
 
 Open:
@@ -65,7 +65,7 @@ K6_SCRIPT=k6/prod-start-exam-200.js
 K6_STUDENTS=60
 ```
 
-`run.sh` will use `npm run e2e:live-with-k6`.
+`run.sh` will use `bun run e2e:live-with-k6`.
 
 ## 6) Logs
 
@@ -90,4 +90,4 @@ docker run --rm -p 3366:3366 ielts-load-ui
 On Leapcell:
 - deploy this repo using `deploy/leapcell-load/Dockerfile`
 - expose the app port (`PORT`)
-- start command is already in container (`npm run e2e:leapcell-ui`)
+- start command is already in container (`bun run e2e:leapcell-ui`)

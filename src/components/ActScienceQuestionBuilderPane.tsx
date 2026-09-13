@@ -1,5 +1,5 @@
-import React from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Plus, Trash2, X } from 'lucide-react';
 import {
   ACT_SCIENCE_SKILL_CATEGORIES,
   ActScienceStimulus,
@@ -9,8 +9,50 @@ import {
   SingleMCQQuestion,
 } from '../types';
 import { createId } from '../utils/idUtils';
+import { getImageUrlCandidates } from '../utils/imageUrl';
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'] as const;
+
+interface ActImagePreviewProps {
+  src: string;
+  alt: string;
+  className: string;
+}
+
+function ActImagePreview({ src, alt, className }: ActImagePreviewProps) {
+  const candidates = getImageUrlCandidates(src);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const [hasError, setHasError] = useState(false);
+  const resolvedSrc = candidates[candidateIndex] ?? '';
+
+  useEffect(() => {
+    setCandidateIndex(0);
+    setHasError(false);
+  }, [src]);
+
+  if (!resolvedSrc || hasError) {
+    return (
+      <p className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+        Preview unavailable. Check the image URL.
+      </p>
+    );
+  }
+
+  return (
+    <img
+      src={resolvedSrc}
+      alt={alt}
+      className={className}
+      onError={() => {
+        if (candidateIndex + 1 < candidates.length) {
+          setCandidateIndex((current) => current + 1);
+        } else {
+          setHasError(true);
+        }
+      }}
+    />
+  );
+}
 
 export function createActScienceQuestion(id = createId('act_q')): SingleMCQQuestion {
   return {
@@ -148,6 +190,22 @@ export function ActScienceQuestionBuilderPane({
     }));
   };
 
+  const removeQuestionImage = (blockIndex: number, questionIndex: number) => {
+    updateQuestion(blockIndex, questionIndex, (current) => ({
+      ...current,
+      imageUrl: undefined,
+    }));
+  };
+
+  const removeChoiceImage = (blockIndex: number, questionIndex: number, optionId: string) => {
+    updateQuestion(blockIndex, questionIndex, (current) => ({
+      ...current,
+      options: current.options.map((candidate) =>
+        candidate.id === optionId ? { ...candidate, imageUrl: undefined } : candidate,
+      ),
+    }));
+  };
+
   const addQuestion = () => {
     updateStimulus((current) => {
       if (current.blocks.length === 0) {
@@ -264,6 +322,48 @@ export function ActScienceQuestionBuilderPane({
                     placeholder="Enter the ACT Science question..."
                   />
 
+                  <div className="mb-4 flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {question.imageUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => removeQuestionImage(blockIndex, questionIndex)}
+                          className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:border-red-400 hover:text-red-700"
+                          aria-label={`Remove image from question ${questionNumber} stem`}
+                        >
+                          <X size={14} /> Remove image
+                        </button>
+                      ) : null}
+                    </div>
+                    {question.imageUrl ? (
+                      <ActImagePreview
+                        src={question.imageUrl}
+                        alt={`Question ${questionNumber} stem preview`}
+                        className="max-h-40 max-w-full rounded-md border border-gray-200 object-contain"
+                      />
+                    ) : null}
+                    <label
+                      className="text-[11px] font-semibold uppercase tracking-wider text-gray-500"
+                      htmlFor={`act-question-image-url-${question.id}`}
+                    >
+                      Question image URL
+                    </label>
+                    <input
+                      id={`act-question-image-url-${question.id}`}
+                      type="url"
+                      value={question.imageUrl ?? ''}
+                      onChange={(event) =>
+                        updateQuestion(blockIndex, questionIndex, (current) => ({
+                          ...current,
+                          imageUrl: event.target.value,
+                        }))
+                      }
+                      aria-label={`Question ${questionNumber} image URL`}
+                      placeholder="https://drive.google.com/file/d/... or https://example.com/image.png"
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
                   <label className="mb-1 block text-xs font-semibold text-gray-700" htmlFor={`act-skill-${question.id}`}>
                     Skill category for question {questionNumber}
                   </label>
@@ -294,7 +394,7 @@ export function ActScienceQuestionBuilderPane({
                       }
 
                       return (
-                        <div key={option.id} className="flex items-center gap-2">
+                        <div key={option.id} className="flex items-start gap-2">
                           <input
                             type="radio"
                             name={`act-correct-${question.id}`}
@@ -311,22 +411,69 @@ export function ActScienceQuestionBuilderPane({
                             aria-label={`Correct answer ${label} for question ${questionNumber}`}
                           />
                           <span className="w-5 text-sm font-bold text-gray-700">{label}</span>
-                          <input
-                            type="text"
-                            value={option.text}
-                            onChange={(event) =>
-                              updateQuestion(blockIndex, questionIndex, (current) => ({
-                                ...current,
-                                options: current.options.map((candidate) =>
-                                  candidate.id === option.id
-                                    ? { ...candidate, text: event.target.value }
-                                    : candidate,
-                                ),
-                              }))
-                            }
-                            aria-label={`Option ${label} text for question ${questionNumber}`}
-                            className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-                          />
+                          <div className="flex min-w-0 flex-1 flex-col gap-2">
+                            <input
+                              type="text"
+                              value={option.text}
+                              onChange={(event) =>
+                                updateQuestion(blockIndex, questionIndex, (current) => ({
+                                  ...current,
+                                  options: current.options.map((candidate) =>
+                                    candidate.id === option.id
+                                      ? { ...candidate, text: event.target.value }
+                                      : candidate,
+                                  ),
+                                }))
+                              }
+                              aria-label={`Option ${label} text for question ${questionNumber}`}
+                              className="min-w-0 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                            />
+                            <div className="flex flex-wrap items-center gap-2">
+                              {option.imageUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    removeChoiceImage(blockIndex, questionIndex, option.id)
+                                  }
+                                  className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:border-red-400 hover:text-red-700"
+                                  aria-label={`Remove image from option ${label} question ${questionNumber}`}
+                                >
+                                  <X size={14} /> Remove image
+                                </button>
+                              ) : null}
+                            </div>
+                            {option.imageUrl ? (
+                              <ActImagePreview
+                                src={option.imageUrl}
+                                alt={`Option ${label} preview`}
+                                className="max-h-32 max-w-full rounded-md border border-gray-200 object-contain"
+                              />
+                            ) : null}
+                            <label
+                              className="text-[11px] font-semibold uppercase tracking-wider text-gray-500"
+                              htmlFor={`act-option-image-url-${question.id}-${option.id}`}
+                            >
+                              Option {label} image URL
+                            </label>
+                            <input
+                              id={`act-option-image-url-${question.id}-${option.id}`}
+                              type="url"
+                              value={option.imageUrl ?? ''}
+                              onChange={(event) =>
+                                updateQuestion(blockIndex, questionIndex, (current) => ({
+                                  ...current,
+                                  options: current.options.map((candidate) =>
+                                    candidate.id === option.id
+                                      ? { ...candidate, imageUrl: event.target.value }
+                                      : candidate,
+                                  ),
+                                }))
+                              }
+                              aria-label={`Option ${label} image URL for question ${questionNumber}`}
+                              placeholder="https://drive.google.com/file/d/... or https://example.com/image.png"
+                              className="min-w-0 w-full rounded-md border border-gray-300 px-3 py-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
                         </div>
                       );
                     })}

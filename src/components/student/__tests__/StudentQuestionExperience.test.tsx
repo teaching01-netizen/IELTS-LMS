@@ -1328,20 +1328,24 @@ describe('student question experience', () => {
 
     const workspace = screen.getByTestId('reading-split-workspace');
     expect(workspace).toHaveClass('flex-row');
+    // P2.4b: a cramped touch workspace (1024px) opens question-first at the
+    // module's canonical 45/55 instead of an even split.
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '50%',
-      '--question-pane-width': 'calc(50%)',
+      '--reading-pane-width': '45%',
+      '--question-pane-width': 'calc(55%)',
       '--split-divider-width': '8px',
     });
     const readingResizer = screen.getByTestId('reading-pane-resizer');
     expect(readingResizer).toBeInTheDocument();
     expect(readingResizer).toHaveAttribute('role', 'separator');
-    expect(readingResizer).toHaveAttribute('aria-valuenow', '50');
+    expect(readingResizer).toHaveAttribute('aria-valuenow', '45');
     expect(readingResizer).toHaveClass('w-8');
     expect(readingResizer).toHaveClass('absolute');
     expect(readingResizer.querySelector('.w-0\\.5')).toBeInTheDocument();
-    expect(readingResizer.querySelector('.h-16')).toBeInTheDocument();
-    expect(readingResizer.querySelector('.w-8')).toBeInTheDocument();
+    // P2.4: the persistent grabber replaces the hover-only handle, and the
+    // grabbable area extends beyond the rail.
+    expect(screen.getByTestId('reading-pane-resizer-grabber')).toBeInTheDocument();
+    expect(screen.getByTestId('reading-pane-resizer-hit-area')).toBeInTheDocument();
     expect(workspace.querySelector('.min-w-\\[48px\\]')).toBeInTheDocument();
     expect(screen.queryByTestId('reading-split-presets')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /set split to material wider/i })).not.toBeInTheDocument();
@@ -1353,15 +1357,16 @@ describe('student question experience', () => {
     expect(screen.queryByText(/select passage text to highlight it/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /highlight selected text/i })).not.toBeInTheDocument();
 
+    // P2.4: arrow nudges move real pixels (12px), not percentages.
     fireEvent.keyDown(readingResizer, { key: 'ArrowRight' });
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '52%',
-      '--question-pane-width': 'calc(48%)',
+      '--reading-pane-width': '46%',
+      '--question-pane-width': 'calc(54%)',
     });
     fireEvent.keyDown(readingResizer, { key: 'ArrowLeft' });
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '50%',
-      '--question-pane-width': 'calc(50%)',
+      '--reading-pane-width': '45%',
+      '--question-pane-width': 'calc(55%)',
     });
 
     // P2.4: 1730px workspace → usable 1720px after the 10px rail; readable
@@ -1382,8 +1387,8 @@ describe('student question experience', () => {
     fireEvent.pointerMove(screen.getByTestId('reading-pane-resizer'), { pointerId: 1, clientX: 1137 });
     fireEvent.pointerUp(screen.getByTestId('reading-pane-resizer'), { pointerId: 1 });
     expect(workspace).toHaveStyle({
-      '--reading-pane-width': '60%',
-      '--question-pane-width': 'calc(40%)',
+      '--reading-pane-width': '55%',
+      '--question-pane-width': 'calc(45%)',
     });
 
     fireEvent.pointerDown(screen.getByTestId('reading-pane-resizer'), { pointerId: 1, clientX: 1137 });
@@ -2195,9 +2200,11 @@ describe('student question experience', () => {
 
     const workspace = screen.getByTestId('listening-split-workspace');
     expect(workspace).toHaveClass('flex-row');
+    // P2.4b: Listening is question-first on a cramped touch workspace; the
+    // audio pane and transcript need far less width than the answers.
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '50%',
-      '--question-pane-width': 'calc(50%)',
+      '--listening-pane-width': '38%',
+      '--question-pane-width': 'calc(62%)',
       '--split-divider-width': '8px',
     });
     const scrollOwners = workspace.querySelectorAll<HTMLElement>('[data-student-zoom-scroll]');
@@ -2210,15 +2217,15 @@ describe('student question experience', () => {
     const listeningResizer = screen.getByTestId('listening-pane-resizer');
     expect(listeningResizer).toBeInTheDocument();
     expect(listeningResizer).toHaveAttribute('role', 'separator');
-    expect(listeningResizer).toHaveAttribute('aria-valuenow', '50');
+    expect(listeningResizer).toHaveAttribute('aria-valuenow', '38');
     expect(screen.queryByText(/staff instructions/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/use the invigilator audio system/i)).not.toBeInTheDocument();
     expect(screen.getByText(/answer the question using the words you hear/i)).toBeInTheDocument();
     expect(listeningResizer).toHaveClass('w-8');
     expect(listeningResizer).toHaveClass('absolute');
     expect(listeningResizer.querySelector('.w-0\\.5')).toBeInTheDocument();
-    expect(listeningResizer.querySelector('.h-16')).toBeInTheDocument();
-    expect(listeningResizer.querySelector('.w-8')).toBeInTheDocument();
+    expect(screen.getByTestId('listening-pane-resizer-grabber')).toBeInTheDocument();
+    expect(screen.getByTestId('listening-pane-resizer-hit-area')).toBeInTheDocument();
     expect(workspace.querySelector('.min-w-\\[48px\\]')).toBeInTheDocument();
     expect(screen.queryByTestId('listening-split-presets')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /set split to material wider/i })).not.toBeInTheDocument();
@@ -2232,13 +2239,13 @@ describe('student question experience', () => {
 
     fireEvent.keyDown(listeningResizer, { key: 'ArrowRight' });
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '52%',
-      '--question-pane-width': 'calc(48%)',
+      '--listening-pane-width': '39%',
+      '--question-pane-width': 'calc(61%)',
     });
     fireEvent.keyDown(listeningResizer, { key: 'ArrowLeft' });
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '50%',
-      '--question-pane-width': 'calc(50%)',
+      '--listening-pane-width': '38%',
+      '--question-pane-width': 'calc(62%)',
     });
 
     // P2.4: pointer-capture drag at a 1730px workspace (bounds 32%/68%).
@@ -2257,8 +2264,8 @@ describe('student question experience', () => {
     fireEvent.pointerMove(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 1137 });
     fireEvent.pointerUp(screen.getByTestId('listening-pane-resizer'), { pointerId: 1 });
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '60%',
-      '--question-pane-width': 'calc(40%)',
+      '--listening-pane-width': '48%',
+      '--question-pane-width': 'calc(52%)',
     });
 
     fireEvent.pointerDown(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 1137 });

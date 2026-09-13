@@ -57,6 +57,41 @@ describe('student answer commands', () => {
     });
   });
 
+  it('persists science set/replace/clear with module scope and stable mutation ids (AT-07)', async () => {
+    const seed = createSeed();
+    seed.currentModule = 'science';
+    const store = createStudentExamStore(seed);
+    const mutations: StudentAttemptMutation[] = [];
+    let nextId = 0;
+    const commands = createStudentAnswerCommands({
+      store,
+      module: 'science',
+      outbox: {
+        enqueue: (mutation) => mutations.push(mutation),
+        flush: async () => true,
+        pendingCount: () => mutations.length,
+      },
+      createMutationId: () => `science-mutation-${(nextId += 1)}`,
+      now: () => '2026-09-12T00:00:00.000Z',
+    });
+
+    // Set then replace then clear: canonical value converges, module stays science.
+    await commands.setObjectiveAnswer('sci-q1', 'opt-a', { interactionType: 'discrete' });
+    expect(store.getState().attempt.answers['sci-q1']).toBe('opt-a');
+    await commands.setObjectiveAnswer('sci-q1', 'opt-b', { interactionType: 'discrete' });
+    expect(store.getState().attempt.answers['sci-q1']).toBe('opt-b');
+    await commands.setObjectiveAnswer('sci-q1', '', { interactionType: 'discrete' });
+    expect(store.getState().attempt.answers['sci-q1']).toBe('');
+    expect(mutations).toHaveLength(3);
+    for (const [index, mutation] of mutations.entries()) {
+      expect(mutation.id).toBe(`science-mutation-${index + 1}`);
+      expect(mutation.payload).toMatchObject({ questionId: 'sci-q1', module: 'science' });
+    }
+    // Stable ids: no two mutations share an id (idempotent retry key).
+    const ids = new Set(mutations.map((mutation) => mutation.id));
+    expect(ids.size).toBe(3);
+  });
+
   it('updates writing answers and flags through the same scoped command surface', async () => {
     const store = createStudentExamStore(createSeed());
     const commands = createStudentAnswerCommands({ store, module: 'reading' });

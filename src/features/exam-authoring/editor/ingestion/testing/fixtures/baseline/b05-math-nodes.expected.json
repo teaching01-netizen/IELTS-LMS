@@ -1,0 +1,36 @@
+{
+  "probe": "B5a",
+  "inputKind": "text/html TipTap math-node markup (closest thing to an equation paste that survives today)",
+  "targetField": "prompt",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML (math extensions parse only their own data-type markup)",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "inlineMath",
+            "attrs": {
+              "latex": "x^2"
+            }
+          },
+          {
+            "type": "text",
+            "text": " and"
+          }
+        ]
+      },
+      {
+        "type": "blockMath",
+        "attrs": {
+          "latex": "\\frac{a}{b}"
+        }
+      }
+    ]
+  },
+  "validatorOutcome": "valid (math latex counts as content via richNodeHasContent/hasStructuredContent)"
+}

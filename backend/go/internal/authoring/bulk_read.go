@@ -316,9 +316,38 @@ func moduleToolPolicy(m bulkModuleRow) json.RawMessage {
 //     loadRouting; a section with no row -> nil (serialized as null).
 //   - tool_policy: NULL/blank -> {} (loadModules' default), else the raw column
 //     text verbatim.
-//   - policy_config: minimumCorrectForHigher / operationalQuestionCount read as
-//     float64 and truncated to int, exactly as loadRouting does; an
-//     unparseable config leaves both at their zero value.
+//   - policy_config: minimumCorrectForHigher read as float64 and truncated
+//     to int, exactly as loadRouting does; an unparseable config leaves it
+//     at its zero value.
+//   - operationalQuestionCount is DERIVED, never read from policy_config:
+//     writers persist threshold-only JSON (sat_initialization.go,
+//     UpdateDeliverySettings) and the key is absent on every real row, so
+//     reading it projected 0 and the release page clamped to 1 (stuck-at-1).
+//     operational = base module target_question_count - authored pretest
+//     placements in the base module, floored at 1 — the same derivation the
+//     UpdateDeliverySettings upper-bound check and readiness gate use.
+//
+// derivedOperationalCount is the candidate-facing operational question count
+// for one section: base module target minus pretest, floored at 1. The SAT
+// blueprint (questionCount - pretestCount) wins when the base module is a
+// known blueprint module, so a partially-authored draft still projects the
+// stable provider contract (RW 25, Math 20) — exactly the bound the
+// UpdateDeliverySettings upper-bound check and the readiness gate enforce.
+// Otherwise it falls back to target minus authored pretest placements.
+// authoredPretest is the live pretest placement count in the base module.
+func derivedOperationalCount(sectionKey, baseModuleKey string, targetCount, authoredPretest int) int {
+	if spec, ok := satBlueprintModule(sectionKey, baseModuleKey); ok {
+		if operational := spec.questionCount - spec.pretestCount; operational >= 1 {
+			return operational
+		}
+		return 1
+	}
+	if operational := targetCount - authoredPretest; operational >= 1 {
+		return operational
+	}
+	return 1
+}
+
 func assembleShellTree(identity shellIdentity, sections []bulkSectionRow, modules []bulkModuleRow, routing []bulkRoutingRow, questions []bulkQuestionRow, examID string) Shell {
 	questionsByModule := make(map[string][]QuestionSummary, len(modules))
 	for _, row := range questions {
@@ -346,11 +375,20 @@ func assembleShellTree(identity shellIdentity, sections []bulkSectionRow, module
 		})
 	}
 
-	routingBySection := make(map[string]*RoutingPolicy, len(routing))
+	// Routing needs the grouped modules + questions (modulesBySection and
+	// questionsByModule are built first) because OperationalCount is derived
+	// from the base module, not parsed from policy_config.
+	type routingSeed struct {
+		rp        *RoutingPolicy
+		sectionID string
+	}
+	seeds := make([]routingSeed, 0, len(routing))
+	seenRouting := make(map[string]bool, len(routing))
 	for _, r := range routing {
-		if _, seen := routingBySection[r.sectionID]; seen {
+		if seenRouting[r.sectionID] {
 			continue // first row wins (see doc comment)
 		}
+		seenRouting[r.sectionID] = true
 		rp := &RoutingPolicy{
 			ID:             r.id,
 			BaseModuleID:   r.baseModuleID,
@@ -365,12 +403,39 @@ func assembleShellTree(identity shellIdentity, sections []bulkSectionRow, module
 				if v, ok := parsed["minimumCorrectForHigher"].(float64); ok {
 					rp.MinimumCorrectForHigher = int(v)
 				}
-				if v, ok := parsed["operationalQuestionCount"].(float64); ok {
-					rp.OperationalCount = int(v)
-				}
+				// NOTE: operationalQuestionCount is intentionally NOT parsed:
+				// real rows never carry the key, and a stale stored value
+				// would disagree with the live module/question shape. It is
+				// derived below from the base module.
 			}
 		}
-		routingBySection[r.sectionID] = rp
+		seeds = append(seeds, routingSeed{rp: rp, sectionID: r.sectionID})
+	}
+
+	routingBySection := make(map[string]*RoutingPolicy, len(seeds))
+	for _, s := range seeds {
+		mods := modulesBySection[s.sectionID]
+		var sectionKey, baseKey string
+		target, pretest := 0, 0
+		for _, section := range sections {
+			if section.id == s.sectionID {
+				sectionKey = section.sectionKey
+				break
+			}
+		}
+		for _, m := range mods {
+			if m.ID == s.rp.BaseModuleID {
+				baseKey, target = m.ModuleKey, m.TargetQuestionCount
+				for _, q := range questionsByModule[m.ID] {
+					if q.IsPretest {
+						pretest++
+					}
+				}
+				break
+			}
+		}
+		s.rp.OperationalCount = derivedOperationalCount(sectionKey, baseKey, target, pretest)
+		routingBySection[s.sectionID] = s.rp
 	}
 
 	out := make([]Section, 0, len(sections))

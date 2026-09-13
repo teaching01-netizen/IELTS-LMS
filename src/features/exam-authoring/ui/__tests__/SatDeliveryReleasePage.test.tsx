@@ -313,6 +313,44 @@ describe("SatDeliveryReleasePage", () => {
     expect(screen.getByText(/Publish checks are stale/)).toBeInTheDocument();
   });
 
+  it("edits the threshold against the blueprint on threshold-only rows (stuck-at-1 regression)", async () => {
+    // Real shells arrive with operationalQuestionCount: 0 (threshold-only
+    // policy_config). The Higher-route field must still accept the RW
+    // contract range instead of clamping every keystroke back to 1.
+    render(
+      <SatDeliveryReleasePage
+        {...pageProps({
+          shell: {
+            ...shell,
+            sections: [
+              {
+                ...shell.sections[0]!,
+                routingPolicy: { ...shell.sections[0]!.routingPolicy!, operationalQuestionCount: 0 },
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/25 operational questions/)).toBeInTheDocument();
+    const threshold = screen.getByLabelText(/Higher route at/);
+    fireEvent.change(threshold, { target: { value: "13" } });
+    expect(threshold).toHaveValue(13);
+    // Range summary is split across elements (0–12 → Lower · 13–25 → Higher).
+    expect(screen.getByText("0–12")).toBeInTheDocument();
+    expect(screen.getByText("13–25")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save section" }));
+    await waitFor(() =>
+      expect(updateMutation.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: expect.objectContaining({ minimumCorrectForHigher: 13 }),
+        }),
+      ),
+    );
+  });
+
   it("keeps release checks visible in read-only mode once published", () => {
     render(
       <SatDeliveryReleasePage

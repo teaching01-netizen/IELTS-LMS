@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import {
   AlertCircle,
   Check,
@@ -64,6 +64,11 @@ export interface QuestionQueueRailProps {
   ) => Promise<void>;
   /** Renders inside the compact viewport navigation sheet. */
   embedded?: boolean;
+  /**
+   * Phase 05: per-row collaboration radar. The workspace supplies the node so
+   * the rail stays presence-agnostic (props in, nothing more).
+   */
+  presenceSlot?: ((examQuestionId: string) => ReactNode) | undefined;
 }
 
 /**
@@ -270,6 +275,7 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
                     onSelect={props.onSelectQuestion}
                     onToggleSelection={props.onToggleSelection}
                     onReorder={props.onReorder}
+                    {...(props.presenceSlot ? { presenceSlot: props.presenceSlot(row.question.examQuestionId) } : {})}
                   />
                 </li>
               ),
@@ -287,10 +293,12 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
   );
 }
 
-function QueueRow({question, position, selected, checked, disabled, selectionMode, moduleQuestions, onSelect, onToggleSelection, onReorder, onDuplicate, onDelete}: {
+function QueueRow({question, position, selected, checked, disabled, selectionMode, moduleQuestions, onSelect, onToggleSelection, onReorder, onDuplicate, onDelete, presenceSlot}: {
  question: AssessmentQuestionSummary; position:number; selected:boolean; checked:boolean; disabled:boolean; selectionMode:boolean;
  moduleQuestions:AssessmentQuestionSummary[]; onSelect:(id:string)=>void; onToggleSelection:(id:string,range:boolean)=>void;
  onReorder:(ids:string[],expected:string[])=>Promise<void>; onDuplicate?:((id:string)=>void)|undefined; onDelete?:((id:string)=>void)|undefined;
+ /** Phase 05: the rail is the collaboration radar — a tiny per-row avatar. */
+ presenceSlot?:ReactNode|undefined;
 }) {
  const index=moduleQuestions.findIndex(q=>q.examQuestionId===question.examQuestionId);
  const [pending,setPending]=useState(false);
@@ -327,6 +335,7 @@ function QueueRow({question, position, selected, checked, disabled, selectionMod
      <span className="sr-only">{statusLabel}</span>
    </span>
   </button>
+  {presenceSlot?<span className="sat-spine__row-presence shrink-0">{presenceSlot}</span>:null}
   <div className="sat-spine__row-actions"><QuestionRowMenu position={position} disabled={disabled||pending} canMoveUp={index>0} canMoveDown={index<moduleQuestions.length-1} onMove={move} onDuplicate={onDuplicate?()=>onDuplicate(question.examQuestionId):undefined} onDelete={onDelete?()=>onDelete(question.examQuestionId):undefined}/></div>
  </div>;
 }

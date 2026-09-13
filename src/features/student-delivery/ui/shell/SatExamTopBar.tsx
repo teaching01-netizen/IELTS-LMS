@@ -171,6 +171,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
           {props.calculatorAvailable ? (
             <TopToolButton
               label="Calculator"
+              dataSatToolTrigger="calculator"
               pressed={props.calculatorOpen}
               disabled={props.blocked}
               onClick={props.onToggleCalculator}
@@ -180,6 +181,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
           {props.referenceAvailable ? (
             <TopToolButton
               label="Reference"
+              dataSatToolTrigger="reference"
               pressed={props.referenceOpen}
               disabled={props.blocked}
               onClick={props.onToggleReference}
@@ -213,6 +215,7 @@ function TopToolButton({
   id,
   buttonRef,
   dataSatFocus,
+  dataSatToolTrigger,
   label,
   icon,
   pressed,
@@ -223,6 +226,7 @@ function TopToolButton({
   id?: string;
   buttonRef?: Ref<HTMLButtonElement>;
   dataSatFocus?: string | undefined;
+  dataSatToolTrigger?: "calculator" | "reference" | undefined;
   label: string;
   icon: React.ReactNode;
   pressed: boolean;
@@ -235,6 +239,7 @@ function TopToolButton({
       ref={buttonRef}
       id={id}
       data-sat-focus={dataSatFocus}
+      data-sat-tool-trigger={dataSatToolTrigger}
       type="button"
       onClick={onClick}
       disabled={disabled}

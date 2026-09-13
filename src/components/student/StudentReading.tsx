@@ -78,7 +78,7 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
 }: ReadingPassagePaneProps) {
   return (
     <div
-      className={`student-reading-passage-pane h-full overflow-y-auto font-sans text-gray-900 ${
+      className={`student-reading-passage-pane student-scroll-breathe h-full overflow-y-auto font-sans text-gray-900 ${
         materialCompact ? "p-2 pr-2 md:p-3 md:pr-3" : "p-4 pr-4 md:p-6 md:pr-6"
       } ${
         isTabletMode
@@ -197,6 +197,9 @@ export function StudentReading({
   } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: "--reading-pane-width",
+    // Portrait/narrow tablets open question-first, but passage reading is the
+    // work in IELTS Reading, so the material keeps a generous share (45/55).
+    crampedDefaultLeftWidth: 45,
     dividerMode: isTabletMode ? "overlay" : "consumes-space",
     persistenceKey: persistenceKeyBase ? `${persistenceKeyBase}:reading:split` : undefined,
   });

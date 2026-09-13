@@ -1,0 +1,7 @@
+{
+  "section": "science",
+  "providerKey": "act",
+  "score": { "totalScore": 0, "maxScore": 0, "percentage": 0 },
+  "content": { "questions": [] },
+  "answers": { "q-legacy-1": "A" }
+}

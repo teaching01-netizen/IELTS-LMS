@@ -1,0 +1,25 @@
+{
+  "probe": "B12",
+  "inputKind": "paste over a range selection",
+  "targetField": "prompt",
+  "harness": "jsdom + real composer extensions; setTextSelection({from:7,to:12}) on 'Hello world' then pasteText('there')",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Hello there"
+          }
+        ]
+      }
+    ]
+  },
+  "observed": "REPLACEMENT (not insert): selected range deleted and replaced (ProseMirror replaceSelection); collapsed caret inserts at caret. No composer-level selection policy exists.",
+  "validatorOutcome": "valid"
+}

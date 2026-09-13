@@ -260,6 +260,26 @@ describe("AdminResults", () => {
     expect(screen.getByText("Unanswered")).toBeInTheDocument();
   });
 
+  it("renders safe ACT error states without raw payloads or fabricated scores (AT-10)", () => {
+    mocks.useActScienceDetailQuery.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('{"totalScore":40,"secret":"key-material"}'),
+    });
+    render(<AdminResults />);
+    fireEvent.click(screen.getAllByRole("button", { name: "View Report" })[0]);
+    // Summary stays authoritative from the dashboard row (32/40), never a zero.
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("32/40");
+    fireEvent.click(screen.getByRole("tab", { name: "Modules" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/summary above is still authoritative/i);
+    fireEvent.click(screen.getByRole("tab", { name: "Questions" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/summary above is still authoritative/i);
+    // No raw payload leaks into the dialog, and no fabricated zero appears.
+    expect(dialog.textContent).not.toContain("key-material");
+    expect(dialog.textContent).not.toContain("0/40");
+  });
+
   it("keeps the report dialog accessible and closable", () => {
     render(<AdminResults />);
     fireEvent.click(screen.getAllByRole("button", { name: "View Report" })[1]);

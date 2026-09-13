@@ -1,0 +1,259 @@
+{
+  "nodes": [
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Quadratic review",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        }
+      ],
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Solve ",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        },
+        {
+          "kind": "text",
+          "text": "x^2 = 4",
+          "marks": [
+            "bold"
+          ],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        },
+        {
+          "kind": "text",
+          "text": " and ",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        },
+        {
+          "kind": "text",
+          "text": "check",
+          "marks": [
+            "italic"
+          ],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        },
+        {
+          "kind": "text",
+          "text": " each root.",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        }
+      ],
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    },
+    {
+      "kind": "bulletList",
+      "items": [
+        [
+          {
+            "kind": "paragraph",
+            "children": [
+              {
+                "kind": "text",
+                "text": "First step",
+                "marks": [],
+                "meta": {
+                  "source": "html",
+                  "confidence": 2,
+                  "transformations": []
+                }
+              }
+            ],
+            "meta": {
+              "source": "html",
+              "confidence": 2,
+              "transformations": []
+            }
+          }
+        ],
+        [
+          {
+            "kind": "paragraph",
+            "children": [
+              {
+                "kind": "text",
+                "text": "Second step",
+                "marks": [],
+                "meta": {
+                  "source": "html",
+                  "confidence": 2,
+                  "transformations": []
+                }
+              }
+            ],
+            "meta": {
+              "source": "html",
+              "confidence": 2,
+              "transformations": []
+            }
+          }
+        ]
+      ],
+      "ordered": false,
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    },
+    {
+      "kind": "table",
+      "rows": [
+        [
+          {
+            "children": [
+              {
+                "kind": "text",
+                "text": "x",
+                "marks": [],
+                "meta": {
+                  "source": "html",
+                  "confidence": 2,
+                  "transformations": []
+                }
+              }
+            ]
+          },
+          {
+            "children": [
+              {
+                "kind": "text",
+                "text": "y",
+                "marks": [],
+                "meta": {
+                  "source": "html",
+                  "confidence": 2,
+                  "transformations": []
+                }
+              }
+            ]
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "kind": "text",
+                "text": "1",
+                "marks": [],
+                "meta": {
+                  "source": "html",
+                  "confidence": 2,
+                  "transformations": []
+                }
+              }
+            ]
+          },
+          {
+            "children": [
+              {
+                "kind": "text",
+                "text": "2",
+                "marks": [],
+                "meta": {
+                  "source": "html",
+                  "confidence": 2,
+                  "transformations": []
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "headerRow": true,
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Inline ",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        },
+        {
+          "kind": "text",
+          "text": "x",
+          "marks": [
+            "code"
+          ],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        },
+        {
+          "kind": "text",
+          "text": " follows.",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        }
+      ],
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    }
+  ],
+  "warnings": [
+    "import.style.stripped"
+  ]
+}

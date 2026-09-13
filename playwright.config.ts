@@ -102,7 +102,7 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: "npm run dev",
+      command: "bun run dev",
       env: {
         ...process.env,
         ...backendFeatureEnv,

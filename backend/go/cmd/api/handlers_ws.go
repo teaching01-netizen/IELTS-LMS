@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"example.com/ielts-proctoring/internal/auth"
+	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
@@ -109,6 +110,12 @@ func startLiveBusForwarder(app *App) {
 					if ctx.Err() != nil {
 						return
 					}
+					// Phase 06: a poll error is a delivery failure, not a silent
+					// retry. The cursor deliberately does NOT advance past unpolled
+					// rows, so the next tick re-reads them and the gap self-heals;
+					// the two series exist so "the forwarder is blind" is visible.
+					authoringrealtime.EmitDeliveryFailure(authoringrealtime.DeliveryStageForwarder)
+					authoringrealtime.EmitDropped(authoringrealtime.DropForwardPollErr)
 					continue
 				}
 				for _, event := range events {
@@ -116,6 +123,12 @@ func startLiveBusForwarder(app *App) {
 						cursor = event.SequenceID
 					}
 					app.LiveHub.Publish(event)
+					// Age at fan-out: the event is already stale by the time it
+					// reaches a socket, and that staleness is what the freshness
+					// SLO bounds. Sampled per delivered event into fixed buckets.
+					if !event.CreatedAt.IsZero() {
+						authoringrealtime.ObserveDeliveryLatency(float64(time.Since(event.CreatedAt).Milliseconds()))
+					}
 				}
 			}
 		}()

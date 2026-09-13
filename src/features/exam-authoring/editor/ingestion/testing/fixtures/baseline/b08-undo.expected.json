@@ -1,0 +1,53 @@
+{
+  "probe": "B8",
+  "inputKind": "multi-node paste then repeated undo",
+  "targetField": "any",
+  "harness": "jsdom + real composer extensions; pasteHTML then editor.commands.undo() loop against empty-doc comparison",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "one"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "two"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "id": "content-<stable>",
+          "level": 2
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "three"
+          }
+        ]
+      }
+    ]
+  },
+  "undoCost": {
+    "pasteStepsToRevert": 1,
+    "note": "a single pasteHTML dispatch reverts in ONE undo step (ProseMirror replaceSelection is one transaction; RichContentIdentity appendTransaction id-backfill is docChanged-triggered but folds into the same undo history entry in observed runs). Phase-07 single-undo requirement is ALREADY met for single paste events; multi-field whole-question fill (phase-08) must preserve the property at the revision level."
+  },
+  "cursorNote": "cursor lands after inserted content (replaceSelection semantics); focus handling is ProseMirror default - no composer override"
+}

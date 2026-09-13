@@ -1,0 +1,24 @@
+{
+  "probe": "B2",
+  "inputKind": "text/plain clipboard",
+  "targetField": "prompt",
+  "harness": "jsdom + real composer extensions, EditorView.pasteText (replaces selection, single dispatch with meta paste:true)",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Solve for x: 2x + 3 = 11"
+          }
+        ]
+      }
+    ]
+  },
+  "validatorOutcome": "valid (same as B1 - plain text carries no marks, no capability interaction)"
+}

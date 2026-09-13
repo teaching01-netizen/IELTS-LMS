@@ -1,0 +1,24 @@
+{
+  "probe": "B1",
+  "inputKind": "typed-text",
+  "targetField": "prompt",
+  "harness": "jsdom + real composer extensions, EditorView.pasteText (ProseMirror doPaste path; ClipboardEvent stub). Typed text and pasted plain text share the same insertion path - no paste-specific transform exists (core Paste extension only re-emits; RichQuestionComposer.tsx has no handlePaste/handleDrop).",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Solve for x typed"
+          }
+        ]
+      }
+    ]
+  },
+  "validatorOutcome": "valid (prompt has content; full question validity additionally requires section/domain/skill + 4 choices + key)"
+}

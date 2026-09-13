@@ -949,6 +949,9 @@ func resultsSATListHandler(app *App) http.HandlerFunc {
 }
 
 // resultsACTScienceHandler lists sealed ACT science reports, optional ?scheduleId=.
+// Errors keep the stable envelope via httpx.WriteError: unknown (non-apperrors)
+// failures render 500 INTERNAL without leaking internals, and DB outages
+// surface through the service as retryable errors (Phase 02 AT02-11).
 func resultsACTScienceHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader, auth.RoleProctor) == nil {

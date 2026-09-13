@@ -1,0 +1,10 @@
+{
+  "id": "img-growth-chart",
+  "alt": "Bar chart of plant growth by light condition",
+  "annotations": [],
+  "crop": { "x": 0, "y": 0, "width": 800, "height": 600 },
+  "height": 600,
+  "src": "assets/act/stim-1/growth-chart.png",
+  "width": 800,
+  "zoom": 1
+}

@@ -10,10 +10,10 @@
 
 The Playwright runner is currently **not executable** in this lane, so there is no
 before/after test-count delta from a live run. Both the pre- and post-quarantine state
-were established by the same method: `npx playwright test --list` (inventory only) plus
+were established by the same method: `bunx playwright test --list` (inventory only) plus
 static selector-vs-UI triage (§4). A full run is blocked before any spec executes:
 
-- `npx playwright test e2e/smoke.spec.ts --project=chromium --reporter=line` never
+- `bunx playwright test e2e/smoke.spec.ts --project=chromium --reporter=line` never
   reaches a spec — the Playwright `webServer` gate fails while compiling
   `backend/go/cmd/api` for the local Go-backed harness:
   `cmd/api/main.go: cannot use r (*http.Request) as chi.Router in argument to
@@ -108,9 +108,9 @@ exceeds the <5 min trivial-fix bar and belongs in the §4 backlog.
 
 Verification (scoped, no backend/CI edits):
 
-- `npx playwright test --list --project=chromium` resolves all specs incl. quarantine labels (37 quarantined tests inventoried).
-- `npx prettier --check` on the three touched specs: clean.
-- `npx eslint` on the three touched specs: 0 errors (4 pre-existing warnings in telemetry: 2 unused-`page` args on now-skipped tests, 2 `any` uses).
+- `bunx playwright test --list --project=chromium` resolves all specs incl. quarantine labels (37 quarantined tests inventoried).
+- `bunx prettier --check` on the three touched specs: clean.
+- `bunx eslint` on the three touched specs: 0 errors (4 pre-existing warnings in telemetry: 2 unused-`page` args on now-skipped tests, 2 `any` uses).
 - Full `tsc --noEmit` is red at HEAD for unrelated reasons (`StudentListening.tsx` syntax errors + a dirty-tree stash conflict); no new type errors were introduced in `e2e/` (scoped grep of `tsc` output over `e2e/` is empty).
 - `git status --short -- e2e/` shows only the four files above (specs + this status file).
 
@@ -123,7 +123,7 @@ do not pop it implicitly while rolling back.)
 
 ## 6. CI report — e2e as a hard gate (READ-ONLY, for Lane H; NOT applied)
 
-`e2e-tests` is currently a hard gate: it runs `npx playwright test` with no
+`e2e-tests` is currently a hard gate: it runs `bunx playwright test` with no
 `continue-on-error`, and no other job declares `needs: [e2e-tests]` only because
 nothing needs it — the suite itself fails the workflow whenever it is red. While the
 suite is red (runner blocked on the backend compile break, §1), Lane H may, at their
@@ -149,7 +149,7 @@ railway-deploy:
   # if: always() && (needs.quality-gates.result == 'success' && needs.go-backend.result == 'success')
 ```
 
-Notes: `npx playwright test` runs the FULL default project set (7 projects × every
+Notes: `bunx playwright test` runs the FULL default project set (7 projects × every
 non-quarantined test); quarantined tests report as skipped, not failed, so they do not
 need a `--grep-invert` carve-out. `retries: 2` on CI stays as-is. Revert whichever
 option Lane H picks as soon as a live run shows the §2 suite green with the §3 skips.

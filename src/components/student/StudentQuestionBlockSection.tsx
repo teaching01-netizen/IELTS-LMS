@@ -1,5 +1,4 @@
 import React from 'react';
-import { Flag } from 'lucide-react';
 import { getBlockQuestionCount } from '../../utils/examUtils';
 import {
   getQuestionStartNumber,
@@ -9,6 +8,7 @@ import type { QuestionAnswer, QuestionBlock } from '../../types';
 import type { StudentAnswerMutationMeta } from '../../types/studentAttempt';
 import type { StudentHighlightColor } from './highlightPalette';
 import { QuestionRenderer } from './QuestionRenderer';
+import { StudentFlagButton } from './StudentFlagButton';
 import { SubAnswerTreeQuestionList } from './SubAnswerTreeQuestionList';
 import { formatQuestionRange } from './questionRangeLabel';
 import { resolveSharedStudentAnswerMeta } from './resolveSharedStudentAnswerMeta';
@@ -26,8 +26,12 @@ export interface StudentQuestionBlockSectionProps {
     meta?: StudentAnswerMutationMeta,
   ) => void;
   onToggleFlag?: ((id: string) => void) | undefined;
+  /** P4: an answered/focused question becomes the one active question. */
+  onActivate?: ((id: string) => void) | undefined;
   tabletMode: boolean;
   answerCompact: boolean;
+  /** P4: measured width says the pane is too narrow for a trailing flag column. */
+  stackFlag?: boolean | undefined;
   highlightEnabled: boolean;
   highlightColor?: StudentHighlightColor | undefined;
   registerLiveAnswer?: ((answerKey: string, value: QuestionAnswer) => void) | undefined;
@@ -39,50 +43,6 @@ export interface StudentQuestionBlockSectionProps {
   onToggleOptionElimination?: ((questionId: string, optionId: string) => void) | undefined;
   /** P3.4: render selects as the phone choice sheet (compact/phone). */
   selectSheetPresentation?: boolean | undefined;
-}
-
-function FlagButton({
-  flagged,
-  tabletMode,
-  onClick,
-}: {
-  flagged: boolean;
-  tabletMode: boolean;
-  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
-}) {
-  if (tabletMode) {
-    return (
-      <div className="flex justify-end">
-        <button
-          onClick={onClick}
-          aria-pressed={flagged}
-          className={`inline-flex h-10 w-10 items-center justify-center rounded-full border shadow-sm ${
-            flagged
-              ? 'bg-amber-700 text-white border-amber-700'
-              : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-gray-700'
-          }`}
-          title={flagged ? 'Unflag question' : 'Flag question'}
-        >
-          <Flag size={14} className={flagged ? 'fill-current' : ''} />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={flagged}
-      className={`absolute top-0 right-0 w-10 h-10 rounded-full flex items-center justify-center z-10 shadow-sm ${
-        flagged
-          ? 'bg-amber-700 text-white'
-          : 'bg-white border border-gray-300 text-gray-400 hover:bg-gray-50 hover:text-gray-600'
-      }`}
-      title={flagged ? 'Unflag question' : 'Flag question'}
-    >
-      <Flag size={14} className={flagged ? 'fill-current' : ''} />
-    </button>
-  );
 }
 
 function getRelevantAnswerKeys(
@@ -109,10 +69,12 @@ function areBlockPropsEqual(
     previous.allQuestions !== next.allQuestions ||
     previous.activeQuestionId !== next.activeQuestionId ||
     previous.answerCompact !== next.answerCompact ||
+    previous.stackFlag !== next.stackFlag ||
     previous.tabletMode !== next.tabletMode ||
     previous.highlightEnabled !== next.highlightEnabled ||
     previous.highlightColor !== next.highlightColor ||
     previous.onAnswerChange !== next.onAnswerChange ||
+    previous.onActivate !== next.onActivate ||
     previous.onToggleFlag !== next.onToggleFlag ||
     previous.registerLiveAnswer !== next.registerLiveAnswer ||
     previous.getBlockStartQuestionNumber !== next.getBlockStartQuestionNumber ||
@@ -151,8 +113,10 @@ export const StudentQuestionBlockSection = React.memo(
     flags,
     onAnswerChange,
     onToggleFlag,
+    onActivate,
     tabletMode,
     answerCompact,
+    stackFlag = false,
     highlightEnabled,
     highlightColor,
     registerLiveAnswer,
@@ -184,6 +148,26 @@ export const StudentQuestionBlockSection = React.memo(
       ? 'space-y-3 mb-3 md:mb-4'
       : 'space-y-4 md:space-y-6 mb-4 md:mb-6';
     const deferredClassName = containsCurrentQuestion ? '' : 'student-question-block-deferred';
+    // P4: the flag always owns a real layout slot. Above the measured
+    // threshold it is a trailing action column; below it, the flag becomes a
+    // metadata row above the prompt so the text keeps the full width.
+    const rowClassName = (hasFlag: boolean) =>
+      [
+        'student-question-row',
+        hasFlag ? 'student-question-row--flagged' : '',
+        hasFlag && stackFlag ? 'student-question-row--stacked' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+    // P4: interacting with a question (focus or click, e.g. on an answer or a
+    // blank) makes it THE active question, so the single global navigator can
+    // never point somewhere the student is not working.
+    const activateRow = (questionId: string | undefined) => {
+      if (!questionId || questionId === activeQuestionId) {
+        return;
+      }
+      onActivate?.(questionId);
+    };
 
     return (
       <div className={`${deferredClassName} ${blockSpacingClassName}`.trim()}>
@@ -207,6 +191,7 @@ export const StudentQuestionBlockSection = React.memo(
               highlightEnabled={highlightEnabled}
               highlightColor={highlightColor}
               onAnswerChange={onAnswerChange}
+              onActivate={onActivate}
             />
           ) : ('questions' in block) ? (
             block.questions.map((question, questionIndex) => {
@@ -219,24 +204,17 @@ export const StudentQuestionBlockSection = React.memo(
               const inlineFlags = block.type === 'SENTENCE_COMPLETION' || block.type === 'NOTE_COMPLETION';
               const flagId = firstEntry?.id;
               const answerKey = firstEntry?.answerKey ?? question.id;
+              const showFlag = Boolean(onToggleFlag && flagId && !inlineFlags);
 
               return (
                 <div
                   key={question.id}
                   id={!inlineFlags && flagId ? `question-${flagId}` : undefined}
-                  className={`relative ${tabletMode ? 'space-y-2' : ''}`}
+                  className={rowClassName(showFlag)}
+                  onFocusCapture={() => activateRow(flagId ?? firstEntry?.id)}
                   tabIndex={-1}
                 >
-                  {onToggleFlag && flagId && !inlineFlags ? (
-                    <FlagButton
-                      flagged={Boolean(flags[flagId])}
-                      tabletMode={tabletMode}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onToggleFlag(flagId);
-                      }}
-                    />
-                  ) : null}
+                  <div className="student-question-row-body">
                   <QuestionRenderer
                     question={question}
                     block={block}
@@ -278,21 +256,29 @@ export const StudentQuestionBlockSection = React.memo(
                         : undefined
                     }
                   />
+                  </div>
+                  {showFlag && flagId ? (
+                    <div className="student-question-row-action">
+                      <StudentFlagButton
+                        flagged={Boolean(flags[flagId])}
+                        onToggle={(event) => {
+                          event.stopPropagation();
+                          onToggleFlag?.(flagId);
+                        }}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               );
             })
           ) : (
-            <div key={block.id} className="relative" tabIndex={-1}>
-              {onToggleFlag && singleBlockQuestion ? (
-                <FlagButton
-                  flagged={Boolean(flags[singleBlockQuestion.id])}
-                  tabletMode={tabletMode}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onToggleFlag(singleBlockQuestion.id);
-                  }}
-                />
-              ) : null}
+            <div
+              key={block.id}
+              className={rowClassName(Boolean(onToggleFlag && singleBlockQuestion))}
+              onFocusCapture={() => activateRow(singleBlockQuestion?.id)}
+              tabIndex={-1}
+            >
+              <div className="student-question-row-body">
               <QuestionRenderer
                 question={null}
                 block={block}
@@ -327,6 +313,18 @@ export const StudentQuestionBlockSection = React.memo(
                     : undefined
                 }
               />
+              </div>
+              {onToggleFlag && singleBlockQuestion ? (
+                <div className="student-question-row-action">
+                  <StudentFlagButton
+                    flagged={Boolean(flags[singleBlockQuestion.id])}
+                    onToggle={(event) => {
+                      event.stopPropagation();
+                      onToggleFlag(singleBlockQuestion.id);
+                    }}
+                  />
+                </div>
+              ) : null}
             </div>
           )}
         </div>

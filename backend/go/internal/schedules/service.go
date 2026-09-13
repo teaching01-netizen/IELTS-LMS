@@ -666,6 +666,17 @@ func fallbackRuntimePlan(providerKey string, plannedMinutes int) []examruntime.P
 	if duration <= 0 {
 		duration = 1
 	}
+	// Phase 02: ACT fallback is a single Science section (default 40
+	// minutes per the Phase 01 contract). It must never fall back to the
+	// IELTS reading entry: a Science-less ACT plan silently drops the only
+	// scorable section. Callers always pass the effective provider, so
+	// legacy ACT rows (provider_key='ielts', exam_type='ACT') land here.
+	if strings.EqualFold(providerKey, examdomain.ProviderACT) {
+		if duration <= 1 {
+			duration = 40
+		}
+		return []examruntime.PlanEntry{{SectionKey: "science", Label: "Science", Order: 0, DurationMinutes: duration, GapAfterMinutes: 0}}
+	}
 	if strings.EqualFold(providerKey, examdomain.ProviderSAT) {
 		first := duration / 2
 		if first < 1 {

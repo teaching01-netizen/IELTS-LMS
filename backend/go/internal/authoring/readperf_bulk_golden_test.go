@@ -387,15 +387,20 @@ func TestGoldenPreviewBulkDelivery(t *testing.T) {
 	}
 }
 
-// TestGoldenShellBulkPolicyConfigParsingGolden pins that a policy_config with
-// only one numeric key still projects the documented shape.
+// TestGoldenShellBulkPolicyConfigParsingGolden pins the real production
+// shape: policy_config carries threshold only, and operationalQuestionCount
+// is DERIVED from the SAT blueprint for the section's base module
+// (reading-writing/rw-m1 -> 25), never 0.
 func TestGoldenShellBulkPolicyConfigParsingGolden(t *testing.T) {
 	_, runner, mock := readPerfBulkGoldenDB(t)
 	service := NewService(nil, runner)
 	mock.ExpectBegin()
 	readPerfBulkIdentityRows(mock)
 	readPerfSectionRows(mock)
-	readPerfBulkModuleRows(mock, [][]driver.Value{})
+	readPerfBulkModuleRows(mock, [][]driver.Value{
+		{"mod-rw-1", "sec-rw", "rw-m1", "Module 1", 0, 1920, 27, "base", nil, 0},
+		{"mod-rw-2", "sec-rw", "rw-m2-lower", "Module 2 - Lower", 1, 1920, 27, "lower_branch", nil, 0},
+	})
 	readPerfBulkRoutingRows(mock, [][]driver.Value{
 		{"sec-rw", "rp-sec-rw", "mod-rw-1", "mod-rw-2", "mod-rw-3", "practice_threshold", "{\"minimumCorrectForHigher\":13}", 2},
 	})
@@ -410,14 +415,14 @@ func TestGoldenShellBulkPolicyConfigParsingGolden(t *testing.T) {
 	if policy == nil {
 		t.Fatal("routing policy missing")
 	}
-	if policy.MinimumCorrectForHigher != 13 || policy.OperationalCount != 0 {
+	if policy.MinimumCorrectForHigher != 13 || policy.OperationalCount != 25 {
 		t.Fatalf("policy projection drifted: %+v", policy)
 	}
 	encoded, err := json.Marshal(policy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "{\"id\":\"rp-sec-rw\",\"baseModuleId\":\"mod-rw-1\",\"lowerModuleId\":\"mod-rw-2\",\"higherModuleId\":\"mod-rw-3\",\"policyKey\":\"practice_threshold\",\"minimumCorrectForHigher\":13,\"operationalQuestionCount\":0,\"revision\":2}"
+	want := "{\"id\":\"rp-sec-rw\",\"baseModuleId\":\"mod-rw-1\",\"lowerModuleId\":\"mod-rw-2\",\"higherModuleId\":\"mod-rw-3\",\"policyKey\":\"practice_threshold\",\"minimumCorrectForHigher\":13,\"operationalQuestionCount\":25,\"revision\":2}"
 	if string(encoded) != want {
 		t.Fatalf("policy JSON drifted.\n got: %s\nwant: %s", encoded, want)
 	}

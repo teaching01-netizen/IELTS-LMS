@@ -23,6 +23,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/act"
 	"example.com/ielts-proctoring/internal/assessscore"
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
@@ -245,14 +246,21 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
 	}
 	var scheduleID, examID, providerKey, versionID string
+	var examType string
 	if err := s.db.QueryRowContext(ctx,
-		"SELECT s.id, s.exam_id, e.provider_key, s.published_version_id FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?",
-		bearerScheduleID).Scan(&scheduleID, &examID, &providerKey, &versionID); err != nil {
+		"SELECT s.id, s.exam_id, e.provider_key, s.published_version_id, e.exam_type FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?",
+		bearerScheduleID).Scan(&scheduleID, &examID, &providerKey, &versionID, &examType); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
 		}
 		return nil, err
 	}
+	// Phase 02 (blocker 4): the stored provider_key is not authoritative for
+	// legacy ACT rows (provider_key='ielts', exam_type='ACT'). Resolve the
+	// effective provider centrally via exams.EffectiveProviderKey so legacy
+	// ACT attempts keep Science delivery instead of hitting the
+	// unsupported-provider gate.
+	providerKey = examdomain.EffectiveProviderKey(providerKey, examType)
 	if providerKey != "sat" && providerKey != "act" {
 		err := apperrors.New(apperrors.CodeValidation, "The assessment provider is not supported.")
 		err.Details = map[string]any{"code": "UNSUPPORTED_PROVIDER"}
@@ -1219,17 +1227,21 @@ func validateSaveResponseRequest(req SaveResponseRequest) error {
 }
 
 // saveScheduleBinding mirrors schedule_binding: schedule + exam + provider.
+// It resolves the effective provider centrally (exams.EffectiveProviderKey)
+// so legacy ACT rows (provider_key='ielts', exam_type='ACT') keep their
+// Science write path instead of hitting the SAT-only gate (Phase 02
+// blocker 4). The stored provider key is never authoritative on its own.
 func (s *Service) saveScheduleBinding(ctx context.Context, scheduleID string) (id, examID, providerKey string, err error) {
-	var versionID string
+	var versionID, examType string
 	if err = s.db.QueryRowContext(ctx,
-		"SELECT s.id, s.exam_id, e.provider_key, s.published_version_id FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?",
-		scheduleID).Scan(&id, &examID, &providerKey, &versionID); err != nil {
+		"SELECT s.id, s.exam_id, e.provider_key, s.published_version_id, e.exam_type FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?",
+		scheduleID).Scan(&id, &examID, &providerKey, &versionID, &examType); err != nil {
 		if err == sql.ErrNoRows {
 			return "", "", "", apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
 		}
 		return "", "", "", err
 	}
-	return id, examID, providerKey, nil
+	return id, examID, examdomain.EffectiveProviderKey(providerKey, examType), nil
 }
 
 // saveAttemptBinding mirrors ensure_attempt_binding: the attempt must belong

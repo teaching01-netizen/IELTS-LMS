@@ -182,3 +182,145 @@ groups:
           summary: "Server error rate elevated"
           description: "5xx responses elevated over the last 5 minutes. Break down http_requests_total by route/method to find the hot endpoint."
           runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+
+  # Phase 06: SAT authoring realtime (durable events, delivery, presence,
+  # divergence). Every series below is registered in
+  # backend/go/internal/platform/telemetry/telemetry.go, and
+  # cmd/api/alert_parity_test.go fails the build if a rule points at a series
+  # nothing emits.
+  #
+  # Cardinality rule for every rule here: labels are bounded sets only. Exam,
+  # draft, question, user, and connection ids never appear in a series, so no
+  # rule can be written against one.
+  - name: sat-authoring-realtime
+    rules:
+      # An in-tx append failure rolls the mutation back with it, so this is
+      # correctness-adjacent rather than a bus-health nicety: authors are
+      # getting failed saves. This is the PERSISTENCE series, deliberately
+      # separate from delivery failures below.
+      - alert: AuthoringEventAppendFailing
+        expr: increase(authoring_event_publish_failures_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: page
+          slo: authoring-save-availability
+        annotations:
+          summary: "Authoring realtime event append is failing"
+          description: "authoring_publish_failure_total{stage=\"append\"} moved, which means authoring mutations are rolling back. Correlate with authoring_operation_total{outcome=\"rejected\"}; flip AUTHORING_REALTIME_EVENTS off to stop writing event rows while HTTP editing stays functional."
+          runbook_url: "docs/runbooks/sat-authoring-realtime-rollout.md"
+
+      # A DETECTED invariant break. Note the framing: this pages on a violation
+      # that code actually OBSERVED, and its silence is NOT proof of
+      # correctness — a stale write is dangerous precisely because buggy code
+      # may not know it won. The guarantee comes from revision fencing,
+      # database constraints, and the concurrency/property suites.
+      - alert: AuthoringInvariantViolation
+        expr: increase(authoring_invariant_violations_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: page
+          slo: authoring-data-integrity
+        annotations:
+          summary: "Authoring correctness invariant violated"
+          description: "authoring_invariant_violations_total is nonzero, so a post-condition check observed an impossible state. Halt the realtime rollout (flip AUTHORING_REALTIME_DELIVERY and AUTHORING_REALTIME_EVENTS off) and treat as a data-integrity incident."
+          runbook_url: "docs/runbooks/sat-authoring-realtime-rollout.md"
+
+      # Conflicts are EXPECTED under collaboration, so this is a ticket, not a
+      # page: a spike means UX pressure (or a fencing regression to triage in
+      # logs via the revision_fenced lines).
+      - alert: AuthoringRevisionConflictSpike
+        expr: increase(authoring_revision_conflicts_total[10m]) > 25
+        for: 10m
+        labels:
+          severity: warning
+          slo: authoring-collaboration
+        annotations:
+          summary: "Authoring revision conflicts elevated"
+          description: "Fenced authoring writes are above the expected collaboration baseline. Break down by operation to find whether one workflow (bulk/import/publish) is driving it, and check the divergence UX funnel."
+          runbook_url: "docs/runbooks/sat-authoring-realtime-rollout.md"
+
+      # THE freshness SLI. A resync means we could not keep a client fresh and it
+      # had to refetch authoritative state. Note what is NOT measured: there is
+      # no sequence-gap series, because the cursor is global and filtered and a
+      # skipped value is normal (it belongs to another exam or kind). Break the
+      # reason label down in the description rather than inventing gap math.
+      - alert: AuthoringResyncPressureHigh
+        expr: increase(authoring_resync_total[10m]) > 10
+        for: 10m
+        labels:
+          severity: warning
+          slo: authoring-freshness
+        annotations:
+          summary: "Authoring clients are resyncing too often"
+          description: "Clients are falling back to authoritative refetches. Break down authoring_resync_total by reason: delivery_overflow points at capacity (see the drop series), replay_too_large at the replay bound, unsupported_event at version skew, lifecycle_rebind at publish/undo churn."
+          runbook_url: "docs/runbooks/sat-authoring-realtime-rollout.md"
+
+      # cursor_expired is the retention-vs-offline mismatch signal: clients are
+      # coming back after the 72h replay window. The cover is the resync path; a
+      # sustained rate means the window or client behavior needs review.
+      - alert: AuthoringCursorExpiredSustained
+        expr: increase(authoring_resync_total{reason="cursor_expired"}[15m]) > 5
+        for: 15m
+        labels:
+          severity: warning
+          slo: authoring-delivery
+        annotations:
+          summary: "Authoring cursors are falling outside the retention window"
+          description: "Clients are resuming with a cursor older than the 72h authoring retention window and recovering via snapshot. Confirm AuthoringRetentionHours still matches the wired live-bus purge window, then review offline durations."
+          runbook_url: "docs/runbooks/sat-authoring-realtime-rollout.md"
+
+      # A shed frame means a slow consumer. The client resyncs and writers are
+      # never backpressured, so this is a capacity review (QueueCap, bandwidth,
+      # or one pathological author) rather than an outage.
+      - alert: AuthoringDeliveryOverflow
+        expr: increase(authoring_ws_events_dropped_total{stage="hub_queue_full"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          slo: authoring-delivery
+        annotations:
+          summary: "Authoring hub is shedding events for slow clients"
+          description: "The authoring hub dropped events because a subscriber queue was full. Writers were not blocked. Check authoring_ws_connections_current and authoring_ws_disconnects_total{reason=\"slow_client\"} for the affected cohort."
+          runbook_url: "docs/runbooks/sat-authoring-realtime-rollout.md"
+
+      # Transport failures are separate from persistence failures: canonical
+      # state is still correct here, a client just reconnects and resyncs. The
+      # cursor does not advance past unpolled rows, so a forwarder error
+      # self-heals on the next tick.
+      - alert: AuthoringDeliveryFailures
+        expr: increase(authoring_delivery_failures_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          slo: authoring-delivery
+        annotations:
+          summary: "Authoring events are failing to reach clients"
+          description: "authoring_delivery_failures_total moved: break down by stage. forwarder failures mean this instance is not relaying other instances' events (it should self-heal next tick); socket failures mean frames were lost to a client that will reconnect and resync. Canonical state is unaffected either way."
+          runbook_url: "docs/runbooks/sat-authoring-realtime-rollout.md"
+
+      # Reconnect storms are the deploy-restart signature. Stage 7 halts the
+      # ramp on this, because a storm is how a rollout turns into an outage.
+      - alert: AuthoringReconnectStorm
+        expr: increase(authoring_reconnects_total{outcome="snapshot_required"}[2m]) > 20
+        for: 2m
+        labels:
+          severity: page
+          slo: authoring-delivery
+        annotations:
+          summary: "Authoring reconnect storm"
+          description: "Authoring clients are resubscribing and being forced to snapshot at a deploy-storm rate. If this follows a deploy, HALT the rollout ramp (see the stage 7 auto-halt gate) and verify clients resume via cursor rather than snapshot."
+          runbook_url: "docs/runbooks/sat-authoring-realtime-rollout.md"
+
+      # The delivery SLO as a real percentile. The series is emitted as fixed
+      # cumulative buckets (le label), because the rollout gate is a p95 and a
+      # last-sample gauge cannot produce one.
+      - alert: AuthoringDeliveryLatencyP95High
+        expr: histogram_quantile(0.95, sum(rate(authoring_delivery_latency_seconds[10m])) by (le)) > 5
+        for: 10m
+        labels:
+          severity: warning
+          slo: authoring-freshness
+        annotations:
+          summary: "Authoring delivery latency p95 above the 5s worst-case SLO"
+          description: "Authoring event freshness p95 exceeded 5s. Check the forwarder poll cadence, event-table growth, and db_pool_wait before widening the latency budget."
+          runbook_url: "docs/runbooks/sat-authoring-realtime-rollout.md"

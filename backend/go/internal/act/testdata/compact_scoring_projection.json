@@ -1,0 +1,7 @@
+{
+  "questions": [
+    { "questionId": "q1", "correctAnswer": "q1-B" },
+    { "questionId": "q2", "correctAnswer": "q2-A" },
+    { "questionId": "q3", "correctAnswer": "q3-C" }
+  ]
+}

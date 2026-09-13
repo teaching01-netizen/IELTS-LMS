@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatResultDetailRoute } from '../SatResultDetailRoute';
 import { SatResultsRoute } from '../SatResultsRoute';
@@ -17,14 +17,59 @@ const summary = {
   submittedAt: '2026-08-30T08:00:00Z', totalScore: 1370, scoreKind: 'practice', releaseStatus: 'ready_to_release', outcomeStatus: 'scored',
 };
 
+// Wave 4 drill-down fixtures (phase-04 §5 Step 1, normative names). Every row is
+// SatResultSummary-shaped via { ...summary, ...overrides }; domain order is
+// latestSubmittedAt desc, so submittedAt values below fix the rendered order.
+const groupedFixture = [
+  { ...summary, id: 'r-a1', examId: 'sat-A', examTitle: 'Practice Test 06', studentId: 'W2501', studentName: 'Ananda S.', outcomeStatus: 'scored', totalScore: 1370, submittedAt: '2026-08-30T08:00:00Z' },
+  { ...summary, id: 'r-a2', examId: 'sat-A', examTitle: 'Practice Test 06', studentId: 'W2502', studentName: 'Bima R.', outcomeStatus: 'pending', totalScore: null, submittedAt: '2026-08-29T08:00:00Z' },
+  { ...summary, id: 'r-b1', examId: 'sat-B', examTitle: 'Practice Test 07', studentId: 'W2503', studentName: 'Citra D.', outcomeStatus: 'invalidated_proctor', totalScore: null, submittedAt: '2026-08-28T08:00:00Z' },
+];
+const duplicateTitleFixture = [
+  { ...summary, id: 'r-c1', examId: 'sat-C', examTitle: 'Practice Test 06', studentId: 'W2504', studentName: 'Eka P.', outcomeStatus: 'scored', totalScore: 1200, submittedAt: '2026-08-30T08:00:00Z' },
+  { ...summary, id: 'r-d1', examId: 'sat-D', examTitle: 'Practice Test 06', studentId: 'W2505', studentName: 'Farah Q.', outcomeStatus: 'scored', totalScore: 1100, submittedAt: '2026-08-29T08:00:00Z' },
+];
+const invalidatedOnlyFixture = [
+  { ...summary, id: 'r-e1', examId: 'sat-E', examTitle: 'Practice Test 08', studentId: 'W2506', studentName: 'Gilang H.', outcomeStatus: 'invalidated_proctor', totalScore: null, submittedAt: '2026-08-30T08:00:00Z' },
+  { ...summary, id: 'r-e2', examId: 'sat-E', examTitle: 'Practice Test 08', studentId: 'W2507', studentName: 'Hana I.', outcomeStatus: 'invalidated_proctor', totalScore: null, submittedAt: '2026-08-29T08:00:00Z' },
+];
+const mixedGroupFixture = [
+  { ...summary, id: 'r-g1', examId: 'sat-G', examTitle: 'Practice Test 09', studentId: 'W2501', studentName: 'Ananda S.', outcomeStatus: 'scored', totalScore: 1370, submittedAt: '2026-08-30T08:00:00Z' },
+  { ...summary, id: 'r-g2', examId: 'sat-G', examTitle: 'Practice Test 09', studentId: 'W2502', studentName: 'Bima R.', outcomeStatus: 'invalidated_proctor', totalScore: null, submittedAt: '2026-08-29T08:00:00Z' },
+];
+
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="test-location">{location.pathname + location.search}</span>;
+}
+
+function renderResultsRoute(initialEntry = '/sat/results') {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <LocationProbe />
+      <Routes>
+        <Route path="/sat/results" element={<SatResultsRoute />} />
+        <Route path="/sat/results/:resultId" element={<SatResultDetailRoute />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 describe('SAT Results product', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('renders SAT practice scores without IELTS band-score language', () => {
-    useSatResultsQueryMock.mockReturnValue({ data: [summary], isLoading: false, error: null, refetch: vi.fn() });
-    render(<MemoryRouter><SatResultsRoute /></MemoryRouter>);
-    expect(screen.getByText('Ananda S.')).toBeInTheDocument();
-    expect(screen.getByText('1370')).toBeInTheDocument();
+  it('lists one group row per exam with no student names before drill-down', () => {
+    // Drill-down addendum §6(1): the list shows N group rows per examId, never
+    // flat student rows. Absorbs the legacy no-IELTS-band guard at list level.
+    useSatResultsQueryMock.mockReturnValue({ data: groupedFixture, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    const { container } = renderResultsRoute();
+    expect(screen.getByText('Practice Test 06')).toBeInTheDocument();
+    expect(screen.getByText('Practice Test 07')).toBeInTheDocument();
+    expect(container.querySelectorAll('.sat-list-row')).toHaveLength(2);
+    expect(screen.queryByText('Ananda S.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Bima R.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Citra D.')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('2 exams');
     expect(screen.queryByText(/overall band/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/6\.5/)).not.toBeInTheDocument();
   });
@@ -36,63 +81,169 @@ describe('SAT Results product', () => {
     expect(screen.getByRole('status', { name: 'Loading SAT results' })).toBeInTheDocument();
   });
 
-  it('announces the visible result count once data is present', () => {
-    useSatResultsQueryMock.mockReturnValue({ data: [summary], isLoading: false, error: null, refetch: vi.fn() });
-    render(<MemoryRouter><SatResultsRoute /></MemoryRouter>);
-    expect(screen.getByRole('status')).toHaveTextContent('1 result');
+  it('opens the inside page on group click with ?exam=, header, students and count', () => {
+    // Drill-down addendum §6(2) + Step-8 hierarchy sweep on the revealed rows.
+    useSatResultsQueryMock.mockReturnValue({ data: groupedFixture, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    const { container } = renderResultsRoute();
+    fireEvent.click(screen.getByRole('button', { name: /Practice Test 06/ }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-A');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Practice Test 06');
+    expect(screen.getByText('Ananda S.')).toBeInTheDocument();
+    expect(screen.getByText('Bima R.')).toBeInTheDocument();
+    expect(screen.queryByText('Citra D.')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('2 students');
+    // Focus moves to the inside entry control (Wave 3 addendum §5: the drill
+    // unmounts the clicked row, so focus would otherwise fall to <body>).
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Back to SAT results');
+    // 04A hierarchy guard, now on an inside attempt row: 13px name, 10px
+    // tabular-nums metas, 17px tabular-nums score, no gradient/blur surfaces.
+    const row = screen.getByText('Ananda S.').closest('.sat-list-row');
+    expect(row).not.toBeNull();
+    expect(row).toHaveTextContent('W2501');
+    expect(row).toHaveTextContent('Morning');
+    expect(row).toHaveTextContent('Practice Test 06');
+    const score = screen.getByText('1370');
+    expect(score.className).toMatch(/tabular-nums/);
+    expect(score.className).toMatch(/17px/);
+    expect(score.closest('.sat-list-row')).not.toBeNull();
+    const tabularMetas = row?.querySelectorAll('.tabular-nums') ?? [];
+    expect(tabularMetas.length).toBeGreaterThanOrEqual(2);
+    expect(container.innerHTML).not.toMatch(/bg-gradient|backdrop-blur/);
   });
 
-  it('filters results by score availability and explains an empty match', () => {
-    useSatResultsQueryMock.mockReturnValue({
-      data: [summary, { ...summary, id: 'result-2', studentName: 'Unscored Student', totalScore: null }],
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-    render(<MemoryRouter><SatResultsRoute /></MemoryRouter>);
+  it('returns to the exam list from the inside Back button', () => {
+    // Drill-down addendum §6(3): Back restores the list view.
+    useSatResultsQueryMock.mockReturnValue({ data: groupedFixture, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    renderResultsRoute();
+    fireEvent.click(screen.getByRole('button', { name: /Practice Test 06/ }));
     expect(screen.getByText('Ananda S.')).toBeInTheDocument();
-    expect(screen.getByText('Unscored Student')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: /Score available/i }));
-    expect(screen.getByText('Ananda S.')).toBeInTheDocument();
-    expect(screen.queryByText('Unscored Student')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: /Score unavailable/i }));
-    expect(screen.getByText('Unscored Student')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Search SAT results'), { target: { value: 'missing' } });
-    expect(screen.getByText('No matching SAT results')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to SAT results' }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results');
+    expect(screen.getByText('Practice Test 06')).toBeInTheDocument();
+    expect(screen.getByText('Practice Test 07')).toBeInTheDocument();
+    expect(screen.queryByText('Ananda S.')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('2 exams');
+    // Focus returns to the list entry control (Wave 3 addendum §5).
+    expect(document.activeElement?.id).toBe('sat-results-search');
   });
 
-  it('renders explicit proctor invalidation instead of treating termination as a missing score', () => {
-    useSatResultsQueryMock.mockReturnValue({
-      data: [{ ...summary, id: 'result-terminated', submissionId: null, totalScore: null, outcomeStatus: 'invalidated_proctor' }],
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-    render(<MemoryRouter><SatResultsRoute /></MemoryRouter>);
-    expect(screen.getByText('Exam terminated by proctor')).toBeInTheDocument();
+  it('keeps duplicate exam titles with distinct examIds as separate groups', () => {
+    // Drill-down addendum §6(4): the grouping key is examId, never examTitle.
+    useSatResultsQueryMock.mockReturnValue({ data: duplicateTitleFixture, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    renderResultsRoute();
+    expect(screen.getAllByText('Practice Test 06')).toHaveLength(2);
+    expect(screen.getByRole('status')).toHaveTextContent('2 exams');
+    const groupButtons = screen.getAllByRole('button', { name: /Practice Test 06/ });
+    expect(groupButtons).toHaveLength(2);
+    fireEvent.click(groupButtons[0] as HTMLElement);
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-C');
+    expect(screen.getByText('Eka P.')).toBeInTheDocument();
+    expect(screen.queryByText('Farah Q.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to SAT results' }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Practice Test 06/ })[1] as HTMLElement);
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-D');
+    expect(screen.getByText('Farah Q.')).toBeInTheDocument();
+    expect(screen.queryByText('Eka P.')).not.toBeInTheDocument();
+  });
+
+  it('drills into an invalidated-only group with dash scores and never 0', () => {
+    // Drill-down addendum §6(5): an invalidated-only group drills fine; null
+    // scores render as dashes, never 0. Absorbs the legacy
+    // termination-vs-missing-score guard (no Practice caption leaks here).
+    useSatResultsQueryMock.mockReturnValue({ data: invalidatedOnlyFixture, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    const { container } = renderResultsRoute();
+    expect(container.querySelectorAll('.sat-list-row')).toHaveLength(1);
+    expect(screen.getByRole('status')).toHaveTextContent('1 exam');
+    fireEvent.click(screen.getByRole('button', { name: /Practice Test 08/ }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-E');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Practice Test 08');
+    expect(screen.getAllByText('Exam terminated by proctor')).toHaveLength(2);
     expect(screen.queryByText('Practice')).not.toBeInTheDocument();
+    for (const name of ['Gilang H.', 'Hana I.']) {
+      const row = screen.getByText(name).closest('.sat-list-row');
+      expect(row).not.toBeNull();
+      // First child of the right column is the score block: dash, never 0.
+      expect(row?.querySelector('span.text-right > span')?.textContent).toBe('—');
+    }
   });
 
-  it('renders a status pill per row with the frozen outcome tone map', () => {
-    useSatResultsQueryMock.mockReturnValue({
-      data: [
-        summary,
-        { ...summary, id: 'result-pending', studentName: 'Pending Student', outcomeStatus: 'pending', totalScore: null },
-        { ...summary, id: 'result-terminated', studentName: 'Terminated Student', outcomeStatus: 'invalidated_proctor', totalScore: null },
-      ],
-      isLoading: false,
-      error: null,
-      isFetching: false,
-      refetch: vi.fn(),
-    });
-    render(<MemoryRouter><SatResultsRoute /></MemoryRouter>);
-    // Phase 02 single-pill contract: each row exposes exactly one status signal (the pill).
-    // The duplicate 'outcome · Practice · releaseStatus' caption was deleted.
-    expect(screen.getAllByText('Practice')).toHaveLength(1);
-    expect(screen.getByText('Scoring pending')).toBeInTheDocument();
-    expect(screen.getByText('Exam terminated by proctor')).toBeInTheDocument();
-    expect(screen.queryByText('Scoring pending · Practice · ready_to_release')).not.toBeInTheDocument();
-    expect(screen.queryByText('Exam terminated by proctor · Practice · ready_to_release')).not.toBeInTheDocument();
+  it('narrows exams on the list and students inside, with Clear restoring focus', () => {
+    // Drill-down addendum §6(6): list search is exam-title-only; student/cohort
+    // matching plus the availability radios live inside. Absorbs the legacy
+    // score-filter/empty-match and filter-zero announcer guards.
+    useSatResultsQueryMock.mockReturnValue({ data: groupedFixture, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    renderResultsRoute();
+    // No availability radios on the list: per-attempt filtering has no meaning
+    // on exam rows.
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    // A student name matches no exam title, so the list goes empty (EXAMS only).
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search exams' }), { target: { value: 'Ananda' } });
+    expect(screen.getByText('No matching SAT exams')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('0 of 2 exams');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Search' }));
+    expect(screen.getByText('Practice Test 06')).toBeInTheDocument();
+    expect(screen.getByText('Practice Test 07')).toBeInTheDocument();
+    expect(document.activeElement?.id).toBe('sat-results-search');
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search exams' }), { target: { value: 'Test 07' } });
+    expect(screen.queryByText('Practice Test 06')).not.toBeInTheDocument();
+    expect(screen.getByText('Practice Test 07')).toBeInTheDocument();
+    // Singular itemLabel when one group is visible (route passes 'exam').
+    expect(screen.getByRole('status')).toHaveTextContent('1 of 2 exam');
+    // Non-empty list has no empty-state Clear action: reset via the field.
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search exams' }), { target: { value: '' } });
+    // Inside: the student search narrows STUDENTS with an X-of-Y count.
+    fireEvent.click(screen.getByRole('button', { name: /Practice Test 06/ }));
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search students' }), { target: { value: 'bima' } });
+    expect(screen.queryByText('Ananda S.')).not.toBeInTheDocument();
+    expect(screen.getByText('Bima R.')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('1 of 2 students');
+    // Escape clears the student search.
+    fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Search students' }), { key: 'Escape' });
+    expect(screen.getByText('Ananda S.')).toBeInTheDocument();
+    expect(screen.getByText('Bima R.')).toBeInTheDocument();
+    // Inside radios drop non-matching students.
+    fireEvent.click(screen.getByRole('radio', { name: 'Score unavailable' }));
+    expect(screen.queryByText('Ananda S.')).not.toBeInTheDocument();
+    expect(screen.getByText('Bima R.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Score available' }));
+    expect(screen.getByText('Ananda S.')).toBeInTheDocument();
+    expect(screen.queryByText('Bima R.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'All' }));
+    // Filter-zero keeps the announcer mounted next to the empty state.
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search students' }), { target: { value: 'zzz-no-match' } });
+    expect(screen.getByText('No matching students')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('0 of 2 students');
+    // Clear restores the full roster and refocuses the search field.
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Search' }));
+    expect(screen.getByText('Ananda S.')).toBeInTheDocument();
+    expect(screen.getByText('Bima R.')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('2 students');
+    expect(document.activeElement?.id).toBe('sat-results-student-search');
+  });
+
+  it('never masks scored totals with an invalidated pill in a mixed group', () => {
+    // Drill-down addendum §6(7) + Step-8 single-pill sweep on inside rows:
+    // the scored row keeps its score + Practice pill, the invalidated row
+    // keeps its pill, and the header roll-up is ready (never invalidated).
+    useSatResultsQueryMock.mockReturnValue({ data: mixedGroupFixture, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    const { container } = renderResultsRoute();
+    expect(screen.getByText('Practice')).toBeInTheDocument();
+    expect(screen.queryByText('Not scored')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Practice Test 09/ }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-G');
+    const scoredRow = screen.getByText('Ananda S.').closest('.sat-list-row');
+    expect(scoredRow).toHaveTextContent('1370');
+    expect(scoredRow).toHaveTextContent('Practice');
+    const invalidatedRow = screen.getByText('Bima R.').closest('.sat-list-row');
+    expect(invalidatedRow).toHaveTextContent('Exam terminated by proctor');
+    expect(invalidatedRow?.querySelector('span.text-right > span')?.textContent).toBe('—');
+    // Exactly one status signal per row: one pill frame + its dot per row, and
+    // no duplicate 'outcome · Practice · releaseStatus' caption anywhere.
+    for (const row of Array.from(container.querySelectorAll('.sat-list-row'))) {
+      expect(row.querySelectorAll('span.rounded-full')).toHaveLength(2);
+    }
+    expect(screen.queryByText(/· Practice ·/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Not scored')).not.toBeInTheDocument();
   });
 
   it('exposes a single status signal per row without a duplicate release-status caption', () => {
@@ -107,30 +258,6 @@ describe('SAT Results product', () => {
     useSatResultsQueryMock.mockReturnValue({ data: [summary], isLoading: false, error: null, isFetching: true, refetch: vi.fn() });
     render(<MemoryRouter><SatResultsRoute /></MemoryRouter>);
     expect(screen.getByText('Updating…')).toBeInTheDocument();
-  });
-
-  it('keeps tabular meta lines and the 17px score block on each row (04A hierarchy guard)', () => {
-    useSatResultsQueryMock.mockReturnValue({ data: [summary], isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
-    const { container } = render(<MemoryRouter><SatResultsRoute /></MemoryRouter>);
-    const row = screen.getByText('Ananda S.').closest('.sat-list-row');
-    expect(row).not.toBeNull();
-    expect(row).toHaveTextContent('W2501');
-    expect(row).toHaveTextContent('Morning');
-    expect(row).toHaveTextContent('Practice Test 06');
-    const score = screen.getByText('1370');
-    expect(score.className).toMatch(/tabular-nums/);
-    expect(score.closest('.sat-list-row')).not.toBeNull();
-    const tabularMetas = row?.querySelectorAll('.tabular-nums') ?? [];
-    expect(tabularMetas.length).toBeGreaterThanOrEqual(2);
-    expect(container.innerHTML).not.toMatch(/bg-gradient|backdrop-blur/);
-  });
-
-  it('keeps the result-count announcer visible when a filter matches nothing', () => {
-    useSatResultsQueryMock.mockReturnValue({ data: [summary], isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
-    render(<MemoryRouter><SatResultsRoute /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('radio', { name: /Score unavailable/i }));
-    expect(screen.getByText('No matching SAT results')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('0 of 1 results');
   });
 
   it('labels the back control with its destination', () => {
@@ -291,5 +418,47 @@ describe('SAT Results product', () => {
     });
     render(<MemoryRouter initialEntries={['/sat/results/result-2']}><Routes><Route path="/sat/results/:resultId" element={<SatResultDetailRoute />} /></Routes></MemoryRouter>);
     expect(screen.queryByText(/Question-level responses/)).not.toBeInTheDocument();
+  });
+
+  it('lands Back on the inside page for a results from-state and falls back on hostile states', () => {
+    // Addendum §4: detail Back honors location.state.from only when it starts
+    // with '/sat/results'; hostile values fall back to '/sat/results'.
+    const detailData = { summary, scorePayload: {}, sections: [], questions: [] };
+    const resultsTree = (
+      <>
+        <LocationProbe />
+        <Routes>
+          <Route path="/sat/results" element={<SatResultsRoute />} />
+          <Route path="/sat/results/:resultId" element={<SatResultDetailRoute />} />
+        </Routes>
+      </>
+    );
+    useSatResultQueryMock.mockReturnValue({ data: detailData, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    useSatResultsQueryMock.mockReturnValue({ data: groupedFixture, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
+    const trusted = render(
+      <MemoryRouter initialEntries={[{ pathname: '/sat/results/result-1', state: { from: '/sat/results?exam=sat-A' } }]}>
+        {resultsTree}
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Back to SAT results' }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-A');
+    expect(screen.getByText('Ananda S.')).toBeInTheDocument();
+    trusted.unmount();
+    const hostileAbsolute = render(
+      <MemoryRouter initialEntries={[{ pathname: '/sat/results/result-1', state: { from: 'https://evil.example/phish' } }]}>
+        {resultsTree}
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Back to SAT results' }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results');
+    expect(screen.getByText('Practice Test 06')).toBeInTheDocument();
+    hostileAbsolute.unmount();
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/sat/results/result-1', state: { from: '/admin/users' } }]}>
+        {resultsTree}
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Back to SAT results' }));
+    expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results');
   });
 });

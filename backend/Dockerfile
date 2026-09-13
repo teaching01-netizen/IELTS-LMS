@@ -12,11 +12,15 @@ FROM node:22-bookworm-slim AS frontend-builder
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+# Bun is the package manager; Node (from the base image) remains the runtime
+# because the toolchain binaries use a `#!/usr/bin/env node` shebang.
+COPY --from=oven/bun:1.3.14-debian /usr/local/bin/bun /usr/local/bin/bun
+
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY . .
-RUN npm run build
+RUN bun run build
 
 FROM golang:1.26-bookworm AS backend-builder
 

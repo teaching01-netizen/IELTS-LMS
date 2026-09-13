@@ -1,0 +1,98 @@
+{
+  "nodes": [
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Benign intro",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        }
+      ],
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "clickable",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        }
+      ],
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "evil link",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        },
+        {
+          "kind": "text",
+          "text": "vb link",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        }
+      ],
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Benign outro",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        }
+      ],
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    }
+  ],
+  "warnings": [
+    "import.style.stripped",
+    "import.block.degraded"
+  ]
+}

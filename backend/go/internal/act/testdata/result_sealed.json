@@ -1,0 +1,13 @@
+{
+  "section": "science",
+  "providerKey": "act",
+  "score": { "totalScore": 2, "maxScore": 3, "percentage": 66.66666666666666 },
+  "content": {
+    "questions": [
+      { "questionId": "q1", "correctAnswer": "A" },
+      { "questionId": "q2", "correctAnswer": "B" },
+      { "questionId": "q3", "correctAnswer": "C" }
+    ]
+  },
+  "answers": { "q1": "a", "q2": "zzz" }
+}

@@ -94,6 +94,7 @@ export interface MCQOption {
   id: string;
   text: string;
   isCorrect: boolean;
+  imageUrl?: string | undefined;
 }
 
 export type { StudentAnswerValue };
@@ -255,6 +256,7 @@ export interface SingleMCQBlock extends BaseQuestionBlock {
 export interface SingleMCQQuestion {
   id: string;
   stem: string;
+  imageUrl?: string | undefined;
   options: MCQOption[];
   skillCategory?: ActScienceSkillCategory | undefined;
 }

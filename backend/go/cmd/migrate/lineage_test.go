@@ -45,11 +45,13 @@ func migDir(t *testing.T) string {
 // added or removed. WS-09 lane D landed 0055 (outbox DLQ) + 0056 (receipt
 // immutability), previously reserved for lanes B/D — count bumped 55->57
 // and the reservation cleared. SAT authoring lane landed 0058 (operation
-// keys) — count/max bumped 57->58. Any other count/max/gap change fails
-// loudly.
+// keys) — count/max bumped 57->58. ACT reconciliation Phase 02 landed 0059
+// (answer fencing columns) — count/max bumped 58->59. SAT authoring realtime
+// Phase 02 landed 0060 (authoring replay indexes) — count/max bumped 59->60.
+// Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 58
-	pinnedMigrationMax   = 58
+	pinnedMigrationFiles = 60
+	pinnedMigrationMax   = 60
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

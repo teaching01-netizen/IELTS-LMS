@@ -1,9 +1,19 @@
 /* eslint-disable jsx-a11y/no-noninteractive-element-interactions -- iframe onLoad is a lifecycle signal, not a user interaction. */
 import { useEffect, useRef, useState } from "react";
-import type { DesmosCalculatorMode } from "../../infrastructure/desmos/desmosTypes";
+import type {
+  DesmosCalculatorMode,
+  DesmosLocale,
+} from "../../infrastructure/desmos/desmosTypes";
+import { SAT_EXAM_LOCALE, desmosEmbedUrl } from "../../infrastructure/desmos/desmosTypes";
 
 export interface DesmosCalculatorProps {
   mode: DesmosCalculatorMode;
+  /**
+   * Exam locale for the embed. Defaults to SAT_EXAM_LOCALE (frozen English)
+   * so the calculator follows the exam shell — never navigator.language.
+   * Both prewarmed frames share this value so reveal never reloads.
+   */
+  locale?: DesmosLocale | undefined;
   disabled?: boolean;
   prewarmInactiveModes?: boolean;
   /**
@@ -15,13 +25,9 @@ export interface DesmosCalculatorProps {
 
 const DESMOS_MODES = ["scientific", "graphing"] as const;
 
-const DESMOS_EMBED_URLS: Record<DesmosCalculatorMode, string> = {
-  scientific: "https://www.desmos.com/testing/collegeboard/scientific?embed",
-  graphing: "https://www.desmos.com/testing/collegeboard/graphing?embed",
-};
-
 export function DesmosCalculator({
   mode,
+  locale = SAT_EXAM_LOCALE,
   disabled = false,
   prewarmInactiveModes = false,
   silenceLiveRegions = false,
@@ -78,9 +84,13 @@ export function DesmosCalculator({
           <iframe
             ref={candidate === "scientific" ? scientificRef : graphingRef}
             key={candidate}
-            src={DESMOS_EMBED_URLS[candidate]}
+            src={desmosEmbedUrl(candidate, locale)}
             title={`Desmos ${candidate} calculator, College Board testing version`}
-            className={`h-full min-h-[320px] w-full border-0 ${candidate === mode ? "block" : "hidden"}`}
+            className={
+              candidate === "graphing"
+                ? `h-full min-h-[320px] w-full border-0 ${candidate === mode ? "block" : "hidden"}`
+                : `h-full w-full border-0 ${candidate === mode ? "block" : "hidden"}`
+            }
             loading={candidate === mode || prewarmInactiveModes ? "eager" : "lazy"}
             referrerPolicy="strict-origin-when-cross-origin"
             tabIndex={disabled ? -1 : 0}

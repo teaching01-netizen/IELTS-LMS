@@ -1,0 +1,35 @@
+{
+  "probe": "B3b",
+  "inputKind": "text/html anchor",
+  "targetField": "prompt",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "marks": [
+              {
+                "type": "link",
+                "attrs": {
+                  "href": "https://example.test",
+                  "target": "_blank",
+                  "rel": "noopener noreferrer nofollow"
+                }
+              }
+            ],
+            "text": "link text"
+          }
+        ]
+      }
+    ]
+  },
+  "observed": "link mark preserved with StarterKit defaults (target _blank, rel noopener noreferrer nofollow); no SAT-specific link policy exists today",
+  "validatorOutcome": "valid (links are invisible to SAT validators)"
+}

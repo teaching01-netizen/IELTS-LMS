@@ -40,8 +40,8 @@ func TestSchemaGuardListSizes(t *testing.T) {
 	if len(RequiredColumns) != 19 {
 		t.Fatalf("RequiredColumns must hold 19 entries (I6), got %d", len(RequiredColumns))
 	}
-	if len(RequiredIndexes) != 9 {
-		t.Fatalf("RequiredIndexes must hold 9 entries (I6), got %d", len(RequiredIndexes))
+	if len(RequiredIndexes) != 10 {
+		t.Fatalf("RequiredIndexes must hold 10 entries (I6 + the 0060 authoring replay index), got %d", len(RequiredIndexes))
 	}
 	seen := map[string]bool{}
 	for _, c := range RequiredColumns {

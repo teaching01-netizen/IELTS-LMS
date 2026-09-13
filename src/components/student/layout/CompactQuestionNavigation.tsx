@@ -76,7 +76,9 @@ export function CompactQuestionNavigation({
         disabled={!onOpenNavigator}
         data-student-primary-touch-target
       >
-        <span className="truncate">Q {currentLabel} / {totalQuestions}</span>
+        {/* One position vocabulary across every presentation (P4): the compact
+            bar, the desktop bar, and the navigator all read "8 of 40". */}
+        <span className="truncate">{currentLabel} of {totalQuestions}</span>
         {onOpenNavigator ? <LayoutGrid size={16} aria-hidden="true" /> : null}
       </button>
 

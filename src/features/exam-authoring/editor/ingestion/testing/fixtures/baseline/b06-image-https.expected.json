@@ -1,0 +1,34 @@
+{
+  "probe": "B6a",
+  "inputKind": "text/html img with https src",
+  "targetField": "stimulus",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML (Image parseHTML img[src] since src is not data:)",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "see"
+          }
+        ]
+      },
+      {
+        "type": "image",
+        "attrs": {
+          "src": "https://example.test/graph.png",
+          "alt": "Graph",
+          "assetId": null,
+          "caption": null
+        }
+      }
+    ]
+  },
+  "renderNote": "SatImageExtension isDirectSource(https...) renders directly; assetId null triggers no media fetch",
+  "validatorOutcome": "valid IF alt non-empty (sat.accessibility.alt.required otherwise); sat.media.source.required NOT raised (src present)"
+}

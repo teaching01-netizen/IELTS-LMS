@@ -71,4 +71,35 @@ func TestRunbookFlagsMatrixParity(t *testing.T) {
 	if cfg.DBPoolMaxAPI != 20 || cfg.DBPoolMaxWorker != 20 {
 		t.Errorf("DB_POOL split ship must fall back to 20/20, got %d/%d", cfg.DBPoolMaxAPI, cfg.DBPoolMaxWorker)
 	}
+
+	// Phase 06: the four independent SAT authoring realtime flags. All ship
+	// false, and they stay INDEPENDENT: a mega-flag would make the staged
+	// rollout (and the flag-flip rollback) impossible to express.
+	//
+	// The names here are the ones the runtime actually reads. The rollout
+	// runbook uses these exact strings; an older, shorter pair
+	// (AUTHORING_PRESENCE / AUTHORING_CONFLICT_COMPARE) was removed from
+	// authoringrealtime/flags.go precisely because flipping those did nothing.
+	if cfg.AuthoringRealtimeEvents {
+		t.Errorf("AUTHORING_REALTIME_EVENTS ship must be off")
+	}
+	if cfg.AuthoringRealtimeDelivery {
+		t.Errorf("AUTHORING_REALTIME_DELIVERY ship must be off")
+	}
+	if cfg.AuthoringRealtimePresence {
+		t.Errorf("AUTHORING_REALTIME_PRESENCE ship must be off")
+	}
+	if cfg.AuthoringRealtimeConflictCompare {
+		t.Errorf("AUTHORING_REALTIME_CONFLICT_COMPARE ship must be off")
+	}
+	// Delivery without events would advertise a socket over an empty table, and
+	// presence/compare without delivery would advertise capabilities no socket
+	// can carry. The loader already ANDs these together; pin the intent here so
+	// a future "just turn presence on" edit fails loudly.
+	if cfg.AuthoringRealtimePresence && !cfg.AuthoringRealtimeDelivery {
+		t.Errorf("presence must never ship enabled without delivery")
+	}
+	if cfg.AuthoringRealtimeConflictCompare && !cfg.AuthoringRealtimeDelivery {
+		t.Errorf("conflict compare must never ship enabled without delivery")
+	}
 }

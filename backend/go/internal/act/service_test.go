@@ -11,14 +11,37 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-func TestListScienceReportsUsesUnquotedSectionPredicate(t *testing.T) {
+// The list predicate must use the effective-provider identity
+// (provider_key='act' OR exam_type='ACT') so legacy ACT rows survive the
+// report listing after the 0054 heal window (Phase 02 blocker 4).
+// SealedContentHash is deterministic: identical sealed content hashes
+// equally regardless of input shape (nested vs compact), and any key change
+// moves the hash (Phase 02 blocker 2: seal vs replay identity).
+func TestSealedContentHashDeterministic(t *testing.T) {
+	nested := normalizeScienceContent(mustLoadContractFixture(t, "nested_science_content.json"))
+	compact := normalizeScienceContent(mustLoadContractFixture(t, "compact_scoring_projection.json"))
+	if SealedContentHash(nested) != SealedContentHash(compact) {
+		t.Fatal("identical sealed content must hash equally across shapes")
+	}
+	tampered := normalizeScienceContent(mustLoadContractFixture(t, "compact_scoring_projection.json"))
+	if questions, ok := tampered["questions"].([]any); ok && len(questions) > 0 {
+		if first, ok := questions[0].(map[string]any); ok {
+			first["correctAnswer"] = "tampered"
+		}
+	}
+	if SealedContentHash(tampered) == SealedContentHash(compact) {
+		t.Fatal("a changed sealed key must move the content hash")
+	}
+}
+
+func TestListScienceReportsUsesEffectiveProviderPredicate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 
-	expectation := mock.ExpectQuery(regexp.QuoteMeta("JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.section')) = 'science'"))
+	expectation := mock.ExpectQuery(regexp.QuoteMeta("(e.provider_key = 'act' OR e.exam_type = 'ACT')"))
 	expectation.WithArgs("schedule-1", 10, 0).WillReturnRows(sqlmock.NewRows([]string{
 		"attempt_id",
 		"schedule_id",

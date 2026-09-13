@@ -229,7 +229,7 @@ export function SatStudentSessionRoute({
       moduleAttemptId={calculatorModuleAttemptId}
       disabled={calculatorDisabled}
       prewarmWhenClosed
-      onClose={commands.closeTool}
+      onClose={() => commands.closeTool("calculator")}
     />
   ) : null;
   // Single save surface (Phase 6f close-out): in module phase the shell's
@@ -593,7 +593,7 @@ export function SatStudentSessionRoute({
           scheduleId={scheduleId}
           attemptId={attemptId}
           moduleAttemptId={exam.stateModuleAttempt?.id ?? "unknown-module"}
-          onClose={commands.closeTool}
+          onClose={() => commands.closeTool("reference_sheet")}
         />
       ) : null}
     </>

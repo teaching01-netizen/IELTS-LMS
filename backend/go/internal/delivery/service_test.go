@@ -125,8 +125,8 @@ func deliverySaveBegin(mock sqlmock.Sqlmock) {
 func deliverySaveBinding(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules s JOIN exam_entities e")).
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "published_version_id"}).
-			AddRow("sched-1", "exam-1", "sat", "pv-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "published_version_id", "exam_type"}).
+			AddRow("sched-1", "exam-1", "sat", "pv-1", "Academic"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ?")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id", "exam_id"}).

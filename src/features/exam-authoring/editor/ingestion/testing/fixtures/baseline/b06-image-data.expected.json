@@ -1,0 +1,25 @@
+{
+  "probe": "B6b",
+  "inputKind": "text/html img with data: src (copied-image HTML flavor)",
+  "targetField": "stimulus",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML (Image parseHTML img[src]:not([src^=data:]) with allowBase64:false)",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "see"
+          }
+        ]
+      }
+    ]
+  },
+  "observed": "data: image SILENTLY DROPPED at the paste-parse layer (node absent, text kept); image upload dialog is the only insertion path (uploadAssessmentAsset question ownerKind) - nothing prompts the author to upload after such a paste",
+  "validatorOutcome": "prompt still valid if other content exists; a lone dropped image leaves an empty paragraph -> question.prompt.required (blocking). No alt/source issue is raised because no image node exists - the loss is invisible to validation."
+}

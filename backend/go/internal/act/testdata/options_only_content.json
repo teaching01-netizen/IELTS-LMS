@@ -1,0 +1,38 @@
+{
+  "science": {
+    "stimuli": [
+      {
+        "id": "stim-1",
+        "title": "Ecology experiment",
+        "content": "Plants were grown under four light conditions.",
+        "blocks": [
+          {
+            "id": "block-1",
+            "type": "SINGLE_MCQ",
+            "instruction": "Use the stimulus to answer.",
+            "questions": [
+              {
+                "id": "q1",
+                "stem": "Which condition produced the greatest growth?",
+                "skillCategory": "interpretation_of_data",
+                "options": [
+                  { "id": "q1-A", "text": "Darkness", "isCorrect": false },
+                  { "id": "q1-B", "text": "Full sun", "isCorrect": true }
+                ]
+              },
+              {
+                "id": "q-keyless",
+                "stem": "Draft question with no key yet.",
+                "skillCategory": "scientific_investigation",
+                "options": [
+                  { "id": "qk-A", "text": "Unreviewed A", "isCorrect": false },
+                  { "id": "qk-B", "text": "Unreviewed B", "isCorrect": false }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

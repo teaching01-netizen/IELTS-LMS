@@ -12,6 +12,11 @@ export interface SpineHeaderProps {
   onModeChange: (mode: 'build' | 'overview' | 'issues') => void;
   issueCount: number;
   saveSlot?: ReactNode;
+  /**
+   * Phase 05 collaboration cluster (WHO is here + the subtle editing label).
+   * Receives plain nodes so the header stays presence-agnostic.
+   */
+  collaborationSlot?: ReactNode;
   workbookImportDisabled: boolean;
   onOpenWorkbookImport: () => void;
   sampleExamDisabled: boolean;
@@ -27,7 +32,7 @@ export interface SpineHeaderProps {
 
 /** Exam actions only. Question readiness belongs beside the question. */
 export function SpineHeader({ examTitle, sectionTitle, moduleTitle, lifecycleState = 'draft',
-  workspaceMode, onModeChange, issueCount, saveSlot, workbookImportDisabled, onOpenWorkbookImport,
+  workspaceMode, onModeChange, issueCount, saveSlot, collaborationSlot, workbookImportDisabled, onOpenWorkbookImport,
   sampleExamDisabled, onOpenSampleExam, onOpenShortcuts, previewDisabled, onOpenFullPreview,
   onOpenRelease, onBack, onOpenQueue }: SpineHeaderProps) {
   const lifecycle = lifecycleState === 'published' ? 'Published' : lifecycleState === 'changes' ? 'Changes' : 'Draft';
@@ -41,6 +46,9 @@ export function SpineHeader({ examTitle, sectionTitle, moduleTitle, lifecycleSta
           <h1 className="truncate text-base font-semibold text-foreground">{examTitle}</h1>
           <p className="truncate text-xs text-muted-foreground">{[sectionTitle, moduleTitle, lifecycle].filter(Boolean).join(' · ')}</p>
         </div>
+        {collaborationSlot ? (
+          <div className="sat-spine__header-collaboration shrink-0">{collaborationSlot}</div>
+        ) : null}
         <div className="sat-spine__header-save shrink-0">{saveSlot}</div>
         <button type="button" onClick={onOpenFullPreview} disabled={previewDisabled} aria-label="Open the full SAT preview" className="authoring-button authoring-button--quiet min-h-11">Preview</button>
         <button type="button" onClick={onOpenRelease} className="authoring-button authoring-button--primary min-h-11">Release</button>

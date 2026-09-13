@@ -1,4 +1,5 @@
 import { backendGet, backendPost } from "../infrastructure/examAuthoringBackendGateway";
+import { apiClient } from "../../../shared/api/apiClient";
 
 export interface AssessmentMediaAsset {
   id: string;
@@ -14,6 +15,15 @@ interface UploadIntent {
   asset: AssessmentMediaAsset;
   uploadUrl: string;
   headers: Record<string, string>;
+}
+
+function isSameOriginUrl(rawUrl: string): boolean {
+  if (typeof window === "undefined") return rawUrl.startsWith("/");
+  try {
+    return new URL(rawUrl, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
 }
 
 async function sha256(file: File): Promise<string | null> {
@@ -41,9 +51,15 @@ async function uploadImageAsset(
     fileName: file.name,
     checksumSha256,
   });
+  const uploadHeaders = { ...intent.headers };
+  const csrfToken = apiClient.getCsrfToken();
+  if (csrfToken && isSameOriginUrl(intent.uploadUrl)) {
+    uploadHeaders["x-csrf-token"] = csrfToken;
+  }
   const upload = await fetch(intent.uploadUrl, {
     method: "PUT",
-    headers: intent.headers,
+    credentials: "same-origin",
+    headers: uploadHeaders,
     body: file,
   });
   if (!upload.ok) throw new Error(`Image upload failed (${upload.status}).`);

@@ -6,8 +6,8 @@ Deploy this folder as a separate Railway/Leapcell service.
 
 ```bash
 cd load-runner
-npm install
-npm run ui
+bun install
+bun run ui
 ```
 
 Open `http://localhost:3366`.
@@ -15,8 +15,8 @@ Open `http://localhost:3366`.
 ## Railway
 
 - Root directory: `load-runner`
-- Build command: `npm install`
-- Start command: `npm run ui`
+- Build command: `bun install`
+- Start command: `bun run ui`
 - Port: `3366` (or use Railway `PORT` env)
 
 Notes:

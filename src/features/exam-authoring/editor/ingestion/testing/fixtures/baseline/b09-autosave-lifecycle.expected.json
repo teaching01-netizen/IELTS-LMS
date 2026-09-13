@@ -1,0 +1,24 @@
+{
+  "probe": "B9",
+  "inputKind": "paste then navigate (autosave lifecycle; no editor paste involved - onUpdate -> structuredContentFromDocument -> onChange -> scheduleAutosave)",
+  "targetField": "question (AuthoringWorkspace draft)",
+  "harness": "code-read + existing hook tests (useQuestionAutosave.offline/durability); mocked save gateway",
+  "lifecycle": {
+    "onUpdate": "RichQuestionComposer onUpdate fires per TipTap transaction -> structuredContentFromDocument(doc) (always v2 + withRichContentIdentities) -> onChange",
+    "schedule": "AuthoringWorkspace handleChange sets draft + autosave.scheduleAutosave(next); debounce 800ms default (useQuestionAutosave->useDurableLatestAutosave)",
+    "flush": "flushNow/commitAndAdvance flush latest revision; returns {ok, isLatest}",
+    "statuses": [
+      "saved",
+      "unsaved",
+      "saving",
+      "error",
+      "offline",
+      "conflict"
+    ],
+    "offline": "schedule while navigator.onLine=false keeps edits local (durable draft) and reports offline; online event reschedules newest draft; save NOT called while offline",
+    "conflict": "409/412/CONFLICT/VERSION_COLLISION/CONTROL_EPOCH_STALE or /revision|stale|conflict|changed elsewhere|changed while/ message -> conflict status; local wording stays durable, never auto-retried/dropped",
+    "durableLocal": "saveDurableDraft(durableKey, revision) before/with server save; recover via onRecover without auto-overwriting newer server revision; commitAndAdvance resolves only after save settles",
+    "flushBeforeNavigation": "AuthoringWorkspace flushBeforeNavigation: if status!=saved, flushNow(draft); navigation blocked with message on !ok (conflict/offline/generic variants); beforeunload warn guard while hasPendingChanges && (offline|unsaved|saving|error)"
+  },
+  "validatorOutcome": "autosave is content-agnostic; SAT validation runs separately and remains the release gate"
+}

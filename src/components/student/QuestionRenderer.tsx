@@ -28,7 +28,8 @@ import { ProtectedInput } from "./ProtectedInput";
 import { ProtectedExamSelect } from "./ProtectedExamSelect";
 import { StudentQuestionText } from "./StudentQuestionText";
 import { StudentQuestionNumber } from "./StudentQuestionNumber";
-import { Check, Flag } from "lucide-react";
+import { StudentFlagButton } from "./StudentFlagButton";
+import { Check } from "lucide-react";
 import { stripBoldMarkdown } from "../../utils/boldMarkdown";
 import { getImageUrlCandidates } from "../../utils/imageUrl";
 import { StudentZoomableMedia } from "./StudentZoomableMedia";
@@ -145,26 +146,20 @@ export function QuestionRenderer({
     return `rounded-lg border p-2 transition-colors ${activeClass} ${flaggedClass}`;
   };
 
+  // Inline completion slots keep the flag inside the answer row (there is no
+  // separate block shell to host it), but it uses the same quiet shared
+  // control as the structural per-question flag — one flag, one behavior.
   const renderFlagButton = (slotId: string) => {
     if (!onToggleFlag) {
       return null;
     }
 
     return (
-      <button
-        type="button"
-        onClick={() => onToggleFlag(slotId)}
-        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border ${
-          flags[slotId]
-            ? "border-amber-700 bg-amber-700 text-white"
-            : "border-gray-300 bg-white text-gray-500 hover:border-gray-400 hover:text-gray-700"
-        }`}
-        aria-label={flags[slotId] ? "Unflag question" : "Flag question"}
-        aria-pressed={flags[slotId]}
-        title={flags[slotId] ? "Unflag question" : "Flag question"}
-      >
-        <Flag size={14} aria-hidden="true" className={flags[slotId] ? "fill-current" : ""} />
-      </button>
+      <StudentFlagButton
+        flagged={Boolean(flags[slotId])}
+        size="compact"
+        onToggle={() => onToggleFlag(slotId)}
+      />
     );
   };
 

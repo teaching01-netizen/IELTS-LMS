@@ -1,12 +1,20 @@
 import React from 'react';
 import { Button } from '../ui/Button';
 
+/**
+ * Phase 04 ACT reconciliation: provider-aware completion copy.
+ * The default (omitted) provider preserves the exact IELTS strings so
+ * existing IELTS surfaces do not regress; "act" renders ACT Science copy.
+ */
+export type StudentPostExamProvider = "ielts" | "sat" | "act";
+
 interface StudentPostExamViewProps {
   isProctorTerminated: boolean;
   proctorNote: string | null;
   studentInfo: Array<{ label: string; value: string }>;
   onExit: () => void;
   finalSubmitOverlay: React.ReactNode;
+  provider?: StudentPostExamProvider | undefined;
 }
 
 export function StudentPostExamView({
@@ -15,7 +23,16 @@ export function StudentPostExamView({
   studentInfo,
   onExit,
   finalSubmitOverlay,
+  provider = "ielts",
 }: StudentPostExamViewProps) {
+  const completionHeading =
+    provider === "act" ? "ACT Science Complete!" : provider === "sat" ? "SAT Complete!" : "IELTS Examination Complete!";
+  const completionBody =
+    provider === "act"
+      ? "Congratulations! You have completed the ACT Science section. Your answers were submitted for server scoring."
+      : provider === "sat"
+        ? "Congratulations! You have completed all modules of the SAT."
+        : "Congratulations! You have completed all modules of the IELTS examination.";
   return (
     <div className="flex flex-col items-center justify-center h-full w-full bg-gray-50 p-4 font-sans text-gray-900">
       <a href="#main-content" className="skip-link">
@@ -24,7 +41,7 @@ export function StudentPostExamView({
       <main id="main-content" role="main" className="flex flex-col items-center justify-center">
         <div className="bg-white p-6 md:p-8 rounded-lg shadow-md max-w-2xl w-full text-center">
           <h1 className="text-3xl font-bold mb-4">
-            {isProctorTerminated ? 'Session terminated' : 'IELTS Examination Complete!'}
+            {isProctorTerminated ? 'Session terminated' : completionHeading}
           </h1>
           {isProctorTerminated ? (
             <div className="text-gray-600 mb-8 space-y-3">
@@ -35,7 +52,7 @@ export function StudentPostExamView({
             </div>
           ) : (
             <p className="text-gray-600 mb-8">
-              Congratulations! You have completed all modules of the IELTS examination.
+              {completionBody}
             </p>
           )}
 

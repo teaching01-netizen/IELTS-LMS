@@ -22,8 +22,8 @@ fi
 
 if [[ "${RUN_WITH_K6:-false}" == "true" ]]; then
   echo "[leapcell-load] running combined Playwright + k6"
-  npm run e2e:live-with-k6
+  bun run e2e:live-with-k6
 else
   echo "[leapcell-load] running Playwright live runner only"
-  npm run e2e:live-runner
+  bun run e2e:live-runner
 fi

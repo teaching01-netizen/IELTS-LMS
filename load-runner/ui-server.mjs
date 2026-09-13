@@ -219,8 +219,8 @@ app.post('/api/start', (req, res) => {
   if (mode === 'headless') env.HEADED_USERS = '0';
   if (mode === 'headed') env.HEADED_USERS = String(Math.max(1, Number(env.HEADED_USERS || '1')));
 
-  let cmd = ['npm', 'run', 'e2e:live-runner'];
-  if (mode === 'hybrid') cmd = ['npm', 'run', 'e2e:live-with-k6'];
+  let cmd = ['bun', 'run', 'e2e:live-runner'];
+  if (mode === 'hybrid') cmd = ['bun', 'run', 'e2e:live-with-k6'];
   if (mode === 'k6') cmd = ['k6', 'run', env.K6_SCRIPT];
 
   liveCards.clear();

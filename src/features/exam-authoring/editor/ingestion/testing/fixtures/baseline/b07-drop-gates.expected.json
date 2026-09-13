@@ -1,0 +1,19 @@
+{
+  "probe": "B7",
+  "inputKind": "dropped image FILE (no pasteHTML path; ImageDialog file input + assessmentMediaApi gates)",
+  "targetField": "stimulus",
+  "harness": "unit-level: uploadImageAsset gates (assessmentMediaApi.ts) + ImageDialog file flow (RichQuestionComposer.tsx); no TipTap handleDrop exists - dropped files hit ProseMirror default drop handling, NOT an upload",
+  "observedGates": {
+    "typeGate": "file.type must start with image/ else 'Only image files can be inserted here.'",
+    "sizeGate": "file.size > 10MB else 'Images must be 10 MB or smaller.' (11MB png rejected; 1MB png proceeds)",
+    "checksumGate": "SHA-256 via crypto.subtle required; null digest -> 'Secure browser cryptography is required for image uploads.'",
+    "flow": "checksum -> POST /v1/media/uploads (ownerKind assessment_question today; assessment_import reserved for ingestion, NOT wired) -> PUT bytes -> POST complete",
+    "dialogPreview": "local preview uses URL.createObjectURL + revoke-on-unmount; persisted node uses assetSource(assetId) (/api/v1/media/<id>) or https URL, never the object URL"
+  },
+  "files": {
+    "pass1MB": "png ~1MB -> proceeds to intent->PUT->complete; node attrs {src, assetId, alt REQUIRED, caption}",
+    "fail11MB": "png 11MB -> rejected with size message before any network call",
+    "failNonImage": "notes.txt -> rejected with type message"
+  },
+  "validatorOutcome": "size-gate message surfaced in ImageDialog alert with Retry; staged node without alt -> sat.accessibility.alt.required (blocking)"
+}

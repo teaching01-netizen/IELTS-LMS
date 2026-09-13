@@ -24,6 +24,7 @@ import (
 	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authoring"
+	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/authz"
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/exams"
@@ -81,7 +82,28 @@ type App struct {
 	Terminal      *terminalization.Service
 	LiveBus       *liveupdates.Bus
 	LiveHub       *liveupdates.Hub
-	Leases        *liveupdates.LeaseRepository
+	// AuthoringExamLoader, when set, overrides the exam-backed loader used by
+	// the authoring realtime ACL. Production leaves it nil (the handler falls
+	// back to app.Exams); tests inject a fake to exercise the socket with no DB.
+	AuthoringExamLoader authoringrealtime.ExamLoader
+	// AuthoringBarrier, when set, overrides the live bus as the source of the
+	// replay/live barrier cursor. Production leaves it nil (the handler uses
+	// app.LiveBus); tests inject a fixed watermark for deterministic handoffs.
+	AuthoringBarrier authoringrealtime.BarrierSource
+	// AuthoringDisplayNames, when set, overrides the DB-backed display-name
+	// lookup that stamps presence frames. Cosmetic only: a lookup failure
+	// yields an empty name and never fails a subscription.
+	AuthoringDisplayNames authoringrealtime.DisplayNameResolver
+	// AuthoringPresence is the process-local Phase 05 presence registry.
+	// Production leaves it nil and a default-configured hub is created on
+	// first use; tests inject a hub with a tiny TTL for deterministic expiry.
+	AuthoringPresence     *authoringrealtime.PresenceHub
+	authoringPresenceOnce sync.Once
+	// AuthoringConfigErr is a fail-closed startup check from app.Build:
+	// non-nil means AUTHORING_REALTIME_EVENTS was enabled without a live
+	// bus, so main refuses to boot instead of silently degrading.
+	AuthoringConfigErr error
+	Leases             *liveupdates.LeaseRepository
 	// Admission is the plan-C2 in-memory WS gate. Always non-nil (db mode
 	// leaves it unused; memory mode serves acquires with zero SQL).
 	Admission       *liveupdates.Admission
@@ -219,6 +241,7 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.LiveBus = bus
 		app.LiveHub = hub
 		app.Leases = liveupdates.NewLeaseRepository(pool)
+		app.AuthoringConfigErr = svc.AuthoringConfigErr
 	}
 
 	return app
@@ -249,6 +272,11 @@ func main() {
 	}
 
 	app := BuildApp(cfg, pool)
+	// Phase 02: a flag-on process with no live bus must not start, or the
+	// authoring realtime capability would be silently disabled at runtime.
+	if app.AuthoringConfigErr != nil {
+		log.Fatalf("api: authoring realtime misconfigured: %v", app.AuthoringConfigErr)
+	}
 	// Plan E3: report absorbed tx transients on db_deadlocks_total{kind}.
 	defer installTxRetryHook()()
 	srvCfg := httpx.DefaultServerConfig()
@@ -598,6 +626,9 @@ func BuildRouter(app *App) http.Handler {
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Group(func(r chi.Router) {
 			authzRoute(r, "GET", "/ws/live", liveWebSocketHandler(app))
+			// Phase 03: SAT authoring realtime. Same tier as the runtime socket;
+			// the handler applies the authoring read ACL before upgrading.
+			authzRoute(r, "GET", "/ws/authoring", authoringRealtimeHandler(app))
 		})
 	})
 

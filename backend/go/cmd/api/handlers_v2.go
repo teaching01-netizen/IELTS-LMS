@@ -529,19 +529,36 @@ func loadV2Acknowledgements(ctx context.Context, db *sql.DB, attemptID string, w
 	return acks, nil
 }
 
+// scheduleProvider resolves the V2 submit provider for an attempt via the
+// central effective-provider rule: legacy ACT rows (provider_key='ielts',
+// exam_type='ACT') route to the ACT direct-seal path, never the IELTS path
+// (Phase 02 blocker 4). Unknown/unreadable rows fail closed to IELTS — the
+// pre-existing default — so the submit preamble never misroutes on DB
+// uncertainty.
 func scheduleProvider(ctx context.Context, app *App, attemptID string) string {
 	if app.DB == nil {
 		return string(attempts.ProviderIELTS)
 	}
-	var scheduleID string
-	if err := app.DB.QueryRowContext(ctx, `SELECT schedule_id FROM student_attempts WHERE id = ?`, attemptID).Scan(&scheduleID); err != nil {
+	var provider, examType sql.NullString
+	if err := app.DB.QueryRowContext(ctx, `SELECT e.provider_key, e.exam_type FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id WHERE a.id = ?`, attemptID).Scan(&provider, &examType); err != nil || !provider.Valid || provider.String == "" {
 		return string(attempts.ProviderIELTS)
 	}
-	var provider sql.NullString
-	if err := app.DB.QueryRowContext(ctx, `SELECT s.provider_key FROM exam_schedules s WHERE s.id = ?`, scheduleID).Scan(&provider); err != nil || !provider.Valid || provider.String == "" {
+	return effectiveProviderForSubmit(provider.String, examType.String)
+}
+
+// effectiveProviderForSubmit mirrors exams.EffectiveProviderKey without
+// importing the exams package at the HTTP edge (cmd/api already depends on
+// it transitively; the local mirror keeps the submit preamble dependency
+// surface minimal and is pinned by TestScheduleProviderHealsLegacyACT).
+func effectiveProviderForSubmit(providerKey, examType string) string {
+	if strings.EqualFold(strings.TrimSpace(examType), "ACT") {
+		return string(attempts.ProviderACT)
+	}
+	p := strings.ToLower(strings.TrimSpace(providerKey))
+	if p == "" {
 		return string(attempts.ProviderIELTS)
 	}
-	return provider.String
+	return p
 }
 
 func v2TakeoverHandler(app *App) http.HandlerFunc {

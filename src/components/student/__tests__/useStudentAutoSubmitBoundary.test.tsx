@@ -98,6 +98,71 @@ describe('useStudentAutoSubmitBoundary', () => {
     expect(flushAndSubmitCurrentModuleWithRetry).toHaveBeenCalledTimes(1);
   });
 
+  it('submits science once on server-confirmed zero and ignores repeated polls (AT-03)', async () => {
+    const flushAndSubmitCurrentModuleWithRetry = vi.fn().mockResolvedValue(undefined);
+    const scienceState = {
+      blockingActive: false,
+      displayTimeRemaining: 1,
+      runtimeBacked: true,
+      runtimeStatus: 'live' as const,
+      currentModule: 'science' as const,
+      runtimeSnapshot: createRuntimeSnapshot({
+        currentSectionKey: 'science',
+        currentSectionRemainingSeconds: 5,
+      }),
+    };
+    const { rerender } = renderHook(
+      (props: typeof scienceState) =>
+        useStudentAutoSubmitBoundary({
+          effectivePhase: 'exam',
+          autoSubmitEnabled: true,
+          runtimeState: props,
+          flushAndSubmitCurrentModuleWithRetry,
+        }),
+      { initialProps: scienceState },
+    );
+    // Unconfirmed local zero: no submit.
+    rerender({
+      ...scienceState,
+      displayTimeRemaining: 0,
+      runtimeSnapshot: createRuntimeSnapshot({
+        currentSectionKey: 'science',
+        currentSectionRemainingSeconds: 5,
+      }),
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(flushAndSubmitCurrentModuleWithRetry).not.toHaveBeenCalled();
+    // Server-confirmed zero: exactly one submit with the science fingerprint.
+    rerender({
+      ...scienceState,
+      displayTimeRemaining: 0,
+      runtimeSnapshot: createRuntimeSnapshot({
+        currentSectionKey: 'science',
+        currentSectionRemainingSeconds: 0,
+      }),
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(flushAndSubmitCurrentModuleWithRetry).toHaveBeenCalledTimes(1);
+    expect(flushAndSubmitCurrentModuleWithRetry).toHaveBeenCalledWith('runtime:science');
+    // Repeated zero polls do not duplicate.
+    rerender({
+      ...scienceState,
+      displayTimeRemaining: 0,
+      runtimeSnapshot: createRuntimeSnapshot({
+        currentSectionKey: 'science',
+        currentSectionRemainingSeconds: 0,
+      }),
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(flushAndSubmitCurrentModuleWithRetry).toHaveBeenCalledTimes(1);
+  });
+
   it('does not submit in runtime mode when boundary is not confirmed by server', async () => {
     const flushAndSubmitCurrentModuleWithRetry = vi.fn().mockResolvedValue(undefined);
 

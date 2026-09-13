@@ -644,7 +644,9 @@ func TestEquivalenceSingleSectionModule(t *testing.T) {
 }
 
 // TestEquivalenceRoutingConfigParsing pins policy_config handling on real
-// MySQL, including the absent-keys branch (both numeric fields stay 0).
+// MySQL: the threshold key parses (absent -> 0), while the operational count
+// is DERIVED from the SAT blueprint for the section's base module
+// (math/math-m1 -> 20) — never 0, even when policy_config carries no count.
 func TestEquivalenceRoutingConfigParsing(t *testing.T) {
 	fixture := seedReadPerfFixture(t)
 	examID, versionID := seedEquivVersion(t, fixture.DB, fixture.Runner, []equivSectionSpec{
@@ -670,8 +672,11 @@ func TestEquivalenceRoutingConfigParsing(t *testing.T) {
 	if policy == nil {
 		t.Fatal("routing policy missing")
 	}
-	if policy.MinimumCorrectForHigher != 0 || policy.OperationalCount != 0 {
-		t.Fatalf("absent policy_config keys must stay 0, got %+v", policy)
+	if policy.MinimumCorrectForHigher != 0 {
+		t.Fatalf("absent threshold key must stay 0, got %+v", policy)
+	}
+	if policy.OperationalCount != 20 {
+		t.Fatalf("operational count must derive from the SAT math blueprint (20), got %+v", policy)
 	}
 	if policy.Revision != 2 {
 		t.Fatalf("routing revision = %d, want 2", policy.Revision)

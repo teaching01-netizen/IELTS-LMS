@@ -35,6 +35,31 @@ import {
 import { isBackendNotFound } from "../../../services/backendBridge";
 import { useQuestionAutosave } from "../hooks/useQuestionAutosave";
 import {
+  authorForActor,
+  classifyQuestionFields,
+  occupantsOf,
+  resolveAuthoringRealtimeFlags,
+  resolveEffectiveCapabilities,
+  useAuthoringPresence,
+  useAuthoringRealtime,
+  useQuestionDivergence,
+  type AuthoringCapabilities,
+  type AuthoringPresence,
+  type DivergenceEvent,
+} from "../realtime";
+import { SAVE_CONFLICT_COPY } from "../realtime/connectionCopy";
+import { RemoteUpdateNotice } from "./collaboration/RemoteUpdateNotice";
+import { ConflictResolver } from "./collaboration/ConflictResolver";
+import { CollaboratorStack } from "./collaboration/CollaboratorStack";
+import { QuestionPresenceBadge } from "./collaboration/QuestionPresenceBadge";
+import {
+  DELETION_COPY,
+  PRESENCE_COPY,
+  PUBLISH_COPY,
+  STRUCTURAL_COPY,
+  questionLabel,
+} from "./collaboration/collaborationCopy";
+import {
   hasStructuredContent,
   plainTextFromContent,
   supportsFastPlainEditing,
@@ -109,6 +134,31 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const [filter, setFilter] = useState<SpineQueueFilter>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [navigationError, setNavigationError] = useState<string | null>(null);
+  // Phase 05 race-recovery guards, declared here because `saveDraft` (defined
+  // below) must consult them. A published draft or a remotely deleted question
+  // freezes the mutation path WITHOUT touching the author's typed content.
+  const mutationFrozenRef = useRef(false);
+  const deletedRemotelyRef = useRef(false);
+  // The presence roster is the ONLY source of collaborator names (the event
+  // envelope carries a bare actor id). Kept in a ref so the realtime seams —
+  // registered before presence is mounted — read it at call time without
+  // re-subscribing on every roster change.
+  const presenceRosterRef = useRef<readonly AuthoringPresence[]>([]);
+  // Declared here rather than beside the hook that owns it, because `saveDraft`
+  // (defined below) must dispatch SERVER_ACK on its own success, and the
+  // realtime seams — also declared earlier than the hook — route through it.
+  // The effect that keeps it current lives with the hook.
+  const divergenceDispatchRef = useRef<(event: DivergenceEvent) => void>(() => undefined);
+  // Phase 05 invariant: a known-newer remote revision stops NETWORK autosave
+  // while the durable local write continues. A ref (not state) because the
+  // divergence that sets it is derived from the autosave this feeds.
+  const networkSavePausedRef = useRef(false);
+  // True while the open question holds unsaved local work, so a refetch may not
+  // adopt the server document over it. Written by an effect that is declared
+  // BEFORE the refetch path that reads it, so within one commit the reader sees
+  // this render's value rather than the previous one's.
+  const draftProtectedRef = useRef(false);
+  const conflictOpenerRef = useRef<HTMLElement | null>(null);
   const overlayStack = useOverlayStack();
   const [previewOpen, setPreviewOpen] = useOverlayToggle(overlayStack,"preview","sheet");
   const [importOpen, setImportOpen] = useOverlayToggle(overlayStack,"import","sheet");
@@ -258,16 +308,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   }, [searchParams, selectedModuleId, setSearchParams, shell, requestField]);
 
   useEffect(() => {
-    if (
-      questionQuery.data?.question &&
-      questionQuery.data.examQuestionId === selectedExamQuestionId &&
-      recoveredQuestionDraftKeyRef.current !== questionDraftKey
-    ) {
-      setDraft(questionQuery.data.question);
-    }
-  }, [questionDraftKey, questionQuery.data, selectedExamQuestionId]);
-
-  useEffect(() => {
     if (!draft || !focusField) return;
     let frame=0,attempts=0;
     const focus=()=>{
@@ -325,6 +365,20 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     async (revision: QuestionRevision) => {
       const examQuestionId = selectedExamQuestionId;
       if (!examQuestionId) throw new Error("Cannot save a question that is not selected.");
+      // Race-recovery freeze (plan §F). Both cases surface as a typed failure
+      // instead of an HTTP write: the published draft is not a valid target and
+      // a remotely deleted question can only answer 404. The author's typed
+      // content is untouched either way — only the WRITE is blocked.
+      if (mutationFrozenRef.current) {
+        throw new Error(
+          "This draft was published. Open the new draft to keep editing."
+        );
+      }
+      if (deletedRemotelyRef.current) {
+        throw new Error(
+          "This question was deleted elsewhere. Copy your work before leaving."
+        );
+      }
       const saved = await assessmentAuthoringApi.saveQuestionRevision(revision.id, {
         revision: revision.revision,
         questionType: revision.questionType,
@@ -336,6 +390,19 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         accessibility: revision.accessibility,
       });
       setDraft(saved);
+      // The author's OWN save must never read as a remote revision. `setDraft`
+      // and the query-cache write land in one batch, so the divergence hook
+      // re-seeds with `base = saved` while this entry still holds the edited
+      // draft — and without this ack the base never advances, making the re-seed
+      // indistinguishable from a collaborator's newer revision. The visible
+      // cost of that: the save area claims "a newer version is available" for
+      // the author's own work, and the pause that exists to protect a stale
+      // draft swallows their next edit.
+      divergenceDispatchRef.current({
+        type: "SERVER_ACK",
+        examQuestionId,
+        saved,
+      });
       if (recoveredQuestionDraftKeyRef.current === questionDraftKey) {
         recoveredQuestionDraftKeyRef.current = null;
       }
@@ -361,15 +428,348 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     save: saveDraft,
     durableKey: questionDraftKey,
     autoSaveRecovered: false,
+    networkPausedRef: networkSavePausedRef,
     onRecover: (recovered) => {
       if (!questionDraftKey) return;
       recoveredQuestionDraftKeyRef.current = questionDraftKey;
       setDraft(recovered);
+      // A device-local draft came back after a reload. That is its own state,
+      // not a remote conflict: nobody else's save is implied, and with the
+      // refetch guard in place this can no longer be the accidental
+      // consequence of a newer version silently replacing the editor.
       setNavigationError(
-        "Recovered unsaved changes from this device. Review them before leaving this question."
+        `${SAVE_CONFLICT_COPY.recovered} ${SAVE_CONFLICT_COPY.recoveredHint}`
       );
     },
   });
+
+  // Phase 04/05: the ONLY authoring realtime mount. It is deliberately placed
+  // here (after autosave so the dirty closure binds; before the early returns
+  // so the hook is unconditional) and NEVER inside an editor or rail.
+  //
+  // Composition rule (Phase 05): three small hooks, one owner. There is no
+  // `useCollaborationEverything`; each hook owns exactly one concern and the
+  // workspace threads their outputs into the spine as PROPS.
+  const realtimeFlags = useMemo(
+    () => resolveAuthoringRealtimeFlags(import.meta.env as Record<string, unknown>),
+    []
+  );
+  const [serverCapabilities, setServerCapabilities] = useState<AuthoringCapabilities>({
+    delivery: true,
+    presence: false,
+    conflictCompare: false,
+  });
+  // Server OFF always wins; the local kill switch can only narrow further.
+  const effectiveCapabilities = useMemo(
+    () => resolveEffectiveCapabilities(serverCapabilities, realtimeFlags),
+    [serverCapabilities, realtimeFlags]
+  );
+  const realtimeDeliveryEnabled = effectiveCapabilities.delivery;
+  const isQuestionDirtyForRealtime = useCallback(
+    (examQuestionId: string) =>
+      examQuestionId === selectedExamQuestionId && autosave.hasPendingChanges,
+    [selectedExamQuestionId, autosave.hasPendingChanges]
+  );
+  const handleRealtimeLifecycle = useCallback(
+    (signal: "draft-replaced" | "published" | "exam-changed") => {
+      // Re-fetch the shell so the workspace re-resolves the current draft; the
+      // draft binding change re-mounts the socket against the new draft.
+      void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
+      if (signal === "published") {
+        setPublishedFrozen(true);
+      }
+    },
+    [examId, queryClient]
+  );
+
+  // Phase 05 divergence: driven by the Phase 04 reconciler seams, so the
+  // decision of WHAT happened stays in one place and this only records state.
+  const [publishedFrozen, setPublishedFrozen] = useState(false);
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+
+  // The realtime client is created before these hooks exist, so the seams it
+  // calls are routed through refs that the effects below keep current (the
+  // divergence dispatcher is declared with the other Phase 05 refs, above, so
+  // `saveDraft` can use it). This is what lets the Phase 04 reconciler drive
+  // Phase 05 state without a cycle.
+  const presenceFrameRef = useRef<(raw: unknown) => void>(() => undefined);
+  const autosavePendingRef = useRef(false);
+  useEffect(() => {
+    autosavePendingRef.current = autosave.hasPendingChanges;
+  }, [autosave.hasPendingChanges]);
+  useEffect(() => {
+    mutationFrozenRef.current = publishedFrozen;
+  }, [publishedFrozen]);
+
+  const authoringRealtime = useAuthoringRealtime({
+    examId,
+    enabled: canOpenDraft && Boolean(shell?.versionId) && realtimeDeliveryEnabled,
+    draftVersionId: shell?.versionId ?? null,
+    selectedExamQuestionId,
+    isQuestionDirty: isQuestionDirtyForRealtime,
+    onLifecycle: handleRealtimeLifecycle,
+    onCapabilities: setServerCapabilities,
+    onPresence: (raw) => presenceFrameRef.current(raw),
+    // The reconciler only calls this for a DIRTY question: the clean path is
+    // already handled by invalidation + refetch (the Phase 04 refetch-replace).
+    onRemoteRevision: (examQuestionId, eventRevision, actorId) => {
+      const author = authorForActor(presenceRosterRef.current, actorId);
+      divergenceDispatchRef.current({
+        type: "REMOTE_REVISION",
+        examQuestionId,
+        remoteRevision: eventRevision,
+        hasPendingChanges: autosavePendingRef.current,
+        ...(author ? { author } : {}),
+      });
+    },
+    onRemoteStructuralChange: (examQuestionId, kind, actorId) => {
+      const author = authorForActor(presenceRosterRef.current, actorId);
+      const event: DivergenceEvent =
+        kind === "deleted"
+          ? { type: "REMOTE_DELETED", examQuestionId, ...(author ? { author } : {}) }
+          : kind === "moved"
+            ? { type: "REMOTE_MOVED", examQuestionId }
+            : { type: "REMOTE_BULK_CHANGED", examQuestionId };
+      divergenceDispatchRef.current(event);
+    },
+  });
+
+  const baseQuestion = questionQuery.data?.question ?? null;
+  const { divergence, isDirty: isQuestionDiverged, dispatch: dispatchDivergence } =
+    useQuestionDivergence(selectedExamQuestionId, {
+      base: baseQuestion,
+      draft,
+      hasPendingChanges: autosave.hasPendingChanges,
+    });
+  const diverged = divergence?.status === "diverged";
+  useEffect(() => {
+    // The single place divergence gates network writes. Everything else (the
+    // 409 fence, the mutation freeze) stays as it was.
+    networkSavePausedRef.current = diverged;
+  }, [diverged]);
+  useEffect(() => {
+    // The sanctioned dirty rule (content vs the authored-against base, or an
+    // unsaved-but-identical pending write) — never DOM state, focus, or
+    // keystrokes. Gated on a draft existing: a pending flag that arrived BEFORE
+    // the editor had anything in it (a recovered device draft) must not block
+    // the seed, or the question would never open at all.
+    draftProtectedRef.current =
+      draft !== null && (autosave.hasPendingChanges || isQuestionDiverged);
+  }, [draft, autosave.hasPendingChanges, isQuestionDiverged]);
+
+  // The refetch path. Declared AFTER the dirty flag it consults, so a refetch
+  // that lands in the same commit as the first keystroke still sees the work it
+  // must not discard. A refetch may adopt the server document only when there
+  // is no unsaved local work: otherwise the very fetch that reveals a newer
+  // revision would replace the draft the notice beside it promises to keep, and
+  // the device copy would be the only survivor — which is what turns "review
+  // the newer version" into "recovered unsaved changes from this device" a
+  // reload later. The clean case keeps its refetch-replace: that IS the
+  // intended freshness path (Phase 04).
+  useEffect(() => {
+    if (
+      questionQuery.data?.question &&
+      questionQuery.data.examQuestionId === selectedExamQuestionId &&
+      recoveredQuestionDraftKeyRef.current !== questionDraftKey &&
+      !draftProtectedRef.current
+    ) {
+      setDraft(questionQuery.data.question);
+    }
+  }, [questionDraftKey, questionQuery.data, selectedExamQuestionId]);
+
+  const openReview = useCallback(() => {
+    // Captured for focus restore on close. Opening the sheet programmatically
+    // must not move focus: the surface is non-modal and the author keeps
+    // typing where they were.
+    conflictOpenerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setConflictOpen(true);
+  }, []);
+
+  // Phase 05 parity: a FENCED write is the same product condition as a
+  // socket-delivered newer revision — the author is dirty and a newer revision
+  // exists — but it arrives with no socket at all (delivery off, degraded, or a
+  // POST already in flight when the collaborator's save committed). Route it
+  // into the same divergence state and the same Review surface instead of
+  // stranding the author on a manual "reload and reapply your changes"
+  // instruction. The fetch below is what turns the fence into a fact: HTTP, not
+  // the event stream, is authoritative.
+  const conflictRoutedRef = useRef<string | null>(null);
+  // Read at resolution time, never as a dependency: the draft arriving is what
+  // triggers this fetch, so depending on it would tear the effect down and
+  // cancel the very request it just issued.
+  const draftRevisionRef = useRef<number | null>(null);
+  useEffect(() => {
+    draftRevisionRef.current = draft?.revision ?? null;
+  }, [draft]);
+  useEffect(() => {
+    if (autosave.status !== "conflict") {
+      conflictRoutedRef.current = null;
+      return undefined;
+    }
+    if (!selectedExamQuestionId || conflictRoutedRef.current === selectedExamQuestionId) {
+      return undefined;
+    }
+    conflictRoutedRef.current = selectedExamQuestionId;
+    let cancelled = false;
+    void assessmentAuthoringApi
+      .getQuestion(selectedExamQuestionId)
+      .then((detail) => {
+        if (cancelled) return;
+        const remoteRevision = detail.question.revision;
+        // 409 also covers draft_replaced / draft_not_editable. Only a genuinely
+        // newer revision is a divergence; anything else keeps its own
+        // explanation rather than being dressed up as a newer version.
+        const attemptedRevision = draftRevisionRef.current;
+        if (attemptedRevision !== null && remoteRevision <= attemptedRevision) return;
+        dispatchDivergence({
+          type: "REMOTE_REVISION",
+          examQuestionId: selectedExamQuestionId,
+          remoteRevision,
+          hasPendingChanges: autosavePendingRef.current,
+        });
+        openReview();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [autosave.status, dispatchDivergence, openReview, selectedExamQuestionId]);
+
+  const presence = useAuthoringPresence({
+    draftVersionId: shell?.versionId ?? null,
+    selectedExamQuestionId,
+    isDirty: isQuestionDiverged,
+    enabled: effectiveCapabilities.presence,
+    connectionState: authoringRealtime.connectionState,
+    sendFrame: authoringRealtime.sendFrame,
+    selfConnectionId: authoringRealtime.selfConnectionId,
+  });
+  useEffect(() => {
+    divergenceDispatchRef.current = dispatchDivergence;
+  }, [dispatchDivergence]);
+  useEffect(() => {
+    presenceFrameRef.current = presence.handlePresenceFrame;
+  }, [presence.handlePresenceFrame]);
+
+  // A fresh divergence is a fresh notice: never leave the banner dismissed
+  // from a previous conflict.
+  useEffect(() => {
+    setNoticeDismissed(false);
+  }, [selectedExamQuestionId, divergence?.remoteRevision]);
+
+  const labelForQuestion = useCallback(
+    (examQuestionId: string): string | null => {
+      for (const section of shell?.sections ?? []) {
+        for (const module of section.modules) {
+          const index = module.questions.findIndex(
+            (q) => q.examQuestionId === examQuestionId
+          );
+          if (index >= 0) return questionLabel(index);
+        }
+      }
+      return null;
+    },
+    [shell]
+  );
+
+  const remoteAuthorName = divergence?.remoteAuthor?.displayName ?? null;
+  useEffect(() => {
+    presenceRosterRef.current = presence.occupants;
+  }, [presence.occupants]);
+  useEffect(() => {
+    deletedRemotelyRef.current = Boolean(divergence?.deletedRemotely);
+  }, [divergence?.deletedRemotely]);
+  const selectedQuestionLabel = selectedExamQuestionId
+    ? labelForQuestion(selectedExamQuestionId)
+    : null;
+  const editorHere = presence.editorsHere[0] ?? null;
+
+  // The remote document is fetched LAZILY, only when Review opens, and never
+  // from an event payload: an event carries ids + revisions, not content.
+  const [remoteDocument, setRemoteDocument] = useState<QuestionRevision | null>(null);
+  useEffect(() => {
+    if (!conflictOpen || !selectedExamQuestionId) {
+      setRemoteDocument(null);
+      return undefined;
+    }
+    let cancelled = false;
+    void assessmentAuthoringApi
+      .getQuestion(selectedExamQuestionId)
+      .then((detail) => {
+        if (cancelled) return;
+        setRemoteDocument(detail.question);
+        dispatchDivergence({
+          type: "REMOTE_DOCUMENT",
+          examQuestionId: selectedExamQuestionId,
+          remote: detail.question,
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [conflictOpen, selectedExamQuestionId, dispatchDivergence]);
+
+  // `base` is the document the author STARTED FROM — taken from the divergence
+  // entry that recorded it, not from the live query. Using the query would
+  // silently use the newest server revision as the base as soon as anything
+  // refetched, turning the three-way compare into a two-way diff in which a
+  // same-field conflict can never be reported as one. `local` is always the
+  // workspace draft: the editable document has exactly one owner.
+  const baseDocument = divergence?.baseDocument ?? baseQuestion;
+  const classifications = useMemo(() => {
+    if (!effectiveCapabilities.conflictCompare) return [];
+    if (!baseDocument || !draft || !remoteDocument) return [];
+    return classifyQuestionFields({ base: baseDocument, local: draft, remote: remoteDocument });
+  }, [effectiveCapabilities.conflictCompare, baseDocument, draft, remoteDocument]);
+
+  const handleUseLatest = useCallback(
+    async (remote: QuestionRevision) => {
+      if (!selectedExamQuestionId) return;
+      // Refetch at CLICK time so a save that landed while the sheet was open is
+      // not silently discarded in favour of the snapshot we opened with.
+      const refreshed = await questionQuery.refetch().catch(() => null);
+      const latest = refreshed?.data?.question ?? remote;
+      // Install only AFTER the authoritative revision is in hand: the local
+      // draft is never dropped before the replacement is rendered.
+      setDraft(latest);
+      dispatchDivergence({
+        type: "RESOLVE_USE_LATEST",
+        examQuestionId: selectedExamQuestionId,
+        remote: latest,
+      });
+      // Nothing is left to send, so the fenced/diverged save state must clear
+      // with it — otherwise the save area keeps offering a Retry for a payload
+      // the client already knows is stale, on a conflict that no longer exists.
+      autosave.acknowledgeServerRevision();
+      setConflictOpen(false);
+      setNoticeDismissed(false);
+    },
+    [selectedExamQuestionId, questionQuery, dispatchDivergence, autosave]
+  );
+
+  const activeRaceNotice = divergence?.deletedRemotely
+    ? DELETION_COPY.body(remoteAuthorName ?? "Another author")
+    : publishedFrozen
+      ? PUBLISH_COPY.body
+      : divergence?.movedRemotely
+        ? STRUCTURAL_COPY.movedTo(selectedModule?.title ?? "another module")
+        : divergence?.bulkChangedRemotely
+          ? STRUCTURAL_COPY.orderUpdated
+          : null;
+
+  const copyMyWork = useCallback(async () => {
+    if (!draft) return;
+    const text = JSON.stringify(draft, null, 2);
+    try {
+      await navigator.clipboard?.writeText(text);
+      setNavigationError("Your current question draft was copied to the clipboard.");
+    } catch {
+      setNavigationError("Copy failed — select the text in Review and copy it manually.");
+    }
+  }, [draft]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -390,11 +790,16 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     const result = await autosave.flushNow(draft);
     if (result.ok) return true;
     setNavigationError(
-      autosave.status === "conflict"
-        ? "Another author saved this question first. Your edits are kept here — reload the latest version before leaving, or copy your changes first."
+      // Fenced and diverged are the same condition with the same answer, so
+      // they share one sentence: review the newer version, or take your work
+      // with you. Neither accuses the save of failing.
+      autosave.status === "conflict" ||
+        networkSavePausedRef.current ||
+        autosave.isNetworkPaused
+        ? SAVE_CONFLICT_COPY.fencedBeforeLeaving
         : autosave.isOffline
           ? "You are offline. This draft is saved on this device; reconnect before leaving so it can sync."
-          : "Save failed. The current question remains open; navigation was stopped so no work is lost."
+          : SAVE_CONFLICT_COPY.failed
     );
     return false;
   }, [autosave, draft]);
@@ -443,8 +848,16 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     if (!draft) return;
     setNavigationError(null);
     const result = await autosave.flushNow(draft);
-    if (!result.ok) setNavigationError("Could not save this question. Retry before leaving it.");
-  }, [autosave, draft]);
+    if (result.ok) return;
+    if (networkSavePausedRef.current || autosave.isNetworkPaused) {
+      // Diverged, not failed: the write is held back on purpose because the
+      // server already holds a newer revision. The author asked to save, so
+      // answer with the decision they actually have to make.
+      openReview();
+      return;
+    }
+    setNavigationError(SAVE_CONFLICT_COPY.failed);
+  }, [autosave, draft, openReview]);
 
   const handleCreateQuestion = useCallback(
     async (inheritFrom?: QuestionRevision) => {
@@ -1018,6 +1431,15 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             }}
             onReorder={handleReorder}
             onBulkAction={handleBulkAction}
+            {...(effectiveCapabilities.presence
+              ? {
+                  presenceSlot: (examQuestionId: string) => (
+                    <QuestionPresenceBadge
+                      occupants={occupantsOf(presence.occupants, examQuestionId)}
+                    />
+                  ),
+                }
+              : {})}
           />
         );
       }
@@ -1034,6 +1456,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       <div
         className="sat-product"
         data-au-section={selectedSection?.sectionKey ?? "rw"}
+        data-authoring-realtime={authoringRealtime.connectionState}
       >
         <SpineLayout
           header={
@@ -1064,13 +1487,9 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                     announce={false}
                     status={autosave.status}
                     lastSavedAt={autosave.lastSavedAt}
+                    diverged={Boolean(diverged) || Boolean(publishedFrozen)}
                     onRetry={() => autosave.retry(draft)}
-                    onReviewConflict={() => {
-                      setNavigationError(
-                        "Another author saved this question first. Your edits are kept on this device — reload the latest version, then reapply your changes."
-                      );
-                      void questionQuery.refetch();
-                    }}
+                    onReviewConflict={openReview}
                   />
                 ) : null
               }
@@ -1093,6 +1512,30 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                 })();
               }}
               onOpenQueue={() => setQuestionListOpen(true)}
+              collaborationSlot={
+                effectiveCapabilities.presence ? (
+                  <span className="flex items-center gap-2">
+                    {editorHere ? (
+                      <span
+                        className="text-[11px] text-muted-foreground"
+                        data-testid="editing-elsewhere-label"
+                        title={PRESENCE_COPY.editingThisQuestion(
+                          editorHere.displayName.trim() || "Another author"
+                        )}
+                      >
+                        {PRESENCE_COPY.editingThisQuestion(
+                          editorHere.displayName.trim() || "Another author"
+                        )}
+                      </span>
+                    ) : null}
+                    <CollaboratorStack
+                      occupants={presence.occupants}
+                      labelFor={labelForQuestion}
+                      onSelectQuestion={(id) => void selectQuestion(id)}
+                    />
+                  </span>
+                ) : null
+              }
             />
           }
           queue={compactViewport?null:spineQueue}
@@ -1105,6 +1548,20 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                 <div role="alert" className="border-b px-5 py-2 text-center text-xs font-medium">
                   {navigationError}
                 </div>
+              ) : null}
+              {activeRaceNotice ? (
+                <div className="border-b px-5 py-2 text-center text-xs font-semibold text-destructive">
+                  {activeRaceNotice}
+                </div>
+              ) : null}
+              {diverged && !noticeDismissed ? (
+                <RemoteUpdateNotice
+                  remoteAuthorName={remoteAuthorName}
+                  questionLabel={selectedQuestionLabel}
+                  onReview={() => setConflictOpen(true)}
+                  onDismiss={() => setNoticeDismissed(true)}
+                  announce={false}
+                />
               ) : null}
               {workbookUndo?.available ? (
                 <WorkbookImportUndoBanner
@@ -1141,12 +1598,12 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                   onSaveNow={() => void handleSaveNow()}
                   onSaveAndNext={() => void handleSaveAndNext()}
                   onRetrySave={() => autosave.retry(draft)}
-                  onReviewConflict={() => {
-                    setNavigationError(
-                      "Another author saved this question first. Your edits are kept on this device — reload the latest version, then reapply your changes."
-                    );
-                    void questionQuery.refetch();
-                  }}
+                  // One Review behavior for both save-cluster sites. The footer
+                  // used to answer this click with a page message that told the
+                  // author to reload and retype work the app was already
+                  // holding, while the header opened the real surface.
+                  onReviewConflict={openReview}
+                  diverged={Boolean(diverged) || Boolean(publishedFrozen)}
                   onDuplicate={() => void handleDuplicate()}
                   onDelete={() => handleDelete()}
                   onPreview={() => setPreviewOpen(true)}
@@ -1170,6 +1627,26 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             />
           )}
         </SpineLayout>
+        {conflictOpen && (baseDocument || remoteDocument) ? (
+          <ConflictResolver
+            open={conflictOpen}
+            base={baseDocument ?? remoteDocument!}
+            local={draft ?? baseDocument ?? remoteDocument!}
+            remote={remoteDocument ?? baseDocument!}
+            classifications={classifications}
+            remoteAuthorName={remoteAuthorName}
+            deletedRemotely={Boolean(divergence?.deletedRemotely)}
+            onUseLatest={(remote) => void handleUseLatest(remote)}
+            onKeepEditing={() => {
+              // Dismissing resolves nothing: stay diverged, keep the draft.
+              setConflictOpen(false);
+              setNoticeDismissed(true);
+            }}
+            onCopyLocal={() => void copyMyWork()}
+            onClose={() => setConflictOpen(false)}
+            openerRef={conflictOpenerRef}
+          />
+        ) : null}
         {selectedModule ? (
           <QuestionJumpPalette
             open={jumpPaletteOpen}

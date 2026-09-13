@@ -289,6 +289,22 @@ func isDupKeyErr(err error) bool {
 	return strings.Contains(msg, "entry") || strings.Contains(msg, "unique") || strings.Contains(msg, "1062")
 }
 
+// effectiveProviderKey mirrors exams.EffectiveProviderKey without importing
+// the exams package (terminalization sits below it in the dependency order):
+// exam_type ACT always wins so legacy ACT rows (provider_key='ielts',
+// exam_type='ACT') seal through the ACT scorer/materializer. The stored
+// provider key is otherwise authoritative; blank normalizes to ielts.
+func effectiveProviderKey(providerKey, examType string) string {
+	if strings.EqualFold(strings.TrimSpace(examType), "ACT") {
+		return "act"
+	}
+	p := strings.ToLower(strings.TrimSpace(providerKey))
+	if p == "" {
+		return "ielts"
+	}
+	return p
+}
+
 // ValidateSealCommand enforces the outcome/reason/actor vocabulary.
 func ValidateSealCommand(cmd SealCommand) error {
 	if cmd.AttemptID == "" || cmd.ScheduleID == "" {
@@ -452,15 +468,25 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 		a.Flags = json.RawMessage(blobs.Flags)
 	}
 
-	// Provider key for snapshot + SAT materialization.
-	var providerNull sql.NullString
-	if err := q.QueryRowContext(ctx, "SELECT provider_key FROM exam_entities WHERE id = ?", a.ExamID).Scan(&providerNull); err != nil && err != sql.ErrNoRows {
+	// Provider key for snapshot + SAT/ACT materialization. Resolved via the
+	// central effective-provider rule (internal/exams): legacy ACT rows
+	// carry provider_key='ielts' with exam_type='ACT' and must seal through
+	// the ACT scorer/materializer, never the IELTS path (Phase 02 blocker 4).
+	// The repair is read-time only; stored identity is healed forward by
+	// migration 0054.
+	var providerNull, examTypeNull sql.NullString
+	if err := q.QueryRowContext(ctx, "SELECT provider_key, exam_type FROM exam_entities WHERE id = ?", a.ExamID).Scan(&providerNull, &examTypeNull); err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
 	providerKey := "legacy"
 	if providerNull.Valid && providerNull.String != "" {
 		providerKey = providerNull.String
 	}
+	examType := ""
+	if examTypeNull.Valid {
+		examType = examTypeNull.String
+	}
+	providerKey = effectiveProviderKey(providerKey, examType)
 
 	// Step 2: replay check — receipt FOR UPDATE.
 	existing, err := s.repo.FindByAttemptID(ctx, q, a.ID)

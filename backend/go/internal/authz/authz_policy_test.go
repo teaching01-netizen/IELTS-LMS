@@ -134,6 +134,7 @@ var expectedAnnotated = []string{
 var expectedFullPaths = []string{
 	"GET /healthz", "GET /readyz", "GET /metrics",
 	"GET /api/v1/assessment-release/exams/{examID}",
+	"GET /api/v1/ws/authoring",
 	"GET /api/v1/assessment-authoring/exams/{examID}/shell",
 	"POST /api/v1/assessment-authoring/exams/{examID}/shell",
 	"GET /api/v1/assessment-authoring/exams/{examID}/preview",

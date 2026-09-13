@@ -162,32 +162,40 @@ func TestAssembleShellTreeMissingRoutingIsNil(t *testing.T) {
 	}
 }
 
-// TestAssembleShellTreePolicyConfigParsing pins loadRouting's policy_config
-// rules: the two numeric keys are read as float64 and truncated to int, absent
-// keys stay 0, and an unparseable config is ignored without an error.
+// TestAssembleShellTreePolicyConfigParsing pins the threshold parse rules
+// (float64, truncated to int; absent/unparseable stays 0) and the derived
+// operational count: policy_config is threshold-only on real rows, so
+// OperationalCount comes from the SAT blueprint for the section's base
+// module (math/math-m1 -> 20), never from a stored operationalQuestionCount
+// key (a stale stored value must not win).
 func TestAssembleShellTreePolicyConfigParsing(t *testing.T) {
 	cases := []struct {
 		name          string
 		config        sql.NullString
 		wantThreshold int
-		wantOperatio  int
 	}{
-		{"both keys", sql.NullString{String: `{"minimumCorrectForHigher":13,"operationalQuestionCount":25}`, Valid: true}, 13, 25},
-		{"only threshold", sql.NullString{String: `{"minimumCorrectForHigher":7}`, Valid: true}, 7, 0},
-		{"no keys", sql.NullString{String: `{"unrelated":true}`, Valid: true}, 0, 0},
-		{"invalid json", sql.NullString{String: `not json at all`, Valid: true}, 0, 0},
-		{"null column", sql.NullString{Valid: false}, 0, 0},
-		{"fractional truncates", sql.NullString{String: `{"minimumCorrectForHigher":13.9}`, Valid: true}, 13, 0},
+		{"threshold only (real shape)", sql.NullString{String: `{"minimumCorrectForHigher":7}`, Valid: true}, 7},
+		{"stale stored count ignored", sql.NullString{String: `{"minimumCorrectForHigher":13,"operationalQuestionCount":25}`, Valid: true}, 13},
+		{"no keys", sql.NullString{String: `{"unrelated":true}`, Valid: true}, 0},
+		{"invalid json", sql.NullString{String: `not json at all`, Valid: true}, 0},
+		{"null column", sql.NullString{Valid: false}, 0},
+		{"fractional truncates", sql.NullString{String: `{"minimumCorrectForHigher":13.9}`, Valid: true}, 13},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			identity := shellIdentity{providerKey: "sat", versionID: "v-1"}
 			sections := []bulkSectionRow{{id: "sec-a", sectionKey: "math"}}
+			modules := []bulkModuleRow{{
+				id: "mod-a1", sectionID: "sec-a", moduleKey: "math-m1",
+				title: "M1", displayOrder: 0, targetCount: 22, adaptiveRole: RoleBase,
+			}}
 			routing := []bulkRoutingRow{{
-				sectionID: "sec-a", id: "rp-1", policyKey: "practice_threshold",
+				sectionID: "sec-a", id: "rp-1", baseModuleID: "mod-a1",
+				lowerModuleID: "mod-a1", higherModuleID: "mod-a1",
+				policyKey:    "practice_threshold",
 				policyConfig: testCase.config, revision: 4,
 			}}
-			shell := assembleShellTree(identity, sections, nil, routing, nil, "exam-9")
+			shell := assembleShellTree(identity, sections, modules, routing, nil, "exam-9")
 			policy := shell.Sections[0].RoutingPolicy
 			if policy == nil {
 				t.Fatal("routing row present but policy is nil")
@@ -195,13 +203,48 @@ func TestAssembleShellTreePolicyConfigParsing(t *testing.T) {
 			if policy.MinimumCorrectForHigher != testCase.wantThreshold {
 				t.Fatalf("minimumCorrectForHigher = %d, want %d", policy.MinimumCorrectForHigher, testCase.wantThreshold)
 			}
-			if policy.OperationalCount != testCase.wantOperatio {
-				t.Fatalf("operationalQuestionCount = %d, want %d", policy.OperationalCount, testCase.wantOperatio)
+			if policy.OperationalCount != 20 {
+				t.Fatalf("operationalQuestionCount = %d, want 20 (SAT math blueprint)", policy.OperationalCount)
 			}
 			if policy.Revision != 4 || policy.ID != "rp-1" || policy.PolicyKey != "practice_threshold" {
 				t.Fatalf("policy scalar fields drifted: %+v", policy)
 			}
 		})
+	}
+}
+
+// TestAssembleShellTreeOperational Derivation pins the fallback when the
+// base module is not a known blueprint module: target minus authored pretest
+// in the base module, floored at 1.
+func TestAssembleShellTreeOperationalDerivation(t *testing.T) {
+	identity := shellIdentity{providerKey: "sat", versionID: "v-1"}
+	sections := []bulkSectionRow{{id: "sec-a", sectionKey: "custom", title: "C", displayOrder: 0}}
+	modules := []bulkModuleRow{{
+		id: "mod-a1", sectionID: "sec-a", moduleKey: "custom-m1",
+		title: "M1", displayOrder: 0, targetCount: 10, adaptiveRole: RoleBase,
+	}}
+	routing := []bulkRoutingRow{{
+		sectionID: "sec-a", id: "rp-1", baseModuleID: "mod-a1",
+		lowerModuleID: "mod-a1", higherModuleID: "mod-a1",
+		policyKey:    "practice_threshold",
+		policyConfig: sql.NullString{String: `{"minimumCorrectForHigher":3}`, Valid: true},
+		revision:     1,
+	}}
+	questions := []bulkQuestionRow{
+		{moduleID: "mod-a1", examQuestionID: "eq-1", questionID: "q-1", revisionID: "rev-1", sectionKey: "custom", displayOrder: 0, isPretest: false},
+		{moduleID: "mod-a1", examQuestionID: "eq-2", questionID: "q-2", revisionID: "rev-2", sectionKey: "custom", displayOrder: 1, isPretest: true},
+		{moduleID: "mod-a1", examQuestionID: "eq-3", questionID: "q-3", revisionID: "rev-3", sectionKey: "custom", displayOrder: 2, isPretest: true},
+	}
+	shell := assembleShellTree(identity, sections, modules, routing, questions, "exam-9")
+	// target 10 - 2 authored pretest = 8 (row.summary() preserves isPretest).
+	if got := shell.Sections[0].RoutingPolicy.OperationalCount; got != 8 {
+		t.Fatalf("operationalQuestionCount = %d, want 8 (10 target - 2 pretest)", got)
+	}
+
+	// Missing base module never projects 0 (the release page would clamp to 1).
+	shell = assembleShellTree(identity, sections, nil, routing, nil, "exam-9")
+	if got := shell.Sections[0].RoutingPolicy.OperationalCount; got != 1 {
+		t.Fatalf("operationalQuestionCount without base = %d, want floor 1", got)
 	}
 }
 

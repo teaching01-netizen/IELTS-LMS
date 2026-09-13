@@ -72,6 +72,10 @@ var RequiredIndexes = []RequiredIndex{
 	{Table: "attempt_mutations_v2", Index: "uq_attempt_mutations_v2_write_id"},
 	{Table: "attempt_mutations_v2", Index: "uq_attempt_mutations_v2_version"},
 	{Table: "attempt_submissions_v2", Index: "uq_attempt_submissions_v2_submission"},
+	// Phase 02 (0060): authoring replay + forward lookups on the generic
+	// live-update bus. Draft-scoped replay is the Phase 03 hot path; the
+	// kind-scoped index serves the bus forwarder's poll.
+	{Table: "live_update_events", Index: "idx_live_update_events_kind_target_seq"},
 }
 
 // SchemaVerifier queries information_schema for the required lists.

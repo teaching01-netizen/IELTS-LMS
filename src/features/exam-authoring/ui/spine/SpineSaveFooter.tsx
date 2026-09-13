@@ -5,6 +5,8 @@ import { SaveCluster } from "./SaveCluster";
 export interface SpineSaveFooterProps {
   status: QuestionSaveStatus;
   lastSavedAt: Date | null;
+  /** Phase 05: dirty + a known-newer revision. Same wording as the header. */
+  diverged?: boolean | undefined;
   keepMetadataForNext: boolean;
   saveDisabled: boolean;
   onKeepMetadataForNextChange: (value: boolean) => void;
@@ -21,6 +23,7 @@ export interface SpineSaveFooterProps {
 export function SpineSaveFooter({
   status,
   lastSavedAt,
+  diverged = false,
   keepMetadataForNext,
   saveDisabled,
   onKeepMetadataForNextChange,
@@ -31,7 +34,7 @@ export function SpineSaveFooter({
   return (
     <div className="sat-spine__save-footer mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-border py-5">
       <div className="flex min-w-0 flex-wrap items-center gap-3">
-        <SaveCluster status={status} lastSavedAt={lastSavedAt} onRetry={onRetry} onReviewConflict={onReviewConflict} />
+        <SaveCluster status={status} lastSavedAt={lastSavedAt} diverged={diverged} onRetry={onRetry} onReviewConflict={onReviewConflict} />
         <label
           htmlFor="sat-spine-carry-metadata"
           className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground"

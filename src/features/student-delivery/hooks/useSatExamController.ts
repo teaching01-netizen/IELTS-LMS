@@ -29,6 +29,7 @@ import {
 } from "../infrastructure/satCalculatorWorkspace";
 import { clearSatReadingPreferences } from "../infrastructure/satReadingPreferencesStore";
 import { createSatRunnerState, satRunnerReducer } from "../application/satRunnerReducer";
+import type { SatToolId } from "../domain/satTools";
 import {
   findActiveAttempt,
   findAttemptForModule,
@@ -1339,7 +1340,8 @@ export function useSatExamController({
       showDirections: () => dispatch({ type: "showDirections" }),
       toggleCalculator: () => dispatch({ type: "toggleTool", tool: "calculator" }),
       toggleReference: () => dispatch({ type: "toggleTool", tool: "reference_sheet" }),
-      closeTool: () => dispatch({ type: "closeTool" }),
+      closeTool: (tool: SatToolId) => dispatch({ type: "closeTool", tool }),
+      closeAllTools: () => dispatch({ type: "closeAllTools" }),
     },
   };
 }

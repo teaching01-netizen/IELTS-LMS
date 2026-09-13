@@ -105,4 +105,64 @@ describe("SatCalculatorPanel", () => {
     fireEvent.keyDown(graphing, { key: "ArrowLeft" });
     expect(scientific).toHaveAttribute("aria-checked", "true");
   });
+
+  it("renders exactly one mode selector in the window header with no Desmos byline", () => {
+    render(<SatCalculatorPanel {...baseProps} open />);
+    // Exactly one selector: two radios, one radiogroup (headerControls slot).
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect(screen.getAllByRole("radiogroup", { name: "Calculator type" })).toHaveLength(1);
+    // Stacked chrome is gone: the inner Desmos byline no longer renders.
+    expect(screen.queryByText("Desmos · College Board")).toBeNull();
+    // Header slot owns the selector: the radiogroup lives inside the tool header.
+    const dialog = screen.getByRole("dialog", { name: "Calculator" });
+    const header = dialog.querySelector("[data-sat-tool-header]");
+    expect(header).not.toBeNull();
+    expect(header!.querySelector('[role="radiogroup"]')).not.toBeNull();
+  });
+
+  it("does not resize the window when switching modes", () => {
+    render(<SatCalculatorPanel {...baseProps} open />);
+    const dialog = screen.getByRole("dialog", { name: "Calculator" });
+    const before = { left: dialog.style.left, top: dialog.style.top, width: dialog.style.width, height: dialog.style.height };
+    fireEvent.click(screen.getByRole("radio", { name: "Graphing" }));
+    expect(screen.getByTitle("Desmos graphing calculator, College Board testing version")).toHaveClass("block");
+    expect(dialog.style.left).toBe(before.left);
+    expect(dialog.style.top).toBe(before.top);
+    expect(dialog.style.width).toBe(before.width);
+    expect(dialog.style.height).toBe(before.height);
+  });
+
+  it("embeds carry the explicit exam locale", () => {
+    render(<SatCalculatorPanel {...baseProps} open />);
+    const scientific = screen.getByTitle("Desmos scientific calculator, College Board testing version");
+    expect(scientific.getAttribute("src")).toContain("lang=en");
+  });
+
+  it("compact sheet keeps exactly one mode selector at the top of the body", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(
+        (query: string) =>
+          ({
+            matches: true,
+            media: query,
+            onchange: null,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+          }) satisfies MediaQueryList
+      )
+    );
+    render(<SatCalculatorPanel {...baseProps} open />);
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    const group = screen.getByRole("radiogroup", { name: "Calculator type" });
+    const dialog = screen.getByRole("dialog", { name: "Calculator" });
+    // Compact sheet: no header slot by design, so the single selector lives
+    // at the top of the body inside the dialog.
+    expect(dialog).toHaveAttribute("data-sat-tool-presentation", "compact-sheet");
+    expect(dialog.querySelector("[data-sat-tool-header]")).toBeNull();
+    expect(dialog.contains(group)).toBe(true);
+  });
 });

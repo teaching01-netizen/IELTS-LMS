@@ -128,7 +128,7 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
                   }
                   placeholder={`Choice ${letter}`}
                   compact
-                  assetOwnerId={question.id}
+                  assetOwnerId={question.questionId}
                   capabilities={SAT_CHOICE_COMPOSER_CAPABILITIES}
                   minHeightClassName="min-h-[42px]"
                 />

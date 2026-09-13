@@ -1,0 +1,12 @@
+{
+  "probe": "B11",
+  "inputKind": "broken latex node (simulates MathDialog validation bypass / future ingested latex)",
+  "targetField": "prompt",
+  "harness": "jsdom + real composer extensions; insertContent {type:inlineMath, attrs:{latex:'\\\\frac{unclosed'}}; KaTeX runtime render with throwOnError:false",
+  "observed": {
+    "dialogGate": "MathDialog preview validates with katex.renderToString(throwOnError:true, strict:false); commit button DISABLED until preview HTML exists (canCommit=false) - broken latex CANNOT be committed through the dialog UI",
+    "runtimeFallback": "EditableMathExtension renderEquation uses throwOnError:false + try/catch returning raw latex; node renders without throwing (ReactNodeView span mounts; no katex-error styling asserted - node view replaces content with KaTeX HTML or raw string)",
+    "editorStable": true,
+    "validatorOutcome": "valid (SAT validators do not inspect latex); invalid latex is an editor-render concern, never a validation blocker today - phase-03 must add import.latex.invalid diagnostic + fenced-code fallback"
+  }
+}

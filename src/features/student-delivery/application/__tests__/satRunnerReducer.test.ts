@@ -122,6 +122,57 @@ describe('satRunnerReducer', () => {
     expect(closed.phase === 'module' ? closed.activeTool : undefined).toBe('reference_sheet');
   });
 
+  it('closes one tool via closeTool(tool) without touching the other (Phase 05 coexistence)', () => {
+    const module = startedMath();
+    const both = satRunnerReducer(
+      satRunnerReducer(module, { type: 'toggleTool', tool: 'calculator' }),
+      { type: 'toggleTool', tool: 'reference_sheet' },
+    );
+    expect(both.phase === 'module' ? both.activeTools : undefined).toEqual({
+      calculator: true,
+      referenceSheet: true,
+    });
+
+    const calcClosed = satRunnerReducer(both, { type: 'closeTool', tool: 'calculator' });
+    expect(calcClosed.phase === 'module' ? calcClosed.activeTools : undefined).toEqual({
+      calculator: false,
+      referenceSheet: true,
+    });
+    expect(calcClosed.phase === 'module' ? calcClosed.activeTool : undefined).toBe('reference_sheet');
+
+    const refClosed = satRunnerReducer(both, { type: 'closeTool', tool: 'reference_sheet' });
+    expect(refClosed.phase === 'module' ? refClosed.activeTools : undefined).toEqual({
+      calculator: true,
+      referenceSheet: false,
+    });
+    expect(refClosed.phase === 'module' ? refClosed.activeTool : undefined).toBe('calculator');
+  });
+
+  it('closeTool on an already-closed tool is a no-op', () => {
+    const module = startedMath();
+    const onlyCalc = satRunnerReducer(module, { type: 'toggleTool', tool: 'calculator' });
+    const closed = satRunnerReducer(onlyCalc, { type: 'closeTool', tool: 'reference_sheet' });
+    expect(closed.phase === 'module' ? closed.activeTools : undefined).toEqual({
+      calculator: true,
+      referenceSheet: false,
+    });
+    expect(closed.phase === 'module' ? closed.activeTool : undefined).toBe('calculator');
+  });
+
+  it('closeAllTools clears both tools at once', () => {
+    const module = startedMath();
+    const both = satRunnerReducer(
+      satRunnerReducer(module, { type: 'toggleTool', tool: 'calculator' }),
+      { type: 'toggleTool', tool: 'reference_sheet' },
+    );
+    const closed = satRunnerReducer(both, { type: 'closeAllTools' });
+    expect(closed.phase === 'module' ? closed.activeTools : undefined).toEqual({
+      calculator: false,
+      referenceSheet: false,
+    });
+    expect(closed.phase === 'module' ? closed.activeTool : undefined).toBeNull();
+  });
+
   it('updates answer, review, elimination, and annotations in one response aggregate', () => {
     const module = startedMath();
     const answered = satRunnerReducer(module, { type: 'setAnswer', questionId: 'q1', value: 'B' });

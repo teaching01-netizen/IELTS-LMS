@@ -17,12 +17,12 @@ This suite targets a real production environment and is intended for a **dedicat
 Example (6 shards):
 
 ```bash
-E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=0 npm run e2e:prod-load
-E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=1 npm run e2e:prod-load
-E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=2 npm run e2e:prod-load
-E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=3 npm run e2e:prod-load
-E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=4 npm run e2e:prod-load
-E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=5 npm run e2e:prod-load
+E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=0 bun run e2e:prod-load
+E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=1 bun run e2e:prod-load
+E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=2 bun run e2e:prod-load
+E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=3 bun run e2e:prod-load
+E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=4 bun run e2e:prod-load
+E2E_PROD_RUN_ID=examday-2026-04-20 E2E_PROD_SHARD_COUNT=6 E2E_PROD_WORKERS=1 E2E_PROD_SHARD_INDEX=5 bun run e2e:prod-load
 ```
 
 Notes:
@@ -34,7 +34,7 @@ Notes:
 If you want a full loop (create exam + publish + create schedule), run shard `0` with:
 
 ```bash
-E2E_PROD_BOOTSTRAP=true E2E_PROD_ALLOW_BOOTSTRAP=true npm run e2e:prod-load
+E2E_PROD_BOOTSTRAP=true E2E_PROD_ALLOW_BOOTSTRAP=true bun run e2e:prod-load
 ```
 
 This writes `e2e/.generated/prod-runtime.json` with the new `examId` and `scheduleId`.
@@ -82,7 +82,7 @@ JPEG_QUALITY=45 \\
 LIVE_MODE=balanced \\
 HEADLESS=true \\
 HEADED_USERS=0 \\
-npm run e2e:live-runner
+bun run e2e:live-runner
 ```
 
 Open dashboard:
@@ -119,5 +119,5 @@ HEADLESS=true \\
 HEADED_USERS=3 \\
 MAX_CONCURRENT_USERS=20 \\
 LIVE_MODE=balanced \\
-npm run e2e:live-runner
+bun run e2e:live-runner
 ```

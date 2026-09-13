@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { StudentQuestionDescriptor } from '../../../services/examAdapterService';
 import { SubAnswerTreeQuestionList } from '../SubAnswerTreeQuestionList';
@@ -183,5 +183,41 @@ describe('SubAnswerTreeQuestionList', () => {
     const flagButton = container.querySelector('button[aria-label="Unflag question"]');
     expect(flagButton).not.toBeNull();
     expect(flagButton).toHaveClass('flex-shrink-0');
+  });
+
+  it('activates a leaf the student starts working in (P4)', () => {
+    const leafOne = buildTreeDescriptor({
+      id: 'tree-block::tree::root-a::leaf-a',
+      rootNumber: 51,
+      numberLabel: '51.1',
+      rootLeafQuestionIds: ['tree-block::tree::root-a::leaf-a', 'tree-block::tree::root-a::leaf-b'],
+    });
+    const leafTwo = buildTreeDescriptor({
+      id: 'tree-block::tree::root-a::leaf-b',
+      rootNumber: 51,
+      numberLabel: '51.2',
+      rootLeafQuestionIds: ['tree-block::tree::root-a::leaf-a', 'tree-block::tree::root-a::leaf-b'],
+    });
+    const onActivate = vi.fn();
+
+    render(
+      <SubAnswerTreeQuestionList
+        questions={[leafOne, leafTwo]}
+        answers={{ [leafOne.id]: '', [leafTwo.id]: '' }}
+        currentQuestionId={leafOne.id}
+        onActivate={onActivate}
+        onAnswerChange={vi.fn()}
+      />,
+    );
+
+    // Focusing a leaf's input is the same "I am working here" signal as
+    // clicking it, so the single global navigator follows the student.
+    fireEvent.focus(screen.getByRole('textbox', { name: 'Answer for question 51.2' }));
+    expect(onActivate).toHaveBeenCalledWith(leafTwo.id);
+
+    // The already-active leaf does not re-announce itself.
+    onActivate.mockClear();
+    fireEvent.focus(screen.getByRole('textbox', { name: 'Answer for question 51.1' }));
+    expect(onActivate).not.toHaveBeenCalled();
   });
 });

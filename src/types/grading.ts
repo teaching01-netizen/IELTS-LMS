@@ -122,6 +122,33 @@ export interface ObjectiveIntegrityOverview {
 }
 
 /**
+ * Phase 05 ACT reconciliation (residual a): canonical Go wire shape for
+ * GET /v1/results/act-science (backend/go/internal/act ScienceReport).
+ *
+ * The pre-Phase-05 TS shape (submissionId/examId/publishedVersionId/...
+ * plus score.correctCount/totalQuestions) never matched the Go wire shape
+ * and has zero non-test product consumers: the admin dashboard reads ACT
+ * rows from GET /v1/results/dashboard (AdminResultRow) and per-question
+ * detail from GET /v1/results/act-science/{attemptId} (ActScienceDetail).
+ * This interface now pins the Go-canonical row so any future consumer of
+ * gradingService.getActScienceReports decodes the real payload; the legacy
+ * field names are intentionally NOT accepted here (fail-closed decode:
+ * unknown shapes must surface in the contract test, not coerce silently).
+ * See backend/go/internal/act/service.go ScienceReport + api/openapi/openapi.yaml
+ * ACTScienceReport.
+ */
+export interface ActScienceScoreReport {
+  attemptId: string;
+  scheduleId: string;
+  studentId: string;
+  studentName: string;
+  totalScore: number;
+  maxScore: number;
+  percentage: number;
+  releaseStatus: string;
+}
+
+/**
  * Visibility for comments and notes
  */
 export type CommentVisibility = 'student_visible' | 'internal_only';

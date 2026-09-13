@@ -202,7 +202,7 @@ describe('StudentWriting a11y', () => {
       '--writing-editor-pane-width': 'calc(50% - var(--split-divider-width))',
       '--split-divider-width': '10px',
     });
-    expect(resizer.querySelector('.h-12.w-8')).toBeInTheDocument();
+    expect(resizer.querySelector('[data-testid="writing-pane-resizer-grabber"]')).toBeInTheDocument();
 
     vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,
@@ -277,8 +277,8 @@ describe('StudentWriting a11y', () => {
     expect(resizer).toHaveClass('w-8');
     expect(resizer).toHaveClass('absolute');
     expect(resizer.querySelector('.w-0\\.5')).toBeInTheDocument();
-    expect(resizer.querySelector('.h-16')).toBeInTheDocument();
-    expect(resizer.querySelector('.w-8')).toBeInTheDocument();
+    expect(screen.getByTestId('writing-pane-resizer-grabber')).toBeInTheDocument();
+    expect(screen.getByTestId('writing-pane-resizer-hit-area')).toBeInTheDocument();
   });
 
   it('offsets tablet writing header and placeholder away from the splitter overlay', () => {

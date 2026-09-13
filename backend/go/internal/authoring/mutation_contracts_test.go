@@ -97,7 +97,7 @@ func TestReorderSwapsPositionsWithoutUniqueKeyCollision(t *testing.T) {
 		mock.ExpectExec("UPDATE assessment_exam_questions SET display_order = \\?, updated_at").WithArgs(i, id, "mod-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	}
 	mock.ExpectCommit()
-	if err := svc.ReorderQuestions(context.Background(), "mod-1", []string{"a", "b"}, []string{"b", "a"}); err != nil {
+	if err := svc.ReorderQuestions(context.Background(), "mod-1", []string{"a", "b"}, []string{"b", "a"}, "actor-1"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -108,7 +108,7 @@ func TestReorderRejectsStaleOrderWithUnchangedMembership(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_modules WHERE id = ? FOR UPDATE")).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("mod-1"))
 	mock.ExpectQuery("SELECT id, display_order FROM assessment_exam_questions").WillReturnRows(sqlmock.NewRows([]string{"id", "display_order"}).AddRow("b", 0).AddRow("a", 1))
 	mock.ExpectRollback()
-	if err := svc.ReorderQuestions(context.Background(), "mod-1", []string{"a", "b"}, []string{"b", "a"}); codeOf(err) != apperrors.CodeConflict {
+	if err := svc.ReorderQuestions(context.Background(), "mod-1", []string{"a", "b"}, []string{"b", "a"}, "actor-1"); codeOf(err) != apperrors.CodeConflict {
 		t.Fatalf("wanted order conflict, got %v", err)
 	}
 }

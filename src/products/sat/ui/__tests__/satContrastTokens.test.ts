@@ -22,9 +22,11 @@ describe('SAT contrast tokens (Phase 01)', () => {
   });
 
   it('uses text-slate-400 (tertiary remap) on every chevron slot', () => {
+    // SatResultsRoute.tsx renders rows via SatExamGroupSection.tsx (group-by-exam
+    // drill-down): the route owns composition, chevrons live in the section file.
     for (const relative of [
       'routes/SatSessionsRoute.tsx',
-      'routes/SatResultsRoute.tsx',
+      'routes/SatExamGroupSection.tsx',
       'routes/SatExamLibraryRoute.tsx',
     ]) {
       const source = readSource(relative);

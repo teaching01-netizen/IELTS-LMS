@@ -1,0 +1,96 @@
+{
+  "probe": "B3d",
+  "inputKind": "text/html lists",
+  "targetField": "prompt (full) vs choice (UNFILTERED today)",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "bulletList",
+        "content": [
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "attrs": {
+                  "id": "content-<stable>"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "a"
+                  }
+                ]
+              },
+              {
+                "type": "bulletList",
+                "content": [
+                  {
+                    "type": "listItem",
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "attrs": {
+                          "id": "content-<stable>"
+                        },
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "nested"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "attrs": {
+                  "id": "content-<stable>"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "b"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "orderedList",
+        "content": [
+          {
+            "type": "listItem",
+            "content": [
+              {
+                "type": "paragraph",
+                "attrs": {
+                  "id": "content-<stable>"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "one"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "observed": "nested lists preserved verbatim; trailing empty paragraph appended by replaceSelection wiring",
+  "validatorOutcome": "valid (lists invisible to SAT validators; choice-capability NOT enforced on paste - see B10)"
+}

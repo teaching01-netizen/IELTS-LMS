@@ -1629,6 +1629,31 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/ACTScienceReport" }
         "401": { $ref: "#/components/responses/Error" }
+  /results/act-science/{attemptId}:
+    get:
+      tags: [act, results]
+      summary: Get one sealed ACT science attempt with per-question rows
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Sealed ACT science detail (stored aggregate plus ordered verdicts)
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attemptId: { type: string }
+                  totalScore: { type: integer }
+                  maxScore: { type: integer }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /assessment-authoring/exams/{examId}/shell:
     get:
       tags: [authoring]

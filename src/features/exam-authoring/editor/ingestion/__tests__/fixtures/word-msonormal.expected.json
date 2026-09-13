@@ -1,0 +1,130 @@
+{
+  "nodes": [
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "Practice question",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        }
+      ],
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "· First item",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        }
+      ],
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    },
+    {
+      "kind": "paragraph",
+      "children": [
+        {
+          "kind": "text",
+          "text": "See note",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        },
+        {
+          "kind": "text",
+          "text": "[1]",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        },
+        {
+          "kind": "text",
+          "text": " for detail.",
+          "marks": [],
+          "meta": {
+            "source": "html",
+            "confidence": 2,
+            "transformations": []
+          }
+        }
+      ],
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    },
+    {
+      "kind": "table",
+      "rows": [
+        [
+          {
+            "children": [
+              {
+                "kind": "text",
+                "text": "cell one",
+                "marks": [],
+                "meta": {
+                  "source": "html",
+                  "confidence": 2,
+                  "transformations": []
+                }
+              }
+            ]
+          },
+          {
+            "children": [
+              {
+                "kind": "text",
+                "text": "cell two",
+                "marks": [],
+                "meta": {
+                  "source": "html",
+                  "confidence": 2,
+                  "transformations": []
+                }
+              }
+            ]
+          }
+        ]
+      ],
+      "headerRow": false,
+      "meta": {
+        "source": "html",
+        "confidence": 2,
+        "transformations": []
+      }
+    }
+  ],
+  "warnings": [
+    "import.style.stripped",
+    "import.style.stripped",
+    "import.block.degraded"
+  ]
+}

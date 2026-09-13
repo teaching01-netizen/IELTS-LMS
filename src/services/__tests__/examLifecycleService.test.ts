@@ -1,7 +1,7 @@
 /**
  * Tests for Exam Lifecycle Service - Phase 3: Versioning, Clone, Rollback, Audit
  * 
- * Note: Run with `npm test` - vitest types are available at runtime
+ * Note: Run with `bun run test` - vitest types are available at runtime
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';

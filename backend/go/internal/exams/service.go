@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/auth"
+	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
@@ -135,6 +136,12 @@ func EffectiveProviderKey(providerKey, examType string) string {
 type Service struct {
 	db     *sql.DB
 	runner *tx.Runner
+	// liveOrigin is this instance's bus origin id (mirrors delivery.Service and
+	// authoring.Service). Empty = no bus: eventsOn() stays false.
+	liveOrigin string
+	// eventsEnabled is the AUTHORING_REALTIME_EVENTS gate (Phase 02). Off by
+	// default: byte-identical legacy publish behavior with no bus INSERT.
+	eventsEnabled bool
 }
 
 // NewService wires dependencies explicitly.
@@ -786,6 +793,7 @@ func (s *Service) SaveDraft(ctx context.Context, examID string, actorID string, 
 // draft id/revision fencing rejects stale consoles with CONFLICT.
 func (s *Service) Publish(ctx context.Context, examID string, actorID string, req PublishRequest) (Version, error) {
 	var out Version
+	emission := &eventEmission{}
 	normalizedKey := strings.TrimSpace(req.OperationKey)
 	if normalizedKey != "" && len(normalizedKey) > 128 {
 		return Version{}, validationError("operationKey must contain between 1 and 128 characters.")
@@ -825,7 +833,8 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 		var content, config string
 		var draftRev int
 		var providerKey, examType string
-		if err := q.QueryRowContext(ctx, "SELECT v.id, v.version_number, CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR), v.revision, e.provider_key, e.exam_type FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND v.id = (SELECT current_draft_version_id FROM exam_entities WHERE id = ?) FOR UPDATE", examID, examID).Scan(&draftID, &versionNumber, &content, &config, &draftRev, &providerKey, &examType); err != nil {
+		var organizationID sql.NullString
+		if err := q.QueryRowContext(ctx, "SELECT v.id, v.version_number, CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR), v.revision, e.provider_key, e.exam_type, e.organization_id FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND v.id = (SELECT current_draft_version_id FROM exam_entities WHERE id = ?) FOR UPDATE", examID, examID).Scan(&draftID, &versionNumber, &content, &config, &draftRev, &providerKey, &examType, &organizationID); err != nil {
 			if err == sql.ErrNoRows {
 				return notFoundError("Draft version not found.")
 			}
@@ -870,6 +879,46 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 		if _, err := q.ExecContext(ctx, "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, from_state, to_state, created_at) VALUES (?, ?, ?, ?, 'published', 'draft', 'published', NOW())", uuid.NewString(), examID, draftID, actorID); err != nil {
 			return err
 		}
+		// Phase 02: exam.published, appended in-tx with the pointer flip so a
+		// rollback leaves no event.
+		//
+		// Publishing REMOVES the working draft (current_draft_version_id -> NULL),
+		// so this is a draft REPLACEMENT with no successor. Subscribers learn their
+		// workspace is no longer editable, stop autosaving against it, and keep
+		// local dirty work.
+		//
+		// DraftRevision is the post-flip generation (the UPDATE above bumps it by
+		// one); the entity revision is not meaningful for an exam-scoped event, so
+		// it stays 0. The emission is recorded on the publisher so the metric is
+		// counted only after this transaction commits.
+		if s.eventsOn() {
+			evt, err := authoringrealtime.NewEvent(authoringrealtime.EventInput{
+				Kind:           authoringrealtime.KindDraftReplaced,
+				OrganizationID: orgPtr(organizationID),
+				ExamID:         examID,
+				DraftVersionID: draftID,
+				DraftRevision:  draftRev + 1,
+				ActorID:        actorID,
+				Entity: authoringrealtime.Entity{
+					Kind:   authoringrealtime.EntityExam,
+					ExamID: examID,
+				},
+				ChangedFields: authoringrealtime.NewChangedFields(
+					string(authoringrealtime.FieldDeliverySettings),
+					string(authoringrealtime.FieldDraftRevision),
+				),
+				CausationID: normalizedKey,
+			})
+			if err == nil {
+				err = authoringrealtime.AppendInTx(ctx, q, s.liveOrigin, evt)
+			}
+			if err != nil {
+				emission.operation = "publish"
+				return authoringrealtime.WrapPublishError(err)
+			}
+			emission.operation = "publish"
+			emission.appended = true
+		}
 		_ = versionNumber
 		v, err := loadVersion(ctx, q, draftID)
 		if err != nil {
@@ -887,6 +936,7 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 		}
 		return nil
 	})
+	emission.flush(err)
 	return out, err
 }
 

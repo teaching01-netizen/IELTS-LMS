@@ -16,7 +16,7 @@ export default defineConfig({
     { name: "touch-chromium", use: { ...devices["Pixel 5"] } },
   ],
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1",
+    command: "bun run dev -- --host 127.0.0.1",
     url: "http://127.0.0.1:3000/__dev/sat-accessibility",
     timeout: 120_000,
     reuseExistingServer: true,

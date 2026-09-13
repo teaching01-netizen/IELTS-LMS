@@ -1,0 +1,97 @@
+{
+  "probe": "B3c",
+  "inputKind": "text/html block styles",
+  "targetField": "prompt (full capabilities)",
+  "harness": "jsdom + real composer extensions, EditorView.pasteHTML",
+  "expectedDoc": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "H1"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "id": "content-<stable>",
+          "level": 2
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "H2"
+          }
+        ]
+      },
+      {
+        "type": "heading",
+        "attrs": {
+          "id": "content-<stable>",
+          "level": 3
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Sub"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "H4"
+          }
+        ]
+      },
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "quoted"
+          }
+        ]
+      },
+      {
+        "type": "horizontalRule"
+      },
+      {
+        "type": "codeBlock",
+        "attrs": {
+          "id": "content-<stable>"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "const x = 1;"
+          }
+        ]
+      }
+    ]
+  },
+  "clampRules": [
+    "h1 -> paragraph (StarterKit heading levels [2,3]; no h1 node exists)",
+    "h2/h3 preserved",
+    "h4 -> paragraph",
+    "blockquote element DISABLED (blockquote:false) -> unwrapped to paragraph, quote semantics lost silently at paste layer",
+    "hr -> horizontalRule (toolbar Divider; choice-capability NOT enforced on paste - see B10)",
+    "pre/code -> codeBlock"
+  ],
+  "validatorOutcome": "valid (block styles invisible to SAT validators)"
+}

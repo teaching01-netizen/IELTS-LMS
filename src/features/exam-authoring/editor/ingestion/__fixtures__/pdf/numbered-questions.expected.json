@@ -1,0 +1,20 @@
+{
+  "segments": [
+    {
+      "text": "12. Solve for x in the equation.",
+      "kind": "question"
+    },
+    {
+      "text": "Show every step of work.",
+      "kind": "text"
+    },
+    {
+      "text": "Q3: What is the main idea?",
+      "kind": "question"
+    },
+    {
+      "text": "Read the passage again.",
+      "kind": "text"
+    }
+  ]
+}

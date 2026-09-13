@@ -1,0 +1,6 @@
+The function f is defined
+by f(x) = 2x + 3. What is
+the value of f(4)?
+
+The graph below shows
+the line clearly.

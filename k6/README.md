@@ -135,7 +135,7 @@ K6_SCRIPT=k6/prod-start-exam-200.js \
 REGISTER_URL="https://your-host/student/<scheduleId>/register" \
 USERS_FILE="e2e/prod-load/live-users.500.csv" \
 USER_COUNT=100 \
-npm run e2e:live-with-k6
+bun run e2e:live-with-k6
 ```
 
 Notes:

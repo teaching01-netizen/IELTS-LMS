@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
@@ -151,6 +152,7 @@ func (s *Service) SATWorkbookUndoState(ctx context.Context, examID string) (*Und
 
 // UndoSATWorkbook restores the immutable checkpoint created at commit time.
 func (s *Service) UndoSATWorkbook(ctx context.Context, examID, importID, actorID string) (Shell, error) {
+	emission := &eventEmission{}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		var provider string
 		var currentDraft sql.NullString
@@ -210,6 +212,40 @@ func (s *Service) UndoSATWorkbook(ctx context.Context, examID, importID, actorID
 		if _, err := q.ExecContext(ctx, "UPDATE exam_entities SET current_draft_version_id = ?, updated_at = CURRENT_TIMESTAMP(6), revision = revision + 1 WHERE id = ?", checkpoint.String, examID); err != nil {
 			return err
 		}
+		// Phase 02: draft.replaced — the working draft is SWAPPED, not merely
+		// edited. Receivers must stop autosaving against the old draft, preserve
+		// local dirty work, reload the shell, and rebind the subscription.
+		//
+		// Undo swaps the entity pointer without bumping exam_versions.revision,
+		// so DraftRevision is the RESTORED version's current generation — which
+		// can be LOWER than the pre-undo value. That is exactly why draftRevision
+		// is a state hint and never an ordering key (sequence_id orders events).
+		if s.eventsOn() {
+			scope, err := resolveDraftScopeTx(ctx, q, checkpoint.String)
+			if err != nil {
+				return err
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, "undo_workbook", scope, authoringrealtime.EventInput{
+				Kind:    authoringrealtime.KindDraftReplaced,
+				ActorID: actorID,
+				Entity:  authoringrealtime.Entity{Kind: authoringrealtime.EntityDraft, ExamID: examID, DraftVersionID: checkpoint.String},
+				ChangedFields: authoringrealtime.NewChangedFields(
+					string(authoringrealtime.FieldPrompt),
+					string(authoringrealtime.FieldStimulus),
+					string(authoringrealtime.FieldAnswer),
+					string(authoringrealtime.FieldRationale),
+					string(authoringrealtime.FieldMetadataDomain),
+					string(authoringrealtime.FieldMetadataSkill),
+					string(authoringrealtime.FieldMetadataDiff),
+					string(authoringrealtime.FieldMetadataTags),
+					string(authoringrealtime.FieldAccessibility),
+					string(authoringrealtime.FieldDisplayOrder),
+					string(authoringrealtime.FieldQuestionType),
+				),
+			}); err != nil {
+				return err
+			}
+		}
 		if assetIDsRaw.Valid && strings.TrimSpace(assetIDsRaw.String) != "" && strings.TrimSpace(assetIDsRaw.String) != "null" {
 			var assetIDs []string
 			if err := json.Unmarshal([]byte(assetIDsRaw.String), &assetIDs); err != nil {
@@ -234,6 +270,7 @@ func (s *Service) UndoSATWorkbook(ctx context.Context, examID, importID, actorID
 		}
 		return nil
 	})
+	emission.flush(err)
 	if err != nil {
 		return Shell{}, err
 	}
@@ -266,6 +303,7 @@ func (s *Service) replaceCompleteSATDraft(ctx context.Context, examID, expectedV
 // is built from in-tx reads; every other op (create/duplicate/batch/bulk)
 // already claims+stores in-tx via claimOperationKey/storeOperationResult.
 func (s *Service) replaceCompleteSATDraftOpKey(ctx context.Context, examID, expectedVersionID string, expectedRevision int, actorID string, requests []satReplacementRequest, importRequest *satImportRequest, operationKey, opScope, opFingerprint string) (Shell, error) {
+	emission := &eventEmission{}
 	for moduleIndex := range requests {
 		for questionIndex := range requests[moduleIndex].Questions {
 			metadata, err := normalizeSATQuestionMetadata(requests[moduleIndex].Questions[questionIndex].Metadata)
@@ -480,6 +518,40 @@ func (s *Service) replaceCompleteSATDraftOpKey(ctx context.Context, examID, expe
 				return err
 			}
 		}
+		// Phase 02: draft.replaced — workbook import / sample load REPLACES the
+		// draft content wholesale (every previous question row is deleted and
+		// recreated), which is a stronger signal than question.bulk_changed:
+		// receivers must stop autosaving against the old draft, preserve local
+		// dirty work, reload the shell, and rebind. ONE event for the whole
+		// import, never N per-question rows. Ids are bounded hints.
+		if s.eventsOn() {
+			scope, err := resolveDraftScopeTx(ctx, q, expectedVersionID)
+			if err != nil {
+				return err
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, "commit_workbook", scope, authoringrealtime.EventInput{
+				Kind:                    authoringrealtime.KindDraftReplaced,
+				ActorID:                 actorID,
+				Entity:                  authoringrealtime.Entity{Kind: authoringrealtime.EntityDraft, ExamID: examID, DraftVersionID: expectedVersionID},
+				AffectedExamQuestionIDs: boundedIDs(previousIDs),
+				ChangedFields: authoringrealtime.NewChangedFields(
+					string(authoringrealtime.FieldPrompt),
+					string(authoringrealtime.FieldStimulus),
+					string(authoringrealtime.FieldAnswer),
+					string(authoringrealtime.FieldRationale),
+					string(authoringrealtime.FieldMetadataDomain),
+					string(authoringrealtime.FieldMetadataSkill),
+					string(authoringrealtime.FieldMetadataDiff),
+					string(authoringrealtime.FieldMetadataTags),
+					string(authoringrealtime.FieldAccessibility),
+					string(authoringrealtime.FieldDisplayOrder),
+					string(authoringrealtime.FieldQuestionType),
+				),
+				CausationID: operationKey,
+			}); err != nil {
+				return err
+			}
+		}
 		// Build the replay Shell from in-tx reads and store it with the
 		// key in the SAME tx: commit is atomic over (claim, mutation,
 		// replay result). A crash before commit leaves no partial effect
@@ -498,6 +570,7 @@ func (s *Service) replaceCompleteSATDraftOpKey(ctx context.Context, examID, expe
 		}
 		return nil
 	})
+	emission.flush(err)
 	if err != nil {
 		return Shell{}, err
 	}

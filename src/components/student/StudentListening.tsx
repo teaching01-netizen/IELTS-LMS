@@ -123,6 +123,9 @@ export function StudentListening({
   } = useSplitPaneResize({
     isTabletMode,
     materialPaneWidthProperty: "--listening-pane-width",
+    // Listening is question-first: the audio pane plus transcript need far
+    // less width than the answer surface on a portrait/narrow tablet (38/62).
+    crampedDefaultLeftWidth: 38,
     dividerMode: isTabletMode ? "overlay" : "consumes-space",
     persistenceKey: persistenceKeyBase ? `${persistenceKeyBase}:listening:split` : undefined,
   });
@@ -392,7 +395,7 @@ export function StudentListening({
       persistenceKey={persistenceKeyBase ? `${persistenceKeyBase}:listening:tab` : undefined}
       materialPane={
         <div
-          className={`h-full overflow-y-auto font-sans leading-relaxed text-gray-900 ${
+          className={`student-scroll-breathe h-full overflow-y-auto font-sans leading-relaxed text-gray-900 ${
             materialCompact
               ? "p-2 pr-2 text-xs md:p-3 md:pr-3 md:text-sm"
               : "p-4 pr-4 text-sm md:p-6 md:pr-6 md:text-base"

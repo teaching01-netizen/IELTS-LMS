@@ -161,6 +161,14 @@ class ApiClient {
   }
 
   /**
+   * Return the current CSRF token for raw same-origin requests that cannot use
+   * the JSON request path (for example, a binary media upload).
+   */
+  getCsrfToken(): string | null {
+    return getCsrfCookieToken() ?? this.defaultHeaders["x-csrf-token"] ?? null;
+  }
+
+  /**
    * Set authentication token
    */
   setAuthToken(token: string): void {

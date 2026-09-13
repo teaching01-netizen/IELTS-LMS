@@ -1,4 +1,8 @@
 node_modules/
+# Package manager: Bun (bun.lock is the source of truth)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 backend/target/
 backend/.data/
 build/

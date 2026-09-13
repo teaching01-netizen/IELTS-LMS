@@ -23,6 +23,23 @@ func TestConfiguredRuntimePlanKeepsScienceForLegacyACT(t *testing.T) {
 	}
 }
 
+// Phase 02: the empty-plan fallback for ACT is a single Science section
+// (default 40 minutes), never the IELTS reading entry — a Science-less ACT
+// plan silently drops the only scorable section.
+func TestFallbackRuntimePlanKeepsScienceForACT(t *testing.T) {
+	plan := fallbackRuntimePlan(examdomain.ProviderACT, 0)
+	if len(plan) != 1 || plan[0].SectionKey != "science" {
+		t.Fatalf("ACT fallback must be a single science entry, got %+v", plan)
+	}
+	if plan[0].DurationMinutes != 40 {
+		t.Fatalf("ACT fallback must default to 40 minutes, got %+v", plan)
+	}
+	legacy := fallbackRuntimePlan(examdomain.EffectiveProviderKey(examdomain.ProviderIELTS, examdomain.ExamTypeACT), 0)
+	if len(legacy) != 1 || legacy[0].SectionKey != "science" {
+		t.Fatalf("legacy ACT fallback must heal to science, got %+v", legacy)
+	}
+}
+
 // RED: enabled-section filtering must use the same effective provider, so a
 // persisted assessment_sections science row is not dropped for legacy rows.
 func TestEffectiveProviderKeepsScienceSectionRow(t *testing.T) {

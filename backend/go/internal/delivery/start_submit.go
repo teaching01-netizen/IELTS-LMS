@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/assessscore"
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
@@ -215,17 +216,21 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 func (g timingGate) usesPersonalDeadline() bool { return g == timingGateLegacy }
 
 // startScheduleBinding mirrors schedule_binding plus the published version id
-// (needed to assemble the bootstrap payload after the write commits).
+// (needed to assemble the bootstrap payload after the write commits). It
+// resolves the effective provider centrally (exams.EffectiveProviderKey) so
+// legacy ACT rows (provider_key='ielts', exam_type='ACT') are not gated as
+// unsupported (Phase 02 blocker 4).
 func (s *Service) startScheduleBinding(ctx context.Context, scheduleID string) (id, examID, providerKey, versionID string, err error) {
+	var examType string
 	if err = s.db.QueryRowContext(ctx,
-		"SELECT s.id, s.exam_id, e.provider_key, s.published_version_id FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?",
-		scheduleID).Scan(&id, &examID, &providerKey, &versionID); err != nil {
+		"SELECT s.id, s.exam_id, e.provider_key, s.published_version_id, e.exam_type FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?",
+		scheduleID).Scan(&id, &examID, &providerKey, &versionID, &examType); err != nil {
 		if err == sql.ErrNoRows {
 			return "", "", "", "", apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
 		}
 		return "", "", "", "", err
 	}
-	return id, examID, providerKey, versionID, nil
+	return id, examID, examdomain.EffectiveProviderKey(providerKey, examType), versionID, nil
 }
 
 // lockModuleAttemptTx locks one module attempt row FOR UPDATE by

@@ -58,6 +58,11 @@ export interface UseDurableLatestAutosaveResult<T> {
   schedule: (value: T) => void;
   flush: (value: T) => Promise<DurableAutosaveFlushResult>;
   retry: (value: T) => void;
+  /**
+   * Settle the local bookkeeping on an authoritative server value the caller
+   * has already installed, WITHOUT a write. See the implementation comment.
+   */
+  adoptServerRevision: () => void;
 }
 
 type QueueItem<T> = {
@@ -195,6 +200,34 @@ export function useDurableLatestAutosave<T>(
     });
   }, []);
 
+  /**
+   * Adopt the server's authoritative value as the local baseline WITHOUT a
+   * write. Used by an explicit conflict resolution that installs the remote
+   * revision: there is nothing left to send, so `saved` is the truth — and
+   * leaving the fenced `conflict` status behind would strand the save area on a
+   * conflict that no longer exists, with a Retry button that would re-send a
+   * payload the client already knows is stale.
+   *
+   * The durable copy is retired because the author chose the other version; a
+   * surviving device draft would re-surface as "recovered unsaved changes" on
+   * the next reload, which is precisely the work they resolved against.
+   * In-flight requests stay fenced server-side as always.
+   */
+  const adoptServerRevision = useCallback(() => {
+    // Bump the request id so any in-flight or queued item loses the authority
+    // to write status (its id can no longer match), then drop the pending slot
+    // and its debounce so nothing is left to send.
+    latestRequestIdRef.current += 1;
+    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    debounceRef.current = null;
+    pendingValueRef.current = null;
+    pendingRequestIdRef.current = null;
+    setStatus("saved");
+    setLastSavedAt(new Date());
+    const key = durableKeyRef.current;
+    if (key) void clearDurableDraft(key).catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     const requestId = ++latestRequestIdRef.current;
     if (!durableKey) return;
@@ -230,5 +263,6 @@ export function useDurableLatestAutosave<T>(
     schedule,
     flush,
     retry,
+    adoptServerRevision,
   };
 }
