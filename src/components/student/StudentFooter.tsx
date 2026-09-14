@@ -157,6 +157,7 @@ export function StudentFooter({
 
                     return (
                       <button
+                        type="button"
                         key={item.navigationId}
                         onClick={() => onNavigate(item.navigationId)}
                         className={`${pressClassName} relative text-[length:var(--student-chip-font-size)] flex items-center justify-center min-w-[1.6rem] min-h-6 md:min-w-[1.8rem] lg:min-w-[2rem] h-6 md:h-7 lg:h-8 px-1 md:px-1.5 rounded-sm font-bold border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 ${

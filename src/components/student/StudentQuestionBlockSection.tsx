@@ -26,7 +26,7 @@ export interface StudentQuestionBlockSectionProps {
     meta?: StudentAnswerMutationMeta,
   ) => void;
   onToggleFlag?: ((id: string) => void) | undefined;
-  /** P4: an answered/focused question becomes the one active question. */
+  /** @deprecated Answer focus does not change navigation state. */
   onActivate?: ((id: string) => void) | undefined;
   tabletMode: boolean;
   answerCompact: boolean;
@@ -74,7 +74,6 @@ function areBlockPropsEqual(
     previous.highlightEnabled !== next.highlightEnabled ||
     previous.highlightColor !== next.highlightColor ||
     previous.onAnswerChange !== next.onAnswerChange ||
-    previous.onActivate !== next.onActivate ||
     previous.onToggleFlag !== next.onToggleFlag ||
     previous.registerLiveAnswer !== next.registerLiveAnswer ||
     previous.getBlockStartQuestionNumber !== next.getBlockStartQuestionNumber ||
@@ -113,7 +112,6 @@ export const StudentQuestionBlockSection = React.memo(
     flags,
     onAnswerChange,
     onToggleFlag,
-    onActivate,
     tabletMode,
     answerCompact,
     stackFlag = false,
@@ -159,16 +157,6 @@ export const StudentQuestionBlockSection = React.memo(
       ]
         .filter(Boolean)
         .join(' ');
-    // P4: interacting with a question (focus or click, e.g. on an answer or a
-    // blank) makes it THE active question, so the single global navigator can
-    // never point somewhere the student is not working.
-    const activateRow = (questionId: string | undefined) => {
-      if (!questionId || questionId === activeQuestionId) {
-        return;
-      }
-      onActivate?.(questionId);
-    };
-
     return (
       <div className={`${deferredClassName} ${blockSpacingClassName}`.trim()}>
         <div className={answerCompact ? 'mb-2' : 'mb-3 md:mb-4'}>
@@ -184,14 +172,12 @@ export const StudentQuestionBlockSection = React.memo(
             <SubAnswerTreeQuestionList
               questions={treeQuestions}
               answers={answers}
-              currentQuestionId={activeQuestionId}
               flags={flags}
               onToggleFlag={onToggleFlag}
               tabletMode={tabletMode}
               highlightEnabled={highlightEnabled}
               highlightColor={highlightColor}
               onAnswerChange={onAnswerChange}
-              onActivate={onActivate}
             />
           ) : ('questions' in block) ? (
             block.questions.map((question, questionIndex) => {
@@ -200,7 +186,6 @@ export const StudentQuestionBlockSection = React.memo(
               const globalQuestionNumber =
                 (firstEntry ? getQuestionStartNumber(allQuestions, firstEntry.id) : null) ??
                 blockStartQ + questionIndex;
-              const isActive = questionEntries.some((entry) => entry.id === activeQuestionId);
               const inlineFlags = block.type === 'SENTENCE_COMPLETION' || block.type === 'NOTE_COMPLETION';
               const flagId = firstEntry?.id;
               const answerKey = firstEntry?.answerKey ?? question.id;
@@ -211,7 +196,6 @@ export const StudentQuestionBlockSection = React.memo(
                   key={question.id}
                   id={!inlineFlags && flagId ? `question-${flagId}` : undefined}
                   className={rowClassName(showFlag)}
-                  onFocusCapture={() => activateRow(flagId ?? firstEntry?.id)}
                   tabIndex={-1}
                 >
                   <div className="student-question-row-body">
@@ -237,10 +221,8 @@ export const StudentQuestionBlockSection = React.memo(
                       registerLiveAnswer?.(answerKey, value)
                     }
                     isFlagged={flagId ? Boolean(flags[flagId]) : false}
-                    isActive={isActive}
                     slotIds={questionEntries.map((entry) => entry.id)}
                     slotNumbers={questionEntries.map((entry, index) => entry.rootNumber ?? (blockStartQ + index))}
-                    currentQuestionId={activeQuestionId}
                     flags={flags}
                     onToggleFlag={onToggleFlag}
                     tabletMode={tabletMode}
@@ -275,7 +257,6 @@ export const StudentQuestionBlockSection = React.memo(
             <div
               key={block.id}
               className={rowClassName(Boolean(onToggleFlag && singleBlockQuestion))}
-              onFocusCapture={() => activateRow(singleBlockQuestion?.id)}
               tabIndex={-1}
             >
               <div className="student-question-row-body">
@@ -291,10 +272,8 @@ export const StudentQuestionBlockSection = React.memo(
                   registerLiveAnswer?.(singleBlockQuestion?.answerKey ?? block.id, value)
                 }
                 isFlagged={singleBlockQuestion ? Boolean(flags[singleBlockQuestion.id]) : false}
-                isActive={blockQuestions.some((entry) => entry.id === activeQuestionId)}
                 slotIds={blockQuestions.map((entry) => entry.id)}
                 slotNumbers={blockQuestions.map((entry, index) => entry.rootNumber ?? (blockStartQ + index))}
-                currentQuestionId={activeQuestionId}
                 flags={flags}
                 onToggleFlag={onToggleFlag}
                 tabletMode={tabletMode}

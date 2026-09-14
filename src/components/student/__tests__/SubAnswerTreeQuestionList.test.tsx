@@ -185,7 +185,7 @@ describe('SubAnswerTreeQuestionList', () => {
     expect(flagButton).toHaveClass('flex-shrink-0');
   });
 
-  it('activates a leaf the student starts working in (P4)', () => {
+  it('does not navigate or add active styling when an answer receives focus', () => {
     const leafOne = buildTreeDescriptor({
       id: 'tree-block::tree::root-a::leaf-a',
       rootNumber: 51,
@@ -210,14 +210,11 @@ describe('SubAnswerTreeQuestionList', () => {
       />,
     );
 
-    // Focusing a leaf's input is the same "I am working here" signal as
-    // clicking it, so the single global navigator follows the student.
-    fireEvent.focus(screen.getByRole('textbox', { name: 'Answer for question 51.2' }));
-    expect(onActivate).toHaveBeenCalledWith(leafTwo.id);
+    const leafRow = document.getElementById(`question-${leafTwo.id}`);
+    expect(leafRow).not.toBeNull();
 
-    // The already-active leaf does not re-announce itself.
-    onActivate.mockClear();
-    fireEvent.focus(screen.getByRole('textbox', { name: 'Answer for question 51.1' }));
+    fireEvent.focus(screen.getByRole('textbox', { name: 'Answer for question 51.2' }));
     expect(onActivate).not.toHaveBeenCalled();
+    expect(leafRow).not.toHaveClass('ring-2', 'ring-blue-800');
   });
 });

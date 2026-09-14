@@ -145,6 +145,14 @@ describe('one navigation authority', () => {
     expect(onNavigate).toHaveBeenCalledWith('q1');
   });
 
+  it('does not turn question-pane scrolling into navigation', () => {
+    const { onNavigate } = renderPanel();
+
+    fireEvent.scroll(screen.getByTestId('question-panel-dock'));
+
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
   it('disables the ends of the exam instead of wrapping', () => {
     const first = renderFooter({ currentQuestionId: 'q1' });
     expect(screen.getByRole('button', { name: 'Previous question' })).toBeDisabled();

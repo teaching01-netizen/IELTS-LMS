@@ -58,9 +58,11 @@ interface QuestionRendererProps {
   answer: QuestionAnswer;
   onChange: (val: QuestionAnswer, meta?: StudentAnswerMutationMeta) => void;
   isFlagged?: boolean | undefined;
+  /** @deprecated The question pane no longer renders an active-question state. */
   isActive?: boolean | undefined;
   slotIds?: string[] | undefined;
   slotNumbers?: number[] | undefined;
+  /** @deprecated Navigation state is shown by the footer/navigator only. */
   currentQuestionId?: string | null | undefined;
   flags?: Record<string, boolean> | undefined;
   onToggleFlag?: ((id: string) => void) | undefined;
@@ -90,10 +92,8 @@ export function QuestionRenderer({
   number,
   answer,
   onChange,
-  isActive = false,
   slotIds = [],
   slotNumbers,
-  currentQuestionId = null,
   flags = {},
   onToggleFlag,
   tabletMode = false,
@@ -141,9 +141,8 @@ export function QuestionRenderer({
   const getSlotAriaLabelSuffix = (slotIndex: number) =>
     hasDuplicateSlotNumbers ? ` (blank ${slotIndex + 1})` : "";
   const getSlotClassName = (slotId: string) => {
-    const activeClass = currentQuestionId === slotId ? "ring-2 ring-blue-800 ring-offset-2" : "";
     const flaggedClass = flags[slotId] ? "border-amber-300 bg-amber-50" : "border-transparent";
-    return `rounded-lg border p-2 transition-colors ${activeClass} ${flaggedClass}`;
+    return `rounded-lg border p-2 transition-colors ${flaggedClass}`;
   };
 
   // Inline completion slots keep the flag inside the answer row (there is no
@@ -214,13 +213,13 @@ export function QuestionRenderer({
       <div
         className={isCompactPane ? "flex flex-col items-stretch gap-2" : "flex items-center gap-3"}
       >
-        <StudentQuestionNumber number={slotNumber} isActive={currentQuestionId === slotId} />
+        <StudentQuestionNumber number={slotNumber} />
         <ProtectedInput
           type="text"
           name={slotId}
           value={value}
           onChange={(event) => changeValue(event.target.value)}
-          className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${inputWidthClass}`}
+          className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus-visible:border-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/25 ${inputWidthClass}`}
           placeholder="Enter answer..."
           security={security}
           sessionId={sessionId}
@@ -253,7 +252,7 @@ export function QuestionRenderer({
     return (
       <fieldset className="flex flex-col gap-4">
         <legend className="flex gap-3 items-start">
-          <StudentQuestionNumber number={number} isActive={isActive} />
+          <StudentQuestionNumber number={number} />
           <StudentQuestionText
             as="span"
             className="leading-relaxed text-gray-900"
@@ -278,7 +277,7 @@ export function QuestionRenderer({
                 name={`q-${q.id}`}
                 checked={answer === option}
                 onChange={() => commitAnswerChange(option)}
-                className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-600"
+                className="h-4 w-4 border-gray-300 text-blue-600 focus-visible:ring-blue-600"
               />
               <span className="text-sm uppercase text-gray-900">
                 {labels[option as keyof typeof labels]}
@@ -311,7 +310,7 @@ export function QuestionRenderer({
             name={q.id}
             value={typeof answer === "string" ? answer : ""}
             onChange={(event) => commitAnswerChange(event.target.value)}
-            className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${inputWidthClass}`}
+            className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus-visible:border-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/25 ${inputWidthClass}`}
             placeholder="Enter answer..."
             security={security}
             sessionId={sessionId}
@@ -500,7 +499,7 @@ export function QuestionRenderer({
             name={q.id}
             value={typeof answer === "string" ? answer : ""}
             onChange={(event) => commitAnswerChange(event.target.value)}
-            className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${inputWidthClass}`}
+            className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus-visible:border-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/25 ${inputWidthClass}`}
             placeholder="Enter label..."
             security={security}
             sessionId={sessionId}
@@ -577,7 +576,7 @@ export function QuestionRenderer({
                     checked={answer === option.id}
                     disabled={isEliminated}
                     onChange={() => commitAnswerChange(option.id)}
-                    className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+                    className="mt-1 h-4 w-4 border-gray-300 text-blue-600 focus-visible:ring-blue-500"
                   />
                   <div className={`flex min-w-0 flex-1 flex-col gap-2 ${isEliminated ? "text-gray-400 line-through" : ""}`}>
                     <div className="flex min-w-0 gap-2">
@@ -644,7 +643,7 @@ export function QuestionRenderer({
     return (
       <div className="flex flex-col gap-3">
         <div className="flex gap-3">
-          <StudentQuestionNumber number={num} isActive={isActive} />
+          <StudentQuestionNumber number={num} />
           <StudentQuestionText
             as="span"
             className="text-gray-800"
@@ -660,7 +659,7 @@ export function QuestionRenderer({
             name={q.id}
             value={typeof answer === "string" ? answer : ""}
             onChange={(event) => commitAnswerChange(event.target.value)}
-            className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${inputWidthClass}`}
+            className={`w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus-visible:border-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/25 ${inputWidthClass}`}
             placeholder="Enter answer..."
             security={security}
             sessionId={sessionId}
@@ -707,7 +706,6 @@ export function QuestionRenderer({
                       >
                         <StudentQuestionNumber
                           number={slotNumber}
-                          isActive={currentQuestionId === slotId}
                         />
                         <ProtectedInput
                           type="text"
@@ -716,7 +714,7 @@ export function QuestionRenderer({
                           onChange={(event) =>
                             updateIndexedAnswer(index, event.target.value, blanks, slotId)
                           }
-                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-[length:var(--student-control-font-size,1rem)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
+                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-[length:var(--student-control-font-size,1rem)] focus-visible:border-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
                           placeholder="Answer..."
                           security={security}
                           sessionId={sessionId}
@@ -766,7 +764,6 @@ export function QuestionRenderer({
                       >
                         <StudentQuestionNumber
                           number={slotNumber}
-                          isActive={currentQuestionId === slotId}
                         />
                         <ProtectedInput
                           type="text"
@@ -775,7 +772,7 @@ export function QuestionRenderer({
                           onChange={(event) =>
                             updateIndexedAnswer(index, event.target.value, blanks, slotId)
                           }
-                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-[length:var(--student-control-font-size,1rem)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
+                          className={`rounded-md border border-gray-300 px-3 py-1.5 text-[length:var(--student-control-font-size,1rem)] focus-visible:border-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/25 ${isCompactPane ? "w-full min-w-0" : "w-28"} ${tabletMode && !isCompactPane ? "max-w-full" : ""}`}
                           placeholder="Answer..."
                           security={security}
                           sessionId={sessionId}
@@ -1012,7 +1009,6 @@ export function QuestionRenderer({
                         key={slot.cell.id}
                         slotId={slot.slotId}
                         highlightSurfaceIdPrefix={`question:${tableBlock.id}:${slot.slotId}`}
-                        isActive={currentQuestionId === slot.slotId}
                         isFlagged={Boolean(flags[slot.slotId])}
                         promptPrefixText={promptPrefixText}
                         promptSuffixText={promptSuffixText}
@@ -1037,9 +1033,6 @@ export function QuestionRenderer({
                     );
                   }
 
-                  const isActive = orderedSlots.some(
-                    (candidate) => candidate.slotId === currentQuestionId
-                  );
                   const isFlagged = orderedSlots.some((candidate) =>
                     Boolean(flags[candidate.slotId])
                   );
@@ -1047,9 +1040,7 @@ export function QuestionRenderer({
                   return (
                     <td
                       key={`cell-${rowIndex}-${cellIndex}`}
-                      className={`border border-gray-200 px-3 py-2 align-top ${
-                        isActive ? "ring-2 ring-blue-800 ring-inset" : ""
-                      } ${isFlagged ? "bg-amber-50" : ""}`}
+                      className={`border border-gray-200 px-3 py-2 align-top ${isFlagged ? "bg-amber-50" : ""}`}
                     >
                       <div className="space-y-2">
                         <div className="text-[length:var(--student-control-font-size)] text-gray-800 [white-space:pre-wrap]">
@@ -1081,7 +1072,6 @@ export function QuestionRenderer({
                                   >
                                     <StudentQuestionNumber
                                       number={getSlotNumber(slot.index, number + slot.index)}
-                                      isActive={currentQuestionId === slot.slotId}
                                     />
                                     <span className="inline-block min-w-[11rem] max-w-full align-middle">
                                       <ProtectedInput
@@ -1096,7 +1086,7 @@ export function QuestionRenderer({
                                             slot.slotId
                                           )
                                         }
-                                        className="w-full min-w-0 rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25"
+                                        className="w-full min-w-0 rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus-visible:border-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/25"
                                         placeholder="Enter answer..."
                                         security={security}
                                         sessionId={sessionId}
@@ -1150,7 +1140,6 @@ export function QuestionRenderer({
                 <div className="flex items-start gap-3 md:flex-1">
                   <StudentQuestionNumber
                     number={slotNumber}
-                    isActive={currentQuestionId === slotId}
                   />
                   <StudentQuestionText
                     as="span"
@@ -1220,7 +1209,6 @@ export function QuestionRenderer({
                 <div className="flex items-start gap-3 md:flex-1">
                   <StudentQuestionNumber
                     number={slotNumber}
-                    isActive={currentQuestionId === slotId}
                   />
                   <StudentQuestionText
                     as="span"

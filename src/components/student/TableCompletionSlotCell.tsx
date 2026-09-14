@@ -7,7 +7,8 @@ import type { StudentHighlightColor } from './highlightPalette';
 export type TableCompletionSlotCellProps = {
   slotId: string;
   highlightSurfaceIdPrefix: string;
-  isActive: boolean;
+  /** @deprecated The question pane no longer renders an active-question state. */
+  isActive?: boolean | undefined;
   isFlagged: boolean;
   promptPrefixText: string;
   promptSuffixText: string;
@@ -29,7 +30,6 @@ export type TableCompletionSlotCellProps = {
 export function TableCompletionSlotCell({
   slotId,
   highlightSurfaceIdPrefix,
-  isActive,
   isFlagged,
   promptPrefixText,
   promptSuffixText,
@@ -47,7 +47,7 @@ export function TableCompletionSlotCell({
   return (
     <td
       id={`question-${slotId}`}
-      className={`border border-gray-200 px-3 py-2 align-top ${isActive ? 'ring-2 ring-blue-800 ring-inset' : ''} ${isFlagged ? 'bg-amber-50' : ''}`}
+      className={`border border-gray-200 px-3 py-2 align-top ${isFlagged ? 'bg-amber-50' : ''}`}
     >
       <div className="space-y-2">
         <div className="text-[length:var(--student-control-font-size)] text-gray-800 [white-space:pre-wrap]">
@@ -60,14 +60,14 @@ export function TableCompletionSlotCell({
             highlightSurfaceId={`${highlightSurfaceIdPrefix}:prefix`}
           />
           <span className="mx-1 inline-flex items-center gap-2 align-middle">
-            <StudentQuestionNumber number={slotNumber} isActive={isActive} />
+            <StudentQuestionNumber number={slotNumber} />
             <span className="inline-block min-w-[11rem] max-w-full align-middle">
               <ProtectedInput
                 type="text"
                 name={slotId}
                 value={answerValue}
                 onChange={(event) => onChange(event.target.value)}
-                className="w-full min-w-0 rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25"
+                className="w-full min-w-0 rounded-md border border-gray-300 px-3 py-2 text-[length:var(--student-control-font-size)] focus-visible:border-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/25"
                 placeholder="Enter answer..."
                 security={security}
                 sessionId={sessionId}

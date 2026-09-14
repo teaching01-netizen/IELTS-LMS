@@ -56,6 +56,51 @@ describe('SAT annotation decoration', () => {
     expect(styled).toContain('var(--sat-underline');
   });
 
+  it('keeps multi-line note affordances as inline accessible controls', () => {
+    const text = 'A long supporting-material sentence that wraps across several lines.';
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [createSatTextAnnotation({
+      kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: text.length - 1,
+      exact: text.slice(2, -1),
+    })];
+    const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text }] };
+    const { container } = render(<SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled onEditNote={vi.fn()} />);
+    const highlight = container.querySelector<HTMLElement>('[data-sat-highlight="true"]');
+
+    expect(highlight?.tagName).toBe('SPAN');
+    expect(highlight).toHaveAttribute('role', 'button');
+    expect(highlight).toHaveAttribute('tabindex', '0');
+    expect(highlight).toHaveAttribute('data-sat-annotation-control', 'true');
+    expect(highlight?.style.boxDecorationBreak).toBe('clone');
+  });
+
+  it('allows highlight selection through an existing note affordance', () => {
+    const onChange = vi.fn();
+    const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text: 'A tree grows.' }] };
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [createSatTextAnnotation({
+      kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree',
+    })];
+    const { container } = render(
+      <SatAnnotationModeContext.Provider value="highlight">
+        <SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled onChange={onChange} onEditNote={vi.fn()} />
+      </SatAnnotationModeContext.Provider>,
+    );
+    const leafOf = (text: string) => [...container.querySelectorAll<HTMLElement>('[data-content-text-node] span')]
+      .find((element) => element.textContent === text && element.firstChild?.nodeType === Node.TEXT_NODE)!.firstChild!;
+    const range = document.createRange();
+    range.setStart(leafOf('tree'), 0);
+    range.setEnd(leafOf(' grows.'), ' grows.'.length);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.pointerUp(container.firstChild!);
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ annotations: [
+      expect.objectContaining({ anchor: expect.objectContaining({ exact: 'tree' }) }),
+      expect.objectContaining({ kind: 'highlight', anchor: expect.objectContaining({ exact: 'tree grows.' }) }),
+    ] }));
+  });
+
   it('removes intersecting marks on selection completion while erase mode is armed', () => {
     const onChange = vi.fn();
     const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text: 'A tree grows.' }] };

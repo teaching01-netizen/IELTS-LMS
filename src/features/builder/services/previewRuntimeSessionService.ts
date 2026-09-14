@@ -147,6 +147,21 @@ function createPrecheckPayload() {
   };
 }
 
+function isPreviewSessionSupersededError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const candidate = error as {
+    code?: unknown;
+    backendCode?: unknown;
+  };
+  return (
+    candidate.code === 'ACTIVE_SESSION_SUPERSEDED' ||
+    candidate.backendCode === 'ACTIVE_SESSION_SUPERSEDED'
+  );
+}
+
 async function createPreviewSchedule(
   exam: ExamEntity,
   versionId: string,
@@ -321,22 +336,32 @@ async function ensurePreviewAttemptWithPrecheck(
     phase: 'exam',
   });
 
-  await backendPost<any>(
-    studentSessionTransport.paths.precheck(schedule.id),
-    {
-      studentKey,
-      candidateId: studentId,
-      candidateName: PREVIEW_CANDIDATE_NAME,
-      candidateEmail: PREVIEW_CANDIDATE_EMAIL,
-      clientSessionId: ensureClientSessionIdForAttempt(attempt),
-      preCheck: createPrecheckPayload(),
-      deviceFingerprintHash: attempt.integrity.deviceFingerprintHash ?? undefined,
-    },
-    {
-      headers: buildAttemptAuthorizationHeader(attempt),
-      retries: 0,
-    },
-  );
+  try {
+    await backendPost<any>(
+      studentSessionTransport.paths.precheck(schedule.id),
+      {
+        studentKey,
+        candidateId: studentId,
+        candidateName: PREVIEW_CANDIDATE_NAME,
+        candidateEmail: PREVIEW_CANDIDATE_EMAIL,
+        clientSessionId: ensureClientSessionIdForAttempt(attempt),
+        preCheck: createPrecheckPayload(),
+        deviceFingerprintHash: attempt.integrity.deviceFingerprintHash ?? undefined,
+      },
+      {
+        headers: buildAttemptAuthorizationHeader(attempt),
+        retries: 0,
+      },
+    );
+  } catch (error) {
+    // Preview answer persistence is disabled, so a preview tab that reuses an
+    // attempt owned by another preview tab can continue with a local precheck.
+    // Real student sessions still surface this fence through their normal write
+    // path.
+    if (!isPreviewSessionSupersededError(error)) {
+      throw error;
+    }
+  }
 
   return { studentId };
 }

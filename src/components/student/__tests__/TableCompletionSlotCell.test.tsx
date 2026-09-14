@@ -114,7 +114,7 @@ describe('TableCompletionSlotCell', () => {
     expect(screen.getByTestId('flag-slot-1')).toBeInTheDocument();
   });
 
-  it('applies active ring style when isActive is true', () => {
+  it('does not apply active ring style when isActive is true', () => {
     const { container } = render(
       <table>
         <tbody>
@@ -125,8 +125,8 @@ describe('TableCompletionSlotCell', () => {
       </table>,
     );
     const td = container.querySelector('td');
-    expect(td?.className).toContain('ring-2');
-    expect(td?.className).toContain('ring-blue-800');
+    expect(td?.className).not.toContain('ring-2');
+    expect(td?.className).not.toContain('ring-blue-800');
   });
 
   it('applies flagged background when isFlagged is true', () => {

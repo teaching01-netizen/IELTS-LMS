@@ -2,6 +2,7 @@ import React from 'react';
 
 type StudentQuestionNumberProps = {
   number: number | string;
+  /** @deprecated The question pane no longer renders an active-question state. */
   isActive?: boolean | undefined;
   className?: string | undefined;
 };
@@ -11,17 +12,11 @@ const baseClassName =
 
 export function StudentQuestionNumber({
   number,
-  isActive = false,
   className,
 }: StudentQuestionNumberProps) {
-  // The number is orientation, not a state: at rest it stays neutral so the
-  // accent is reserved for meaningful state (the focused question, the
-  // selected answer, keyboard focus, the flagged state). A page where every
-  // question number shouts in blue leaves nothing for the current question
-  // to say.
-  const stateClassName = isActive
-    ? 'border-blue-800 bg-blue-800 text-white'
-    : 'border-gray-300 bg-white text-gray-700';
+  // The question pane is content, not a navigation cursor. Keep the number
+  // neutral even when legacy callers still provide isActive.
+  const stateClassName = 'border-gray-300 bg-white text-gray-700';
 
   return (
     <span

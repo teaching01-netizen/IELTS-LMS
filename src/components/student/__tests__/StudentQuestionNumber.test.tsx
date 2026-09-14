@@ -22,12 +22,13 @@ describe('StudentQuestionNumber', () => {
     expect(number).not.toHaveClass('text-blue-600');
   });
 
-  it('keeps the active question visibly selected inside the same square', () => {
+  it('keeps the question number neutral when a legacy active flag is provided', () => {
     const { getByText } = render(
       <StudentQuestionNumber number={39} isActive />,
     );
     const number = getByText('39');
 
-    expect(number).toHaveClass('bg-blue-800', 'border-blue-800', 'text-white');
+    expect(number).toHaveClass('bg-white', 'border-gray-300', 'text-gray-700');
+    expect(number).not.toHaveClass('bg-blue-800', 'border-blue-800', 'text-white');
   });
 });

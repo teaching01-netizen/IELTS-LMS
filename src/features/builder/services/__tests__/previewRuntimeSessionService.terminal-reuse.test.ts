@@ -311,6 +311,39 @@ describe('previewRuntimeSessionService terminal-runtime reuse', () => {
     );
   });
 
+  it('continues preview when a reused attempt is owned by another preview session', async () => {
+    const schedule = scheduleFixture({ id: 'sched-superseded', module: 'reading' });
+    getSchedulesByExamMock.mockResolvedValue([schedule]);
+    getRuntimeSnapshotMock.mockResolvedValue(
+      runtimeFixture('sched-superseded', 'live', 'reading', ['listening', 'reading']),
+    );
+    backendPostMock.mockImplementation(async (endpoint: string) => {
+      if (endpoint === '/v1/student/sessions/sched-superseded/precheck') {
+        throw Object.assign(
+          new Error('Attempt write credential has been superseded by a newer student session.'),
+          {
+            code: 'ACTIVE_SESSION_SUPERSEDED',
+            status: 409,
+          },
+        );
+      }
+      return {} as never;
+    });
+
+    const resolved = await resolvePreviewRuntimeSession({
+      exam: examFixture(),
+      state: stateFixture(),
+      authorUserId: AUTHOR_ID,
+      requestedModule: 'reading',
+      now: NOW,
+    });
+
+    expect(resolved).toMatchObject({
+      scheduleId: 'sched-superseded',
+      studentId: expect.stringMatching(/^W\d{6}$/),
+    });
+  });
+
   it('reuses the already-live runtime without issuing a start command', async () => {
     const schedule = scheduleFixture({ id: 'sched-raced', module: 'reading' });
     getSchedulesByExamMock.mockResolvedValue([schedule]);

@@ -17,6 +17,7 @@ interface StudentQuestionPanelProps {
     meta?: StudentAnswerMutationMeta
   ) => void;
   currentQuestionId: string | null;
+  /** @deprecated Pane events never dispatch navigation; footer/navigator own it. */
   onNavigate: (id: string) => void;
   flags: Record<string, boolean>;
   onToggleFlag?: ((id: string) => void) | undefined;
@@ -47,7 +48,6 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
   answers,
   onAnswerChange,
   currentQuestionId,
-  onNavigate,
   flags,
   onToggleFlag,
   tabletMode = false,
@@ -71,101 +71,20 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
   // the device or the viewport.
   const paneComposition = useStudentQuestionPaneComposition(questionContainerRef);
 
-  // P4: one active question, shared with the global navigator. `onNavigate` is
-  // the same action the footer chips and Previous/Next dispatch, so the pane
-  // never holds a private notion of "current".
-  const currentQuestionIdRef = React.useRef(currentQuestionId);
-  const onNavigateRef = React.useRef(onNavigate);
-  // Id of the last question we activated from scrolling (declared before the
-  // scroll callback that writes it).
-  const scrollSyncedIdRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    currentQuestionIdRef.current = currentQuestionId;
-    onNavigateRef.current = onNavigate;
-  }, [currentQuestionId, onNavigate]);
-
-  // Passive scroll -> active question (P4). Scrolling is not navigation, but the
-  // interface must never claim the student is on a question that has scrolled
-  // away. A question becomes active only once its top crosses a reading band
-  // near the top of the pane, so mid-question scrolling never flickers state.
-  const scrollSyncFrame = React.useRef(0);
-  const syncActiveQuestionFromScroll = React.useCallback(() => {
-    const node = questionContainerRef.current;
-    if (!node) {
-      return;
-    }
-    const rows = node.querySelectorAll<HTMLElement>('[id^="question-"]');
-    if (rows.length === 0) {
-      return;
-    }
-    if (node.clientHeight === 0) {
-      // A hidden pane (compact tab switch) reports no geometry; never treat an
-      // unmeasurable pane as "the last question is current".
-      return;
-    }
-    const containerTop = node.getBoundingClientRect().top;
-    const bandTop = containerTop + node.clientHeight * 0.2;
-    let candidateId: string | null = null;
-    for (const row of rows) {
-      if (row.getBoundingClientRect().top - bandTop > 0) {
-        break;
-      }
-      candidateId = row.id.slice("question-".length);
-    }
-    if (candidateId === null) {
-      candidateId = rows[0]?.id.slice("question-".length) ?? null;
-    }
-    if (candidateId && candidateId !== currentQuestionIdRef.current) {
-      // Remember that this change came from scrolling: the student is already
-      // looking at the question, so the scroll-into-view effect must not fire.
-      scrollSyncedIdRef.current = candidateId;
-      onNavigateRef.current(candidateId);
-    }
-  }, [questionContainerRef]);
-  const handleQuestionScroll = React.useCallback(() => {
-    if (scrollSyncFrame.current !== 0) {
-      return;
-    }
-    scrollSyncFrame.current = requestAnimationFrame(() => {
-      scrollSyncFrame.current = 0;
-      syncActiveQuestionFromScroll();
-    });
-  }, [syncActiveQuestionFromScroll]);
-  React.useEffect(
-    () => () => {
-      if (scrollSyncFrame.current !== 0) {
-        cancelAnimationFrame(scrollSyncFrame.current);
-      }
-    },
-    [],
-  );
-
-  // P4: an interaction inside a question activates it without scrolling — the
-  // student is already looking at it.
-  const activateFromInteraction = React.useCallback((id: string) => {
-    scrollSyncedIdRef.current = id;
-    onNavigateRef.current(id);
-  }, []);
-
   const shouldFocusQuestionRef = React.useRef(shouldFocusQuestion);
   React.useEffect(() => {
     shouldFocusQuestionRef.current = shouldFocusQuestion;
   }, [shouldFocusQuestion]);
 
-  // Explicit navigation (footer chip, Previous/Next, keyboard shortcut) must
-  // bring its destination to a stable reading position — a question activated
-  // off-screen would recreate the very contradiction this redesign removes.
-  // Two guards keep the browser from doing that for us: a change produced by
-  // scrolling is already on screen, and the caller's selection veto protects a
-  // student who is mid-highlight in the passage.
+  // Explicit navigation (footer chip, Previous/Next, keyboard shortcut) brings
+  // its destination to a stable reading position. Ordinary scrolling and
+  // answer focus never update currentQuestionId, so this effect cannot create a
+  // scroll/navigation feedback loop.
   const previousActiveQuestionRef = React.useRef(currentQuestionId);
   React.useEffect(() => {
     const previous = previousActiveQuestionRef.current;
     previousActiveQuestionRef.current = currentQuestionId;
     if (previous === currentQuestionId || currentQuestionId === null) {
-      return;
-    }
-    if (scrollSyncedIdRef.current === currentQuestionId) {
       return;
     }
     if (shouldFocusQuestionRef.current?.() === false) {
@@ -218,17 +137,16 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
           tabletMode={tabletMode}
           answerCompact={answerCompact}
           stackFlag={paneComposition.stackFlag}
-          onActivate={activateFromInteraction}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
           registerLiveAnswer={registerLiveAnswer}
           getBlockStartQuestionNumber={getBlockStartQuestionNumber}
           renderBlockInstruction={renderBlockInstruction}
-              expandedQuestionGapClassName={expandedQuestionGapClassName}
-              hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
-              eliminatedOptionIdsByQuestion={eliminatedOptionIdsByQuestion}
-              onToggleOptionElimination={onToggleOptionElimination}
-              selectSheetPresentation={selectSheetPresentation}
+          expandedQuestionGapClassName={expandedQuestionGapClassName}
+          hideDiagramReferenceForBlock={hideDiagramReferenceForBlock}
+          eliminatedOptionIdsByQuestion={eliminatedOptionIdsByQuestion}
+          onToggleOptionElimination={onToggleOptionElimination}
+          selectSheetPresentation={selectSheetPresentation}
         />
       );
     },
@@ -247,7 +165,6 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
       onAnswerChange,
       onToggleFlag,
       onToggleOptionElimination,
-      activateFromInteraction,
       paneComposition.stackFlag,
       selectSheetPresentation,
       questionsByBlockId,
@@ -271,7 +188,6 @@ export const StudentQuestionPanel = React.memo(function StudentQuestionPanel({
             : "p-4 md:p-5 lg:p-8 space-y-6 md:space-y-8"
         }`}
         ref={questionContainerRef}
-        onScroll={handleQuestionScroll}
         data-student-zoom-scroll
         data-testid={panelTestId}
         style={{

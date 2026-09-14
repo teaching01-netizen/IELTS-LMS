@@ -11,7 +11,8 @@ import type { StudentHighlightColor } from "./highlightPalette";
 interface SubAnswerTreeQuestionListProps {
   questions: StudentQuestionDescriptor[];
   answers: Record<string, QuestionAnswer>;
-  currentQuestionId: string | null;
+  /** @deprecated The question list does not render or derive an active state. */
+  currentQuestionId?: string | null | undefined;
   flags?: Record<string, boolean>;
   onToggleFlag?: ((id: string) => void) | undefined;
   tabletMode?: boolean;
@@ -22,25 +23,19 @@ interface SubAnswerTreeQuestionListProps {
     answer: QuestionAnswer,
     meta?: StudentAnswerMutationMeta
   ) => void;
-  /**
-   * P4: working in a leaf makes it THE active question, so the single global
-   * navigator can never point at a question the student has moved on from.
-   * Optional so existing callers keep compiling unchanged.
-   */
+  /** @deprecated Answer focus does not change navigation state. */
   onActivate?: ((id: string) => void) | undefined;
 }
 
 export function SubAnswerTreeQuestionList({
   questions,
   answers,
-  currentQuestionId,
   flags = {},
   onToggleFlag,
   tabletMode = false,
   highlightEnabled = false,
   highlightColor,
   onAnswerChange,
-  onActivate,
 }: SubAnswerTreeQuestionListProps) {
   const rootOrder = new Map<string, number>();
   const groups: Array<{
@@ -112,7 +107,6 @@ export function SubAnswerTreeQuestionList({
             {group.leaves.map((leaf) => {
               const slotId = leaf.id;
               const value = typeof answers[slotId] === "string" ? (answers[slotId] as string) : "";
-              const isCurrent = currentQuestionId === slotId;
               const isFlagged = Boolean(flags[slotId]);
               const showLeafNumber = group.leaves.length > 1;
               const displayNumber = showLeafNumber
@@ -124,17 +118,7 @@ export function SubAnswerTreeQuestionList({
                   key={slotId}
                   id={`question-${slotId}`}
                   tabIndex={-1}
-                  // Focus capture covers both clicking into the input and
-                  // tabbing to it, so answering activates without a separate
-                  // click handler racing the input's own focus.
-                  onFocusCapture={() => {
-                    if (!isCurrent) {
-                      onActivate?.(slotId);
-                    }
-                  }}
-                  className={`rounded-lg p-1 transition-colors ${
-                    isCurrent ? "ring-2 ring-blue-800 ring-offset-2" : ""
-                  } ${isFlagged ? "bg-amber-50" : ""}`}
+                  className={`rounded-lg p-1 transition-colors ${isFlagged ? "bg-amber-50" : ""}`}
                 >
                   <div
                     className={
@@ -142,7 +126,7 @@ export function SubAnswerTreeQuestionList({
                     }
                   >
                     {showLeafNumber ? (
-                      <StudentQuestionNumber number={displayNumber} isActive={isCurrent} />
+                      <StudentQuestionNumber number={displayNumber} />
                     ) : null}
                     <div className="flex-1">
                       <ProtectedInput
@@ -155,7 +139,7 @@ export function SubAnswerTreeQuestionList({
                             interactionType: "typing",
                           })
                         }
-                        className="w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/25"
+                        className="w-full rounded-md border border-gray-300 px-4 py-2 text-base transition-colors focus-visible:border-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/25"
                         placeholder="Enter answer..."
                         aria-label={`Answer for question ${displayNumber}`}
                       />

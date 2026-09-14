@@ -1,6 +1,11 @@
 import type { SatTextAnchor } from '../../domain/satResponses';
 
-export function captureSatTextSelection(root: HTMLElement, region: string, selection: Selection | null): SatTextAnchor | null {
+export interface SatTextSelectionOptions {
+  /** Allow an active paint tool to select through an existing note affordance. */
+  allowAnnotationControls?: boolean;
+}
+
+export function captureSatTextSelection(root: HTMLElement, region: string, selection: Selection | null, options: SatTextSelectionOptions = {}): SatTextAnchor | null {
   if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;
   const range = selection.getRangeAt(0);
   const elementFor = (node: Node) => node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
@@ -9,8 +14,11 @@ export function captureSatTextSelection(root: HTMLElement, region: string, selec
   const block = startElement?.closest<HTMLElement>('[data-content-text-node]');
   if (!block || !root.contains(block) || endElement?.closest('[data-content-text-node]') !== block) return null;
   const forbidden = 'button, a, input, textarea, select, [contenteditable="true"], [role="math"]';
-  if (startElement?.closest(forbidden) || endElement?.closest(forbidden)) return null;
-  if ([...block.querySelectorAll(forbidden)].some((element) => range.intersectsNode(element))) return null;
+  const forbiddenWithControls = options.allowAnnotationControls
+    ? forbidden
+    : `${forbidden}, [data-sat-annotation-control="true"]`;
+  if (startElement?.closest(forbiddenWithControls) || endElement?.closest(forbiddenWithControls)) return null;
+  if ([...block.querySelectorAll(forbiddenWithControls)].some((element) => range.intersectsNode(element))) return null;
   const preceding = range.cloneRange();
   preceding.selectNodeContents(block);
   preceding.setEnd(range.startContainer, range.startOffset);

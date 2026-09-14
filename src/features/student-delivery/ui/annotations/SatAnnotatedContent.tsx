@@ -47,7 +47,12 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
       // content root itself.
       const scope = root.current.parentElement ?? root.current;
       if (event.type === 'pointerup' && (!(event.target instanceof Node) || !scope.contains(event.target))) return;
-      const anchor = captureSatTextSelection(root.current, region, window.getSelection());
+      const anchor = captureSatTextSelection(root.current, region, window.getSelection(), {
+        // Existing note affordances are inline buttons. While the highlight
+        // tool is armed they must remain selectable so a later gesture can
+        // extend or overlap an earlier highlight.
+        allowAnnotationControls: mode === 'highlight',
+      });
       if (!anchor) return;
       if (mode === 'erase') {
         const next = removeSatAnnotationsInRange(annotations, anchor.nodeId, anchor.startOffset, anchor.endOffset);
@@ -106,14 +111,23 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
           });
           if (match) {
             const label = `${match.note ? "Edit note" : "Add note"}: ${match.anchor.exact}`;
-            return <button key={start} type="button" data-sat-highlight data-sat-annotation-note={match.id}
+            return <span key={start} role="button" tabIndex={0} data-sat-highlight="true" data-sat-annotation-control="true" data-sat-annotation-note={match.id}
               onClick={() => onEditNote(match)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                onEditNote(match);
+              }}
               aria-label={label} title={label}
               className="rounded-[2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
               // Paper highlight (Phase 7, Lane 3): canonical token with
               // Bluebook paper fallback #FFF2B3 (was #fff1a8).
-              style={{ backgroundColor: 'var(--sat-highlight-background, #FFF2B3)', color: 'var(--sat-highlight-text, #1d1d1f)', padding: 0 }}
-            >{text.slice(start - startOffset, end - startOffset)}</button>;
+              // Keep the control as a real inline fragment so a multi-line
+              // selection paints only its text instead of a full-width form
+              // control. Clone decoration per wrapped line for the same
+              // geometry in Chromium and WebKit.
+              style={{ backgroundColor: 'var(--sat-highlight-background, #FFF2B3)', color: 'var(--sat-highlight-text, #1d1d1f)', boxDecorationBreak: 'clone', WebkitBoxDecorationBreak: 'clone' }}
+            >{text.slice(start - startOffset, end - startOffset)}</span>;
           }
         }
         return <span key={start} data-sat-highlight={segment.highlight || undefined} data-sat-underline={segment.underline || undefined}
