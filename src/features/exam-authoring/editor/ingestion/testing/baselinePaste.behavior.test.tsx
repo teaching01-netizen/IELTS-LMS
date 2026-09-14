@@ -380,8 +380,13 @@ describe("baseline paste behavior (B1-B12, observed)", () => {
     ).not.toThrow();
     expect(JSON.stringify(editor.getJSON())).toContain("inlineMath");
     const { readFileSync } = await import("node:fs");
+    // The runtime math options moved into the shared schema module when the
+    // node vocabulary was split for the co-editing service (the browser and
+    // the Hocuspocus service must build the same schema). The pinned intent is
+    // unchanged: the RUNTIME renders with throwOnError:false while the dialog
+    // validates with throwOnError:true.
     const runtime = readFileSync(
-      "src/features/exam-authoring/editor/EditableMathExtension.tsx",
+      "src/features/exam-authoring/editor/schema/mathNodes.ts",
       "utf8"
     );
     expect(runtime).toContain("throwOnError: false");

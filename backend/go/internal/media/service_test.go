@@ -311,7 +311,7 @@ func TestCompleteUploadVerifiesStoredObject(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
 		WillReturnRows(assetRow("asset-1", StatusPending, "media/asset-1/pic.png", "image/png"))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE media_assets SET upload_status = 'finalized'")).
-		WithArgs(int64(len(body)), checksum, "/api/v1/media/assets/asset-1", "asset-1").
+		WithArgs(int64(len(body)), checksum, "/api/v1/media/asset-1/content", "asset-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ?")).
 		WillReturnRows(assetRowWithMetadata("asset-1", StatusFinalized, "media/asset-1/pic.png", "image/png", int64(len(body)), checksum))

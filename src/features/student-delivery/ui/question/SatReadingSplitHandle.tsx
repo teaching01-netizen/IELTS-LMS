@@ -9,12 +9,14 @@ import {
 export interface SatReadingSplitHandleProps {
   containerRef: RefObject<HTMLDivElement | null>;
   ratio: number;
+  leftPaneLabel?: string;
   onChange: (ratio: number) => void;
 }
 
 export function SatReadingSplitHandle({
   containerRef,
   ratio,
+  leftPaneLabel = "Passage",
   onChange,
 }: SatReadingSplitHandleProps) {
   const draggingPointer = useRef<number | null>(null);
@@ -66,11 +68,11 @@ export function SatReadingSplitHandle({
       type="button"
       role="slider"
       aria-orientation="horizontal"
-      aria-label="Passage and question width"
+      aria-label={`${leftPaneLabel} and question width`}
       aria-valuemin={38}
       aria-valuemax={62}
       aria-valuenow={passagePercent}
-      aria-valuetext={`Passage ${passagePercent} percent, question ${100 - passagePercent} percent`}
+      aria-valuetext={`${leftPaneLabel} ${passagePercent} percent, question ${100 - passagePercent} percent`}
       tabIndex={0}
       data-sat-reading-split-handle
       onPointerDown={handlePointerDown}

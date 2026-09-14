@@ -37,6 +37,15 @@ describe('SAT contrast tokens (Phase 01)', () => {
         expect(chevron, `${relative}: ${chevron}`).not.toContain('text-slate-300');
       }
     }
-    expect(readSource('routes/SatSessionRoomRoute.tsx')).toContain('className="text-slate-400"');
+    // The session room moved its tertiary text into the room stylesheet rather
+    // than slate utility literals: the roster meta, the empty-state copy, and
+    // the inspector labels all resolve from --sat-staff-text-tertiary.
+    const roomCss = readFileSync(resolve(SAT_ROOT, 'ui/sat-session-room.css'), 'utf8');
+    for (const selector of ['.sat-room__cohort', '.sat-room__row-meta', '.sat-room__empty-hint', '.sat-room__eyebrow']) {
+      const rule = roomCss.match(new RegExp(`\\${selector} \\{([^}]*)\\}`))?.[1] ?? '';
+      expect(rule, selector).toContain('--sat-staff-text-tertiary');
+    }
+    const room = readSource('routes/SatSessionRoomRoute.tsx');
+    expect(room).not.toMatch(/text-slate-300/);
   });
 });

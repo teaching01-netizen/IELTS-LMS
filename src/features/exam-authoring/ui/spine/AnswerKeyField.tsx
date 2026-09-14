@@ -1,22 +1,40 @@
 import { motion } from "motion/react";
+import { Check } from "lucide-react";
 import { authoringMotion } from "@/src/shared/motion";
 import { FastQuestionComposer } from "../../editor/FastQuestionComposer";
 import { SAT_CHOICE_COMPOSER_CAPABILITIES } from "../../editor/RichQuestionComposer";
 import { plainTextFromContent } from "../../editor/richContent";
-import type { QuestionRevision } from "../../contracts/assessment";
+import type { QuestionRevision, StructuredContent } from "../../contracts/assessment";
+import type { RichComposerCollaboration } from "../../editor/RichQuestionComposer";
+
+function emptyContent(): StructuredContent {
+  return {
+    version: 2,
+    nodes: [],
+    document: { type: "doc", content: [{ type: "paragraph" }] },
+  };
+}
 
 export interface AnswerKeyFieldProps {
   question: QuestionRevision;
   onChange: (question: QuestionRevision) => void;
+  onLocalChange?: ((question: QuestionRevision) => void) | undefined;
+  collaborationFor?: ((optionId: string) => RichComposerCollaboration | null | undefined) | undefined;
+  readOnly?: boolean | undefined;
 }
 
 /**
- * Unmissable MCQ answer key (plan Phase 5): the key is a radiogroup of 44px
- * radio cards — filled selected state PLUS "Key" text, never color alone.
- * Same `{ ...answer, correctOptionId }` payload shape as the legacy editor;
- * choice text still edits through FastQuestionComposer (unchanged).
+ * Answer choices as first-class domain components (plan Phase 5, refined).
+ *
+ * Four options, one component: identical geometry in every state, so the set
+ * reads as a single list rather than four different things. Selection changes
+ * only the *surface treatment* — a soft tint, a leading rail, the filled letter
+ * chip, and the word "Key" — never the size or position of anything.
+ *
+ * The editor inside a choice stays compact and hidden behind its own toolbar
+ * until the row is focused, so content leads and editing mechanics follow.
  */
-export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
+export function AnswerKeyField({ question, onChange, onLocalChange, collaborationFor, readOnly = false }: AnswerKeyFieldProps) {
   const answer = question.answer;
   if (answer.kind !== "single_choice") return null;
 
@@ -51,28 +69,30 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
         <h3 id="spine-answer-key-heading" className="sr-only">
           Answer key
         </h3>
-        <span className="sr-only">
-          Required
-        </span>
+        <span className="sr-only">Required</span>
       </div>
-      <p className="mb-3 text-xs text-muted-foreground">
-        Select the one correct choice. The key is shown with fill and text, not color alone.
+      <p className="mb-3.5 text-xs leading-5 text-muted-foreground">
+        Select the one correct choice. The key is marked by a letter chip, a row
+        tint, and the word “Key” — never by color alone.
       </p>
-      <div role="radiogroup" aria-label="Answer key choices" className="space-y-2">
+      <div role="radiogroup" aria-label="Answer key choices" className="answer-list">
         {answer.options.map((option, index) => {
           const letter = String.fromCharCode(65 + index);
           const checked = answer.correctOptionId === option.id;
-          const text = plainTextFromContent(option.content);
+          const content = option.content ?? emptyContent();
+          const text = plainTextFromContent(content);
           return (
             <div
               key={option.id}
               data-spine-key-row={checked ? "key" : "option"}
-              className={`flex items-start gap-2 rounded-lg border p-2 transition-colors ${checked ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/60"}`}
+              data-correct={checked ? "true" : "false"}
+              className="answer-choice"
             >
               <motion.button
                 type="button"
                 role="radio"
                 whileTap={authoringMotion.press}
+                disabled={readOnly}
                 aria-checked={checked}
                 aria-label={`Choice ${letter}${text ? `: ${text}` : ""}${checked ? ", correct answer, key" : ""}`}
                 onClick={() => setKey(option.id)}
@@ -85,36 +105,14 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
                     moveKey(option.id, -1);
                   }
                 }}
-                className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] ${checked ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+                className="answer-choice__letter flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
               >
                 {letter}
               </motion.button>
-              <div className="sat-spine__choice-reorder flex shrink-0 flex-col gap-1" role="group" aria-label={`Reorder choice ${letter}`}>
-                <button
-                  type="button"
-                  disabled={index === 0}
-                  onClick={() => moveOption(option.id, -1)}
-                  aria-label={`Move choice ${letter} earlier`}
-                  title={`Move choice ${letter} earlier`}
-                  className="flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
-                >
-                  <span aria-hidden="true">↑</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={index === answer.options.length - 1}
-                  onClick={() => moveOption(option.id, 1)}
-                  aria-label={`Move choice ${letter} later`}
-                  title={`Move choice ${letter} later`}
-                  className="flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
-                >
-                  <span aria-hidden="true">↓</span>
-                </button>
-              </div>
-              <div className="min-w-0 flex-1">
+              <div className="answer-choice__content">
                 <FastQuestionComposer
                   label={`Answer choice ${letter}`}
-                  value={option.content}
+                  value={content}
                   onChange={(optionContent) =>
                     onChange({
                       ...question,
@@ -126,22 +124,72 @@ export function AnswerKeyField({ question, onChange }: AnswerKeyFieldProps) {
                       },
                     })
                   }
+                  {...(onLocalChange && !collaborationFor
+                    ? {
+                        onLocalChange: (optionContent) =>
+                          onLocalChange({
+                            ...question,
+                            answer: {
+                              ...answer,
+                              options: answer.options.map((candidate) =>
+                                candidate.id === option.id
+                                  ? { ...candidate, content: optionContent }
+                                  : candidate,
+                              ),
+                            },
+                          }),
+                      }
+                    : {})}
                   placeholder={`Choice ${letter}`}
                   compact
                   assetOwnerId={question.questionId}
                   capabilities={SAT_CHOICE_COMPOSER_CAPABILITIES}
-                  minHeightClassName="min-h-[42px]"
+                  minHeightClassName="min-h-[40px]"
+                  {...(collaborationFor?.(option.id) ? { collaboration: collaborationFor(option.id)! } : {})}
                 />
               </div>
-              {checked ? (
-                <motion.span
-                  layoutId="spine-key-tag"
-                  transition={authoringMotion.snap}
-                  className="mt-3 shrink-0 pr-1 text-[10px] font-bold uppercase tracking-wider text-primary"
+              <div className="answer-choice__aside">
+                <div
+                  className="answer-choice__reorder sat-spine__choice-reorder"
+                  role="group"
+                  aria-label={`Reorder choice ${letter}`}
                 >
-                  Key
-                </motion.span>
-              ) : null}
+                  <button
+                    type="button"
+                    disabled={readOnly || index === 0}
+                    onClick={() => moveOption(option.id, -1)}
+                    aria-label={`Move choice ${letter} earlier`}
+                    title={`Move choice ${letter} earlier`}
+                    className="flex min-h-8 min-w-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+                  >
+                    <span aria-hidden="true">↑</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={readOnly || index === answer.options.length - 1}
+                    onClick={() => moveOption(option.id, 1)}
+                    aria-label={`Move choice ${letter} later`}
+                    title={`Move choice ${letter} later`}
+                    className="flex min-h-8 min-w-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+                  >
+                    <span aria-hidden="true">↓</span>
+                  </button>
+                </div>
+                {checked ? (
+                  <motion.span
+                    layoutId="spine-key-tag"
+                    transition={authoringMotion.snap}
+                    className="answer-choice__key"
+                  >
+                    <Check size={12} aria-hidden="true" strokeWidth={3} />
+                    Key
+                  </motion.span>
+                ) : (
+                  <span aria-hidden="true" className="answer-choice__key answer-choice__key--idle">
+                    Set key
+                  </span>
+                )}
+              </div>
             </div>
           );
         })}

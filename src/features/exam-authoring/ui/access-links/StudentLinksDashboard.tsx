@@ -18,8 +18,7 @@ import type {
   DuplicateAssessmentAccessLinkRequest,
   UpdateAssessmentAccessLinkRequest,
 } from "../../contracts/accessLinks";
-import { logError } from "../../../../app/error/errorLogger";
-import { useNotificationStore } from "../../../../app/store/notificationStore";
+import { logError, useNotificationStore } from "../../infrastructure/authoringUiGateway";
 import { AccessLinkEditorSheet } from "./AccessLinkEditorSheet";
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
 import type { SatMenuItem } from "../../../../products/sat/ui/Menu";
@@ -36,6 +35,8 @@ import {
   SatPrimaryButton,
 } from "../../../../products/sat/ui/SatPage";
 import { copyText, studentJoinUrl } from "./accessLinkUi";
+import { CollaborationHeaderCluster } from "../collaboration/CollaborationHeaderCluster";
+import { useSatAuthoringCollaboration } from "../../realtime/coedit";
 
 interface StudentLinksDashboardProps {
   exam: ExamEntity;
@@ -49,6 +50,31 @@ interface StudentLinksDashboardProps {
 const EMPTY_ACCESS_LINKS: AssessmentAccessLink[] = [];
 const STATUS_RANK: Record<AccessLinkStatus, number> = { live: 0, upcoming: 1, paused: 2, ended: 3, revoked: 4 };
 
+type LinkUpdateOptions = { silent?: boolean };
+
+function projectSharedAccessLink(
+  fallback: AssessmentAccessLink,
+  value: Record<string, unknown>,
+): AssessmentAccessLink {
+  const next = { ...fallback };
+  if (typeof value["name"] === "string") next.name = value["name"];
+  if (value["audienceType"] === "anyone" || value["audienceType"] === "cohort" || value["audienceType"] === "selected_students") next.audienceType = value["audienceType"];
+  if (typeof value["audienceLabel"] === "string" || value["audienceLabel"] === null) next.audienceLabel = value["audienceLabel"];
+  if (value["accessMode"] === "student_code" || value["accessMode"] === "open") next.accessMode = value["accessMode"];
+  if (value["availabilityType"] === "scheduled" || value["availabilityType"] === "anytime") next.availabilityType = value["availabilityType"];
+  if (typeof value["opensAt"] === "string" || value["opensAt"] === null) next.opensAt = value["opensAt"];
+  if (typeof value["closesAt"] === "string" || value["closesAt"] === null) next.closesAt = value["closesAt"];
+  if (value["lifecycleState"] === "active" || value["lifecycleState"] === "paused" || value["lifecycleState"] === "revoked") next.lifecycleState = value["lifecycleState"];
+  if (value["status"] === "live" || value["status"] === "upcoming" || value["status"] === "ended" || value["status"] === "paused" || value["status"] === "revoked") next.status = value["status"];
+  if (typeof value["revision"] === "number") next.revision = value["revision"];
+  if (typeof value["updatedAt"] === "string") next.updatedAt = value["updatedAt"];
+  return next;
+}
+
+function isSharedAccessLinkCandidate(value: Record<string, unknown>): value is Record<string, unknown> & Pick<AssessmentAccessLink, "id" | "name" | "examId" | "revision"> {
+  return typeof value["id"] === "string" && typeof value["name"] === "string" && typeof value["examId"] === "string" && typeof value["revision"] === "number";
+}
+
 function isRevisionConflict(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return /revision|stale|conflict|changed elsewhere|409/i.test(error.message);
@@ -56,7 +82,38 @@ function isRevisionConflict(error: unknown): boolean {
 
 export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefresh, onBackToRelease }: StudentLinksDashboardProps) {
   const version = overview?.currentPublishedVersion ?? null;
-  const links = overview?.links ?? EMPTY_ACCESS_LINKS;
+  const collaboration = useSatAuthoringCollaboration();
+  const announceWorkspaceCommand = useCallback(
+    (command: Parameters<NonNullable<typeof collaboration>["publishCommand"]>[0], payload: Record<string, unknown>) => {
+      collaboration?.publishCommand(command, payload);
+    },
+    [collaboration],
+  );
+  const sourceLinks = overview?.links ?? EMPTY_ACCESS_LINKS;
+  const sharedValues = collaboration?.workspaceSnapshot.values;
+  const links = useMemo(() => {
+    const byId = new Map(sourceLinks.map((link) => [link.id, link]));
+    for (const [path, raw] of Object.entries(sharedValues ?? {})) {
+      if (!path.startsWith("access/") || path === "access/index" || raw === null || typeof raw !== "object") continue;
+      const candidate = raw as Record<string, unknown>;
+      if (!isSharedAccessLinkCandidate(candidate)) continue;
+      const fallback = byId.get(candidate.id);
+      if (fallback) {
+        byId.set(candidate.id, projectSharedAccessLink(fallback, candidate));
+      } else if (candidate["publishedVersionId"] === version?.id || candidate["examId"] === exam.id) {
+        // A newly created link is broadcast before the overview query has
+        // returned it. It is safe to show only a complete link-shaped payload;
+        // malformed room values stay invisible at this UI boundary.
+        byId.set(candidate.id, candidate as unknown as AssessmentAccessLink);
+      }
+    }
+    return [...byId.values()];
+  }, [exam.id, sharedValues, sourceLinks, version?.id]);
+
+  useEffect(() => {
+    if (!collaboration?.workspaceSnapshot.ready) return;
+    for (const link of sourceLinks) collaboration.ensureValue(`access/${link.id}`, link);
+  }, [collaboration, collaboration?.workspaceSnapshot.ready, sourceLinks]);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -76,6 +133,12 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const lifecycleMutation = useSetAccessLinkLifecycle(exam.id);
   const duplicateMutation = useDuplicateAccessLink(exam.id);
   const membersQuery = useAccessLinkMembers(editingLink?.id ?? null);
+
+  useEffect(() => {
+    if (!editingLink) return;
+    const live = links.find((link) => link.id === editingLink.id);
+    if (live && live.revision !== editingLink.revision) setEditingLink(live);
+  }, [editingLink, links]);
 
   useEffect(() => {
     if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
@@ -146,13 +209,17 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
 
   const createLink = async (request: CreateAssessmentAccessLinkRequest) => {
     const created = await createMutation.mutateAsync(request);
+    collaboration?.setValue(`access/${created.id}`, created);
+    announceWorkspaceCommand("access.created", { linkId: created.id });
     setSelectedId(created.id);
     showToast("Student Link created");
   };
-  const updateLink = async (linkId: string, request: UpdateAssessmentAccessLinkRequest) => {
+  const updateLink = async (linkId: string, request: UpdateAssessmentAccessLinkRequest, options?: LinkUpdateOptions) => {
     const updated = await updateMutation.mutateAsync({ linkId, request });
+    collaboration?.setValue(`access/${linkId}`, updated);
+    announceWorkspaceCommand("access.updated", { linkId });
     setSelectedId(updated.id);
-    showToast("Student Link updated");
+    if (!options?.silent) showToast("Student Link updated");
   };
   const setLifecycle = async (
     link: AssessmentAccessLink,
@@ -161,7 +228,15 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     setActionError(null);
     setStaleConflict(false);
     try {
-      await lifecycleMutation.mutateAsync({ linkId: link.id, request: { revision: link.revision, state } });
+      const updated = await lifecycleMutation.mutateAsync({ linkId: link.id, request: { revision: link.revision, state } });
+      collaboration?.setValues({
+        [`access/${link.id}`]: {
+          ...updated,
+          lifecycleState: state,
+          status: state === "active" ? "live" : state,
+        },
+      });
+      announceWorkspaceCommand("access.lifecycle_changed", { linkId: link.id, state });
       showToast(state === "active" ? "Student Link resumed" : state === "paused" ? "Student Link paused" : "Student Link revoked");
       return true;
     } catch (err) {
@@ -183,6 +258,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       : { revision: link.revision, name: `${link.name} Copy`, releaseTarget: "source" };
     try {
       const created = await duplicateMutation.mutateAsync({ linkId: link.id, request });
+      collaboration?.setValue(`access/${created.id}`, created);
+      announceWorkspaceCommand("access.duplicated", { linkId: created.id, sourceLinkId: link.id });
       setSelectedId(created.id);
       showToast(releaseTarget === "current" ? `Created for Version ${version?.versionNumber ?? "current"}` : "Student Link duplicated");
     } catch (err) {
@@ -219,8 +296,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       ? [{ id: "pause", label: link.lifecycleState === "paused" ? "Resume Link" : "Pause Link", onSelect: () => { void setLifecycle(link, link.lifecycleState === "paused" ? "active" : "paused"); } } as SatMenuItem]
       : []),
     { id: "revoke", label: "Revoke Link", onSelect: () => setConfirm({ link, action: "revoke" }), destructive: true, separatorBefore: true, disabled: link.lifecycleState === "revoked" },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [copy, openEditor]);
+  ], [copy, duplicate, openEditor, setLifecycle]);
 
   if (isLoading) {
     return (
@@ -275,6 +351,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
             <p className="truncate text-[13px] font-semibold tracking-[-0.01em]">{exam.title}</p>
             <p className="truncate text-[11px] font-medium text-slate-500">Student Access · Version {version.versionNumber} is published</p>
           </div>
+          <CollaborationHeaderCluster surface="access" />
           <SatPrimaryButton onClick={() => openEditor(null)} icon={<Plus size={14} aria-hidden="true" />} ariaLabel="New Student Link">New Student Link</SatPrimaryButton>
         </div>
       </header>

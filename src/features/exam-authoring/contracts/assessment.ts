@@ -79,6 +79,32 @@ export type SaveQuestionRevisionRequest = Omit<
   "id" | "questionId" | "semanticRevision" | "state"
 >;
 
+/**
+ * Partial save used while prompt co-editing owns the question (2026-09-13
+ * design). `prompt` is structurally absent: this request type cannot express a
+ * prompt write, so no client can accidentally send one. Only fields PRESENT on
+ * the request are written; Go bumps the revision and appends the same
+ * content-free `question.changed` event the full save would.
+ */
+export type SaveQuestionRevisionFieldsRequest = {
+  revision: number;
+} & Partial<
+  Pick<
+    QuestionRevision,
+    "questionType" | "stimulus" | "answer" | "rationale" | "metadata" | "accessibility"
+  >
+>;
+
+/** The allow-listed, prompt-free field vocabulary of the partial save. */
+export const SAVE_QUESTION_REVISION_FIELD_KEYS = [
+  "questionType",
+  "stimulus",
+  "answer",
+  "rationale",
+  "metadata",
+  "accessibility",
+] as const satisfies readonly (keyof SaveQuestionRevisionFieldsRequest)[];
+
 export type QuestionReadinessStatus = "ready" | "incomplete" | "error";
 
 export interface QuestionReadinessSummary {

@@ -18,6 +18,7 @@ export interface AuthoringSegmentedProps<T extends string> {
   onChange: (value: T) => void;
   ariaLabel: string;
   className?: string;
+  disabled?: boolean | undefined;
 }
 
 export function AuthoringSegmented<T extends string>({
@@ -26,6 +27,7 @@ export function AuthoringSegmented<T extends string>({
   onChange,
   ariaLabel,
   className,
+  disabled = false,
 }: AuthoringSegmentedProps<T>) {
   return (
     <div
@@ -38,10 +40,11 @@ export function AuthoringSegmented<T extends string>({
         return (
           <button
             key={option.value}
-            type="button"
+          type="button"
+            disabled={disabled}
             aria-pressed={active}
             onClick={() => onChange(option.value)}
-            className={`relative flex min-h-9 min-w-0 flex-1 items-center justify-center rounded-[8px] px-3 text-[12px] font-semibold transition-colors active:scale-[0.96] ${
+            className={`relative flex min-h-9 min-w-0 flex-1 items-center justify-center rounded-[8px] px-3 text-[12px] font-semibold transition-colors active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 ${
               active ? "text-slate-950" : "text-slate-500 hover:text-slate-800"
             }`}
           >

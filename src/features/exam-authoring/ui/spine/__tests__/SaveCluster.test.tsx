@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { QuestionSaveStatus } from "../../../hooks/useQuestionAutosave";
-import { saveStatusCopy } from "../../../realtime/connectionCopy";
+import { COEDIT_SAVE_COPY, saveStatusCopy } from "../../../realtime/connectionCopy";
 import { SaveCluster } from "../SaveCluster";
 
 const statuses: QuestionSaveStatus[] = ["saved", "unsaved", "saving", "offline", "error", "conflict"];
@@ -63,5 +63,61 @@ describe("SaveCluster", () => {
     render(<SaveCluster status="conflict" lastSavedAt={null} />);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Changed elsewhere");
+  });
+
+  it.each([
+    ["saved", COEDIT_SAVE_COPY.saved],
+    ["saving", COEDIT_SAVE_COPY.saving],
+    ["still_saving", COEDIT_SAVE_COPY.still_saving],
+    ["offline", COEDIT_SAVE_COPY.offline],
+    ["reconnecting", COEDIT_SAVE_COPY.reconnecting],
+    ["error", COEDIT_SAVE_COPY.error],
+    ["view_only", COEDIT_SAVE_COPY.view_only],
+    ["finishing", COEDIT_SAVE_COPY.finishing],
+  ] as const)("uses human co-edit copy for %s", (status, copy) => {
+    render(
+      <SaveCluster
+        status={status}
+        displayMode="coedit"
+        lastSavedAt={null}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(copy)).toBeInTheDocument();
+  });
+
+  it("does not hide a co-edit Saved state after the transient-success window", () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(
+        <SaveCluster
+          status="saved"
+          displayMode="coedit"
+          transientSaved
+          lastSavedAt={null}
+        />,
+      );
+      act(() => { vi.advanceTimersByTime(2_000); });
+      expect(container.querySelector('[data-save-hidden="true"]')).not.toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent(COEDIT_SAVE_COPY.saved);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps retry inline in the same co-edit status surface", () => {
+    const onRetry = vi.fn();
+    render(
+      <SaveCluster
+        status="error"
+        displayMode="coedit"
+        lastSavedAt={null}
+        onRetry={onRetry}
+      />,
+    );
+    const retry = screen.getByRole("button", { name: /Couldn’t save.*Retry save/i });
+    expect(retry).toContainElement(screen.getByText(COEDIT_SAVE_COPY.error));
+    fireEvent.click(retry);
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });

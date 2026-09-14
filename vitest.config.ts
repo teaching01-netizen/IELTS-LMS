@@ -19,7 +19,16 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
-    exclude: ["**/node_modules/**", ".mimocode/**", "dist/**", "e2e/**"],
+    // The co-edit service is a Node/Hocuspocus process with its own Vitest
+    // config and lifecycle suite. Keep it out of the browser bundle gate;
+    // `bun run coedit:test` owns that verification boundary.
+    exclude: [
+      "**/node_modules/**",
+      ".mimocode/**",
+      "dist/**",
+      "e2e/**",
+      "services/authoring-coedit/**",
+    ],
     coverage: {
       // The gate measures shipped product code. Storybook stories are
       // interactive demos (built by the storybook job), and test files

@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultConfig } from "../../../../constants/examDefaults";
 import { studentAttemptRepository } from "../../../../services/studentAttemptRepository";
+import { clearDurableDraft, listDurableDrafts } from "../../../../utils/durableDraftStore";
 import type { ExamState } from "../../../../types";
 import type { StudentAttempt } from "../../../../types/studentAttempt";
 import type {
@@ -149,8 +150,15 @@ function createAcknowledgement(writeId: string): ResponseAcknowledgementV2 {
 }
 
 describe("StudentNetworkProvider", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    const durableDrafts = await listDurableDrafts<unknown>("v2_attempt_attempt-1_");
+    const checkpoints = await listDurableDrafts<unknown>("response-checkpoint:v2:attempt-1:");
+    await Promise.all(
+      [...durableDrafts, ...checkpoints].map(({ key }) =>
+        clearDurableDraft(key).catch(() => undefined)
+      )
+    );
     transportMocks.createTransport.mockReturnValue(transportMocks.transport);
     transportMocks.transport.fetchSnapshot.mockResolvedValue(createEmptySnapshot());
     transportMocks.transport.sendBatch.mockImplementation(
@@ -189,7 +197,14 @@ describe("StudentNetworkProvider", () => {
     vi.spyOn(studentAttemptRepository, "getHeartbeatEvents").mockResolvedValue([]);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    const durableDrafts = await listDurableDrafts<unknown>("v2_attempt_attempt-1_");
+    const checkpoints = await listDurableDrafts<unknown>("response-checkpoint:v2:attempt-1:");
+    await Promise.all(
+      [...durableDrafts, ...checkpoints].map(({ key }) =>
+        clearDurableDraft(key).catch(() => undefined)
+      )
+    );
     vi.useRealTimers();
   });
 
@@ -501,6 +516,12 @@ describe("StudentNetworkProvider", () => {
       .fn<() => Promise<void>>()
       .mockRejectedValueOnce(new Error("live refresh timeout"))
       .mockResolvedValue(undefined);
+    const retryAttemptSnapshot = {
+      ...createAttemptSnapshot(),
+      id: "attempt-reconnect-retry",
+      scheduleId: "sched-reconnect-retry",
+      studentKey: "student-sched-reconnect-retry-alice",
+    };
 
     Object.defineProperty(window.navigator, "onLine", {
       configurable: true,
@@ -513,12 +534,12 @@ describe("StudentNetworkProvider", () => {
         runtime: useStudentRuntime(),
       }),
       {
-        wrapper: createWrapper(createAttemptSnapshot(), createExamState().config, onRefreshRuntime),
+        wrapper: createWrapper(retryAttemptSnapshot, createExamState().config, onRefreshRuntime),
       }
     );
 
     await waitFor(() => {
-      expect(result.current.attempt.state.attempt?.id).toBe("attempt-1");
+      expect(result.current.attempt.state.attempt?.id).toBe("attempt-reconnect-retry");
     });
 
     act(() => {

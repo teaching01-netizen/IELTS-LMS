@@ -2065,7 +2065,10 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
    * H2 16-17 with -0.025; title and body 13-14 with -0.012; control and hint 12 semibold;
    * floor 11 medium; eyebrow 11 caps with 0.12 (primitive ships 10px bridge, do not go below).
    * Contrast floor: text at least 4.5 to 1, dots at least 3 to 1. Neutral dot #6e6e73 (5.07 to 1). */
-  --sat-staff-canvas: var(--color-au-canvas);
+  /* One page ground for the whole product (staff + authoring): a hair cooler
+   * and flatter than the Apple canvas so white surfaces read as the work.
+   * Surfaces raised off it carry --au-elevation-*; everything else is flat. */
+  --sat-staff-canvas: #f7f7f8;
   --sat-staff-surface: var(--color-au-surface);
   --sat-staff-surface-raised: var(--color-au-surface-raised);
   --sat-staff-surface-solid-fallback: #ffffff;
@@ -2144,8 +2147,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-staff-radius-control: 10px;
   --sat-staff-radius-input: 12px;
   --sat-staff-radius-menu: 13px;
-  --sat-staff-radius-card: 16px;
-  --sat-staff-radius-dialog: 22px;
+  --sat-staff-radius-card: 14px;
+  --sat-staff-radius-dialog: 18px;
   --authoring-sheet: var(--sat-surface);
   --authoring-hairline: var(--sat-separator);
   --au-elevation-menu: var(--sat-menu-elevation);
@@ -2974,13 +2977,59 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   opacity: 0.45;
 }
 
+/* The primary action is the one control that earns a visible gradient: a
+ * physical key with a lit top edge and a specular gloss. The ramp is built from
+ * the accent token through color-mix rather than hard-coded hex, so dark
+ * appearance and forced-colors mode keep resolving their own accent. The 1px
+ * edge is a ring shadow, not a border, so a primary button stays exactly the
+ * same size as the quiet buttons beside it. */
 .authoring-button--primary {
-  background: var(--color-au-accent);
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-au-accent) 84%, #ffffff) 0%,
+    var(--color-au-accent) 48%,
+    color-mix(in srgb, var(--color-au-accent) 88%, #000000) 100%
+  );
   color: white;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-au-accent) 70%, #000000),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -1px 0 rgba(0, 40, 100, 0.16),
+    0 1px 2px rgba(0, 61, 135, 0.16),
+    0 4px 10px rgba(0, 97, 205, 0.1);
+}
+
+/* Light from above: the gloss is clipped to the top third of the control, clear
+ * of the label's x-height, so it never veils the text. */
+.authoring-button--primary::before {
+  content: "";
+  position: absolute;
+  inset: 1px 10% auto;
+  height: 36%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent);
+  pointer-events: none;
+}
+
+.authoring-button--primary:disabled::before {
+  background: none;
 }
 
 .authoring-button--primary:hover:not(:disabled) {
-  background: var(--color-au-accent-hover);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-au-accent) 74%, #ffffff) 0%,
+    color-mix(in srgb, var(--color-au-accent) 96%, #ffffff) 48%,
+    color-mix(in srgb, var(--color-au-accent) 92%, #000000) 100%
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-au-accent) 62%, #000000),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -1px 0 rgba(0, 40, 100, 0.16),
+    0 2px 4px rgba(0, 61, 135, 0.16),
+    0 6px 14px rgba(0, 97, 205, 0.14);
 }
 
 .authoring-button--danger {
@@ -3216,10 +3265,19 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   flex-wrap: wrap;
   gap: var(--spacing-1);
   padding: var(--spacing-1) var(--spacing-2);
+  /* When the row runs out of width it wraps whole controls, never words inside
+   * a control: "Insert +" must not break into "Insert" and a stray "+". */
+  white-space: nowrap;
 }
 
 .sat-rich-editor__toolbar-group {
   gap: 2px;
+}
+
+/* Groups are separated by space, not by lines: style / format / math / insert /
+ * more must read as distinct sets rather than one long string of controls. */
+.sat-rich-editor__toolbar-group + .sat-rich-editor__toolbar-group {
+  margin-left: var(--spacing-2);
 }
 
 .sat-rich-editor__toolbar-group--history {
@@ -3272,14 +3330,19 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   box-shadow: 0 0 0 2px var(--color-au-accent-tint);
 }
 
+/* Toolbar tools are secondary until the field is engaged: a 32px hit area,
+ * transparent fill, and a low-contrast glyph. Touch hardware still receives
+ * the 44px floor from the coarse-pointer block below. */
 .sat-rich-editor__toolbar-button {
   display: inline-flex;
-  min-width: 44px;
+  min-width: 32px;
+  min-height: 30px;
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
+  border-radius: var(--radius-au-sm);
   background: transparent;
-  padding-inline: var(--spacing-2);
+  padding-inline: var(--spacing-1);
   color: var(--color-gray-500);
   outline: none;
   cursor: pointer;
@@ -3371,11 +3434,27 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 }
 
 .sat-rich-editor__content {
-  padding: var(--spacing-4) var(--spacing-5);
+  padding: 18px 18px 20px;
 }
 
 .sat-rich-editor[data-compact="true"] .sat-rich-editor__content {
-  padding: var(--spacing-3) var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
+}
+
+/* Supporting material is exam content being edited, not UI text in a field:
+ * it gets the largest, most comfortable reading treatment on the page.
+ * (Answer-choice editor geometry belongs with the choice component in
+ * spine.css, so the shared editor contract stays generic here.) */
+.sat-spine [data-authoring-field="stimulus"] .sat-rich-editor__input {
+  font-size: 1rem;
+  line-height: 1.7;
+  letter-spacing: -0.006em;
+  color: var(--spine-text-content, #25282d);
+}
+
+/* Text hierarchy by role: prose outranks its chrome everywhere in the spine. */
+.sat-spine .sat-rich-editor__input {
+  color: var(--spine-text-content, #25282d);
 }
 
 .sat-rich-editor__input {
@@ -3384,8 +3463,11 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   outline: none;
   color: var(--color-gray-900);
   font-family: var(--font-au-sans);
-  font-size: 1rem;
-  line-height: 1.6;
+  /* Exam content is the loudest thing on the page; the chrome around it is
+   * always quieter than this line. */
+  font-size: 1.0625rem;
+  line-height: 1.62;
+  letter-spacing: -0.006em;
 }
 
 .sat-rich-editor [contenteditable="true"]::selection {

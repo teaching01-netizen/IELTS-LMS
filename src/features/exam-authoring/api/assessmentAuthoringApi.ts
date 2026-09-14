@@ -4,7 +4,7 @@ import {
   backendPatch,
   backendPost,
 } from "../infrastructure/examAuthoringBackendGateway";
-import type { ApiRequestConfig } from "../../../services/backendBridge";
+import type { ApiRequestConfig } from "../infrastructure/examAuthoringBackendGateway";
 import type {
   AssessmentAuthoringShell,
   AssessmentPreviewProjection,
@@ -25,6 +25,7 @@ import type {
   PublishedAssessmentVersion,
   PublishAssessmentRequest,
   QuestionRevision,
+  SaveQuestionRevisionFieldsRequest,
   SaveQuestionRevisionRequest,
   UpdateSectionDeliverySettingsRequest,
 } from "../contracts/assessment";
@@ -145,6 +146,22 @@ export const assessmentAuthoringApi = {
   ): Promise<QuestionRevision> {
     return backendPatch<QuestionRevision>(
       `/v1/assessment-authoring/question-revisions/${revisionId}`,
+      request
+    );
+  },
+
+  /**
+   * Partial, prompt-free save used while prompt co-editing is active. Writes
+   * only the fields present on the request; `prompt` is not expressible, so a
+   * collaborative prompt can never be overwritten by a field save (design
+   * 2026-09-13, "Non-collaborative field saves").
+   */
+  saveQuestionRevisionFields(
+    revisionId: string,
+    request: SaveQuestionRevisionFieldsRequest
+  ): Promise<QuestionRevision> {
+    return backendPatch<QuestionRevision>(
+      `/v1/assessment-authoring/question-revisions/${revisionId}/fields`,
       request
     );
   },

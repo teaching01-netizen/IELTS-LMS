@@ -75,6 +75,9 @@ type Service struct {
 	// eventsEnabled is the AUTHORING_REALTIME_EVENTS gate (Phase 02). Off by
 	// default: byte-identical legacy behavior with no bus INSERT.
 	eventsEnabled bool
+	// coeditEnabled is retained as an internal compatibility seam for the
+	// prompt co-editing guard. The application enables it by default.
+	coeditEnabled bool
 }
 
 // NewService wires dependencies explicitly.
@@ -1152,6 +1155,11 @@ func (s *Service) UpdateQuestion(ctx context.Context, examQuestionID, actorID st
 		if rev != expectedRevision {
 			return conflictError("Question changed while you were editing; refresh before retrying.")
 		}
+		// Co-editing guard: a whole-revision replacement carries a prompt, so
+		// it is refused while a collaborative room owns that prompt.
+		if err := s.coeditGuardTx(ctx, q, examQuestionID, draft); err != nil {
+			return err
+		}
 		newRevisionID := uuid.NewString()
 		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_question_revisions (id, question_id, semantic_revision, state, question_type, stimulus, prompt, answer_definition, rationale, metadata, accessibility, revision, created_by, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, 0, ?, NOW(6), NOW(6))", newRevisionID, questionID, semanticRev+1, orDefault(draft.QuestionType, "single_choice"), nonEmptyJSON(draft.Stimulus), nonEmptyJSON(draft.Prompt), nonEmptyJSON(draft.Answer), nonEmptyJSON(draft.Rationale), nonEmptyJSON(draft.Metadata), nonEmptyJSON(draft.Accessibility), actorID); err != nil {
 			return err
@@ -1784,6 +1792,11 @@ func (s *Service) SaveRevision(ctx context.Context, examQuestionID, revisionID s
 		}
 		if rev != expectedRevision {
 			return conflictError("Question changed while you were editing; refresh before retrying.")
+		}
+		// Co-editing guard: an active collaborative room owns this prompt. The
+		// check runs in-tx so a staggered deployment cannot interleave writers.
+		if err := s.coeditGuardTx(ctx, q, examQuestionID, draft); err != nil {
+			return err
 		}
 		questionType := orDefault(draft.QuestionType, "single_choice")
 		metadata := nonEmptyJSON(draft.Metadata)

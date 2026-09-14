@@ -70,9 +70,6 @@ export const SAT_COPY = {
     backToQuestions: "Back to questions",
     passage: "Passage",
     question: "Question",
-    splitView: "Split view",
-    passageOnly: "Passage only",
-    questionOnly: "Question only",
   },
   review: {
     eyebrow: "Review your answers",
@@ -148,13 +145,16 @@ export const SAT_COPY = {
   },
   annotations: {
     limitReached: "Note limit reached (200) for this question \u2014 remove one to add another.",
+    highlight: "Highlight",
+    underline: "Underline",
+    eraser: "Eraser",
     highlightArmed: "Highlighting \u2014 select text.",
     // Mode strings kept for the sr-only armed status + interaction machine.
-    // The top bar exposes separate Highlight and Question note entries; the
-    // highlight armed indicator is silent (no visible bar).
+    // The top bar exposes separate annotation and Question note entries; the
+    // highlight/underline armed indicators are silent (no visible bar).
     underlineArmed: "Underlining \u2014 select text.",
     noteArmed: "Note mode \u2014 select text to attach a note.",
-    eraserArmed: "Eraser on \u2014 select a highlight to remove it.",
+    eraserArmed: "Eraser on \u2014 select highlighted or underlined text to remove it.",
     done: "Done",
   },
   blocking: {

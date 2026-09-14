@@ -66,6 +66,20 @@ describe("assessmentAuthoringApi question contracts", () => {
     expect("answerDefinition" in request).toBe(false);
   });
 
+  it("patches non-collaborative fields at the prompt-free endpoint", async () => {
+    backendPatch.mockResolvedValue({ id: "rev-1", revision: 8 });
+    const request = { revision: 7, rationale: { type: "doc", content: [] } };
+    const saved = await assessmentAuthoringApi.saveQuestionRevisionFields("rev-1", request);
+    expect(backendPatch).toHaveBeenCalledWith(
+      "/v1/assessment-authoring/question-revisions/rev-1/fields",
+      request,
+    );
+    // The partial endpoint is not a back door for the prompt: the request type
+    // cannot carry one and the call must not smuggle one in.
+    expect(Object.keys(request)).not.toContain("prompt");
+    expect(saved.revision).toBe(8);
+  });
+
   it("reorders with the frontend questionIds key and returns summaries", async () => {
     const summaries: any[] = [];
     backendPatch.mockResolvedValue(summaries);

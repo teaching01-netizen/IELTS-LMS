@@ -49,7 +49,7 @@ import {
   buildSatBootstrapSeed,
   getCachedDeliveryEtag,
   type SatBootstrapSeed,
-} from '../../student-delivery/bootstrap/satBootstrapSeed';
+} from '../../student-delivery/api/satBootstrap';
 
 export type { StudentAnswerInvariantRollout } from './studentSessionRouteUtils';
 

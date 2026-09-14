@@ -329,6 +329,20 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 		for key, value := range fields {
 			snapshotFields[key] = value
 		}
+		if detailed, ok := s.scorer.(terminalization.DetailedAttemptScorer); ok {
+			details, err := detailed.ScoreAttemptDetails(ctx, q, attemptID, versionID, json.RawMessage(answers))
+			if err != nil {
+				return err
+			}
+			for key, value := range details {
+				snapshotFields[key] = value
+			}
+			for _, key := range []string{"score", "providerKey", "section"} {
+				if value, present := details[key]; present {
+					fields[key] = value
+				}
+			}
+		}
 	}
 	snap, _ := json.Marshal(snapshotFields)
 	var orgArg any

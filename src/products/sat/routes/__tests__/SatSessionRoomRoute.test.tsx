@@ -269,10 +269,14 @@ describe('SatSessionRoomRoute', () => {
       const row = screen.getByRole('option', { name: 'Open Ananda S.' });
       // Left cell holds name + single merged section-status line; the timer
       // stays a separate tabular p on the right per the Step 5 structure.
-      expect(row.querySelector('div.min-w-0')?.querySelectorAll('p')).toHaveLength(2);
+      expect(row.querySelector('.sat-room__row-name')).not.toBeNull();
+      // The left cell owns exactly one name line and one merged status line.
+      const name = row.querySelector('.sat-room__row-name');
+      expect(name?.parentElement?.querySelectorAll('p')).toHaveLength(1);
+      expect(row.querySelector('.sat-room__row-meta')).not.toBeNull();
       expect(row).toHaveTextContent(/reading/);
       expect(row).toHaveTextContent(/active/);
-      expect(row.querySelector('.tabular-nums')).toBeInTheDocument();
+      expect(row.querySelector('.sat-room__row-time')).toBeInTheDocument();
     });
 
     it('keeps the type floor at 11px in owned room markup', () => {
@@ -295,21 +299,27 @@ describe('SatSessionRoomRoute', () => {
 
     it('keeps the hero clock and tabular timers after compress', () => {
       const { container } = room();
-      const hero = container.querySelector('[class*="text-[36px]"]');
+      const hero = container.querySelector('.sat-room__clock');
       expect(hero).toBeInTheDocument();
-      expect(hero?.className).toMatch(/tabular-nums/);
+      // The clock earns its 32px scale from the room stylesheet, and the
+      // tabular figures live there too so the digits never jitter.
+      const css = readFileSync(resolve(__dirname, '../../ui/sat-session-room.css'), 'utf8');
+      expect(css).toMatch(/\.sat-room__clock \{[^}]*font-variant-numeric: tabular-nums/);
       const row = screen.getByRole('option', { name: 'Open Ananda S.' });
-      expect(row.querySelector('.tabular-nums')).toBeInTheDocument();
+      expect(row.querySelector('.sat-room__row-time')).toBeInTheDocument();
     });
 
-    it('sits InfoRow labels on the eyebrow floor', () => {
+    it('sits InspectorRow labels on the eyebrow floor', () => {
       room();
-      const labels = document.querySelectorAll('aside dt');
+      const labels = document.querySelectorAll('aside .sat-inspector__row dt');
       expect(labels.length).toBeGreaterThan(0);
       labels.forEach((label) => {
-        expect(label.className).toMatch(/text-\[11px\]/);
-        expect(label.className).toMatch(/uppercase/);
+        expect(label.closest('.sat-inspector__row')).not.toBeNull();
       });
+      expect(document.querySelectorAll('aside .sat-inspector__label').length).toBeGreaterThan(0);
+      const css = readFileSync(resolve(__dirname, '../../ui/sat-session-room.css'), 'utf8');
+      expect(css).toMatch(/\.sat-room__eyebrow \{[^}]*text-transform: uppercase/);
+      expect(css).toMatch(/\.sat-inspector__row dt \{[^}]*font-size: 13px/);
     });
   });
 });

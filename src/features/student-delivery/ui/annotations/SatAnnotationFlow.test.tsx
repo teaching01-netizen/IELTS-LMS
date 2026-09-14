@@ -105,6 +105,49 @@ describe('SAT shell annotation flow', () => {
     fireEvent.keyUp(document, { key: 'ArrowRight', shiftKey: true });
     expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
   });
+  it('creates an underline and erases highlighted or underlined text from the top bar', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    const selectStimulusText = (value: string) => {
+      const root = container.querySelector('[data-sat-annotation-region="stimulus"]')!;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node: Node | null = walker.nextNode();
+      while (node && (!(node.nodeValue ?? '').includes(value))) node = walker.nextNode();
+      expect(node).not.toBeNull();
+      const textNode = node as Text;
+      const start = textNode.data.indexOf(value);
+      const range = document.createRange();
+      range.setStart(textNode, start);
+      range.setEnd(textNode, start + value.length);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      fireEvent.pointerUp(textNode.parentElement!);
+    };
+
+    fireEvent.click(screen.getByRole('button', { name: 'Highlight' }));
+    selectStimulusText('Several');
+    expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add note: Several' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your note' }), { target: { value: 'Keep this evidence' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Underline' }));
+    expect(screen.getByRole('button', { name: 'Underline' })).toHaveAttribute('aria-pressed', 'true');
+    selectStimulusText('researchers');
+    expect(container.querySelector('[data-sat-underline="true"]')).toHaveTextContent('researchers');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Eraser' }));
+    expect(screen.getByRole('button', { name: 'Eraser' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('sat-annotation-mode-bar-stimulus')).toHaveTextContent('highlighted or underlined');
+
+    selectStimulusText('researchers');
+    expect(container.querySelector('[data-sat-underline="true"]')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
+
+    selectStimulusText('Several');
+    expect(container.querySelector('[data-sat-highlight="true"]')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /note: Several/ })).not.toBeInTheDocument();
+  });
 });
 
 describe('SAT annotation Bluebook surfaces (Phase 7)', () => {

@@ -415,6 +415,16 @@ export function SatReferenceSheetPanel({
     writeSatReferenceViewState(viewKey, { zoom, scrollTop: node.scrollTop });
   }, [viewKey, zoom]);
 
+  const markManualMove = useCallback(() => {
+    movedRef.current = true;
+    writeSatReferenceViewState(viewKey, { hasBeenMoved: true });
+  }, [viewKey]);
+
+  const markManualResize = useCallback(() => {
+    resizedRef.current = true;
+    writeSatReferenceViewState(viewKey, { hasBeenResized: true });
+  }, [viewKey]);
+
   // R-04 Step 4 — viewport-change clamp path (clamp only, never reset;
   // collapsed path re-applies collapse at render via collapsedEffective).
   // A rAF-batched resize listener re-clamps the authoritative rect (stored
@@ -594,6 +604,8 @@ export function SatReferenceSheetPanel({
       maxSize={referenceMaxSize}
       resizable
       disabled={disabled}
+      onManualMove={markManualMove}
+      onManualResize={markManualResize}
       collapsed={collapsed}
       onToggleCollapse={handleToggleCollapse}
       onClose={onClose}

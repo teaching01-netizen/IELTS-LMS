@@ -76,6 +76,13 @@ func mediaDownloadHandler(app *App) http.HandlerFunc {
 	}
 }
 
+// mediaDownloadContentHandler serves the Rust-compatible canonical content
+// route. It deliberately shares the byte-serving behavior with the current
+// /assets/{assetID} alias so old and new persisted download URLs remain valid.
+func mediaDownloadContentHandler(app *App) http.HandlerFunc {
+	return mediaDownloadHandler(app)
+}
+
 // mediaGetHandler returns one media asset's metadata JSON, mirroring Rust
 // get_asset (metadata route, reader roles).
 func mediaGetHandler(app *App) http.HandlerFunc {

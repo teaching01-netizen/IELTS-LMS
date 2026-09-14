@@ -20,6 +20,39 @@ func TestLoadDefaults(t *testing.T) {
 	if c.AttemptTokenTTLMins != 15 || c.SessionIdleStaffMins != 30 || c.SessionIdleStudentMins != 60 {
 		t.Fatalf("auth lifetimes changed: %+v", c)
 	}
+	if c.IdleGraceSecs != 60 || c.GradingSyncOnReadFallback || !c.PrometheusEnabled {
+		t.Fatalf("Rust runtime defaults changed: %+v", c)
+	}
+	if c.WorkerFallbackIntervalSecs != 10 || c.LiveUpdatePollIntervalMs != 250 || c.AutoSubmitBatchSize != 50 {
+		t.Fatalf("Rust worker defaults changed: %+v", c)
+	}
+	if c.RateLimitBucketCap != 10000 || c.RateLimitExportPerUser != 3 || c.RateLimitExportPerUserWindowSecs != 300 {
+		t.Fatalf("Rust rate-limit defaults changed: %+v", c)
+	}
+}
+
+func TestPromptCoeditingIsAlwaysOn(t *testing.T) {
+	t.Setenv("AUTHORING_REALTIME_COEDITING", "false")
+	t.Setenv("AUTHORING_COEDIT_SERVICE_ENABLED", "false")
+	t.Setenv("AUTHORING_COEDIT_SERVICE_URL", "")
+	t.Setenv("AUTHORING_COEDIT_TOKEN_SECRET", "")
+	t.Setenv("AUTHORING_COEDIT_SERVICE_SECRET", "")
+
+	c := Load()
+	if !c.AuthoringRealtimeCoediting || !c.AuthoringCoeditServiceEnabled {
+		t.Fatalf("prompt co-editing must be enabled without rollout flags: %+v", c)
+	}
+	if c.AuthoringCoeditServiceURL == "" || len(c.AuthoringCoeditTokenSecret) < 32 || len(c.AuthoringCoeditServiceSecret) < 32 {
+		t.Fatalf("prompt co-editing local defaults are incomplete: %+v", c)
+	}
+}
+
+func TestLoadLowResourceDefaults(t *testing.T) {
+	t.Setenv("RESOURCE_PROFILE", "low")
+	c := Load()
+	if c.WorkerFallbackIntervalSecs != 60 || c.LiveUpdatePollIntervalMs != 500 {
+		t.Fatalf("low-resource defaults changed: %+v", c)
+	}
 }
 
 func TestLoadPrefersPlatformPort(t *testing.T) {

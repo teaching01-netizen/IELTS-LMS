@@ -7,7 +7,7 @@ import {
   isStudentEntryScheduleBlockedError,
 } from "../infrastructure/studentEntryGateway";
 import { commonSchemas } from "@shared/lib/validateApiResponse";
-import { entryQueueDelayMs, parseEntryQueueError } from "../../../services/entryQueueRetry";
+import { entryQueueDelayMs, parseEntryQueueError } from "../infrastructure/studentEntryGateway";
 
 interface EntryFormData {
   wcode: string;

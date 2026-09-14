@@ -223,6 +223,12 @@ export function StudentNetworkProvider({
   }, [verifyDeviceContinuity]);
 
   const handleOnline = useCallback(() => {
+    // Browsers can dispatch an online event while the connectivity probe is
+    // still stale. Wait for the authoritative navigator state so a transient
+    // event cannot occupy the single-flight slot and suppress the real retry.
+    if (!navigator.onLine) {
+      return;
+    }
     if (onlineInFlightRef.current) {
       return;
     }
@@ -248,7 +254,7 @@ export function StudentNetworkProvider({
       if (epoch !== recoveryEpochRef.current) {
         return;
       }
-      await saveStudentAuditEvent(
+      void saveStudentAuditEvent(
         scheduleIdRef.current,
         'NETWORK_RECONNECTED',
         { timestamp },

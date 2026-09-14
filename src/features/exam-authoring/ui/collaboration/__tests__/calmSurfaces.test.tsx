@@ -15,6 +15,7 @@ import {
 import { classifyQuestionFields } from "../../../realtime/threeWayCompare";
 import { makeRevision } from "../../../realtime/__tests__/divergenceFixtures";
 import { CollaboratorStack } from "../CollaboratorStack";
+import type { CollaborationParticipant } from "../collaborationParticipants";
 import { ConflictResolver } from "../ConflictResolver";
 import { QuestionPresenceBadge } from "../QuestionPresenceBadge";
 import { RemoteUpdateNotice } from "../RemoteUpdateNotice";
@@ -307,6 +308,37 @@ describe("CollaboratorStack (WHO)", () => {
   it("renders nothing when the room is empty", () => {
     const { container } = render(<CollaboratorStack occupants={[]} />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it("uses the co-edit roster with self included, three visible avatars, and no permanent WHO control", () => {
+    const participants: CollaborationParticipant[] = [
+      { id: "self", displayName: "You", initials: "YO", color: "#2563EB", state: "editing", isSelf: true },
+      { id: "alice", displayName: "Alice", initials: "AL", color: "#7C3AED", state: "editing", isSelf: false },
+      { id: "bob", displayName: "Bob", initials: "BO", color: "#DB2777", state: "idle", isSelf: false },
+      { id: "cam", displayName: "Cam", initials: "CA", color: "#0891B2", state: "viewing", isSelf: false },
+    ];
+    render(<CollaboratorStack participants={participants} />);
+    const stack = screen.getByTestId("collaborator-stack");
+    expect(stack.querySelectorAll("[data-presence-state]")).toHaveLength(3);
+    expect(within(stack).getByRole("button", { name: PRESENCE_COPY.overflow(1) })).toBeInTheDocument();
+    expect(within(stack).queryByText("Who's here")).toBeNull();
+
+    fireEvent.click(within(stack).getByRole("button", { name: PRESENCE_COPY.overflow(1) }));
+    expect(screen.getByRole("heading", { name: PRESENCE_COPY.editingNow })).toBeInTheDocument();
+    expect(screen.getByTestId("collaborator-popover")).toHaveTextContent("You");
+  });
+
+  it("opens Editing now from the avatar stack when there is no overflow", () => {
+    render(
+      <CollaboratorStack
+        participants={[
+          { id: "self", displayName: "You", initials: "YO", color: "#2563EB", state: "editing", isSelf: true },
+          { id: "alice", displayName: "Alice", initials: "AL", color: "#7C3AED", state: "editing", isSelf: false },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: PRESENCE_COPY.editingNow }));
+    expect(screen.getByRole("heading", { name: PRESENCE_COPY.editingNow })).toBeInTheDocument();
   });
 });
 

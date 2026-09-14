@@ -3,32 +3,45 @@ import type { AuthoringPresence } from "../../realtime/presenceTypes";
 import { displayNameOf } from "../../realtime/presenceChannel";
 import { restoreAuthoringFocus } from "../authoringPrimitives";
 import { PRESENCE_COPY, questionLabel } from "./collaborationCopy";
+import type { CollaborationParticipant } from "./collaborationParticipants";
+import { participantInitials } from "./collaborationParticipants";
 
 export interface CollaboratorPopoverProps {
-  /** Whole exam, current draft, unexpired, self excluded. */
-  occupants: AuthoringPresence[];
+  /** Normalized co-edit participants, including the current user. */
+  participants?: CollaborationParticipant[] | undefined;
+  /** Legacy workspace roster, retained for the non-co-edit header. */
+  occupants?: AuthoringPresence[] | undefined;
   open: boolean;
   onClose: () => void;
-  /** Navigate to a question. The caller keeps its unsaved-work guard. */
   onSelectQuestion?: ((examQuestionId: string) => void) | undefined;
-  /** Focus returns here on close. */
   openerRef?: React.RefObject<HTMLElement | null> | undefined;
-  /** Display order lookup so rows can say "Q14" instead of raw ids. */
   labelFor?: ((examQuestionId: string) => string | null) | undefined;
 }
 
-const STATE_WORD: Record<AuthoringPresence["state"], string> = {
+type PopoverParticipant = CollaborationParticipant;
+
+const STATE_WORD: Record<PopoverParticipant["state"], string> = {
   editing: "editing",
   viewing: "viewing",
   idle: "idle",
 };
 
-/**
- * Progressive disclosure, third level: who is on which question. Keyboard
- * accessible, Esc closes with focus restored. Deliberately not a live region —
- * churn in here must never announce.
- */
+function legacyParticipant(entry: AuthoringPresence): CollaborationParticipant {
+  const displayName = displayNameOf(entry);
+  return {
+    id: entry.connectionId,
+    displayName,
+    initials: participantInitials(displayName),
+    color: "#64748B",
+    state: entry.state,
+    isSelf: false,
+    ...(entry.selectedQuestionId ? { selectedQuestionId: entry.selectedQuestionId } : {}),
+  };
+}
+
+/** Progressive disclosure for collaborator identity and question context. */
 export function CollaboratorPopover({
+  participants,
   occupants,
   open,
   onClose,
@@ -37,6 +50,8 @@ export function CollaboratorPopover({
   labelFor,
 }: CollaboratorPopoverProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const normalized = participants ?? (occupants ?? []).map(legacyParticipant);
+  const isCoedit = participants !== undefined;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -51,26 +66,26 @@ export function CollaboratorPopover({
 
   if (!open) return null;
 
-  const grouped = new Map<string, AuthoringPresence[]>();
-  for (const entry of occupants) {
+  const grouped = new Map<string, PopoverParticipant[]>();
+  for (const entry of normalized) {
     const key = entry.selectedQuestionId ?? "__none__";
     const list = grouped.get(key);
-    if (list) {
-      list.push(entry);
-    } else {
-      grouped.set(key, [entry]);
-    }
+    if (list) list.push(entry);
+    else grouped.set(key, [entry]);
   }
 
   return (
     <div
       ref={panelRef}
       role="dialog"
-      aria-label="Collaborators"
+      aria-label={isCoedit ? PRESENCE_COPY.editingNow : "Collaborators"}
       className="absolute right-0 top-full z-30 mt-1 w-64 rounded-md border bg-popover p-2 text-sm shadow-md"
       data-testid="collaborator-popover"
     >
-      {occupants.length === 0 ? (
+      {isCoedit ? (
+        <h2 className="px-2 pb-1 pt-0.5 text-sm font-semibold">{PRESENCE_COPY.editingNow}</h2>
+      ) : null}
+      {normalized.length === 0 ? (
         <p className="px-2 py-1.5 text-xs text-muted-foreground">{PRESENCE_COPY.empty}</p>
       ) : (
         <ul className="space-y-1">
@@ -84,16 +99,23 @@ export function CollaboratorPopover({
                 </p>
                 <ul>
                   {list.map((entry) => {
-                    const name = displayNameOf(entry);
+                    const name = entry.isSelf ? "You" : entry.displayName;
                     const row = (
                       <>
+                        <span
+                          className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold"
+                          style={{ backgroundColor: `${entry.color}18`, color: entry.color }}
+                          aria-hidden="true"
+                        >
+                          {entry.initials}
+                        </span>
                         <span className="font-medium">{name}</span>
                         <span className="text-muted-foreground"> ({STATE_WORD[entry.state]})</span>
                       </>
                     );
                     return (
-                      <li key={entry.connectionId}>
-                        {id && onSelectQuestion ? (
+                      <li key={entry.id}>
+                        {id && onSelectQuestion && !entry.isSelf ? (
                           <button
                             type="button"
                             onClick={() => onSelectQuestion(id)}

@@ -121,11 +121,12 @@ var expectedAnnotated = []string{
 	"GET /sat", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
 	"GET /{resultID}/events", "GET /{resultID}",
 	"POST /uploads", "PUT /uploads/{assetID}", "POST /uploads/{assetID}/complete",
-	"GET /assets/{assetID}", "GET /{assetID}",
+	"GET /assets/{assetID}", "GET /{assetID}/content", "GET /{assetID}",
 	"GET /submissions/{submissionID}/overview", "GET /submissions/{submissionID}/targets/{targetID}",
 	"GET /submissions/{submissionID}/export", "GET /attempts/{attemptID}/overview",
 	"GET /attempts/{attemptID}/targets/{targetID}",
 	"GET /ws/live",
+	"GET /ws/authoring",
 	"POST /{attemptID}/responses:batch", "POST /{attemptID}/submit", "POST /{attemptID}/takeover",
 	"GET /{attemptID}/responses",
 }
@@ -134,7 +135,6 @@ var expectedAnnotated = []string{
 var expectedFullPaths = []string{
 	"GET /healthz", "GET /readyz", "GET /metrics",
 	"GET /api/v1/assessment-release/exams/{examID}",
-	"GET /api/v1/ws/authoring",
 	"GET /api/v1/assessment-authoring/exams/{examID}/shell",
 	"POST /api/v1/assessment-authoring/exams/{examID}/shell",
 	"GET /api/v1/assessment-authoring/exams/{examID}/preview",
@@ -156,6 +156,14 @@ var expectedFullPaths = []string{
 	"PATCH /api/v1/assessment-authoring/question-revisions/{revisionID}",
 	"PATCH /api/v1/assessment-authoring/exams/{examID}/sections/{sectionID}/delivery-settings",
 	"POST /api/v1/assessment-authoring/exams/{examID}/validate",
+	// Prompt co-editing (2026-09-13 design): public token issuance plus the
+	// private, service-signature-authenticated Hocuspocus endpoints.
+	"POST /api/v1/assessment-authoring/exam-questions/{examQuestionID}/coedit-token",
+	"POST /api/v1/assessment-authoring/exams/{examID}/coedit-token",
+	"PATCH /api/v1/assessment-authoring/question-revisions/{revisionID}/fields",
+	"POST /internal/authoring-coedit/load",
+	"POST /internal/authoring-coedit/initialize",
+	"POST /internal/authoring-coedit/store",
 }
 
 func TestTableCompleteness(t *testing.T) {

@@ -855,8 +855,9 @@ export function StudentAttemptProvider({
         !engine ||
         engine.attemptId !== expectedIdentity.attemptId ||
         engine.scheduleId !== expectedIdentity.scheduleId
-      )
+      ) {
         return false;
+      }
       await engine.flush();
       if (!isCurrent() || engine.getPendingCount() > 0) return false;
       return true;

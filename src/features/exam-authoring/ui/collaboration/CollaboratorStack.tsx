@@ -5,11 +5,16 @@ import type { AuthoringPresence } from "../../realtime/presenceTypes";
 import { PRESENCE_STACK_MAX, displayNameOf } from "../../realtime/presenceChannel";
 import { CollaboratorPopover } from "./CollaboratorPopover";
 import { PRESENCE_COPY } from "./collaborationCopy";
-import { initialsOf } from "./QuestionPresenceBadge";
+import type { CollaborationParticipant } from "./collaborationParticipants";
+import { participantInitials } from "./collaborationParticipants";
+
+const COEDIT_STACK_MAX = 3;
 
 export interface CollaboratorStackProps {
-  /** Whole exam, current draft, unexpired, self excluded. */
-  occupants: AuthoringPresence[];
+  /** Normalized active prompt-room participants, including self. */
+  participants?: CollaborationParticipant[] | undefined;
+  /** Legacy workspace roster, retained for the non-co-edit UI. */
+  occupants?: AuthoringPresence[] | undefined;
   onSelectQuestion?: ((examQuestionId: string) => void) | undefined;
   labelFor?: ((examQuestionId: string) => string | null) | undefined;
 }
@@ -20,71 +25,132 @@ const STATE_WORD: Record<AuthoringPresence["state"], string> = {
   idle: "idle",
 };
 
-/**
- * WHO: overlapping initials in the header, capped, with the overflow opening a
- * grouped popover. Fades only (`authoringMotion.state`, 0.16s) and instant under
- * reduced motion — a join never springs the layout around.
- *
- * Not a live region: a collaborator arriving is ambient, not an announcement.
- */
+function legacyVisibleParticipant(entry: AuthoringPresence): CollaborationParticipant {
+  const name = displayNameOf(entry);
+  return {
+    id: entry.connectionId,
+    displayName: name,
+    initials: participantInitials(name),
+    color: "#64748B",
+    state: entry.state,
+    isSelf: false,
+    ...(entry.selectedQuestionId ? { selectedQuestionId: entry.selectedQuestionId } : {}),
+  };
+}
+
+/** Calm overlapping initials with progressive disclosure for names. */
 export function CollaboratorStack({
-  occupants,
+  participants,
+  occupants = [],
   onSelectQuestion,
   labelFor,
 }: CollaboratorStackProps) {
   const reduceMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const openerRef = useRef<HTMLButtonElement | null>(null);
+  const isCoedit = participants !== undefined;
+  const entries = participants ?? occupants.map(legacyVisibleParticipant);
 
-  if (occupants.length === 0) return null;
+  if (entries.length === 0) return null;
 
-  const visible = occupants.slice(0, PRESENCE_STACK_MAX);
-  const overflow = occupants.length - visible.length;
+  const visible = entries.slice(0, isCoedit ? COEDIT_STACK_MAX : PRESENCE_STACK_MAX);
+  const overflow = entries.length - visible.length;
+  const toggle = () => setOpen((previous) => !previous);
 
   return (
     <span className="relative inline-flex items-center" data-testid="collaborator-stack">
-      <span className="flex items-center -space-x-1.5">
-        {visible.map((entry) => {
-          const name = displayNameOf(entry);
-          return (
-            <motion.span
-              key={entry.connectionId}
-              initial={reduceMotion ? false : { opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={reduceMotion ? { duration: 0 } : authoringMotion.state}
-              title={PRESENCE_COPY.stackTitle(
-                name,
-                STATE_WORD[entry.state],
-                entry.selectedQuestionId ? (labelFor?.(entry.selectedQuestionId) ?? "") : "",
-              )}
-              className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-background bg-muted text-[10px] font-semibold text-muted-foreground"
-              data-presence-state={entry.state}
-            >
-              {initialsOf(name)}
-            </motion.span>
-          );
-        })}
-      </span>
-      {overflow > 0 || occupants.length > 0 ? (
+      {isCoedit && overflow === 0 ? (
         <button
           ref={openerRef}
           type="button"
-          onClick={() => setOpen((previous) => !previous)}
+          onClick={toggle}
+          aria-label={PRESENCE_COPY.editingNow}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          className="flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="collaborator-stack-opener"
+        >
+          <AvatarGroup visible={visible} reduceMotion={Boolean(reduceMotion)} isCoedit labelFor={labelFor} />
+        </button>
+      ) : (
+        <AvatarGroup visible={visible} reduceMotion={Boolean(reduceMotion)} isCoedit={isCoedit} labelFor={labelFor} />
+      )}
+      {overflow > 0 ? (
+        <button
+          ref={openerRef}
+          type="button"
+          onClick={toggle}
+          aria-label={PRESENCE_COPY.overflow(overflow)}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          className="ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="collaborator-overflow"
+        >
+          {PRESENCE_COPY.overflow(overflow)}
+        </button>
+      ) : null}
+      {!isCoedit && overflow === 0 ? (
+        <button
+          ref={openerRef}
+          type="button"
+          onClick={toggle}
           aria-expanded={open}
           aria-haspopup="dialog"
           className="ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {overflow > 0 ? PRESENCE_COPY.overflow(overflow) : "Who's here"}
+          Who&apos;s here
         </button>
       ) : null}
       <CollaboratorPopover
-        occupants={occupants}
+        {...(isCoedit ? { participants } : { occupants })}
         open={open}
         onClose={() => setOpen(false)}
         onSelectQuestion={onSelectQuestion}
         openerRef={openerRef}
         labelFor={labelFor}
       />
+    </span>
+  );
+}
+
+function AvatarGroup({
+  visible,
+  reduceMotion,
+  isCoedit,
+  labelFor,
+}: {
+  visible: CollaborationParticipant[];
+  reduceMotion: boolean;
+  isCoedit: boolean;
+  labelFor?: ((examQuestionId: string) => string | null) | undefined;
+}) {
+  return (
+    <span className="flex items-center -space-x-1.5">
+      {visible.map((entry) => {
+        const name = entry.isSelf ? "You" : entry.displayName;
+        const label = isCoedit
+          ? `${name} — ${entry.state}`
+          : PRESENCE_COPY.stackTitle(
+              name,
+              STATE_WORD[entry.state],
+              entry.selectedQuestionId ? (labelFor?.(entry.selectedQuestionId) ?? "") : "",
+            );
+        return (
+          <motion.span
+            key={entry.id}
+            initial={reduceMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={reduceMotion ? { duration: 0 } : authoringMotion.state}
+            title={label}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-background text-[10px] font-semibold"
+            style={{ backgroundColor: `${entry.color}18`, color: entry.color }}
+            data-presence-state={entry.state}
+            data-collaboration-self={entry.isSelf ? "true" : "false"}
+          >
+            {entry.initials}
+          </motion.span>
+        );
+      })}
     </span>
   );
 }

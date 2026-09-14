@@ -317,7 +317,8 @@ function QueueRow({question, position, selected, checked, disabled, selectionMod
    ? (issueCount > 1 ? String(issueCount) + " issues" : "Needs attention")
    : token?.label;
  const preview=question.promptPreview||"Empty question";
- return <div className={'sat-spine__question-row'+(selected?' is-selected':'')+(pending?' is-busy':'')} data-question-list-row={question.examQuestionId} aria-busy={pending||undefined}>
+ const hasIssue=token?.kind==='issue';
+ return <div className={'sat-spine__question-row'+(selected?' is-selected':'')+(pending?' is-busy':'')+(hasIssue?' has-issue':'')} data-question-list-row={question.examQuestionId} aria-busy={pending||undefined}>
   {selected?<span data-selected-bar aria-hidden="true"/> : null}
   {selectionMode?<button type="button" role="checkbox" aria-checked={checked} disabled={disabled} aria-label={(checked?'Deselect':'Select')+' question '+position} onClick={e=>onToggleSelection(question.examQuestionId,e.shiftKey)} className="sat-spine__check"><span className={'sat-spine__check-box'+(checked?' is-checked':'')}><Check size={13} aria-hidden="true" className={checked?'':'invisible'}/></span></button>:null}
   <button
@@ -331,7 +332,7 @@ function QueueRow({question, position, selected, checked, disabled, selectionMod
    <span className={'sat-spine__row-num'+(selected?' is-selected':'')}>{String(position).padStart(2,'0')}</span>
    <span className="sat-spine__row-preview">{preview}</span>
    <span className={'sat-spine__row-status'+(token?.kind==='issue'?' is-issue':'')}>
-     {token?.kind==='issue'?<><AlertCircle size={14} aria-hidden="true"/>{issueCount>1?<span className="sat-spine__row-count">{issueCount}</span>:null}</>:token?.label}
+     {hasIssue?<><AlertCircle size={14} aria-hidden="true"/>{issueCount>1?<span className="sat-spine__row-count">{issueCount}</span>:null}</>:token?.label}
      <span className="sr-only">{statusLabel}</span>
    </span>
   </button>

@@ -37,14 +37,18 @@ describe("PasteStatus", () => {
   });
 
   it("shows alt-text hint for image pastes and hides when invisible", () => {
+    const onAddAltText = vi.fn();
     const { rerender } = render(
       <PasteStatus
         status={{ visible: true, source: "files", imageCount: 1, mathCount: 0, needsAltText: true }}
         onUndo={vi.fn()}
+        onAddAltText={onAddAltText}
         onDismiss={vi.fn()}
       />
     );
     expect(screen.getByRole("status")).toHaveTextContent("add alt text");
+    fireEvent.click(screen.getByRole("button", { name: "Add alt text" }));
+    expect(onAddAltText).toHaveBeenCalledTimes(1);
     rerender(
       <PasteStatus
         status={{ visible: false, source: null, imageCount: 0, mathCount: 0, needsAltText: false }}

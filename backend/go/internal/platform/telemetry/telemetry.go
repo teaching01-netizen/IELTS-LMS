@@ -207,6 +207,20 @@ const (
 	MACTScoreFailure  = "act_score_failure_total"
 	MACTResultTotal   = "act_result_total"
 	MACTResultFailure = "act_result_failure_total"
+
+	// SAT prompt co-editing (2026-09-13 design). The Go side owns token
+	// issuance, the atomic store endpoint, the partial field patch path, and
+	// the publish freeze/manifest verification. The Hocuspocus service exposes
+	// the authoring_coedit_* process metrics (lock, connections, documents,
+	// store, freeze, shutdown) plus its own auth prefix. Labels here stay a
+	// closed vocabulary (outcome, reason); ids, hashes, revisions, and content
+	// never become labels.
+	MCoeditTokenTotal          = "authoring_coedit_token_total"
+	MCoeditGoStoreTotal        = "authoring_coedit_go_store_total"
+	MCoeditGoFieldPatchTotal   = "authoring_coedit_go_field_patch_total"
+	MCoeditGoGuardTotal        = "authoring_coedit_go_guard_total"
+	MCoeditGoLifecycleTotal    = "authoring_coedit_go_lifecycle_total"
+	MCoeditGoFreezeManifestMis = "authoring_coedit_go_manifest_mismatch_total"
 )
 
 // V2 batch outcome label values.
@@ -342,5 +356,11 @@ func Names() []string {
 		MACTScoreFailure,
 		MACTResultTotal,
 		MACTResultFailure,
+		MCoeditTokenTotal,
+		MCoeditGoStoreTotal,
+		MCoeditGoFieldPatchTotal,
+		MCoeditGoGuardTotal,
+		MCoeditGoLifecycleTotal,
+		MCoeditGoFreezeManifestMis,
 	}
 }

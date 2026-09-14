@@ -204,6 +204,7 @@ func init() {
 		"PUT /uploads/{assetID}":           {MinRoles: mediaWrite},
 		"POST /uploads/{assetID}/complete": {MinRoles: mediaWrite},
 		"GET /assets/{assetID}":            {MinRoles: AllRoles},
+		"GET /{assetID}/content":           {MinRoles: AllRoles},
 		"GET /{assetID}":                   {MinRoles: AllRoles},
 		// answer-history.
 		"GET /submissions/{submissionID}/overview":           {MinRoles: resultsRead},
@@ -213,6 +214,11 @@ func init() {
 		"GET /attempts/{attemptID}/targets/{targetID}":       {MinRoles: resultsRead},
 		// ws-live: any authenticated session (topic checks in-handler).
 		"GET /ws/live": {MinRoles: []string{}},
+		// ws-authoring: the authoring read set may subscribe; the handler
+		// re-verifies tenant scope + the current draft before upgrading.
+		// Registered through authzRoute, so the key is the STRIPPED pattern:
+		// a full-path key here silently denies every handshake (403).
+		"GET /ws/authoring": {MinRoles: readStaff},
 		// V2: attempt bearer credential (handler).
 		"POST /{attemptID}/responses:batch": {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /{attemptID}/submit":          {Bearer: true, Scope: ScopeAttemptOwner},

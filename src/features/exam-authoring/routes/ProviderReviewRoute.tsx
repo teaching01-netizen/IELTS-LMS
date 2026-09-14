@@ -4,9 +4,14 @@ import { LoadingSurface } from "@components/ui/LoadingSurface";
 import { ExamReviewRoute } from "../../builder/routes/ExamReviewRoute";
 import { useExamQuery } from "../api/examQueries";
 import { SatDeliveryReleaseRoute } from "./SatDeliveryReleaseRoute";
+import {
+  SatAuthoringCollaborationBoundary,
+  useSatAuthoringCollaboration,
+} from "../realtime/coedit";
 
 export function ProviderReviewRoute() {
   const { examId } = useParams<{ examId: string }>();
+  const existingCollaboration = useSatAuthoringCollaboration();
   const examQuery = useExamQuery(examId);
 
   if (examQuery.isLoading) return <LoadingSurface label="Loading release workspace…" />;
@@ -29,8 +34,15 @@ export function ProviderReviewRoute() {
   }
 
   if (examQuery.data.providerKey === "sat") {
-    return (
+    const content = (
       <SatDeliveryReleaseRoute exam={examQuery.data} onExamRefresh={() => examQuery.refetch()} />
+    );
+    return (
+      existingCollaboration ? content : (
+        <SatAuthoringCollaborationBoundary examId={examQuery.data.id}>
+          {content}
+        </SatAuthoringCollaborationBoundary>
+      )
     );
   }
 

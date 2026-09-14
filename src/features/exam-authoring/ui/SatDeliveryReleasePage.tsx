@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { ExamEntity } from "../../../types/domain";
 import type {
   AssessmentAuthoringShell,
@@ -43,6 +43,9 @@ export interface SatDeliveryReleasePageProps {
   onPublish: (publishNotes?: string) => Promise<void>;
   onIssueClick: (issue: AssessmentValidationIssue) => void;
   onOpenStudentAccess: () => void;
+  presenceSlot?: ReactNode;
+  saveSlot?: ReactNode;
+  collaborationSlot?: ReactNode;
 }
 
 export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
@@ -63,6 +66,9 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
     onPublish,
     onIssueClick,
     onOpenStudentAccess,
+    presenceSlot,
+    saveSlot,
+    collaborationSlot,
   } = props;
   const [dirtySections, setDirtySections] = useState<Set<string>>(() => new Set());
   const [showPublishDialog, setShowPublishDialog] = useState(false);
@@ -148,6 +154,9 @@ export function SatDeliveryReleasePage(props: SatDeliveryReleasePageProps) {
       onClosePublishDialog={() => setShowPublishDialog(false)}
       onOpenLeaveDialog={() => setShowLeaveDialog(true)}
       onCloseLeaveDialog={() => setShowLeaveDialog(false)}
+      presenceSlot={presenceSlot}
+      saveSlot={saveSlot}
+      collaborationSlot={collaborationSlot}
     />
   );
 }
@@ -176,6 +185,9 @@ function ReleasePageBody(props: {
   onClosePublishDialog: () => void;
   onOpenLeaveDialog: () => void;
   onCloseLeaveDialog: () => void;
+  presenceSlot?: ReactNode;
+  saveSlot?: ReactNode;
+  collaborationSlot?: ReactNode;
 }) {
   const {
     exam,
@@ -200,6 +212,9 @@ function ReleasePageBody(props: {
     onOpenPublishDialog,
     onClosePublishDialog,
     onCloseLeaveDialog,
+    presenceSlot,
+    saveSlot,
+    collaborationSlot,
   } = props;
 
   const readinessFresh = isReadinessFresh(readiness, shell);
@@ -237,6 +252,9 @@ function ReleasePageBody(props: {
         examTitle={exam.title}
         onBack={onRequestBack}
         onOpenStudentAccess={releaseState.currentPublishedVersion ? onOpenStudentAccess : undefined}
+        presenceSlot={presenceSlot}
+        saveSlot={saveSlot}
+        collaborationSlot={collaborationSlot}
       />
       <main className="mx-auto w-full max-w-[1240px] px-4 pb-20 pt-8 sm:px-6 lg:px-8">
         <ReleaseStatusHero

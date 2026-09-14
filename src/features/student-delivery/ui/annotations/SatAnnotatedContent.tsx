@@ -98,7 +98,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         // In-place note affordance: clicking a highlight opens its note
         // editor directly — no separate bottom list of quoted text. Marks
         // without an editor callback stay plain spans (read-only contexts).
-        if (segment.highlight && onEditNote) {
+        if (segment.highlight && onEditNote && mode !== 'erase') {
           const match = annotations.annotations.find((item) => {
             if (item.anchor.nodeId !== scopedId) return false;
             const range = resolveSatTextAnchor(blockText, item.anchor);
@@ -127,7 +127,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- contentKey is the memo input; the raw content object is consumed by the renderer, not read here.
-  }, [annotations, region, contentKey]);
+  }, [annotations, mode, onEditNote, region, contentKey]);
 
   const eraseArmed = mode === 'erase';
   // Selection preview (Phase 7): while a paint tool is armed, native text
@@ -135,10 +135,10 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
   // Erase mode opts out (no preview — removal, not paint). Eraser gesture
   // logic above is untouched.
   const highlightPreview = mode === 'highlight' || mode === 'underline' || mode === 'note';
-  // No visible mode bar: highlight mode is silent (the top-bar Highlight
-  // button's aria-pressed state is the only indicator). The region keeps
-  // data-sat-annotation-mode + aria-describedby for tests and AT; erase
-  // keeps its dashed outline + cell cursor as the non-color cue.
+  // No visible mode bar: annotation modes are indicated by the matching
+  // top-bar control's aria-pressed state. The region keeps
+  // data-sat-annotation-mode + aria-describedby for tests and AT; erase keeps
+  // its dashed outline + cell cursor as the non-color cue.
   return (
     <div>
       {armedLabel && enabled ? (

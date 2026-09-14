@@ -182,6 +182,15 @@ type AttemptScorer interface {
 	ScoreAttempt(ctx context.Context, q tx.Tx, attemptID, versionID string, answers json.RawMessage) (map[string]any, error)
 }
 
+// DetailedAttemptScorer is an additive seal hook for providers that also
+// materialize a canonical grading read model. The compatibility projection
+// remains intentionally redacted; details are embedded only in the sealed
+// server snapshot and are never copied into the client-facing projection.
+type DetailedAttemptScorer interface {
+	AttemptScorer
+	ScoreAttemptDetails(ctx context.Context, q tx.Tx, attemptID, versionID string, answers json.RawMessage) (map[string]any, error)
+}
+
 // SQLTerminalizationRepository is the MySQL receipt store.
 type SQLTerminalizationRepository struct{}
 
@@ -412,7 +421,7 @@ func (s *Service) TerminalizeInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 // deliberately narrow: callers cannot mutate the immutable receipt through
 // this method and must supply the receipt's already-recorded identity.
 func (s *Service) MaterializeProviderResultInTx(ctx context.Context, q tx.Tx, attemptID, providerKey, outcome, reason, actorKind, terminalizationID string, effectiveAt time.Time, snapshot, projection json.RawMessage) error {
-	return s.materializeProviderResult(ctx, q, attemptID, providerKey, outcome, reason, actorKind, terminalizationID, effectiveAt, snapshot, projection)
+	return s.materializeProviderResult(ctx, q, attemptID, providerKey, outcome, reason, actorKind, terminalizationID, effectiveAt, snapshot, projection, nil)
 }
 
 // attemptRow is the locked attempt subset the seal needs.
@@ -496,7 +505,7 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 	if existing != nil {
 		// T4 outcome-only compat: reason ignored on replay.
 		if OutcomeCompat(existing.Outcome, cmd.Outcome) {
-			if err := s.materializeProviderResult(ctx, q, a.ID, providerKey, existing.Outcome, existing.Reason, existing.ActorKind, existing.TerminalizationID, existing.EffectiveAt, existing.FinalSnapshot, nil); err != nil {
+			if err := s.materializeProviderResult(ctx, q, a.ID, providerKey, existing.Outcome, existing.Reason, existing.ActorKind, existing.TerminalizationID, existing.EffectiveAt, existing.FinalSnapshot, nil, nil); err != nil {
 				return nil, err
 			}
 			return &SealResult{Created: false, TerminalizationID: existing.TerminalizationID, Outcome: existing.Outcome, Reason: existing.Reason, EffectiveAt: existing.EffectiveAt, RecordedAt: existing.RecordedAt}, nil
@@ -565,6 +574,7 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 	// Provider scoring is part of the seal transaction. The callback receives
 	// only the server-locked answer snapshot; client-provided score fields are
 	// rejected before the scorer is invoked.
+	var scoringDetails map[string]any
 	if providerKey == "act" && cmd.Outcome == OutcomeSubmitted && s.attemptScorer != nil {
 		if jsonObjectHasKey(cmd.FinalSubmission, "score") {
 			return nil, &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Client-supplied ACT scores are rejected; scoring is server-authoritative.", HTTPStatus: 400}
@@ -580,6 +590,29 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 		snapshot, err = mergeJSONObject(snapshot, fields)
 		if err != nil {
 			return nil, err
+		}
+		if detailed, ok := s.attemptScorer.(DetailedAttemptScorer); ok {
+			scoringDetails, err = detailed.ScoreAttemptDetails(ctx, q, a.ID, a.PublishedVerID, a.Answers)
+			if err != nil {
+				return nil, err
+			}
+			snapshot, err = mergeJSONObject(snapshot, scoringDetails)
+			if err != nil {
+				return nil, err
+			}
+			// Schedule overrides are resolved by the detailed engine. Copy only
+			// its aggregate server fields into the compatibility projection; the
+			// canonical question audit remains sealed-server-only.
+			compat := map[string]any{}
+			for _, key := range []string{"score", "providerKey", "section"} {
+				if value, ok := scoringDetails[key]; ok {
+					compat[key] = value
+				}
+			}
+			cmd.FinalSubmission, err = mergeJSONObject(cmd.FinalSubmission, compat)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -616,7 +649,7 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 				return nil, err
 			}
 			if OutcomeCompat(existing.Outcome, cmd.Outcome) {
-				if merr := s.materializeProviderResult(ctx, q, a.ID, providerKey, existing.Outcome, existing.Reason, existing.ActorKind, existing.TerminalizationID, existing.EffectiveAt, existing.FinalSnapshot, nil); merr != nil {
+				if merr := s.materializeProviderResult(ctx, q, a.ID, providerKey, existing.Outcome, existing.Reason, existing.ActorKind, existing.TerminalizationID, existing.EffectiveAt, existing.FinalSnapshot, nil, nil); merr != nil {
 					return nil, merr
 				}
 				return &SealResult{Created: false, TerminalizationID: existing.TerminalizationID, Outcome: existing.Outcome, Reason: existing.Reason, EffectiveAt: existing.EffectiveAt, RecordedAt: existing.RecordedAt}, nil
@@ -672,7 +705,7 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 	}
 
 	// Step 11: SAT materialize.
-	if err := s.materializeProviderResult(ctx, q, a.ID, providerKey, cmd.Outcome, cmd.Reason, cmd.ActorKind, terminalizationID, effectiveAt, snapshot, projection); err != nil {
+	if err := s.materializeProviderResult(ctx, q, a.ID, providerKey, cmd.Outcome, cmd.Reason, cmd.ActorKind, terminalizationID, effectiveAt, snapshot, projection, scoringDetails); err != nil {
 		return nil, err
 	}
 
@@ -888,12 +921,12 @@ func mergeJSONObject(raw json.RawMessage, fields map[string]any) (json.RawMessag
 	return encoded, nil
 }
 
-func (s *Service) materializeProviderResult(ctx context.Context, q tx.Tx, attemptID, providerKey, outcome, reason, actorKind, terminalizationID string, effectiveAt time.Time, snapshot, projection json.RawMessage) error {
+func (s *Service) materializeProviderResult(ctx context.Context, q tx.Tx, attemptID, providerKey, outcome, reason, actorKind, terminalizationID string, effectiveAt time.Time, snapshot, projection json.RawMessage, scoringDetails map[string]any) error {
 	if err := s.materializeSATResult(ctx, q, attemptID, providerKey, outcome, reason, actorKind, terminalizationID, effectiveAt, snapshot); err != nil {
 		return err
 	}
 	if providerKey == "act" {
-		return s.materializeACTResult(ctx, q, attemptID, outcome, reason, actorKind, terminalizationID, effectiveAt, snapshot, projection)
+		return s.materializeACTResult(ctx, q, attemptID, outcome, reason, actorKind, terminalizationID, effectiveAt, snapshot, projection, scoringDetails)
 	}
 	return nil
 }
@@ -946,7 +979,7 @@ func (s *Service) materializeSATResult(ctx context.Context, q tx.Tx, attemptID, 
 // the ACT final_submission projection. ACT has one objective section, so the
 // score payload is sufficient for reports while the immutable terminal
 // snapshot remains the source of truth for audit/replay.
-func (s *Service) materializeACTResult(ctx context.Context, q tx.Tx, attemptID, outcome, reason, actorKind, terminalizationID string, effectiveAt time.Time, snapshot, projection json.RawMessage) error {
+func (s *Service) materializeACTResult(ctx context.Context, q tx.Tx, attemptID, outcome, reason, actorKind, terminalizationID string, effectiveAt time.Time, snapshot, projection json.RawMessage, scoringDetails map[string]any) error {
 	want := "invalidated_timeout"
 	if actorKind == ActorProctor {
 		want = "invalidated_proctor"
@@ -970,6 +1003,16 @@ func (s *Service) materializeACTResult(ctx context.Context, q tx.Tx, attemptID, 
 	if score != nil {
 		payload["score"] = score
 	}
+	var canonicalSubmissionID string
+	var canonicalIntegrityStatus string
+	var err error
+	if scoringDetails != nil && outcome == OutcomeSubmitted {
+		canonicalSubmissionID, canonicalIntegrityStatus, err = s.materializeACTCanonicalProjection(ctx, q, attemptID, effectiveAt, snapshot, scoringDetails)
+		if err != nil {
+			return err
+		}
+		payload["autoGradingResults"] = scoringDetails["autoGradingResults"]
+	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -990,18 +1033,126 @@ func (s *Service) materializeACTResult(ctx context.Context, q tx.Tx, attemptID, 
 	releaseStatus := "invalidated"
 	var submissionID any
 	if outcome == OutcomeSubmitted {
-		releaseStatus = "ready_to_release"
+		if canonicalIntegrityStatus == "auto_graded" {
+			releaseStatus = "ready_to_release"
+		} else {
+			releaseStatus = "pending"
+		}
 		if value, ok := score["totalScore"].(float64); ok {
 			total = int64(value)
 		}
-		var projectionObject map[string]any
-		_ = json.Unmarshal(projection, &projectionObject)
-		if value, ok := projectionObject["submissionId"].(string); ok && value != "" {
-			submissionID = value
+		if canonicalSubmissionID != "" {
+			submissionID = canonicalSubmissionID
+		} else {
+			var projectionObject map[string]any
+			_ = json.Unmarshal(projection, &projectionObject)
+			if value, ok := projectionObject["submissionId"].(string); ok && value != "" {
+				submissionID = value
+			}
 		}
 	}
 	_, err = q.ExecContext(ctx, "INSERT INTO assessment_results (id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status) VALUES (?, ?, ?, 'act', ?, ?, ?, ?)", uuid.NewString(), attemptID, submissionID, want, total, string(payloadJSON), releaseStatus)
 	return err
+}
+
+// materializeACTCanonicalProjection writes the provider-neutral grading
+// model in the same transaction as the terminal receipt. The snapshot is
+// still the immutable source for answers; the detail payload is only the
+// server-computed projection returned by DetailedAttemptScorer.
+func (s *Service) materializeACTCanonicalProjection(ctx context.Context, q tx.Tx, attemptID string, submittedAt time.Time, snapshot json.RawMessage, details map[string]any) (string, string, error) {
+	var scheduleID, examID, versionID, studentID, studentName, cohortName string
+	var email sql.NullString
+	if err := q.QueryRowContext(ctx, `
+		SELECT a.schedule_id, a.exam_id, a.published_version_id,
+			a.candidate_id, a.candidate_name, a.candidate_email, sch.cohort_name
+		FROM student_attempts a
+		JOIN exam_schedules sch ON sch.id = a.schedule_id
+		WHERE a.id = ? FOR UPDATE`, attemptID).Scan(
+		&scheduleID, &examID, &versionID, &studentID, &studentName, &email, &cohortName); err != nil {
+		return "", "", err
+	}
+	var submissionID, storedProvider string
+	err := q.QueryRowContext(ctx,
+		"SELECT id, provider_key FROM student_submissions WHERE attempt_id = ? FOR UPDATE", attemptID).
+		Scan(&submissionID, &storedProvider)
+	if err == sql.ErrNoRows {
+		submissionID = uuid.NewString()
+	} else if err != nil {
+		return "", "", err
+	}
+	if storedProvider != "" && storedProvider != "act" {
+		if _, err := q.ExecContext(ctx, "UPDATE student_submissions SET provider_key = 'act', updated_at = UTC_TIMESTAMP(6) WHERE id = ?", submissionID); err != nil {
+			return "", "", err
+		}
+	}
+	integrityStatus := "needs_review"
+	if integrity, ok := details["autoGradingResults"].(map[string]any); ok {
+		if audit, ok := integrity["integrity"].(map[string]any); ok && audit["integrityStatus"] == "verified" {
+			integrityStatus = "auto_graded"
+		}
+	}
+	sectionStatuses := terminalJSON(map[string]any{"science": integrityStatus})
+	var emailArg any
+	if email.Valid {
+		emailArg = email.String
+	}
+	_, err = q.ExecContext(ctx, `
+		INSERT INTO student_submissions (
+			id, attempt_id, schedule_id, exam_id, published_version_id, provider_key,
+			student_id, student_name, student_email, cohort_name, submitted_at,
+			grading_status, section_statuses, created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, 'act', ?, ?, ?, ?, ?, 'submitted', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+		ON DUPLICATE KEY UPDATE
+			schedule_id = VALUES(schedule_id), exam_id = VALUES(exam_id),
+			published_version_id = VALUES(published_version_id), provider_key = 'act',
+			student_id = VALUES(student_id), student_name = VALUES(student_name),
+			student_email = VALUES(student_email), cohort_name = VALUES(cohort_name),
+			submitted_at = VALUES(submitted_at), section_statuses = VALUES(section_statuses),
+			updated_at = UTC_TIMESTAMP(6)`,
+		submissionID, attemptID, scheduleID, examID, versionID, studentID, studentName,
+		emailArg, cohortName, submittedAt, sectionStatuses)
+	if err != nil {
+		return "", "", err
+	}
+
+	var snap map[string]any
+	_ = json.Unmarshal(snapshot, &snap)
+	answers := map[string]any{}
+	if raw, ok := snap["answers"]; ok {
+		if encoded, err := json.Marshal(raw); err == nil {
+			_ = json.Unmarshal(encoded, &answers)
+		}
+	}
+	answersPayload := terminalJSON(map[string]any{"type": "science", "answers": answers})
+	autoResults := terminalJSON(details["autoGradingResults"])
+	sectionID := uuid.NewString()
+	var existingSectionID string
+	if err := q.QueryRowContext(ctx,
+		"SELECT id FROM section_submissions WHERE submission_id = ? AND section = 'science' FOR UPDATE",
+		submissionID).Scan(&existingSectionID); err == nil {
+		sectionID = existingSectionID
+	} else if err != sql.ErrNoRows {
+		return "", "", err
+	}
+	_, err = q.ExecContext(ctx, `
+		INSERT INTO section_submissions (
+			id, submission_id, section, answers, auto_grading_results, grading_status, submitted_at
+		)
+		VALUES (?, ?, 'science', ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			answers = VALUES(answers), auto_grading_results = VALUES(auto_grading_results),
+			grading_status = VALUES(grading_status), submitted_at = VALUES(submitted_at)`,
+		sectionID, submissionID, answersPayload, autoResults, integrityStatus, submittedAt)
+	if err != nil {
+		return "", "", err
+	}
+	return submissionID, integrityStatus, nil
+}
+
+func terminalJSON(value any) string {
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
 }
 
 // StragglerRow is one terminal-without-receipt attempt awaiting repair.

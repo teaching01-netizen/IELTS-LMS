@@ -12,6 +12,17 @@ import (
 	"strings"
 )
 
+// Prompt co-editing is a product default. These development-only fallbacks
+// let the local API and the sidecar agree without requiring rollout flags or
+// secret plumbing in every developer shell. Production-like deployments still
+// need to provide their own dedicated secrets; wireCoedit fails closed when
+// they are absent or too short.
+const (
+	defaultCoeditServiceURL    = "http://127.0.0.1:1235"
+	defaultCoeditTokenSecret   = "local-coedit-token-secret-not-for-production-2026"
+	defaultCoeditServiceSecret = "local-coedit-service-secret-not-for-production-2026"
+)
+
 // AttemptVerifyMode selects the attempt-bearer verification posture (A3).
 // Strict keeps today's DB binding; stateless drops the per-request SELECT.
 // Unknown values fail closed at ValidateForRuntime (never silently
@@ -434,8 +445,10 @@ type Config struct {
 	AuthoringWSReplayBound  int
 	AuthoringWSMaxFrameSize int
 
-	RateLimitGlobalPerMin int
-	RateLimitBucketCap    int
+	RateLimitGlobalPerMin            int
+	RateLimitBucketCap               int
+	RateLimitExportPerUser           int
+	RateLimitExportPerUserWindowSecs int
 
 	// Per-tier per-minute budgets (0 = derive from the legacy globals).
 	// New tiers share one distributed-counter table via distinct route_key
@@ -517,6 +530,27 @@ type Config struct {
 	// unset/off.
 	AuthoringRealtimeConflictCompare bool
 
+	// AuthoringRealtimeCoediting is retained as a compatibility field for the
+	// SAT prompt co-editing capability. The application posture is always on;
+	// the old environment gate no longer controls it.
+	AuthoringRealtimeCoediting bool
+	// AuthoringCoeditServiceEnabled is retained for compatibility. The
+	// Hocuspocus admission posture is always on in the application build.
+	AuthoringCoeditServiceEnabled bool
+	// AuthoringCoeditServiceURL is the private base URL of the singleton
+	// Hocuspocus service (AUTHORING_COEDIT_SERVICE_URL).
+	AuthoringCoeditServiceURL string
+	// AuthoringCoeditTokenSecret signs short-lived browser co-edit tokens
+	// (AUTHORING_COEDIT_TOKEN_SECRET). It is deliberately NOT the general
+	// application authentication secret. Minimum 32 bytes.
+	AuthoringCoeditTokenSecret string
+	// AuthoringCoeditServiceSecret signs private Go <-> Hocuspocus calls
+	// (AUTHORING_COEDIT_SERVICE_SECRET). Minimum 32 bytes.
+	AuthoringCoeditServiceSecret string
+	// AuthoringCoeditPublicWSScheme is the scheme the browser should use for
+	// the co-edit socket (ws or wss). Empty derives it from the request.
+	AuthoringCoeditPublicWSScheme string
+
 	// EntryGateEnabled gates the plan-D3 per-schedule check-in bucket. Off
 	// (default) = today's shape (only the email+IP limiter). On = in-memory
 	// token bucket per schedule (ENTRY_PER_SEC_PER_SCHEDULE sustained,
@@ -582,6 +616,36 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func productionLike(environment string) bool {
+	switch strings.ToLower(strings.TrimSpace(environment)) {
+	case "production", "prod", "staging", "stage", "preview":
+		return true
+	default:
+		return false
+	}
+}
+
+// coeditSecret keeps local development zero-config while preserving the
+// dedicated-secret requirement anywhere that could be a shared deployment.
+func coeditSecret(key, fallback, environment string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	if productionLike(environment) {
+		return ""
+	}
+	return fallback
+}
+
+// resourceDefault mirrors Rust's base/low-resource profile behavior while
+// keeping explicit environment values authoritative at the call site.
+func resourceDefault(profile string, normal, low int) int {
+	if strings.EqualFold(strings.TrimSpace(profile), "low") {
+		return low
+	}
+	return normal
 }
 
 // deriveTierLimit reads an explicit per-tier budget, falling back to the
@@ -700,14 +764,14 @@ func Load() Config {
 		DBPoolMaxIdle:     getenvInt("DB_POOL_MAX_IDLE", 5),
 
 		BackgroundMode: mode,
-		IdleGraceSecs:  getenvInt("IDLE_GRACE_SECS", 300),
+		IdleGraceSecs:  getenvInt("IDLE_GRACE_SECS", 60),
 
 		RuntimeAutoAdvanceEnabled: getenvBool("RUNTIME_AUTO_ADVANCE_ENABLED", true),
 		RuntimeAutoAdvanceTickMs:  getenvInt("RUNTIME_AUTO_ADVANCE_TICK_MS", 1000),
 
 		LiveModeEnabled:           getenvBool("LIVE_MODE_ENABLED", true),
 		GradingProjectionEnabled:  getenvBool("GRADING_PROJECTION_ENABLED", true),
-		GradingSyncOnReadFallback: getenvBool("GRADING_SYNC_ON_READ_FALLBACK", true),
+		GradingSyncOnReadFallback: getenvBool("GRADING_SYNC_ON_READ_FALLBACK", false),
 		StormAdmissionEnabled:     getenvBool("STORM_ADMISSION_ENABLED", false),
 		// Master-key emergency admin login (mirrors Rust AppConfig
 		// master_key_*: username defaults to "master" like Rust; blank
@@ -716,7 +780,7 @@ func Load() Config {
 		MasterKeyEnabled:  getenvBool("MASTER_KEY_ENABLED", false),
 		MasterKeyUsername: getenv("MASTER_KEY_USERNAME", "master"),
 		MasterKeyPassword: os.Getenv("MASTER_KEY_PASSWORD"),
-		PrometheusEnabled: getenvBool("PROMETHEUS_ENABLED", false),
+		PrometheusEnabled: getenvBool("PROMETHEUS_ENABLED", true),
 		// NOTE (WS-10a): the OTEL_EXPORTER_OTLP_ENDPOINT surface was dead —
 		// no OTel SDK is vendored (trace is X-Trace-Id echo only), so the
 		// endpoint string was parsed and never consumed. Removed; use the
@@ -738,12 +802,12 @@ func Load() Config {
 		MaxMutationsPerBatch:  getenvInt("MAX_MUTATIONS_PER_BATCH", 200),
 		MaxWritingAnswerChars: getenvInt("MAX_WRITING_ANSWER_CHARS", 50000),
 		MaxTextAnswerChars:    getenvInt("MAX_TEXT_ANSWER_CHARS", 512),
-		AutoSubmitBatchSize:   getenvInt("AUTO_SUBMIT_BATCH_SIZE", 100),
+		AutoSubmitBatchSize:   getenvInt("AUTO_SUBMIT_BATCH_SIZE", 50),
 		HeartbeatMinWriteSecs: getenvInt("HEARTBEAT_PRESENCE_MIN_WRITE_INTERVAL_SECS", 5),
 
-		WorkerFallbackIntervalSecs:       getenvInt("WORKER_FALLBACK_INTERVAL_SECS", 5),
+		WorkerFallbackIntervalSecs:       getenvInt("WORKER_FALLBACK_INTERVAL_SECS", resourceDefault(profile, 10, 60)),
 		WorkerMaintenanceIntervalSecs:    getenvInt("WORKER_MAINTENANCE_INTERVAL_SECS", 300),
-		LiveUpdatePollIntervalMs:         getenvInt("LIVE_UPDATE_POLL_INTERVAL_MS", 1000),
+		LiveUpdatePollIntervalMs:         getenvInt("LIVE_UPDATE_POLL_INTERVAL_MS", resourceDefault(profile, 250, 500)),
 		OutboxBatchSize:                  getenvInt("OUTBOX_BATCH_SIZE", 100),
 		LiveBus:                          parseLiveBusMode(os.Getenv("LIVE_BUS")),
 		StudentWS:                        parseStudentWSMode(os.Getenv("STUDENT_WS")),
@@ -759,18 +823,29 @@ func Load() Config {
 		AuthoringRealtimeDelivery:        getenvBool("AUTHORING_REALTIME_DELIVERY", false),
 		AuthoringRealtimePresence:        getenvBool("AUTHORING_REALTIME_PRESENCE", false),
 		AuthoringRealtimeConflictCompare: getenvBool("AUTHORING_REALTIME_CONFLICT_COMPARE", false),
-		RollupEnabled:                    getenvBool("ROLLUP", false),
-		PresenceMode:                     parsePresenceMode(os.Getenv("PRESENCE_MODE")),
-		OutboxExecOnly:                   getenvBool("OUTBOX_EXEC_ONLY", false),
-		DBPoolMaxAPI:                     poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_API", 0)),
-		DBPoolMaxWorker:                  poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_WORKER", 0)),
-		WorkerClaimPartitions:            claimPartitionsFromEnv(),
-		OutboxClaimMode:                  parseOutboxClaimMode(os.Getenv("OUTBOX_CLAIM_MODE")),
-		OutboxMaxAttempts:                getenvInt("OUTBOX_MAX_ATTEMPTS", 10),
-		GradingProjectionIntervalSecs:    getenvInt("GRADING_PROJECTION_INTERVAL_SECS", 5),
+		// Prompt co-editing is always on. The old rollout variables remain
+		// accepted by the process environment for mixed-version deployments but
+		// no longer decide whether the capability is advertised.
+		AuthoringRealtimeCoediting:    true,
+		AuthoringCoeditServiceEnabled: true,
+		AuthoringCoeditServiceURL:     getenv("AUTHORING_COEDIT_SERVICE_URL", defaultCoeditServiceURL),
+		AuthoringCoeditTokenSecret:    coeditSecret("AUTHORING_COEDIT_TOKEN_SECRET", defaultCoeditTokenSecret, environment),
+		AuthoringCoeditServiceSecret:  coeditSecret("AUTHORING_COEDIT_SERVICE_SECRET", defaultCoeditServiceSecret, environment),
+		AuthoringCoeditPublicWSScheme: strings.ToLower(getenv("AUTHORING_COEDIT_PUBLIC_WS_SCHEME", "ws")),
+		RollupEnabled:                 getenvBool("ROLLUP", false),
+		PresenceMode:                  parsePresenceMode(os.Getenv("PRESENCE_MODE")),
+		OutboxExecOnly:                getenvBool("OUTBOX_EXEC_ONLY", false),
+		DBPoolMaxAPI:                  poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_API", 0)),
+		DBPoolMaxWorker:               poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_WORKER", 0)),
+		WorkerClaimPartitions:         claimPartitionsFromEnv(),
+		OutboxClaimMode:               parseOutboxClaimMode(os.Getenv("OUTBOX_CLAIM_MODE")),
+		OutboxMaxAttempts:             getenvInt("OUTBOX_MAX_ATTEMPTS", 10),
+		GradingProjectionIntervalSecs: getenvInt("GRADING_PROJECTION_INTERVAL_SECS", 5),
 
-		RateLimitGlobalPerMin: getenvInt("RATE_LIMIT_GLOBAL", 600),
-		RateLimitBucketCap:    getenvInt("RATE_LIMIT_BUCKET_CAP", 120),
+		RateLimitGlobalPerMin:            getenvInt("RATE_LIMIT_GLOBAL", 600),
+		RateLimitBucketCap:               getenvInt("RATE_LIMIT_BUCKET_CAP", 10000),
+		RateLimitExportPerUser:           getenvInt("RATE_LIMIT_EXPORT_PER_USER", 3),
+		RateLimitExportPerUserWindowSecs: getenvInt("RATE_LIMIT_EXPORT_PER_USER_WINDOW_SECS", 300),
 
 		RateLimitAuthCriticalPerMin: deriveTierLimit("RATE_LIMIT_AUTH_CRITICAL_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 120),
 		RateLimitAnonAuthPerMin:     deriveTierLimit("RATE_LIMIT_ANON_AUTH_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 30),

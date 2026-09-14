@@ -5,7 +5,7 @@ import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { useAuthSession } from '../../auth/api/authSession';
 import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRouteData';
 import { SatStudentSessionRoute } from '../../student-delivery/routes/SatStudentSessionRoute';
-import { SatLoadingSurface } from '../../student-delivery/ui/feedback/SatStateSurfaces';
+import { SatLoadingSurface } from '../../student-delivery/api/satStateSurfaces';
 
 /**
  * Student Session Route

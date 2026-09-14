@@ -49,6 +49,10 @@ export interface SatFloatingToolProps {
   active?: boolean | undefined;
   /** Fired on pointerdown anywhere in the window so the owner can mark it active. */
   onActivate?: (() => void) | undefined;
+  /** Fired exactly when a user commits a position change. */
+  onManualMove?: (() => void) | undefined;
+  /** Fired exactly when a user commits a size change. */
+  onManualResize?: (() => void) | undefined;
   /**
    * Optional content minimum. Defaults assume the per-tool size policy
    * (Calculator 400x480, Reference 360x420, otherwise the store floor)
@@ -487,6 +491,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     if (!session.committed) {
       session.committed = true;
       markHintSeen();
+      props.onManualResize?.();
     }
     // Thread the same min/max into the committed rect: resizeGeometry pins
     // the content minimum (e.g. 400) but the legacy 2-arg clamp only floors
@@ -612,6 +617,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       if (!dragExceeded(session.startX, session.startY, event.clientX, event.clientY)) return;
       session.live = true;
       markHintSeen();
+      props.onManualMove?.();
     }
     const origin = session.origin;
     persist(clampSatToolGeometry(
@@ -639,6 +645,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       { ...current, x: current.x + dx, y: current.y + dy },
       viewportSize(),
     ));
+    props.onManualMove?.();
   };
 
   const handleGripKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
@@ -663,6 +670,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       },
       viewport,
     ));
+    props.onManualResize?.();
   };
 
   const startResize = (event: React.PointerEvent, edge: SatResizeEdge) => {

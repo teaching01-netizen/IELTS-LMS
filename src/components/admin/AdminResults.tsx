@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { BarChart2, CheckCircle2, Clock3, RefreshCw, Search, Users, X } from "lucide-react";
+import { BarChart2, CheckCircle2, Clock3, Download, RefreshCw, Search, Users, X } from "lucide-react";
 import { ErrorSurface } from "../ui/ErrorSurface";
 import { LoadingSurface } from "../ui/LoadingSurface";
 import {
@@ -9,6 +9,7 @@ import {
   type AdminResultRow,
   type ResultProviderKey,
 } from "../../features/results/api/resultsQueries";
+import { downloadActScienceCsv } from "../../features/results/api/resultsExport";
 import {
   useIeltsResultDetailQuery,
 } from "../../features/results/api/ieltsResultDetail";
@@ -415,6 +416,8 @@ export function AdminResults() {
   const [provider, setProvider] = useState<ProviderFilter>("all");
   const [search, setSearch] = useState("");
   const [selectedResult, setSelectedResult] = useState<AdminResultRow | null>(null);
+  const [exportingAct, setExportingAct] = useState(false);
+  const [actExportError, setActExportError] = useState<string | null>(null);
   const query = useAdminResultsQuery(provider);
   const analytics = useResultsAnalyticsQuery();
 
@@ -443,6 +446,19 @@ export function AdminResults() {
     (result) => result.releaseStatus === "ready_to_release"
   ).length;
   const averageBand = analytics.data?.averageOverallBand ?? null;
+  const hasActResults = filteredResults.some((result) => result.providerKey === "act");
+
+  const exportActResults = async () => {
+    setActExportError(null);
+    setExportingAct(true);
+    try {
+      await downloadActScienceCsv(filteredResults);
+    } catch {
+      setActExportError("ACT Science export could not be generated. Try again.");
+    } finally {
+      setExportingAct(false);
+    }
+  };
 
   if (query.isLoading) return <LoadingSurface label="Opening results…" />;
   if (query.error)
@@ -513,8 +529,25 @@ export function AdminResults() {
             <RefreshCw size={15} aria-hidden="true" />
             Refresh
           </button>
+          {hasActResults ? (
+            <button
+              type="button"
+              onClick={() => void exportActResults()}
+              disabled={exportingAct}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+            >
+              <Download size={15} aria-hidden="true" />
+              {exportingAct ? "Exporting…" : "ACT Science CSV"}
+            </button>
+          ) : null}
         </div>
       </div>
+
+      {actExportError ? (
+        <p role="alert" className="text-sm text-red-600">
+          {actExportError}
+        </p>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard

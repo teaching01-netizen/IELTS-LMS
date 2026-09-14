@@ -22,17 +22,27 @@
    * Tailwind mapping: display text-[28px], title text-xl, label text-sm,
    * body text-base, helper text-[13px], metadata text-xs.
    * Existing shared au-* tokens are deliberately unchanged. */
-  --spine-measure: 840px;
+  /* Geometry: the shell is wide (it holds toolbar + two columns of chrome),
+   * the reading measure stays narrow. --spine-measure is the prose ceiling;
+   * --spine-shell-* is the workspace panel ceiling. */
+  --spine-measure: 1180px;
   --spine-measure-compact: 720px;
+  --spine-measure-prose: 760px;
   --spine-measure-wide: 920px;
-  --spine-rail-width: 392px;
-  --spine-rail-min: 340px;
-  --spine-rail-max: 460px;
+  --spine-rail-width: 340px;
+  --spine-rail-min: 288px;
+  --spine-rail-max: 420px;
   --spine-inspector-width: 304px;
+  /* Text hierarchy: primary is the foreground; secondary is muted-foreground;
+   * tertiary is metadata only (labels, hints, counts). Content copy sits a
+   * step darker than pure chrome so prose always outranks its controls. */
+  --spine-text-content: #25282d;
+  --spine-text-tertiary: #8b929d;
   --spine-text-display: 1.75rem;
   --spine-text-title: 1.25rem;
+  --spine-text-heading: 1.0625rem;
   --spine-text-label: 0.875rem;
-  --spine-text-body: 1rem;
+  --spine-text-body: 1.0625rem;
   --spine-text-helper: 0.8125rem;
   --spine-text-meta: 0.75rem;
   --spine-space-1: 4px;
@@ -99,12 +109,40 @@
   overflow-y: auto;
 }
 
-.sat-spine__column {
-  margin-inline: auto;
-  width: calc(100% - 2rem);
-  max-width: clamp(var(--spine-measure-compact), 70vw, var(--spine-measure));
-  padding-block: 1.75rem 6rem;
+/* Optical centring: the document sits slightly right of mathematical centre so
+ * the wide navigation rail on the left doesn't make the page read as
+ * left-heavy. The footer inks from the same grid, so title, editor edges,
+ * section rules, and actions all share one vertical axis. */
+.sat-spine {
+  --spine-document: 840px;
+  --spine-gutter-min: 32px;
+  --spine-grid: minmax(var(--spine-gutter-min), 1fr) minmax(0, var(--spine-document)) minmax(48px, 1.22fr);
 }
+
+.sat-spine__column {
+  display: grid;
+  grid-template-columns: var(--spine-grid);
+  padding-block: var(--spine-space-8) var(--spine-space-16);
+}
+
+.sat-spine__column > * {
+  grid-column: 2;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .sat-spine {
+    --spine-document: 100%;
+  }
+
+  .sat-spine__column {
+    grid-template-columns: var(--spine-gutter-min) minmax(0, 1fr) var(--spine-gutter-min);
+  }
+}
+
+/* The workspace is the surface. The column no longer draws its own card, so
+ * the eye reads one continuous document instead of a floating sheet in a
+ * gray void; grouping comes from spacing and section rules. */
 
 .sat-spine__skip-link {
   position: absolute;
@@ -162,25 +200,59 @@
   display: none;
 }
 
+/* Modules are navigation, not cards: one full-width row per module, stacked,
+ * so the section rail reads top-to-bottom like a table of contents. */
+.sat-spine__modules {
+  flex-direction: column;
+  gap: 2px;
+  overflow: visible;
+  margin-top: var(--spine-space-2);
+}
+
 .sat-spine__tab {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-height: 56px;
+  gap: 6px;
+  min-height: 44px;
   min-width: 44px;
   flex: 1 1 0;
-  align-items: flex-start;
+  align-items: stretch;
   justify-content: center;
-  border: 1px solid var(--color-border);
+  border: 1px solid transparent;
   border-radius: var(--spine-radius-md);
   background: transparent;
   padding: var(--spine-space-2) var(--spine-space-3);
   text-align: left;
   transition:
     background-color var(--spine-motion-fast) ease-out,
-    border-color var(--spine-motion-fast) ease-out,
     transform var(--spine-motion-fast) ease-out;
+}
+
+.sat-spine__tab--module {
+  flex: 0 0 auto;
+}
+
+.sat-spine__tab-text {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spine-space-3);
+  min-width: 0;
+}
+
+.sat-spine__tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: var(--sat-staff-success-dot, #059669);
+  vertical-align: middle;
+}
+
+.sat-spine__tab-bar {
+  flex: 0 0 auto;
 }
 
 .sat-spine__tab:hover:not(:disabled) {
@@ -215,18 +287,43 @@
 
 .sat-spine__tab-bar {
   display: block;
-  height: 2px;
+  height: 3px;
   width: 100%;
   border-radius: 999px;
-  background: var(--color-border);
+  background: rgba(0, 0, 0, 0.05);
   overflow: hidden;
 }
 
+/* Progress is a faint track, not a tab underline. Only the module you are
+ * working in carries a vivid line; a finished module reads green. */
+/* Four semantic colors at most: blue is current/interactive, green is
+ * successfully complete, red is action required, gray is everything else.
+ * The current module always outranks a completed one. */
 .sat-spine__tab-bar > span {
+  position: relative;
   display: block;
   height: 100%;
-  background: var(--color-primary);
+  background: linear-gradient(90deg, #1590ff, #0071e3);
   transition: width var(--spine-motion-panel) ease-out;
+}
+
+/* A 1px specular line along the top of the fill. Almost invisible at reading
+ * size, but it is the difference between a drawn bar and a lit one. */
+.sat-spine__tab-bar > span::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.sat-spine__tab.is-complete:not(.is-selected) .sat-spine__tab-bar > span {
+  background: linear-gradient(90deg, rgba(37, 166, 111, 0.6), rgba(23, 137, 88, 0.75));
+}
+
+.sat-spine__tab.is-selected .sat-spine__tab-bar > span {
+  background: linear-gradient(90deg, #1590ff, #0071e3);
+  box-shadow: 0 0 4px rgba(0, 113, 227, 0.14);
 }
 
 .sat-spine__nav-tools {
@@ -242,18 +339,21 @@
   color: var(--color-muted-foreground);
 }
 
+/* Adding a question is frequent enough to deserve a real secondary button,
+ * but not enough to earn the accent. */
 .sat-spine__add {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 44px;
+  min-height: 36px;
   padding: 0 var(--spine-space-3);
   border-radius: var(--spine-radius-sm);
-  background: transparent;
-  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  border: 1px solid var(--color-border-strong);
   color: var(--color-foreground);
   font-size: var(--spine-text-label);
   font-weight: 600;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.02);
 }
 
 .sat-spine__add:hover:not(:disabled) {
@@ -451,7 +551,14 @@
 
 @media (max-width: 1279px) {
   .sat-spine {
-    --spine-rail-width: 360px;
+    --spine-rail-width: 320px;
+  }
+}
+
+@media (max-width: 1279px) {
+  .sat-spine {
+    --spine-document: 720px;
+    --spine-gutter-min: 24px;
   }
 }
 
@@ -476,6 +583,69 @@
 @media (max-width: 600px) {
   .sat-spine__header-save { display: none; }
   .sat-spine__header > div { gap: 4px; padding-inline: 8px; flex-wrap: wrap; }
+}
+
+.sat-spine__question-header-actions {
+  max-width: 100%;
+}
+
+.sat-spine__question-header-collaboration {
+  row-gap: 2px;
+}
+
+.sat-spine__question-header-status {
+  min-width: 7.5rem;
+  justify-content: flex-end;
+}
+
+.sat-spine__question-header-presence {
+  min-height: 2.75rem;
+}
+
+.sat-coedit-caret {
+  transition: opacity 120ms ease;
+}
+
+.sat-coedit-caret__label {
+  opacity: 1;
+  transition: opacity 160ms ease;
+}
+
+.sat-coedit-caret__label[data-caret-hidden="true"] {
+  opacity: 0;
+}
+
+.sat-coedit-caret__label:hover {
+  opacity: 1;
+}
+
+.sat-coedit-caret:hover .sat-coedit-caret__label[data-caret-hidden="true"] {
+  opacity: 1;
+}
+
+.sat-coedit-selection {
+  /* The exact colour is supplied by the shared renderer; this class prevents
+   * selection decorations from acquiring semantic status colours. */
+  border-radius: 2px;
+}
+
+@media (max-width: 640px) {
+  .sat-spine__question-header-collaboration {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .sat-spine__question-header-status {
+    min-width: 0;
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sat-coedit-caret,
+  .sat-coedit-caret__label {
+    transition: none;
+  }
 }
 
 .sat-spine__add-content { min-height: 44px; color: var(--muted-foreground); font-size: var(--spine-text-label); padding: 8px; border-radius: var(--spine-radius-sm); }
@@ -522,94 +692,149 @@
   }
 }
 
-/* Art direction: warm workspace / crisp document / tactile authoring controls.
- * This layer intentionally keeps the existing spine architecture intact. */
+/* Art direction: calm workspace / crisp document / tactile authoring controls.
+ * Grouping is done with space, one hairline per structural boundary, and a
+ * single elevated vocabulary for truly floating surfaces. This layer keeps the
+ * existing spine architecture intact. */
 .sat-spine {
-  --color-background: #f5f5f3;
+  --color-background: #f5f7fa;
   --color-card: #ffffff;
-  --color-muted: #f4f4f2;
-  --color-foreground: #1d1d1f;
-  --color-muted-foreground: #6e6e73;
-  --color-border: rgba(0, 0, 0, 0.08);
-  --color-border-strong: rgba(0, 0, 0, 0.13);
-  --color-input: rgba(0, 0, 0, 0.14);
+  --color-muted: #f4f4f5;
+  --color-foreground: #17191d;
+  --color-muted-foreground: #59616c;
+  /* Border is discovered on interaction, not constantly announced: the rest
+   * state is nearly invisible and hover/focus carries the emphasis. */
+  --color-border: rgba(24, 32, 42, 0.065);
+  --color-border-strong: rgba(24, 32, 42, 0.105);
+  --color-input: rgba(24, 32, 42, 0.11);
+  --border-header: rgba(24, 32, 42, 0.075);
   --color-primary: #0071e3;
   --color-primary-foreground: #ffffff;
   --color-ring: #0071e3;
-  --spine-measure: 860px;
-  background: #f5f5f3;
-  color: #1d1d1f;
+  background: #f5f7fa;
+  color: #17191d;
 }
 
 .sat-spine__header {
-  background: rgba(255, 255, 255, 0.96);
-  border-bottom-color: rgba(0, 0, 0, 0.1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(252, 253, 254, 0.94));
+  border-bottom-color: var(--border-header);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 8px rgba(20, 27, 36, 0.025);
 }
 
 .sat-spine__header h1 {
-  color: #1d1d1f;
+  color: #18181b;
   letter-spacing: -0.018em;
 }
 
 .sat-spine__header p {
-  color: #71717a;
+  color: #626269;
 }
 
 .sat-spine__body {
-  background: #f5f5f3;
+  background: #f5f7fa;
 }
 
+/* The rail is its own tonal layer: white, with a hairline and a light inner
+ * edge so it never merges with the canvas. */
 .sat-spine__queue {
-  background: #f8f8f6;
-  border-right-color: rgba(0, 0, 0, 0.1);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 48%, #f8fafc 100%);
+  border-right-color: var(--border-header);
+  /* An inner edge, not an outer shadow: the canvas next door paints after the
+   * rail, so any drop shadow would be buried under it. Separation therefore
+   * has to live inside the rail itself. */
+  box-shadow: inset -1px 0 0 rgba(20, 30, 44, 0.045);
 }
 
+/* The question column is the one dominant workspace: white, continuous, no
+ * enclosing card, no floating shadow. */
+/* Depth comes from layers, not from decoration: a cool canvas, a white
+ * navigation rail, white editing surfaces on top of it, and accent gradients
+ * only for the strong states. */
+/* One light source, above and slightly right of the document axis, applied to
+ * every surface the same way: highlights land on top edges, shade falls at the
+ * bottom, and shadows only ever travel downward. The layers stay fixed to the
+ * element, so the wash reads as light in the room rather than paint on the
+ * paper. Roughly 70% matte neutral, 20% tonal depth, 7% illumination, and 3%
+ * visibly saturated accent — nothing here should be identifiable as a gradient. */
 .sat-spine__main {
-  background: #f5f5f3;
+  background:
+    radial-gradient(900px 520px at 52% -40px, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.62) 38%, rgba(255, 255, 255, 0) 72%),
+    radial-gradient(700px 420px at 82% 10%, rgba(90, 145, 255, 0.035), transparent 70%),
+    radial-gradient(620px 360px at 48% 24%, rgba(40, 120, 255, 0.03), transparent 72%),
+    linear-gradient(180deg, #f8fafc 0%, #f4f7fa 52%, #f1f4f8 100%);
+  border-left: 1px solid var(--color-border);
 }
 
+/* Row measure: the shell is wide, the prose is not. Panels that hold reading
+ * content cap themselves below this so a 1600px display never produces a
+ * 140-character line. */
+/* Reading measure: the document column is 840px; prose inside it caps lower
+ * so a wide display never produces a 140-character line. */
+.sat-spine__prose {
+  max-width: 760px;
+}
+
+/* Reserve room under the document so the last field can scroll fully clear of
+ * the sticky action bar instead of disappearing beneath it. */
 .sat-spine__column {
-  max-width: min(var(--spine-measure), calc(100% - 2rem));
-  margin-block: 20px 32px;
-  padding: 40px 48px 96px;
-  border: 1px solid rgba(0, 0, 0, 0.07);
-  border-radius: 16px;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.025), 0 18px 52px rgba(30, 28, 22, 0.045);
+  padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+  /* The document's own light field: a barely-there luminous zone anchored to
+   * the top of the page, so the working column reads as the lit part of the
+   * room. Never a card — no border, no radius, no shadow. */
+  background: radial-gradient(720px 380px at 48% 64px, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.18) 58%, rgba(255, 255, 255, 0) 82%);
 }
 
 .sat-spine__nav-region {
   padding: 20px 20px 16px;
-  border-bottom-color: rgba(0, 0, 0, 0.1);
+  border-bottom-color: rgba(0, 0, 0, 0.07);
 }
 
 .sat-spine__nav-title,
 .sat-spine__tab-title {
-  color: #1d1d1f;
+  color: #18181b;
 }
 
 .sat-spine__nav-progress,
 .sat-spine__tab-meta,
 .sat-spine__nav-count {
-  color: #71717a;
+  color: #626269;
 }
 
+/* Section → module behaves like navigation, not like a row of cards: the
+ * active module gets a directional wash and a leading indicator instead of a
+ * heavy box. The gradient fades with the reading direction, so the current
+ * context points at the workspace rather than sitting in a tinted rectangle. */
 .sat-spine__tab {
-  border-color: rgba(0, 0, 0, 0.08);
+  border-color: transparent;
+}
+
+.sat-spine__tab.is-selected {
+  /* Selection is lit rather than merely tinted: the light lands at the leading
+   * edge and falls away with the reading direction. */
+  background:
+    radial-gradient(300px 70px at 0% 0%, rgba(68, 148, 255, 0.11), transparent 70%),
+    linear-gradient(90deg, rgba(236, 245, 255, 0.95) 0%, rgba(249, 252, 255, 0.82) 100%);
+  border-color: transparent;
+}
+
+.sat-spine__tab.is-selected::before {
+  content: "";
+  position: absolute;
+  inset-block: 8px;
+  inset-inline-start: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #4da1ff, #006ee0);
+  box-shadow: 0 0 8px rgba(0, 113, 227, 0.2);
 }
 
 .sat-spine__tab:hover:not(:disabled),
 .sat-spine__question-row:hover {
-  background: #f4f4f2;
-}
-
-.sat-spine__tab.is-selected,
-.sat-spine__question-row.is-selected {
-  background: rgba(0, 113, 227, 0.08);
-  border-color: rgba(0, 113, 227, 0.24);
+  background: #f4f4f5;
 }
 
 .sat-spine__question-row.is-selected {
+  background: linear-gradient(90deg, rgba(0, 113, 227, 0.085), rgba(0, 113, 227, 0.035));
   border-color: transparent;
 }
 
@@ -623,72 +848,184 @@
   background: #0071e3;
 }
 
+/* The question title is the page's anchor: heavier than any section heading,
+ * tighter tracking, and lit from above like every other surface here. */
+.sat-spine__question-title {
+  font-weight: 680;
+  color: #111318;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
 .sat-spine__row-preview {
-  color: #3a3a3c;
+  color: #3f3f46;
+  line-height: 1.45;
 }
 
 .sat-spine__question-row.is-selected .sat-spine__row-preview {
-  color: #1d1d1f;
+  color: #18181b;
   font-weight: 600;
+}
+
+/* A row with blocking errors leads with the danger edge, so state is readable
+ * at scan distance without a badge. */
+/* One channel per meaning: the left edge is navigation state (blue when this
+ * is the open question), the trailing glyph is validation state. A selected
+ * row that also has errors keeps its blue edge and shows the issue quietly,
+ * instead of stacking a red rail on a blue wash. */
+.sat-spine__question-row.has-issue:not(.is-selected)::after {
+  content: "";
+  position: absolute;
+  inset-block: 7px;
+  inset-inline-start: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-destructive) 62%, transparent);
 }
 
 .sat-spine__section {
   scroll-margin-block: 32px;
 }
 
-.sat-spine__section + .sat-spine__section {
-  margin-top: 52px;
+/* Vertical rhythm carries the hierarchy the boxes used to. One systematic
+ * rhythm for every section — no hand-tuned per-section margins — and a rule
+ * that is perceptible at reading size but dissolves when you squint. */
+.sat-spine {
+  --border-section: rgba(20, 20, 24, 0.045);
 }
 
+.sat-spine__section {
+  padding-block: 28px;
+}
+
+.sat-spine__section:first-child {
+  padding-top: 0;
+}
+
+.sat-spine__section + .sat-spine__section {
+  margin-top: 0;
+  border-top: 1px solid var(--border-section);
+}
+
+/* Section rules carry the hierarchy the boxes used to: a 15px heading, a
+ * quiet requirement hint, and one gradient-faded hairline that dissolves at
+ * both ends instead of drawing a rigid spreadsheet line. */
 .sat-spine__section > div:first-child {
-  margin-bottom: 16px;
+  position: relative;
+  margin-bottom: 12px;
   padding-bottom: 10px;
-  border-bottom-color: rgba(0, 0, 0, 0.08);
+  border-bottom: 0;
+}
+
+/* A short optical anchor under the section title rather than a full-width rule:
+ * it gives the heading a crafted base without drawing another line across the
+ * page. The longest anchor belongs to the section being edited. */
+.sat-spine__section > div:first-child::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  bottom: 0;
+  width: 46px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(35, 45, 60, 0.22), rgba(35, 45, 60, 0));
+}
+
+.sat-spine__section:focus-within > div:first-child::after {
+  width: 68px;
+  background: linear-gradient(90deg, rgba(0, 113, 227, 0.65), rgba(0, 113, 227, 0));
 }
 
 .sat-spine__section > div:first-child h3 {
-  color: #2a2a2d;
+  color: #18181b;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
 .sat-spine__section > div:first-child h3 span {
-  color: #8c8c92;
+  color: var(--spine-text-tertiary);
   font-size: 12px;
   font-weight: 400;
 }
 
+/* The section status is metadata, never a second title. */
+.sat-spine__section > div:first-child h3 .sat-spine__status {
+  font-weight: 500;
+}
+
+/* Editable surfaces are the white layer on the tinted canvas. Elevation is
+ * dynamic: at rest an editor barely lifts; on focus it rises toward the user. */
 .sat-spine .sat-rich-editor {
-  border-color: rgba(0, 0, 0, 0.08);
-  border-radius: 12px;
-  background: #fafaf9;
+  border-color: rgba(26, 34, 46, 0.075);
+  border-radius: 11px;
+  /* A precision surface: the top edge catches the light, the bottom edge falls
+   * into a hair of shade, and the ambient shadow only ever travels downward. */
+  background: linear-gradient(180deg, #ffffff 0%, #fefeff 60%, #fcfdff 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(20, 30, 44, 0.015),
+    0 1px 2px rgba(18, 30, 48, 0.025),
+    0 8px 30px rgba(20, 40, 70, 0.018);
 }
 
 .sat-spine .sat-rich-editor:hover {
-  background: #f4f4f2;
-  border-color: rgba(0, 0, 0, 0.14);
+  border-color: var(--color-border-strong);
 }
 
+/* Focus turns the light up: the field becomes the brightest surface on the page
+ * and rises one optical level. No animation — the contrast does the work. */
 .sat-spine .sat-rich-editor:focus-within {
-  background: #ffffff;
-  border-color: #0071e3;
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12);
+  border-color: rgba(0, 113, 227, 0.28);
+  background: linear-gradient(180deg, #ffffff 0%, #ffffff 75%, #fcfdff 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    0 0 0 3px rgba(0, 113, 227, 0.055),
+    0 10px 34px rgba(25, 65, 120, 0.055);
+}
+
+/* Editor chrome stays present (never animated in and out), but it recedes by
+ * contrast: at rest the toolbars are the quietest layer on the page, and they
+ * step up only for the field being worked on. */
+/* The toolbar is its own optical layer: a cool-white band that steps down from
+ * the document, always present, never announced. */
+.sat-spine .sat-rich-editor__toolbar {
+  opacity: 0.65;
+  color: #7b828c;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 253, 0.94));
+  border-bottom-color: rgba(25, 35, 48, 0.055);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: opacity var(--spine-motion-fast) ease-out;
+}
+
+/* Three steps, never hidden: the shell is present at rest, comes forward when
+ * the field is under the pointer, and reaches full strength only while the
+ * document has focus. */
+.sat-spine .sat-rich-editor:hover .sat-rich-editor__toolbar {
+  opacity: 0.82;
+}
+
+.sat-spine .sat-rich-editor:focus-within .sat-rich-editor__toolbar {
+  opacity: 1;
 }
 
 .sat-spine .sat-rich-editor__toolbar-button {
-  color: #3a3a3c;
+  color: #7b828c;
+}
+
+.sat-spine .sat-rich-editor:hover .sat-rich-editor__toolbar-button,
+.sat-spine .sat-rich-editor:focus-within .sat-rich-editor__toolbar-button {
+  color: #626269;
 }
 
 .sat-spine .sat-rich-editor__toolbar-button:hover:not(:disabled) {
-  background: #f4f4f2;
-  border-color: rgba(0, 0, 0, 0.12);
-  color: #1d1d1f;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(236, 240, 245, 0.95));
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #18181b;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .sat-spine .sat-rich-editor__style-select {
-  background: #f2f2f0;
-  color: #3a3a3c;
+  background: transparent;
+  color: #3f3f46;
 }
 
 .sat-spine :is(input, select, textarea):not([type="checkbox"]) {
@@ -705,45 +1042,352 @@
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12);
 }
 
-.sat-spine .spine-card {
-  border-color: rgba(0, 0, 0, 0.08);
-  background: #fafaf9;
+/* ── Answer choices ──────────────────────────────────────────────────────
+ * Four options, one component. Geometry is identical in every state —
+ * selection changes only the surface treatment, so the set always reads as
+ * one list. Spacing is owned exclusively by the list gap. */
+.answer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 0;
+}
+
+/* Every answer is a normal white editing surface — the same material the
+ * question, supporting-material, and explanation fields are made of. The box
+ * belongs to the row, so the choice letter, the editor, and the key marker all
+ * live inside one box rather than a box inside a box. */
+.answer-choice {
+  position: relative;
+  display: grid;
+  /* 44px is the letter chip's real size, so the toolbar strip's geometry can be
+   * derived from the tracks instead of guessed. */
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
+  min-height: 54px;
+  margin: 0;
+  /* No top padding: the toolbar strip is flush with the top edge, exactly as it
+   * is in every other rich editor. */
+  padding: 0 10px 8px;
+  border: 1px solid rgba(26, 34, 46, 0.075);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #fefeff 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 1px 2px rgba(18, 30, 48, 0.02);
+  transition:
+    background-color var(--spine-motion-fast) ease-out,
+    border-color var(--spine-motion-fast) ease-out,
+    box-shadow var(--spine-motion-fast) ease-out;
+}
+
+.answer-choice:hover {
+  border-color: var(--color-border-strong);
+}
+
+.answer-choice:focus-within {
+  border-color: rgba(0, 113, 227, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    0 0 0 3px rgba(0, 113, 227, 0.055),
+    0 8px 24px rgba(25, 65, 120, 0.045);
+}
+
+.answer-choice[data-correct="true"] {
+  /* The key carries its own micro light source instead of a flat blue fill, so
+   * selection reads as illumination rather than as a coloured rectangle. */
+  background:
+    radial-gradient(540px 180px at 12% -20%, rgba(70, 150, 255, 0.13), transparent 58%),
+    linear-gradient(135deg, #ffffff 0%, #f6faff 100%);
+  border-color: rgba(0, 113, 227, 0.26);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 4px 16px rgba(0, 100, 220, 0.05);
+}
+
+/* Selection is carried by exactly three quiet signals — the row tint, the
+ * filled letter chip, and the word "Key". No edge, no border, no badge: too
+ * many simultaneous signals read as decoration rather than refinement. */
+
+/* The letter chip occupies the strip's leading slot — 44px square, flush with
+ * the top edge — and is lifted above the strip so the band runs behind it. */
+.answer-choice__letter {
+  position: relative;
+  z-index: 1;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  margin-top: 0;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #f6f6f8, #eeeef1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: #66666d;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.answer-choice__letter:hover {
+  background: #eaeaee;
+  color: var(--color-foreground);
+}
+
+.answer-choice[data-correct="true"] .answer-choice__letter {
+  background: linear-gradient(180deg, #218af0, #0874dd);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 2px 5px rgba(0, 90, 190, 0.18);
+  color: var(--color-primary-foreground);
+}
+
+/* Answer editors are compact rows, never documents: no reserved document
+ * height may leak in from the question/stimulus composer sizing. */
+.answer-choice__content {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 38px;
+  padding-block: 3px;
+}
+
+.answer-choice__content > * {
+  width: 100%;
+}
+
+/* Editing mechanics stay hidden until the choice is the one being worked on;
+ * the expansion is animated rather than display-toggled so nothing jumps. */
+.answer-choice .sat-rich-editor {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  min-height: 0;
+}
+
+.sat-spine .answer-choice .sat-rich-editor:focus-within {
   box-shadow: none;
 }
 
+.sat-spine .answer-choice .sat-rich-editor__content {
+  padding: 0 !important;
+}
+
+/* The row owns the reserved height; the editor's own min-height utility is
+ * neutralised so document sizing can never leak into a compact answer row. */
+.sat-spine .answer-choice .sat-rich-editor__input {
+  min-height: 0 !important;
+  padding-block: 9px;
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: -0.004em;
+}
+
+.sat-spine .answer-choice .sat-rich-editor__input p {
+  margin-block: 0;
+}
+
+/* The answer strip is the same strip as every other rich editor: one tonal
+ * band, one hairline, running the full width of its box. The letter chip and
+ * the key marker sit *on* the strip, exactly where the style select and the
+ * "···" sit in a document toolbar.
+ *
+ * The band has to reach past two grid tracks to do that (the 44px letter
+ * column plus its 10px gap, and the key slot on the other side), so the strip
+ * is pulled out by exactly those tracks and padded back by the same amount. The
+ * controls therefore stay exactly where they were; only the band and its
+ * hairline grow. Values are derived from the row grid above — change the grid
+ * and change these together. */
+.sat-spine .answer-choice .sat-rich-editor__toolbar {
+  opacity: 1;
+  margin-inline: -64px -144px;
+  padding-inline: 64px 144px;
+  border-radius: 9px 9px 0 0;
+}
+
+.sat-spine .answer-choice .sat-rich-editor__style-select {
+  height: 28px;
+  min-height: 28px;
+  padding-inline: 8px;
+}
+
+/* One fixed-width trailing slot so the key marker never reflows the row. It is
+ * exactly the strip's height so the marker centres on the band. */
+.answer-choice__aside {
+  display: flex;
+  height: 44px;
+  align-items: center;
+  gap: 6px;
+  padding-top: 0;
+}
+
+.answer-choice__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 62px;
+  justify-content: flex-end;
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.answer-choice__key--idle {
+  color: var(--color-muted-foreground);
+  opacity: 0;
+  transition: opacity var(--spine-motion-fast) ease-out;
+}
+
+.answer-choice:hover .answer-choice__key--idle,
+.answer-choice:focus-within .answer-choice__key--idle {
+  opacity: 1;
+}
+
+/* Grouping summaries (release gate, validation) stay on one quiet surface.
+ * Only overlays float. */
+.sat-spine .spine-card {
+  border-color: var(--color-border);
+  background: #fafbfc;
+  box-shadow: none;
+}
+
+/* One status vocabulary for the main workspace: dot + label, tinted wash,
+ * never color alone. Mirrors the --sat-staff-* status families so the session
+ * screen and the authoring screen say the same thing the same way. */
+.sat-spine__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--spine-text-meta);
+  font-weight: 600;
+}
+
+.sat-spine__status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.sat-spine__status--success { color: var(--sat-staff-success-text, #067647); }
+.sat-spine__status--warning { color: var(--sat-staff-warning-text, #92400e); }
+.sat-spine__status--danger { color: var(--sat-staff-danger-text, #b42318); }
+.sat-spine__status--neutral { color: var(--color-muted-foreground); }
+
+/* Validation is discoverable, not violent: a quiet line of text under the
+ * field with the same icon the row status uses. No banner, no fill. */
+.sat-spine__field-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0;
+  font-size: var(--spine-text-helper);
+  line-height: 1.45;
+  font-weight: 500;
+  color: #c9372c;
+}
+
+/* The action bar inks from the same document column as the editor, so the
+ * status, the preference, and the primary action all share one vertical axis.
+ * It reads as part of the window rather than a floating card: one hairline,
+ * a translucent fill, no radius, no shadow. */
 .sat-spine__save-footer {
   position: sticky;
   bottom: 0;
   z-index: 5;
-  margin-inline: -48px;
-  padding: 14px 48px;
-  border-top-color: rgba(0, 0, 0, 0.1);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 -8px 24px rgba(30, 28, 22, 0.035);
-  backdrop-filter: blur(12px);
+  margin-top: var(--spine-space-12);
+  padding-block: 14px;
+  border-top-color: var(--border-header);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 250, 253, 0.97));
+  box-shadow: 0 -12px 34px rgba(24, 45, 80, 0.045);
+  backdrop-filter: saturate(150%) blur(18px);
+  -webkit-backdrop-filter: saturate(150%) blur(18px);
+}
+
+/* A specular line where the bar meets the document. The boundary only catches
+ * light in the middle, so the bar reads as a lit edge rather than a cut. */
+.sat-spine__save-footer::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95) 25%, rgba(255, 255, 255, 0.95) 75%, transparent);
 }
 
 .sat-spine__save-footer button {
   min-height: 40px;
-  border-radius: 8px;
-  background: #0071e3;
-  font-weight: 500;
+  border-radius: 10px;
+  font-weight: 600;
 }
 
-.sat-spine__save-footer button:hover:not(:disabled) {
-  background: #0077ed;
+/* The footer's primary action is the only filled control in the column at
+ * rest; it reads as "continue", not "commit". */
+/* The one place a visible gradient is right: the primary action. It reads as
+ * a physical key rather than a flat rectangle of blue. */
+.sat-spine .spine-next {
+  position: relative;
+  overflow: hidden;
+  color: #ffffff;
+  background: linear-gradient(180deg, #1684ed 0%, #0877e4 46%, #006bd8 100%);
+  border: 1px solid rgba(0, 91, 193, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 0 rgba(0, 60, 140, 0.16),
+    0 1px 2px rgba(0, 61, 135, 0.16),
+    0 5px 14px rgba(0, 97, 205, 0.12);
+}
+
+/* The one place a gradient paints over the surface itself. It is clipped to the
+ * top third of the control, clear of the label's x-height, so the gloss reads as
+ * a specular highlight rather than as a veil over the text. */
+.sat-spine .spine-next::before {
+  content: "";
+  position: absolute;
+  inset: 1px 10% auto;
+  height: 38%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent);
+  pointer-events: none;
+}
+
+.sat-spine .spine-next:hover:not(:disabled) {
+  background: linear-gradient(180deg, #238cf2, #0877e4 48%, #0066cf);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 2px 4px rgba(0, 61, 135, 0.16), 0 6px 14px rgba(0, 97, 205, 0.12);
+}
+
+.sat-spine .spine-next:active:not(:disabled) {
+  background: linear-gradient(180deg, #006edb, #0877e4);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+  transform: translateY(1px);
+}
+
+.sat-spine .spine-next:disabled {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: transparent;
+  box-shadow: none;
+  color: #8b8b93;
+}
+
+.sat-spine .spine-next:disabled::before {
+  background: none;
+}
+
+.sat-spine__kbd {
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.24);
+  padding: 1px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 @media (max-width: 700px) {
-  .sat-spine__column {
-    max-width: calc(100% - 1rem);
-    margin-block: 8px 16px;
-    padding: 28px 20px 88px;
-    border-radius: 12px;
-  }
-
-  .sat-spine__save-footer {
-    margin-inline: -20px;
-    padding-inline: 20px;
+  .sat-spine {
+    --spine-document: 100%;
+    --spine-gutter-min: 20px;
   }
 }

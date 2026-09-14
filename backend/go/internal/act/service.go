@@ -52,39 +52,14 @@ type Score struct {
 // late-penalty policy; currently unused). Client-supplied scores are never
 // read here by construction.
 func ComputeScienceScore(config, content map[string]any, answers []Answer, now time.Time) (Score, error) {
-	key := answerKeyFromContent(content)
-	weights := weightsFromConfig(config, len(key))
-	total := len(key)
-	if total == 0 {
-		return Score{}, fmt.Errorf("ACT science content carries no scorable questions")
+	results, err := computeScienceAutoGradingResults(config, content, answers, now, nil)
+	if err != nil {
+		return Score{}, err
 	}
-	byQuestion := map[string]any{}
-	for _, a := range answers {
-		byQuestion[a.QuestionID] = a.Answer
-	}
-	scored := 0
-	max := 0
-	// Deterministic order: iterate the content-derived key sequence.
-	for i, q := range orderedQuestions(content) {
-		w := 1
-		if i < len(weights) {
-			w = weights[i]
-		}
-		max += w
-		accepted := key[q]
-		given, ok := byQuestion[q]
-		if !ok {
-			continue
-		}
-		if answersEqual(given, accepted) {
-			scored += w
-		}
-	}
-	pct := 0.0
-	if max > 0 {
-		pct = float64(scored) / float64(max) * 100
-	}
-	return Score{TotalScore: scored, MaxScore: max, Percentage: pct}, nil
+	total, _ := numberAsInt(results["totalScore"])
+	max, _ := numberAsInt(results["maxScore"])
+	percentage, _ := numVal(results["percentage"])
+	return Score{TotalScore: total, MaxScore: max, Percentage: percentage}, nil
 }
 
 // Service wires seal-time scoring and science reporting.
@@ -188,6 +163,74 @@ func (s *Service) ScoreAttempt(ctx context.Context, q tx.Tx, _ string, versionID
 		"score":       score,
 		"providerKey": "act",
 		"section":     SectionScience,
+	}, nil
+}
+
+// ScoreAttemptDetails computes the Rust-compatible objective result payload
+// used by section_submissions. It is separate from ScoreAttempt so the
+// compatibility final_submission remains a deliberately redacted projection.
+func (s *Service) ScoreAttemptDetails(ctx context.Context, q tx.Tx, attemptID, versionID string, answersRaw json.RawMessage) (map[string]any, error) {
+	var configRaw, contentRaw sql.NullString
+	if err := q.QueryRowContext(ctx,
+		"SELECT config_snapshot, content_snapshot FROM exam_versions WHERE id = ?",
+		versionID).Scan(&configRaw, &contentRaw); err != nil {
+		return nil, err
+	}
+	config, err := decodeObject(configRaw)
+	if err != nil {
+		return nil, fmt.Errorf("ACT scoring config is invalid: %w", err)
+	}
+	content, err := decodeObject(contentRaw)
+	if err != nil {
+		return nil, fmt.Errorf("ACT scoring content is invalid: %w", err)
+	}
+	content = normalizeScienceContent(content)
+	overrides := map[string]map[string]any{}
+	var scheduleID string
+	if err := q.QueryRowContext(ctx, "SELECT schedule_id FROM student_attempts WHERE id = ?", attemptID).Scan(&scheduleID); err == nil {
+		rows, queryErr := q.QueryContext(ctx,
+			"SELECT question_id, override_json FROM grading_schedule_question_overrides WHERE schedule_id = ?", scheduleID)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		for rows.Next() {
+			var id, raw string
+			if err := rows.Scan(&id, &raw); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			var value map[string]any
+			if json.Unmarshal([]byte(raw), &value) == nil {
+				overrides[id] = value
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	} else if err != sql.ErrNoRows {
+		return nil, err
+	}
+	answers := decodeAnswers(answersRaw)
+	results, err := computeScienceAutoGradingResults(config, content, answers, time.Now().UTC(), overrides)
+	if err != nil {
+		return nil, err
+	}
+	if integrity, ok := results["integrity"].(map[string]any); ok {
+		// Release validation pins every objective audit to the published
+		// version used for the seal; "unknown" is only valid for standalone
+		// score calculations that do not own a version row.
+		integrity["gradingSourceVersionId"] = versionID
+	}
+	return map[string]any{
+		"score": Score{
+			TotalScore: mustInt(results["totalScore"]), MaxScore: mustInt(results["maxScore"]),
+			Percentage: mustFloat(results["percentage"]),
+		},
+		"providerKey": "act", "section": SectionScience,
+		"content": content, "contentHash": SealedContentHash(content),
+		"autoGradingResults": results,
 	}, nil
 }
 
@@ -326,7 +369,14 @@ func decodeAnswers(raw json.RawMessage) []Answer {
 // snapshot (science.stimuli[].blocks[].questions/options) and the compact
 // questions[] shape used by the scoring core.
 func normalizeScienceContent(content map[string]any) map[string]any {
-	if _, ok := content["questions"].([]any); ok {
+	if rawQuestions, ok := content["questions"].([]any); ok {
+		questions := make([]any, 0, len(rawQuestions))
+		for _, raw := range rawQuestions {
+			if question, ok := raw.(map[string]any); ok {
+				questions = append(questions, normalizeScienceQuestionWithRule(question, ""))
+			}
+		}
+		content["questions"] = questions
 		return content
 	}
 	science, _ := content["science"].(map[string]any)
@@ -337,16 +387,17 @@ func normalizeScienceContent(content map[string]any) map[string]any {
 		blocks, _ := stimulus["blocks"].([]any)
 		for _, rawBlock := range blocks {
 			block, _ := rawBlock.(map[string]any)
+			fallbackRule := firstNonEmptyString(block, "scoringRule", "answerRule")
 			if blockQuestions, ok := block["questions"].([]any); ok {
 				for _, rawQuestion := range blockQuestions {
 					if question, ok := rawQuestion.(map[string]any); ok {
-						questions = append(questions, normalizeScienceQuestion(question))
+						questions = append(questions, normalizeScienceQuestionWithRule(question, fallbackRule))
 					}
 				}
 				continue
 			}
 			if _, ok := block["id"].(string); ok {
-				questions = append(questions, normalizeScienceQuestion(block))
+				questions = append(questions, normalizeScienceQuestionWithRule(block, fallbackRule))
 			}
 		}
 	}
@@ -355,30 +406,49 @@ func normalizeScienceContent(content map[string]any) map[string]any {
 }
 
 func normalizeScienceQuestion(question map[string]any) map[string]any {
+	return normalizeScienceQuestionWithRule(question, "")
+}
+
+func normalizeScienceQuestionWithRule(question map[string]any, fallbackRule string) map[string]any {
 	out := map[string]any{}
+	for key, value := range question {
+		out[key] = value
+	}
 	for _, key := range []string{"id", "questionId", "question_id"} {
 		if value, ok := question[key]; ok {
 			out["questionId"] = value
 			break
 		}
 	}
-	for _, key := range []string{"correctAnswer", "correct_answer", "answer"} {
-		if value, ok := question[key]; ok {
+	if _, ok := out["correctAnswer"]; !ok {
+		if value, ok := question["correct_answer"]; ok {
 			out["correctAnswer"] = value
-			return out
+		}
+	}
+	if _, ok := out["scoringRule"]; !ok {
+		if rule, ok := out["answerRule"]; ok {
+			out["scoringRule"] = rule
+		} else if fallbackRule != "" {
+			out["scoringRule"] = fallbackRule
 		}
 	}
 	if options, ok := question["options"].([]any); ok {
+		correctIDs := make([]string, 0)
 		for _, rawOption := range options {
 			option, _ := rawOption.(map[string]any)
 			if correct, _ := option["isCorrect"].(bool); correct {
-				if id, ok := option["id"]; ok {
-					out["correctAnswer"] = id
-				} else if text, ok := option["text"]; ok {
-					out["correctAnswer"] = text
+				if id, ok := firstString(option, "id", "key", "value"); ok {
+					correctIDs = append(correctIDs, id)
 				}
-				break
 			}
+		}
+		if len(correctIDs) == 1 {
+			if _, ok := out["correctAnswer"]; !ok {
+				out["correctAnswer"] = correctIDs[0]
+			}
+		} else if len(correctIDs) > 1 {
+			out["correctOptionIds"] = correctIDs
+			out["correctAnswer"] = correctIDs
 		}
 	}
 	return out
@@ -423,6 +493,8 @@ type ScienceDetail struct {
 	Percentage  float64           `json:"percentage"`
 	Outcome     string            `json:"outcomeStatus"`
 	Release     string            `json:"releaseStatus"`
+	Integrity   string            `json:"integrityStatus,omitempty"`
+	AutoResults map[string]any    `json:"autoGradingResults,omitempty"`
 	SubmittedAt *time.Time        `json:"submittedAt,omitempty"`
 	Questions   []ScienceQuestion `json:"questions"`
 }
@@ -447,16 +519,18 @@ func (s *Service) ListScienceReports(ctx context.Context, f ReportFilter) ([]Sci
 	}
 	query := `
 		SELECT a.id, a.schedule_id, a.candidate_id, a.candidate_name,
-			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.score.totalScore')), '0'),
-			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.score.maxScore')), '0'),
-			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.score.percentage')), '0'),
+			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ss.auto_grading_results, '$.totalScore')), JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.score.totalScore')), '0'),
+			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ss.auto_grading_results, '$.maxScore')), JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.score.maxScore')), '0'),
+			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ss.auto_grading_results, '$.percentage')), JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.score.percentage')), '0'),
 			COALESCE(ar.release_status, 'ready_to_release')
 		FROM student_attempts a
 		JOIN exam_entities e ON e.id = a.exam_id
+		LEFT JOIN student_submissions sub ON sub.attempt_id = a.id AND sub.provider_key = 'act'
+		LEFT JOIN section_submissions ss ON ss.submission_id = sub.id AND ss.section = 'science'
 		LEFT JOIN assessment_results ar
 			ON ar.attempt_id = a.id AND ar.provider_key = 'act'
 		WHERE (e.provider_key = 'act' OR e.exam_type = 'ACT')
-		  AND JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.section')) = 'science'
+		  AND (ss.id IS NOT NULL OR JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.section')) = 'science')
 		  AND a.submitted_at IS NOT NULL`
 	args := []any{}
 	if strings.TrimSpace(f.ScheduleID) != "" {
@@ -515,11 +589,13 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 	scope, scopeArgs := actResultScope(actor)
 	query := `
 		SELECT a.schedule_id, a.candidate_id, a.candidate_name,
-			a.final_submission, a.submitted_at,
+			COALESCE(ss.auto_grading_results, a.final_submission), a.submitted_at,
 			ar.outcome_status, ar.release_status
 		FROM student_attempts a
 		JOIN exam_entities e ON e.id = a.exam_id
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
+		LEFT JOIN student_submissions sub ON sub.attempt_id = a.id AND sub.provider_key = 'act'
+		LEFT JOIN section_submissions ss ON ss.submission_id = sub.id AND ss.section = 'science'
 		LEFT JOIN assessment_results ar
 			ON ar.attempt_id = a.id AND ar.provider_key = 'act'
 		WHERE a.id = ? AND (e.provider_key = 'act' OR e.exam_type = 'ACT')
@@ -540,12 +616,25 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 		_ = json.Unmarshal([]byte(finalSub.String), &snap)
 	}
 	score, _ := snap["score"].(map[string]any)
+	if score == nil {
+		if _, ok := snap["totalScore"]; ok {
+			score = snap
+		}
+	}
 	detail := &ScienceDetail{
 		AttemptID: attemptID, ScheduleID: scheduleID,
 		StudentID: studentID, StudentName: studentName,
 		Outcome:   firstNonEmpty(nullableString(outcome), "scored"),
 		Release:   firstNonEmpty(nullableString(release), "ready_to_release"),
 		Questions: []ScienceQuestion{},
+	}
+	if audit, ok := snap["integrity"].(map[string]any); ok {
+		if status, ok := audit["integrityStatus"].(string); ok {
+			detail.Integrity = status
+		}
+	}
+	if _, ok := snap["questionResults"]; ok {
+		detail.AutoResults = snap
 	}
 	if total, ok := numVal(score["totalScore"]); ok {
 		detail.TotalScore = int(total)
@@ -579,6 +668,9 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 // contentSnapshot alias exists only for pre-Phase-02 seals that embedded
 // the raw snapshot shape.
 func buildScienceQuestions(snap map[string]any) []ScienceQuestion {
+	if raw, ok := snap["questionResults"].([]any); ok {
+		return scienceQuestionsFromResults(raw)
+	}
 	out := []ScienceQuestion{}
 	content, _ := snap["content"].(map[string]any)
 	if content == nil {
@@ -636,6 +728,32 @@ func buildScienceQuestions(snap map[string]any) []ScienceQuestion {
 			QuestionID: questionID, DisplayOrder: len(out) + 1,
 			Response: given, Answered: isScienceAnswered(given, true),
 		})
+	}
+	return out
+}
+
+func scienceQuestionsFromResults(raw []any) []ScienceQuestion {
+	out := make([]ScienceQuestion, 0, len(raw))
+	for index, item := range raw {
+		result, _ := item.(map[string]any)
+		if result == nil {
+			continue
+		}
+		id, _ := result["questionId"].(string)
+		answer, present := result["studentAnswer"]
+		answerText, _ := answer.(string)
+		question := ScienceQuestion{
+			QuestionID: id, DisplayOrder: index + 1,
+			Response: answerText, CorrectAnswer: result["correctAnswer"],
+			Answered: present && strings.TrimSpace(answerText) != "",
+		}
+		if verdict, ok := result["isCorrect"].(bool); ok {
+			question.IsCorrect = &verdict
+		}
+		if !question.Answered {
+			question.Response = nil
+		}
+		out = append(out, question)
 	}
 	return out
 }

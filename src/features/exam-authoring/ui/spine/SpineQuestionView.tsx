@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type {
   AssessmentValidationIssue,
   QuestionRevision,
   StructuredContent,
 } from "../../contracts/assessment";
-import type { SmartPasteStatus } from "../../editor/RichQuestionComposer";
+import type {
+  RichComposerCollaboration,
+  SmartPasteStatus,
+} from "../../editor/RichQuestionComposer";
 import type {
   AnalyzeWholeQuestionInput,
   SuggestionOutcome,
@@ -37,8 +40,13 @@ export interface SpineQuestionViewProps {
   onMove?: ((direction:-1|1)=>void)|undefined;
   canMoveUp?: boolean|undefined;
   canMoveDown?: boolean|undefined;
+  readOnly?: boolean | undefined;
   isMutating?: boolean|undefined;
   questionNumber?: number | undefined;
+  questionContext?: string | null | undefined;
+  headerPresenceSlot?: ReactNode;
+  headerSaveSlot?: ReactNode;
+  hideFooterSaveStatus?: boolean | undefined;
   saveStatus: QuestionSaveStatus;
   lastSavedAt: Date | null;
   /**
@@ -49,9 +57,20 @@ export interface SpineQuestionViewProps {
    */
   diverged?: boolean | undefined;
   issues: AssessmentValidationIssue[];
+  /**
+   * Prompt binding for the selected question, owned by AuthoringWorkspace.
+   * Absent means the legacy non-collaborative editor. In the SAT workspace,
+   * the same Yjs room also supplies `fieldCollaboration` for supporting
+   * material, answer choices, and rationale.
+   */
+  promptCollaboration?: RichComposerCollaboration | undefined;
+  /** Exam-workspace bindings for every rich field on the selected question. */
+  fieldCollaboration?: ((fieldPath: string) => RichComposerCollaboration | null | undefined) | undefined;
   keepMetadataForNext: boolean;
   onKeepMetadataForNextChange: (value: boolean) => void;
   onChange: (question: QuestionRevision) => void;
+  /** Local rich-editor transactions only; remote Yjs projections never call this. */
+  onLocalRichChange?: ((question: QuestionRevision) => void) | undefined;
   onSaveNow: () => void;
   onSaveAndNext: () => void;
   onRetrySave: () => void;
@@ -76,15 +95,23 @@ export function SpineQuestionView(props:SpineQuestionViewProps) { return <Questi
 
 function QuestionCanvas({
   focusField,onRequestDelete,onOpenSettings,onMove,canMoveUp,canMoveDown,isMutating,
+  readOnly = false,
   question,
   questionNumber,
+  questionContext,
+  headerPresenceSlot,
+  headerSaveSlot,
+  hideFooterSaveStatus = false,
   saveStatus,
   lastSavedAt,
   diverged = false,
   issues,
+  promptCollaboration,
+  fieldCollaboration,
   keepMetadataForNext,
   onKeepMetadataForNextChange,
   onChange,
+  onLocalRichChange,
   onSaveAndNext,
   onRetrySave,
   onReviewConflict,
@@ -105,6 +132,12 @@ function QuestionCanvas({
     sectionKey: AnalyzeWholeQuestionInput["sectionKey"];
   } | null>(null);
   const [, setSuggestionOutcome] = useState<SuggestionOutcome | null>(null);
+  /**
+   * Whole-question split uses the shared roots in the exam workspace. The
+   * legacy question-scoped room still blocks it because that room owns only
+   * the prompt and cannot safely apply the other fields as one operation.
+   */
+  const [coeditSplitBlocked, setCoeditSplitBlocked] = useState(false);
   const sectionKeyForAnalysis = (question.metadata.sectionKey === "math" ? "math" : "reading-writing") as AnalyzeWholeQuestionInput["sectionKey"];
   const handleSmartPaste =
     (field: AnalyzeWholeQuestionInput["targetField"]) =>
@@ -124,17 +157,29 @@ function QuestionCanvas({
     };
   const acceptSuggestion = (): void => {
     if (!suggestion) return;
-    onChange(buildSplitQuestion(question, suggestion.analysis));
+    if (promptCollaboration && !fieldCollaboration) {
+      // The legacy question-scoped room only owns the prompt. A whole-question
+      // import would otherwise send a stale prompt through the partial-save
+      // path. The exam-level SAT workspace owns every field, so it can apply
+      // the same replacement through the shared roots below.
+      setCoeditSplitBlocked(true);
+      return;
+    }
+    const next = buildSplitQuestion(question, suggestion.analysis);
+    onChange(next);
+    if (fieldCollaboration) onLocalRichChange?.(next);
     setSuggestionOutcome(toOutcome(suggestion.analysis, suggestion.sectionKey, true));
     setSuggestion(null);
   };
   const dismissSuggestion = (outcome: SuggestionOutcome): void => {
     setSuggestionOutcome(outcome);
     setSuggestion(null);
+    setCoeditSplitBlocked(false);
   };
   useEffect(() => {
     setSuggestion(null);
     setSuggestionOutcome(null);
+    setCoeditSplitBlocked(false);
   }, [question.id]);
   const answer = question.answer;
   const isSpr = answer.kind === "student_produced_response";
@@ -144,10 +189,11 @@ function QuestionCanvas({
   const showStimulus=!stimulusEmpty||expanded.stimulus||focusField==='stimulus';
   const showRationale=hasStructuredContent(question.rationale)||expanded.rationale||focusField==='rationale';
   const jump=(field:string|null)=>{if(field?.startsWith('stimulus'))setExpanded(current=>({...current,stimulus:true}));if(field?.startsWith('rationale'))setExpanded(current=>({...current,rationale:true}));onIssueSelect(field);};
+  const promptBinding = promptCollaboration ?? fieldCollaboration?.("prompt") ?? undefined;
 
   const applyKindChange = (kind: QuestionRevision["questionType"]) => {
     if (kind === "student_produced_response") {
-      onChange({
+      const next = {
         ...question,
         questionType: kind,
         answer: {
@@ -157,10 +203,12 @@ function QuestionCanvas({
           normalizeDecimal: true,
           numericTolerance: null,
         },
-      });
+      };
+      onChange(next);
+      if (fieldCollaboration) onLocalRichChange?.(next);
       return;
     }
-    onChange({
+    const next = {
       ...question,
       questionType: kind,
       answer: {
@@ -168,7 +216,9 @@ function QuestionCanvas({
         options: ["A", "B", "C", "D"].map((id) => ({ id, content: emptyContent() })),
         correctOptionId: null,
       },
-    });
+    };
+    onChange(next);
+    if (fieldCollaboration) onLocalRichChange?.(next);
   };
 
   const changeKind = (kind: QuestionRevision["questionType"]) => {
@@ -190,24 +240,30 @@ function QuestionCanvas({
 
   return (
     <article aria-labelledby="spine-question-heading">
-      <QuestionHeader number={questionNumber} issues={issues} onIssueSelect={jump} onPreview={onPreview} onDuplicate={onDuplicate} onDelete={onRequestDelete??(()=>setDeleteOpen(true))} onSettings={onOpenSettings} onMove={onMove} canMoveUp={canMoveUp} canMoveDown={canMoveDown} busy={isMutating}/>
+      <QuestionHeader number={questionNumber} contextLabel={questionContext} presenceSlot={headerPresenceSlot} saveSlot={headerSaveSlot} issues={issues} onIssueSelect={jump} onPreview={onPreview} onDuplicate={onDuplicate} onDelete={onRequestDelete??(()=>setDeleteOpen(true))} onSettings={onOpenSettings} onMove={onMove} canMoveUp={canMoveUp} canMoveDown={canMoveDown} busy={isMutating} readOnly={readOnly}/>
       <div className="space-y-10">
-        <SectionRule title="Question" field="prompt" required issues={issuesForField(issues,'prompt')}>
-          <FastQuestionComposer label="Question prompt" value={question.prompt} onChange={prompt=>onChange({...question,prompt})} placeholder="Write the question students will see…" assetOwnerId={question.questionId} minHeightClassName="min-h-[112px]" onSmartPaste={handleSmartPaste("prompt")}/>
+        <SectionRule title="Question" field="prompt" issues={issuesForField(issues,'prompt')}>
+          <FastQuestionComposer label="Question prompt" value={question.prompt} onChange={prompt=>onChange({...question,prompt})} {...(onLocalRichChange && !promptBinding ? { onLocalChange: prompt => onLocalRichChange({...question,prompt}) } : {})} placeholder="Write the question students will see…" assetOwnerId={question.questionId} minHeightClassName="min-h-[140px]" onSmartPaste={handleSmartPaste("prompt")} {...(promptBinding ? { collaboration: promptBinding } : {})}/>
           {suggestion?.field === "prompt" ? <ImportSuggestion analysis={suggestion.analysis} targetField="prompt" sectionKey={suggestion.sectionKey} onAccept={acceptSuggestion} onDismiss={dismissSuggestion} onOutcome={setSuggestionOutcome}/> : null}
+          {coeditSplitBlocked ? (
+            <p role="status" className="text-xs leading-5 text-slate-500">
+              This prompt is being edited collaboratively, so the whole-question suggestion can’t
+              be applied. Dismiss it and paste into the prompt normally.
+            </p>
+          ) : null}
         </SectionRule>
-        <SectionRule title="Supporting material" field="stimulus" issues={issuesForField(issues,'stimulus')} actions={showStimulus?<label htmlFor="supporting-type" className="flex items-center gap-2 text-xs text-muted-foreground">Type<select id="supporting-type" aria-label="Supporting material type" value="" className="min-h-11 max-w-44 rounded-md bg-transparent px-2 text-xs focus-visible:ring-2 focus-visible:ring-ring" onChange={e=>{const starter=e.target.value as SatSupportingMaterialStarter;if(!starter)return;if(stimulusEmpty)onChange({...question,stimulus:createSatSupportingMaterial(starter)});else setPendingStarter(starter);}}><option value="">{stimulusEmpty?'Choose a starter':'Change type…'}</option>{question.metadata.sectionKey==='reading-writing'?<><option value="paired_texts">Paired texts</option><option value="student_notes">Student notes</option></>:null}<option value="data_table">Data table</option></select></label>:undefined}>
-          {showStimulus?<FastQuestionComposer label="Supporting material" value={question.stimulus} onChange={stimulus=>onChange({...question,stimulus})} placeholder="Passage, context, data, equation, table, or visual…" assetOwnerId={question.questionId} minHeightClassName="min-h-[92px]" onSmartPaste={handleSmartPaste("stimulus")}/> :<button type="button" className="sat-spine__add-content" onClick={()=>setExpanded(current=>({...current,stimulus:true}))}>+ Add supporting material</button>}
+        <SectionRule title="Supporting material" field="stimulus" hint="Optional" issues={issuesForField(issues,'stimulus')} actions={showStimulus?<label htmlFor="supporting-type" className="flex items-center gap-2 text-xs text-muted-foreground">Type<select id="supporting-type" aria-label="Supporting material type" value="" disabled={readOnly} className="min-h-11 max-w-44 rounded-md bg-transparent px-2 text-xs focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50" onChange={e=>{const starter=e.target.value as SatSupportingMaterialStarter;if(!starter)return;const next={...question,stimulus:createSatSupportingMaterial(starter)};if(stimulusEmpty){onChange(next);onLocalRichChange?.(next);}else setPendingStarter(starter);}}><option value="">{stimulusEmpty?'Choose a starter':'Change type…'}</option>{question.metadata.sectionKey==='reading-writing'?<><option value="paired_texts">Paired texts</option><option value="student_notes">Student notes</option></>:null}<option value="data_table">Data table</option></select></label>:undefined}>
+          {showStimulus?<FastQuestionComposer label="Supporting material" value={question.stimulus} onChange={stimulus=>onChange({...question,stimulus})} {...(onLocalRichChange && !fieldCollaboration?.("stimulus") ? { onLocalChange: stimulus => onLocalRichChange({...question,stimulus}) } : {})} placeholder="Passage, context, data, equation, table, or visual…" assetOwnerId={question.questionId} minHeightClassName="min-h-[120px]" onSmartPaste={handleSmartPaste("stimulus")} {...(fieldCollaboration?.("stimulus") ? { collaboration: fieldCollaboration("stimulus")! } : {})}/> :<button type="button" disabled={readOnly} className="sat-spine__add-content disabled:cursor-not-allowed disabled:opacity-50" onClick={()=>setExpanded(current=>({...current,stimulus:true}))}>+ Add supporting material</button>}
           {suggestion?.field === "stimulus" ? <ImportSuggestion analysis={suggestion.analysis} targetField="stimulus" sectionKey={suggestion.sectionKey} onAccept={acceptSuggestion} onDismiss={dismissSuggestion} onOutcome={setSuggestionOutcome}/> : null}
         </SectionRule>
-        <SectionRule title="Answer" required field="answer" issues={issuesForField(issues,'answer')} actions={<AuthoringSegmented ariaLabel="Response type" value={isSpr?'spr':'choice'} onChange={kind=>changeKind(kind==='spr'?'student_produced_response':'single_choice')} options={[{value:'choice',label:'Multiple choice'},...(question.metadata.sectionKey==='math'?[{value:'spr' as const,label:'Student response'}]:[])]}/>}>
-          {isSpr?<SatStudentResponseEditor acceptedResponses={answer.acceptedResponses} onChange={acceptedResponses=>onChange({...question,answer:{...answer,acceptedResponses}})}/>:<AnswerKeyField question={question} onChange={onChange}/>}
+        <SectionRule title="Answer" field="answer" issues={issuesForField(issues,'answer')} actions={<AuthoringSegmented ariaLabel="Response type" value={isSpr?'spr':'choice'} disabled={readOnly} onChange={kind=>changeKind(kind==='spr'?'student_produced_response':'single_choice')} options={[{value:'choice',label:'Multiple choice'},...(question.metadata.sectionKey==='math'?[{value:'spr' as const,label:'Student response'}]:[])]}/>}>
+          {isSpr?<SatStudentResponseEditor acceptedResponses={answer.acceptedResponses} readOnly={readOnly} onChange={acceptedResponses=>onChange({...question,answer:{...answer,acceptedResponses}})}/>:<AnswerKeyField question={question} readOnly={readOnly} onChange={onChange} {...(onLocalRichChange && !fieldCollaboration ? { onLocalChange: onLocalRichChange } : {})} {...(fieldCollaboration ? { collaborationFor: (optionId) => fieldCollaboration(`choice/${optionId}`) } : {})}/>}
         </SectionRule>
-        <SectionRule title="Explanation" field="rationale" issues={issuesForField(issues,'rationale')}>
-          {showRationale?<FastQuestionComposer label="Question explanation" value={question.rationale} onChange={rationale=>onChange({...question,rationale})} placeholder="Explain why the answer is correct…" assetOwnerId={question.questionId} minHeightClassName="min-h-[92px]" onSmartPaste={handleSmartPaste("rationale")}/> :<button type="button" className="sat-spine__add-content" onClick={()=>setExpanded(current=>({...current,rationale:true}))}>+ Add an explanation…</button>}
+        <SectionRule title="Explanation" field="rationale" hint="Optional" issues={issuesForField(issues,'rationale')}>
+          {showRationale?<FastQuestionComposer label="Question explanation" value={question.rationale} onChange={rationale=>onChange({...question,rationale})} {...(onLocalRichChange && !fieldCollaboration?.("rationale") ? { onLocalChange: rationale => onLocalRichChange({...question,rationale}) } : {})} placeholder="Explain why the answer is correct…" assetOwnerId={question.questionId} minHeightClassName="min-h-[120px]" onSmartPaste={handleSmartPaste("rationale")} {...(fieldCollaboration?.("rationale") ? { collaboration: fieldCollaboration("rationale")! } : {})}/> :<button type="button" disabled={readOnly} className="sat-spine__add-content disabled:cursor-not-allowed disabled:opacity-50" onClick={()=>setExpanded(current=>({...current,rationale:true}))}>+ Add an explanation…</button>}
           {suggestion?.field === "rationale" ? <ImportSuggestion analysis={suggestion.analysis} targetField="rationale" sectionKey={suggestion.sectionKey} onAccept={acceptSuggestion} onDismiss={dismissSuggestion} onOutcome={setSuggestionOutcome}/> : null}
         </SectionRule>
-        <SpineSaveFooter status={saveStatus} lastSavedAt={lastSavedAt} diverged={diverged} keepMetadataForNext={keepMetadataForNext} saveDisabled={saveStatus==='saving'||Boolean(isMutating)} onKeepMetadataForNextChange={onKeepMetadataForNextChange} onSaveAndNext={onSaveAndNext} onRetry={onRetrySave} onReviewConflict={onReviewConflict}/>
+        <SpineSaveFooter status={saveStatus} lastSavedAt={lastSavedAt} diverged={diverged} showSaveStatus={!hideFooterSaveStatus} keepMetadataForNext={keepMetadataForNext} saveDisabled={readOnly || saveStatus==='saving'||Boolean(isMutating)} onKeepMetadataForNextChange={onKeepMetadataForNextChange} onSaveAndNext={onSaveAndNext} onRetry={onRetrySave} onReviewConflict={onReviewConflict}/>
       </div>
 
       <AuthoringConfirmDialog
@@ -220,7 +276,11 @@ function QuestionCanvas({
         onConfirm={() => {
           const starter = pendingStarter;
           setPendingStarter(null);
-          if (starter) onChange({ ...question, stimulus: createSatSupportingMaterial(starter) });
+          if (starter) {
+            const next = { ...question, stimulus: createSatSupportingMaterial(starter) };
+            onChange(next);
+            onLocalRichChange?.(next);
+          }
         }}
       />
       <AuthoringConfirmDialog

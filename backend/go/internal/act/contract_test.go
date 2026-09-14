@@ -224,6 +224,74 @@ func TestContractScoringWeights(t *testing.T) {
 	}
 }
 
+func TestContractDetailedScoringVectors(t *testing.T) {
+	content := map[string]any{"questions": []any{
+		map[string]any{"questionId": "alt", "acceptedAnswers": []any{"alpha", "beta"}},
+		map[string]any{"questionId": "multi", "correctOptionIds": []any{"A", "B"}},
+		map[string]any{"questionId": "rule", "correctAnswer": "one two", "scoringRule": "TWO_WORDS"},
+		map[string]any{"questionId": "round", "correctAnswer": "yes", "maxScore": float64(3)},
+	}}
+	answers := []Answer{
+		{QuestionID: "alt", Answer: " BETA "},
+		{QuestionID: "multi", Answer: []any{"A"}},
+		{QuestionID: "rule", Answer: "one two"},
+		{QuestionID: "round", Answer: "yes"},
+		{QuestionID: "unknown", Answer: "ignored"},
+	}
+	results, err := computeScienceAutoGradingResults(map[string]any{}, content, answers, time.Now().UTC(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results["totalScore"] != 6 || results["maxScore"] != 7 || results["percentage"] != 85.71 {
+		t.Fatalf("unexpected detailed vector aggregate: %#v", results)
+	}
+	integrity := results["integrity"].(map[string]any)
+	if integrity["integrityStatus"] != "needs_recheck" || integrity["unknownAnswerCount"] != 1 {
+		t.Fatalf("unknown answer must quarantine the result: %#v", integrity)
+	}
+	questionResults := results["questionResults"].([]map[string]any)
+	byID := map[string]map[string]any{}
+	for _, result := range questionResults {
+		byID[result["questionId"].(string)] = result
+	}
+	if byID["multi"]["isCorrect"] != false || byID["multi"]["awardedScore"] != 1 {
+		t.Fatalf("multi-choice partial credit mismatch: %#v", byID["multi"])
+	}
+	if byID["alt"]["isCorrect"] != true {
+		t.Fatalf("accepted alternative should match: %#v", byID["alt"])
+	}
+}
+
+func TestContractDetailedIntegrityVectors(t *testing.T) {
+	content := map[string]any{"questions": []any{
+		map[string]any{"questionId": "bad-key", "correctAnswer": "too many words", "scoringRule": "ONE_WORD"},
+		map[string]any{"questionId": "bad-answer", "correctAnswer": "A"},
+	}}
+	results, err := computeScienceAutoGradingResults(
+		map[string]any{},
+		content,
+		[]Answer{{QuestionID: "bad-answer", Answer: map[string]any{"raw": "A"}}},
+		time.Now().UTC(),
+		map[string]map[string]any{"bad-answer": {
+			"acceptedAnswers": []any{"A"}, "excludedAnswers": []any{"A"}, "maxScore": float64(2),
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	integrity := results["integrity"].(map[string]any)
+	if integrity["integrityStatus"] != "invalid" || integrity["invalidCount"] != 1 {
+		t.Fatalf("malformed answer/key rule must be invalid: %#v", integrity)
+	}
+	questionResults := results["questionResults"].([]map[string]any)
+	if questionResults[0]["issueCode"] != "answer_key_violates_scoring_rule" {
+		t.Fatalf("expected scoring-rule key issue, got %#v", questionResults[0])
+	}
+	if questionResults[1]["issueCode"] != "answer_payload_type_invalid" || questionResults[1]["isCorrect"] != nil {
+		t.Fatalf("expected malformed payload quarantine, got %#v", questionResults[1])
+	}
+}
+
 // AT-08: empty scorable content errors instead of returning a silent zero.
 func TestContractScoringEmptyContentErrors(t *testing.T) {
 	if _, err := ComputeScienceScore(map[string]any{}, map[string]any{}, nil, time.Now().UTC()); err == nil {
@@ -234,7 +302,8 @@ func TestContractScoringEmptyContentErrors(t *testing.T) {
 	}
 }
 
-// AT-08: numeric/string coercion is forbidden unless explicitly normalized.
+// AT-08: the objective engine accepts textual answer keys only; numeric keys
+// and numeric student payloads are integrity-invalid rather than coerced.
 func TestContractNoNumericStringCoercion(t *testing.T) {
 	content := map[string]any{"questions": []any{
 		map[string]any{"questionId": "qn", "correctAnswer": float64(7)},
@@ -243,15 +312,15 @@ func TestContractNoNumericStringCoercion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if coerced.TotalScore != 0 {
-		t.Fatalf("string \"7\" must not match numeric key 7: %+v", coerced)
+	if coerced.TotalScore != 0 || coerced.MaxScore != 1 {
+		t.Fatalf("numeric key must be integrity-invalid without changing the score ceiling: %+v", coerced)
 	}
 	exact, err := ComputeScienceScore(map[string]any{}, content, []Answer{{QuestionID: "qn", Answer: float64(7)}}, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exact.TotalScore != 1 {
-		t.Fatalf("numeric 7 must match numeric key 7: %+v", exact)
+	if exact.TotalScore != 0 {
+		t.Fatalf("numeric answer must be rejected as malformed: %+v", exact)
 	}
 }
 

@@ -57,6 +57,16 @@ type Service struct {
 // NewService wires dependencies explicitly.
 func NewService(db *sql.DB) *Service { return &Service{db: db} }
 
+// ExportVisible returns the same caller-scoped result set used by the legacy
+// results surface. Keeping selection in ResultsService means the HTTP export
+// contract cannot accidentally accept a client-provided profile or id list.
+func (s *Service) ExportVisible(ctx context.Context, actor auth.ActorContext) ([]DashboardResult, error) {
+	// The legacy export contract has no pagination: keep the caller's full
+	// visible result set instead of silently truncating at the dashboard page
+	// size. The private negative limit is an explicit no-LIMIT sentinel.
+	return s.ListDashboard(ctx, actor, "", -1)
+}
+
 // ResultSummary is the list row shared by providers.
 type ResultSummary struct {
 	ID            string     `json:"id"`
@@ -192,7 +202,7 @@ func (s *Service) Analytics(ctx context.Context, actor auth.ActorContext) (Analy
 // the admin surface cannot silently fall back to a fabricated IELTS table
 // when SAT or ACT attempts are present.
 func (s *Service) ListDashboard(ctx context.Context, actor auth.ActorContext, provider string, limit int) ([]DashboardResult, error) {
-	if limit <= 0 || limit > 500 {
+	if limit == 0 {
 		limit = 100
 	}
 	provider = strings.TrimSpace(provider)
@@ -202,7 +212,11 @@ func (s *Service) ListDashboard(ctx context.Context, actor auth.ActorContext, pr
 		return nil, &apperrors.Error{Code: apperrors.CodeValidation, Message: "provider must be ielts, sat, or act.", HTTPStatus: 422}
 	}
 
-	rows := make([]DashboardResult, 0, limit)
+	capacity := limit
+	if capacity < 0 {
+		capacity = 0
+	}
+	rows := make([]DashboardResult, 0, capacity)
 	var err error
 	if provider == "" || provider == "ielts" {
 		var ielts []DashboardResult
@@ -237,7 +251,7 @@ func (s *Service) ListDashboard(ctx context.Context, actor auth.ActorContext, pr
 			return left.After(*right)
 		}
 	})
-	if len(rows) > limit {
+	if limit > 0 && len(rows) > limit {
 		rows = rows[:limit]
 	}
 	return rows, nil
@@ -262,15 +276,22 @@ func (s *Service) listIELTSDashboard(ctx context.Context, actor auth.ActorContex
 			WHERE latest.submission_id = result.submission_id
 		  )`
 	scope, args := resultScope("sch", actor)
-	query += scope + " ORDER BY submission.submitted_at DESC, result.id DESC LIMIT ?"
-	args = append(args, limit)
+	query += scope + " ORDER BY submission.submitted_at DESC, result.id DESC"
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	out := make([]DashboardResult, 0, limit)
+	capacity := limit
+	if capacity < 0 {
+		capacity = 0
+	}
+	out := make([]DashboardResult, 0, capacity)
 	for rows.Next() {
 		var (
 			row          DashboardResult
@@ -332,16 +353,25 @@ func (s *Service) listAssessmentDashboard(ctx context.Context, actor auth.ActorC
 		query += " AND ar.provider_key IN ('sat', 'act')"
 	}
 	scope, scopeArgs := resultScope("sch", actor)
-	query += scope + " ORDER BY a.submitted_at DESC, ar.id DESC LIMIT ?"
+	query += scope + " ORDER BY a.submitted_at DESC, ar.id DESC"
+	if limit > 0 {
+		query += " LIMIT ?"
+	}
 	args = append(args, scopeArgs...)
-	args = append(args, limit)
+	if limit > 0 {
+		args = append(args, limit)
+	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	out := make([]DashboardResult, 0, limit)
+	capacity := limit
+	if capacity < 0 {
+		capacity = 0
+	}
+	out := make([]DashboardResult, 0, capacity)
 	for rows.Next() {
 		var (
 			row                       DashboardResult

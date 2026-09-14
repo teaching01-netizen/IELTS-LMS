@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"example.com/ielts-proctoring/internal/act"
 	shared "example.com/ielts-proctoring/internal/app"
 	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/delivery"
@@ -51,6 +52,8 @@ var Jobs = []string{
 	"RunGradingProjection",
 	"RunRetention",
 	"RunMediaCleanup",
+	"NormalizeMediaDownloadURLs",
+	"RepairACTCanonicalResults",
 }
 
 // worker carries the handles every background job needs. Dependencies are
@@ -67,6 +70,7 @@ type worker struct {
 	db       *sql.DB
 	outbox   *outbox.Repository
 	sat      *sat.Service
+	act      *act.Service
 	delivery *delivery.Service
 	proctor  *proctor.Service
 	student  *student.Service
@@ -144,6 +148,7 @@ func main() {
 		db:       pool,
 		outbox:   outbox.NewRepository(pool).WithClaim(cfg.WorkerClaimPartitions, 0, claimMode),
 		sat:      svc.SAT,
+		act:      svc.ACT,
 		delivery: delivery.NewService(pool, svc.Tx).SetCompleter(shared.Completer(pool, svc)),
 		proctor:  svc.Proctor,
 		student:  svc.Student,
@@ -894,6 +899,18 @@ func (w *worker) runMaintenanceCycle(ctx context.Context, at time.Time) {
 		log.Printf("worker: RunMediaCleanup error: %v", err)
 	} else {
 		log.Printf("worker: RunMediaCleanup total=%d orphaned=%d deleted=%d", rep.Total(), rep.OrphanedRows, rep.DeletedRows)
+	}
+	if rep, err := maintenance.NormalizeMediaDownloadURLs(ctx, w.db, maintenance.MediaBatch); err != nil {
+		log.Printf("worker: NormalizeMediaDownloadURLs error: %v", err)
+	} else {
+		log.Printf("worker: NormalizeMediaDownloadURLs normalized=%d legacy_before=%d", rep.NormalizedURLRows, rep.LegacyRouteRows)
+	}
+	if w.act != nil {
+		if n, err := w.act.RepairCanonicalRows(ctx, maintenance.ACTRepairBatch); err != nil {
+			log.Printf("worker: RepairACTCanonicalResults repaired=%d error=%v", n, err)
+		} else {
+			log.Printf("worker: RepairACTCanonicalResults repaired=%d", n)
+		}
 	}
 	log.Printf("worker: maintenance cycle at %s done", at.UTC().Format(time.RFC3339))
 }

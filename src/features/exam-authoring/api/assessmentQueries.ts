@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { hasBackendStatusCode, isBackendNotFound } from "../../../services/backendBridge";
+import { hasBackendStatusCode, isBackendNotFound } from "../infrastructure/examAuthoringBackendGateway";
 import { assessmentAuthoringApi } from "./assessmentAuthoringApi";
 import { assessmentReleaseApi } from "./assessmentReleaseApi";
 import type {

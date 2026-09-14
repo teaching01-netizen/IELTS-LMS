@@ -17,6 +17,8 @@
 //
 // Media: pending uploads older than 24h become orphaned; rows with
 // delete_after_at < NOW() are deleted; both bounded to batch 1000.
+// Finalized download URLs are normalized in a separate resumable pass so old
+// Rust rows remain readable while the migration drains.
 //
 // Grading projection: gated by GradingProjectionEnabled; idempotent sync of
 // schedule/submission/section/writing rows with a durable checkpoint in
@@ -46,6 +48,7 @@ const (
 	OutboxClaimLimit          = 100
 	OutboxClaimLeaseSecs      = 60
 	SATRepairBatch            = 250
+	ACTRepairBatch            = 250
 	RetentionBatch            = 1000
 	MediaBatch                = 1000
 	ProjectionBatch           = 500
@@ -255,12 +258,51 @@ func RunRetention(ctx context.Context, db *sql.DB, budget StorageBudget) (Retent
 
 // MediaReport counts one media janitor pass.
 type MediaReport struct {
-	OrphanedRows int64 `json:"orphanedRows"`
-	DeletedRows  int64 `json:"deletedRows"`
+	OrphanedRows      int64 `json:"orphanedRows"`
+	DeletedRows       int64 `json:"deletedRows"`
+	NormalizedURLRows int64 `json:"normalizedURLRows"`
+	LegacyRouteRows   int64 `json:"legacyRouteRows"`
 }
 
 // Total sums a media pass.
-func (r MediaReport) Total() int64 { return r.OrphanedRows + r.DeletedRows }
+func (r MediaReport) Total() int64 {
+	return r.OrphanedRows + r.DeletedRows + r.NormalizedURLRows
+}
+
+// NormalizeMediaDownloadURLs repairs one bounded page of finalized media
+// rows. It is idempotent and intentionally reports the legacy /assets route
+// count before updating, allowing operators to watch the compatibility debt
+// drain without requiring a destructive rewrite.
+func NormalizeMediaDownloadURLs(ctx context.Context, db *sql.DB, batch int64) (MediaReport, error) {
+	if batch <= 0 {
+		batch = MediaBatch
+	}
+	var report MediaReport
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM media_assets
+		WHERE upload_status = 'finalized'
+		  AND download_url LIKE '/api/v1/media/assets/%'`).Scan(&report.LegacyRouteRows); err != nil {
+		if isMissingTable(err) {
+			return report, nil
+		}
+		return report, err
+	}
+	result, err := db.ExecContext(ctx, `
+		UPDATE media_assets
+		SET download_url = CONCAT('/api/v1/media/', id, '/content'), updated_at = NOW()
+		WHERE upload_status = 'finalized'
+		  AND (download_url IS NULL OR download_url NOT LIKE '/api/v1/media/%/content')
+		ORDER BY updated_at ASC, id ASC
+		LIMIT ?`, batch)
+	if err != nil {
+		if isMissingTable(err) {
+			return report, nil
+		}
+		return report, err
+	}
+	report.NormalizedURLRows, _ = result.RowsAffected()
+	return report, nil
+}
 
 // RunMedia marks pending uploads older than 24h orphaned, then deletes rows
 // whose delete_after_at elapsed. Both bounded to batch 1000.

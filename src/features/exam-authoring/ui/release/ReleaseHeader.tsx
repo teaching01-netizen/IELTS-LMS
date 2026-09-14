@@ -1,12 +1,16 @@
+import type { ReactNode } from "react";
 import { ArrowLeft, Link2 } from "lucide-react";
 
 interface ReleaseHeaderProps {
   examTitle: string;
   onBack: () => void;
   onOpenStudentAccess?: (() => void) | undefined;
+  presenceSlot?: ReactNode;
+  saveSlot?: ReactNode;
+  collaborationSlot?: ReactNode;
 }
 
-export function ReleaseHeader({ examTitle, onBack, onOpenStudentAccess }: ReleaseHeaderProps) {
+export function ReleaseHeader({ examTitle, onBack, onOpenStudentAccess, presenceSlot, saveSlot, collaborationSlot }: ReleaseHeaderProps) {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-card">
       <div className="mx-auto flex min-h-[68px] max-w-[1240px] items-center gap-3 px-4 sm:px-6 lg:px-8">
@@ -35,6 +39,14 @@ export function ReleaseHeader({ examTitle, onBack, onOpenStudentAccess }: Releas
             Student Access
           </button>
         ) : null}
+        {collaborationSlot ? (
+          <span className="inline-flex min-w-0 items-center">{collaborationSlot}</span>
+        ) : (
+          <>
+            {presenceSlot ? <span className="inline-flex min-w-0 items-center">{presenceSlot}</span> : null}
+            {saveSlot ? <span className="inline-flex min-w-0 items-center">{saveSlot}</span> : null}
+          </>
+        )}
       </div>
     </header>
   );

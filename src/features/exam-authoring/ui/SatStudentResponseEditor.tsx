@@ -5,11 +5,13 @@ import { validateSatStudentResponse } from "../providers/sat/studentResponse";
 export interface SatStudentResponseEditorProps {
   acceptedResponses: string[];
   onChange: (responses: string[]) => void;
+  readOnly?: boolean | undefined;
 }
 
 export function SatStudentResponseEditor({
   acceptedResponses,
   onChange,
+  readOnly = false,
 }: SatStudentResponseEditorProps) {
   const idPrefix = useId();
   const primaryResponseId = `sat-primary-response-${idPrefix}`;
@@ -55,6 +57,7 @@ export function SatStudentResponseEditor({
             id={primaryResponseId}
             aria-label="Primary answer"
             value={primary}
+            disabled={readOnly}
             onChange={(event) => updatePrimary(event.target.value)}
             inputMode="decimal"
             autoComplete="off"
@@ -97,6 +100,7 @@ export function SatStudentResponseEditor({
                 {response}
                 <button
                   type="button"
+                  disabled={readOnly}
                   onClick={() => removeEquivalent(response)}
                   className="authoring-interactive rounded-full p-0.5 text-slate-400 hover:bg-au-fill hover:text-slate-700"
                   aria-label={`Remove accepted response ${response}`}
@@ -110,6 +114,7 @@ export function SatStudentResponseEditor({
         <div className="flex gap-2">
           <input
             value={equivalentDraft}
+            disabled={readOnly}
             onChange={(event) => {
               setEquivalentDraft(event.target.value);
               setEquivalentError(null);
@@ -130,7 +135,7 @@ export function SatStudentResponseEditor({
           />
           <button
             type="button"
-            disabled={!equivalentDraft}
+            disabled={readOnly || !equivalentDraft}
             onClick={addEquivalent}
             className="authoring-interactive inline-flex h-10 items-center gap-1.5 rounded-[11px] bg-au-fill px-3.5 text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong disabled:opacity-35"
           >

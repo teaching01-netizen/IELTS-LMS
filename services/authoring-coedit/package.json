@@ -1,0 +1,38 @@
+{
+  "//": "Install from the repository root (`bun install` there), not from this directory: this service imports the shared rich-text schema from src/, and a second dependency tree would load two prosemirror-model instances and break Y.Doc conversion.",
+  "name": "@ielts-proctoring/authoring-coedit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Singleton Hocuspocus service owning live Yjs prompt documents for SAT authoring co-editing.",
+  "main": "src/main.ts",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hocuspocus/server": "^4.7.0",
+    "@tiptap/core": "3.30.5",
+    "@tiptap/extension-image": "3.30.5",
+    "@tiptap/extension-mathematics": "3.30.5",
+    "@tiptap/extension-subscript": "3.30.5",
+    "@tiptap/extension-superscript": "3.30.5",
+    "@tiptap/extension-table": "3.30.5",
+    "@tiptap/pm": "3.30.5",
+    "@tiptap/starter-kit": "3.30.5",
+    "mysql2": "^3.11.0",
+    "y-prosemirror": "^1.3.7",
+    "yjs": "^13.6.32"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

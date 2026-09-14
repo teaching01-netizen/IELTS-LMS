@@ -3,10 +3,15 @@ import { motion } from "motion/react";
 import { Check, CircleAlert, Cloud, LoaderCircle } from "lucide-react";
 import { authoringMotion } from "@/src/shared/motion";
 import type { QuestionSaveStatus } from "../../hooks/useQuestionAutosave";
-import { SAVE_CONFLICT_COPY, saveBlockedCopy, saveStatusCopy } from "../../realtime/connectionCopy";
+import {
+  SAVE_CONFLICT_COPY,
+  saveBlockedCopy,
+  saveStatusCopy,
+  type CoeditSaveDisplayStatus,
+} from "../../realtime/connectionCopy";
 
 export interface SaveClusterProps {
-  status: QuestionSaveStatus;
+  status: QuestionSaveStatus | CoeditSaveDisplayStatus;
   /**
    * Phase 05: the open question has unsaved work AND a newer remote revision.
    * Swaps the status copy to `Newer version available` without inventing a new
@@ -22,6 +27,8 @@ export interface SaveClusterProps {
   transientSaved?: boolean;
   /** The footer is the single live announcer when two copies render. */
   announce?: boolean;
+  /** Co-edit uses human acknowledgement/lifecycle copy and never hides Saved. */
+  displayMode?: "legacy" | "coedit";
 }
 
 /**
@@ -43,19 +50,20 @@ function usePrevious<T>(value: T): T | undefined {
  * autosave object. Error is a Retry button; everything else is read-only
  * status text with a polite live region.
  */
-export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, diverged = false, transientSaved = false, announce = true }: SaveClusterProps) {
+export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, diverged = false, transientSaved = false, announce = true, displayMode = "legacy" }: SaveClusterProps) {
+  const isCoedit = displayMode === "coedit";
   const [hidden, setHidden] = useState(false);
   useEffect(() => {
     setHidden(false);
-    if (!transientSaved || status !== 'saved') return;
+    if (isCoedit || !transientSaved || status !== 'saved') return;
     const timer = window.setTimeout(() => setHidden(true), 1500);
     return () => window.clearTimeout(timer);
-  }, [status, lastSavedAt, transientSaved]);
-  const hideSuccess = transientSaved && status === 'saved' && hidden;
+  }, [isCoedit, status, lastSavedAt, transientSaved]);
+  const hideSuccess = !isCoedit && transientSaved && status === 'saved' && hidden;
   const statusRole = announce ? 'status' : undefined;
-  const label = saveStatusCopy({ status, diverged });
+  const label = saveStatusCopy({ status, diverged: isCoedit ? false : diverged, mode: displayMode });
   const Icon =
-    status === "saving"
+    status === "saving" || status === "still_saving" || status === "reconnecting" || status === "finishing"
       ? LoaderCircle
       : !diverged && (status === "error" || status === "conflict")
         ? CircleAlert
@@ -77,7 +85,9 @@ export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, di
   // One source for this vocabulary: `connectionCopy.ts`. The fenced branch is
   // the same product condition the socket delivers, so it says the same thing
   // and points at Review instead of at a manual reload.
-  const title = diverged
+  const title = isCoedit
+    ? label
+    : diverged
     ? SAVE_CONFLICT_COPY.diverged
     : status === "conflict"
       ? saveBlockedCopy(false)
@@ -99,9 +109,9 @@ export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, di
     <>
       {justSaved ? (
         <motion.span
-          initial={{ scale: 0.6, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={authoringMotion.snap}
+          initial={isCoedit ? { opacity: 0 } : { scale: 0.6, opacity: 0 }}
+          animate={isCoedit ? { opacity: 1 } : { scale: 1, opacity: 1 }}
+          transition={isCoedit ? authoringMotion.state : authoringMotion.snap}
           className="flex"
           aria-hidden="true"
         >

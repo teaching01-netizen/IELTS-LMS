@@ -13,10 +13,11 @@ export interface PasteStatusState {
 export interface PasteStatusProps {
   status: PasteStatusState;
   onUndo: () => void;
+  onAddAltText?: (() => void) | undefined;
   onDismiss: () => void;
 }
 
-export function PasteStatus({ status, onUndo, onDismiss }: PasteStatusProps) {
+export function PasteStatus({ status, onUndo, onAddAltText, onDismiss }: PasteStatusProps) {
   useEffect(() => {
     if (!status.visible) return;
     const timer = window.setTimeout(onDismiss, 4000);
@@ -47,6 +48,16 @@ export function PasteStatus({ status, onUndo, onDismiss }: PasteStatusProps) {
   return (
     <div role="status" aria-live="polite" className="sat-rich-editor__paste-status">
       <span>{copy}</span>
+      {status.needsAltText && onAddAltText ? (
+        <button
+          type="button"
+          aria-label="Add alt text"
+          onClick={onAddAltText}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          Add alt text
+        </button>
+      ) : null}
       {status.canUndo !== false ? (
         <button
           type="button"

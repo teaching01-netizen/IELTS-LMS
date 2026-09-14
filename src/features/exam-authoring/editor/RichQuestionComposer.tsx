@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import type { JSONContent } from "@tiptap/core";
+import type { Extensions, JSONContent } from "@tiptap/core";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import { TableKit } from "@tiptap/extension-table";
-import Subscript from "@tiptap/extension-subscript";
-import Superscript from "@tiptap/extension-superscript";
 import Placeholder from "@tiptap/extension-placeholder";
 import katex from "katex";
 import "katex/dist/katex.min.css";
@@ -22,8 +18,10 @@ import { uploadAssessmentAsset } from "../api/assessmentMediaApi";
 import { AuthoringDialog } from "../ui/authoringPrimitives";
 import { authoringMotion } from "../ui/authoringMotion";
 import { RichContentIdentity } from "./RichContentIdentityExtension";
+import { richTextSchemaExtensions } from "./schema/richTextSchema";
 import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerContext } from "./composerContext";
+import { isDirectImageSource } from "./schema/imageNode";
 import { SmartPastePlugin } from "./plugins/smartPastePlugin";
 import { SmartDropPlugin } from "./plugins/smartDropPlugin";
 import { LatexPasteRule } from "./plugins/latexPasteRule";
@@ -32,20 +30,39 @@ import { ingestClipboard } from "./ingestion/application/ingestClipboard";
 import { createPipelineContext } from "./ingestion/application/pipelineContext";
 import { PasteStatus } from "./PasteStatus";
 import { stripTransientImages } from "./ingestion/adapters/imageValidation";
+import { ySyncPluginKey } from "y-prosemirror";
 
+// The node/mark vocabulary comes from ./schema/richTextSchema.ts, the exact
+// same list the Hocuspocus co-editing service builds. The browser substitutes
+// its node-view variants for math and images (same node names and attributes)
+// and its identity extension (same attribute, plus the id-assignment plugin).
 const baseExtensions = [
   RichContentIdentity,
-  StarterKit.configure({
-    blockquote: false,
-    heading: { levels: [2, 3] },
-  }),
+  ...richTextSchemaExtensions({ identity: false, math: false, image: false }),
   EditableInlineMath,
   EditableBlockMath,
-  TableKit.configure({ table: { resizable: true, lastColumnResizable: false } }),
-  Subscript,
-  Superscript,
-  SatImage.configure({ inline: false, allowBase64: false }),
+  SatImage,
 ];
+
+// Collaborative variant: Yjs owns history once Collaboration is bound, so
+// StarterKit's undo/redo must NOT be registered. Two independent history stacks
+// corrupt each other's undo (design 2026-09-13, "Frontend ownership").
+const collaborativeBaseExtensions = [
+  RichContentIdentity,
+  ...richTextSchemaExtensions({ identity: false, math: false, image: false, history: false }),
+  EditableInlineMath,
+  EditableBlockMath,
+  SatImage,
+];
+
+/**
+ * The base extension list for a mode. Exported so a test can assert the
+ * collaborative set really has no independent undo history, instead of trusting
+ * the flag: two history stacks corrupt each other's undo under a CRDT.
+ */
+export function composerBaseExtensions(collaborative: boolean): Extensions {
+  return collaborative ? collaborativeBaseExtensions : baseExtensions;
+}
 
 type Dialog = "math" | "image" | null;
 type MathDialogTarget =
@@ -102,6 +119,8 @@ export interface SmartPasteStatus {
 export interface RichQuestionComposerProps {
   value: StructuredContent;
   onChange: (value: StructuredContent) => void;
+  /** Called only for an author-originated transaction in a collaborative editor. */
+  onLocalChange?: ((value: StructuredContent) => void) | undefined;
   label: string;
   placeholder?: string;
   compact?: boolean;
@@ -110,11 +129,51 @@ export interface RichQuestionComposerProps {
   capabilities?: Readonly<RichComposerCapabilities>;
   smartPaste?: boolean;
   onSmartPaste?: ((info: SmartPasteStatus) => void) | undefined;
+  /**
+   * Prompt co-editing binding, supplied by the co-edit package (the only
+   * package that knows about Yjs and Hocuspocus). When present the composer:
+   *
+   *   - binds the shared `prompt` field to the collaborative document;
+   *   - adds the caret extension for remote collaborators;
+   *   - mounts only AFTER the provider reports initial sync, so an empty Yjs
+   *     document is never rendered as an editable prompt;
+   *   - drops the legacy `value -> setContent` effect (the Y.Doc is the
+   *     source of truth);
+   *   - still emits a structured projection for preview/validation, but that
+   *     projection no longer schedules whole-question autosave.
+   *
+   * Absent => byte-for-byte the pre-co-editing behavior.
+   */
+  collaboration?: RichComposerCollaboration | undefined;
+}
+
+function firstImageWithoutAlt(editor: Editor): number | null {
+  let position: number | null = null;
+  editor.state.doc.descendants((node, pos) => {
+    if (position !== null) return false;
+    if (node.type.name === "image" && !String(node.attrs["alt"] ?? "").trim()) {
+      position = pos;
+      return false;
+    }
+    return undefined;
+  });
+  return position;
+}
+
+/** Domain-facing collaboration binding handed to the composer. */
+export interface RichComposerCollaboration {
+  /** Collaboration + caret extensions built by the co-edit package. */
+  extensions: Extensions;
+  /** True once the provider has completed initial sync with the service. */
+  ready: boolean;
+  /** Read-only collaborators (observers, frozen rooms) cannot type. */
+  readOnly?: boolean;
 }
 
 export function RichQuestionComposer({
   value,
   onChange,
+  onLocalChange,
   label,
   placeholder = "Start typing…",
   compact = false,
@@ -123,6 +182,7 @@ export function RichQuestionComposer({
   capabilities = SAT_RICH_COMPOSER_CAPABILITIES,
   smartPaste = true,
   onSmartPaste,
+  collaboration,
 }: RichQuestionComposerProps) {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [dialogContext, setDialogContext] = useState<ComposerContext>({ kind: "text" });
@@ -144,9 +204,26 @@ export function RichQuestionComposer({
   smartPasteRef.current = smartPaste;
   const onSmartPasteRef = useRef(onSmartPaste);
   onSmartPasteRef.current = onSmartPaste;
+  const onLocalChangeRef = useRef(onLocalChange);
+  onLocalChangeRef.current = onLocalChange;
+  // Identity of the collaboration extension list, not of the binding object:
+  // rebuilding extensions on every save-state change would destroy and recreate
+  // the editor on each acknowledgement.
+  const collaborationExtensions = collaboration?.extensions;
+  const collaborative = collaboration !== undefined;
+  const collaborationReady = collaboration?.ready ?? false;
+  const collaborationReadOnly = Boolean(collaboration?.readOnly);
+  // A collaborative editor is EMPTY until the room's document is applied, and
+  // Tiptap emits an update for the initial CRDT apply as well as for
+  // `setEditable`. Emitting those would replace the author's prompt projection
+  // with nothing (and schedule a legacy save of it), so the projection is
+  // withheld until the room reports initial sync.
+  const mayProjectRef = useRef(!collaboration || collaboration.ready);
+  mayProjectRef.current = !collaboration || collaboration.ready;
   const editorExtensions = useMemo(
     () => [
-      ...baseExtensions,
+      ...composerBaseExtensions(collaborative),
+      ...(collaborationExtensions ?? []),
       Placeholder.configure({
         placeholder,
         emptyEditorClass: "is-editor-empty",
@@ -237,35 +314,80 @@ export function RichQuestionComposer({
       LatexPasteRule.configure({ enabled: capabilities.equation }),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable plugin identity; runtime opts flow via refs
-    [placeholder]
+    [collaborative, placeholder, collaborationExtensions]
   );
-  const editor = useEditor({
-    extensions: editorExtensions,
-    content: initialContent as JSONContent,
-    immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        role: "textbox",
-        "aria-label": label,
-        "data-placeholder": placeholder,
-        class: `${minHeightClassName} sat-rich-editor__input`,
+  const editor = useEditor(
+    {
+      extensions: editorExtensions,
+      // Collaborative mode never seeds from props: the Y.Doc (seeded by the
+      // service when the room first opens) is the single source of truth, and
+      // passing `content` would race the initial sync.
+      ...(collaboration ? {} : { content: initialContent as JSONContent }),
+      immediatelyRender: false,
+      editable: !collaborationReadOnly,
+      editorProps: {
+        attributes: {
+          role: "textbox",
+          "aria-label": label,
+          "data-placeholder": placeholder,
+          class: `${minHeightClassName} sat-rich-editor__input`,
+        },
+      },
+      onUpdate: ({ editor: current, transaction }) => {
+        if (!mayProjectRef.current) return;
+        // Keep upload placeholders in the live editor, never in autosave data.
+        const { doc } = stripTransientImages(current.getJSON() as RichTextDocument);
+        const next = structuredContentFromDocument(doc);
+        onChange(next);
+        if (collaboration) {
+          // y-prosemirror marks transactions produced by a Yjs observer as
+          // change-origin. Undo/redo is also marked that way, but remains an
+          // author action and must be persisted, so only the non-undo remote
+          // branch is filtered out.
+          const syncMeta = transaction.getMeta(ySyncPluginKey) as
+            | { isChangeOrigin?: boolean; isUndoRedoOperation?: boolean }
+            | undefined;
+          const isRemote = Boolean(syncMeta?.isChangeOrigin && !syncMeta?.isUndoRedoOperation);
+          if (!isRemote) onLocalChangeRef.current?.(next);
+        } else {
+          onLocalChangeRef.current?.(next);
+        }
       },
     },
-    onUpdate: ({ editor: current }) => {
-      // Keep upload placeholders in the live editor, never in autosave data.
-      const { doc } = stripTransientImages(current.getJSON() as RichTextDocument);
-      onChange(structuredContentFromDocument(doc));
-    },
-  });
+    // Tiptap only rebuilds its extensions via `setOptions` for a MINOR subset of
+    // options; the schema and plugins are fixed at construction. A provider is
+    // created asynchronously (the token round-trip precedes it), so the editor
+    // routinely mounts before the binding exists, and a retry after a rejected
+    // session creates a NEW room with a NEW Y.Doc. Without these deps the editor
+    // would keep the first (unbound) extension list forever and no remote edit
+    // would ever appear. Identity is per room, so acknowledgement updates do not
+    // recreate the editor.
+    [collaborative, collaborationExtensions]
+  );
 
   useEffect(() => {
+    // Non-collaborative only. In collaborative mode the projection is emitted
+    // for preview/validation but the legacy prop-driven setContent is disabled:
+    // writing props back into the doc would fight the CRDT.
+    if (collaboration) return;
     if (!editor || editor.isFocused) return;
     const next = documentFromStructuredContent(value);
     const { doc } = stripTransientImages(editor.getJSON() as RichTextDocument);
     if (JSON.stringify(doc) !== JSON.stringify(next)) {
       editor.commands.setContent(next as JSONContent, { emitUpdate: false });
     }
-  }, [editor, value]);
+  }, [collaboration, editor, value]);
+
+  useEffect(() => {
+    if (!editor || !collaborative || !collaborationReady) return;
+    // The pre-sync surface is a skeleton: nothing is editable yet, and the
+    // call would emit an update for the still-empty collaborative document.
+    // The binding object is recreated when presence/save state changes, so
+    // depend only on the state that can actually change editor editability.
+    if (editor.isEditable !== !collaborationReadOnly) {
+      editor.setEditable(!collaborationReadOnly, false);
+    }
+  }, [collaborationReadOnly, collaborationReady, collaborative, editor]);
 
   const flashTableFeedback = () => {
     setTableFeedback(false);
@@ -275,9 +397,38 @@ export function RichQuestionComposer({
     });
   };
 
+  // An empty Yjs document is never rendered as an editable prompt while seed
+  // status is unresolved: the composer shows the loading surface until the
+  // provider reports initial sync.
+  if (collaboration && !collaboration.ready) {
+    return (
+      <div
+        data-editor-surface="rich"
+        data-coedit-pending="true"
+        aria-busy="true"
+        className={`${minHeightClassName} animate-pulse rounded-xl bg-au-fill`}
+      />
+    );
+  }
+
   if (!editor) {
     return <div className={`${minHeightClassName} animate-pulse rounded-xl bg-au-fill`} />;
   }
+
+  const openAltTextForFirstMissingImage = () => {
+    const position = firstImageWithoutAlt(editor);
+    if (position === null) return;
+    const node = editor.state.doc.nodeAt(position);
+    if (!node || node.type.name !== "image") return;
+    editor.chain().focus().setNodeSelection(position).run();
+    setDialogContext({
+      kind: "image",
+      pos: position,
+      attrs: { ...(node.attrs as Record<string, unknown>) },
+    });
+    setDialog("image");
+    setPasteStatus((status) => ({ ...status, visible: false }));
+  };
 
   return (
     <div
@@ -299,6 +450,7 @@ export function RichQuestionComposer({
       <PasteStatus
         status={pasteStatus}
         onUndo={() => editor.commands.undo()}
+        onAddAltText={openAltTextForFirstMissingImage}
         onDismiss={() => setPasteStatus((s) => ({ ...s, visible: false }))}
       />
       <AnimatePresence>
@@ -658,15 +810,29 @@ function ImageDialog({
   onClose: () => void;
 }) {
   const reduceMotion = useReducedMotion();
-  const [assetId, setAssetId] = useState(
-    String(target?.attrs["assetId"] || target?.attrs["src"] || "")
-  );
+  const initialTargetAssetId = String(target?.attrs["assetId"] ?? "");
+  const initialTargetSource = String(target?.attrs["src"] ?? "");
+  const initialAssetId =
+    initialTargetAssetId ||
+    (isDirectImageSource(initialTargetSource) ? initialTargetSource : "");
+  const [assetId, setAssetId] = useState(initialAssetId);
   const [alt, setAlt] = useState(String(target?.attrs["alt"] ?? ""));
   const [caption, setCaption] = useState(String(target?.attrs["caption"] ?? ""));
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const liveTargetAssetId = target
+    ? String(editor.state.doc.nodeAt(target.pos)?.attrs["assetId"] ?? "")
+    : "";
+
+  useEffect(() => {
+    // Pasted images upload in the background. Keep the dialog actionable while
+    // the author types alt text, then adopt the real asset ID once the upload
+    // resolves instead of ever persisting a transient blob URL.
+    if (liveTargetAssetId && liveTargetAssetId !== assetId) setAssetId(liveTargetAssetId);
+  }, [assetId, liveTargetAssetId, target?.pos]);
 
   useEffect(() => {
     return () => {
@@ -831,6 +997,7 @@ function ImageDialog({
         id="sat-visual-alt"
         aria-labelledby="sat-visual-alt-label"
         aria-required="true"
+        data-dialog-initial-focus={target && !alt.trim() ? true : undefined}
         value={alt}
         onChange={(event) => setAlt(event.target.value)}
         className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"

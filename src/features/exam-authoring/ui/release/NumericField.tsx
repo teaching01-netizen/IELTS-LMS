@@ -7,6 +7,7 @@ interface NumericFieldProps {
   max: number;
   suffix: string;
   allowZero?: boolean;
+  disabled?: boolean | undefined;
   onChange: (value: number) => void;
 }
 
@@ -22,6 +23,7 @@ export function NumericField({
   max,
   suffix,
   allowZero = false,
+  disabled = false,
   onChange,
 }: NumericFieldProps) {
   const id = useId();
@@ -57,6 +59,7 @@ export function NumericField({
           min={floor}
           max={max}
           aria-label={label}
+          disabled={disabled}
           aria-describedby={hintId}
           value={draft ?? String(value)}
           onChange={(event) => {
@@ -68,7 +71,7 @@ export function NumericField({
             onChange(Math.min(max, Math.max(floor, Math.floor(parsed))));
           }}
           onBlur={(event) => commit(event.target.value)}
-          className="min-w-0 flex-1 bg-transparent py-2 text-sm font-semibold text-foreground outline-none"
+          className="min-w-0 flex-1 bg-transparent py-2 text-sm font-semibold text-foreground outline-none disabled:cursor-not-allowed disabled:opacity-60"
         />
         <span id={hintId} className="shrink-0 text-xs tabular-nums text-muted-foreground">
           {floor}–{max} {suffix}

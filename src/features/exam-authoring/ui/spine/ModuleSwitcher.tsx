@@ -116,6 +116,7 @@ function TabStrip({
     >
       {items.map((item) => {
         const percent = item.target > 0 ? Math.min(100, (item.value / item.target) * 100) : 0;
+        const ready = item.target > 0 && item.value >= item.target;
         return (
           <button
             key={item.id}
@@ -129,10 +130,17 @@ function TabStrip({
             aria-label={`${item.title}, ${item.value} of ${item.target} ${
               variant === "module" ? "questions ready" : "authored"
             }${item.selected ? ", selected" : ""}`}
-            className={`sat-spine__tab sat-spine__tab--${variant}${item.selected ? " is-selected" : ""}`}
+            className={`sat-spine__tab sat-spine__tab--${variant}${item.selected ? " is-selected" : ""}${ready && variant === "module" ? " is-complete" : ""}`}
           >
-            <span className="sat-spine__tab-title">{item.title}</span>
-            <span className="sat-spine__tab-meta">{item.meta}</span>
+            <span className="sat-spine__tab-text">
+              <span className="sat-spine__tab-title">{item.title}</span>
+              <span className="sat-spine__tab-meta">
+                {variant === "module" && ready ? (
+                  <span className="sat-spine__tab-dot" aria-hidden="true" />
+                ) : null}
+                {item.meta}
+              </span>
+            </span>
             {variant === "module" ? (
               <span className="sat-spine__tab-bar" aria-hidden="true">
                 <span style={{ width: `${percent}%` }} />

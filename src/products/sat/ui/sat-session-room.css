@@ -1,0 +1,349 @@
+/*
+ * SAT session room — operational workspace for a live Digital SAT sitting.
+ *
+ * Same product language as the authoring spine: one page ground, three
+ * structural columns separated by hairlines (no floating cards), a quiet
+ * roster, one dominant workspace, and a real inspector rail. Status always
+ * reads as dot + label, never color alone.
+ */
+
+.sat-room {
+  --room-rail: 300px;
+  --room-inspector: 264px;
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  background: var(--sat-staff-canvas, #f5f7fa);
+  color: var(--sat-staff-text-primary, #17191d);
+}
+
+.sat-room__header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  border-bottom: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
+  background: var(--sat-staff-glass-room, rgba(255, 255, 255, 0.9));
+  backdrop-filter: saturate(140%) blur(16px);
+  /* Light from above, same as the authoring header: a lit top edge and a
+   * downward-only shadow, so both screens share one physical model. */
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 8px rgba(20, 27, 36, 0.025);
+}
+
+.sat-room__header-inner {
+  display: flex;
+  min-height: 60px;
+  align-items: center;
+  gap: 12px;
+  padding-inline: 20px;
+}
+
+.sat-room__title {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.sat-room__title h1 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  color: var(--sat-staff-text-primary, #18181b);
+}
+
+.sat-room__cohort {
+  margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+}
+
+/* Layout: roster · workspace · inspector. Hairlines are the only boundary. */
+.sat-room__body {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 1024px) {
+  .sat-room__body {
+    grid-template-columns: var(--room-rail) minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 1440px) {
+  .sat-room__body {
+    grid-template-columns: var(--room-rail) minmax(0, 1fr) var(--room-inspector);
+  }
+}
+
+.sat-room__roster {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  border-bottom: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 48%, #f8fafc 100%);
+}
+
+@media (min-width: 1024px) {
+  .sat-room__roster {
+    border-bottom: 0;
+    border-right: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
+  }
+}
+
+.sat-room__roster-head {
+  flex: 0 0 auto;
+  padding: 16px 16px 12px;
+}
+
+.sat-room__eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+}
+
+.sat-room__roster-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--sat-staff-text-primary, #18181b);
+}
+
+/* The same tonal layering as the authoring workspace: cool gradient canvas,
+ * white structural rails, one white editing surface on top. The wash is fixed
+ * to the element, so it reads as light in the room rather than paint on the
+ * content. */
+.sat-room__workspace {
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 24px;
+  background:
+    radial-gradient(900px 520px at 50% -40px, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.6) 38%, rgba(255, 255, 255, 0) 72%),
+    radial-gradient(660px 400px at 78% 8%, rgba(90, 145, 255, 0.035), transparent 70%),
+    linear-gradient(180deg, #f8fafc 0%, #f4f7fa 52%, #f1f4f8 100%);
+}
+
+@media (min-width: 1280px) {
+  .sat-room__workspace {
+    padding: 28px 32px;
+  }
+}
+
+.sat-room__inspector {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px;
+  border-top: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
+  background: linear-gradient(180deg, var(--sat-staff-surface, #ffffff) 0%, #fcfdfe 100%);
+}
+
+@media (min-width: 1440px) {
+  .sat-room__inspector {
+    border-top: 0;
+    border-left: 1px solid var(--sat-staff-border-header, rgba(0, 0, 0, 0.08));
+  }
+}
+
+/* Inspector: grouped facts, dividers instead of a summary card. */
+.sat-inspector__section + .sat-inspector__section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+}
+
+.sat-inspector__label {
+  margin: 0 0 10px;
+}
+
+.sat-inspector__row {
+  display: flex;
+  min-height: 30px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sat-inspector__row dt {
+  font-size: 13px;
+  color: var(--sat-staff-text-secondary, #515154);
+}
+
+.sat-inspector__row dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--sat-staff-text-primary, #18181b);
+}
+
+/* Stage: the clock only earns its scale once the session is running. */
+.sat-room__stage {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--sat-staff-border-hairline, rgba(0, 0, 0, 0.06));
+}
+
+.sat-room__stage h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--sat-staff-text-primary, #18181b);
+}
+
+.sat-room__stage-note {
+  margin: 6px 0 0;
+  max-width: 46ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--sat-staff-text-secondary, #515154);
+}
+
+.sat-room__clock {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  color: var(--sat-staff-text-primary, #18181b);
+}
+
+.sat-room__clock--idle {
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+}
+
+/* Empty state: the product waiting to become active, not a blank canvas. */
+.sat-room__empty {
+  display: grid;
+  min-height: 420px;
+  place-items: center;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.sat-room__empty-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 14px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--sat-staff-fill-chip, rgba(0, 0, 0, 0.04));
+  /* A tiny top-edge highlight so the idle state reads as a surface rather than
+   * a hole in the page. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: var(--sat-staff-text-secondary, #515154);
+}
+
+.sat-room__empty-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  color: var(--sat-staff-text-primary, #18181b);
+}
+
+.sat-room__empty-text {
+  margin: 0 auto;
+  max-width: 34ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--sat-staff-text-secondary, #515154);
+}
+
+.sat-room__empty-hint {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+}
+
+/* Student rows: state lives on a leading dot and an edge, not on a card. */
+.sat-room__row {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-height: 56px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--sat-staff-text-secondary, #515154);
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+.sat-room__row:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.sat-room__row[aria-selected="true"] {
+  /* Selection is lit from the leading edge and falls away with the reading
+   * direction, exactly like a selected module in the authoring rail. */
+  background:
+    radial-gradient(280px 60px at 0% 0%, rgba(68, 148, 255, 0.1), transparent 70%),
+    linear-gradient(90deg, rgba(236, 245, 255, 0.95), rgba(249, 252, 255, 0.8));
+  color: var(--sat-staff-text-primary, #17191d);
+}
+
+
+.sat-room__row[aria-selected="true"]::before {
+  content: "";
+  position: absolute;
+  inset-block: 10px;
+  inset-inline-start: 3px;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #4da1ff, #006ee0);
+  box-shadow: 0 0 8px rgba(0, 113, 227, 0.2);
+}
+
+.sat-room__row-name {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--sat-staff-text-primary, #18181b);
+}
+
+.sat-room__row-meta {
+  margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sat-staff-text-tertiary, #6e6e73);
+}
+
+.sat-room__row-time {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--sat-staff-text-secondary, #515154);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sat-room *,
+  .sat-room *::before,
+  .sat-room *::after {
+    transition-duration: 0.01ms !important;
+  }
+}

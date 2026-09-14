@@ -1,4 +1,5 @@
 import type { AuthoringConnectionState } from "./contracts";
+import type { QuestionSaveStatus } from "../hooks/useQuestionAutosave";
 
 /**
  * The ONLY source of connection + divergence status copy. Rendered exclusively
@@ -14,6 +15,25 @@ export const CONNECTION_COPY = {
   offline: "Offline - saved on this device",
   /** Diverged: dirty + a newer remote revision. Paired with the Review action. */
   newerVersionAvailable: "Newer version available",
+} as const;
+
+export type CoeditSaveDisplayStatus =
+  | QuestionSaveStatus
+  | "reconnecting"
+  | "still_saving"
+  | "view_only"
+  | "finishing";
+
+export const COEDIT_SAVE_COPY = {
+  saved: "Saved",
+  saving: "Saving…",
+  still_saving: "Still saving…",
+  offline: "Offline · Changes kept on this device",
+  reconnecting: "Reconnecting…",
+  error: "Couldn’t save · Retry",
+  view_only: "View only",
+  finishing: "Finishing changes…",
+  conflict: "Changed elsewhere — Review",
 } as const;
 
 export type ConnectionCopyKey = keyof typeof CONNECTION_COPY;
@@ -48,9 +68,14 @@ export function connectionCopyFor(state: AuthoringConnectionState): string | nul
  * (and already-explained) condition.
  */
 export function saveStatusCopy(args: {
-  status: "saved" | "unsaved" | "saving" | "offline" | "error" | "conflict";
+  status: QuestionSaveStatus | CoeditSaveDisplayStatus;
   diverged: boolean;
+  mode?: "legacy" | "coedit";
 }): string {
+  if (args.mode === "coedit") {
+    if (args.diverged) return CONNECTION_COPY.newerVersionAvailable;
+    return COEDIT_SAVE_COPY[args.status as keyof typeof COEDIT_SAVE_COPY] ?? COEDIT_SAVE_COPY.saved;
+  }
   if (args.diverged) {
     return CONNECTION_COPY.newerVersionAvailable;
   }

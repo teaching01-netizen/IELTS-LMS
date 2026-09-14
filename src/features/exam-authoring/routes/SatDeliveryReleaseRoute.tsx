@@ -11,6 +11,7 @@ import { useAccessDistributionOverview } from "../api/assessmentAccessLinkQuerie
 import type { AssessmentValidationIssue } from "../contracts/assessment";
 import { parseIssueLink } from "../ui/release/releaseSelectors";
 import { SatDeliveryReleasePage } from "../ui/SatDeliveryReleasePage";
+import { CollaborationHeaderCluster } from "../ui/collaboration/CollaborationHeaderCluster";
 
 const StudentLinksDashboard = lazy(() =>
   import("../ui/access-links/StudentLinksDashboard").then((module) => ({
@@ -165,6 +166,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       onRefreshReadiness={() => readinessQuery.refetch()}
       onPublish={handlePublish}
       onIssueClick={handleIssue}
+      collaborationSlot={<CollaborationHeaderCluster surface="release" />}
     />
   );
 }

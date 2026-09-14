@@ -3,6 +3,7 @@ import { MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { BarChart3, BookOpen, LogOut, Radio, UserRound } from 'lucide-react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthSession } from '../../features/auth/authSession';
+import { SatAuthoringCollaborationBoundary } from '../../features/exam-authoring/realtime/coedit';
 import { SatMenu } from './ui/Menu';
 
 type SatNavItem = {
@@ -48,6 +49,12 @@ export function SatRoot() {
   const { session, logout } = useAuthSession();
   const navItems = useMemo(() => navForRole(session?.user.role), [session?.user.role]);
   const displayName = session?.user.displayName?.trim() || session?.user.email || 'Staff';
+  const authoringExamMatch = location.pathname.match(
+    /^\/sat\/exams\/([^/]+)(?:\/(release|access))?\/?$/,
+  );
+  const collaborationExamId = authoringExamMatch?.[1]
+    ? decodeURIComponent(authoringExamMatch[1])
+    : null;
   // Option 3 (refined): sidebar stays everywhere except exam-authoring
   // focus pages. Session room (/sat/sessions/:id), result detail
   // (/sat/results/:id) and access (/sat/exams/:id/access) keep the sidebar;
@@ -163,9 +170,17 @@ export function SatRoot() {
         )}
 
         <main id="sat-main" tabIndex={-1} className={`min-h-screen focus:outline-none ${isDetailPage ? '' : 'pb-20 md:pb-0'}`}>
-          <SatRouteFade routeKey={location.pathname}>
-            <Outlet />
-          </SatRouteFade>
+          {collaborationExamId ? (
+            <SatAuthoringCollaborationBoundary examId={collaborationExamId}>
+              <SatRouteFade routeKey={location.pathname}>
+                <Outlet />
+              </SatRouteFade>
+            </SatAuthoringCollaborationBoundary>
+          ) : (
+            <SatRouteFade routeKey={location.pathname}>
+              <Outlet />
+            </SatRouteFade>
+          )}
         </main>
 
         {isDetailPage ? null : (

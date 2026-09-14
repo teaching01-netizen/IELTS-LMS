@@ -11,7 +11,8 @@ import type { StudentSession } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import { SatConfirmDialog } from '../ui/ConfirmDialog';
 import { SatMenu, type SatMenuItem } from '../ui/Menu';
-import { SatEyebrow, SatSearchField, SatSectionCard, type SatStatusTone, SatStatusPill } from '../ui/SatPage';
+import { SatEyebrow, SatSearchField, type SatStatusTone, SatStatusPill } from '../ui/SatPage';
+import '../ui/sat-session-room.css';
 
 const WARN_MESSAGE = 'Please return your attention to the exam.';
 const RELOAD_FAILED_SUFFIX = ' However, the live view could not refresh. Retry to confirm.';
@@ -23,7 +24,6 @@ function formatRemaining(seconds: number): string {
   const secs = safe % 60;
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}` : `${minutes}:${String(secs).padStart(2, '0')}`;
 }
-
 function runtimeLabel(status: string): string {
   if (status === 'not_started') return 'Ready';
   if (status === 'live') return 'Live';
@@ -152,13 +152,15 @@ export function SatSessionRoomRoute() {
   if (controller.error && !schedule) return <SatPageError title="SAT session could not load" description={controller.error} retryLabel="Retry" onRetry={() => void controller.reload()} />;
   if (!schedule || !runtime) return <SatPageError title="SAT session not found" description="This session is not part of the Digital SAT workspace." retryLabel="Back to Sessions" onRetry={() => navigate('/sat/sessions')} />;
 
+  const sessionLive = runtime.status === 'live' || runtime.status === 'paused';
+
   return (
-    <div className="min-h-screen bg-[var(--sat-staff-canvas,#f5f5f7)] text-[var(--sat-staff-text-primary,#1d1d1f)]">
-      <header className="sticky top-0 z-50 border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] bg-[var(--sat-staff-glass-room,rgba(255,255,255,0.9))] backdrop-blur-2xl">
-        <div className="mx-auto flex min-h-[64px] max-w-[1500px] items-center gap-3 px-3 sm:px-5">
-          <button type="button" onClick={() => navigate('/sat/sessions')} className="flex min-h-10 shrink-0 items-center gap-1 rounded-[var(--sat-staff-radius-control,10px)] px-2 text-[11px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><ArrowLeft size={15} />Sessions</button>
+    <div className="sat-room sat-product">
+      <header className="sat-room__header">
+        <div className="sat-room__header-inner">
+          <button type="button" onClick={() => navigate('/sat/sessions')} className="flex min-h-10 shrink-0 items-center gap-1 rounded-[10px] px-2 text-[13px] font-semibold text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><ArrowLeft size={16} />Sessions</button>
           <div className="h-5 w-px bg-[var(--sat-staff-border-input,rgba(0,0,0,0.075))]" aria-hidden="true" />
-          <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-[13px] font-semibold tracking-[-0.01em]">{schedule.examTitle}</p><SatStatusPill tone={roomStatusTone(runtime.status)} pulse={runtime.status === 'live'}>{runtimeLabel(runtime.status)}</SatStatusPill></div><p className="mt-0.5 truncate text-[11px] font-medium text-slate-400">{schedule.cohortName}</p></div>
+          <div className="sat-room__title"><div className="flex items-center gap-2"><h1>{schedule.examTitle}</h1><SatStatusPill tone={roomStatusTone(runtime.status)} pulse={runtime.status === 'live'}>{runtimeLabel(runtime.status)}</SatStatusPill></div><p className="sat-room__cohort">{schedule.cohortName}</p></div>
           {runtime.isOverrun ? <span className="inline-flex items-center gap-1 rounded-full border border-amber-700/25 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-2.5 py-1 text-[11px] font-semibold text-[var(--sat-staff-warning-text,#92400e)]">Overrun</span> : null}
           {controller.error ? <span className="inline-flex items-center gap-1 text-[11px] font-semibold tabular-nums text-[var(--sat-staff-warning-text,#92400e)]"><AlertTriangle size={11} aria-hidden="true" />Reconnecting</span> : null}
           {openAlerts > 0 ? <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-2.5 py-1.5 text-[11px] font-semibold tabular-nums text-[var(--sat-staff-warning-text,#92400e)]"><AlertTriangle size={12} aria-hidden="true" />{openAlerts} need attention</span> : null}
@@ -169,14 +171,14 @@ export function SatSessionRoomRoute() {
       {isStale ? <div role="alert" className="sat-banner-enter mx-auto flex max-w-[1500px] items-center justify-between gap-3 px-4 pt-3"><div className="rounded-2xl border border-amber-700/15 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3.5 py-2.5 text-[11px] font-medium text-amber-800"><span className="font-semibold">Data may be out of date.</span> Last updated {lastUpdatedLabel}. Risky session actions are paused until reconnection.</div><button type="button" onClick={() => void controller.reload()} className="min-h-9 shrink-0 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-surface,#fff)] px-3 text-[11px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] shadow-sm ring-1 ring-[var(--sat-staff-border-strong,rgba(0,0,0,0.09))] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">Retry</button></div> : null}
       {message ? <div role={message.kind === 'error' ? 'alert' : 'status'} className="sat-banner-enter mx-auto max-w-[1500px] px-4 pt-3"><div className={message.kind === 'error' ? 'rounded-2xl border border-red-700/20 bg-[var(--sat-staff-danger-tint,rgba(217,45,32,0.08))] px-3.5 py-2.5 text-[11px] font-medium text-[var(--sat-staff-danger,#b42318)]' : 'rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] px-3.5 py-2.5 text-[11px] font-medium text-[var(--sat-staff-text-secondary,#515154)]'}>{message.text}</div></div> : null}
 
-      <main className="mx-auto grid min-h-[calc(100vh-64px)] max-w-[1500px] lg:grid-cols-[310px_minmax(0,1fr)]">
-        <section className="border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] bg-[var(--sat-staff-glass-roster,rgba(255,255,255,0.45))] lg:border-b-0 lg:border-r" aria-label="Students">
-          <div className="border-b border-[var(--sat-staff-border-input,rgba(0,0,0,0.075))] px-3 py-3">
-            <div className="flex items-center justify-between"><div><p className="text-[12px] font-semibold text-slate-700">Students</p><p className="mt-0.5 text-[11px] font-medium tabular-nums text-slate-400">{students.length} joined · {students.filter((student) => student.status === 'active').length} active</p></div><span className="text-[11px] font-semibold tabular-nums text-slate-400">{formatRemaining(stageRemainingSeconds)}</span></div>
-            <div className="mt-3"><SatSearchField id="sat-room-student-search" label="Search students" value={search} onChange={setSearch} placeholder="Search name, ID, email" widthClassName="w-full" /></div>
-            <div className="mt-2 flex gap-1.5 px-0" role="group" aria-label="Roster filter">
-              <button type="button" aria-pressed={attentionFilter === 'all'} onClick={() => setAttentionFilter('all')} className={`min-h-7 rounded-full px-3 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${attentionFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))]'}`}>All</button>
-              <button type="button" aria-pressed={attentionFilter === 'needs'} onClick={() => setAttentionFilter((current) => (current === 'needs' ? 'all' : 'needs'))} className={`min-h-7 rounded-full px-3 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${attentionFilter === 'needs' ? 'bg-slate-900 text-white' : 'bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))]'}`}>Needs attention</button>
+      <main className="sat-room__body">
+        <section className="sat-room__roster" aria-label="Students">
+          <div className="sat-room__roster-head">
+            <div className="flex items-baseline justify-between gap-3"><div><p className="sat-room__eyebrow">Students</p><p className="mt-1 text-[13px] font-medium tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">{students.length} joined · {students.filter((student) => student.status === 'active').length} active</p></div>{sessionLive ? <span className="text-[13px] font-semibold tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">{formatRemaining(stageRemainingSeconds)}</span> : null}</div>
+            <div className="mt-4"><SatSearchField id="sat-room-student-search" label="Search students" value={search} onChange={setSearch} placeholder="Search name, ID, email" widthClassName="w-full" /></div>
+            <div className="mt-3 flex gap-1.5" role="group" aria-label="Roster filter">
+              <button type="button" aria-pressed={attentionFilter === 'all'} onClick={() => setAttentionFilter('all')} className={`min-h-8 rounded-full px-3 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${attentionFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))]'}`}>All</button>
+              <button type="button" aria-pressed={attentionFilter === 'needs'} onClick={() => setAttentionFilter((current) => (current === 'needs' ? 'all' : 'needs'))} className={`min-h-8 rounded-full px-3 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${attentionFilter === 'needs' ? 'bg-slate-900 text-white' : 'bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-chip-hover,rgba(0,0,0,0.07))]'}`}>Needs attention</button>
             </div>
           </div>
           <div
@@ -197,18 +199,23 @@ export function SatSessionRoomRoute() {
                 document.getElementById(`sat-room-student-${next}`)?.focus();
               }
             }}
-            className="max-h-[44vh] space-y-1 overflow-y-auto bg-[var(--sat-staff-surface-raised,#fbfbfd)] p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] lg:max-h-[calc(100vh-166px)]"
+            className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
           >
-            {visibleStudents.length ? visibleStudents.map((student) => <SatRoomStudentRow key={student.id} student={student} runtime={runtime} selected={selectedStudent?.id === student.id} onSelect={() => setSelectedStudentId(student.id)} />) : <div className="px-5 py-10 text-center text-[11px] text-slate-400">{students.length ? 'No matching students.' : 'Students appear here when they join.'}</div>}
+            {visibleStudents.length ? visibleStudents.map((student) => <SatRoomStudentRow key={student.id} student={student} runtime={runtime} selected={selectedStudent?.id === student.id} onSelect={() => setSelectedStudentId(student.id)} />) : <div className="px-6 py-12 text-center"><p className="text-[13px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">{students.length ? 'No matching students.' : 'No students have joined yet.'}</p><p className="mt-1.5 text-[12px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{students.length ? 'Change the search or the filter.' : 'Students appear here the moment they open their exam link.'}</p></div>}
           </div>
         </section>
 
-        <section className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_250px]">
-            <div className="min-w-0">
-              <div className="border-b border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] pb-6">
+        <section className="sat-room__workspace" aria-label="Session workspace">
+          <div className="min-w-0">
+              <div className="sat-room__stage">
                 <SatEyebrow>Current stage</SatEyebrow>
-                <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-[17px] font-semibold tracking-[-0.025em]">{currentStage}</h1><p className="mt-1 text-[11px] font-medium text-slate-400">Server-authoritative session clock</p></div><p className="text-[36px] font-semibold tabular-nums tracking-[-0.045em] text-slate-900">{formatRemaining(stageRemainingSeconds)}</p></div>
+                <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="min-w-0">
+                    <h2>{currentStage}</h2>
+                    <p className="sat-room__stage-note">{sessionLive ? 'Server-authoritative session clock' : 'Session timing begins when you start the session.'}</p>
+                  </div>
+                  <p className={'sat-room__clock' + (sessionLive ? '' : ' sat-room__clock--idle')} aria-label={sessionLive ? 'Time remaining in this stage' : 'Session not started'}>{sessionLive ? formatRemaining(stageRemainingSeconds) : '—:—'}</p>
+                </div>
               </div>
 
               {openAlerts > 0 && selectedStudent ? (
@@ -218,18 +225,48 @@ export function SatSessionRoomRoute() {
                 </button>
               ) : null}
 
-              {selectedStudent ? <StudentDetail student={selectedStudent} pendingActions={pendingActions} blocked={isStale} onAddTime={(minutes) => { if (isStale || !selectedStudent) return; setConfirm({ kind: 'extend-student', minutes, studentId: selectedStudent.id, studentName: selectedStudent.name, remainingLabel: formatRemaining(selectedStudent.runtimeTimeRemainingSeconds ?? selectedStudent.timeRemaining) }); }} onWarn={() => { if (!selectedStudent) return; setConfirm({ kind: 'warn', studentId: selectedStudent.id, studentName: selectedStudent.name }); }} onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`)} onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`)} onTerminate={() => { if (selectedStudent) setConfirm({ kind: 'terminate', studentId: selectedStudent.id, studentName: selectedStudent.name }); }} /> : <div className="flex min-h-[380px] flex-col items-center justify-center text-center"><UserRound size={24} className="text-slate-400" /><p className="mt-3 text-[12px] font-semibold text-slate-500">No student selected</p><p className="mt-1 text-[11px] font-medium text-slate-400">Select a student to inspect their SAT attempt.</p></div>}
-            </div>
-
-            <aside className="border-t border-[var(--sat-staff-border-header,rgba(0,0,0,0.065))] pt-5 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
-              <SatSectionCard>
-                <SatEyebrow>Session</SatEyebrow>
-                <dl className="mt-3 space-y-2.5"><InfoRow label="Status" value={runtimeLabel(runtime.status)} /><InfoRow label="Current stage" value={currentStage} /><InfoRow label="Joined" value={String(students.length)} /><InfoRow label="Active" value={String(students.filter((student) => student.status === 'active').length)} /><InfoRow label="Warnings" value={String(openAlerts)} /></dl>
-                {runtime.isOverrun ? <div className="mt-5 rounded-[12px] border border-amber-700/15 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2.5 text-[11px] font-medium leading-5 text-amber-700"><span className="font-semibold">Running beyond the scheduled window.</span><br />Review current time extensions before ending the session.</div> : null}
-              </SatSectionCard>
-            </aside>
+              {selectedStudent ? <StudentDetail student={selectedStudent} pendingActions={pendingActions} blocked={isStale} onAddTime={(minutes) => { if (isStale || !selectedStudent) return; setConfirm({ kind: 'extend-student', minutes, studentId: selectedStudent.id, studentName: selectedStudent.name, remainingLabel: formatRemaining(selectedStudent.runtimeTimeRemainingSeconds ?? selectedStudent.timeRemaining) }); }} onWarn={() => { if (!selectedStudent) return; setConfirm({ kind: 'warn', studentId: selectedStudent.id, studentName: selectedStudent.name }); }} onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`)} onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`)} onTerminate={() => { if (selectedStudent) setConfirm({ kind: 'terminate', studentId: selectedStudent.id, studentName: selectedStudent.name }); }} /> : (
+                <div className="sat-room__empty">
+                  <div className="sat-room__empty-content">
+                    <span className="sat-room__empty-icon" aria-hidden="true"><UserRound size={20} /></span>
+                    <p className="sat-room__empty-title">{sessionLive ? 'Select a student' : 'Waiting to begin'}</p>
+                    <p className="sat-room__empty-text">
+                      {sessionLive
+                        ? 'Choose a student in the roster to inspect their progress, timing, and integrity events.'
+                        : 'This workspace becomes operational as soon as you start the session. Students appear in the roster as they open their exam link.'}
+                    </p>
+                    {!sessionLive ? <p className="sat-room__empty-hint">{students.length ? `${students.length} student${students.length === 1 ? '' : 's'} already connected.` : 'No students have joined yet.'}</p> : null}
+                  </div>
+                </div>
+              )}
           </div>
         </section>
+
+        <aside className="sat-room__inspector" aria-label="Session summary">
+          <section className="sat-inspector__section">
+            <p className="sat-inspector__label sat-room__eyebrow">Session</p>
+            <dl>
+              <div className="sat-inspector__row"><dt>Status</dt><dd>{runtimeLabel(runtime.status)}</dd></div>
+              <div className="sat-inspector__row"><dt>Current stage</dt><dd>{currentStage}</dd></div>
+            </dl>
+          </section>
+          <section className="sat-inspector__section">
+            <p className="sat-inspector__label sat-room__eyebrow">Students</p>
+            <dl>
+              <div className="sat-inspector__row"><dt>Joined</dt><dd>{students.length}</dd></div>
+              <div className="sat-inspector__row"><dt>Active</dt><dd>{students.filter((student) => student.status === 'active').length}</dd></div>
+              <div className="sat-inspector__row"><dt>Needs attention</dt><dd>{students.filter((student) => student.warnings > 0 || student.violations.length > 0).length}</dd></div>
+            </dl>
+          </section>
+          <section className="sat-inspector__section">
+            <p className="sat-inspector__label sat-room__eyebrow">Session health</p>
+            <dl>
+              <div className="sat-inspector__row"><dt>Warnings</dt><dd>{openAlerts}</dd></div>
+              <div className="sat-inspector__row"><dt>Clock</dt><dd>{sessionLive ? formatRemaining(stageRemainingSeconds) : 'Not started'}</dd></div>
+            </dl>
+            {runtime.isOverrun ? <div className="mt-4 rounded-[10px] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2.5 text-[12px] font-medium leading-5 text-[var(--sat-staff-warning-text,#92400e)]"><span className="font-semibold">Running beyond the scheduled window.</span> Review time extensions before ending the session.</div> : null}
+          </section>
+        </aside>
       </main>
 
       {confirm ? <SatConfirmDialog open title={confirm.kind === 'complete' ? 'Finish this SAT session?' : confirm.kind === 'terminate' ? `End ${confirm.studentName}’s attempt?` : confirm.kind === 'warn' ? `Send warning to ${confirm.studentName}?` : confirm.kind === 'extend-session' ? `Add ${confirm.minutes} minutes to ${confirm.stage}?` : `Add ${confirm.minutes} minutes for ${confirm.studentName}?`} description={confirm.kind === 'complete' ? 'The session will be completed for the cohort. This should only be used when testing is finished.' : confirm.kind === 'terminate' ? 'This ends the student’s current attempt. Their recorded answers remain available.' : confirm.kind === 'warn' ? `The student will see exactly: “${WARN_MESSAGE}”` : confirm.kind === 'extend-session' ? `Current stage remaining: ${confirm.remainingLabel}. The extension applies to the current stage immediately.` : `Current remaining: ${confirm.remainingLabel}. The extension applies to this attempt immediately.`} confirmLabel={confirm.kind === 'complete' ? 'Finish Session' : confirm.kind === 'terminate' ? 'End Attempt' : confirm.kind === 'warn' ? 'Send Warning' : `Add ${confirm.minutes} Minutes`} destructive={confirm.kind === 'terminate' || confirm.kind === 'complete'} onCancel={() => setConfirm(null)} onConfirm={() => { const action = confirm; setConfirm(null); if (action.kind === 'complete') { void run('complete', () => controller.handleCompleteExam(scheduleId), 'Session completed.'); return; } if (action.kind === 'extend-session') { void run(`extend-${action.minutes}`, () => controller.handleExtendCurrentSection(scheduleId, action.minutes), `Added ${action.minutes} minutes to the current stage.`); return; } if (action.kind === 'warn') { const bound = students.find((student) => student.id === action.studentId); if (!bound) { if (mountedRef.current) setMessage({ kind: 'error', text: `${action.studentName} is no longer in this session, so no warning was sent.` }); return; } void runStudentAction('student-warn', () => examDeliveryService.warnStudent(bound.id, WARN_MESSAGE, proctorName), `Warning sent to ${bound.name}.`); return; } if (action.kind === 'extend-student') { const bound = students.find((student) => student.id === action.studentId); if (!bound) { if (mountedRef.current) setMessage({ kind: 'error', text: `${action.studentName} is no longer in this session, so no time was added.` }); return; } void runStudentAction(`student-extend-${action.minutes}`, () => examDeliveryService.extendStudentAttempt(bound.id, proctorName, action.minutes), `Added ${action.minutes} minutes for ${bound.name}.`); return; } const bound = students.find((student) => student.id === action.studentId); if (!bound) { if (mountedRef.current) setMessage({ kind: 'error', text: `${action.studentName} is no longer in this session, so their attempt was not ended.` }); return; } void runStudentAction('student-terminate', () => examDeliveryService.terminateStudentAttempt(bound.id, proctorName), `${bound.name}’s attempt ended.`); }} /> : null}
@@ -269,7 +306,7 @@ function SatRoomStudentRow({ student, runtime, selected, onSelect }: { student: 
     running,
     coarse: running && fallbackSeconds > 300,
   });
-  return <button type="button" id={`sat-room-student-${student.id}`} role="option" aria-selected={selected} aria-label={`Open ${student.name}`} aria-current={selected || undefined} tabIndex={-1} onClick={onSelect} className={`grid min-h-[56px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 text-left transition-[background-color,border-color,box-shadow] duration-[var(--sat-staff-motion-row,160ms)] ease-[var(--sat-staff-ease,cubic-bezier(0.2,0,0,1))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${selected ? 'border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] shadow-[var(--sat-staff-shadow-row-press,0_1px_2px_rgba(0,0,0,0.05))]' : 'border-transparent hover:border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] hover:bg-[var(--sat-staff-surface,#fff)]'}`}><div className="min-w-0"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${studentTone(student)}`} /><p className="truncate text-[13px] font-semibold tracking-[-0.012em] text-slate-800">{student.name}</p>{student.warnings > 0 || student.violations.length > 0 ? <AlertTriangle size={11} className="shrink-0 text-amber-500" /> : null}</div><p className="mt-0.5 truncate pl-3.5 text-[11px] font-medium capitalize text-slate-400">{String(student.runtimeCurrentSection ?? student.currentSection)} · {student.status}</p></div><div className="text-right"><p className="text-[12px] font-semibold tabular-nums text-slate-600">{formatRemaining(remaining)}</p></div></button>;
+  return <button type="button" id={`sat-room-student-${student.id}`} role="option" aria-selected={selected} aria-label={`Open ${student.name}`} aria-current={selected || undefined} tabIndex={-1} onClick={onSelect} className="sat-room__row focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"><div className="min-w-0"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${studentTone(student)}`} /><p className="sat-room__row-name">{student.name}</p>{student.warnings > 0 || student.violations.length > 0 ? <AlertTriangle size={12} className="shrink-0 text-[var(--sat-staff-warning-dot,#d97706)]" /> : null}</div><p className="sat-room__row-meta pl-3.5">{String(student.runtimeCurrentSection ?? student.currentSection)} · {student.status}</p></div><div className="text-right"><p className="sat-room__row-time">{formatRemaining(remaining)}</p></div></button>;
 }
 
 function StudentDetail({ student, pendingActions, blocked, onAddTime, onWarn, onPause, onResume, onTerminate }: { student: StudentSession; pendingActions: ReadonlySet<string>; blocked: boolean; onAddTime: (minutes: number) => void; onWarn: () => void; onPause: () => void; onResume: () => void; onTerminate: () => void }) {
@@ -280,10 +317,12 @@ function StudentDetail({ student, pendingActions, blocked, onAddTime, onWarn, on
     fallbackSeconds: student.runtimeTimeRemainingSeconds ?? student.timeRemaining,
     running: student.runtimeStatus === 'live' && student.runtimeSectionStatus === 'live' && student.status !== 'terminated',
   });
-  return <div className="pt-6"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><SatEyebrow>Student</SatEyebrow><h2 className="mt-1 truncate text-[17px] font-semibold tracking-[-0.025em]">{student.name}</h2><p className="mt-1 text-[11px] font-medium text-slate-400">{student.studentId}{student.email ? ` · ${student.email}` : ''}</p></div><div><SatMenu label="Student actions" compact align="end" width={176} icon={MoreHorizontal} items={[{ id: 'extend-5', label: 'Add 5 minutes…', disabled: anyStudentPending || blocked, onSelect: () => onAddTime(5) }, { id: 'warn', label: 'Send warning…', disabled: anyStudentPending || blocked, onSelect: onWarn }, { id: 'toggle', label: student.status === 'paused' ? 'Resume attempt' : 'Pause attempt', disabled: anyStudentPending || blocked, onSelect: student.status === 'paused' ? onResume : onPause }, { id: 'terminate', label: 'End attempt…', destructive: true, disabled: anyStudentPending || blocked, separatorBefore: true, onSelect: onTerminate }]} /></div></div>
-    <dl className="mt-5 grid gap-2 sm:grid-cols-3"><div className="rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-3 py-2.5"><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Current module</dt><dd className="mt-1 text-[12px] font-semibold text-slate-700">{String(student.runtimeCurrentSection ?? student.currentSection)}</dd></div><div className="rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-3 py-2.5"><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Time remaining</dt><dd className="mt-0.5 text-[17px] font-semibold tabular-nums tracking-[-0.025em] text-slate-900">{formatRemaining(remaining)}</dd></div><div className="rounded-2xl border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-3 py-2.5"><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Attempt</dt><dd className="mt-1 text-[12px] font-semibold capitalize text-slate-700">{student.status}</dd></div></dl>
-    <div className="mt-6"><h3 className="text-[12px] font-semibold tracking-[-0.01em]">Attention</h3>{student.warnings === 0 && student.violations.length === 0 ? <div className="mt-3 flex items-center gap-2 text-[11px] font-medium text-slate-400"><span className="h-1.5 w-1.5 rounded-full bg-[var(--sat-staff-success-dot,#059669)]" />No current warnings or integrity events.</div> : <div className="mt-3 space-y-2">{student.warnings > 0 ? <div className="rounded-[12px] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2.5 text-[11px] font-medium text-amber-700">{student.warnings} proctor warning{student.warnings === 1 ? '' : 's'}</div> : null}{student.violations.slice(0, 5).map((violation) => <div key={violation.id} className="rounded-[12px] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2.5"><p className="text-[11px] font-semibold text-amber-800">{violation.type.replace(/_/g, ' ')}</p><p className="mt-0.5 text-[11px] font-medium leading-5 text-amber-700">{violation.description}</p></div>)}</div>}</div>
+  return <div className="pt-8"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><SatEyebrow>Student</SatEyebrow><h2 className="mt-1.5 truncate text-[19px] font-semibold tracking-[-0.02em]">{student.name}</h2><p className="mt-1 text-[12px] font-medium text-[var(--sat-staff-text-tertiary,#6e6e73)]">{student.studentId}{student.email ? ` · ${student.email}` : ''}</p></div><div><SatMenu label="Student actions" compact align="end" width={176} icon={MoreHorizontal} items={[{ id: 'extend-5', label: 'Add 5 minutes…', disabled: anyStudentPending || blocked, onSelect: () => onAddTime(5) }, { id: 'warn', label: 'Send warning…', disabled: anyStudentPending || blocked, onSelect: onWarn }, { id: 'toggle', label: student.status === 'paused' ? 'Resume attempt' : 'Pause attempt', disabled: anyStudentPending || blocked, onSelect: student.status === 'paused' ? onResume : onPause }, { id: 'terminate', label: 'End attempt…', destructive: true, disabled: anyStudentPending || blocked, separatorBefore: true, onSelect: onTerminate }]} /></div></div>
+    <dl className="mt-6 grid gap-x-8 gap-y-4 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-5 sm:grid-cols-3">
+      <div><dt className="sat-room__eyebrow">Current module</dt><dd className="mt-1.5 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#18181b)]">{String(student.runtimeCurrentSection ?? student.currentSection)}</dd></div>
+      <div><dt className="sat-room__eyebrow">Time remaining</dt><dd className="mt-1 text-[20px] font-semibold tabular-nums tracking-[-0.03em] text-[var(--sat-staff-text-primary,#18181b)]">{formatRemaining(remaining)}</dd></div>
+      <div><dt className="sat-room__eyebrow">Attempt</dt><dd className="mt-1.5 text-[14px] font-semibold capitalize text-[var(--sat-staff-text-primary,#18181b)]">{student.status}</dd></div>
+    </dl>
+    <div className="mt-7 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-5"><h3 className="text-[14px] font-semibold tracking-[-0.01em]">Attention</h3>{student.warnings === 0 && student.violations.length === 0 ? <div className="mt-3 flex items-center gap-2 text-[13px] font-medium text-[var(--sat-staff-text-secondary,#515154)]"><span className="h-1.5 w-1.5 rounded-full bg-[var(--sat-staff-success-dot,#059669)]" />No current warnings or integrity events.</div> : <div className="mt-3 space-y-2">{student.warnings > 0 ? <div className="rounded-[10px] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2.5 text-[13px] font-medium text-[var(--sat-staff-warning-text,#92400e)]">{student.warnings} proctor warning{student.warnings === 1 ? '' : 's'}</div> : null}{student.violations.slice(0, 5).map((violation) => <div key={violation.id} className="rounded-[10px] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2.5"><p className="text-[12px] font-semibold capitalize text-[var(--sat-staff-warning-text,#92400e)]">{violation.type.replace(/_/g, ' ')}</p><p className="mt-0.5 text-[12px] font-medium leading-5 text-[var(--sat-staff-warning-text,#92400e)]">{violation.description}</p></div>)}</div>}</div>
   </div>;
 }
-
-function InfoRow({ label, value }: { label: string; value: string }) { return <div><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{label}</dt><dd className="mt-0.5 text-[12px] font-semibold text-slate-700">{value}</dd></div>; }

@@ -208,7 +208,7 @@ describe('TimingTab', () => {
   it('renders ACT science timing mode with only the science section', () => {
     renderTab(createDefaultConfig('ACT', 'ACT Science'));
     expect(screen.getByText('ACT Science Timing')).toBeInTheDocument();
-    expect(screen.getByText('Science')).toBeInTheDocument();
+    expect(screen.getAllByText('Science')).toHaveLength(2);
     expect(screen.queryByText('Authentic IELTS Mode')).not.toBeInTheDocument();
     expect(screen.queryByText('Reading')).not.toBeInTheDocument();
   });

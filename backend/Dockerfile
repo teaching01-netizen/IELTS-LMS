@@ -76,12 +76,16 @@ MALLOC_MMAP_THRESHOLD_="${API_MALLOC_MMAP_THRESHOLD}" \
 /app/api &
 API_PID=$!
 
-# BACKGROUND_RUNTIME_MODE is normalized for API config parity only; it never
-# gates the worker. The Go API serves requests in every mode, and the worker
-# owns the background job set (outbox drain, reconcile/repair, grading
-# projection, retention/media) in every mode.
+# BACKGROUND_RUNTIME_MODE mirrors the Rust topology. Activity-driven mode is
+# API-only; continuous mode owns the background job set in the worker.
 BACKGROUND_RUNTIME_MODE="$(/app/normalize-background-runtime-mode.sh "${BACKGROUND_RUNTIME_MODE:-continuous}")"
 export BACKGROUND_RUNTIME_MODE
+
+if [ "$BACKGROUND_RUNTIME_MODE" = "activity_driven" ]; then
+  trap 'kill "$API_PID" 2>/dev/null || true' INT TERM EXIT
+  wait "$API_PID"
+  exit $?
+fi
 
 /app/worker &
 WORKER_PID=$!

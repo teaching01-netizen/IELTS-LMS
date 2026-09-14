@@ -41,7 +41,7 @@ describe("assessment media API", () => {
         contentType: "image/png",
         fileName: "graph.png",
         uploadStatus: "finalized",
-        downloadUrl: "/api/v1/media/assets/asset-1",
+        downloadUrl: "/api/v1/media/asset-1/content",
       });
 
     const file = {

@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BlockMath, InlineMath } from "@tiptap/extension-mathematics";
 import { Selection } from "@tiptap/pm/state";
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import katex from "katex";
 import type { MathfieldElement } from "mathlive";
 import "mathlive/fonts.css";
 import { logger } from "../../../utils/logger";
-
-const mathOptions = { throwOnError: false, strict: false } as const;
+import { BlockMathNode, InlineMathNode, mathOptions } from "./schema/mathNodes";
 
 let mathLiveModule: Promise<typeof import("mathlive")> | null = null;
 
@@ -229,14 +227,18 @@ function EditableMathNode({ editor, getPos, node, updateAttributes, selected }: 
   );
 }
 
-export const EditableInlineMath = InlineMath.extend({
+// The browser extends the SHARED node definitions (see ./schema/mathNodes.ts)
+// with a node view. Node name, attributes, and schema rules stay identical to
+// what the Hocuspocus co-editing service converts, which is what makes a
+// round trip lossless.
+export const EditableInlineMath = InlineMathNode.extend({
   addNodeView() {
     return ReactNodeViewRenderer(EditableMathNode, { as: "span" });
   },
-}).configure({ katexOptions: mathOptions });
+});
 
-export const EditableBlockMath = BlockMath.extend({
+export const EditableBlockMath = BlockMathNode.extend({
   addNodeView() {
     return ReactNodeViewRenderer(EditableMathNode, { as: "div" });
   },
-}).configure({ katexOptions: mathOptions });
+});

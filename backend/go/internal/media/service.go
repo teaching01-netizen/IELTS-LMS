@@ -237,7 +237,7 @@ func (s *Service) CompleteUpload(ctx context.Context, assetID string, req Comple
 		if int64(len(body)) != req.SizeBytes || !strings.EqualFold(actualChecksum, checksum) {
 			return validationError("The uploaded object metadata does not match the completion request.")
 		}
-		downloadURL := fmt.Sprintf("/api/v1/media/assets/%s", assetID)
+		downloadURL := fmt.Sprintf("/api/v1/media/%s/content", assetID)
 		res, err := q.ExecContext(ctx, "UPDATE media_assets SET upload_status = 'finalized', size_bytes = ?, checksum_sha256 = ?, download_url = ?, delete_after_at = NULL, updated_at = NOW() WHERE id = ? AND upload_status = 'pending'", req.SizeBytes, checksum, downloadURL, assetID)
 		if err != nil {
 			return err

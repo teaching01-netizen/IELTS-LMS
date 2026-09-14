@@ -46,11 +46,9 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
   const editingNote = props.response.annotations.annotations.find((annotation) => annotation.id === editingNoteId);
   const editNote = (note: string | undefined) => {
     if (!editingNoteId || props.disabled) return;
-    // Deleting the note off a note-less mark removes the whole annotation:
-    // a bare highlight opened via Add note + Delete is a no-op round-trip
-    // otherwise, with no other path to remove a bare mark (erase mode was
-    // retired from the top bar in Phase 5). Note-bearing marks keep their
-    // highlight and lose only the note text (pre-existing semantics).
+    // Deleting from a note-less mark removes the whole annotation. Note-bearing
+    // marks keep their highlight and lose only the note text here; the Eraser
+    // tool removes the entire mark, including any attached note.
     const target = props.response.annotations.annotations.find((annotation) => annotation.id === editingNoteId);
     if (note === undefined && target && !target.note) {
       props.onAnnotationsChange?.({ ...props.response.annotations, annotations: props.response.annotations.annotations.filter((annotation) => annotation.id !== editingNoteId) });
@@ -63,7 +61,11 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
     }) });
   };
   const hasStimulus = hasStructuredContent(props.question.stimulus);
-  const split = props.sectionKey === "reading-writing" && hasStimulus;
+  // Both SAT sections use the Bluebook two-pane layout when a question has
+  // supporting material. Reading and Writing calls that pane a passage;
+  // Math uses the product's supporting-material label.
+  const split = hasStimulus;
+  const stimulusLabel = props.sectionKey === "math" ? "Supporting material" : "Passage";
   const eliminationAvailable = props.question.answer.kind === "single_choice";
   const eliminated = new Set(props.response.eliminatedOptionIds);
   const policy = resolveSatExamToolPolicy(props.sectionKey, []);
@@ -115,6 +117,7 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
   return (
     <SatQuestionWorkspace
       split={split}
+      stimulusLabel={stimulusLabel}
       readingPreferences={props.readingPreferences}
       onSplitRatioChange={props.onReadingSplitRatioChange}
       {...(split

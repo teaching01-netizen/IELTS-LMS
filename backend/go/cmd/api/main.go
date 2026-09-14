@@ -24,6 +24,7 @@ import (
 	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authoring"
+	"example.com/ielts-proctoring/internal/authoringcoedit"
 	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/authz"
 	"example.com/ielts-proctoring/internal/delivery"
@@ -61,6 +62,7 @@ type App struct {
 	DB            *sql.DB
 	Tx            *tx.Runner
 	Limiter       *httpx.BucketStore
+	ExportLimiter *httpx.DBRateLimiter
 	Tiers         *httpx.TierSet
 	Attempts      *attempts.Service
 	Exams         *exams.Service
@@ -103,7 +105,21 @@ type App struct {
 	// non-nil means AUTHORING_REALTIME_EVENTS was enabled without a live
 	// bus, so main refuses to boot instead of silently degrading.
 	AuthoringConfigErr error
-	Leases             *liveupdates.LeaseRepository
+	// CoeditTokens mints short-lived browser co-edit tokens. Nil when the
+	// AUTHORING_REALTIME_COEDITING flag is off (or misconfigured: see
+	// CoeditConfigErr).
+	CoeditTokens *authoringcoedit.TokenIssuer
+	// CoeditSigner verifies private Hocuspocus -> Go calls and signs the
+	// Go -> Hocuspocus control calls.
+	CoeditSigner *authoringcoedit.ServiceSigner
+	// CoeditControl is the private control client for the singleton service
+	// (freeze/flush/close). Nil when service admission is off.
+	CoeditControl *authoringcoedit.ControlClient
+	// CoeditConfigErr is a fail-closed startup check: non-nil means
+	// AUTHORING_REALTIME_COEDITING was enabled with a missing or short
+	// secret, so main refuses to boot instead of issuing unsigned tokens.
+	CoeditConfigErr error
+	Leases          *liveupdates.LeaseRepository
 	// Admission is the plan-C2 in-memory WS gate. Always non-nil (db mode
 	// leaves it unused; memory mode serves acquires with zero SQL).
 	Admission       *liveupdates.Admission
@@ -203,6 +219,7 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 			TTL:         liveupdates.LeaseTTL,
 		})}
 	if pool != nil {
+		app.ExportLimiter = httpx.NewDBRateLimiter(pool, "results_export", cfg.RateLimitExportPerUser, time.Duration(cfg.RateLimitExportPerUserWindowSecs)*time.Second)
 		// WS-04b: domain services come from the shared graph so the
 		// SAT/ACT provider switch, presence posture, and terminal scorer
 		// cannot drift from the worker's copy. HTTP-edge state (bus, hub,
@@ -242,9 +259,56 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.LiveHub = hub
 		app.Leases = liveupdates.NewLeaseRepository(pool)
 		app.AuthoringConfigErr = svc.AuthoringConfigErr
+		if app.Authoring != nil {
+			app.Authoring.SetCoeditEnabled(cfg.AuthoringRealtimeCoediting)
+		}
 	}
+	wireCoedit(app, cfg)
 
 	return app
+}
+
+// wireCoedit resolves the co-edit posture. It never partially configures: a
+// short secret leaves CoeditConfigErr set and CoeditTokens nil, so the handler
+// reports the capability as off rather than minting a weak token.
+func wireCoedit(app *App, cfg config.Config) {
+	if !cfg.AuthoringRealtimeCoediting {
+		return
+	}
+	issuer, err := authoringcoedit.NewTokenIssuer(cfg.AuthoringCoeditTokenSecret)
+	if err != nil {
+		app.CoeditConfigErr = err
+		return
+	}
+	app.CoeditTokens = issuer
+	signer, err := authoringcoedit.NewServiceSigner(cfg.AuthoringCoeditServiceSecret)
+	if err != nil {
+		app.CoeditConfigErr = err
+		return
+	}
+	app.CoeditSigner = signer
+	if !cfg.AuthoringCoeditServiceEnabled {
+		return
+	}
+	control, err := authoringcoedit.NewControlClient(cfg.AuthoringCoeditServiceURL, signer)
+	if err != nil {
+		app.CoeditConfigErr = err
+		return
+	}
+	app.CoeditControl = control
+}
+
+// CoeditCapability reports whether browsers may be told co-editing is
+// available. It is the AND of both flags and a fully wired client: telling a
+// browser to connect to a service that will refuse admission is a broken
+// state, so the capability is never advertised on half a configuration.
+func (a *App) CoeditCapability() bool {
+	if a == nil {
+		return false
+	}
+	return a.Config.AuthoringRealtimeCoediting &&
+		a.Config.AuthoringCoeditServiceEnabled &&
+		a.CoeditTokens != nil && a.CoeditSigner != nil && a.CoeditControl != nil
 }
 
 func main() {
@@ -276,6 +340,12 @@ func main() {
 	// authoring realtime capability would be silently disabled at runtime.
 	if app.AuthoringConfigErr != nil {
 		log.Fatalf("api: authoring realtime misconfigured: %v", app.AuthoringConfigErr)
+	}
+	// Prompt co-editing fails closed the same way: a flag-on process with a
+	// missing or short secret must not start, or it would advertise a
+	// collaborative editor whose tokens nobody can verify.
+	if app.CoeditConfigErr != nil {
+		log.Fatalf("api: prompt co-editing misconfigured: %v", app.CoeditConfigErr)
 	}
 	// Plan E3: report absorbed tx transients on db_deadlocks_total{kind}.
 	defer installTxRetryHook()()
@@ -426,9 +496,9 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/{id}", examsGetHandler(app))
 			authzRoute(r, "PATCH", "/{id}", examsUpdateHandler(app))
 			authzRoute(r, "DELETE", "/{id}", examsDeleteHandler(app))
-			authzRoute(r, "PATCH", "/{id}/draft", examsDraftHandler(app))
+			authzRoute(r, "PATCH", "/{id}/draft", coeditScopeCloseGuard(app, authoringcoedit.CloseDraftReplaced, "id", examsDraftHandler(app)))
 			authzRoute(r, "POST", "/{id}/draft/reopen", examsDraftReopenHandler(app))
-			authzRoute(r, "POST", "/{id}/publish", examsPublishHandler(app))
+			authzRoute(r, "POST", "/{id}/publish", coeditPublishGuard(app, examsPublishHandler(app)))
 			authzRoute(r, "GET", "/{id}/events", examsEventsHandler(app))
 			authzRoute(r, "GET", "/{id}/validation", examsValidationHandler(app))
 			authzRoute(r, "GET", "/{id}/versions", examsVersionsHandler(app))
@@ -457,7 +527,7 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Get("/exams/{examID}/sat-workbook-template", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-workbook-template", authorSatWorkbookTemplateHandler(app)))
 			// Workbook import tiers keep the 64MiB global ceiling.
 			authzRoute(r, "POST", "/exams/{examID}/sat-workbook-preview", authorPreviewImportHandler(app))
-			authzRoute(r, "POST", "/exams/{examID}/sat-workbook-commit", authorCommitImportHandler(app))
+			authzRoute(r, "POST", "/exams/{examID}/sat-workbook-commit", coeditScopeCloseGuard(app, authoringcoedit.CloseWorkbookReplaced, "examID", authorCommitImportHandler(app)))
 			r.With(adminLimit).Get("/exams/{examID}/sat-workbook-undo", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-workbook-undo", authorUndoStateHandler(app)))
 			r.With(adminLimit).Post("/exams/{examID}/sat-workbook-imports/{importID}/undo", authorize("POST /api/v1/assessment-authoring/exams/{examID}/sat-workbook-imports/{importID}/undo", authorUndoImportHandler(app)))
 			r.With(adminLimit).Get("/modules/{moduleID}/questions", authorize("GET /api/v1/assessment-authoring/modules/{moduleID}/questions", authorListQuestionsHandler(app)))
@@ -466,7 +536,10 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Patch("/modules/{moduleID}/question-order", authorize("PATCH /api/v1/assessment-authoring/modules/{moduleID}/question-order", authorReorderHandler(app)))
 			r.With(adminLimit).Get("/exam-questions/{examQuestionID}", authorize("GET /api/v1/assessment-authoring/exam-questions/{examQuestionID}", authorGetQuestionHandler(app)))
 			r.With(adminLimit).Patch("/exam-questions/{examQuestionID}", authorize("PATCH /api/v1/assessment-authoring/exam-questions/{examQuestionID}", authorUpdateQuestionHandler(app)))
-			r.With(adminLimit).Delete("/exam-questions/{examQuestionID}", authorize("DELETE /api/v1/assessment-authoring/exam-questions/{examQuestionID}", authorDeleteQuestionHandler(app)))
+			r.With(adminLimit).Delete("/exam-questions/{examQuestionID}", authorize("DELETE /api/v1/assessment-authoring/exam-questions/{examQuestionID}", coeditQuestionDeleteGuard(app, authorDeleteQuestionHandler(app))))
+			r.With(adminLimit).Post("/exam-questions/{examQuestionID}/coedit-token", authorize("POST /api/v1/assessment-authoring/exam-questions/{examQuestionID}/coedit-token", authorCoeditTokenHandler(app)))
+			r.With(adminLimit).Post("/exams/{examID}/coedit-token", authorize("POST /api/v1/assessment-authoring/exams/{examID}/coedit-token", authorWorkspaceCoeditTokenHandler(app)))
+			r.With(adminLimit).Patch("/question-revisions/{revisionID}/fields", authorize("PATCH /api/v1/assessment-authoring/question-revisions/{revisionID}/fields", authorRevisionFieldsHandler(app)))
 			r.With(adminLimit).Post("/exam-questions/{examQuestionID}/duplicate", authorize("POST /api/v1/assessment-authoring/exam-questions/{examQuestionID}/duplicate", authorDuplicateHandler(app)))
 			r.With(adminLimit).Post("/questions/bulk", authorize("POST /api/v1/assessment-authoring/questions/bulk", authorBulkHandler(app)))
 			r.With(adminLimit).Patch("/question-revisions/{revisionID}", authorize("PATCH /api/v1/assessment-authoring/question-revisions/{revisionID}", authorSaveRevisionHandler(app)))
@@ -588,6 +661,7 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/submissions/{submissionID}/sections", gradingSectionsHandler(app))
 			authzRoute(r, "PUT", "/submissions/{submissionID}/sections/{section}/questions/{questionID}/override", gradingOverrideQuestionHandler(app))
 			authzRoute(r, "GET", "/submissions/{submissionID}/writing-tasks", gradingWritingTasksHandler(app))
+			authzRoute(r, "POST", "/export", gradingProfileExportHandler(app))
 			authzRoute(r, "POST", "/submissions/{submissionID}/start-review", gradingStartReviewHandler(app))
 			authzRoute(r, "GET", "/submissions/{submissionID}/review-draft", gradingReviewDraftGetHandler(app))
 			authzRoute(r, "PUT", "/submissions/{submissionID}/review-draft", gradingReviewDraftPutHandler(app))
@@ -603,6 +677,8 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/dashboard", resultsDashboardHandler(app))
 			authzRoute(r, "GET", "/analytics", resultsAnalyticsHandler(app))
 			authzRoute(r, "POST", "/export", resultsExportHandler(app))
+			// Deprecated compatibility alias for pre-parity Go profile clients.
+			authzRoute(r, "POST", "/export-profile", gradingProfileExportHandler(app))
 			authzRoute(r, "GET", "/sat", resultsSATListHandler(app))
 			authzRoute(r, "GET", "/sat/{resultID}", resultsSATGetHandler(app))
 			authzRoute(r, "GET", "/act-science", resultsACTScienceHandler(app))
@@ -615,6 +691,7 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "PUT", "/uploads/{assetID}", mediaUploadBytesHandler(app))
 			authzRoute(r, "POST", "/uploads/{assetID}/complete", mediaCompleteHandler(app))
 			authzRoute(r, "GET", "/assets/{assetID}", withAuthedReadsTier(app, mediaDownloadHandler(app)))
+			authzRoute(r, "GET", "/{assetID}/content", withAuthedReadsTier(app, mediaDownloadContentHandler(app)))
 			authzRoute(r, "GET", "/{assetID}", withAuthedReadsTier(app, mediaGetHandler(app)))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/answer-history", func(r chi.Router) {
@@ -645,7 +722,15 @@ func BuildRouter(app *App) http.Handler {
 				authzRoute(r, "GET", "/{attemptID}/responses", v2SnapshotHandler(app))
 			})
 		})
-	}
+	} // Private Hocuspocus -> Go surface. Same router, but these routes are
+	// authenticated by the service signature only (the authz table marks them
+	// public so the session layer passes through); a browser cannot reach them
+	// because it never has AUTHORING_COEDIT_SERVICE_SECRET.
+	r.With(httpx.BodyLimit(coeditPrivateMaxBodyBytes)).Route("/internal/authoring-coedit", func(r chi.Router) {
+		r.Post("/load", authorize("POST /internal/authoring-coedit/load", coeditLoadHandler(app)))
+		r.Post("/initialize", authorize("POST /internal/authoring-coedit/initialize", coeditInitializeHandler(app)))
+		r.Post("/store", authorize("POST /internal/authoring-coedit/store", coeditStoreHandler(app)))
+	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Route not found."))

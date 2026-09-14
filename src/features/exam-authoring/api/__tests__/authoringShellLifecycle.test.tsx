@@ -14,9 +14,17 @@ import {
 const backendGet = vi.hoisted(() => vi.fn());
 const backendPost = vi.hoisted(() => vi.fn());
 
+function mockedStatusCode(error: unknown): unknown {
+  if (typeof error !== "object" || error === null) return undefined;
+  const candidate = error as { status?: unknown; statusCode?: unknown };
+  return candidate.status ?? candidate.statusCode;
+}
+
 vi.mock("../../infrastructure/examAuthoringBackendGateway", () => ({
   backendGet,
   backendPost,
+  isBackendNotFound: (error: unknown) => mockedStatusCode(error) === 404,
+  hasBackendStatusCode: (error: unknown, status: number) => mockedStatusCode(error) === status,
 }));
 
 function makeShell(revision = 3): AssessmentAuthoringShell {

@@ -1268,6 +1268,29 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /grading/export:
+    post:
+      tags: [grading]
+      summary: Export selected submissions using a grading profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [submissionIds, profileId]
+              properties:
+                submissionIds: { type: array, items: { type: string } }
+                profileId: { type: string }
+      responses:
+        "200":
+          description: Profile export
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /grading/submissions/{submissionId}:
     get:
       tags: [grading]
@@ -1515,8 +1538,35 @@ paths:
             X-Request-Id: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                $ref: "#/components/schemas/LegacyResultsExport"
         "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /results/export-profile:
+    post:
+      tags: [results]
+      summary: Deprecated selected-submission profile export
+      deprecated: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [submissionIds, profileId]
+              properties:
+                submissionIds: { type: array, items: { type: string } }
+                profileId: { type: string }
+      responses:
+        "200":
+          description: Profile export
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /results/{resultId}/events:
     get:
       tags: [results]
@@ -2043,6 +2093,141 @@ paths:
               schema: { type: object }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/question-revisions/{revisionId}/fields:
+    patch:
+      tags: [authoring]
+      summary: Partially update non-collaborative question revision fields
+      description: |
+        Partial, allow-listed field update used while prompt co-editing is
+        active. `prompt` is structurally absent from the request type: this
+        endpoint cannot overwrite a collaborative prompt. On a stale revision
+        the client refetches and retries only when the fields it is saving
+        were not changed remotely.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: revisionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Updated
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exam-questions/{examQuestionId}/coedit-token:
+    post:
+      tags: [authoring]
+      summary: Issue a short-lived prompt co-editing token
+      description: |
+        Creates or loads the collaborative prompt document for the selected
+        question in the current editable draft and returns a five-minute
+        HMAC-SHA256 token plus the opaque document name and service URL. The
+        browser never constructs the room name from raw identifiers. Observers
+        receive a read-mode token.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examQuestionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Token issued
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/coedit-token:
+    post:
+      tags: [authoring]
+      summary: Issue an exam-workspace co-editing token
+      description: |
+        Issues a short-lived token for the exam-level SAT authoring workspace
+        document. The workspace room is keyed by the active editable draft;
+        the browser never constructs the room name from raw identifiers.
+        Observers receive a read-mode token.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Token issued
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /internal/authoring-coedit/load:
+    post:
+      tags: [authoring-coedit-internal]
+      summary: Load a collaborative document (private)
+      description: |
+        Private endpoint called by the singleton Hocuspocus service. Requests
+        are authenticated by an HMAC over method, path, timestamp, and body
+        hash using AUTHORING_COEDIT_SERVICE_SECRET; a browser never holds that
+        secret. Not part of the public client contract.
+      responses:
+        "200":
+          description: Document state or seed
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+  /internal/authoring-coedit/initialize:
+    post:
+      tags: [authoring-coedit-internal]
+      summary: Seed a collaborative document (private)
+      description: |
+        Stores freshly seeded binary Yjs state without bumping the question
+        revision, because the materialized prompt is unchanged by seeding.
+      responses:
+        "200":
+          description: Seeded
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+  /internal/authoring-coedit/store:
+    post:
+      tags: [authoring-coedit-internal]
+      summary: Commit collaborative prompt state (private)
+      description: |
+        Commits the Yjs binary state, state vector, state hash, and prompt
+        projection in the same MySQL transaction as the question revision bump
+        and the content-free authoring event. A previous-hash mismatch is
+        refused. Same-hash replay is acknowledged without a revision bump.
+      responses:
+        "200":
+          description: Committed or already current
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
   /assessment-authoring/exams/{examId}/sections/{sectionId}/delivery-settings:
     patch:
       tags: [authoring]
@@ -3436,6 +3621,26 @@ paths:
               schema: { type: string, format: binary }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /media/{assetId}/content:
+    get:
+      tags: [media]
+      summary: Download media asset bytes using the canonical content URL
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Bytes
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /media/{assetId}:
     get:
       tags: [media]
@@ -3570,6 +3775,7 @@ components:
         A retry with the same key and identical content replays the original
         outcome; reuse with different content is a 409. An `operationKey` body
         field is accepted as an equivalent on the same routes. 1-128 chars.
+      schema: { type: string, minLength: 1, maxLength: 128 }
     AttemptId:
       name: attemptId
       in: path
@@ -3891,3 +4097,13 @@ components:
         institution: { type: string, nullable: true }
         versionNumber: { type: integer }
         submittedAt: { type: string, format: date-time, nullable: true }
+    LegacyResultsExport:
+      type: object
+      required: [format, generatedAt, count, items]
+      properties:
+        format: { type: string, enum: [json] }
+        generatedAt: { type: string, format: date-time }
+        count: { type: integer, minimum: 0 }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardResult" }

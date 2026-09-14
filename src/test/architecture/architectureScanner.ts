@@ -174,6 +174,8 @@ export function addBrowserGlobalViolations(
       .replace(/(["'])(?:\\.|(?!\1).)*\1/g, '')
       .replace(/\/\/[^\n]*/g, '')
       .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\.\s*(window|document|navigator|localStorage|sessionStorage)\b/g, '.x')
+      .replace(/\b(window|document|navigator|localStorage|sessionStorage)\s*\??\s*(?=\s*[:,])/g, 'x')
       .replace(/\.navigator[A-Z]\w*/g, '.x')
       .replace(/\bnavigator[A-Z]\w*/g, 'x');
     const globals = new Set(

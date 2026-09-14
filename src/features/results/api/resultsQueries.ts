@@ -58,6 +58,8 @@ export interface ActScienceDetail {
   percentage: number;
   outcomeStatus: string;
   releaseStatus: string;
+  integrityStatus?: string | null;
+  autoGradingResults?: Record<string, unknown> | null;
   submittedAt?: string | null | undefined;
   questions: ActScienceQuestion[];
 }

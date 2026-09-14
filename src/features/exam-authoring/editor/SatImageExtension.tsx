@@ -1,16 +1,8 @@
 import { useEffect, useState } from "react";
-import Image from "@tiptap/extension-image";
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import { ImageIcon } from "lucide-react";
 import { getAssessmentMediaAsset } from "../api/assessmentMediaApi";
-
-// Renderable without the media service: http(s) and app-relative paths
-// only. data:/blob: URLs are never rendered directly — pasted images must go
-// through the upload pipeline (allowBase64:false) so unverified bytes cannot
-// become publishable content and so no object-URL lifetime leaks into drafts.
-function isDirectSource(value: string): boolean {
-  return /^(https?:\/\/|\/)/i.test(value);
-}
+import { SatImageNode, isDirectImageSource as isDirectSource } from "./schema/imageNode";
 
 function SatImageNodeView({ node }: NodeViewProps) {
   const assetId = String(node.attrs["assetId"] ?? "");
@@ -62,25 +54,14 @@ function SatImageNodeView({ node }: NodeViewProps) {
   );
 }
 
-export const SatImage = Image.extend({
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      assetId: { default: null },
-      caption: { default: null },
-      // Phase 06 carve-out (attrs only, no render change): transient upload
-      // state for clipboard image paste. The pipe inserts a temp node with
-      // uploadId/uploading set, then swaps attrs with addToHistory:false so
-      // the paste stays one undo step. Undeclared attrs are dropped by the
-      // schema, so these must be declared or the state vanishes silently.
-      // The node view below is UNCHANGED: blob: previews are never rendered
-      // (existing loading placeholder covers uploading); data: stays
-      // unrendarable; allowBase64:false untouched.
-      uploadId: { default: null },
-      uploading: { default: false },
-      uploadError: { default: null },
-    };
-  },
+// The browser extends the SHARED node definition (see ./schema/imageNode.ts)
+// with a node view only: attributes and schema rules stay identical to what
+// the Hocuspocus co-editing service converts.
+//
+// The node view is UNCHANGED from before the split: blob: previews are never
+// rendered (the loading placeholder covers uploading); data: stays
+// unrenderable; allowBase64:false untouched.
+export const SatImage = SatImageNode.extend({
   addNodeView() {
     return ReactNodeViewRenderer(SatImageNodeView);
   },

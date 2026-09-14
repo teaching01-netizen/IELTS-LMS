@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { gradingGateway } from "../../grading/infrastructure/gradingGateway";
+import { gradingGateway } from "../../grading/api/gradingGateway";
 import type {
   ObjectiveQuestionResult,
   SectionSubmission,

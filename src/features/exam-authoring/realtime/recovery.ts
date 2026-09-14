@@ -1,4 +1,4 @@
-import { hasBackendStatusCode, isBackendNotFound } from "../../../services/backendBridge";
+import { hasBackendStatusCode, isBackendNotFound } from "../api/examAuthoringBackendGateway";
 import type {
   AssessmentAuthoringShell,
   AssessmentQuestionDetail,

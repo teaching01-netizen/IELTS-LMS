@@ -1,10 +1,11 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, GitBranch, LoaderCircle, Save } from "lucide-react";
 import { useUpdateSectionDeliverySettings } from "../../api/assessmentQueries";
 import type { AssessmentSectionShell } from "../../contracts/assessment";
 import { operationalCountForSection, secondsToMinutes, toUserFacingReleaseError } from "./releaseSelectors";
 import { releaseDisabledButtonClass } from "./releaseUi";
 import { NumericField } from "./NumericField";
+import { useSatAuthoringCollaboration } from "../../realtime/coedit";
 
 interface SectionDeliveryEditorProps {
   examId: string;
@@ -21,6 +22,12 @@ function SectionDeliveryEditorInner({
   saveDisabledReason,
   onDirtyChange,
 }: SectionDeliveryEditorProps) {
+  const collaboration = useSatAuthoringCollaboration();
+  const collaborationReadOnly = Boolean(
+    collaboration &&
+      (collaboration.workspaceSnapshot.readOnly || collaboration.lifecyclePhase !== "active"),
+  );
+  const effectiveCanEdit = canEdit && !collaborationReadOnly;
   const update = useUpdateSectionDeliverySettings(examId);
   const base = useMemo(
     () => section.modules.find((module) => module.adaptiveRole === "base"),
@@ -46,6 +53,54 @@ function SectionDeliveryEditorInner({
   const [threshold, setThreshold] = useState(() => routing?.minimumCorrectForHigher ?? 1);
   const [localError, setLocalError] = useState<string | null>(null);
   const mountedSectionRef = useRef(section.id);
+  const sharedPath = `delivery/${section.id}`;
+  const formRef = useRef({
+    baseMinutes: secondsToMinutes(base?.durationSeconds ?? 60),
+    lowerMinutes: secondsToMinutes(lower?.durationSeconds ?? 60),
+    higherMinutes: secondsToMinutes(higher?.durationSeconds ?? 60),
+    breakMinutes: Math.max(0, Math.round(section.breakAfterSeconds / 60)),
+    threshold: routing?.minimumCorrectForHigher ?? 1,
+    writerId: null as string | null,
+  });
+  const selfId = collaboration?.participants.find((participant) => participant.isSelf)?.id ?? null;
+  const sharedDelivery = collaboration?.workspaceSnapshot.values[sharedPath];
+
+  const deliverySeed = useMemo(
+    () => ({
+      baseMinutes: secondsToMinutes(base?.durationSeconds ?? 60),
+      lowerMinutes: secondsToMinutes(lower?.durationSeconds ?? 60),
+      higherMinutes: secondsToMinutes(higher?.durationSeconds ?? 60),
+      breakMinutes: Math.max(0, Math.round(section.breakAfterSeconds / 60)),
+      threshold: routing?.minimumCorrectForHigher ?? 1,
+      writerId: null,
+    }),
+    [base?.durationSeconds, higher?.durationSeconds, lower?.durationSeconds, routing?.minimumCorrectForHigher, section.breakAfterSeconds],
+  );
+
+  useEffect(() => {
+    if (!collaboration?.workspaceSnapshot.ready) return;
+    collaboration.ensureValue(sharedPath, deliverySeed);
+  }, [collaboration, collaboration?.workspaceSnapshot.ready, deliverySeed, sharedPath]);
+
+  useEffect(() => {
+    if (sharedDelivery === null || typeof sharedDelivery !== "object") return;
+    const value = sharedDelivery as Record<string, unknown>;
+    if (!Number.isFinite(value["baseMinutes"]) || !Number.isFinite(value["lowerMinutes"]) || !Number.isFinite(value["higherMinutes"]) || !Number.isFinite(value["breakMinutes"]) || !Number.isFinite(value["threshold"])) return;
+    const next = {
+      baseMinutes: Number(value["baseMinutes"]),
+      lowerMinutes: Number(value["lowerMinutes"]),
+      higherMinutes: Number(value["higherMinutes"]),
+      breakMinutes: Number(value["breakMinutes"]),
+      threshold: Number(value["threshold"]),
+      writerId: typeof value["writerId"] === "string" ? value["writerId"] : null,
+    };
+    formRef.current = next;
+    setBaseMinutes(next.baseMinutes);
+    setLowerMinutes(next.lowerMinutes);
+    setHigherMinutes(next.higherMinutes);
+    setBreakMinutes(next.breakMinutes);
+    setThreshold(next.threshold);
+  }, [sharedDelivery]);
 
   // Reset local form only when the server revision actually changes, not on
   // every parent render. The dirty flag is derived below, never pushed in
@@ -94,20 +149,11 @@ function SectionDeliveryEditorInner({
     }
   }, [dirty, section.id]);
 
-  if (!base || !lower || !higher || !routing) {
-    return (
-      <div
-        role="alert"
-        className="rounded-2xl border border-destructive/20 bg-destructive/10 p-4 text-sm leading-6 text-destructive"
-      >
-        <p className="font-semibold">{section.title} has an incomplete adaptive structure.</p>
-        <p className="mt-1">A base module plus lower and higher branches are required before publishing.</p>
-      </div>
-    );
-  }
-
-  const save = async () => {
-    if (!canEdit || update.isPending) return;
+  // Keep this callback above the incomplete-structure return. Hooks must run
+  // in the same order when a remote workspace update temporarily removes or
+  // restores one of the delivery modules.
+  const save = useCallback(async () => {
+    if (!base || !lower || !higher || !routing || !effectiveCanEdit || update.isPending) return;
     setLocalError(null);
     if (!Number.isInteger(threshold) || threshold < 1 || threshold > operationalCount) {
       setLocalError(`Higher-route threshold must be between 1 and ${operationalCount}.`);
@@ -143,15 +189,52 @@ function SectionDeliveryEditorInner({
           })),
         },
       });
+      collaboration?.publishCommand("delivery.changed", { sectionId: section.id });
     } catch (error) {
       setLocalError(toUserFacingReleaseError(error));
     }
+  }, [base, baseMinutes, breakMinutes, collaboration, effectiveCanEdit, higher, higherMinutes, lower, lowerMinutes, operationalCount, routing, section, threshold, update]);
+
+  // Keep this effect above the incomplete-structure return. A remote
+  // structural update can temporarily remove or restore a module; hooks must
+  // stay in the same order while that live update is rendered.
+  useEffect(() => {
+    if (!collaboration || !dirty || !effectiveCanEdit || !selfId) return;
+    if (!sharedDelivery || typeof sharedDelivery !== "object") return;
+    const writerId = (sharedDelivery as Record<string, unknown>)["writerId"];
+    if (writerId !== selfId) return;
+    const timer = globalThis.setTimeout(() => void save(), 500);
+    return () => globalThis.clearTimeout(timer);
+  }, [collaboration, dirty, effectiveCanEdit, save, selfId, sharedDelivery]);
+
+  if (!base || !lower || !higher || !routing) {
+    return (
+      <div
+        role="alert"
+        className="rounded-2xl border border-destructive/20 bg-destructive/10 p-4 text-sm leading-6 text-destructive"
+      >
+        <p className="font-semibold">{section.title} has an incomplete adaptive structure.</p>
+        <p className="mt-1">A base module plus lower and higher branches are required before publishing.</p>
+      </div>
+    );
+  }
+
+  const publishShared = (key: "baseMinutes" | "lowerMinutes" | "higherMinutes" | "breakMinutes" | "threshold", value: number) => {
+    if (!effectiveCanEdit) return;
+    formRef.current = { ...formRef.current, [key]: value, writerId: selfId };
+    collaboration?.setValue(sharedPath, formRef.current);
   };
 
+  const changeBaseMinutes = (value: number) => { setBaseMinutes(value); publishShared("baseMinutes", value); };
+  const changeLowerMinutes = (value: number) => { setLowerMinutes(value); publishShared("lowerMinutes", value); };
+  const changeHigherMinutes = (value: number) => { setHigherMinutes(value); publishShared("higherMinutes", value); };
+  const changeBreakMinutes = (value: number) => { setBreakMinutes(value); publishShared("breakMinutes", value); };
+  const changeThreshold = (value: number) => { setThreshold(value); publishShared("threshold", value); };
+
   const candidateMinutes = baseMinutes + Math.max(lowerMinutes, higherMinutes);
-  const saveDisabled = !dirty || update.isPending || !canEdit;
+  const saveDisabled = !dirty || update.isPending || !effectiveCanEdit;
   const saveReasonId = `section-${section.id}-save-reason`;
-  const saveReason = !canEdit
+  const saveReason = !effectiveCanEdit
     ? (saveDisabledReason ?? "You do not have permission to edit delivery settings.")
     : null;
 
@@ -174,9 +257,9 @@ function SectionDeliveryEditorInner({
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        <NumericField label="Module 1" value={baseMinutes} min={1} max={600} suffix="min" onChange={setBaseMinutes} />
-        <NumericField label="Module 2 · Lower" value={lowerMinutes} min={1} max={600} suffix="min" onChange={setLowerMinutes} />
-        <NumericField label="Module 2 · Higher" value={higherMinutes} min={1} max={600} suffix="min" onChange={setHigherMinutes} />
+        <NumericField label="Module 1" value={baseMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit} onChange={changeBaseMinutes} />
+        <NumericField label="Module 2 · Lower" value={lowerMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit} onChange={changeLowerMinutes} />
+        <NumericField label="Module 2 · Higher" value={higherMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit} onChange={changeHigherMinutes} />
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
@@ -191,7 +274,8 @@ function SectionDeliveryEditorInner({
               min={1}
               max={operationalCount}
               suffix="correct"
-              onChange={setThreshold}
+              disabled={!effectiveCanEdit}
+              onChange={changeThreshold}
             />
             <div className="rounded-xl bg-muted px-3 py-2.5 text-xs leading-5 text-muted-foreground">
               <span className="font-semibold text-foreground">0–{Math.max(0, threshold - 1)}</span> → Lower
@@ -214,7 +298,8 @@ function SectionDeliveryEditorInner({
             max={600}
             suffix="min"
             allowZero
-            onChange={setBreakMinutes}
+            disabled={!effectiveCanEdit}
+            onChange={changeBreakMinutes}
           />
           <p className="mt-2 text-xs leading-4 text-muted-foreground">
             Applied after the section completes.
@@ -241,7 +326,7 @@ function SectionDeliveryEditorInner({
           ) : (
             <Save size={15} aria-hidden="true" />
           )}
-          {update.isPending ? "Saving…" : dirty ? "Save section" : "Saved"}
+          {update.isPending ? "Saving…" : collaboration && dirty ? "Saving automatically…" : dirty ? "Save section" : "Saved"}
         </button>
       </div>
       {saveReason ? (

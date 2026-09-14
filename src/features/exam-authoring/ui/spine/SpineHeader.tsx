@@ -49,7 +49,7 @@ export function SpineHeader({ examTitle, sectionTitle, moduleTitle, lifecycleSta
         {collaborationSlot ? (
           <div className="sat-spine__header-collaboration shrink-0">{collaborationSlot}</div>
         ) : null}
-        <div className="sat-spine__header-save shrink-0">{saveSlot}</div>
+        {saveSlot ? <div className="sat-spine__header-save shrink-0">{saveSlot}</div> : null}
         <button type="button" onClick={onOpenFullPreview} disabled={previewDisabled} aria-label="Open the full SAT preview" className="authoring-button authoring-button--quiet min-h-11">Preview</button>
         <button type="button" onClick={onOpenRelease} className="authoring-button authoring-button--primary min-h-11">Release</button>
         <div className="sat-spine__menu">

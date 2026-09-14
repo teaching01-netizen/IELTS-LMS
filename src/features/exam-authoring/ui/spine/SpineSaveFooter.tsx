@@ -7,6 +7,8 @@ export interface SpineSaveFooterProps {
   lastSavedAt: Date | null;
   /** Phase 05: dirty + a known-newer revision. Same wording as the header. */
   diverged?: boolean | undefined;
+  /** Co-edit keeps this indicator in the selected question header only. */
+  showSaveStatus?: boolean | undefined;
   keepMetadataForNext: boolean;
   saveDisabled: boolean;
   onKeepMetadataForNextChange: (value: boolean) => void;
@@ -16,14 +18,19 @@ export interface SpineSaveFooterProps {
 }
 
 /**
- * Spine footer save cluster (plan Phase 7): status + always-visible
- * carry-metadata + Save & Next docked to the 720px column in normal flow
- * (never floating, never clipped at 200% zoom).
+ * Spine footer action bar (plan Phase 7, refined).
+ *
+ * Autosave is the product behaviour, so the footer reports on it rather than
+ * asking the author to perform it: save truth sits quietly on the left beside
+ * the carry-metadata preference, and the single filled control on the right is
+ * the next step — `Next`, with its shortcut. The label keeps "Save" in its
+ * accessible name and title so the behaviour is still discoverable.
  */
 export function SpineSaveFooter({
   status,
   lastSavedAt,
   diverged = false,
+  showSaveStatus = true,
   keepMetadataForNext,
   saveDisabled,
   onKeepMetadataForNextChange,
@@ -32,13 +39,22 @@ export function SpineSaveFooter({
   onReviewConflict,
 }: SpineSaveFooterProps) {
   return (
-    <div className="sat-spine__save-footer mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-border py-5">
-      <div className="flex min-w-0 flex-wrap items-center gap-3">
-        <SaveCluster status={status} lastSavedAt={lastSavedAt} diverged={diverged} onRetry={onRetry} onReviewConflict={onReviewConflict} />
+    <div className="sat-spine__save-footer flex flex-wrap items-center justify-between gap-3 border-t border-border">
+      <div className="flex min-w-0 flex-wrap items-center gap-4">
+        {showSaveStatus ? (
+          <SaveCluster
+            status={status}
+            lastSavedAt={lastSavedAt}
+            diverged={diverged}
+            onRetry={onRetry}
+            onReviewConflict={onReviewConflict}
+          />
+        ) : null}
+        {showSaveStatus ? <span aria-hidden="true" className="hidden h-4 w-px bg-border sm:block" /> : null}
         <label
           htmlFor="sat-spine-carry-metadata"
-          className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground"
-          title="When Save & Next reaches an empty slot, carry Domain, Skill, and Difficulty into the new question."
+          className="flex min-h-11 cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground"
+          title="When moving to the next question, carry Domain, Skill, and Difficulty into the new question."
         >
           <input
             id="sat-spine-carry-metadata"
@@ -55,10 +71,13 @@ export function SpineSaveFooter({
         type="button"
         onClick={onSaveAndNext}
         disabled={saveDisabled}
-        title="Save and move to the next question"
-        className="flex min-h-11 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97] disabled:opacity-45"
+        aria-label="Save and move to the next question"
+        title="Save and move to the next question (⌘↵)"
+        className="spine-next flex min-h-11 items-center gap-2 rounded-[10px] px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98] disabled:opacity-100"
       >
-        Save & Next <ChevronRight size={13} aria-hidden="true" />
+        Next
+        <span className="sat-spine__kbd" aria-hidden="true">⌘↵</span>
+        <ChevronRight size={14} aria-hidden="true" className="opacity-70" />
       </button>
     </div>
   );

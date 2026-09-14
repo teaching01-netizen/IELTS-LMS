@@ -61,6 +61,30 @@ describe("SatExamShell", () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('button', { name: 'Highlight' })).toHaveAttribute('aria-pressed', 'false');
   });
+  it("switches between Highlight, Underline, and Eraser modes", () => {
+    render(<SatExamShell {...props({ notesAvailable: true })} />);
+    const highlight = screen.getByRole('button', { name: 'Highlight' });
+    const underline = screen.getByRole('button', { name: 'Underline' });
+    const eraser = screen.getByRole('button', { name: 'Eraser' });
+
+    fireEvent.click(highlight);
+    expect(highlight).toHaveAttribute('aria-pressed', 'true');
+    expect(underline).toHaveAttribute('aria-pressed', 'false');
+    expect(eraser).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(underline);
+    expect(highlight).toHaveAttribute('aria-pressed', 'false');
+    expect(underline).toHaveAttribute('aria-pressed', 'true');
+    expect(eraser).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(eraser);
+    expect(highlight).toHaveAttribute('aria-pressed', 'false');
+    expect(underline).toHaveAttribute('aria-pressed', 'false');
+    expect(eraser).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(eraser).toHaveAttribute('aria-pressed', 'false');
+  });
   it("pins Display, Question note, and More panels to the top bar (never the shell bottom)", () => {
     render(<SatExamShell {...props({ notesAvailable: true })} />);
     fireEvent.click(screen.getByRole("button", { name: "Display" }));
@@ -78,10 +102,12 @@ describe("SatExamShell", () => {
     expect(menu).toHaveAttribute("data-sat-popover-panel", "anchored");
     expect(menu.className).toMatch(/fixed/);
   });
-  it("shows Highlight and Question note as separate entries; hides both in Math", () => {
+  it("shows annotation tools and Question note in Reading and Writing; hides them in Math", () => {
     const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })} />);
-    // Separate entries: the freeform note is always reachable, never gated
-    // on highlight mode.
+    expect(screen.getByRole('button', { name: 'Highlight' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Underline' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Eraser' })).toBeInTheDocument();
+    // The freeform note is always reachable, never gated on annotation mode.
     expect(screen.getByRole('button', { name: 'Question note' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Highlight' }));
     expect(screen.getByRole('button', { name: 'Question note' })).toBeInTheDocument();
@@ -89,7 +115,15 @@ describe("SatExamShell", () => {
     expect(screen.getByRole('button', { name: 'Question note' })).toBeInTheDocument();
     rerender(<SatExamShell {...props({ notesAvailable: false })} />);
     expect(screen.queryByRole('button', { name: 'Highlight' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Underline' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Eraser' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Question note' })).not.toBeInTheDocument();
+  });
+  it("disables annotation tools while the exam is blocked", () => {
+    render(<SatExamShell {...props({ notesAvailable: true, blocked: true })} />);
+    expect(screen.getByRole('button', { name: 'Highlight' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Underline' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Eraser' })).toBeDisabled();
   });
   it("shows SAT timer/tools with a quiet persistent save token (Phase 6f)", () => {
     render(<SatExamShell {...props()} />);

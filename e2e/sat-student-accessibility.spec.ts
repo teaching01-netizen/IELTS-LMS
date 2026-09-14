@@ -61,6 +61,24 @@ async function expectButtonsDoNotOverlap(page: Page, scopeSelector: string) {
   expect(overlaps).toEqual([]);
 }
 
+async function selectStimulusText(page: Page, requested: string) {
+  await page.locator('[data-sat-annotation-region="stimulus"]').evaluate((root, value) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node: Node | null = walker.nextNode();
+    while (node && !(node.nodeValue ?? '').includes(value)) node = walker.nextNode();
+    if (!node) throw new Error(`Could not find stimulus text: ${value}`);
+    const textNode = node as Text;
+    const start = textNode.data.indexOf(value);
+    const range = document.createRange();
+    range.setStart(textNode, start);
+    range.setEnd(textNode, start + value.length);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    textNode.parentElement?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  }, requested);
+}
+
 test.describe("SAT student accessibility and layout", () => {
   test('combined text size, exam zoom, and contrast reflow without clipping', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -75,15 +93,18 @@ test.describe("SAT student accessibility and layout", () => {
     const passage = page.locator('[data-sat-passage-scroll]');
     const geometry = await passage.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
     expect(geometry.scroll).toBeLessThanOrEqual(geometry.width + 1);
-    await page.getByRole('button', { name: 'Question only', exact: true }).click();
     const question = page.locator('[data-sat-question-scroll]');
+    await expect(page.getByRole('button', { name: 'Split view', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Passage only', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Question only', exact: true })).toHaveCount(0);
+    await expect(question).toBeVisible();
     const questionGeometry = await question.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));
     expect(questionGeometry.scroll).toBeLessThanOrEqual(questionGeometry.width + 1);
     await page.reload();
     await expect(page.locator('[data-sat-content-zoom]')).toHaveAttribute('data-sat-content-zoom', '2');
     await expect(page.getByTestId('sat-exam-shell')).toHaveAttribute('data-sat-contrast', 'high-contrast');
   });
-  test('mobile reading switches panes without losing passage scroll', async ({ page }) => {
+  test('mobile reading keeps both panes available without layout mode controls', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await openSatHarness(page);
     await page.getByRole('button', { name: 'Display', exact: true }).click();
@@ -92,26 +113,57 @@ test.describe("SAT student accessibility and layout", () => {
     const passage = page.locator('[data-sat-passage-scroll]');
     const question = page.locator('[data-sat-question-scroll]');
     await expect(passage).toBeVisible();
-    await expect(question).toBeHidden();
+    await expect(question).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Split view', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Passage only', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Question only', exact: true })).toHaveCount(0);
     const scrollTop = await passage.evaluate((element) => { element.scrollTop = 60; return element.scrollTop; });
     expect(scrollTop).toBeGreaterThan(0);
-    await page.getByRole('button', { name: 'Question only', exact: true }).click();
-    await expect(question).toBeVisible();
-    await expect(passage).toBeHidden();
-    await page.getByRole('button', { name: 'Passage only', exact: true }).click();
-    await expect(passage).toBeVisible();
     await expect.poll(() => passage.evaluate((element) => element.scrollTop)).toBe(scrollTop);
   });
 
-  test('desktop passage expansion restores the chosen split ratio', async ({ page }) => {
+  test('Reading and Writing exposes underline and erases both annotation types', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openSatHarness(page);
+
+    await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Underline', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+    await selectStimulusText(page, 'Several');
+    await expect(page.locator('[data-sat-highlight="true"]')).toContainText('Several');
+
+    await page.getByRole('button', { name: 'Underline', exact: true }).click();
+    await selectStimulusText(page, 'researchers');
+    await expect(page.locator('[data-sat-underline="true"]')).toContainText('researchers');
+
+    await page.getByRole('button', { name: 'Eraser', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-sat-erase-armed="true"]')).toHaveCount(2);
+
+    await selectStimulusText(page, 'Several');
+    await expect(page.locator('[data-sat-highlight="true"]')).toHaveCount(0);
+    await selectStimulusText(page, 'researchers');
+    await expect(page.locator('[data-sat-underline="true"]')).toHaveCount(0);
+
+    await openSatHarness(page, { mode: 'math' });
+    await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Underline', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveCount(0);
+  });
+
+  test('desktop reading keeps the split divider without layout mode controls', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await openSatHarness(page);
     const divider = page.getByRole('slider', { name: 'Passage and question width' });
+    await expect(divider).toHaveAttribute('aria-valuenow', '50');
     await divider.focus(); await page.keyboard.press('ArrowRight');
-    await page.getByRole('button', { name: 'Passage only' }).click();
-    await expect(page.locator('[data-sat-question-scroll]')).toBeHidden();
-    await page.getByRole('button', { name: 'Split view' }).click();
     await expect(divider).toHaveAttribute('aria-valuenow', '55');
+    await expect(page.getByRole('button', { name: 'Split view', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Passage only', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Question only', exact: true })).toHaveCount(0);
+    await expect(page.locator('[data-sat-passage-scroll]')).toBeVisible();
     await expect(page.locator('[data-sat-question-scroll]')).toBeVisible();
   });
   test("regular iPad geometry preserves 44px controls and visible radio focus", async ({

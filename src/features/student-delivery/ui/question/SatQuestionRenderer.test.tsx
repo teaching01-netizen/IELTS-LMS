@@ -13,6 +13,10 @@ const question: DeliveredQuestion = {
   metadata: { sectionKey: 'reading-writing', domain: null, skill: null, difficulty: 'medium', tags: [] },
   accessibility: { longDescription: null },
 };
+const mathQuestion: DeliveredQuestion = {
+  ...question,
+  metadata: { ...question.metadata, sectionKey: 'math' },
+};
 
 describe('SAT annotated question rendering', () => {
   it('renders saved passage highlights without marking the identical prompt or answer text', () => {
@@ -25,6 +29,18 @@ describe('SAT annotated question rendering', () => {
     expect(highlights).toHaveLength(1);
     expect(highlights[0]).toHaveTextContent('tree');
     expect(highlights[0]?.closest('[data-sat-passage-scroll]')).not.toBeNull();
+  });
+
+  it('uses the supporting material pane for Math questions with stimulus content', () => {
+    const response = emptySatQuestionResponse('q1');
+    const { container } = render(<SatQuestionRenderer sectionKey="math" questionNumber={1} question={mathQuestion} response={response}
+      eliminationMode={false} disabled={false} readingPreferences={createSatReadingPreferences()}
+      onReadingSplitRatioChange={vi.fn()} onAnswerChange={vi.fn()} onToggleReview={vi.fn()} onToggleEliminationMode={vi.fn()} onToggleEliminatedOption={vi.fn()} />);
+
+    expect(screen.queryByRole('group', { name: 'Supporting material and question layout' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Supporting material' })).toHaveTextContent('A tree grows.');
+    expect(screen.getByRole('slider', { name: 'Supporting material and question width' })).toBeInTheDocument();
+    expect(container.querySelector('[data-sat-question-scroll]')).toHaveTextContent('A tree grows.');
   });
 });
 

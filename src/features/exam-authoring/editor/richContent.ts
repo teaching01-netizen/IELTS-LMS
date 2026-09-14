@@ -55,9 +55,9 @@ export function assetSource(assetId: string): string {
   return `/api/v1/media/${encodeURIComponent(assetId)}`;
 }
 
-export function documentFromStructuredContent(content: StructuredContent): RichTextDocument {
-  if (content.version === 2 && content.document?.type === "doc") return withRichContentIdentities(content.document);
-  return withRichContentIdentities({ type: "doc", content: content.nodes.map((node) => {
+export function documentFromStructuredContent(content: StructuredContent | null | undefined): RichTextDocument {
+  if (content?.version === 2 && content.document?.type === "doc") return withRichContentIdentities(content.document);
+  return withRichContentIdentities({ type: "doc", content: (content?.nodes ?? []).map((node) => {
     const rich = legacyNodeToRich(node);
     return { ...rich, attrs: { ...rich.attrs, id: node.id } };
   }) });
@@ -78,7 +78,8 @@ function richNodeText(node: RichTextNode): string {
   return (node.content ?? []).map(richNodeText).join(node.type === "paragraph" ? "" : "\n");
 }
 
-export function plainTextFromContent(content: StructuredContent): string {
+export function plainTextFromContent(content: StructuredContent | null | undefined): string {
+  if (!content) return "";
   if (content.version === 2 && content.document) {
     return (content.document.content ?? []).map(richNodeText).join("\n").trim();
   }
@@ -100,7 +101,8 @@ export function plainTextFromContent(content: StructuredContent): string {
     .trim();
 }
 
-export function hasStructuredContent(content: StructuredContent): boolean {
+export function hasStructuredContent(content: StructuredContent | null | undefined): boolean {
+  if (!content) return false;
   if (content.version === 2 && content.document) {
     const nodes = content.document.content ?? [];
     return nodes.some(
@@ -118,7 +120,8 @@ export function plainContentFromText(text: string): StructuredContent {
   return structuredContentFromDocument({ type: "doc", content: [paragraphNode] });
 }
 
-export function supportsFastPlainEditing(content: StructuredContent): boolean {
+export function supportsFastPlainEditing(content: StructuredContent | null | undefined): boolean {
+  if (!content) return false;
   if (content.version === 1) {
     return content.nodes.every((node) => node.type === "paragraph") && content.nodes.length <= 1;
   }

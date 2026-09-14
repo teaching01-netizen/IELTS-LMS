@@ -13,6 +13,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"math"
 	"strings"
 	"time"
 
@@ -218,13 +219,216 @@ func (s *Service) OverrideObjectiveQuestion(ctx context.Context, submissionID, s
 		}
 		over[questionID] = map[string]any{"points": points, "by": teacherID}
 		snap["overrides"] = over
-		if _, err := t.ExecContext(ctx,
+		if section == "science" {
+			applyScienceQuestionOverride(snap, questionID, teacherID, teacherName, points)
+		}
+		if section == "science" {
+			if _, err := t.ExecContext(ctx,
+				"UPDATE section_submissions SET auto_grading_results = ?, grading_status = ? WHERE id = ?",
+				string(mustJSON(snap)), SectionInReview, sectionID); err != nil {
+				return err
+			}
+		} else if _, err := t.ExecContext(ctx,
 			"UPDATE section_submissions SET auto_grading_results = ? WHERE id = ?",
 			string(mustJSON(snap)), sectionID); err != nil {
 			return err
 		}
+		if section == "science" {
+			if err := updateACTAssessmentResult(ctx, t, submissionID, snap); err != nil {
+				return err
+			}
+			// A manual ACT review changes the release gate in the same
+			// transaction as the question result. The integrity audit is kept
+			// intact; unresolved/invalid audits still block release.
+			var statuses sql.NullString
+			if err := t.QueryRowContext(ctx, "SELECT section_statuses FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&statuses); err != nil {
+				return err
+			}
+			statusMap := map[string]any{}
+			if statuses.Valid {
+				_ = json.Unmarshal([]byte(statuses.String), &statusMap)
+			}
+			statusMap[section] = SectionInReview
+			if _, err := t.ExecContext(ctx, "UPDATE student_submissions SET section_statuses = ?, grading_status = 'in_progress', updated_at = UTC_TIMESTAMP(6) WHERE id = ?", string(mustJSON(statusMap)), submissionID); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+}
+
+func applyScienceQuestionOverride(snapshot map[string]any, questionID, teacherID, teacherName string, points float64) {
+	results, _ := snapshot["questionResults"].([]any)
+	for _, raw := range results {
+		question, _ := raw.(map[string]any)
+		if question == nil || question["questionId"] != questionID {
+			continue
+		}
+		maxPoints, _ := question["maxScore"].(float64)
+		if maxPoints == 0 {
+			if integer, ok := question["maxScore"].(int); ok {
+				maxPoints = float64(integer)
+			}
+		}
+		if points > maxPoints && maxPoints > 0 {
+			points = maxPoints
+		}
+		correct := points > 0
+		question["isCorrect"] = correct
+		question["awardedScore"] = points
+		if correct {
+			question["verificationStatus"] = "verified_correct"
+		} else {
+			question["verificationStatus"] = "verified_incorrect"
+		}
+		question["hasOverride"] = true
+		question["manualOverride"] = map[string]any{
+			"isCorrect": correct, "awardedScore": points,
+			"overriddenBy": teacherID, "overriddenByName": teacherName,
+			"overriddenAt": time.Now().UTC(),
+		}
+	}
+	var total, max float64
+	for _, raw := range results {
+		question, _ := raw.(map[string]any)
+		if question == nil {
+			continue
+		}
+		if value, ok := question["awardedScore"].(float64); ok {
+			total += value
+		} else if value, ok := question["awardedScore"].(int); ok {
+			total += float64(value)
+		}
+		if value, ok := question["maxScore"].(float64); ok {
+			max += value
+		} else if value, ok := question["maxScore"].(int); ok {
+			max += float64(value)
+		}
+	}
+	snapshot["totalScore"] = total
+	snapshot["maxScore"] = max
+	if max > 0 {
+		snapshot["percentage"] = math.Round(total/max*10000) / 100
+	} else {
+		snapshot["percentage"] = 0.0
+	}
+	rebuildScienceIntegrity(snapshot)
+}
+
+// rebuildScienceIntegrity keeps the persisted audit counts aligned with the
+// question-level decision after an ACT override. The original issue codes are
+// retained: a manual mark changes scoring, but does not erase evidence that a
+// published key or submission payload required review.
+func rebuildScienceIntegrity(snapshot map[string]any) {
+	integrity, _ := snapshot["integrity"].(map[string]any)
+	if integrity == nil {
+		return
+	}
+	results, _ := snapshot["questionResults"].([]any)
+	var correct, incorrect, unanswered, unresolved, invalid int
+	for _, raw := range results {
+		question, _ := raw.(map[string]any)
+		if question == nil {
+			continue
+		}
+		switch question["verificationStatus"] {
+		case "verified_correct":
+			correct++
+		case "verified_incorrect":
+			incorrect++
+		case "verified_unanswered":
+			unanswered++
+		case "invalid":
+			invalid++
+		default:
+			unresolved++
+		}
+	}
+	integrity["verifiedCorrectCount"] = correct
+	integrity["verifiedIncorrectCount"] = incorrect
+	integrity["verifiedUnansweredCount"] = unanswered
+	integrity["unresolvedCount"] = unresolved
+	integrity["invalidCount"] = invalid
+	if overrides, ok := snapshot["overrides"].(map[string]any); ok {
+		integrity["manualOverrideCount"] = len(overrides)
+	}
+}
+
+// updateACTAssessmentResult mirrors the canonical science snapshot into the
+// provider-neutral result row while the same grading transaction still owns
+// both rows. This prevents result lists and exports from serving the
+// pre-override aggregate after the detail view has changed.
+func updateACTAssessmentResult(ctx context.Context, t tx.Tx, submissionID string, snapshot map[string]any) error {
+	var resultID, payloadRaw string
+	err := t.QueryRowContext(ctx, `
+		SELECT ar.id, CAST(ar.score_payload AS CHAR)
+		FROM assessment_results ar
+		JOIN student_submissions submission ON submission.attempt_id = ar.attempt_id
+		WHERE submission.id = ? AND ar.provider_key = 'act'
+		FOR UPDATE`, submissionID).Scan(&resultID, &payloadRaw)
+	if err == sql.ErrNoRows {
+		// Old rows can be repaired by the ACT maintenance job; do not turn an
+		// otherwise valid review action into a failure solely because the
+		// provider-neutral row predates canonical projection.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	payload := map[string]any{}
+	if strings.TrimSpace(payloadRaw) != "" {
+		_ = json.Unmarshal([]byte(payloadRaw), &payload)
+	}
+	score := map[string]any{
+		"totalScore": snapshotNumber(snapshot["totalScore"]),
+		"maxScore":   snapshotNumber(snapshot["maxScore"]),
+		"percentage": snapshotFloat(snapshot["percentage"]),
+	}
+	payload["score"] = score
+	payload["autoGradingResults"] = snapshot
+	encoded := string(mustJSON(payload))
+	_, err = t.ExecContext(ctx, `
+		UPDATE assessment_results
+		SET total_score = ?, score_payload = ?, release_status = 'pending',
+			updated_at = UTC_TIMESTAMP(6), revision = revision + 1
+		WHERE id = ? AND provider_key = 'act'`,
+		score["totalScore"], encoded, resultID)
+	return err
+}
+
+func snapshotNumber(value any) int64 {
+	switch number := value.(type) {
+	case int:
+		return int64(number)
+	case int64:
+		return number
+	case float64:
+		return int64(number)
+	case json.Number:
+		parsed, _ := number.Int64()
+		return parsed
+	default:
+		return 0
+	}
+}
+
+func snapshotFloat(value any) float64 {
+	switch number := value.(type) {
+	case float64:
+		return number
+	case float32:
+		return float64(number)
+	case int:
+		return float64(number)
+	case int64:
+		return float64(number)
+	case json.Number:
+		parsed, _ := number.Float64()
+		return parsed
+	default:
+		return 0
+	}
 }
 
 // SaveDraft upserts the teacher review draft checkpoint (idempotent by
@@ -670,9 +874,12 @@ func (s *Service) Export(ctx context.Context, actor auth.ActorContext, submissio
 	}
 	placeholders := strings.Repeat("?,", len(submissionIDs))
 	placeholders = strings.TrimSuffix(placeholders, ",")
-	query := `SELECT sub.id, sub.student_id, sub.student_name, sub.grading_status, sub.section_statuses
+	query := `SELECT sub.id, sub.student_id, sub.student_name, sub.grading_status, sub.section_statuses,
+		sub.provider_key, ss.auto_grading_results, ss.grading_status, ar.score_payload
 		FROM student_submissions sub
 		JOIN exam_schedules sch ON sch.id = sub.schedule_id
+		LEFT JOIN section_submissions ss ON ss.submission_id = sub.id AND ss.section = 'science'
+		LEFT JOIN assessment_results ar ON ar.attempt_id = sub.attempt_id AND ar.provider_key = sub.provider_key
 		JOIN grading_export_profiles prof ON prof.id = ?
 			AND (prof.organization_id IS NULL OR prof.organization_id = sch.organization_id)
 		WHERE sub.id IN (` + placeholders + `)`
@@ -692,16 +899,41 @@ func (s *Service) Export(ctx context.Context, actor auth.ActorContext, submissio
 	defer rows.Close()
 	var out []map[string]any
 	for rows.Next() {
-		var id, studentID, studentName, status, sections string
-		if err := rows.Scan(&id, &studentID, &studentName, &status, &sections); err != nil {
+		var id, studentID, studentName, status, sections, provider string
+		var autoJSON, sectionStatus, scorePayload sql.NullString
+		if err := rows.Scan(&id, &studentID, &studentName, &status, &sections, &provider, &autoJSON, &sectionStatus, &scorePayload); err != nil {
 			return nil, err
 		}
 		var secVal any
 		_ = json.Unmarshal([]byte(sections), &secVal)
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"submissionId": id, "studentId": studentID, "studentName": studentName,
 			"gradingStatus": status, "sections": secVal, "exportProfileId": profileID,
-		})
+			"providerKey": provider,
+		}
+		if provider == "act" && autoJSON.Valid {
+			var auto map[string]any
+			if json.Unmarshal([]byte(autoJSON.String), &auto) == nil {
+				item["autoGradingResults"] = auto
+				item["totalScore"] = auto["totalScore"]
+				item["maxScore"] = auto["maxScore"]
+				item["percentage"] = auto["percentage"]
+				if integrity, ok := auto["integrity"].(map[string]any); ok {
+					item["integrityStatus"] = integrity["integrityStatus"]
+				}
+				item["questionResults"] = auto["questionResults"]
+			}
+		}
+		if sectionStatus.Valid {
+			item["scienceGradingStatus"] = sectionStatus.String
+		}
+		if scorePayload.Valid {
+			var payload any
+			if json.Unmarshal([]byte(scorePayload.String), &payload) == nil {
+				item["scorePayload"] = payload
+			}
+		}
+		out = append(out, item)
 	}
 	return out, rows.Err()
 }
@@ -1301,7 +1533,7 @@ func lockObjectiveIntegrityForSubmission(ctx context.Context, t tx.Tx, submissio
 		expectedVersionID = strings.TrimSpace(sourceVersionID.String)
 	}
 	rows, err := t.QueryContext(ctx,
-		"SELECT section, auto_grading_results FROM section_submissions WHERE submission_id = ? AND section IN ('listening','reading') ORDER BY section ASC FOR UPDATE",
+		"SELECT section, auto_grading_results FROM section_submissions WHERE submission_id = ? AND section IN ('listening','reading','science') ORDER BY section ASC FOR UPDATE",
 		submissionID)
 	if err != nil {
 		return err
@@ -1323,7 +1555,14 @@ func lockObjectiveIntegrityForSubmission(ctx context.Context, t tx.Tx, submissio
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	for _, section := range []string{"listening", "reading"} {
+	// ACT submissions have one canonical objective section. IELTS retains the
+	// historical listening/reading pair; a science row is therefore validated
+	// when present without making legacy IELTS rows invent one.
+	sections := []string{"listening", "reading"}
+	if found["science"] {
+		sections = []string{"science"}
+	}
+	for _, section := range sections {
 		if !found[section] {
 			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Objective grading integrity blocks release: grading source stale.", HTTPStatus: 409}
 		}

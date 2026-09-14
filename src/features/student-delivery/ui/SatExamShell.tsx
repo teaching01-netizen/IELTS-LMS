@@ -284,6 +284,14 @@ export function SatExamShell(props: SatExamShellProps) {
           interaction.closeSurface();
           interaction.toggleAnnotationMode('highlight');
         }}
+        onToggleUnderline={() => {
+          interaction.closeSurface();
+          interaction.toggleAnnotationMode('underline');
+        }}
+        onToggleErase={() => {
+          interaction.closeSurface();
+          interaction.toggleAnnotationMode('erase');
+        }}
         notesOpen={activeOverlay === "notes"}
         notesButtonId={notesButtonId}
         hasQuestionNote={props.questionNote.trim().length > 0}

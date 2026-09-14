@@ -48,6 +48,9 @@ export const DELETION_COPY = {
 export const PUBLISH_COPY = {
   body: "This draft was published while you were editing. Your changes are preserved.",
   openNewDraft: "Open the new draft",
+  recoveryBody: "A newer version is active. Your unsaved changes are still available.",
+  openCurrentDraft: "Open current draft",
+  reviewMyChanges: "Review my changes",
   copyMyWork: "Copy my work",
   readOnlyNotice: "Published — read-only",
   /** Freeze reason surfaces as a title on every disabled mutation control. */
@@ -60,6 +63,7 @@ export const STRUCTURAL_COPY = {
 } as const;
 
 export const PRESENCE_COPY = {
+  editingNow: "Editing now",
   /** Subtle secondary label; informational tone, never alert chrome. */
   editingThisQuestion: (name: string) => `${name} is editing this question`,
   updatedBy: (name: string) => `Updated by ${name}`,

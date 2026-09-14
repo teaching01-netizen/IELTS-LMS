@@ -1,5 +1,6 @@
 import { backendGet, hasBackendStatusCode, mapBackendSchedule } from "@services/backendBridge";
 import type { ExamSchedule } from "../../../types/domain";
+export { entryQueueDelayMs, parseEntryQueueError } from "@services/entryQueueRetry";
 
 export async function getStudentEntrySchedule(scheduleId: string): Promise<ExamSchedule> {
   // Student entry is public until the registration POST mints the session.

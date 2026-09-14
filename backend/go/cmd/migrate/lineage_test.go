@@ -48,10 +48,12 @@ func migDir(t *testing.T) string {
 // keys) — count/max bumped 57->58. ACT reconciliation Phase 02 landed 0059
 // (answer fencing columns) — count/max bumped 58->59. SAT authoring realtime
 // Phase 02 landed 0060 (authoring replay indexes) — count/max bumped 59->60.
+// Authoring prompt co-editing landed 0061 (co-edit documents) — count/max
+// bumped 60->61.
 // Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 60
-	pinnedMigrationMax   = 60
+	pinnedMigrationFiles = 61
+	pinnedMigrationMax   = 61
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

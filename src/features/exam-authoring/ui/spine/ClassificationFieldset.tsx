@@ -11,6 +11,7 @@ export interface ClassificationFieldsetProps {
   question: QuestionRevision;
   onChange: (question: QuestionRevision) => void;
   issues: AssessmentValidationIssue[];
+  readOnly?: boolean | undefined;
 }
 
 /**
@@ -19,7 +20,7 @@ export interface ClassificationFieldsetProps {
  * as a radiogroup, and blocking domain/skill issues inline via
  * aria-describedby — never a far rail, never a second copy.
  */
-export function ClassificationFieldset({ question, onChange, issues }: ClassificationFieldsetProps) {
+export function ClassificationFieldset({ question, onChange, issues, readOnly = false }: ClassificationFieldsetProps) {
   const baseId = useId();
   const domainId = `${baseId}-domain`;
   const skillId = `${baseId}-skill`;
@@ -56,6 +57,7 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
           <Label htmlFor={domainId}>Domain</Label>
           <select
             id={domainId}
+            disabled={readOnly || skills.length === 0}
             value={question.metadata.domain ?? ""}
             onChange={(event) => updateDomain(event.target.value || null)}
             aria-invalid={Boolean(domainError)}
@@ -80,6 +82,7 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
           <Label htmlFor={skillId}>Skill</Label>
           <select
             id={skillId}
+            disabled={readOnly}
             value={question.metadata.skill ?? ""}
             onChange={(event) =>
               onChange({
@@ -87,7 +90,6 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
                 metadata: { ...question.metadata, skill: event.target.value || null },
               })
             }
-            disabled={skills.length === 0}
             aria-invalid={Boolean(skillError)}
             aria-describedby={skillError ? skillErrorId : undefined}
             className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-40"
@@ -117,6 +119,7 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
                 <button
                   key={difficulty}
                   type="button"
+                  disabled={readOnly}
                   role="radio"
                   aria-checked={checked}
                   onClick={() =>
@@ -145,6 +148,7 @@ export function ClassificationFieldset({ question, onChange, issues }: Classific
             id={tagsId}
             aria-label="Tags"
             value={question.metadata.tags.join(", ")}
+            disabled={readOnly}
             onChange={(event) =>
               onChange({
                 ...question,

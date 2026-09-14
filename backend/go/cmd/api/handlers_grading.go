@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
+	resultsdomain "example.com/ielts-proctoring/internal/results"
 )
 
 // Grading policy: reads, SaveDraft, OverrideObjectiveQuestion and
@@ -894,10 +896,78 @@ func resultsAnalyticsHandler(app *App) http.HandlerFunc {
 	}
 }
 
-// resultsExportHandler exports caller-owned result payloads for download.
+func enforceExportRateLimit(app *App, w http.ResponseWriter, r *http.Request) bool {
+	actor := actorOf(r.Context())
+	if strings.TrimSpace(actor.UserID) == "" {
+		return true
+	}
+	key := "export:" + actor.UserID
+	if app.Limiter != nil {
+		local := app.Limiter.Allow(httpx.RateLimitConfig{
+			MaxRequests: app.Config.RateLimitExportPerUser,
+			Window:      time.Duration(app.Config.RateLimitExportPerUserWindowSecs) * time.Second,
+		}, key)
+		if !local.Allowed {
+			w.Header().Set("Retry-After", retryAfterSeconds(local.RetryAfter))
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeRateLimitExceeded, "Too many export attempts."))
+			return false
+		}
+	}
+	if app.ExportLimiter != nil && !app.Config.RateLimitLocalOnly() {
+		allowed, retryAfter, err := app.ExportLimiter.Check(r.Context(), actor.UserID)
+		if err == nil && !allowed {
+			w.Header().Set("Retry-After", retryAfterSeconds(retryAfter))
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeRateLimitExceeded, "Too many export attempts."))
+			return false
+		}
+	}
+	return true
+}
+
+func retryAfterSeconds(d time.Duration) string {
+	seconds := int(d / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	return strconv.Itoa(seconds)
+}
+
+// resultsExportHandler restores the Rust-compatible legacy export contract.
 func resultsExportHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader, auth.RoleProctor) == nil {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader) == nil {
+			return
+		}
+		if !enforceExportRateLimit(app, w, r) {
+			return
+		}
+		if app.Results == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Results service not configured."))
+			return
+		}
+		items, err := app.Results.ExportVisible(r.Context(), actorOf(r.Context()))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if items == nil {
+			items = []resultsdomain.DashboardResult{}
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"format": "json", "generatedAt": time.Now().UTC(),
+			"count": len(items), "items": items,
+		})
+	}
+}
+
+// gradingProfileExportHandler is the additive selected-submission export
+// contract used by current Go clients. It does not overload /results/export.
+func gradingProfileExportHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader) == nil {
+			return
+		}
+		if !enforceExportRateLimit(app, w, r) {
 			return
 		}
 		if app.Grading == nil {

@@ -104,7 +104,8 @@ function richNodeHasContent(node: import("../../contracts/assessment").RichTextN
   return (node.content ?? []).some(richNodeHasContent);
 }
 
-function hasContent(content: StructuredContent): boolean {
+function hasContent(content: StructuredContent | null | undefined): boolean {
+  if (!content) return false;
   if (content.document?.type === "doc") {
     return (content.document.content ?? []).some(richNodeHasContent);
   }
@@ -147,8 +148,11 @@ function validateRichDocument(
   );
 }
 
-function validateContent(content: StructuredContent, path: string): AssessmentValidationIssue[] {
-  const issues = content.nodes.flatMap((node: ContentNode, index) => {
+function validateContent(
+  content: StructuredContent | null | undefined,
+  path: string,
+): AssessmentValidationIssue[] {
+  const issues = (content?.nodes ?? []).flatMap((node: ContentNode, index) => {
     if (node.type !== "image") return [];
     const nodeIssues: AssessmentValidationIssue[] = [];
     if (!node.assetId.trim()) {
@@ -169,7 +173,7 @@ function validateContent(content: StructuredContent, path: string): AssessmentVa
     }
     return nodeIssues;
   });
-  (content.document?.content ?? []).forEach((node, index) =>
+  (content?.document?.content ?? []).forEach((node, index) =>
     validateRichDocument(node, `${path}.document.content.${index}`, issues)
   );
   return issues;

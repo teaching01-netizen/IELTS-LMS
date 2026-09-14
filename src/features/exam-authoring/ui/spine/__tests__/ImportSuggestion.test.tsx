@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { QuestionRevision, StructuredContent } from "../../../contracts/assessment";
 import type { SmartPasteStatus } from "../../../editor/RichQuestionComposer";
@@ -85,5 +85,52 @@ describe("ImportSuggestion wiring", () => {
     expect(onDismiss2).toHaveBeenCalledTimes(1);
     expect((onDismiss2.mock.calls[0]?.[0] as { accepted: boolean }).accepted).toBe(false);
     void promptPasteStatus;
+  });
+
+  it("refuses the whole-question split while prompt co-editing is active", async () => {
+    const onChange = vi.fn();
+    render(
+      <SpineQuestionView
+        question={choiceRevision()}
+        questionNumber={1}
+        saveStatus="saved"
+        lastSavedAt={null}
+        issues={[]}
+        keepMetadataForNext
+        onKeepMetadataForNextChange={vi.fn()}
+        onChange={onChange}
+        onSaveNow={vi.fn()}
+        onSaveAndNext={vi.fn()}
+        onRetrySave={vi.fn()}
+        onDuplicate={vi.fn()}
+        onDelete={vi.fn()}
+        onPreview={vi.fn()}
+        onIssueSelect={vi.fn()}
+        promptCollaboration={{ extensions: [], ready: true }}
+      />,
+    );
+
+    const prompt = await screen.findByRole("textbox", { name: "Question prompt" });
+    // The suggestion card only appears when the paste analysis band is
+    // `suggest`, so the paste has to go through the real ingestion path.
+    fireEvent.paste(prompt, {
+      clipboardData: { files: [], getData: (format: string) => (format === "text/plain" ? FULL : "") },
+    });
+    const split = await screen.findByRole(
+      "button",
+      { name: "Split pasted content into question fields" },
+      { timeout: 5_000 },
+    );
+
+    // The paste itself legitimately emits a prompt projection, so the refusal
+    // is measured against the state at the moment the author accepts it.
+    const before = onChange.mock.calls.length;
+    fireEvent.click(split);
+
+    // The split writes several fields through the whole-question save path,
+    // which cannot write a collaborative prompt: it is refused with an
+    // explanation, and the author's typed prompt is never silently dropped.
+    await waitFor(() => expect(screen.getByText(/being edited collaboratively/)).toBeInTheDocument());
+    expect(onChange.mock.calls.length).toBe(before);
   });
 });

@@ -31,7 +31,7 @@ func TestMigrationLedgerApplies(t *testing.T) {
 	if err := pool.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatalf("schema_migrations missing (run cmd/migrate first): %v", err)
 	}
-	if count < 58 {
-		t.Fatalf("expected >=58 applied migrations (0001..0058), got %d", count)
+	if count < 61 {
+		t.Fatalf("expected >=61 applied migrations (0001..0061), got %d", count)
 	}
 }
