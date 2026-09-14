@@ -208,8 +208,34 @@ describe("CoeditPersistence.store", () => {
       type: "coedit.save_failed",
       documentName: DOCUMENT_NAME,
       retryable: true,
+      reason: null,
+      requiresResync: false,
     });
     expect(persistence.lastCommit(DOCUMENT_NAME)).toBeNull();
+  });
+
+  it("marks a moved-commit refusal as non-retryable and resync-required", async () => {
+    // A service restart empties the in-memory commit map, so the next store
+    // sends an empty previousStateHash; the row's committed hash moved on and
+    // the fence refuses. Retrying verbatim can never satisfy it.
+    const go = harness(() => ({
+      status: 409,
+      json: { error: { code: "ASSESSMENT_CONFLICT", details: { coeditReason: "coedit_previous_hash_mismatch" } } },
+    }));
+    const persistence = new CoeditPersistence(go.client);
+    const acks: string[] = [];
+    persistence.setBroadcaster((_name, payload) => acks.push(payload));
+
+    await expect(
+      persistence.store({ documentName: DOCUMENT_NAME, document: seedYDocFromPrompt(PROMPT), context: {} }),
+    ).rejects.toThrow();
+    expect(JSON.parse(acks[0] as string)).toEqual({
+      type: "coedit.save_failed",
+      documentName: DOCUMENT_NAME,
+      retryable: false,
+      reason: "coedit_previous_hash_mismatch",
+      requiresResync: true,
+    });
   });
 
   it("retries the same document after a failure instead of caching the error", async () => {

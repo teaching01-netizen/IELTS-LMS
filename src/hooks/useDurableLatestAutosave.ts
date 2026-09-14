@@ -70,6 +70,12 @@ type QueueItem<T> = {
   requestId: number;
   durableKey: string | null;
   save: (value: T) => Promise<unknown>;
+  /**
+   * True for a user-visible action (flush / retry). Automatic debounced saves
+   * are held while a conflict is unresolved; explicit actions may always
+   * attempt the write so the author can resolve on purpose.
+   */
+  explicit: boolean;
 };
 
 function asError(error: unknown): Error {
@@ -82,6 +88,24 @@ export function useDurableLatestAutosave<T>(
   const { debounceMs, durableKey = null, autoSaveRecovered = true } = options;
   const [status, setStatus] = useState<DurableAutosaveStatus>("saved");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  /**
+   * Ref mirror of `status` so the async runner and schedule() can read the
+   * CURRENT fence without waiting for a re-render. RISK-6: an unresolved
+   * conflict must never be downgraded by a later keystroke or auto-send.
+   */
+  const statusRef = useRef<DurableAutosaveStatus>("saved");
+  const applyStatus = useCallback((next: DurableAutosaveStatus) => {
+    statusRef.current = next;
+    setStatus(next);
+  }, []);
+  /**
+   * Per-request outcomes for explicit actions. The latest-only runner exposes
+   * only a GLOBAL lastError, so a superseded failure would report ok:false for
+   * an unrelated flush while a later success would mask a real flush failure.
+   * `null` = saved, an Error = failed/held, and a MISSING entry = the request
+   * never ran (coalesced away) — which must never read as success.
+   */
+  const explicitOutcomesRef = useRef(new Map<number, Error | null>());
   const saveRef = useRef(options.save);
   const onErrorRef = useRef(options.onError);
   const onRecoverRef = useRef(options.onRecover);
@@ -101,7 +125,15 @@ export function useDurableLatestAutosave<T>(
 
   if (!runnerRef.current) {
     runnerRef.current = createLatestOnlyAsyncRunner(async (item) => {
-      setStatus("saving");
+      // RISK-6 mirror: while a conflict is unresolved, an AUTOMATIC debounced
+      // save must not re-send the same stale base — the server rejects it
+      // again and the attempt is pure noise. Explicit actions (flush/retry)
+      // still attempt the write so the author can resolve deliberately. The
+      // newest content is already checkpointed durably by schedule()/flush().
+      if (!item.explicit && statusRef.current === "conflict") {
+        return;
+      }
+      applyStatus("saving");
       if (item.durableKey) {
         try {
           await saveDurableDraft(item.durableKey, item.value);
@@ -116,19 +148,21 @@ export function useDurableLatestAutosave<T>(
           item.durableKey === durableKeyRef.current
         ) {
           if (item.durableKey) await clearDurableDraft(item.durableKey);
-          setStatus("saved");
+          applyStatus("saved");
           setLastSavedAt(new Date());
         }
+        if (item.explicit) explicitOutcomesRef.current.set(item.requestId, null);
       } catch (error) {
+        const resolved = asError(error);
         if (item.requestId === latestRequestIdRef.current) {
-          const resolved = asError(error);
           // A 409/version conflict is not a transient failure: the server
           // advanced, so the local draft is preserved and the UI enters the
           // dedicated conflict state with reload guidance (never auto-retry
           // the stale payload, which would loop on the same conflict).
-          setStatus(isRevisionConflictError(error) ? "conflict" : "error");
+          applyStatus(isRevisionConflictError(error) ? "conflict" : "error");
           onErrorRef.current?.(resolved);
         }
+        if (item.explicit) explicitOutcomesRef.current.set(item.requestId, resolved);
         throw error;
       }
     });
@@ -138,10 +172,10 @@ export function useDurableLatestAutosave<T>(
     if (!key) return;
     void saveDurableDraft(key, value).catch((error) => {
       if (requestId !== latestRequestIdRef.current) return;
-      setStatus("error");
+      applyStatus("error");
       onErrorRef.current?.(asError(error));
     });
-  }, []);
+  }, [applyStatus]);
   const enqueuePending = useCallback(() => {
     const value = pendingValueRef.current;
     const requestId = pendingRequestIdRef.current;
@@ -151,6 +185,7 @@ export function useDurableLatestAutosave<T>(
       requestId,
       durableKey: durableKeyRef.current,
       save: saveRef.current,
+      explicit: false,
     });
     pendingValueRef.current = null;
     pendingRequestIdRef.current = null;
@@ -163,12 +198,16 @@ export function useDurableLatestAutosave<T>(
       const key = durableKeyRef.current;
       pendingValueRef.current = value;
       pendingRequestIdRef.current = requestId;
-      setStatus("unsaved");
+      // Shared-hook finding #1: a keystroke during an unresolved conflict must
+      // not clear the fence back to "unsaved". The newest content is still
+      // checkpointed durably below; the fence clears only through an explicit
+      // resolution (retry / adopt / a successful save).
+      if (statusRef.current !== "conflict") applyStatus("unsaved");
       persistLocal(key, value, requestId);
       if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(enqueuePending, debounceMs);
     },
-    [debounceMs, enqueuePending, persistLocal]
+    [applyStatus, debounceMs, enqueuePending, persistLocal]
   );
 
   const flush = useCallback(async (value: T): Promise<DurableAutosaveFlushResult> => {
@@ -182,10 +221,16 @@ export function useDurableLatestAutosave<T>(
       requestId,
       durableKey: durableKeyRef.current,
       save: saveRef.current,
+      explicit: true,
     });
     await runnerRef.current?.idle();
+    const outcome = explicitOutcomesRef.current.get(requestId);
+    explicitOutcomesRef.current.delete(requestId);
     return {
-      ok: !runnerRef.current?.lastError,
+      // The result is THIS request's outcome, never the runner's global
+      // lastError (a superseded failure, or a later success, must not be
+      // reported as this flush's result — navigation gates read `ok`).
+      ok: outcome === null,
       isLatest: requestId === latestRequestIdRef.current,
     };
   }, []);
@@ -197,6 +242,7 @@ export function useDurableLatestAutosave<T>(
       requestId,
       durableKey: durableKeyRef.current,
       save: saveRef.current,
+      explicit: true,
     });
   }, []);
 
@@ -222,11 +268,11 @@ export function useDurableLatestAutosave<T>(
     debounceRef.current = null;
     pendingValueRef.current = null;
     pendingRequestIdRef.current = null;
-    setStatus("saved");
+    applyStatus("saved");
     setLastSavedAt(new Date());
     const key = durableKeyRef.current;
     if (key) void clearDurableDraft(key).catch(() => undefined);
-  }, []);
+  }, [applyStatus]);
 
   useEffect(() => {
     const requestId = ++latestRequestIdRef.current;
@@ -235,21 +281,34 @@ export function useDurableLatestAutosave<T>(
     void loadDurableDraft<T>(durableKey)
       .then((recovered) => {
         if (cancelled || recovered === null) return;
+        // Shared-hook finding #2: a schedule()/flush()/retry() that landed
+        // while IndexedDB was loading owns the newest state. Installing the
+        // stale recovered value (or enqueueing it) would overwrite the newer
+        // edit with an id whose status writes are suppressed — an invisible
+        // write. The durable read is only authoritative while no newer
+        // request exists.
+        if (requestId !== latestRequestIdRef.current) return;
         onRecoverRef.current?.(recovered);
-        setStatus("unsaved");
+        if (statusRef.current !== "conflict") applyStatus("unsaved");
         if (autoSaveRecovered) {
-          runnerRef.current?.enqueue({ value: recovered, requestId, durableKey, save: saveRef.current });
+          runnerRef.current?.enqueue({
+            value: recovered,
+            requestId,
+            durableKey,
+            save: saveRef.current,
+            explicit: false,
+          });
         }
       })
       .catch((error) => {
         if (cancelled || requestId !== latestRequestIdRef.current) return;
-        setStatus("error");
+        applyStatus("error");
         onErrorRef.current?.(asError(error));
       });
     return () => {
       cancelled = true;
     };
-  }, [autoSaveRecovered, durableKey]);
+  }, [applyStatus, autoSaveRecovered, durableKey]);
 
   useEffect(() => {
     return () => {

@@ -32,6 +32,20 @@ export interface CoeditCommit {
   acknowledgedAt: number;
 }
 
+/**
+ * Domain reasons a verbatim retry can NEVER satisfy: the row's committed state
+ * hash moved past the commit this service holds (typically a service restart
+ * that emptied the in-memory commit map, or a second replica). The room must
+ * resync before it can save again — retrying the same store would repeat the
+ * refusal forever, which is why these are reported as non-retryable with the
+ * `requiresResync` flag instead of a bare `retryable: true`.
+ */
+const SAVE_RESYNC_REASONS: ReadonlySet<string> = new Set([
+  "coedit_previous_hash_mismatch",
+  "coedit_revision_conflict",
+  "coedit_seed_conflict",
+]);
+
 export interface LoadHookInput {
   documentName: string;
   document: Y.Doc;
@@ -226,12 +240,22 @@ export class CoeditPersistence {
       return commit;
     } catch (error) {
       const reason = error instanceof GoRequestError ? error.reason : null;
+      const requiresResync = reason !== null && SAVE_RESYNC_REASONS.has(reason);
       this.broadcaster?.(
         documentName,
         JSON.stringify({
           type: "coedit.save_failed",
           documentName,
-          retryable: error instanceof GoRequestError ? error.retryable : true,
+          // A stale-hash refusal is a CLIENT outcome, not a transient one:
+          // mark it non-retryable so the editor stops looping and tells the
+          // author to reload instead of silently retrying forever.
+          retryable: requiresResync
+            ? false
+            : error instanceof GoRequestError
+              ? error.retryable
+              : true,
+          reason,
+          requiresResync,
         }),
       );
       metrics.incCounter("authoring_coedit_store_total", {

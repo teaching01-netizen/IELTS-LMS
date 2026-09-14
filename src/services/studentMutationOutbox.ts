@@ -582,15 +582,21 @@ export function createStudentMutationOutbox(deps: {
 
         try {
           const persistedAt = new Date().toISOString();
-          const persistedAttempt = mergeStudentAttempt(savingAttempt, {
+          // Finding #6: the record handed to the persist dependency must not
+          // claim the flush succeeded before it has. A crash or a failed
+          // persist between here and the mutation clear would otherwise leave
+          // a durable "saved / 0 pending" claim for work that never landed.
+          // The honest pre-send state is `saving` with the true pending count;
+          // the `saved` record is written only after the mutations are cleared.
+          const flushingAttempt = mergeStudentAttempt(savingAttempt, {
             recovery: {
               lastPersistedAt: persistedAt,
-              pendingMutationCount: 0,
-              syncState: 'saved',
+              pendingMutationCount: mutationsBeingFlushed.length,
+              syncState: 'saving',
             },
           });
 
-          await deps.saveAttempt(persistedAttempt, {
+          await deps.saveAttempt(flushingAttempt, {
             flushCycleId,
             sampledSuccessLogs,
           });
@@ -613,7 +619,7 @@ export function createStudentMutationOutbox(deps: {
             if (!persistedMirror) {
               return false;
             }
-            const stillSavingAttempt = mergeStudentAttempt(deps.getAttempt() ?? persistedAttempt, {
+            const stillSavingAttempt = mergeStudentAttempt(deps.getAttempt() ?? flushingAttempt, {
               recovery: {
                 lastPersistedAt: persistedAt,
                 pendingMutationCount: remainingMutations.length,
@@ -630,7 +636,7 @@ export function createStudentMutationOutbox(deps: {
           }
 
           deps.mirror.cancelDebouncedPersist();
-          await deps.clearPendingMutations(persistedAttempt.id);
+          await deps.clearPendingMutations(flushingAttempt.id);
           const postClearMutations = deps.mirror.getPendingMutations().filter(
             (mutation) => !flushedMutationIds.has(mutation.id),
           );
@@ -648,7 +654,7 @@ export function createStudentMutationOutbox(deps: {
             if (!persistedMirror) {
               return false;
             }
-            const stillSavingAttempt = mergeStudentAttempt(deps.getAttempt() ?? persistedAttempt, {
+            const stillSavingAttempt = mergeStudentAttempt(deps.getAttempt() ?? flushingAttempt, {
               recovery: {
                 lastPersistedAt: persistedAt,
                 pendingMutationCount: postClearMutations.length,
@@ -664,10 +670,24 @@ export function createStudentMutationOutbox(deps: {
             continue;
           }
 
-          deps.mirror.finalizeAfterSuccessfulClear(persistedAttempt.id);
-          const cachedAttempts = await deps.getAttemptsByScheduleId(persistedAttempt.scheduleId);
+          deps.mirror.finalizeAfterSuccessfulClear(flushingAttempt.id);
+          // Only now — after the delivery attempt resolved AND the mutation
+          // ledger was cleared — is it honest to record the saved state.
+          const savedAttempt = mergeStudentAttempt(deps.getAttempt() ?? flushingAttempt, {
+            recovery: {
+              lastPersistedAt: persistedAt,
+              pendingMutationCount: 0,
+              syncState: 'saved',
+            },
+          });
+          // The mutations are already delivered; a failure to record the local
+          // bookkeeping must not turn a successful flush into a failed one.
+          await deps.saveAttempt(savedAttempt, { flushCycleId, sampledSuccessLogs }).catch(
+            () => undefined,
+          );
+          const cachedAttempts = await deps.getAttemptsByScheduleId(savedAttempt.scheduleId);
           const refreshed =
-            cachedAttempts.find((candidate) => candidate.id === persistedAttempt.id) ?? persistedAttempt;
+            cachedAttempts.find((candidate) => candidate.id === savedAttempt.id) ?? savedAttempt;
           deps.syncAttemptState(refreshed);
           return true;
         } catch (error) {

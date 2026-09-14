@@ -31,6 +31,8 @@ import {
   clearScheduleRevision,
   getExamRevision,
   getScheduleRevision,
+  rememberExamRevision,
+  rememberScheduleRevision,
   isBackendNotFound,
   mapBackendExamEntity,
   mapBackendExamEvent,
@@ -154,17 +156,63 @@ export class BackendExamRepository implements IExamRepository {
     }
   }
 
+  /**
+   * Finding #5: the update response carries the NEW revision, but the old code
+   * discarded it — so the very next save PATCHed the stale revision, drew a
+   * 409, and relied on the auto-refresh retry. Publishing the returned
+   * revision makes routine back-to-back saves conflict-free and leaves the 409
+   * path for genuine cross-writer conflicts.
+   */
+  private publishExamRevisionFromPatch(examId: string, payload: unknown): void {
+    const revision = (payload as { revision?: unknown } | null | undefined)?.revision;
+    if (typeof revision === 'number' && Number.isInteger(revision)) {
+      rememberExamRevision(examId, revision);
+    }
+  }
+
+  private publishScheduleRevisionFromPatch(scheduleId: string, payload: unknown): void {
+    const revision = (payload as { revision?: unknown } | null | undefined)?.revision;
+    if (typeof revision === 'number' && Number.isInteger(revision)) {
+      rememberScheduleRevision(scheduleId, revision);
+    }
+  }
+
   async saveExam(exam: ExamEntity): Promise<void> {
     const revision = getExamRevision(exam.id);
     if (revision === undefined) {
       // Cold revision cache: this id was never read, so it is a create.
-      // No hydration GET here — the create path must stay a single POST.
-      await backendPost('/v1/exams', buildCreateExamPayload(exam));
-      return;
+      // No hydration GET here — the happy create path stays a single POST.
+      try {
+        await backendPost('/v1/exams', buildCreateExamPayload(exam));
+        return;
+      } catch (error) {
+        // Finding #5: the exam can already exist server-side even though this
+        // tab never read it. The backend mints its own id and only rejects a
+        // duplicate SLUG, so a blind create for an existing exam fails here —
+        // and a locally-changed slug would quietly create a SECOND exam.
+        // Treat the conflict as "the entity exists": hydrate the revision and
+        // converge onto the update path instead of surfacing a spurious
+        // conflict. A refresh that finds nothing rethrows the original error
+        // (the slug really is taken by an exam this id does not own).
+        if (!isConflictError(error)) throw error;
+        await this.refreshExamRevision(exam.id, true).catch(() => undefined);
+        const hydratedRevision = getExamRevision(exam.id);
+        if (hydratedRevision === undefined) throw error;
+        const converged = await backendPatch(
+          `/v1/exams/${exam.id}`,
+          buildUpdateExamPayload(exam, hydratedRevision),
+        );
+        this.publishExamRevisionFromPatch(exam.id, converged);
+        return;
+      }
     }
 
     try {
-      await backendPatch(`/v1/exams/${exam.id}`, buildUpdateExamPayload(exam, revision));
+      const updated = await backendPatch(
+        `/v1/exams/${exam.id}`,
+        buildUpdateExamPayload(exam, revision),
+      );
+      this.publishExamRevisionFromPatch(exam.id, updated);
     } catch (error) {
       // 409 = stale revision (another writer won the race). Re-read once to
       // refresh the cached revision and retry the PATCH a single time; a
@@ -176,7 +224,11 @@ export class BackendExamRepository implements IExamRepository {
         await backendPost('/v1/exams', buildCreateExamPayload(exam));
         return;
       }
-      await backendPatch(`/v1/exams/${exam.id}`, buildUpdateExamPayload(exam, freshRevision));
+      const retried = await backendPatch(
+        `/v1/exams/${exam.id}`,
+        buildUpdateExamPayload(exam, freshRevision),
+      );
+      this.publishExamRevisionFromPatch(exam.id, retried);
     }
   }
 
@@ -325,18 +377,35 @@ export class BackendExamRepository implements IExamRepository {
 
     if (revision === undefined) {
       // Cold revision cache: this id was never read, so it is a create.
-      // No hydration GET here — the create path must stay a single POST
+      // No hydration GET here — the happy create path stays a single POST
       // (callers/tests queue exactly one response for it).
-      await backendPost('/v1/schedules', buildCreateSchedulePayload(schedule));
-      this.schedulesCache.delete(BackendExamRepository.ALL_SCHEDULES_CACHE_KEY);
-      return;
+      try {
+        await backendPost('/v1/schedules', buildCreateSchedulePayload(schedule));
+        this.schedulesCache.delete(BackendExamRepository.ALL_SCHEDULES_CACHE_KEY);
+        return;
+      } catch (error) {
+        // Finding #5 (mirror of saveExam): a cold-cache create for a schedule
+        // that already exists must converge onto the update path rather than
+        // surfacing a spurious conflict.
+        if (!isConflictError(error)) throw error;
+        await this.refreshScheduleRevision(schedule.id, true).catch(() => undefined);
+        const hydratedRevision = getScheduleRevision(schedule.id);
+        if (hydratedRevision === undefined) throw error;
+        await backendPatch(
+          `/v1/schedules/${schedule.id}`,
+          buildUpdateSchedulePayload(schedule, hydratedRevision),
+        );
+        this.schedulesCache.delete(BackendExamRepository.ALL_SCHEDULES_CACHE_KEY);
+        return;
+      }
     }
 
     try {
-      await backendPatch(
+      const updated = await backendPatch(
         `/v1/schedules/${schedule.id}`,
         buildUpdateSchedulePayload(schedule, revision),
       );
+      this.publishScheduleRevisionFromPatch(schedule.id, updated);
     } catch (error) {
       // 409 = stale revision. Refresh once (bypassing the share so the retry
       // provably observes post-conflict state) and retry a single time.
@@ -346,10 +415,11 @@ export class BackendExamRepository implements IExamRepository {
       if (freshRevision === undefined) {
         await backendPost('/v1/schedules', buildCreateSchedulePayload(schedule));
       } else {
-        await backendPatch(
+        const retried = await backendPatch(
           `/v1/schedules/${schedule.id}`,
           buildUpdateSchedulePayload(schedule, freshRevision),
         );
+        this.publishScheduleRevisionFromPatch(schedule.id, retried);
       }
     }
 

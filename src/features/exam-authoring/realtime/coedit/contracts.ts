@@ -80,6 +80,17 @@ export interface CoeditSaveFailureMessage {
   type: "coedit.save_failed";
   documentName: string;
   retryable: boolean;
+  /**
+   * Machine-readable domain reason (`coedit_previous_hash_mismatch`, …) when
+   * the service knows it. Optional for wire compatibility with older builds.
+   */
+  reason: string | null;
+  /**
+   * True when the row's committed state moved past this room's commit, so a
+   * verbatim retry can never succeed — the room must resync first.
+   * `retryable` is false whenever this is true.
+   */
+  requiresResync: boolean;
 }
 
 /** Invalid or unrelated stateless payloads are deliberately ignored. */
@@ -119,6 +130,8 @@ export function parseCoeditSaveFailureMessage(raw: unknown): CoeditSaveFailureMe
     type: "coedit.save_failed",
     documentName: value["documentName"],
     retryable: value["retryable"],
+    reason: typeof value["reason"] === "string" && value["reason"].trim() !== "" ? value["reason"] : null,
+    requiresResync: value["requiresResync"] === true,
   };
 }
 

@@ -12,7 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DurableResponseEngine, type TransportClient } from '../DurableResponseEngine';
-import type { ResponsePayload, ResponseSnapshotV2 } from '../types';
+import type { ResponseBatchRequestV2, ResponsePayload, ResponseSnapshotV2 } from '../types';
 
 const storage = vi.hoisted(() => ({ save: vi.fn(), list: vi.fn(), clear: vi.fn() }));
 vi.mock('../../../utils/durableDraftStore', () => ({
@@ -395,6 +395,78 @@ describe('durability telemetry (WP7 reason-coded counters)', () => {
     for (const forbidden of ['answer', 'payload', 'response', 'annotation']) {
       expect(keys).not.toContain(forbidden);
     }
+  });
+
+  it('N1b: heals a per-question VERSION_COLLISION by re-issuing above the refreshed floor', async () => {
+    const sendBatch = vi
+      .fn()
+      .mockRejectedValueOnce({
+        code: 'VERSION_COLLISION',
+        details: { questionId: 'q1', clientVersion: 1, current: 3 },
+      })
+      .mockImplementation(async (_attemptId: string, req: ResponseBatchRequestV2) => ({
+        attemptRevision: 4,
+        serverTime: 'now',
+        acknowledgements: req.commands.map((command) => ({
+          writeId: command.writeId,
+          questionId: command.questionId,
+          clientVersion: command.clientVersion,
+          outcome: 'applied' as const,
+          serverRevision: 4,
+          canonicalResponse: command.response,
+          contentHash: 'healed',
+        })),
+      }));
+    const fetchSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(runningSnapshot())
+      .mockResolvedValue(
+        runningSnapshot({
+          attemptRevision: 3,
+          responses: [
+            {
+              writeId: 'server-write',
+              questionId: 'q1',
+              clientVersion: 3,
+              outcome: 'applied',
+              serverRevision: 3,
+              canonicalResponse: payload('server answer'),
+              contentHash: 'server',
+            },
+          ],
+        })
+      );
+    const { engine, events } = createEngine({ fetchSnapshot, sendBatch });
+    await engine.recover();
+    await engine.acceptResponse('q1', payload('local answer'));
+    await engine.flush();
+    expect(events.map((e) => e.name)).toContain('version_collision_recovered');
+    expect(engine.getQuarantined()).toHaveLength(0);
+    expect(engine.getStatus()).toBe('synced');
+    const secondBatch = sendBatch.mock.calls[1]?.[1] as ResponseBatchRequestV2;
+    expect(secondBatch.commands[0]?.questionId).toBe('q1');
+    // Re-issued strictly above the server's own floor (3) so the collision
+    // probe can never match again.
+    expect(secondBatch.commands[0]?.clientVersion).toBe(4);
+  });
+
+  it('N1b: still fences terminally when the collision floor cannot be refreshed', async () => {
+    const sendBatch = vi.fn().mockRejectedValue({
+      code: 'VERSION_COLLISION',
+      details: { questionId: 'q1', clientVersion: 1 },
+    });
+    const fetchSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(runningSnapshot())
+      .mockRejectedValue(new Error('offline'));
+    const { engine, events } = createEngine({ fetchSnapshot, sendBatch });
+    await engine.recover();
+    await engine.acceptResponse('q1', payload('unsendable answer'));
+    await engine.flush();
+    expect(events.map((e) => e.name)).toContain('version_collision_recovery_failed');
+    expect(events.map((e) => e.name)).toContain('version_collision');
+    expect(engine.getStatus()).toBe('conflict_terminal');
+    expect(engine.getQuarantined()).toHaveLength(1);
   });
 
   it('never throws when the durability event hook itself throws', async () => {

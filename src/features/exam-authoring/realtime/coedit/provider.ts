@@ -520,6 +520,21 @@ export class PromptCoeditProvider {
     const saveFailure = parseCoeditSaveFailureMessage(parsed);
     if (saveFailure) {
       if (saveFailure.documentName !== this.documentName) return;
+      if (saveFailure.requiresResync) {
+        // Finding #4 residual: the row's committed state moved past this
+        // room's commit (a service restart empties the in-memory commit map,
+        // so `previousStateHash` comes back empty and the fence refuses). A
+        // verbatim retry can NEVER satisfy the fence, so surface an
+        // actionable, non-retryable state instead of looping on save_failed.
+        this.issue = "rejected";
+        this.issueMessage =
+          "This prompt was changed elsewhere and cannot be saved from this editor. Reload the prompt to continue.";
+        this.lastError = { message: this.issueMessage, retryable: false };
+        this.storeInFlight = false;
+        this.options.onLifecycle?.("rejected", this.issueMessage);
+        this.recompute();
+        return;
+      }
       this.lastError = {
         message: "The latest changes could not be saved.",
         retryable: saveFailure.retryable,

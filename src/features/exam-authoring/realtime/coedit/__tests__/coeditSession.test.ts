@@ -282,6 +282,26 @@ describe("persistence failure messages", () => {
       type: "coedit.save_failed",
       documentName: "coedit:v1:doc-1",
       retryable: true,
+      reason: null,
+      requiresResync: false,
+    });
+  });
+
+  it("reads the stale-hash resync signal from a moved-commit refusal", () => {
+    expect(
+      parseCoeditSaveFailureMessage({
+        type: "coedit.save_failed",
+        documentName: "coedit:v1:doc-1",
+        retryable: false,
+        reason: "coedit_previous_hash_mismatch",
+        requiresResync: true,
+      }),
+    ).toEqual({
+      type: "coedit.save_failed",
+      documentName: "coedit:v1:doc-1",
+      retryable: false,
+      reason: "coedit_previous_hash_mismatch",
+      requiresResync: true,
     });
   });
 

@@ -54,6 +54,14 @@ const CHECKPOINT_PREFIX = "response-checkpoint:v2:";
 const DURABLE_DRAFT_PREFIX = "v2_attempt_";
 const QUARANTINE_PREFIX = "v2_quarantine:";
 const MAX_RETRY_ATTEMPTS_PER_DRAIN = 8;
+/**
+ * N1b self-heal budget: a per-question VERSION_COLLISION means another writer
+ * under the SAME lease already consumed the version this engine minted (a
+ * second tab sharing the client session, or a reload that could not seed the
+ * version floor). Each heal refreshes the authoritative floor and re-issues
+ * once; a server that keeps rejecting still ends in the honest terminal state.
+ */
+const MAX_COLLISION_HEALS_PER_DRAIN = 2;
 /** F-A6: authoritative snapshot fetches never hang longer than this. */
 const SNAPSHOT_FETCH_TIMEOUT_MS = 15_000;
 
@@ -867,6 +875,20 @@ export class DurableResponseEngine {
         }
       }
 
+      // RISK-26 (offline version cliff): a re-enqueued durable draft carries
+      // the clientVersion it was minted with, so the version floor for this
+      // question MUST be raised to at least that version before any new edit
+      // mints from it. Without this seed an offline recovery (no snapshot to
+      // seed trackers from, and no live-supersede branch to seed either)
+      // leaves the tracker at 0, so the student's next keystroke mints v1 — a
+      // version the server already consumed under this lease — and the whole
+      // outbox is terminally quarantined via VERSION_COLLISION. Minting above
+      // the recovered version is always safe: versions may skip, they may
+      // never repeat, and the server's projection prefers lease over version.
+      this.versionTrackers.set(
+        questionId,
+        Math.max(this.versionTrackers.get(questionId) ?? 0, pending.clientVersion)
+      );
       const existing = this.states.get(questionId);
       this.states.set(questionId, {
         confirmed: existing?.confirmed ?? null,
@@ -1194,7 +1216,8 @@ export class DurableResponseEngine {
 
   private async submitInternal(
     submissionId: string,
-    expectedAttemptRevision: number
+    expectedAttemptRevision: number,
+    revisionRaceRetried = false
   ): Promise<SubmitAttemptV2Response> {
     if (this.isDestroyed) throw new Error("Response durability engine is destroyed.");
     await this.waitForPendingAcceptances();
@@ -1224,6 +1247,25 @@ export class DurableResponseEngine {
       response = await this.transport.submit(this.attemptId, request);
     } catch (error: unknown) {
       const errorCode = this.extractErrorCode(error);
+      // N1: the server's VERSION_COLLISION envelope is overloaded. A
+      // submit-time expectedAttemptRevision mismatch (details.expected +
+      // details.current, no questionId) is a benign race — a late batch ack or
+      // a second session moved response_revision after our snapshot — and the
+      // server explicitly asks for a refresh. Refresh the authoritative
+      // snapshot and submit again exactly once; only a per-question collision
+      // (questionId present) is a genuine terminal version fence.
+      if (
+        errorCode === "VERSION_COLLISION" &&
+        !revisionRaceRetried &&
+        this.isSubmitRevisionRace(error)
+      ) {
+        this.emitDurabilityEvent("submit_revision_refresh", {
+          reason: "VERSION_COLLISION",
+        });
+        await this.recover();
+        if (this.isDestroyed) throw error;
+        return this.submitInternal(submissionId, this.attemptRevision, true);
+      }
       if (this.isTerminalConflict(errorCode)) {
         this.quarantineAllPending(errorCode ?? "SUBMISSION_CONFLICT");
         // RISK-23/6: only a lease fence maps to conflict_fenced. A submit-time
@@ -1348,6 +1390,7 @@ export class DurableResponseEngine {
     }
 
     let retryAttempt = 0;
+    let collisionHeals = 0;
     try {
       while (this.outbox.size > 0 && !this.isDestroyed && !this.submissionPromise) {
         this.inFlight.clear();
@@ -1410,6 +1453,31 @@ export class DurableResponseEngine {
           }
         } catch (error: unknown) {
           const errorCode = this.extractErrorCode(error);
+          // N1b: a per-question VERSION_COLLISION is a stale-floor symptom, not
+          // necessarily a divergent writer. Refresh the authoritative version
+          // floor for the offending question, re-issue its payload ABOVE that
+          // floor as a new write, and re-drain — quarantine the whole outbox
+          // only when the heal cannot help (no questionId, no snapshot, a
+          // lease change, a blocked draft, or a server that keeps rejecting).
+          if (
+            errorCode === "VERSION_COLLISION" &&
+            collisionHeals < MAX_COLLISION_HEALS_PER_DRAIN
+          ) {
+            const collidingQuestionId = this.extractCollisionQuestionId(error);
+            const healed =
+              collidingQuestionId !== null &&
+              !this.isDestroyed &&
+              (await this.recoverVersionCollision(collidingQuestionId));
+            if (healed) {
+              collisionHeals += 1;
+              retryAttempt = 0;
+              for (const [questionId, command] of this.inFlight) {
+                if (!this.outbox.has(questionId)) this.outbox.set(questionId, command);
+              }
+              this.inFlight.clear();
+              continue;
+            }
+          }
           // Retryable reason (SECTION_CLOCK_MISSING) falls through to the
           // bounded retry below — quarantining it would strand answers that
           // the next cohort-start bootstrap would accept.
@@ -2237,6 +2305,158 @@ export class DurableResponseEngine {
     const response = isRecord(error["response"]) ? error["response"] : null;
     const responseData = isRecord(response?.["data"]) ? response["data"] : null;
     return read(error) ?? read(nested) ?? read(responseData) ?? null;
+  }
+
+  /** Question id from a per-question VERSION_COLLISION envelope, if present. */
+  private extractCollisionQuestionId(error: unknown): string | null {
+    if (!isRecord(error)) return null;
+    const read = (holder: unknown): string | null => {
+      if (!isRecord(holder)) return null;
+      const details = isRecord(holder["details"])
+        ? (holder["details"] as Record<string, unknown>)
+        : isRecord(holder["backendDetails"])
+          ? (holder["backendDetails"] as Record<string, unknown>)
+          : null;
+      const questionId = details?.["questionId"];
+      return typeof questionId === "string" && questionId.trim() !== "" ? questionId : null;
+    };
+    const nested = isRecord(error["error"]) ? error["error"] : null;
+    const response = isRecord(error["response"]) ? error["response"] : null;
+    const responseData = isRecord(response?.["data"]) ? response["data"] : null;
+    return read(error) ?? read(nested) ?? read(responseData);
+  }
+
+  /**
+   * N1b self-heal: adopt a fresh authoritative snapshot, raise the version floor
+   * for one question to the server's own version, and re-issue the visible
+   * payload above that floor as a NEW write (mirrors reconcileBlocked's mint
+   * discipline). Refuses — leaving the caller on the existing terminal path —
+   * on a fetch failure, a non-authoritative snapshot, a lease change, a
+   * terminal delivery status, or a blocked draft (which needs the reconcile
+   * UX). Never mints a version at or below the refreshed floor.
+   */
+  private async recoverVersionCollision(questionId: string): Promise<boolean> {
+    if (this.isDestroyed) return false;
+    let snapshot: SnapshotResponse;
+    try {
+      snapshot = await fetchSnapshotWithTimeout(
+        (attemptId) => this.transport.fetchSnapshot(attemptId),
+        this.attemptId
+      );
+    } catch {
+      this.emitDurabilityEvent("version_collision_recovery_failed", {
+        reason: "snapshot_fetch_failed",
+      });
+      return false;
+    }
+    if (this.isDestroyed) return false;
+    if (!isSnapshotResponse(snapshot)) return false;
+    if (snapshot.attemptId !== this.attemptId) return false;
+    if (["submitted", "terminated", "locked", "cancelled"].includes(snapshot.deliveryStatus)) {
+      return false;
+    }
+    // Never cross a lease fence implicitly — that path belongs to reconcile.
+    if (snapshot.leaseEpoch !== this.leaseEpoch) return false;
+    const live = this.states.get(questionId)?.pending;
+    if (!live || live.blocked) return false;
+
+    this.attemptRevision = Math.max(this.attemptRevision, snapshot.attemptRevision);
+    for (const response of snapshot.responses) {
+      this.installServerResponse(response);
+    }
+    const server = snapshot.responses.find((entry) => entry.questionId === questionId);
+    const floor = Math.max(
+      this.versionTrackers.get(questionId) ?? 0,
+      server ? server.clientVersion : 0
+    );
+    const issuedVersion = floor + 1;
+    this.versionTrackers.set(questionId, issuedVersion);
+
+    const writeId = randomWriteId();
+    const pending: PendingResponseState = {
+      payload: clonePayload(live.payload),
+      writeId,
+      leaseEpoch: this.leaseEpoch,
+      controlEpoch: this.controlEpoch,
+      clientVersion: issuedVersion,
+      durability: live.durability,
+    };
+    if (live.receivedAt !== undefined) pending.receivedAt = live.receivedAt;
+    if (live.order !== undefined) pending.order = live.order;
+    this.states.set(questionId, {
+      confirmed: this.states.get(questionId)?.confirmed ?? null,
+      pending,
+    });
+    this.checkpointIntentSync(questionId, pending);
+    void saveDurableDraft(durableDraftKey(this.attemptId, questionId), pending).catch(
+      () => undefined
+    );
+
+    // Replace BOTH the queued and the in-flight entry for Q so the same
+    // colliding version can never be re-sent.
+    const staleQueued = this.outbox.get(questionId);
+    if (staleQueued) {
+      this.outbox.delete(questionId);
+      this.issuedCommands.delete(staleQueued.writeId);
+      this.commandEpochs.delete(staleQueued.writeId);
+    }
+    const staleFlight = this.inFlight.get(questionId);
+    if (staleFlight) {
+      this.inFlight.delete(questionId);
+      this.issuedCommands.delete(staleFlight.writeId);
+      this.commandEpochs.delete(staleFlight.writeId);
+    }
+    const command: ResponseCommandV2 = {
+      writeId,
+      questionId,
+      clientVersion: issuedVersion,
+      response: clonePayload(pending.payload),
+    };
+    this.outbox.set(questionId, command);
+    this.issuedCommands.set(writeId, command);
+    this.commandEpochs.set(writeId, {
+      leaseEpoch: this.leaseEpoch,
+      controlEpoch: this.controlEpoch,
+    });
+    this.emitDurabilityEvent("version_collision_recovered", { reason: "VERSION_COLLISION" });
+    this.notifyStateChange();
+    return true;
+  }
+
+  /**
+   * N1: true only for the submit-time response-revision race. The backend
+   * returns `VERSION_COLLISION` with `details: {expected, current}` (no
+   * questionId) when `expectedAttemptRevision` no longer matches; that state
+   * is recoverable by refreshing and resubmitting. A per-question collision
+   * carries `questionId`/`clientVersion` and must stay terminal.
+   */
+  private isSubmitRevisionRace(error: unknown): boolean {
+    if (!isRecord(error)) return false;
+    const read = (holder: unknown): boolean => {
+      if (!isRecord(holder)) return false;
+      const details = isRecord(holder["details"])
+        ? (holder["details"] as Record<string, unknown>)
+        : isRecord(holder["backendDetails"])
+          ? (holder["backendDetails"] as Record<string, unknown>)
+          : null;
+      if (!details) return false;
+      const expected = details["expected"];
+      const current = details["current"];
+      return (
+        typeof expected === "number" &&
+        Number.isSafeInteger(expected) &&
+        typeof current === "number" &&
+        Number.isSafeInteger(current) &&
+        details["questionId"] === undefined
+      );
+    };
+    const nested = isRecord(error["error"]) ? error["error"] : null;
+    const response = isRecord(error["response"]) ? error["response"] : null;
+    const responseData = isRecord(response?.["data"]) ? response["data"] : null;
+    for (const holder of [error, nested, responseData]) {
+      if (read(holder)) return true;
+    }
+    return false;
   }
 
   private extractErrorCode(error: unknown): string | null {

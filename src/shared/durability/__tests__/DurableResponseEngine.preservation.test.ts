@@ -142,6 +142,141 @@ describe('student answer preservation (repair verification)', () => {
     expect(JSON.parse(localStorage.getItem('response-checkpoint:v2:audit-a:q1')!).payload).toEqual(payload('latest typing', true));
   });
 
+  it('RISK-26: offline recovery seeds the version floor from the recovered draft, so the next edit never re-mints a consumed version', async () => {
+    // Consumer-ledger state: q1 already consumed versions 1..3 under this
+    // lease, and the device holds an unsent v3 draft. The reload happens with
+    // NO network, so no snapshot can seed the version trackers.
+    const recoveredDraft: PendingResponseState = {
+      payload: payload('unsent v3'),
+      writeId: 'w-3',
+      leaseEpoch: 1,
+      controlEpoch: 1,
+      clientVersion: 3,
+      durability: 'checkpoint',
+      receivedAt: new Date().toISOString(),
+      order: 3,
+    };
+    localStorage.setItem('response-checkpoint:v2:audit-a:q1', JSON.stringify(recoveredDraft));
+    const { engine, transport } = setup(vi.fn().mockRejectedValue(new Error('offline')));
+    await engine.recover();
+    // The student keeps answering the same question after the offline reload.
+    await engine.acceptResponse('q1', payload('the next keystroke'));
+    (transport.sendBatch as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_attemptId: string, req: { commands: Array<{ writeId: string; questionId: string; clientVersion: number; response: ResponsePayload }> }) => ({
+        attemptRevision: 8,
+        serverTime: new Date().toISOString(),
+        acknowledgements: req.commands.map((command) => ({
+          writeId: command.writeId,
+          questionId: command.questionId,
+          clientVersion: command.clientVersion,
+          outcome: 'applied' as const,
+          serverRevision: 8,
+          canonicalResponse: command.response,
+          contentHash: 'hash-risk26',
+        })),
+      }),
+    );
+    await engine.flush();
+    const sent = (transport.sendBatch as ReturnType<typeof vi.fn>).mock.calls.flatMap(
+      (call) => (call[1] as { commands: Array<{ clientVersion: number }> }).commands,
+    );
+    expect(sent.length).toBeGreaterThan(0);
+    // The mint must sit ABOVE the recovered version. Without the recovery-time
+    // seed this is v1 — a version the server already used under this lease,
+    // which the exact-match collision probe terminally quarantines.
+    for (const command of sent) {
+      expect(command.clientVersion).toBeGreaterThan(3);
+      expect(command.clientVersion).not.toBe(1);
+    }
+    expect(engine.getStatus()).not.toBe('conflict_terminal');
+  });
+
+  it('N1: a submit-time response-revision race refreshes and retries instead of terminally fencing the attempt', async () => {
+    const revisionRace = Object.assign(
+      new Error('Response revision changed; refresh before submitting.'),
+      { code: 'VERSION_COLLISION', status: 409, details: { expected: 8, current: 9 } },
+    );
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(snapshot('server-old', 8))
+      .mockResolvedValueOnce({ ...snapshot('server-old', 8), attemptRevision: 9 });
+    const { engine, transport } = setup(fetch);
+    const submitMock = transport.submit as ReturnType<typeof vi.fn>;
+    submitMock
+      .mockRejectedValueOnce(revisionRace)
+      .mockResolvedValueOnce({
+        attemptId: 'audit-a',
+        submissionId: 'sub-1',
+        status: 'submitted',
+        attemptRevision: 9,
+        finalResponseDigest: 'digest',
+        submittedAt: new Date().toISOString(),
+        acknowledgements: [],
+      });
+    (transport.sendBatch as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_attemptId: string, req: { commands: Array<{ writeId: string; questionId: string; clientVersion: number; response: ResponsePayload }> }) => ({
+        attemptRevision: 8,
+        serverTime: new Date().toISOString(),
+        acknowledgements: req.commands.map((command) => ({
+          writeId: command.writeId,
+          questionId: command.questionId,
+          clientVersion: command.clientVersion,
+          outcome: 'applied' as const,
+          serverRevision: 8,
+          canonicalResponse: command.response,
+          contentHash: 'hash-n1',
+        })),
+      }),
+    );
+    await engine.recover();
+    await engine.acceptResponse('q1', payload('final answer'));
+    await engine.flush();
+
+    await expect(engine.submit('sub-1', engine.getAttemptRevision())).resolves.toMatchObject({
+      attemptRevision: 9,
+    });
+    // One refresh + one resubmit — never a terminal fence, never quarantine.
+    expect(submitMock).toHaveBeenCalledTimes(2);
+    expect(engine.getStatus()).not.toBe('conflict_terminal');
+    expect(engine.getQuarantined()).toHaveLength(0);
+  });
+
+  it('N1b: a per-question submit collision (questionId in details) stays terminal', async () => {
+    const questionCollision = Object.assign(
+      new Error('Client version already used by another write.'),
+      {
+        code: 'VERSION_COLLISION',
+        status: 409,
+        details: { questionId: 'q1', clientVersion: 2, existingWriteId: 'w-other' },
+      },
+    );
+    const { engine, transport } = setup(vi.fn().mockResolvedValue(snapshot('server-old', 1)));
+    const submitMock = transport.submit as ReturnType<typeof vi.fn>;
+    submitMock.mockRejectedValue(questionCollision);
+    (transport.sendBatch as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_attemptId: string, req: { commands: Array<{ writeId: string; questionId: string; clientVersion: number; response: ResponsePayload }> }) => ({
+        attemptRevision: 3,
+        serverTime: new Date().toISOString(),
+        acknowledgements: req.commands.map((command) => ({
+          writeId: command.writeId,
+          questionId: command.questionId,
+          clientVersion: command.clientVersion,
+          outcome: 'applied' as const,
+          serverRevision: 3,
+          canonicalResponse: command.response,
+          contentHash: 'hash-n1b',
+        })),
+      }),
+    );
+    await engine.recover();
+    await engine.acceptResponse('q1', payload('final answer'));
+    await engine.flush();
+
+    await expect(engine.submit('sub-1', engine.getAttemptRevision())).rejects.toThrow();
+    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(engine.getStatus()).toBe('conflict_terminal');
+  });
+
   it('I5: quarantine archives before deleting — archive failure retains the source and raises a fault', async () => {
     const { engine } = setup(vi.fn().mockResolvedValue(snapshot()));
     await engine.recover(); await engine.acceptResponse('q1', payload('only durable copy'));

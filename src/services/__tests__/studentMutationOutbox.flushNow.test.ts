@@ -109,7 +109,19 @@ describe('studentMutationOutbox.flushNow', () => {
 
     const ok = await outbox.flushNow();
     expect(ok).toBe(true);
-    expect(saveAttempt).toHaveBeenCalledTimes(1);
+    // Finding #6: the persisted record must never claim `saved` before the
+    // delivery attempt resolved. Two honest records: a pre-send `saving`
+    // record carrying the TRUE pending count, then `saved` only after the
+    // mutation queue was cleared.
+    expect(saveAttempt).toHaveBeenCalledTimes(2);
+    expect((saveAttempt.mock.calls[0]?.[0] as StudentAttempt).recovery).toMatchObject({
+      syncState: 'saving',
+      pendingMutationCount: 1,
+    });
+    expect((saveAttempt.mock.calls[1]?.[0] as StudentAttempt).recovery).toMatchObject({
+      syncState: 'saved',
+      pendingMutationCount: 0,
+    });
     expect(clearPendingMutations).toHaveBeenCalledTimes(1);
     expect(mirror.getPendingMutations()).toHaveLength(0);
   });
