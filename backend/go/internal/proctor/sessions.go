@@ -580,9 +580,9 @@ func hydrateSessionRuntime(row sessionRuntimeRow, sections []SessionRuntimeSecti
 // Rust build_not_started_runtime minus the version-plan load (see package
 // doc): empty plan/sections arrays keep the wire shape.
 func notStartedSessionRuntime(schedule SessionSchedule, now time.Time) SessionRuntime {
-	timing := "legacy_section_v1"
+	timing := examruntime.TimingModelLegacy
 	if schedule.ProviderKey == "sat" {
-		timing = "cohort_section_v3"
+		timing = examruntime.TimingModelCohortSection
 	}
 	return SessionRuntime{
 		ID:                             nilUUID,

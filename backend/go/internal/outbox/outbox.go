@@ -51,6 +51,10 @@ const (
 	FamilyAttemptTerminalized      = "attempt_terminalized"
 	FamilyRuntimeChanged           = "runtime_changed"
 	FamilyRosterChanged            = "roster_changed"
+	// FamilyAttemptChanged has no in-repo emitter (the Rust side publishes
+	// it); it is named so every wakeup family this router filters is a
+	// constant, never a literal.
+	FamilyAttemptChanged = "attempt_changed"
 )
 
 // IsExecutable reports whether the worker runs application work for a family.
@@ -72,7 +76,7 @@ func SkipEnqueue(family string, execOnly bool) bool {
 	switch family {
 	case FamilyAutoSubmitScheduleAttempts, FamilySectionAttemptsReconcile:
 		return false
-	case FamilyAttemptTerminalized, FamilyRuntimeChanged, FamilyRosterChanged, "attempt_changed":
+	case FamilyAttemptTerminalized, FamilyRuntimeChanged, FamilyRosterChanged, FamilyAttemptChanged:
 		return true
 	default:
 		return false

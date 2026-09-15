@@ -82,7 +82,7 @@ func TestCompleteExamCustomReasonKeepsVocabularyPayload(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtimes SET status = 'completed'")).
 		WithArgs("rt-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtime_sections SET status = 'completed'")).
-		WithArgs("rt-1").WillReturnResult(sqlmock.NewResult(0, 2))
+		WithArgs(terminalization.ReasonProctorComplete, "rt-1").WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET status = 'completed'")).
 		WithArgs("sched-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO cohort_control_events")).

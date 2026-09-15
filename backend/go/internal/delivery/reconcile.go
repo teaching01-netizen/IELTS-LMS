@@ -316,12 +316,12 @@ func lockReconcileRowTx(ctx context.Context, t tx.Tx, attemptID string) (*reconc
 // reconcileModuleExpiredTx mirrors the Rust per-model expiry branches.
 func reconcileModuleExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeStatus, timingModel string, currentStageKey sql.NullString, currentStageOrder *int, mod *reconcileRow, asOf time.Time) (bool, error) {
 	switch timingModel {
-	case "cohort_stage_v2":
+	case examruntime.TimingModelCohortStage:
 		// legacy: no in-repo writer assigns this timing model (schedules.go
 		// selects cohort_section_v3 for SAT, legacy otherwise). Retained only
 		// because an out-of-repo ops migration could still have written it.
 		return reconcileCohortStageExpiredTx(ctx, t, runtimeID, runtimeStatus, currentStageKey, currentStageOrder, mod, asOf)
-	case "cohort_section_v3":
+	case examruntime.TimingModelCohortSection:
 		return reconcileCohortSectionExpiredTx(ctx, t, runtimeID, runtimeStatus, currentStageKey, currentStageOrder, mod, asOf)
 	default:
 		if runtimeStatus == "completed" || runtimeStatus == "cancelled" {

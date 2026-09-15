@@ -169,7 +169,7 @@ func LoadSnapshot(ctx context.Context, q SnapshotQuerier, scheduleID string, now
 	var timing sql.NullString
 	var waiting sql.NullBool
 	err := q.QueryRowContext(ctx,
-		`SELECT id, status, active_section_key, revision, COALESCE(timing_model,'legacy_section_v1'), waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ?`,
+		"SELECT id, status, active_section_key, revision, COALESCE(timing_model,'"+TimingModelLegacy+"'), waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ?",
 		scheduleID).Scan(&id, &status, &active, &revision, &timing, &waiting)
 	if err == sql.ErrNoRows {
 		return Snapshot{Status: StatusLive, ActiveSectionKey: strptr("*"), SectionLive: true, SectionStarted: true, LoadedAt: now}, nil

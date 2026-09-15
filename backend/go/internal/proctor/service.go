@@ -704,7 +704,7 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 		if err := s.applySectionAdvance(ctx, q, scheduleID, runtimeID, adv); err != nil {
 			return err
 		}
-		if err := insertControlEvent(ctx, q, runtimeID, scheduleID, actor.ID, "end_section_now", &activeKey, nil, cmd.Reason); err != nil {
+		if err := examruntime.InsertControlEvent(ctx, q, runtimeID, scheduleID, actor.ID, "end_section_now", &activeKey, nil, cmd.Reason); err != nil {
 			return err
 		}
 		return nil
@@ -767,21 +767,20 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 		if _, err := q.ExecContext(ctx, bumpRt, cmd.Minutes, runtimeID); err != nil {
 			return err
 		}
-		const extSAT = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_entities e ON e.id = sa.exam_id SET ma.extension_seconds = ma.extension_seconds + (? * 60), ma.revision = ma.revision + 1 WHERE sa.schedule_id = ? AND e.provider_key = 'sat' AND ma.state = 'active' AND ma.started_at IS NOT NULL"
-		if _, err := q.ExecContext(ctx, extSAT, cmd.Minutes, scheduleID); err != nil {
+		if err := examruntime.ExtendSATModulesInTx(ctx, q, scheduleID, cmd.Minutes); err != nil {
 			return err
 		}
-		if err := syncV2(ctx, q, scheduleID, runtimeID, activeKey, nil); err != nil {
+		if err := examruntime.SyncV2TimingInTx(ctx, q, scheduleID, runtimeID, activeKey, nil); err != nil {
 			return err
 		}
-		if err := insertControlEvent(ctx, q, runtimeID, scheduleID, actor.ID, "extend_section", &activeKey, &cmd.Minutes, cmd.Reason); err != nil {
+		if err := examruntime.InsertControlEvent(ctx, q, runtimeID, scheduleID, actor.ID, "extend_section", &activeKey, &cmd.Minutes, cmd.Reason); err != nil {
 			return err
 		}
 		if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "EXTENSION_GRANTED", nil, map[string]any{"sectionKey": activeKey, "minutes": cmd.Minutes, "reason": cmd.Reason}); err != nil {
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": "extend_section"})
-		return s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, "runtime_changed", payload)
+		return s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, outbox.FamilyRuntimeChanged, payload)
 	})
 	if err != nil {
 		return err
@@ -820,19 +819,10 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 		if status == "completed" || status == "cancelled" {
 			return nil
 		}
-		const doneRt = "UPDATE exam_session_runtimes SET status = 'completed', actual_end_at = UTC_TIMESTAMP(6), active_section_key = NULL, current_section_key = NULL, current_section_remaining_seconds = 0, waiting_for_next_section = false, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
-		if _, err := q.ExecContext(ctx, doneRt, runtimeID); err != nil {
+		if err := examruntime.CompleteInTx(ctx, q, scheduleID, runtimeID, terminalization.ReasonProctorComplete); err != nil {
 			return err
 		}
-		const doneSec = "UPDATE exam_session_runtime_sections SET status = 'completed', actual_end_at = COALESCE(actual_end_at, UTC_TIMESTAMP(6)), completion_reason = COALESCE(completion_reason, 'proctor_complete'), paused_at = NULL WHERE runtime_id = ?"
-		if _, err := q.ExecContext(ctx, doneSec, runtimeID); err != nil {
-			return err
-		}
-		const doneSched = "UPDATE exam_schedules SET status = 'completed', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
-		if _, err := q.ExecContext(ctx, doneSched, scheduleID); err != nil {
-			return err
-		}
-		if err := insertControlEvent(ctx, q, runtimeID, scheduleID, actor.ID, "complete_runtime", nil, nil, cmd.Reason); err != nil {
+		if err := examruntime.InsertControlEvent(ctx, q, runtimeID, scheduleID, actor.ID, "complete_runtime", nil, nil, cmd.Reason); err != nil {
 			return err
 		}
 		if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "SESSION_END", nil, map[string]any{"reason": cmd.Reason}); err != nil {
@@ -848,7 +838,7 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": "complete_exam"})
-		return s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, "runtime_changed", payload)
+		return s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, outbox.FamilyRuntimeChanged, payload)
 	})
 	if err != nil {
 		return err
@@ -968,13 +958,13 @@ func (s *Service) updateAttemptStatus(ctx context.Context, actor Actor, schedule
 			return err
 		}
 		if actionType == "STUDENT_PAUSE" {
-			const pauseMods = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET ma.paused_at = COALESCE(ma.paused_at, UTC_TIMESTAMP(6)), ma.revision = ma.revision + 1 WHERE ma.attempt_id = ? AND r.timing_model IN ('legacy_section_v1', 'cohort_section_v3') AND ma.state = 'active' AND ma.started_at IS NOT NULL AND ma.paused_at IS NULL"
+			const pauseMods = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET ma.paused_at = COALESCE(ma.paused_at, UTC_TIMESTAMP(6)), ma.revision = ma.revision + 1 WHERE ma.attempt_id = ? AND r.timing_model IN (" + examruntime.PersonalClockModelsSQL + ") AND ma.state = 'active' AND ma.started_at IS NOT NULL AND ma.paused_at IS NULL"
 			if _, err := q.ExecContext(ctx, pauseMods, attemptID); err != nil {
 				return err
 			}
 		}
 		if actionType == "STUDENT_RESUME" {
-			const resumeMods = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET ma.accumulated_paused_seconds = ma.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, UTC_TIMESTAMP(6)), 0), ma.paused_at = NULL, ma.revision = ma.revision + 1 WHERE ma.attempt_id = ? AND r.timing_model IN ('legacy_section_v1', 'cohort_section_v3') AND ma.state = 'active' AND ma.paused_at IS NOT NULL"
+			const resumeMods = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET ma.accumulated_paused_seconds = ma.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, UTC_TIMESTAMP(6)), 0), ma.paused_at = NULL, ma.revision = ma.revision + 1 WHERE ma.attempt_id = ? AND r.timing_model IN (" + examruntime.PersonalClockModelsSQL + ") AND ma.state = 'active' AND ma.paused_at IS NOT NULL"
 			if _, err := q.ExecContext(ctx, resumeMods, attemptID); err != nil {
 				return err
 			}
@@ -1030,46 +1020,6 @@ func insertAuditLog(ctx context.Context, q tx.Tx, scheduleID, actorID, actionTyp
 	return err
 }
 
-func insertControlEvent(ctx context.Context, q tx.Tx, runtimeID, scheduleID, actorID, action string, sectionKey *string, minutes *int64, reason *string) error {
-	// exam_id is resolved server-side so callers cannot spoof the cohort identity.
-	const ins = "INSERT INTO cohort_control_events (id, schedule_id, runtime_id, exam_id, actor_id, action, section_key, minutes, reason, payload, created_at) VALUES (?, ?, (SELECT id FROM exam_session_runtimes WHERE id = ?), (SELECT exam_id FROM exam_schedules WHERE id = ?), ?, ?, ?, ?, ?, NULL, UTC_TIMESTAMP(6))"
-	// NOTE: the runtime_id subselect above is intentionally trivial (id lookup);
-	// it keeps exam_id server-resolved while preserving the explicit column list.
-	_, err := q.ExecContext(ctx, ins, uuid.NewString(), scheduleID, runtimeID, scheduleID, actorID, action, sectionKey, minutes, reason)
-	return err
-}
-
-// syncV2 re-projects the V2 attempt clocks from the locked section:
-// deadline=actual_start+(planned+extension)*60+paused, grace=+30s, protocol 2
-// non-terminal only, with a control_epoch+1 fence bump.
-func syncV2(ctx context.Context, q tx.Tx, scheduleID, runtimeID, sectionKey string, lifecycle *string) error {
-	lifecycleAssign := ""
-	switch strval(lifecycle) {
-	case "paused":
-		lifecycleAssign = "delivery_status = CASE WHEN COALESCE(sa.delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN sa.delivery_status ELSE 'paused' END, phase = CASE WHEN sa.phase IN ('pre-check', 'post-exam') THEN sa.phase ELSE 'exam' END,"
-	case "running":
-		lifecycleAssign = "delivery_status = CASE WHEN COALESCE(sa.proctor_status, 'active') = 'paused' OR COALESCE(sa.delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN sa.delivery_status ELSE 'running' END, phase = CASE WHEN sa.phase IN ('pre-check', 'post-exam') THEN sa.phase ELSE 'exam' END,"
-	case "":
-		lifecycleAssign = ""
-	default:
-		lifecycleAssign = ""
-	}
-	stmt := "UPDATE student_attempts sa " +
-		"JOIN exam_session_runtime_sections rs ON rs.runtime_id = ? AND rs.section_key = ? " +
-		"SET " + lifecycleAssign +
-		" deadline_at = CASE WHEN rs.actual_start_at IS NULL THEN sa.deadline_at ELSE DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND) END," +
-		" closing_grace_until = CASE WHEN rs.actual_start_at IS NULL THEN sa.closing_grace_until ELSE DATE_ADD(DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND), INTERVAL 30 SECOND) END," +
-		" control_epoch = sa.control_epoch + 1," +
-		" revision = sa.revision + 1," +
-		" updated_at = UTC_TIMESTAMP(6) " +
-		"WHERE sa.schedule_id = ? " +
-		"AND sa.protocol_version = 2 " +
-		"AND sa.submitted_at IS NULL " +
-		"AND COALESCE(sa.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')"
-	_, err := q.ExecContext(ctx, stmt, runtimeID, sectionKey, scheduleID)
-	return err
-}
-
 func terminalConflict(msg string) *apperrors.Error {
 	return &apperrors.Error{Code: apperrors.CodeConflict, Message: msg, HTTPStatus: 409}
 }
@@ -1091,12 +1041,5 @@ func isNonNullTime(v any) bool {
 }
 
 func strptr(s string) *string { v := s; return &v }
-
-func strval(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
 
 var _ = fmt.Sprintf

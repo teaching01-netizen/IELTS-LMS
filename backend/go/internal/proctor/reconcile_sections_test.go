@@ -10,7 +10,6 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"example.com/ielts-proctoring/internal/outbox"
-	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
 // The section auto-advance path had no test before this file: ReconcileExpiredSections
@@ -97,13 +96,7 @@ func expectScheduleTxOpen(mock sqlmock.Sqlmock, scheduleID, runtimeID, status, a
 // between-sections window, no next section starts, and the finished section's
 // open modules are handed to delivery through the outbox.
 func TestReconcileExpiredSectionsEntersWaitingWindowDuringGap(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	outbx := &captureOutbox{}
-	svc := NewService(tx.NewRunner(db), db, nil, outbx, nil)
+	svc, mock, outbx := newMockService(t)
 
 	base := time.Date(2026, 9, 14, 9, 0, 0, 0, time.UTC)
 	deadline := base.Add(64 * time.Minute)
@@ -154,13 +147,7 @@ func TestReconcileExpiredSectionsEntersWaitingWindowDuringGap(t *testing.T) {
 // Gap elapsed: the next locked section goes live at previous end + gap, the
 // waiting flag clears, and the runtime revision bumps once.
 func TestReconcileExpiredSectionsStartsNextSectionWhenGapElapsed(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	outbx := &captureOutbox{}
-	svc := NewService(tx.NewRunner(db), db, nil, outbx, nil)
+	svc, mock, _ := newMockService(t)
 
 	base := time.Date(2026, 9, 14, 9, 0, 0, 0, time.UTC)
 	endedAt := base.Add(64 * time.Minute)
@@ -203,13 +190,7 @@ func TestReconcileExpiredSectionsStartsNextSectionWhenGapElapsed(t *testing.T) {
 // A sweep far behind the schedule catches up through every expired section and
 // completes the runtime exactly once.
 func TestReconcileExpiredSectionsCatchesUpAcrossSections(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	outbx := &captureOutbox{}
-	svc := NewService(tx.NewRunner(db), db, nil, outbx, nil)
+	svc, mock, outbx := newMockService(t)
 
 	base := time.Date(2026, 9, 14, 9, 0, 0, 0, time.UTC)
 	deadline1 := base.Add(64 * time.Minute)
@@ -284,12 +265,7 @@ func TestReconcileExpiredSectionsCatchesUpAcrossSections(t *testing.T) {
 // so the proctor sees it: the state machine decides this, the SQL wiring is
 // pinned here.
 func TestReconcileExpiredSectionsFlagsOverrunOnPausedSection(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	svc := NewService(tx.NewRunner(db), db, nil, &captureOutbox{}, nil)
+	svc, mock, _ := newMockService(t)
 
 	base := time.Date(2026, 9, 14, 9, 0, 0, 0, time.UTC)
 	deadline := base.Add(64 * time.Minute)

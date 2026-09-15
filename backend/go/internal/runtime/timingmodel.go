@@ -29,3 +29,14 @@ const CohortTimingModelsSQL = "'" + TimingModelCohortStage + "', '" + TimingMode
 func IsCohortTimed(model string) bool {
 	return model == TimingModelCohortStage || model == TimingModelCohortSection
 }
+
+// IsPersonalClockTimed reports whether the model gives the module its own
+// pausable clock that proctor pause/resume must stop and credit (see
+// delivery.reconcileCohortSectionExpiredTx: cohort_section_v3 keeps a personal
+// module clock alongside the section clock; legacy has nothing else).
+func IsPersonalClockTimed(model string) bool {
+	return model == TimingModelLegacy || model == TimingModelCohortSection
+}
+
+// PersonalClockModelsSQL is the IN-list matching [IsPersonalClockTimed].
+const PersonalClockModelsSQL = "'" + TimingModelLegacy + "', '" + TimingModelCohortSection + "'"

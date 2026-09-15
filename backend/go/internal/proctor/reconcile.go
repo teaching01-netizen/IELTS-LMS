@@ -8,6 +8,7 @@ import (
 	"example.com/ielts-proctoring/internal/outbox"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
 // sectionClosingGrace is the extra time a section stays writable after its
@@ -554,7 +555,7 @@ func (s *Service) startSectionEffect(ctx context.Context, q tx.Tx, scheduleID, r
 	if err != nil {
 		return err
 	}
-	if err := syncV2(ctx, q, scheduleID, runtimeID, adv.nextKey, strptr("running")); err != nil {
+	if err := examruntime.SyncV2TimingInTx(ctx, q, scheduleID, runtimeID, adv.nextKey, strptr("running")); err != nil {
 		return err
 	}
 	if err := insertAuditLog(ctx, q, scheduleID, adv.actor, "SECTION_START", nil, map[string]any{

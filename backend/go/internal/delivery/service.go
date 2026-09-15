@@ -825,7 +825,7 @@ func (s *Service) loadTiming(ctx context.Context, scheduleID string, now time.Ti
 	var status string
 	err := s.db.QueryRowContext(ctx, "SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&status)
 	if err == sql.ErrNoRows {
-		return TimingSnapshot{Authority: "legacy_attempt", TimingModel: "legacy_section_v1", StageStatus: "live", ServerNow: now}, "live", nil
+		return TimingSnapshot{Authority: "legacy_attempt", TimingModel: examruntime.TimingModelLegacy, StageStatus: "live", ServerNow: now}, "live", nil
 	}
 	if err != nil {
 		return TimingSnapshot{}, "", err
@@ -1393,8 +1393,8 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 		return timingGate(0), err
 	}
 	switch timingModel.String {
-	case "cohort_stage_v2":
-	case "cohort_section_v3":
+	case examruntime.TimingModelCohortStage:
+	case examruntime.TimingModelCohortSection:
 	default:
 		return timingGateLegacy, nil
 	}
@@ -1408,7 +1408,7 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 		return timingGate(0), err
 	}
 	expected := sectionKey
-	if timingModel.String == "cohort_stage_v2" {
+	if timingModel.String == examruntime.TimingModelCohortStage {
 		suffix, err := saveStageSuffix(adaptiveRole)
 		if err != nil {
 			return timingGate(0), err
@@ -1442,7 +1442,7 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 	if !now.Before(deadline) {
 		return timingGate(0), assessmentConflict("DEADLINE_EXPIRED", "The SAT section clock has expired.")
 	}
-	if timingModel.String == "cohort_stage_v2" {
+	if timingModel.String == examruntime.TimingModelCohortStage {
 		return timingGateCohortStage, nil
 	}
 	return timingGateCohortSection, nil
@@ -1575,7 +1575,7 @@ func (s *Service) ensureTimeoutResponseRecoveryTx(ctx context.Context, t tx.Tx, 
 		scheduleID).Scan(&timingModel); err != nil && err != sql.ErrNoRows {
 		return err
 	}
-	model := "legacy_section_v1"
+	model := examruntime.TimingModelLegacy
 	if timingModel.Valid && timingModel.String != "" {
 		model = timingModel.String
 	}
@@ -1590,7 +1590,7 @@ func (s *Service) ensureTimeoutResponseRecoveryTx(ctx context.Context, t tx.Tx, 
 			return err
 		}
 		expected := sectionKey
-		if model == "cohort_stage_v2" {
+		if model == examruntime.TimingModelCohortStage {
 			suffix, err := saveStageSuffix(adaptiveRole)
 			if err != nil {
 				return err
@@ -1616,7 +1616,7 @@ func (s *Service) ensureTimeoutResponseRecoveryTx(ctx context.Context, t tx.Tx, 
 		if now.After(saveStageDeadline(startedAt.Time.UTC(), pausedInt(plannedMinutes), pausedInt(extensionMinutes), pausedInt(pausedSeconds))) {
 			return assessmentConflict("DEADLINE_EXPIRED", "The SAT response reached the server after the cohort deadline.")
 		}
-		if model == "cohort_section_v3" {
+		if model == examruntime.TimingModelCohortSection {
 			if module.startedAt == nil {
 				return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT module never started.")
 			}

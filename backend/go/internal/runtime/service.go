@@ -35,6 +35,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/outbox"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
@@ -214,7 +215,7 @@ func lockAttemptsFirst(ctx context.Context, q tx.Tx, scheduleID string) error {
 
 // lockRuntime loads the runtime row FOR UPDATE (after attempt locks).
 func lockRuntime(ctx context.Context, q tx.Tx, scheduleID string) (*RuntimeRow, error) {
-	const sel = "SELECT id, schedule_id, exam_id, status, active_section_key, revision, COALESCE(timing_model,'legacy_section_v1') FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
+	const sel = "SELECT id, schedule_id, exam_id, status, active_section_key, revision, COALESCE(timing_model,'" + TimingModelLegacy + "') FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
 	var r RuntimeRow
 	var active sql.NullString
 	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&r.ID, &r.ScheduleID, &r.ExamID, &r.Status, &active, &r.Revision, &r.TimingModel); err != nil {
@@ -510,19 +511,10 @@ func (s *Service) Complete(ctx context.Context, scheduleID, completionReason, ac
 		if rt.Status == StatusCompleted || rt.Status == StatusCancelled {
 			return nil
 		}
-		const doneRt = "UPDATE exam_session_runtimes SET status = 'completed', actual_end_at = UTC_TIMESTAMP(6), active_section_key = NULL, current_section_key = NULL, current_section_remaining_seconds = 0, waiting_for_next_section = false, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
-		if _, err := q.ExecContext(ctx, doneRt, rt.ID); err != nil {
+		if err := CompleteInTx(ctx, q, scheduleID, rt.ID, completionReason); err != nil {
 			return err
 		}
-		const doneSec = "UPDATE exam_session_runtime_sections SET status = 'completed', actual_end_at = COALESCE(actual_end_at, UTC_TIMESTAMP(6)), completion_reason = COALESCE(completion_reason, ?), paused_at = NULL WHERE runtime_id = ?"
-		if _, err := q.ExecContext(ctx, doneSec, completionReason, rt.ID); err != nil {
-			return err
-		}
-		const doneSched = "UPDATE exam_schedules SET status = 'completed', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
-		if _, err := q.ExecContext(ctx, doneSched, scheduleID); err != nil {
-			return err
-		}
-		if err := insertControlEvent(ctx, q, rt.ID, scheduleID, actorID, controlCompleteAction, nil, nil, strptr(completionReason)); err != nil {
+		if err := InsertControlEvent(ctx, q, rt.ID, scheduleID, actorID, controlCompleteAction, nil, nil, strptr(completionReason)); err != nil {
 			return err
 		}
 		return s.emitRuntimeChanged(ctx, q, scheduleID, rt.Revision+1, completionReason)
@@ -579,7 +571,33 @@ func (s *Service) emitRuntimeChanged(ctx context.Context, q tx.Tx, scheduleID st
 		return nil
 	}
 	payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": event})
-	return s.outbx.EnqueueInTx(ctx, q, "schedule_runtime", scheduleID, revision, "runtime_changed", payload)
+	return s.outbx.EnqueueInTx(ctx, q, "schedule_runtime", scheduleID, revision, outbox.FamilyRuntimeChanged, payload)
+}
+
+// CompleteInTx finishes the runtime, its sections, and the schedule inside the
+// caller's transaction. It is the single writer of the completed state — the
+// proctor CompleteExam path calls it too, so the two completion owners the
+// earlier passes kept in sync by hand cannot drift again.
+func CompleteInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, completionReason string) error {
+	const doneRt = "UPDATE exam_session_runtimes SET status = 'completed', actual_end_at = UTC_TIMESTAMP(6), active_section_key = NULL, current_section_key = NULL, current_section_remaining_seconds = 0, waiting_for_next_section = false, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
+	if _, err := q.ExecContext(ctx, doneRt, runtimeID); err != nil {
+		return err
+	}
+	const doneSec = "UPDATE exam_session_runtime_sections SET status = 'completed', actual_end_at = COALESCE(actual_end_at, UTC_TIMESTAMP(6)), completion_reason = COALESCE(completion_reason, ?), paused_at = NULL WHERE runtime_id = ?"
+	if _, err := q.ExecContext(ctx, doneSec, completionReason, runtimeID); err != nil {
+		return err
+	}
+	const doneSched = "UPDATE exam_schedules SET status = 'completed', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
+	if _, err := q.ExecContext(ctx, doneSched, scheduleID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// InsertControlEvent is the package-level control-event writer shared by the
+// runtime command path and the proctor command path.
+func InsertControlEvent(ctx context.Context, q tx.Tx, runtimeID, scheduleID, actorID, action string, sectionKey *string, minutes *int64, reason *string) error {
+	return insertControlEvent(ctx, q, runtimeID, scheduleID, actorID, action, sectionKey, minutes, reason)
 }
 
 func insertControlEvent(ctx context.Context, q tx.Tx, runtimeID, scheduleID, actorID, action string, sectionKey *string, minutes *int64, reason *string) error {
@@ -600,6 +618,12 @@ func resumeSATModules(ctx context.Context, q tx.Tx, scheduleID string) error {
 	const stmt = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_entities e ON e.id = sa.exam_id SET ma.accumulated_paused_seconds = ma.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, ma.paused_at, UTC_TIMESTAMP(6)), 0), ma.paused_at = NULL, ma.revision = ma.revision + 1 WHERE sa.schedule_id = ? AND e.provider_key = 'sat' AND ma.state = 'active' AND ma.paused_at IS NOT NULL"
 	_, err := q.ExecContext(ctx, stmt, scheduleID)
 	return err
+}
+
+// ExtendSATModulesInTx extends every active started SAT module attempt of a
+// schedule; shared with the proctor ExtendSection path.
+func ExtendSATModulesInTx(ctx context.Context, q tx.Tx, scheduleID string, minutes int64) error {
+	return extendSATModules(ctx, q, scheduleID, minutes)
 }
 
 func extendSATModules(ctx context.Context, q tx.Tx, scheduleID string, minutes int64) error {

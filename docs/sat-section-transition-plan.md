@@ -838,3 +838,62 @@ extracted from `git archive HEAD` and run against the same `node_modules`, with
   an empty fan-out and a missing delivery surface are no-ops, a missing schedule
   id falls back to the aggregate id and fails without one, and a malformed
   payload fails loudly rather than acking away a cohort's module finalization.
+
+### 10.13 Single-owner pass — one completion writer, one vocabulary, one test scaffold
+
+The third review's DESIGN findings, closed. Net −46 lines.
+
+**The completion finalizer has one owner.** `runtime.Complete` and the proctor
+`CompleteExam` each carried byte-identical `doneRt`/`doneSec`/`doneSched`
+UPDATE strings — three statements whose drift no test would have caught, since
+each side's tests only saw its own copy. The three now live once, in
+`runtime.CompleteInTx(ctx, q, scheduleID, runtimeID, completionReason)`, called
+by both paths (the proctor passes the fixed `terminalization.ReasonProctorComplete`
+vocabulary; `complete_test.go` now pins that exact value as the section-update
+argument rather than a wildcard).
+
+**The control-event writer and the V2 clock re-projection have one owner each.**
+`insertControlEvent` was duplicated verbatim across both packages, and the
+proctor's `syncV2` was a byte-identical copy of `runtime.SyncV2TimingInTx` (with
+a private `strval` helper that existed only to serve it — deleted with it).
+Both proctor call sites go through the runtime package now; the export wrapper
+keeps the runtime package's internal callers unchanged. The same pass caught
+the SAT module-extension UPDATE (`extSAT` vs `extendSATModules`), also
+byte-identical — now `runtime.ExtendSATModulesInTx`, one owner.
+
+**The timing-model vocabulary has no second spelling.** The "only place the
+strings are allowed to live" comment on `timingmodel.go` was aspirational:
+`delivery/service.go` (×6), `delivery/reconcile.go` (×2), the proctor
+pause/resume SQL IN-lists, the `sessions.go` pre-start *writer* (the most
+dangerous site — a typo there writes a model no reader recognizes), and the
+`COALESCE(timing_model, …)` defaults in `runtime` all spelled strings. Every
+production site now goes through the constants, plus the SQL interpolation
+constants: the pause/resume IN-list (`legacy, cohort_section_v3` — the models
+with a personal pausable module clock) is now `PersonalClockModelsSQL`, named by
+`IsPersonalClockTimed` alongside its Go predicate. `outbox.SkipEnqueue`'s
+last literal (`"attempt_changed"`) became `FamilyAttemptChanged` (no in-repo
+emitter; the Rust side publishes it), so the entire event-family vocabulary is
+constant too.
+
+**The reconciler test scaffold collapsed onto the shared builder.** The four
+manual `sqlmock.New()` + `NewService` + `captureOutbox` setups in
+`reconcile_sections_test.go` are `newMockService(t)` one-liners now; the file
+keeps only what it uniquely tests — the section seeds, lock regexes, and
+expectation sequences. (The other seven proctor test files predate this pass
+and keep their own setups; consolidating them is mechanical but out of scope
+here.)
+
+**Verification, this pass.**
+
+- `go build ./...` clean; `go vet ./...` clean; `gofmt -l` clean on every
+  touched file (the one flagged file, `delivery/sat_v2_scoring_test.go`, is
+  pre-existing and untouched).
+- `env -u PORT go test -race -count=1` green on all seven touched packages;
+  the full suite fails only the pre-existing `cmd/migrate` lineage pin
+  (unchanged baseline: no migration added).
+- `bun run typecheck` clean. The vitest suite ran fully green (595 files /
+  4257 tests) at the commit this pass started from, and no TS file changed
+  since; it was not re-run for a Go-only diff.
+- Zero production timing-model literals remain outside `timingmodel.go`
+  (grep-verified), and no `syncV2`/`insertControlEvent` remnants survive in
+  the proctor package.
