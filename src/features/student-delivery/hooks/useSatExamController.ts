@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useAuthoritativeDeadlineClock } from "@shared/hooks/useAuthoritativeDeadlineClock";
 import { emitStudentObservabilityMetric } from "../../../utils/studentObservability";
-import type { ExamSessionRuntime } from "../../../types/domain";
+import {
+  isCohortTimingModel,
+  isSectionKeyedCohortModel,
+  type ExamSessionRuntime,
+} from "../../../types/domain";
 import type {
   AssessmentDeliveryBootstrap,
   AssessmentDeliveryModule,
@@ -48,6 +52,17 @@ import {
 } from "../application/satBootstrapEquality";
 import { useSatIntegrityControl } from "./useSatIntegrityControl";
 import { useSatResponsePersistence } from "./useSatResponsePersistence";
+
+/**
+ * Phase 4: a conflict from the module-submit gate means the server's view of
+ * the authoritative clock has moved past ours (DEADLINE_EXPIRED /
+ * RUNTIME_NOT_LIVE / SECTION_NOT_ACTIVE / already finalized by the reconciler).
+ * The module is finalized server-side and the recovery poll routes the student
+ * onwards, so this must never read as "your submission failed".
+ */
+function isSectionClosingRejection(error: unknown): boolean {
+  return hasBackendStatusCode(error, 409);
+}
 
 export interface UseSatExamControllerOptions {
   scheduleId: string;
@@ -503,12 +518,7 @@ export function useSatExamController({
   }, [liveSocketConnected, refresh]);
 
   useEffect(() => {
-    if (
-      !runtimeSnapshot?.revision ||
-      (data?.timing.timingModel !== "cohort_stage_v2" &&
-        data?.timing.timingModel !== "cohort_section_v3")
-    )
-      return;
+    if (!runtimeSnapshot?.revision || !isCohortTimingModel(data?.timing.timingModel)) return;
     void refresh(false);
   }, [data?.timing.timingModel, refresh, runtimeSnapshot?.revision]);
 
@@ -635,7 +645,7 @@ export function useSatExamController({
   const runtimeTiming = useMemo<AssessmentTimingSnapshot | null>(() => {
     if (!data || !runtimeSnapshot) return null;
     const timingModel = data.timing.timingModel;
-    if (timingModel !== "cohort_stage_v2" && timingModel !== "cohort_section_v3") return null;
+    if (!isCohortTimingModel(timingModel)) return null;
     if (runtimeSnapshot.timingModel !== timingModel) return null;
     const stageKey = runtimeSnapshot.currentSectionKey as string | null;
     const stageStatus =
@@ -650,6 +660,12 @@ export function useSatExamController({
       serverNow: runtimeSnapshot.serverNow ?? data.timing.serverNow,
       deadlineAt: runtimeSnapshot.currentSectionDeadlineAt ?? null,
       remainingSeconds: runtimeSnapshot.currentSectionRemainingSeconds,
+      // The between-sections window is authoritative on both projections;
+      // fall back to the bootstrap values when the runtime snapshot omits them.
+      nextSectionStartAt:
+        runtimeSnapshot.nextSectionStartAt ?? data.timing.nextSectionStartAt ?? null,
+      waitingForNextSection:
+        runtimeSnapshot.waitingForNextSection ?? data.timing.waitingForNextSection ?? false,
       runtimeRevision: runtimeSnapshot.revision ?? data.timing.runtimeRevision,
     };
   }, [data, runtimeSnapshot]);
@@ -669,20 +685,33 @@ export function useSatExamController({
     () => (data && pendingModule ? findAttemptForModule(data, pendingModule.id) : undefined),
     [data, pendingModule]
   );
-  const cohortRuntimeTiming =
-    effectiveTiming?.timingModel === "cohort_stage_v2" ||
-    effectiveTiming?.timingModel === "cohort_section_v3";
+  const cohortRuntimeTiming = isCohortTimingModel(effectiveTiming?.timingModel);
+  // Authored between-sections window (cohort models). The server's runtime
+  // flag is the single gate — the window is open only while the active section
+  // is complete and the next is not yet live — and nextSectionStartAt is its
+  // countdown instant, so the break counts down to that instead of the
+  // finished section's frozen 0:00.
+  const waitingForNextSection = effectiveTiming?.waitingForNextSection ?? false;
+  const nextSectionStartAt = waitingForNextSection
+    ? effectiveTiming?.nextSectionStartAt ?? null
+    : null;
+  const nextSectionStartSeconds = useAuthoritativeDeadlineClock({
+    deadlineAt: nextSectionStartAt,
+    serverNow: effectiveTiming?.serverNow ?? null,
+    fallbackSeconds: 0,
+    running: Boolean(nextSectionStartAt) && data?.scheduleRuntimeStatus === "live",
+  });
   const pendingBreakSeconds = data
     ? cohortRuntimeTiming
-      ? effectiveTiming?.stageKey?.startsWith("sat:break:")
-        ? authoritativeRemainingSeconds
+      ? nextSectionStartAt
+        ? nextSectionStartSeconds
         : 0
       : breakRemainingSeconds(data, pendingAttempt, snapshotReceivedAt, now)
     : 0;
   const pendingSection = data && pendingModule ? sectionForModule(data, pendingModule.id) : null;
   const pendingExpectedStageKey =
     pendingSection && pendingModule
-      ? effectiveTiming?.timingModel === "cohort_section_v3"
+      ? isSectionKeyedCohortModel(effectiveTiming?.timingModel)
         ? pendingSection.sectionKey
         : `${pendingSection.sectionKey}:${pendingModule.adaptiveRole === "base" ? "m1" : "m2"}`
       : null;
@@ -691,13 +720,18 @@ export function useSatExamController({
     (effectiveTiming?.stageKey === pendingExpectedStageKey &&
       effectiveTiming?.stageStatus === "live" &&
       data?.scheduleRuntimeStatus === "live");
+  // Waiting for the scheduled end of the current section (the student finished
+  // their module early while the shared clock is still running). Once the
+  // server names the next section's start this window is over and the break
+  // countdown above takes over.
   const pendingSectionWaitSeconds =
     data &&
     pendingSection &&
-    effectiveTiming?.timingModel === "cohort_section_v3" &&
+    effectiveTiming &&
+    isSectionKeyedCohortModel(effectiveTiming.timingModel) &&
     data.scheduleRuntimeStatus === "live" &&
+    !waitingForNextSection &&
     effectiveTiming.stageKey &&
-    !effectiveTiming.stageKey.startsWith("sat:break:") &&
     effectiveTiming.stageKey !== pendingSection.sectionKey
       ? authoritativeRemainingSeconds
       : 0;
@@ -989,6 +1023,18 @@ export function useSatExamController({
             return;
           }
         }
+        // Phase 4: the server's clock has moved past ours — the section clock
+        // closed underneath the submit, the runtime paused, or the reconciler
+        // already finalized this module. Not a student error and not a
+        // timeout (a timeout keeps the attribution the zero-remaining path
+        // already set): say what is happening and let the poll loop, or
+        // reconnect when this ran offline, move the student on.
+        if (isSectionClosingRejection(submitError)) {
+          setError(
+            "The exam is finalizing this module — your answers are safe. Keep this screen open."
+          );
+          return;
+        }
         setError(submitError instanceof Error ? submitError.message : "Module submission failed.");
       } finally {
         if (isCurrent()) setIsSubmitting(false);
@@ -1120,22 +1166,27 @@ export function useSatExamController({
   const serverClockOffsetMs = data?.timing.serverNow
     ? Date.parse(data.timing.serverNow) - snapshotReceivedAt
     : 0;
-  const cohortStageRunning =
-    effectiveTiming?.timingModel !== "cohort_section_v3" &&
-    effectiveTiming?.timingModel !== "cohort_stage_v2"
-      ? true
-      : data?.scheduleRuntimeStatus === "live" && effectiveTiming?.stageStatus === "live";
+  const cohortStageRunning = !isCohortTimingModel(effectiveTiming?.timingModel)
+    ? true
+    : data?.scheduleRuntimeStatus === "live" && effectiveTiming?.stageStatus === "live";
   const personalModuleRemainingSeconds = stateModuleAttempt
     ? personalModuleCountdown(stateModuleAttempt, snapshotReceivedAt, now, serverClockOffsetMs, cohortStageRunning)
     : 0;
-  const remainingSeconds =
-    effectiveTiming?.timingModel === "cohort_stage_v2"
+  // D2: min(personal, section) is the STUDENT-FACING allotment only. The
+  // server's section clock is the sole expiry authority — a module past its
+  // personal clock is not force-closed while its section is live, so this
+  // minimum never has to agree with a server-side deadline.
+  // A section-keyed cohort model publishes one clock for the whole section, so
+  // the student's allotment is min(their module, the section) — but only while
+  // the published stage is the section they are actually in. A stage-keyed
+  // cohort model already publishes the running module's own clock.
+  const remainingSeconds = effectiveTiming && isSectionKeyedCohortModel(effectiveTiming.timingModel)
+    ? stateSection && effectiveTiming.stageKey === stateSection.sectionKey
+      ? Math.min(personalModuleRemainingSeconds, authoritativeRemainingSeconds)
+      : 0
+    : isCohortTimingModel(effectiveTiming?.timingModel)
       ? authoritativeRemainingSeconds
-      : effectiveTiming?.timingModel === "cohort_section_v3"
-        ? stateSection && effectiveTiming.stageKey === stateSection.sectionKey
-          ? Math.min(personalModuleRemainingSeconds, authoritativeRemainingSeconds)
-          : 0
-        : personalModuleRemainingSeconds;
+      : personalModuleRemainingSeconds;
 
   const saveContext = useCallback(
     (interactionType: "typing" | "discrete") => {

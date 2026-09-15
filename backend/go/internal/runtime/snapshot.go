@@ -36,7 +36,11 @@ type Snapshot struct {
 	SectionLive      bool
 	SectionPaused    bool
 	SectionStarted   bool
-	LoadedAt         time.Time
+	// WaitingForNextSection mirrors exam_session_runtimes.waiting_for_next_section:
+	// the active section is complete and the next has not gone live. Writes are
+	// refused for the whole window (same 422 family as the liveness gate).
+	WaitingForNextSection bool
+	LoadedAt              time.Time
 }
 
 // CheckWritable enforces the snapshot pre-gate with the same 422 code family
@@ -51,6 +55,9 @@ func (s Snapshot) CheckWritable() error {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is not live.", HTTPStatus: 422}
 	default:
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is not live.", HTTPStatus: 422}
+	}
+	if s.WaitingForNextSection {
+		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is waiting.", HTTPStatus: 422}
 	}
 	if s.SectionPaused || !s.SectionLive || !s.SectionStarted {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is not live.", HTTPStatus: 422}
@@ -160,16 +167,18 @@ func LoadSnapshot(ctx context.Context, q SnapshotQuerier, scheduleID string, now
 	var active sql.NullString
 	var revision int64
 	var timing sql.NullString
+	var waiting sql.NullBool
 	err := q.QueryRowContext(ctx,
-		`SELECT id, status, active_section_key, revision, COALESCE(timing_model,'legacy_section_v1') FROM exam_session_runtimes WHERE schedule_id = ?`,
-		scheduleID).Scan(&id, &status, &active, &revision, &timing)
+		`SELECT id, status, active_section_key, revision, COALESCE(timing_model,'legacy_section_v1'), waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ?`,
+		scheduleID).Scan(&id, &status, &active, &revision, &timing, &waiting)
 	if err == sql.ErrNoRows {
 		return Snapshot{Status: StatusLive, ActiveSectionKey: strptr("*"), SectionLive: true, SectionStarted: true, LoadedAt: now}, nil
 	}
 	if err != nil {
 		return Snapshot{}, err
 	}
-	snap := Snapshot{Status: status.String, Revision: revision, TimingModel: timing.String, LoadedAt: now}
+	snap := Snapshot{Status: status.String, Revision: revision, TimingModel: timing.String,
+		WaitingForNextSection: waiting.Bool, LoadedAt: now}
 	if active.Valid && active.String != "" {
 		snap.ActiveSectionKey = strptr(active.String)
 		var secStatus sql.NullString

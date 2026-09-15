@@ -102,6 +102,27 @@ func TestEnsureQuestionAdmittedMatrix(t *testing.T) {
 	}
 }
 
+// Between sections: the runtime is live but waiting for the next section. The
+// gate must refuse with the explicit waiting message (not a generic liveness
+// refusal) so the client can tell "the room is on its break" from "your exam
+// is paused". This is the flag the section reconciler now actually sets.
+func TestEnsureWritableBetweenSections(t *testing.T) {
+	now := time.Now().UTC()
+	a, g := openAttempt(), liveGate(now)
+	g.WaitingForNextSection = true
+	err := ensureWritable(a, g, now)
+	appErr, ok := apperrors.As(err)
+	if !ok {
+		t.Fatalf("expected an app error, got %v", err)
+	}
+	if appErr.Code != apperrors.CodeAttemptNotWritable || appErr.HTTPStatus != 422 {
+		t.Fatalf("expected 422 NOT_WRITABLE, got %s/%d", appErr.Code, appErr.HTTPStatus)
+	}
+	if appErr.Message != "Exam runtime is waiting." {
+		t.Fatalf("expected the waiting message, got %q", appErr.Message)
+	}
+}
+
 func TestFencingErrorCodes(t *testing.T) {
 	if e := leaseFenced(); e.Code != apperrors.CodeLeaseFenced || e.HTTPStatus != 403 {
 		t.Fatalf("leaseFenced wrong: %+v", e)

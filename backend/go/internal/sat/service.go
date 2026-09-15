@@ -434,62 +434,6 @@ func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (
 	return done, err
 }
 
-// ReconcileModuleTimeouts finalizes modules whose authoritative window
-// elapsed while still active. The cohort clock is authoritative upstream;
-// the deadline is available_at + allocated + extension + accumulated pause
-// credit (plus the open paused_at interval when paused), matching
-// compute_sat_attempt_remaining_seconds: elapsed = (paused||now - start) -
-// accumulated. Paused rows are skipped (their clock is stopped), and the
-// conditional UPDATE re-checks the same predicate so a concurrent pause,
-// resume, or extension wins the race instead of being clobbered.
-func (s *Service) ReconcileModuleTimeouts(ctx context.Context, now time.Time, batchSize int64) (int64, error) {
-	if batchSize < 1 {
-		batchSize = 250
-	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT ma.id
-		FROM assessment_module_attempts ma
-		JOIN student_attempts a ON a.id = ma.attempt_id
-		WHERE ma.state = 'active'
-		  AND ma.paused_at IS NULL
-		  AND ma.available_at IS NOT NULL
-		  AND DATE_ADD(ma.available_at, INTERVAL (ma.allocated_seconds + ma.extension_seconds + ma.accumulated_paused_seconds) SECOND) <= ?
-		ORDER BY ma.available_at ASC
-		LIMIT ?`, now.UTC(), batchSize)
-	if err != nil {
-		return 0, err
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	var finalized int64
-	for _, id := range ids {
-		res, err := s.db.ExecContext(ctx, `
-			UPDATE assessment_module_attempts
-			SET state = 'submitted', completion_reason = 'timeout',
-				submitted_at = ?, updated_at = ?, revision = revision + 1
-			WHERE id = ? AND state = 'active' AND paused_at IS NULL
-			  AND available_at IS NOT NULL
-			  AND DATE_ADD(available_at, INTERVAL (allocated_seconds + extension_seconds + accumulated_paused_seconds) SECOND) <= ?`, now.UTC(), now.UTC(), id, now.UTC())
-		if err != nil {
-			return finalized, err
-		}
-		n, _ := res.RowsAffected()
-		finalized += n
-	}
-	return finalized, nil
-}
-
 // OldestProvisionalAgeSeconds reports the age in seconds of the oldest SAT
 // provisional completion; NULL (no rows) returns 0 without error.
 func (s *Service) OldestProvisionalAgeSeconds(ctx context.Context) (int64, error) {

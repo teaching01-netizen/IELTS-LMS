@@ -1,8 +1,13 @@
 # SAT Section Transition, Break, and Module-Timeout — Audit & Implementation Plan
 
-Status: **plan, not implemented**
+Status: **implemented** — phases 1–5 are on disk. Phase 6 ran the unit suites, the
+full frontend suite, and one Playwright e2e (`e2e-05`, chromium) against a fresh
+local database; the SAT e2e variant and both k6 scenarios are still outstanding.
+Phase 7 is complete as far as it is honest to be — the dead branches are marked
+legacy, not deleted. See §10 for the per-phase record, the evidence, and what
+remains.
 Branch: `feat/sat-bluebook-overlays-tools`
-Written: 2026-09-14
+Written: 2026-09-14 (implemented 2026-09-15)
 Scope: section transitions, the between-section break, proctor controls, module
 time-out, and a student advancing to the next module.
 
@@ -462,3 +467,374 @@ independent of Phase 1 and can run in parallel.
    established.
 5. **Whether the proctor should be able to end a SAT section early** (F6) is a
    product decision, not a technical one.
+
+---
+
+## 10. Implementation record
+
+Everything below was read back from the working tree after the change. Test
+suites were executed (unlike §1–9) — see §10.9.
+
+### 10.1 Phase 1 — reconcile correctness
+
+- **1.0 Retired the second finalizer.** `sat.ReconcileModuleTimeouts` is deleted
+  from `internal/sat/service.go`; the `ReconcileSATModules` maintenance job is
+  gone from `cmd/worker/main.go`. `delivery.ReconcileAttemptTimeout` is now the
+  only module finalizer, so the wrong `available_at` anchor, the unrouted
+  `state='submitted'` write, and the `timeout` / `time_expired` vocabulary split
+  are all gone with it. (**KNOWN**)
+- **1.1 The authored gap is now read.** `lockRuntimeSections` selects
+  `gap_after_minutes` into `runtimeSection.gap` (plus `actual_end_at`), and
+  `runtimeSection.deadline()` is the single deadline expression the loop uses.
+- **1.2 The auto-advance path is tested.** New
+  `internal/proctor/reconcile_sections_test.go` (8 cases): between-sections
+  window, start-after-gap, gap `0` equivalence, multi-section catch-up, paused
+  overrun, auto-submit-disabled overrun, the 30-second closing grace, and the
+  between-sections projection. Previously `ReconcileExpiredSections` had no test
+  at all.
+- **1.3 Finished sections close their modules promptly.** New outbox family
+  `FamilySectionAttemptsReconcile` (`section_attempts_reconcile_requested`),
+  enqueued in the same transaction as the section completion and drained on the
+  worker's hot cycle into `delivery.ReconcileAttemptTimeout`. The worker gained
+  an `attemptReconciler` seam for testability; tests live in
+  `cmd/worker/sectionreconcile_fanout_test.go`.
+
+### 10.2 Phase 2 — the waiting window
+
+- **2.1** `waiting_for_next_section` is now written `true` when a section
+  completes and the gap has not elapsed, and cleared on advance (and on the
+  runtime-completion branch). `is_overrun` is cleared in both. The three
+  pre-existing consumers therefore become reachable. `EndSectionNow` clears the
+  flag because it advances immediately.
+- **2.2** `nextSectionStartAt` is projected end to end:
+  `proctor.SessionRuntime` → `delivery.TimingSnapshot` →
+  `AssessmentTimingSnapshot` and the client's `ExamSessionRuntime`. It is set
+  only inside the window and derived from the completed section
+  (`actual_end_at + gap_after_minutes`).
+- **2.3** The client counts the break down against it. `pendingBreakSeconds`
+  and `pendingSectionWaitSeconds` are now mutually exclusive: the section-wait
+  countdown is suppressed once the server names the next start, and the break
+  countdown drives both the break surface and
+  `shouldAutoStartNextSectionAfterBreak`. `mergeAuthoritativeTiming` carries a
+  known `nextSectionStartAt` across projections that omit the key, and clears it
+  only on an explicit `null`.
+
+### 10.3 Phase 3 — one expiry authority
+
+`personalExpired` is removed from `reconcileCohortSectionExpiredTx`; the branch
+returns `sectionExpired` alone. The rationale is recorded at the decision site,
+and the client's `min(personal, section)` is commented as the student-facing
+allotment. Pinned by `internal/delivery/reconcile_section_clock_test.go`
+(4 cases: personal clock exhausted with the section live, section deadline
+passed, section completed, section paused).
+
+### 10.4 Phase 4 — client behaviour at section end
+
+A module-submit conflict (409: `DEADLINE_EXPIRED`, `RUNTIME_NOT_LIVE`,
+`SECTION_NOT_ACTIVE`, already-finalized) is classified as *awaiting server
+finalization* instead of a failure: the student is told the exam is finalizing
+the module and that their answers are safe, and the recovery poll — always
+running — routes them on. The timeout attribution is deliberately **not** set
+from here, so a manual submit that merely raced the reconciler is never
+mislabeled as a timeout (the zero-remaining path sets it itself). The
+pre-existing refresh path still resolves the common case directly.
+
+### 10.5 Phase 5 — proctor parity and honesty
+
+- **5.1** `EndSectionNow` now accepts SAT **inside the waiting window** only:
+  the section is already complete and its open modules are with delivery, so the
+  call shortens the authored break rather than cutting a live section short (the
+  completed section's recorded `actual_end_at` is preserved, because the gap
+  arithmetic depends on it). A live SAT section still returns the original 400.
+  This is the narrower reading of the product decision: "end the break now", not
+  "end a section early".
+- **5.2** `is_overrun` is written: the reconciler sets it when a live section is
+  past the closing grace and it declines to advance (paused, or auto-submit
+  disabled for the schedule), and clears it on completion and on advance. A
+  third candidate-scan branch selects those rows, so the schedule is reached
+  even when auto-submit is off and nothing would otherwise sweep it. Note the
+  projection already *computed* an equivalent signal from the live section clock
+  (`computedSectionTime.overrun`); what was missing was any server-side record,
+  and the reconciler is now the writer for the cases the clock cannot advance
+  past.
+
+### 10.6 Phase 7 — cleanup (marks, not deletions — see §10.11)
+
+The dead `sat:break:` reads are gone: `breakRemainingSeconds` is now
+legacy-model only, and the controller no longer branches on a suffixed stage
+key. The `cohort_stage_v2` branches are **marked legacy, not deleted** — no
+in-repo writer assigns that model, but an out-of-repo writer cannot be excluded,
+and removing the client branches would touch several hot paths for no runtime
+benefit.
+
+### 10.7 RuntimeRevision accounting
+
+`RuntimeRevision` in `AutoAdvanceOutcome` and the inline wakeup revisions count
+actual `exam_session_runtimes` revision bumps, where the previous code counted
+section completions. With gap `0` the two are identical (one bump per advance),
+which is what makes the gap-`0` equivalence test meaningful. The worker only
+logs this value today.
+
+The count is now *returned by the executor* (`applyAdvancePlan`) instead of
+being predicted by a second `advancePlan.runtimeWriteCount()` method that had to
+stay in sync with it by hand. The predicting copy is deleted, along with the two
+test assertions that pinned it.
+
+### 10.8 Residual risks accepted
+
+- A stalled client can hold one module for the rest of its section (the direct
+  consequence of D2). The section clock bounds it.
+- The 5-minute maintenance sweep remains as a backstop for attempts the section
+  family does not cover (e.g. a module row created after its section ended).
+- The legacy per-response path still has no 30-second grace (**F4**, unchanged);
+  the unified deadline helper from the draft plan was not part of the locked
+  plan and was not implemented.
+- Proctor "end a live SAT section early" remains unavailable (F6).
+
+### 10.9 Verification actually run
+
+- `cd backend/go && go build ./...` — clean.
+- `go test ./internal/proctor/... ./internal/delivery/... ./internal/sat/... ./internal/outbox/... ./cmd/worker/...` — all pass.
+- `go test ./...` — two **pre-existing, unrelated** failures in this
+  environment: `cmd/migrate` pins 61 migration files while the tree has 62, and
+  `internal/platform/config` fails because this shell exports `PORT=0`
+  (`env -u PORT go test ./internal/platform/config/...` passes). Neither file
+  was touched by this work.
+- `bun run typecheck` — clean.
+- `bun run test:run` — 593 files / 4253 tests pass.
+- **Not run:** the Playwright e2e variant of
+  `e2e-05-proctor-advance-during-flush.spec.ts` and both k6 transition
+  scenarios from §7 Phase 6.
+
+### 10.10 Post-audit hardening (four-dimension review)
+
+An adversarial review of the work above found four things worth closing. All
+four are now done; nothing in §10.1–10.9 was reverted except the two pieces of
+unrequested churn the review named.
+
+**Owner-per-state.** The between-sections window now has exactly one writer
+(`exam_session_runtimes.waiting_for_next_section`) and every reader reads that
+flag rather than re-deriving the window:
+
+- `StudentSessionSummary` no longer forces the flag to `false` for SAT — only
+  *legacy* SAT (`isSAT && !cohortTimedSAT`) suppresses it, matching its
+  neighbouring guards. This was the reason the proctor dashboard read a breaking
+  room as running. Pinned by `session_projection_test.go` (cohort SAT reports
+  waiting + the section clock; legacy SAT keeps its module clock).
+- The V2 **snapshot** write gate now carries the flag: `runtime.Snapshot` gained
+  `WaitingForNextSection`, `LoadSnapshot` reads the column, `CheckWritable`
+  refuses with the explicit waiting message, and `snapshotRuntimeGate` maps it
+  onto `attempts.RuntimeGate`. Before this, only the legacy `FOR UPDATE` locker
+  saw the flag, so the V2 batch transport — the live one — never reached the
+  "Exam runtime is waiting." 422. Pinned by `snapshot_load_test.go`,
+  `v2locker_snapshot_test.go`, and `TestEnsureWritableBetweenSections`.
+- The client no longer infers the window from `nextSectionStartAt` presence: the
+  flag gates it and `nextSectionStartAt` is only its countdown instant, carried
+  together through `mergeAuthoritativeTiming`.
+
+**Structure.** The cohort section state machine is now a pure function
+(`planSectionAdvance`) over locked rows, applied by `applyAdvancePlan`; the
+reconciler is a thin loader. The rule table is testable without a database
+(`reconcile_plan_test.go`).
+
+**Churn removed.** The `ReconcileSATModules`/`ReconcileSectionAttempts` job-list
+renaming is gone (the section fan-out rides `DrainOutbox` and
+executes in the hot cycle's `ReconcileExpiredSections`), and the separate
+`attemptReconciler` field/setter/resolver collapsed into one `deliveryService`
+interface on the existing `delivery` field.
+
+**Verification gap closed.** `go test ./...` now fails only the pre-existing
+`cmd/migrate` pin (61 vs 62 files; no migration was added).
+`bun run typecheck` clean. (Final closing-pass counts in §10.11, which also
+records the e2e-05 run.)
+
+### 10.11 Closing pass (second four-dimension review)
+
+Everything the second review named, addressed. Nothing was reverted.
+
+**One owner for "advance a cohort section".** `EndSectionNow` had grown its own
+inline advance (`proctor/service.go`): it used `UTC_TIMESTAMP(6)` instead of
+`section end + gap`, skipped the module handover, and omitted the
+`SECTION_WAIT`/`SECTION_START` audit payload — so the same transition persisted
+different state depending on who triggered it. It now builds the same
+`sectionAdvance` the reconciler does and calls the same `applySectionAdvance`.
+The F2 symptom this fixes (a proctor-ended section leaving its modules `active`
+until the 5-minute sweep) is pinned by
+`proctor/endnow_section_test.go::TestEndSectionNowLiveSectionEnqueuesModuleHandover`,
+and the between-sections case by `...AdvancesWithoutRewriting`.
+
+**§5.1's precondition is now enforced, not assumed.** The plan permitted
+short-cutting the SAT break only with "base modules submitted, no routing
+decision pending". `EndSectionNow` now counts the finished section's
+non-terminal module attempts (`openSectionModuleAttempts`) and returns a 409
+while any remain, so the successor cannot open in front of an unfinished
+adaptive routing decision.
+`TestEndSectionNowRefusesWhileModulesAreStillFinalizing` pins the refusal.
+
+**One owner for the timing-model names.** `internal/runtime/timingmodel.go`
+now holds the three model strings, `IsCohortTimed` and `CohortTimingModelsSQL`; `src/types/domain.ts` holds `TimingModel`,
+`isCohortTimingModel` and `isSectionKeyedCohortModel`. The inline spellings are
+replaced at every predicate site on both sides — including
+`delivery/start_submit.go`'s hand-written SQL `IN` list, which now interpolates
+the constant. This is what removes the drift the review found (one client site
+tested only `cohort_section_v3` where its neighbour tested both; that was
+*intentional* — a stage key comparison — and is now named
+`isSectionKeyedCohortModel` instead of being an unexplained literal).
+
+**`reconcile.go` split.** The locked reads, the handover enqueue and the id
+helpers moved to `proctor/section_reconcile_store.go`; `reconcile.go` keeps the
+pure planner and the executors. 792 → 656 lines, with the SQL no longer
+interleaved with the state machine.
+
+**Test scaffolding deduplicated.** `newMockService(t)` (in `complete_test.go`)
+is the one sqlmock + capturing-outbox constructor; the shared lock regexes
+(`sectionsLock`, `setTimeZone`, the new `commandRuntimeLock`) live in one place
+and `endnow_section_test.go` uses them instead of re-spelling five query
+strings.
+
+**New coverage:** route-level `SatStudentSessionRoute.between-sections.test.tsx`
+(the authored break reaches the screen in `break` mode with its own countdown,
+and the early-finish wait does not), and `StudentCard.test.tsx` (the
+`runtimeWaiting` flag reaches the proctor's card). The card's bare `waiting`
+label became a styled "on break" chip with a title, since it sits next to the
+`runtimeSection ?? 'Waiting'` fallback and the two read alike.
+
+**Phase 7:** complete as far as it honestly can be — `cohort_stage_v2` and the
+`sat:break:` stage key are *marked* legacy with the reason at the decision site,
+not deleted; an out-of-repo writer for either cannot be excluded from here.
+
+**Verification, closing pass.** `go build ./...` and `go vet ./internal/... ./cmd/...`
+clean; `env -u PORT go test ./...` fails **only** `cmd/migrate`'s pre-existing
+migration-lineage pin (61 pinned vs 62 on disk — no migration was added).
+`bun run typecheck` clean. Full `bun run test:run`: **595 files / 4257 tests, all
+passing**, including the two preview suites that had been timing out under load;
+the four additions are the route-level between-sections pair and the StudentCard
+pair. `gofmt -l` reports one file, `internal/delivery/sat_v2_scoring_test.go`,
+which this work never touched.
+
+**Playwright e2e — now run and passing (chromium).**
+`e2e-05-proctor-advance-during-flush.spec.ts` passed in 49.4s against a fresh
+local database. This is the real stack: the suite's `webServer` block booted
+`cmd/api`, `cmd/worker` and Vite, the seed built the schedule, and the journey
+ran end to end — student check-in, live answers, proctor
+`POST /sessions/{id}/control/end-section-now`, a mutation held before server
+ingress, then released. The released mutation was rejected after submit
+(409 `CONTROL_EPOCH_STALE`, the value crossing the control boundary) and the
+post-submit value was confirmed retained in the durable recovery queue. The
+worker's hot cycle in the same run published 5 outbox events including the
+section fan-out, so the new handover path executed under load.
+
+Two environment facts had to be resolved first, neither a code defect:
+`ielts_go_fresh` cannot be re-seeded (`cmd/e2e_seed` deletes from
+`attempt_terminalizations`, which migration `0056` makes immutable — 98 rows
+were already there), and a brand-new database has to be migrated before
+Playwright starts, because Playwright boots `webServer` *before* `globalSetup`
+and the API's schema guard rejects an unmigrated schema. The run therefore used
+a purpose-made `ielts_e2e_fresh`: created, migrated through `0062`, seeded.
+Also note this shell exports `PORT=0`, which the API rejects; the run needs
+`env -u PORT`.
+
+**Still not run — two things.**
+
+1. The SAT *variant* of the e2e (Phase 6's "extend
+e2e-05-proctor-advance-during-flush.spec.ts into a SAT variant"), and the spec
+across the other six browser projects. Only `e2e-05` on chromium was run.
+2. Both k6 transition scenarios (`prod-section-transition-200`,
+`prod-transition-reconciliation-200`). Their own README warns they "mutate real
+schedule/runtime state" and need a dedicated schedule; `k6` is installed at
+`/opt/homebrew/bin/k6` and could be pointed at the same `ielts_e2e_fresh`, but
+they were out of the agreed scope for this pass. **Decision, not a blocker** —
+the remaining risk is the no-double-advance and no-module-left-active invariants
+under 200-way concurrency, which no unit test covers.
+
+### 10.12 Closing pass (third four-dimension review) — proctor parity, revision ownership, phase 6 dropped
+
+A third review found that §10.11 closed the *shape* of the proctor path but left
+two things untrue or unfinished. Both are now settled, and Phase 6 was dropped
+by decision.
+
+**No caller predicts a runtime revision any more.** §10.11 unified the
+*effects* but left the *revision* hand-counted: `EndSectionNow` passed
+`reconcileRuntime{id: runtimeID}, adv, revision+1` — the predicted-counter
+pattern the review had already deleted on the reconciler side, plus a
+zero-valued `reconcileRuntime` that would silently have read `revision == 0` if
+anything inside ever looked at it. The revision is now an **output**:
+`currentRuntimeRevision(ctx, q, runtimeID)` reads the locked row, and every
+enqueue that names a revision (the module handover, the runtime wakeup, the
+runtime-end auto-submit) reads it there, after its own write. `applySectionAdvance`
+no longer takes a runtime struct or a revision and returns only an error;
+`applyAdvancePlan` reports `bool` ("did this move the runtime") and
+`reconcileExpiredSchedule` re-reads only when it did.
+
+Pinned by `TestEndSectionNowBetweenSectionsAdvancesWithoutRewriting`, which
+mocks the row read as **42** — deliberately not the `7 + 1` the command used to
+predict — and asserts the `runtime_changed` wakeup carries 42. The
+`captureOutbox` fake now records revisions (`revisionFor(family)`) so this is
+assertable at all.
+
+**Whether `assessment_module_attempts` exists for SAT — answered from code.**
+§10.11's handover and §5.1's precondition both act on rows in that table, and a
+full IELTS student journey in `ielts_e2e_fresh` left it empty (0 rows there and
+0 in `ielts_prod_clone`). The reason is structural, not a defect:
+`delivery.Bootstrap` rejects any provider that is not `sat`/`act` and only then
+calls `ensureBaseModuleAttempt`, so module attempts are created on the SAT/ACT
+path alone. The IELTS schedule shapes that were reachable from here can never
+populate it, which is exactly why the handover and the gate looked unreachable.
+They are reachable on SAT; neither is dead code. What is still **unproven
+empirically** is the handover's effect on SAT rows end to end — see below.
+
+**A real bug the gap-honouring reconciler exposed.** `runtimePlan` derived every
+section's break with `ceilMinutes`, which floors at 1 minute. A section authored
+with **no** break (`break_after_seconds = 0`, the SAT Math default) therefore
+persisted `gap_after_minutes = 1`, and once the reconciler started honouring the
+authored gap the cohort sat in the between-sections window for an unearned
+minute. `ceilGapMinutes` was split out: zero is meaningful for a gap ("advance
+immediately") and must not inherit the duration floor. Pinned in
+`internal/schedules/runtime_plan_act_test.go`.
+
+**The two remaining model literals, client-side.** `satTiming.timingForAttempt`,
+`satTiming.breakRemainingSeconds` and `useSatExamController`'s student-facing
+`remainingSeconds` were still spelling `cohort_stage_v2` / `cohort_section_v3`
+inline. They now discriminate through `isCohortTimingModel` /
+`isSectionKeyedCohortModel`. Their branches genuinely differ per model (a
+section-keyed model publishes the section's deadline, so the module clock is
+clamped to it; a stage-keyed one already publishes the module's own), which is
+why the pair exists and why the branch is now named instead of literal.
+
+**Phase 6's browser half was dropped, and its artifacts removed.** A SAT
+section-transition spec and the SAT fixture for `cmd/e2e_seed` were written, and
+the spec was exercised but never got to a pass inside the budget: it first
+timed out at 600s against the real stack, then the seeded clocks were shortened
+and it was still being debugged when the request changed to skip e2e.
+
+Both are reverted rather than shipped. `playwright.config.ts` resolves
+`testMatch: "**/*.spec.ts"` under `testDir: ./e2e`, and CI runs
+`bunx playwright test`, so an unrun spec is picked up automatically and a
+never-passing one would fail the e2e job. The `e2e_seed` fixture had no
+remaining consumer and would have added a SAT schedule to every seeded database
+for every other spec. `e2e-05-proctor-advance-during-flush.spec.ts` (chromium,
+passing, §10.11) is unchanged and remains the suite's coverage of this
+behaviour. Phase 6 therefore stands as: legacy e2e green, SAT e2e **not
+written**, k6 **not run**.
+
+**Verification, this pass.**
+
+- `go build ./...` clean; `gofmt -l` clean on everything touched here.
+- `env -u PORT go test ./...` fails **only** `cmd/migrate`'s pre-existing
+  lineage pin (61 pinned vs 62 on disk — no migration was added).
+- `bun run typecheck` clean.
+- `bun run test:run`: **595 files / 4257 tests**, 4256 passing. The one failure
+  is `src/features/exam-authoring/api/__tests__/authoringShellLifecycle.test.tsx`
+  `FT-04b` (`409` classified as `"unknown"`), in a feature this work never
+  touches. It is **pre-existing**: it fails identically when the whole tree is
+extracted from `git archive HEAD` and run against the same `node_modules`, with
+  none of this work present. It reproduces in isolation, so it is not suite-load
+  flakiness either. §10.11 recorded the suite fully green, so something in the
+  environment changed between the two passes; the test is unrelated to this
+  change either way.
+- `cmd/worker/sectionreconcile_fanout_test.go` now pins the section fan-out's
+  contract directly: attempts reconcile independently (one transient failure
+  does not stop the cohort), the event retries only when nothing progressed,
+  an empty fan-out and a missing delivery surface are no-ops, a missing schedule
+  id falls back to the aggregate id and fails without one, and a malformed
+  payload fails loudly rather than acking away a cohort's module finalization.

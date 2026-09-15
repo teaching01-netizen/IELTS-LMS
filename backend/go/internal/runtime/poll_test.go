@@ -11,8 +11,8 @@ import (
 )
 
 func pollRow(rev int64, status, active string) *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model"}).
-		AddRow("rt-1", status, active, rev, "legacy_section_v1")
+	return sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section"}).
+		AddRow("rt-1", status, active, rev, "legacy_section_v1", false)
 }
 
 func sectionRow(status string) *sqlmock.Rows {

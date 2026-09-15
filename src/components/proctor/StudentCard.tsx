@@ -101,7 +101,14 @@ export const StudentCard = React.memo(function StudentCard({
         <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
           <Clock size={12} />
           <span className={runtimeTimeRemaining < 600 ? 'font-medium text-red-700' : ''}>{formatTime(runtimeTimeRemaining)}</span>
-          {session.runtimeWaiting ? <span>waiting</span> : null}
+          {session.runtimeWaiting ? (
+            <span
+              className="rounded bg-sky-100 px-1.5 py-0.5 font-medium text-sky-700"
+              title="Between sections: the previous section is finished and the next has not started"
+            >
+              on break
+            </span>
+          ) : null}
         </div>
       </div>
 

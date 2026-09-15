@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckSquare, ChevronLeft, Filter, LayoutGrid, List, Pause, Play, Settings, SkipForward, Square, StopCircle, Timer, X } from 'lucide-react';
 import type { AuditActionType, ExamGroup, ModuleType, ProctorAlert, SessionAuditLog, SessionNote, StudentSession, StudentStatus, ViolationRule } from '../../types';
-import type { ExamSchedule, ExamSessionRuntime } from '../../types/domain';
+import { isCohortTimingModel, type ExamSchedule, type ExamSessionRuntime } from '../../types/domain';
 import { ConfirmModal } from '../ConfirmModal';
 import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
 import { Toast, ToastContainer, type ToastVariant } from '../ui/Toast';
@@ -1198,7 +1198,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                   }
                 }}
                 onExtendTime={
-                  selectedRuntime?.timingModel === 'cohort_stage_v2' || selectedRuntime?.timingModel === 'cohort_section_v3'
+                  isCohortTimingModel(selectedRuntime?.timingModel)
                     ? undefined
                     : async (minutes) => {
                         if (!selectedStudent) return;

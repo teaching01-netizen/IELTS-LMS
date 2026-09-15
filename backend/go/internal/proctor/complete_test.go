@@ -13,14 +13,41 @@ import (
 )
 
 type captureOutbox struct {
-	families []string
-	payloads []string
+	families  []string
+	payloads  []string
+	revisions []int64
 }
 
 func (c *captureOutbox) EnqueueInTx(ctx context.Context, q tx.Tx, aggregateKind, aggregateID string, revision int64, eventFamily string, payload json.RawMessage) error {
 	c.families = append(c.families, eventFamily)
 	c.payloads = append(c.payloads, string(payload))
+	c.revisions = append(c.revisions, revision)
 	return nil
+}
+
+// revisionFor returns the revision the first event of the given family was
+// enqueued with, so a test can pin where that revision came from.
+func (c *captureOutbox) revisionFor(family string) (int64, bool) {
+	for i, f := range c.families {
+		if f == family {
+			return c.revisions[i], true
+		}
+	}
+	return 0, false
+}
+
+// newMockService builds a Service over sqlmock with a capturing outbox, for
+// tests that assert on the durable effects (audit rows, outbox families,
+// revision bumps) rather than on the SQL text.
+func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock, *captureOutbox) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	outbx := &captureOutbox{}
+	return NewService(tx.NewRunner(db), db, nil, outbx, nil), mock, outbx
 }
 
 // CompleteExam with a custom free-text reason must still enqueue the fixed

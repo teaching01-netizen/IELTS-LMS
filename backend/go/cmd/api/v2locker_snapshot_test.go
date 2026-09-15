@@ -53,8 +53,8 @@ func TestSnapshotLockerRefreshOnce(t *testing.T) {
 	// First load: paused runtime.
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model"}).
-			AddRow("rt-1", "paused", "rw", 3, "legacy_section_v1"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section"}).
+			AddRow("rt-1", "paused", "rw", 3, "legacy_section_v1", false))
 	mock.ExpectQuery("FROM exam_session_runtime_sections WHERE").
 		WithArgs("rt-1", "rw").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
@@ -65,8 +65,8 @@ func TestSnapshotLockerRefreshOnce(t *testing.T) {
 	cache.Invalidate("sched-1")
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model"}).
-			AddRow("rt-1", "live", "rw", 4, "legacy_section_v1"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section"}).
+			AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false))
 	mock.ExpectQuery("FROM exam_session_runtime_sections WHERE").
 		WithArgs("rt-1", "rw").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
@@ -79,6 +79,30 @@ func TestSnapshotLockerRefreshOnce(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Between sections: a waiting snapshot must map its flag onto the gate, which
+// is what turns an in-window save into the explicit 422 ("Exam runtime is
+// waiting.") rather than a generic liveness refusal — the V2 batch transport
+// otherwise never sees the flag, since it locks through this snapshot path.
+func TestSnapshotLockerBetweenSectionsBlocked(t *testing.T) {
+	snap := runtime.Snapshot{Status: runtime.StatusLive, ActiveSectionKey: strptrOrNil("rw"),
+		Revision: 12, WaitingForNextSection: true}
+	gate := snapshotGateOf(snap, time.Now().UTC())
+	if !gate.WaitingForNextSection {
+		t.Fatalf("waiting flag must reach the gate: %+v", gate)
+	}
+	// The snapshot pre-gate refuses the window, and the flag reaching the gate
+	// is what makes the in-tx ensureWritable re-check return the explicit
+	// "Exam runtime is waiting." 422 (pinned in attempts' writability matrix).
+	err := snap.CheckWritable()
+	if err == nil {
+		t.Fatal("waiting snapshot must block writes")
+	}
+	appErr, ok := apperrors.As(err)
+	if !ok || appErr.HTTPStatus != 422 {
+		t.Fatalf("waiting gate must be a 422: %v", err)
 	}
 }
 

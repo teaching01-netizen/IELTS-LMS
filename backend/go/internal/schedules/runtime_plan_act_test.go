@@ -40,6 +40,32 @@ func TestFallbackRuntimePlanKeepsScienceForACT(t *testing.T) {
 	}
 }
 
+// A section authored with no break must plan a zero-minute gap. The duration
+// conversion floors at one minute (a zero-length section is not a section),
+// but a gap of zero is the "advance immediately" case the section reconciler
+// supports explicitly — reusing the duration floor here persisted
+// gap_after_minutes = 1 and put the cohort on an unearned one-minute break
+// after any section whose author left the break empty (SAT Math by default).
+func TestZeroAuthoredBreakPlansAZeroGap(t *testing.T) {
+	if got := ceilGapMinutes(0); got != 0 {
+		t.Fatalf("a zero authored break must plan gap 0, got %d", got)
+	}
+	if got := ceilGapMinutes(600); got != 10 {
+		t.Fatalf("a 600s authored break must plan gap 10, got %d", got)
+	}
+	if got := ceilGapMinutes(61); got != 2 {
+		t.Fatalf("a partial minute must round up, got %d", got)
+	}
+	// Durations keep the one-minute floor: a section cannot be zero length.
+	if got := ceilMinutes(0); got != 1 {
+		t.Fatalf("a zero duration must keep the one-minute floor, got %d", got)
+	}
+	plan := configuredRuntimePlan(`{"sections":{"reading-writing":{"enabled":true,"order":0,"duration":64,"gapAfterMinutes":0}}}`, examdomain.ProviderSAT)
+	if len(plan) != 1 || plan[0].GapAfterMinutes != 0 {
+		t.Fatalf("the config plan path must also keep a zero gap, got %+v", plan)
+	}
+}
+
 // RED: enabled-section filtering must use the same effective provider, so a
 // persisted assessment_sections science row is not dropped for legacy rows.
 func TestEffectiveProviderKeepsScienceSectionRow(t *testing.T) {

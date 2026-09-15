@@ -98,6 +98,79 @@ function cohortBootstrap(): AssessmentDeliveryBootstrap {
   };
 }
 
+/**
+ * Between-sections projection: the reading-writing section is complete, its
+ * clock reads 0:00, and the server names the instant math goes live (the
+ * authored gap). The student is on the shared break, not in a module.
+ */
+function breakBootstrap(): AssessmentDeliveryBootstrap {
+  const serverNow = new Date("2026-09-10T08:00:00.000Z").toISOString();
+  const nextSectionStartAt = new Date("2026-09-10T08:05:00.000Z").toISOString();
+  return {
+    ...cohortBootstrap(),
+    timing: {
+      authority: "cohort_runtime",
+      timingModel: "cohort_section_v3",
+      stageKey: "reading-writing",
+      stageStatus: "completed",
+      serverNow,
+      deadlineAt: null,
+      remainingSeconds: 0,
+      nextSectionStartAt,
+      waitingForNextSection: true,
+      runtimeRevision: 9,
+    },
+    sections: [
+      {
+        id: "section", sectionKey: "reading-writing", title: "RW", displayOrder: 0,
+        durationSeconds: 120, breakAfterSeconds: 0,
+        instructions: { version: 1, nodes: [] },
+        modules: [
+          {
+            id: "module", moduleKey: "module", title: "Module", displayOrder: 0,
+            durationSeconds: 60, targetQuestionCount: 1, adaptiveRole: "base",
+            instructions: { version: 1, nodes: [] }, toolPolicy: [], questions: [],
+          },
+        ],
+      },
+      {
+        id: "section-math", sectionKey: "math", title: "Math", displayOrder: 1,
+        durationSeconds: 120, breakAfterSeconds: 0,
+        instructions: { version: 1, nodes: [] },
+        modules: [
+          {
+            id: "module-math", moduleKey: "module-math", title: "Math Module 1",
+            displayOrder: 0, durationSeconds: 60, targetQuestionCount: 1,
+            adaptiveRole: "base", instructions: { version: 1, nodes: [] },
+            toolPolicy: [], questions: [],
+          },
+        ],
+      },
+    ],
+    attempt: {
+      id: "attempt-a",
+      moduleAttempts: [
+        {
+          id: "ma", moduleId: "module", state: "submitted", allocatedSeconds: 60,
+          availableAt: serverNow, startedAt: serverNow, pausedAt: null,
+          accumulatedPausedSeconds: 0, extensionSeconds: 0,
+          deadlineAt: new Date("2026-09-10T08:01:00.000Z").toISOString(),
+          remainingSeconds: 0, completionReason: "time_expired", rawCorrect: null,
+          operationalQuestionCount: null, toolState: {}, revision: 2,
+        },
+        {
+          id: "ma-math", moduleId: "module-math", state: "not_started",
+          allocatedSeconds: 60, availableAt: serverNow, startedAt: null,
+          pausedAt: null, accumulatedPausedSeconds: 0, extensionSeconds: 0,
+          deadlineAt: null, remainingSeconds: 60, completionReason: null,
+          rawCorrect: null, operationalQuestionCount: null, toolState: {}, revision: 1,
+        },
+      ],
+      responses: [],
+    },
+  };
+}
+
 describe("SAT cohort module clock", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -131,6 +204,34 @@ describe("SAT cohort module clock", () => {
     // No new bootstrap: the countdown must still advance from the deadline.
     expect(gatewayMocks.bootstrap.mock.calls.length).toBe(bootstrapCalls);
     expect(hook.result.current.remainingSeconds).toBe(50);
+    vi.useRealTimers();
+  });
+
+  it("counts the authored break down to the next section's start", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(breakBootstrap());
+    const hook = renderHook(() =>
+      useSatExamController({
+        scheduleId: "schedule",
+        attemptId: "attempt-a",
+        candidateId: "candidate",
+        liveSocketConnected: true,
+      }),
+    );
+    await act(async () => {
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    // Section reading-writing is complete and the server names the break end;
+    // the finished section clock must not be reused as the countdown.
+    expect(hook.result.current.pendingSectionWaitSeconds).toBe(0);
+    const breakSeconds = hook.result.current.pendingBreakSeconds;
+    expect(breakSeconds).toBeGreaterThan(290);
+    expect(breakSeconds).toBeLessThanOrEqual(300);
+    const bootstrapCalls = gatewayMocks.bootstrap.mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(gatewayMocks.bootstrap.mock.calls.length).toBe(bootstrapCalls);
+    expect(hook.result.current.pendingBreakSeconds).toBe(breakSeconds - 10);
     vi.useRealTimers();
   });
 });

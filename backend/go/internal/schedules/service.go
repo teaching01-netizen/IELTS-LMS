@@ -552,7 +552,7 @@ func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.
 			Label:           strings.TrimSpace(label),
 			Order:           order,
 			DurationMinutes: ceilMinutes(durationSeconds),
-			GapAfterMinutes: ceilMinutes(gapSeconds),
+			GapAfterMinutes: ceilGapMinutes(gapSeconds),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -564,9 +564,9 @@ func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.
 	if len(plan) == 0 {
 		plan = fallbackRuntimePlan(effectiveProvider, sch.PlannedDurationMinutes)
 	}
-	timingModel := "legacy_section_v1"
+	timingModel := examruntime.TimingModelLegacy
 	if strings.EqualFold(sch.ProviderKey, examdomain.ProviderSAT) {
-		timingModel = "cohort_section_v3"
+		timingModel = examruntime.TimingModelCohortSection
 	}
 	return plan, timingModel, nil
 }
@@ -657,6 +657,19 @@ func configuredRuntimeSections(raw string) map[string]bool {
 func ceilMinutes(seconds int) int {
 	if seconds <= 0 {
 		return 1
+	}
+	return (seconds + 59) / 60
+}
+
+// ceilGapMinutes converts an authored break into whole minutes. Unlike a
+// duration, a gap of zero is meaningful — it is the documented "advance
+// immediately" case — so it must not inherit ceilMinutes' one-minute floor.
+// With the floor, a section authored with no break (break_after_seconds = 0,
+// the SAT Math default) persisted gap_after_minutes = 1 and the cohort sat in
+// the between-sections window for an unearned minute.
+func ceilGapMinutes(seconds int) int {
+	if seconds <= 0 {
+		return 0
 	}
 	return (seconds + 59) / 60
 }

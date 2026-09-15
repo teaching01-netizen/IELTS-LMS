@@ -44,7 +44,6 @@ var Jobs = []string{
 	"DrainOutbox",
 	"ReconcileRuntimeTimeouts",
 	"ReconcileExpiredSections",
-	"ReconcileSATModules",
 	"ReconcileSATProvisionalCompletion",
 	"RepairSATTerminalResults",
 	"RepairMissingTerminalReceipts",
@@ -71,7 +70,7 @@ type worker struct {
 	outbox   *outbox.Repository
 	sat      *sat.Service
 	act      *act.Service
-	delivery *delivery.Service
+	delivery deliveryService
 	proctor  *proctor.Service
 	student  *student.Service
 	terminal *terminalization.Service
@@ -79,6 +78,15 @@ type worker struct {
 	sealer   terminalSealer
 	liveBus  *liveupdates.Bus
 	workerID string
+}
+
+// deliveryService is the delivery surface the worker drives: the maintenance
+// timeout sweep plus the per-attempt reconcile the section-reconcile family
+// runs. *delivery.Service satisfies it (production assigns it directly); tests
+// substitute a fake.
+type deliveryService interface {
+	ReconcileTimeouts(ctx context.Context, asOf time.Time, batchSize int64) (int64, error)
+	ReconcileAttemptTimeout(ctx context.Context, scheduleID, attemptID string, asOf time.Time) (bool, error)
 }
 
 // setTerminalSealer injects a fake sealer (tests only).
@@ -518,6 +526,9 @@ type failureDetail struct {
 // Only a batch with zero seals and at least one transient failure returns
 // an error, so the event retries with backoff.
 func (w *worker) executeOutboxEvent(ctx context.Context, event outbox.Event) error {
+	if event.Family == outbox.FamilySectionAttemptsReconcile {
+		return w.executeSectionAttemptReconcileEvent(ctx, event)
+	}
 	if event.Family != outbox.FamilyAutoSubmitScheduleAttempts {
 		return fmt.Errorf("unsupported executable outbox family %q", event.Family)
 	}
@@ -612,6 +623,67 @@ func hasTransientFailure(failures []failureDetail) bool {
 		}
 	}
 	return false
+}
+
+// sectionAttemptReconcileEvent is the outbox payload for
+// FamilySectionAttemptsReconcile: the module attempts left open when a cohort
+// section ended.
+type sectionAttemptReconcileEvent struct {
+	ScheduleID string   `json:"scheduleId"`
+	SectionKey string   `json:"sectionKey"`
+	AttemptIDs []string `json:"attemptIds"`
+	Reason     string   `json:"reason"`
+}
+
+// executeSectionAttemptReconcileEvent runs the delivery reconciler for the
+// module attempts left open when a cohort section ended. Delivery owns module
+// finalization (adaptive routing + the follow-up module row), so the section
+// reconciler hands the work over instead of finalizing inline. Each attempt is
+// reconciled independently: one transient failure must not stop the rest of
+// the cohort from closing, and the event retries with backoff only when no
+// attempt progressed.
+func (w *worker) executeSectionAttemptReconcileEvent(ctx context.Context, event outbox.Event) error {
+	if w.delivery == nil {
+		return nil
+	}
+	var payload sectionAttemptReconcileEvent
+	if len(event.Payload) > 0 {
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return fmt.Errorf("decode section reconcile payload: %w", err)
+		}
+	}
+	if payload.ScheduleID == "" {
+		payload.ScheduleID = event.AggregateID
+	}
+	if payload.ScheduleID == "" {
+		return fmt.Errorf("section reconcile event has no schedule id")
+	}
+	if len(payload.AttemptIDs) == 0 {
+		return nil
+	}
+	asOf := time.Now().UTC()
+	changed, failed := 0, 0
+	var firstErr error
+	for _, attemptID := range payload.AttemptIDs {
+		ok, err := w.delivery.ReconcileAttemptTimeout(ctx, payload.ScheduleID, attemptID, asOf)
+		if err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if ok {
+			changed++
+		}
+	}
+	if changed == 0 && failed > 0 {
+		return fmt.Errorf("section reconcile schedule %s section %s: %d attempt(s) failed; first: %w",
+			payload.ScheduleID, payload.SectionKey, failed, firstErr)
+	}
+	log.Printf("worker: section reconcile schedule=%s section=%s attempts=%d changed=%d failed=%d",
+		payload.ScheduleID, payload.SectionKey, len(payload.AttemptIDs), changed, failed)
+	return nil
 }
 
 // sealAutoSubmitAttempt seals one fan-out attempt. The terminalization
@@ -855,11 +927,6 @@ func (w *worker) runMaintenanceCycle(ctx context.Context, at time.Time) {
 		} else {
 			telemetry.SetGauge(telemetry.MSATPendingAge, float64(age))
 		}
-	}
-	if n, err := w.sat.ReconcileModuleTimeouts(ctx, time.Now().UTC(), maintenance.SATRepairBatch); err != nil {
-		log.Printf("worker: ReconcileSATModules error: %v", err)
-	} else {
-		log.Printf("worker: ReconcileSATModules finalized=%d", n)
 	}
 	if n, err := terminalization.RepairSATResults(ctx, w.db, maintenance.SATRepairBatch); err != nil {
 		log.Printf("worker: RepairSATTerminalResults error: %v", err)

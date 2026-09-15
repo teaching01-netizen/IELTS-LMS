@@ -9,6 +9,7 @@ import type {
   QuestionMetadata,
   StructuredContent,
 } from "../../exam-authoring/api/assessmentContracts";
+import type { TimingModel } from "../../../types/domain";
 
 export type { DeliveredAnswerDefinition, DeliveredQuestion };
 
@@ -53,12 +54,27 @@ export interface AssessmentAttemptSnapshot {
 
 export interface AssessmentTimingSnapshot {
   authority: "cohort_runtime" | "legacy_attempt";
-  timingModel: "cohort_stage_v2" | "cohort_section_v3" | "legacy_section_v1";
+  timingModel: TimingModel;
   stageKey: string | null;
   stageStatus: string | null;
   serverNow: string;
   deadlineAt: string | null;
   remainingSeconds: number;
+  /**
+   * Between-sections window only: the server's authoritative instant the next
+   * section goes live (previous section end + its authored gap). Present while
+   * the room is on the shared break; absent/null outside it, when the active
+   * section's own deadlineAt is the live clock. The break countdown is driven
+   * by this — the finished section's clock is already past and reads 0:00.
+   */
+  nextSectionStartAt?: string | null;
+  /**
+   * Between-sections state, mirrored from the runtime: the active section is
+   * complete and the next has not gone live. This flag — not the mere
+   * presence of nextSectionStartAt — is what opens the break window, so the
+   * client reads the same state the server writes.
+   */
+  waitingForNextSection?: boolean;
   runtimeRevision: number;
 }
 

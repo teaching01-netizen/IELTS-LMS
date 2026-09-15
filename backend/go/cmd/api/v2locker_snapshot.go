@@ -23,12 +23,13 @@ func errSnapshotLockerDown() error {
 // caller (in-tx dbNow) so server time stays authoritative.
 func snapshotRuntimeGate(snap runtime.Snapshot, now time.Time) attempts.RuntimeGate {
 	gate := attempts.RuntimeGate{
-		Status:           snap.Status,
-		ActiveSectionKey: "*",
-		SectionLive:      snap.SectionLive,
-		SectionPaused:    snap.SectionPaused,
-		SectionStarted:   snap.SectionStarted,
-		Now:              now.UTC(),
+		Status:                snap.Status,
+		ActiveSectionKey:      "*",
+		SectionLive:           snap.SectionLive,
+		SectionPaused:         snap.SectionPaused,
+		SectionStarted:        snap.SectionStarted,
+		WaitingForNextSection: snap.WaitingForNextSection,
+		Now:                   now.UTC(),
 	}
 	if snap.ActiveSectionKey != nil && *snap.ActiveSectionKey != "" {
 		gate.ActiveSectionKey = *snap.ActiveSectionKey

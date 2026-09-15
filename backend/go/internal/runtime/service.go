@@ -236,7 +236,7 @@ func lockRuntime(ctx context.Context, q tx.Tx, scheduleID string) (*RuntimeRow, 
 // (or a raced concurrent INSERT on UNIQUE schedule_id) is a stable 409.
 func (s *Service) Start(ctx context.Context, scheduleID, examID string, plan []PlanEntry, timingModel, actorID string) (string, error) {
 	if timingModel == "" {
-		timingModel = "legacy_section_v1"
+		timingModel = TimingModelLegacy
 	}
 	runtimeID := uuid.NewString()
 	existingID := ""

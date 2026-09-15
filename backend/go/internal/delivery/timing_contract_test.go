@@ -26,6 +26,21 @@ func TestTimingContractPreservesCohortClock(t *testing.T) {
 		if out.StageStatus != "paused" || out.DeadlineAt != nil || out.RemainingSeconds != 60 {
 			t.Fatalf("paused clock changed: %+v", out)
 		}
+		// Between sections: both the state and its countdown instant project
+		// through, so the client gates the break on the server's flag rather
+		// than inferring the window from a present instant.
+		runtime.Status = "live"
+		runtime.Sections[0].Status = "completed"
+		runtime.WaitingForNextSection = true
+		next := now.Add(5 * time.Minute)
+		runtime.NextSectionStartAt = &next
+		out = timingFromRuntime(runtime)
+		if !out.WaitingForNextSection || out.NextSectionStartAt == nil || !out.NextSectionStartAt.Equal(next) {
+			t.Fatalf("between-sections window lost: %+v", out)
+		}
+		if out.StageStatus != "completed" {
+			t.Fatalf("waiting window must report the completed section: %+v", out.StageStatus)
+		}
 	}
 }
 func TestTimingContractWithoutRuntimeUsesLegacy(t *testing.T) {

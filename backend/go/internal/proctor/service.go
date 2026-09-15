@@ -42,6 +42,7 @@ import (
 	"example.com/ielts-proctoring/internal/outbox"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 	terminalization "example.com/ielts-proctoring/internal/terminalization"
 )
 
@@ -482,7 +483,7 @@ func (s *Service) ExtendAttempt(ctx context.Context, actor Actor, scheduleID, at
 		if pk != "sat" {
 			return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Per-student time extensions are currently supported for adaptive SAT attempts only.", HTTPStatus: 400}
 		}
-		if tm := timingModelOfSchedule(ctx, q, scheduleID); tm == "cohort_stage_v2" || tm == "cohort_section_v3" {
+		if tm := timingModelOfSchedule(ctx, q, scheduleID); examruntime.IsCohortTimed(tm) {
 			return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Individual time extensions are disabled for shared-clock SAT sessions; extend the active cohort section instead.", HTTPStatus: 400}
 		}
 		const ext = "UPDATE assessment_module_attempts SET extension_seconds = extension_seconds + (? * 60), revision = revision + 1 WHERE attempt_id = ? AND state = 'active' AND started_at IS NOT NULL"
@@ -566,20 +567,18 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 		if err != nil {
 			return err
 		}
-		if pk == "sat" {
-			return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Adaptive SAT sections cannot be ended with a cohort section override. Use module timing or per-student controls so routing remains deterministic.", HTTPStatus: 400}
-		}
 		if ieltsAuthenticMode(ctx, q, scheduleID) {
 			return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Proctor section override is disabled in IELTS authentic mode.", HTTPStatus: 400}
 		}
 		if err := lockScheduleScope(ctx, q, scheduleID); err != nil {
 			return err
 		}
-		const selRt = "SELECT id, status, active_section_key, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
+		const selRt = "SELECT id, status, active_section_key, waiting_for_next_section, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
 		var runtimeID, status string
 		var active sql.NullString
+		var waiting sql.NullBool
 		var revision int64
-		if err := q.QueryRowContext(ctx, selRt, scheduleID).Scan(&runtimeID, &status, &active, &revision); err != nil {
+		if err := q.QueryRowContext(ctx, selRt, scheduleID).Scan(&runtimeID, &status, &active, &waiting, &revision); err != nil {
 			if err == sql.ErrNoRows {
 				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Runtime not found.", HTTPStatus: 404}
 			}
@@ -637,6 +636,29 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 		if activeIdx < 0 {
 			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Active section row is missing.", HTTPStatus: 409}
 		}
+		// SAT guard: an adaptive section must never be cut short while it is
+		// live, because a manual cut would skip unanswered questions and make
+		// the adaptive routing non-deterministic. The between-sections window is
+		// different — the section is already complete and every open module has
+		// been handed to delivery — so ending it there only shortens the
+		// authored break.
+		betweenSections := waiting.Valid && waiting.Bool && secs[activeIdx].status == "completed"
+		if pk == "sat" && !betweenSections {
+			return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Adaptive SAT sections cannot be ended with a cohort section override. Use module timing or per-student controls so routing remains deterministic.", HTTPStatus: 400}
+		}
+		// Precondition for short-cutting the break: the finished section's
+		// modules are all closed. Until delivery has drained the handover the
+		// reconciler enqueued, a base module is still open and its adaptive
+		// routing decision is pending — opening the successor now would race it.
+		if betweenSections {
+			open, err := openSectionModuleAttempts(ctx, q, scheduleID, activeKey)
+			if err != nil {
+				return err
+			}
+			if open > 0 {
+				return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Modules from the finished section are still being finalized; retry in a moment.", HTTPStatus: 409}
+			}
+		}
 		nextIdx := -1
 		for i := activeIdx + 1; i < len(secs); i++ {
 			if secs[i].status == "locked" {
@@ -644,52 +666,48 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 				break
 			}
 		}
-		const completionReason = "proctor_end"
-		const doneSec = "UPDATE exam_session_runtime_sections SET status = 'completed', actual_end_at = UTC_TIMESTAMP(6), completion_reason = ?, paused_at = NULL WHERE runtime_id = ? AND section_key = ?"
-		if _, err := q.ExecContext(ctx, doneSec, completionReason, runtimeID, activeKey); err != nil {
-			return err
+		// One shared transition, exactly as the automatic reconciler applies it:
+		// complete the outgoing section — handing its open modules to delivery,
+		// which this path used to skip — and either start the successor now or
+		// end the runtime. A proctor override shortens the break instead of
+		// waiting out the authored gap, so the successor starts at `now`. In the
+		// between-sections window the section is already completed, so only the
+		// audit and the advance remain (its recorded end feeds the gap
+		// arithmetic and must not be rewritten).
+		now := time.Now().UTC()
+		auditReason := ""
+		if cmd.Reason != nil {
+			auditReason = *cmd.Reason
+		}
+		adv := sectionAdvance{
+			completeRow:   !betweenSections,
+			handover:      !betweenSections,
+			sectionKey:    activeKey,
+			endAt:         now,
+			reason:        terminalization.ReasonProctorEnd,
+			auditReason:   auditReason,
+			actor:         actor.ID,
+			origin:        "proctor",
+			event:         sectionEventProctor,
+			auditExtra:    map[string]any{"betweenSections": betweenSections},
+			submitStyle:   submitByScan,
+			submitActorID: actor.ID,
 		}
 		if nextIdx >= 0 {
 			next := secs[nextIdx]
-			const startNext = "UPDATE exam_session_runtime_sections SET status = 'live', available_at = COALESCE(available_at, UTC_TIMESTAMP(6)), actual_start_at = COALESCE(actual_start_at, UTC_TIMESTAMP(6)) WHERE runtime_id = ? AND section_key = ?"
-			if _, err := q.ExecContext(ctx, startNext, runtimeID, next.key); err != nil {
-				return err
-			}
-			const advRt = "UPDATE exam_session_runtimes SET active_section_key = ?, current_section_key = ?, current_section_remaining_seconds = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
-			if _, err := q.ExecContext(ctx, advRt, next.key, next.key, (next.planned+next.ext)*60, runtimeID); err != nil {
-				return err
-			}
-			if err := syncV2(ctx, q, scheduleID, runtimeID, next.key, strptr("running")); err != nil {
-				return err
-			}
+			adv.nextKey = next.key
+			adv.nextRemaining = (next.planned + next.ext) * 60
+			adv.startAt = now
 		} else {
-			const doneRt = "UPDATE exam_session_runtimes SET status = 'completed', actual_end_at = UTC_TIMESTAMP(6), active_section_key = NULL, current_section_key = NULL, current_section_remaining_seconds = 0, waiting_for_next_section = false, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
-			if _, err := q.ExecContext(ctx, doneRt, runtimeID); err != nil {
-				return err
-			}
-			const doneSched = "UPDATE exam_schedules SET status = 'completed', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
-			if _, err := q.ExecContext(ctx, doneSched, scheduleID); err != nil {
-				return err
-			}
-			if err := s.enqueueAutoSubmitForSchedule(
-				ctx,
-				q,
-				scheduleID,
-				revision+1,
-				actor.ID,
-				terminalization.ReasonProctorEnd,
-			); err != nil {
-				return err
-			}
+			adv.endRuntime = true
+		}
+		if err := s.applySectionAdvance(ctx, q, scheduleID, runtimeID, adv); err != nil {
+			return err
 		}
 		if err := insertControlEvent(ctx, q, runtimeID, scheduleID, actor.ID, "end_section_now", &activeKey, nil, cmd.Reason); err != nil {
 			return err
 		}
-		if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "SECTION_END", nil, map[string]any{"sectionKey": activeKey, "reason": cmd.Reason}); err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": "end_section_now"})
-		return s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, revision+1, "runtime_changed", payload)
+		return nil
 	})
 	if err != nil {
 		return err

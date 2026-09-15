@@ -16,6 +16,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
 // ModuleStartRequest mirrors AssessmentModuleStartRequest (camelCase) on the
@@ -464,7 +465,7 @@ func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID strin
 	now := time.Now().UTC()
 	var cohortTimed int
 	if err := t.QueryRowContext(ctx,
-		"SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model IN ('cohort_stage_v2', 'cohort_section_v3'))",
+		"SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model IN ("+examruntime.CohortTimingModelsSQL+"))",
 		attemptID).Scan(&cohortTimed); err != nil {
 		return nil, err
 	}

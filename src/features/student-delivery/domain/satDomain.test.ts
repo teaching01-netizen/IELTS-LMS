@@ -4,7 +4,7 @@ import { buildSatQuestionNavigationItems } from './satSelectors';
 import { breakRemainingSeconds, formatSatTime, mergeAuthoritativeTiming, snapshotRemainingSeconds, timingForAttempt } from './satTiming';
 import { resolveAuthoritativeRemainingSeconds } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { resolveSatToolCapabilities, toggleSatActiveTool } from './satTools';
-import type { AssessmentDeliveryBootstrap, AssessmentDeliveryModule, AssessmentModuleAttemptSnapshot } from '../contracts/assessmentDelivery';
+import type { AssessmentDeliveryBootstrap, AssessmentDeliveryModule, AssessmentModuleAttemptSnapshot, AssessmentTimingSnapshot } from '../contracts/assessmentDelivery';
 import { shouldAutoStartInitialModule, shouldAutoStartNextSectionAfterBreak } from '../application/satRuntimeSelectors';
 
 describe('SAT delivery domain', () => {
@@ -141,6 +141,10 @@ describe('SAT delivery domain', () => {
 
     expect(timingForAttempt(data, moduleAttempt).endsAt).toBe('2026-08-30T03:30:00.000Z');
     expect(breakRemainingSeconds(data, moduleAttempt, 0, 0)).toBe(0);
+    // Cohort breaks are no longer read from a `sat:break:`-suffixed stage key
+    // (no writer ever produced one). The authored break is the server's
+    // nextSectionStartAt window, and the controller counts it down; the legacy
+    // helper must stay silent for cohort models rather than invent a 0:00.
     expect(breakRemainingSeconds({
       ...data,
       timing: {
@@ -150,7 +154,42 @@ describe('SAT delivery domain', () => {
         remainingSeconds: 600,
         runtimeRevision: 5,
       },
-    }, moduleAttempt, 0, 0)).toBe(600);
+    }, moduleAttempt, 0, 0)).toBe(0);
+  });
+
+  it('keeps a known between-sections start when a newer projection omits it', () => {
+    const current: AssessmentTimingSnapshot = {
+      authority: 'cohort_runtime',
+      timingModel: 'cohort_section_v3',
+      stageKey: 'reading-writing',
+      stageStatus: 'completed',
+      serverNow: '2026-08-30T03:30:00Z',
+      deadlineAt: null,
+      remainingSeconds: 0,
+      nextSectionStartAt: '2026-08-30T03:40:00Z',
+      waitingForNextSection: true,
+      runtimeRevision: 9,
+    };
+    // A projection that simply lacks the keys must not clear the break window.
+    const omitted = mergeAuthoritativeTiming(current, {
+      ...current,
+      runtimeRevision: 10,
+      nextSectionStartAt: undefined,
+      waitingForNextSection: undefined,
+    });
+    expect(omitted.nextSectionStartAt).toBe('2026-08-30T03:40:00Z');
+    expect(omitted.waitingForNextSection).toBe(true);
+    // An explicit null/false is the server saying the break is over.
+    const ended = mergeAuthoritativeTiming(current, {
+      ...current,
+      stageKey: 'math',
+      stageStatus: 'live',
+      runtimeRevision: 11,
+      nextSectionStartAt: null,
+      waitingForNextSection: false,
+    });
+    expect(ended.nextSectionStartAt).toBeNull();
+    expect(ended.waitingForNextSection).toBe(false);
   });
 
   it('auto-starts only the first SAT module after the proctor makes the runtime live', () => {

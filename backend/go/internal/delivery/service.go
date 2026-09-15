@@ -29,6 +29,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/proctor"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/sat"
 )
 
@@ -214,7 +215,17 @@ type TimingSnapshot struct {
 	ServerNow        time.Time  `json:"serverNow"`
 	DeadlineAt       *time.Time `json:"deadlineAt"`
 	RemainingSeconds int64      `json:"remainingSeconds"`
-	RuntimeRevision  int64      `json:"runtimeRevision"`
+	// NextSectionStartAt is non-nil only in the between-sections window: the
+	// server's authoritative instant the next section goes live. The client
+	// counts the break down against it (the active section's own deadline is
+	// already past, so its clock cannot drive the break countdown).
+	NextSectionStartAt *time.Time `json:"nextSectionStartAt"`
+	// WaitingForNextSection mirrors the runtime flag that defines the window:
+	// the active section is complete and the next one has not gone live yet.
+	// It is the state both sides read; NextSectionStartAt is its countdown
+	// instant, so neither has to infer the window from the other.
+	WaitingForNextSection bool  `json:"waitingForNextSection"`
+	RuntimeRevision       int64 `json:"runtimeRevision"`
 }
 
 // Bootstrap is the assessment-delivery bootstrap payload.
@@ -840,7 +851,9 @@ func timingFromRuntime(runtime proctor.SessionRuntime) TimingSnapshot {
 	}
 	return TimingSnapshot{Authority: "cohort_runtime", TimingModel: runtime.TimingModel,
 		StageKey: key, StageStatus: status, ServerNow: runtime.ServerNow,
-		DeadlineAt: runtime.CurrentSectionDeadlineAt, RemainingSeconds: int64(runtime.CurrentSectionRemainingSeconds), RuntimeRevision: runtime.Revision}
+		DeadlineAt: runtime.CurrentSectionDeadlineAt, RemainingSeconds: int64(runtime.CurrentSectionRemainingSeconds),
+		NextSectionStartAt: runtime.NextSectionStartAt, WaitingForNextSection: runtime.WaitingForNextSection,
+		RuntimeRevision: runtime.Revision}
 }
 
 // moduleDeadline is the single pause-aware deadline anchor shared by the
@@ -1566,7 +1579,7 @@ func (s *Service) ensureTimeoutResponseRecoveryTx(ctx context.Context, t tx.Tx, 
 	if timingModel.Valid && timingModel.String != "" {
 		model = timingModel.String
 	}
-	if model == "cohort_stage_v2" || model == "cohort_section_v3" {
+	if examruntime.IsCohortTimed(model) {
 		var sectionKey, adaptiveRole string
 		if err := t.QueryRowContext(ctx,
 			"SELECT s.section_key, m.adaptive_role FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?",
@@ -1874,7 +1887,7 @@ func deliveredAnswer(raw json.RawMessage) (json.RawMessage, error) {
 	case "single_choice":
 		if rawOptions, ok := firstPresent(source, "options"); ok {
 			// Options are re-allowlisted per element ({id, content}
-		// only): a nested isCorrect/is_correct flag would otherwise
+			// only): a nested isCorrect/is_correct flag would otherwise
 			// survive the allowlist and leak the key inside options.
 			if redacted, err := redactOptions(rawOptions); err == nil {
 				out["options"] = redacted
@@ -1924,7 +1937,7 @@ func snakeOf(camel string) string {
 		if r >= 'A' && r <= 'Z' {
 			out = append(out, '_', r+('a'-'A'))
 		} else {
-		out = append(out, r)
+			out = append(out, r)
 		}
 	}
 	return string(out)

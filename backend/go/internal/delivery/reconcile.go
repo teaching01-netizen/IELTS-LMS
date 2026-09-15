@@ -9,6 +9,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
 // AssessmentCompleter is the terminal CompleteAssessment hook invoked when the
@@ -95,7 +96,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			}
 			return err
 		}
-		cohortTimed := timingModel == "cohort_stage_v2" || timingModel == "cohort_section_v3"
+		cohortTimed := examruntime.IsCohortTimed(timingModel)
 		var currentStageOrder *int
 		if cohortTimed && currentStageKey.Valid {
 			var order int
@@ -316,6 +317,9 @@ func lockReconcileRowTx(ctx context.Context, t tx.Tx, attemptID string) (*reconc
 func reconcileModuleExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeStatus, timingModel string, currentStageKey sql.NullString, currentStageOrder *int, mod *reconcileRow, asOf time.Time) (bool, error) {
 	switch timingModel {
 	case "cohort_stage_v2":
+		// legacy: no in-repo writer assigns this timing model (schedules.go
+		// selects cohort_section_v3 for SAT, legacy otherwise). Retained only
+		// because an out-of-repo ops migration could still have written it.
 		return reconcileCohortStageExpiredTx(ctx, t, runtimeID, runtimeStatus, currentStageKey, currentStageOrder, mod, asOf)
 	case "cohort_section_v3":
 		return reconcileCohortSectionExpiredTx(ctx, t, runtimeID, runtimeStatus, currentStageKey, currentStageOrder, mod, asOf)
@@ -377,9 +381,14 @@ func reconcileCohortStageExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runt
 	return false, nil
 }
 
-// reconcileCohortSectionExpiredTx mirrors the cohort_section_v3 branch: same
-// stage-identity skeleton against the plain section key, plus the personal
-// active-module clock as an OR condition on the current stage.
+// reconcileCohortSectionExpiredTx mirrors the cohort_section_v3 branch: the
+// stage-identity skeleton against the plain section key, with the SECTION clock
+// as the only expiry authority (decision D2). The personal module clock stays
+// the student-facing allotment (the client submits at min(personal, section))
+// but never force-closes a module server-side: closing a module early would
+// consume the student's remaining section time without the section having
+// ended. A stalled client can therefore hold one module for the rest of its
+// section, which the section clock still bounds.
 func reconcileCohortSectionExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeStatus string, currentStageKey sql.NullString, currentStageOrder *int, mod *reconcileRow, asOf time.Time) (bool, error) {
 	if runtimeStatus == "completed" || runtimeStatus == "cancelled" {
 		return true, nil
@@ -415,9 +424,7 @@ func reconcileCohortSectionExpiredTx(ctx context.Context, t tx.Tx, runtimeID, ru
 			case stage.status == "live" && stage.startedAt != nil:
 				sectionExpired = stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf) <= 0
 			}
-			personalExpired := mod.state == "active" && mod.pausedAt == nil &&
-				moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf) <= 0
-			return sectionExpired || personalExpired, nil
+			return sectionExpired, nil
 		}
 	}
 	return false, nil

@@ -267,6 +267,35 @@ export type RuntimeStatus = "not_started" | "live" | "paused" | "completed" | "c
 export type SectionRuntimeStatus = "locked" | "live" | "paused" | "completed";
 
 /**
+ * Timing model an exam runtime is scheduled under. `legacy_section_v1` runs a
+ * per-module clock; the two cohort models run a server-owned section clock and
+ * an authored gap between sections.
+ */
+export type TimingModel = "legacy_section_v1" | "cohort_stage_v2" | "cohort_section_v3";
+
+/**
+ * The single test for "this runtime is on the cohort section clock". Every
+ * reader of a timing model goes through here so the two cohort models cannot
+ * drift apart (they had: some sites tested only `cohort_section_v3`).
+ */
+export function isCohortTimingModel(
+  model: TimingModel | string | null | undefined
+): model is "cohort_stage_v2" | "cohort_section_v3" {
+  return model === "cohort_stage_v2" || model === "cohort_section_v3";
+}
+
+/**
+ * `cohort_section_v3` keys stages by section alone; `cohort_stage_v2` keys them
+ * by section plus module (`"<section>:m1"`). Only code comparing a stage key to
+ * a section key wants this narrower test.
+ */
+export function isSectionKeyedCohortModel(
+  model: TimingModel | string | null | undefined
+): boolean {
+  return model === "cohort_section_v3";
+}
+
+/**
  * Section runtime tracking
  */
 export interface SectionRuntimeState {
@@ -330,13 +359,16 @@ export interface ExamSessionRuntime {
   cohortName: string;
   deliveryMode: "proctor_start";
   status: RuntimeStatus;
-  timingModel?: 'legacy_section_v1' | 'cohort_stage_v2' | 'cohort_section_v3' | undefined;
+  timingModel?: TimingModel | undefined;
   actualStartAt: string | null;
   actualEndAt: string | null;
   activeSectionKey: ModuleType | null;
   currentSectionKey: ModuleType | null;
   currentSectionRemainingSeconds: number;
   currentSectionDeadlineAt?: string | null | undefined;
+  /** Between-sections window: when the next section goes live (previous
+   * section end + its authored gap). Absent/null outside the break. */
+  nextSectionStartAt?: string | null | undefined;
   serverNow?: string | undefined;
   waitingForNextSection: boolean;
   isOverrun: boolean;

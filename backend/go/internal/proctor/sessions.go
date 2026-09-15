@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
 // roleAdminObserver is the read-only admin role allowed on session reads.
@@ -129,27 +130,31 @@ type SessionRuntimeSection struct {
 // SessionRuntime mirrors Rust ExamSessionRuntime (camelCase): the full
 // hydrated projection with sections and computed clocks.
 type SessionRuntime struct {
-	ID                             string                  `json:"id"`
-	ScheduleID                     string                  `json:"scheduleId"`
-	ExamID                         string                  `json:"examId"`
-	ProviderKey                    string                  `json:"providerKey"`
-	Status                         string                  `json:"status"`
-	PlanSnapshot                   []SessionPlanEntry      `json:"planSnapshot"`
-	TimingModel                    string                  `json:"timingModel"`
-	ActualStartAt                  *time.Time              `json:"actualStartAt"`
-	ActualEndAt                    *time.Time              `json:"actualEndAt"`
-	ActiveSectionKey               *string                 `json:"activeSectionKey"`
-	CurrentSectionKey              *string                 `json:"currentSectionKey"`
-	CurrentSectionRemainingSeconds int                     `json:"currentSectionRemainingSeconds"`
-	CurrentSectionDeadlineAt       *time.Time              `json:"currentSectionDeadlineAt"`
-	ServerNow                      time.Time               `json:"serverNow"`
-	WaitingForNextSection          bool                    `json:"waitingForNextSection"`
-	IsOverrun                      bool                    `json:"isOverrun"`
-	TotalPausedSeconds             int                     `json:"totalPausedSeconds"`
-	CreatedAt                      time.Time               `json:"createdAt"`
-	UpdatedAt                      time.Time               `json:"updatedAt"`
-	Revision                       int64                   `json:"revision"`
-	Sections                       []SessionRuntimeSection `json:"sections"`
+	ID                             string             `json:"id"`
+	ScheduleID                     string             `json:"scheduleId"`
+	ExamID                         string             `json:"examId"`
+	ProviderKey                    string             `json:"providerKey"`
+	Status                         string             `json:"status"`
+	PlanSnapshot                   []SessionPlanEntry `json:"planSnapshot"`
+	TimingModel                    string             `json:"timingModel"`
+	ActualStartAt                  *time.Time         `json:"actualStartAt"`
+	ActualEndAt                    *time.Time         `json:"actualEndAt"`
+	ActiveSectionKey               *string            `json:"activeSectionKey"`
+	CurrentSectionKey              *string            `json:"currentSectionKey"`
+	CurrentSectionRemainingSeconds int                `json:"currentSectionRemainingSeconds"`
+	CurrentSectionDeadlineAt       *time.Time         `json:"currentSectionDeadlineAt"`
+	// NextSectionStartAt is set only inside the between-sections window: the
+	// active section is complete and the next one starts at this instant
+	// (previous section end + its authored gap). nil outside that window.
+	NextSectionStartAt    *time.Time              `json:"nextSectionStartAt"`
+	ServerNow             time.Time               `json:"serverNow"`
+	WaitingForNextSection bool                    `json:"waitingForNextSection"`
+	IsOverrun             bool                    `json:"isOverrun"`
+	TotalPausedSeconds    int                     `json:"totalPausedSeconds"`
+	CreatedAt             time.Time               `json:"createdAt"`
+	UpdatedAt             time.Time               `json:"updatedAt"`
+	Revision              int64                   `json:"revision"`
+	Sections              []SessionRuntimeSection `json:"sections"`
 }
 
 // StudentSessionSummary mirrors Rust StudentSessionSummary (camelCase).
@@ -480,6 +485,7 @@ func hydrateSessionRuntime(row sessionRuntimeRow, sections []SessionRuntimeSecti
 		sections = []SessionRuntimeSection{}
 	}
 	var computed *computedSectionTime
+	var nextSectionStartAt *time.Time
 	if row.status == "live" || row.status == "paused" {
 		active := nullStringPtr(row.activeSectionKey)
 		if active == nil {
@@ -488,8 +494,23 @@ func hydrateSessionRuntime(row sessionRuntimeRow, sections []SessionRuntimeSecti
 		if active != nil {
 			for i := range sections {
 				sec := &sections[i]
-				if sec.SectionKey != *active || sec.ActualStartAt == nil {
+				if sec.SectionKey != *active {
 					continue
+				}
+				if sec.Status == "completed" || sec.Status == "cancelled" {
+					// Between sections: the section clock is over, so never
+					// recompute remaining/overrun from its past deadline. The next
+					// section's start is the only live clock, and only while the
+					// runtime is explicitly waiting for it — otherwise the
+					// finished section projects as it always has.
+					if row.waiting.Valid && row.waiting.Bool && sec.ActualEndAt != nil {
+						start := sec.ActualEndAt.Add(time.Duration(sec.GapAfterMinutes) * time.Minute)
+						nextSectionStartAt = &start
+					}
+					break
+				}
+				if sec.ActualStartAt == nil {
+					break
 				}
 				c := computeSectionRemaining(*sec.ActualStartAt, sec.PlannedDurationMinutes, sec.ExtensionMinutes, sec.PausedAt, sec.AccumulatedPausedSeconds, sec.Status, now)
 				computed = &c
@@ -543,6 +564,7 @@ func hydrateSessionRuntime(row sessionRuntimeRow, sections []SessionRuntimeSecti
 		CurrentSectionKey:              nullStringPtr(row.currentSectionKey),
 		CurrentSectionRemainingSeconds: remaining,
 		CurrentSectionDeadlineAt:       deadline,
+		NextSectionStartAt:             nextSectionStartAt,
 		ServerNow:                      now,
 		WaitingForNextSection:          row.waiting.Valid && row.waiting.Bool,
 		IsOverrun:                      overrun,
@@ -924,7 +946,7 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		warnings = 1
 	}
 	isSAT := row.providerKey == "sat"
-	cohortTimedSAT := isSAT && (runtime.TimingModel == "cohort_stage_v2" || runtime.TimingModel == "cohort_section_v3")
+	cohortTimedSAT := isSAT && examruntime.IsCohortTimed(runtime.TimingModel)
 	timeRemaining := runtime.CurrentSectionRemainingSeconds
 	if isSAT && !cohortTimedSAT {
 		alloc, ext, acc := 0, 0, 0
@@ -949,7 +971,11 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 	}
 	runtimeCurrentSection := runtime.CurrentSectionKey
 	runtimeRemaining := runtime.CurrentSectionRemainingSeconds
-	if isSAT {
+	// Legacy SAT has no authoritative section clock, so the roster shows the
+	// student's module clock instead. Cohort-timed SAT does have one, and must
+	// report the same section state as every other cohort exam — otherwise the
+	// proctor row cannot show the between-sections window.
+	if isSAT && !cohortTimedSAT {
 		v := currentSection
 		runtimeCurrentSection = &v
 		runtimeRemaining = timeRemaining
@@ -971,8 +997,13 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		}
 		sectionStatus = &v
 	}
+	// The waiting window is a real server state now (the section reconciler sets
+	// it for the authored gap). Suppressing it here shadowed the room-level flag
+	// on the one projection the proctor dashboard reads per student, so a room
+	// sitting on its break still read as running. Only legacy SAT has no cohort
+	// clock to wait on.
 	runtimeWaiting := runtime.WaitingForNextSection
-	if isSAT {
+	if isSAT && !cohortTimedSAT {
 		runtimeWaiting = false
 	}
 	violations := json.RawMessage([]byte("[]"))

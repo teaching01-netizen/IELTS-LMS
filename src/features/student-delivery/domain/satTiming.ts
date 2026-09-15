@@ -3,6 +3,7 @@ import type {
   AssessmentModuleAttemptSnapshot,
   AssessmentTimingSnapshot,
 } from '../contracts/assessmentDelivery';
+import { isCohortTimingModel, isSectionKeyedCohortModel } from '../../../types/domain';
 
 export function mergeAuthoritativeTiming(
   current: AssessmentTimingSnapshot | null,
@@ -10,6 +11,19 @@ export function mergeAuthoritativeTiming(
 ): AssessmentTimingSnapshot {
   if (!current || current.timingModel !== incoming.timingModel) return incoming;
   if (incoming.runtimeRevision < current.runtimeRevision) return current;
+  // A projection that omits the between-sections keys must not clear a known
+  // break: only an explicit null/false (the server's "the break is over") ends
+  // the window. Newer-but-silent payloads keep the previous value.
+  const carryBetweenSections = (value: AssessmentTimingSnapshot): AssessmentTimingSnapshot => {
+    const next = { ...value };
+    if (next.nextSectionStartAt === undefined && current.nextSectionStartAt !== undefined) {
+      next.nextSectionStartAt = current.nextSectionStartAt;
+    }
+    if (next.waitingForNextSection === undefined && current.waitingForNextSection !== undefined) {
+      next.waitingForNextSection = current.waitingForNextSection;
+    }
+    return next;
+  };
   if (
     incoming.runtimeRevision === current.runtimeRevision
     && incoming.stageKey === current.stageKey
@@ -17,9 +31,9 @@ export function mergeAuthoritativeTiming(
     && incoming.deadlineAt
     && Date.parse(incoming.deadlineAt) > Date.parse(current.deadlineAt)
   ) {
-    return { ...incoming, deadlineAt: current.deadlineAt };
+    return carryBetweenSections({ ...incoming, deadlineAt: current.deadlineAt });
   }
-  return incoming;
+  return carryBetweenSections(incoming);
 }
 
 export function snapshotRemainingSeconds(
@@ -69,15 +83,20 @@ export function personalModuleRemainingSeconds(
   return snapshotRemainingSeconds(attempt, snapshotReceivedAt, now);
 }
 
+/**
+ * Legacy-model break countdown only. Cohort models (cohort_stage_v2 /
+ * cohort_section_v3) derive the break from the server's nextSectionStartAt
+ * instead: their stage keys are plain section keys, and the old
+ * `sat:break:<key>` suffixed stage never had a writer, so reading it only
+ * risked a silent 0:00. Kept for the legacy per-module availableAt delay.
+ */
 export function breakRemainingSeconds(
   data: AssessmentDeliveryBootstrap,
   attempt: AssessmentModuleAttemptSnapshot | undefined,
   snapshotReceivedAt: number,
   now: number,
 ): number {
-  if (data.timing.timingModel === 'cohort_stage_v2' || data.timing.timingModel === 'cohort_section_v3') {
-    return data.timing.stageKey?.startsWith('sat:break:') ? data.timing.remainingSeconds : 0;
-  }
+  if (isCohortTimingModel(data.timing.timingModel)) return 0;
   if (!attempt?.availableAt) return 0;
   const serverDelaySeconds = Math.max(
     0,
@@ -94,10 +113,13 @@ export function timingForAttempt(
   const startedAt = attempt.startedAt ?? data.serverNow;
   const fallbackEndsAt = attempt.deadlineAt
     ?? new Date(Date.parse(data.serverNow) + Math.max(0, attempt.remainingSeconds ?? 0) * 1_000).toISOString();
-  const endsAt = data.timing.timingModel === 'cohort_stage_v2' && data.timing.deadlineAt
-    ? data.timing.deadlineAt
-    : data.timing.timingModel === 'cohort_section_v3' && data.timing.deadlineAt
-      ? new Date(Math.min(Date.parse(fallbackEndsAt), Date.parse(data.timing.deadlineAt))).toISOString()
+  // A section-keyed cohort model publishes the section's deadline, so the
+  // module clock is clamped to it; a stage-keyed model already publishes the
+  // module's own deadline. Anything else is the per-module legacy clock.
+  const endsAt = isSectionKeyedCohortModel(data.timing.timingModel) && data.timing.deadlineAt
+    ? new Date(Math.min(Date.parse(fallbackEndsAt), Date.parse(data.timing.deadlineAt))).toISOString()
+    : isCohortTimingModel(data.timing.timingModel) && data.timing.deadlineAt
+      ? data.timing.deadlineAt
       : fallbackEndsAt;
   return { startedAt, endsAt };
 }

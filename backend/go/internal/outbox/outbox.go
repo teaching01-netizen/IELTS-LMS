@@ -43,14 +43,22 @@ const (
 // Event families.
 const (
 	FamilyAutoSubmitScheduleAttempts = "auto_submit_schedule_attempts_requested"
-	FamilyAttemptTerminalized        = "attempt_terminalized"
-	FamilyRuntimeChanged             = "runtime_changed"
-	FamilyRosterChanged              = "roster_changed"
+	// FamilySectionAttemptsReconcile asks the worker to run the delivery
+	// reconciler for the module attempts left open when a cohort section
+	// ended, so an offline student's module closes with their section instead
+	// of waiting for the slower maintenance sweep.
+	FamilySectionAttemptsReconcile = "section_attempts_reconcile_requested"
+	FamilyAttemptTerminalized      = "attempt_terminalized"
+	FamilyRuntimeChanged           = "runtime_changed"
+	FamilyRosterChanged            = "roster_changed"
 )
 
 // IsExecutable reports whether the worker runs application work for a family.
-// Only the auto-submit family executes; the rest are wakeup notifications.
-func IsExecutable(family string) bool { return family == FamilyAutoSubmitScheduleAttempts }
+// The auto-submit and section-reconcile families execute; the rest are wakeup
+// notifications.
+func IsExecutable(family string) bool {
+	return family == FamilyAutoSubmitScheduleAttempts || family == FamilySectionAttemptsReconcile
+}
 
 // SkipEnqueue tells wakeup-family call sites whether to skip the INSERT
 // under exec-only mode (plan B4.1, OUTBOX_EXEC_ONLY). Executable families
@@ -62,7 +70,7 @@ func SkipEnqueue(family string, execOnly bool) bool {
 		return false
 	}
 	switch family {
-	case FamilyAutoSubmitScheduleAttempts:
+	case FamilyAutoSubmitScheduleAttempts, FamilySectionAttemptsReconcile:
 		return false
 	case FamilyAttemptTerminalized, FamilyRuntimeChanged, FamilyRosterChanged, "attempt_changed":
 		return true
