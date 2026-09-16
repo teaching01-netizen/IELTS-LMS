@@ -26,6 +26,7 @@ import { SmartPastePlugin } from "./plugins/smartPastePlugin";
 import { SmartDropPlugin } from "./plugins/smartDropPlugin";
 import { LatexPasteRule } from "./plugins/latexPasteRule";
 import { insertIngestResult } from "./plugins/insertIngestResult";
+import { importImageSource, ImageSourceError } from "./ingestion/application/imageImport";
 import { ingestClipboard } from "./ingestion/application/ingestClipboard";
 import { createPipelineContext } from "./ingestion/application/pipelineContext";
 import { PasteStatus } from "./PasteStatus";
@@ -34,7 +35,7 @@ import {
   validateSatImageFile,
   type ImageRejectCode,
 } from "./ingestion/adapters/imageValidation";
-import { SAT_IMAGE_POLICY } from "./ingestion/domain/imagePolicy";
+import { SAT_IMAGE_POLICY, validateDurableImageSource } from "./ingestion/domain/imagePolicy";
 import { ySyncPluginKey } from "y-prosemirror";
 
 // The node/mark vocabulary comes from ./schema/richTextSchema.ts, the exact
@@ -827,7 +828,7 @@ function ImageDialog({
   const previewUrlRef = useRef<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<
-    { code: ImageRejectCode | "upload"; message: string } | null
+    { code: ImageRejectCode | "upload" | "source" | "import"; message: string } | null
   >(null);
 
   const liveTargetAssetId = target
@@ -888,6 +889,52 @@ function ImageDialog({
     previewUrlRef.current = nextPreviewUrl;
     setPreviewUrl(nextPreviewUrl);
     void handleUpload(file);
+  };
+
+  const handleInsert = async () => {
+    const source = assetId.trim();
+    const alternativeText = alt.trim();
+    if (!source || !alternativeText || uploading) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      let durableAssetId = source;
+      if (ownerId) {
+        const asset = await importImageSource({ source, ownerId });
+        durableAssetId = asset.id;
+        setAssetId(asset.id);
+      } else if (!validateDurableImageSource(source).ok) {
+        throw new ImageSourceError("source", "Use an existing asset ID or an HTTPS image URL.");
+      }
+      const attrs = {
+        ...target?.attrs,
+        src: assetSource(durableAssetId),
+        alt: alternativeText,
+        assetId: durableAssetId,
+        caption: caption.trim() || null,
+      };
+      if (!attrs.src) {
+        throw new ImageSourceError("source", "Use an existing asset ID or an HTTPS image URL.");
+      }
+      if (target && editor.state.doc.nodeAt(target.pos)?.type.name === "image") {
+        editor
+          .chain()
+          .focus()
+          .setNodeSelection(target.pos)
+          .updateAttributes("image", attrs)
+          .run();
+      } else if (!target) {
+        editor.chain().focus().insertContent({ type: "image", attrs }).run();
+      }
+      onClose();
+    } catch (error) {
+      setUploadError({
+        code: error instanceof ImageSourceError ? error.code : "import",
+        message: error instanceof Error ? error.message : "The image could not be inserted.",
+      });
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -1056,29 +1103,10 @@ function ImageDialog({
           whileTap={reduceMotion ? {} : authoringMotion.press}
           transition={reduceMotion ? { duration: 0.01 } : authoringMotion.fast}
           disabled={uploading || !assetId.trim() || !alt.trim()}
-          onClick={() => {
-            const attrs = {
-              ...target?.attrs,
-              src: assetSource(assetId.trim()),
-              alt: alt.trim(),
-              assetId: assetId.trim(),
-              caption: caption.trim() || null,
-            };
-            if (target && editor.state.doc.nodeAt(target.pos)?.type.name === "image") {
-              editor
-                .chain()
-                .focus()
-                .setNodeSelection(target.pos)
-                .updateAttributes("image", attrs)
-                .run();
-            } else if (!target) {
-              editor.chain().focus().insertContent({ type: "image", attrs }).run();
-            }
-            onClose();
-          }}
+          onClick={() => void handleInsert()}
           className="rounded-lg bg-au-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
         >
-          {target ? "Update visual" : "Insert visual"}
+          {uploading ? "Securing visual…" : target ? "Update visual" : "Insert visual"}
         </motion.button>
       </div>
     </DialogFrame>

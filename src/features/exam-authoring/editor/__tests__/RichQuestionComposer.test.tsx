@@ -6,8 +6,14 @@ import { plainContentFromText } from "../richContent";
 import { FastQuestionComposer } from "../FastQuestionComposer";
 
 const uploadAssessmentAsset = vi.hoisted(() => vi.fn());
+const importAssessmentImageUrl = vi.hoisted(() => vi.fn());
+const getAssessmentMediaAsset = vi.hoisted(() => vi.fn());
 
-vi.mock("../../api/assessmentMediaApi", () => ({ uploadAssessmentAsset }));
+vi.mock("../../api/assessmentMediaApi", () => ({
+  uploadAssessmentAsset,
+  importAssessmentImageUrl,
+  getAssessmentMediaAsset,
+}));
 
 import {
   composerBaseExtensions,
@@ -135,6 +141,50 @@ describe("SAT rich question composer capabilities", () => {
         delete (URL as typeof URL & { revokeObjectURL?: typeof revokeObjectURL }).revokeObjectURL;
       }
     }
+  });
+
+  it("imports an HTTPS dialog source before inserting a managed asset", async () => {
+    importAssessmentImageUrl.mockReset().mockResolvedValue({
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      contentType: "image/png",
+      fileName: "diagram.png",
+      uploadStatus: "finalized",
+      downloadUrl: "/api/v1/media/550e8400-e29b-41d4-a716-446655440000/content",
+    });
+    getAssessmentMediaAsset.mockReset().mockResolvedValue({
+      downloadUrl: "/api/v1/media/550e8400-e29b-41d4-a716-446655440000/content",
+    });
+    const onChange = vi.fn();
+    render(
+      <RichQuestionComposer
+        value={plainContentFromText("Question prompt")}
+        onChange={onChange}
+        label="Question prompt"
+        assetOwnerId="question-1"
+      />
+    );
+
+    await screen.findByRole("button", { name: "Insert content" });
+    fireEvent.click(screen.getByRole("button", { name: "Insert content" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Insert image or graph" }));
+    fireEvent.click(screen.getByText("Use existing asset…"));
+    fireEvent.change(await screen.findByLabelText("Asset ID or image URL"), {
+      target: { value: "https://cdn.example.test/diagram.png" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: /Alternative text/ }), {
+      target: { value: "A coordinate graph" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Insert visual" }));
+
+    await waitFor(() => expect(importAssessmentImageUrl).toHaveBeenCalledWith(
+      "https://cdn.example.test/diagram.png",
+      "question-1"
+    ));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ version: 2 }));
+    expect(JSON.stringify(onChange.mock.calls.at(-1)?.[0])).toContain(
+      "550e8400-e29b-41d4-a716-446655440000"
+    );
   });
 
   it("applies the inline placement layout to the equation preview", async () => {

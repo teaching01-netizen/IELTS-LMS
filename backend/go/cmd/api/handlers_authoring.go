@@ -117,6 +117,40 @@ func mediaUploadHandler(app *App) http.HandlerFunc {
 	}
 }
 
+// mediaImportURLHandler imports one HTTPS image into a managed assessment
+// asset. The media service owns URL validation, SSRF protection, and the
+// byte/image policy; this handler only decodes the bounded request.
+func mediaImportURLHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if requireRole(w, r, auth.RoleAdmin, auth.RoleBuilder, auth.RoleProctor, auth.RoleGrader, auth.RoleStudent) == nil {
+			return
+		}
+		if app.Media == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Media service is unavailable."))
+			return
+		}
+		var req struct {
+			OwnerKind string `json:"ownerKind"`
+			OwnerID   string `json:"ownerId"`
+			URL       string `json:"url"`
+		}
+		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		asset, err := app.Media.ImportURL(r.Context(), media.ImportURLRequest{
+			OwnerKind: req.OwnerKind,
+			OwnerID:   req.OwnerID,
+			URL:       req.URL,
+		})
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusCreated, asset)
+	}
+}
+
 // mediaCompleteHandler finalizes a pending media upload.
 func mediaCompleteHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

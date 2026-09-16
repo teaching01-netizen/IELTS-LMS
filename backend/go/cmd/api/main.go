@@ -688,6 +688,7 @@ func BuildRouter(app *App) http.Handler {
 		})
 		r.With(limitTier(app, httpx.TierWrites, userKey())).With(adminLimit).Route("/media", func(r chi.Router) {
 			authzRoute(r, "POST", "/uploads", mediaUploadHandler(app))
+			authzRoute(r, "POST", "/import-url", mediaImportURLHandler(app))
 			authzRoute(r, "PUT", "/uploads/{assetID}", mediaUploadBytesHandler(app))
 			authzRoute(r, "POST", "/uploads/{assetID}/complete", mediaCompleteHandler(app))
 			authzRoute(r, "GET", "/assets/{assetID}", withAuthedReadsTier(app, mediaDownloadHandler(app)))

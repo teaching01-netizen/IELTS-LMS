@@ -10,7 +10,8 @@
  * Binding rulings honored here:
  * - allowBase64:false invariant: NEVER persist blob:/data: URLs. Temp
  *   uploading nodes carry an objectURL only transiently; stripTransientImages
- *   is the serialize guard that removes them before persist.
+ *   is the serialize guard that removes transient and unsafe sources before
+ *   persist.
  * - Client validation first (MIME + magic bytes, size, dimensions,
  *   pixel/decompression-bomb caps). The backend media policy stays
  *   authoritative; this mirror only fails fast.
@@ -18,7 +19,11 @@
  *   sat.accessibility.alt.required validator owns the publish gate.
  */
 import type { RichTextDocument, RichTextNode } from "../../../contracts/assessment";
-import { SAT_IMAGE_POLICY, isAllowedSatImageMime } from "../domain/imagePolicy";
+import {
+  SAT_IMAGE_POLICY,
+  isAllowedSatImageMime,
+  validateDurableImageSource,
+} from "../domain/imagePolicy";
 
 export const IMAGE_CAPS = {
   maxBytes: SAT_IMAGE_POLICY.maxBytes,
@@ -382,8 +387,13 @@ export function buildResolvedImageAttrs(
 
 function isTransientSource(value: unknown): boolean {
   if (typeof value !== "string") return false;
-  const lower = value.toLowerCase();
-  return lower.startsWith("blob:") || lower.startsWith("data:");
+  const lower = value.trim().toLowerCase();
+  return (
+    lower.startsWith("blob:") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("http://") ||
+    lower.startsWith("javascript:")
+  );
 }
 
 function isTransientImageNode(node: RichTextNode): boolean {
@@ -396,10 +406,12 @@ function isTransientImageNode(node: RichTextNode): boolean {
 
 /**
  * Serialize-strip guard (PURE JSON walk): remove any image node that is still
- * transient (uploading===true) or that points at a blob:/data: src without an
- * assetId. Surrounding blocks are preserved; the dropped count feeds a
- * readiness warning upstream (non-blocking). Deterministic: same input doc
- * always yields the same output doc + count.
+ * transient (uploading===true) or that points at a blob:/data:/http: source
+ * without an assetId. Other invalid source/asset attributes are cleared while
+ * preserving the image node so the accessibility/source validator can report
+ * a recoverable issue. Surrounding blocks are preserved; the dropped count
+ * feeds a readiness warning upstream (non-blocking). Deterministic: same input
+ * doc always yields the same output doc + count.
  */
 export function stripTransientImages(doc: RichTextDocument): {
   doc: RichTextDocument;
@@ -411,8 +423,24 @@ export function stripTransientImages(doc: RichTextDocument): {
       dropped += 1;
       return null;
     }
-    if (node.type === "image" && isTransientSource(node.attrs?.["src"])) {
-      return { ...node, attrs: { ...node.attrs, src: "" } };
+    if (node.type === "image") {
+      const attrs = { ...(node.attrs ?? {}) };
+      if (typeof attrs["assetId"] === "string" && attrs["assetId"].trim()) {
+        const asset = validateDurableImageSource(attrs["assetId"]);
+        if (!asset.ok || asset.kind !== "asset") attrs["assetId"] = null;
+      }
+      if (
+        typeof attrs["src"] === "string" &&
+        attrs["src"].trim() &&
+        !validateDurableImageSource(attrs["src"]).ok
+      ) {
+        attrs["src"] = "";
+      }
+      const originalAttrs = node.attrs ?? {};
+      const sameAttrs =
+        Object.keys(attrs).length === Object.keys(originalAttrs).length &&
+        Object.keys(attrs).every((key) => attrs[key] === originalAttrs[key]);
+      if (!sameAttrs) return { ...node, attrs };
     }
     if (!node.content) return node;
     const next: RichTextNode[] = [];

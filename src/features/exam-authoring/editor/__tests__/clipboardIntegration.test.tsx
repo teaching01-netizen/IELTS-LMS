@@ -25,7 +25,7 @@ vi.mock("../../api/assessmentMediaApi", () => ({
 }));
 
 const asset: AssessmentMediaAsset = {
-  id: "paste-asset",
+  id: "550e8400-e29b-41d4-a716-446655440010",
   fileName: "clipboard.png",
   contentType: "image/png",
   uploadStatus: "ready",
@@ -181,7 +181,7 @@ describe("SAT production composer clipboard integration", () => {
       await waitFor(() =>
         expect(textbox.querySelector("img")).toHaveAttribute("src", asset.downloadUrl)
       );
-      expect(JSON.stringify(changed.mock.lastCall?.[0])).toContain('"assetId":"paste-asset"');
+      expect(JSON.stringify(changed.mock.lastCall?.[0])).toContain(`"assetId":"${asset.id}"`);
       expect(JSON.stringify(changed.mock.calls)).not.toMatch(/blob:|data:image/);
       expect(revokeUrl).toHaveBeenCalledTimes(1);
       act(() => {

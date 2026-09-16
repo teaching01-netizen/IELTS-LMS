@@ -89,6 +89,17 @@ export function getAssessmentMediaAsset(assetId: string): Promise<AssessmentMedi
   return request;
 }
 
+export function importAssessmentImageUrl(
+  url: string,
+  ownerId: string
+): Promise<AssessmentMediaAsset> {
+  return backendPost<AssessmentMediaAsset>("/v1/media/import-url", {
+    ownerKind: "assessment_question",
+    ownerId,
+    url,
+  });
+}
+
 export function uploadAssessmentAsset(
   file: File,
   ownerId: string

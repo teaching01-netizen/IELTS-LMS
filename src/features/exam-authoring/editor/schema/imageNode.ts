@@ -5,13 +5,15 @@
 // view (asset resolution, upload placeholders) lives in
 // ../SatImageExtension.tsx, which extends this same node.
 import Image from "@tiptap/extension-image";
+import { validateDurableImageSource } from "../ingestion/domain/imagePolicy";
 
 // Renderable without the media service: http(s) and app-relative paths only.
 // data:/blob: URLs are never rendered directly — pasted images must go through
 // the upload pipeline (allowBase64:false) so unverified bytes cannot become
 // publishable content and so no object-URL lifetime leaks into drafts.
 export function isDirectImageSource(value: string): boolean {
-  return /^(https?:\/\/|\/)/i.test(value);
+  const validation = validateDurableImageSource(value);
+  return validation.ok && (validation.kind === "https" || validation.kind === "relative");
 }
 
 export const SatImageNode = Image.extend({

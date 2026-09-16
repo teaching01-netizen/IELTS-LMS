@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { StructuredContent } from "../../contracts/assessment";
 import {
+  assetSource,
   documentFromStructuredContent,
   hasStructuredContent,
   plainTextFromContent,
@@ -10,6 +11,16 @@ import {
 } from "../richContent";
 
 describe("rich SAT question content", () => {
+  it("never turns unsafe image sources into persisted render sources", () => {
+    expect(assetSource("data:image/png;base64,AAAA")).toBe("");
+    expect(assetSource("blob:https://example.test/id")).toBe("");
+    expect(assetSource("javascript:alert(1)")).toBe("");
+    expect(assetSource("http://example.test/image.png")).toBe("");
+    expect(assetSource("550e8400-e29b-41d4-a716-446655440000")).toBe(
+      "/api/v1/media/550e8400-e29b-41d4-a716-446655440000"
+    );
+  });
+
   it("assigns identities to plain-text content before it is saved", () => {
     expect(plainContentFromText('A prompt').document?.content?.[0]?.attrs?.['id']).toEqual(expect.any(String));
   });

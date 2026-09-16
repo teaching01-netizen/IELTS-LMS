@@ -28,6 +28,24 @@ type fakeStore struct {
 	putErr         error
 }
 
+type fakeRemoteFetcher struct {
+	image    FetchedImage
+	err      error
+	called   bool
+	maxBytes int64
+	rawURL   string
+}
+
+func (f *fakeRemoteFetcher) Fetch(_ context.Context, rawURL string, maxBytes int64) (FetchedImage, error) {
+	f.called = true
+	f.rawURL = rawURL
+	f.maxBytes = maxBytes
+	if f.err != nil {
+		return FetchedImage{}, f.err
+	}
+	return f.image, nil
+}
+
 func (f *fakeStore) Put(_ context.Context, key string, body []byte, contentType string) error {
 	if f.putErr != nil {
 		return f.putErr
@@ -213,6 +231,77 @@ func TestCreateUploadRejectsNonImageContentType(t *testing.T) {
 	s, _ := svcWith(db, store)
 	if _, err := s.CreateUpload(context.Background(), CreateRequest{OwnerKind: "assessment_question", OwnerID: "q-1", ContentType: "application/octet-stream", FileName: "evil.bin"}); codeOf(err) != apperrors.CodeValidation {
 		t.Fatalf("expected VALIDATION_ERROR on octet-stream, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestImportURLUsesManagedAssetLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	body := encoded.Bytes()
+	digest := sha256.Sum256(body)
+	checksum := fmt.Sprintf("%x", digest[:])
+	store := &fakeStore{getBody: body}
+	fetcher := &fakeRemoteFetcher{image: FetchedImage{
+		ContentType: "image/png",
+		FileName:    "diagram.png",
+		Body:        body,
+	}}
+	s := NewServiceWithRemoteFetcher(db, tx.NewRunner(db), store, fetcher)
+
+	ownerRows := sqlmock.NewRows([]string{"id"}).AddRow("q-1")
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_questions WHERE id = ? LIMIT 1")).
+		WithArgs("q-1").WillReturnRows(ownerRows)
+	// CreateUpload repeats the owner check through the existing upload-intent
+	// boundary, then stages the pending row.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_questions WHERE id = ? LIMIT 1")).
+		WithArgs("q-1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("q-1"))
+	begin(mock)
+	mock.ExpectExec("INSERT INTO media_assets").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ?")).
+		WillReturnRows(assetRow("asset-imported", StatusPending, "media/asset-imported/diagram.png", "image/png"))
+
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
+		WillReturnRows(assetRow("asset-imported", StatusPending, "media/asset-imported/diagram.png", "image/png"))
+	mock.ExpectCommit()
+
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
+		WillReturnRows(assetRow("asset-imported", StatusPending, "media/asset-imported/diagram.png", "image/png"))
+	mock.ExpectExec("UPDATE media_assets SET upload_status = 'finalized'").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ?")).
+		WillReturnRows(assetRowWithMetadata("asset-imported", StatusFinalized, "media/asset-imported/diagram.png", "image/png", int64(len(body)), checksum))
+	mock.ExpectCommit()
+
+	out, err := s.ImportURL(context.Background(), ImportURLRequest{
+		OwnerKind: "assessment_question",
+		OwnerID:   "q-1",
+		URL:       "https://cdn.example.test/diagram.png",
+	})
+	if err != nil {
+		t.Fatalf("ImportURL() error = %v", err)
+	}
+	if !fetcher.called || fetcher.rawURL != "https://cdn.example.test/diagram.png" || fetcher.maxBytes != MaxUploadBytes {
+		t.Fatalf("remote fetcher was not called with the bounded import request: %+v", fetcher)
+	}
+	if out.ID != "asset-imported" || out.Status != StatusFinalized || store.putContentType != "image/png" {
+		t.Fatalf("unexpected imported asset: %+v, stored type %q", out, store.putContentType)
+	}
+	if string(store.putBody) != string(body) {
+		t.Fatal("managed asset store did not receive the fetched bytes")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

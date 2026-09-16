@@ -201,6 +201,7 @@ func init() {
 		"GET /{resultID}": {MinRoles: AllRoles, Scope: ScopeSelfOnly},
 		// media.
 		"POST /uploads":                    {MinRoles: mediaWrite},
+		"POST /import-url":                 {MinRoles: mediaWrite},
 		"PUT /uploads/{assetID}":           {MinRoles: mediaWrite},
 		"POST /uploads/{assetID}/complete": {MinRoles: mediaWrite},
 		"GET /assets/{assetID}":            {MinRoles: AllRoles},

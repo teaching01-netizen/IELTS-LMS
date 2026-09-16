@@ -120,7 +120,7 @@ var expectedAnnotated = []string{
 	"GET /dashboard", "GET /analytics", "POST /export",
 	"GET /sat", "GET /sat/{resultID}", "GET /act-science", "GET /act-science/{attemptID}",
 	"GET /{resultID}/events", "GET /{resultID}",
-	"POST /uploads", "PUT /uploads/{assetID}", "POST /uploads/{assetID}/complete",
+	"POST /uploads", "POST /import-url", "PUT /uploads/{assetID}", "POST /uploads/{assetID}/complete",
 	"GET /assets/{assetID}", "GET /{assetID}/content", "GET /{assetID}",
 	"GET /submissions/{submissionID}/overview", "GET /submissions/{submissionID}/targets/{targetID}",
 	"GET /submissions/{submissionID}/export", "GET /attempts/{attemptID}/overview",

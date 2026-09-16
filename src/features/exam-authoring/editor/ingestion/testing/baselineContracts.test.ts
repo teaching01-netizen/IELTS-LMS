@@ -211,13 +211,14 @@ describe("baseline richContent contracts", () => {
 });
 
 describe("baseline assetSource mapping", () => {
-  it("passes https/app-relative/data: through and prefixes bare ids", () => {
+  it("passes durable sources through and prefixes UUID asset ids", () => {
     expect(assetSource("https://cdn.example.test/a.png")).toBe("https://cdn.example.test/a.png");
     expect(assetSource("/files/a.png")).toBe("/files/a.png");
-    // Observed wart: data: URIs pass through assetSource (the paste-time
-    // allowBase64:false parse rule is what refuses them, not this mapper).
-    expect(assetSource("data:image/png;base64,AAAA")).toBe("data:image/png;base64,AAAA");
-    expect(assetSource("asset-1")).toBe("/api/v1/media/asset-1");
+    expect(assetSource("data:image/png;base64,AAAA")).toBe("");
+    expect(assetSource("asset-1")).toBe("");
+    expect(assetSource("550e8400-e29b-41d4-a716-446655440000")).toBe(
+      "/api/v1/media/550e8400-e29b-41d4-a716-446655440000"
+    );
   });
 });
 

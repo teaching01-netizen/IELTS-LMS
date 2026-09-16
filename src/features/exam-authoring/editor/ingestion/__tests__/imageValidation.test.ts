@@ -435,9 +435,12 @@ describe("attr builders", () => {
 
   it("builds resolved attrs preferring the asset downloadUrl", () => {
     expect(
-      buildResolvedImageAttrs({ id: "asset-1", downloadUrl: "https://cdn.test/a.png" }, "blob:abc")
+      buildResolvedImageAttrs(
+        { id: "550e8400-e29b-41d4-a716-446655440001", downloadUrl: "https://cdn.test/a.png" },
+        "blob:abc"
+      )
     ).toEqual({
-      assetId: "asset-1",
+      assetId: "550e8400-e29b-41d4-a716-446655440001",
       src: "https://cdn.test/a.png",
       uploading: false,
       uploadError: null,
@@ -446,9 +449,12 @@ describe("attr builders", () => {
   });
 
   it("keeps only the asset identity when no download URL is available", () => {
-    const out = buildResolvedImageAttrs({ id: "asset-1", downloadUrl: null }, "blob:abc");
+    const out = buildResolvedImageAttrs(
+      { id: "550e8400-e29b-41d4-a716-446655440001", downloadUrl: null },
+      "blob:abc"
+    );
     expect(out.src).toBe("");
-    expect(out.assetId).toBe("asset-1");
+    expect(out.assetId).toBe("550e8400-e29b-41d4-a716-446655440001");
   });
 });
 
@@ -456,9 +462,17 @@ describe("stripTransientImages", () => {
   it("keeps an uploaded asset but removes a stale local source", () => {
     const result = stripTransientImages({
       type: "doc",
-      content: [{ type: "image", attrs: { assetId: "asset-1", src: "blob:revoked" } }],
+      content: [
+        {
+          type: "image",
+          attrs: { assetId: "550e8400-e29b-41d4-a716-446655440001", src: "blob:revoked" },
+        },
+      ],
     });
-    expect(result.doc.content?.[0]?.attrs).toEqual({ assetId: "asset-1", src: "" });
+    expect(result.doc.content?.[0]?.attrs).toEqual({
+      assetId: "550e8400-e29b-41d4-a716-446655440001",
+      src: "",
+    });
   });
 
   it("removes placeholders nested inside table cells without mutating the input", () => {
@@ -503,7 +517,7 @@ describe("stripTransientImages", () => {
           type: "image",
           attrs: {
             src: "https://cdn.test/real.png",
-            assetId: "asset-9",
+            assetId: "550e8400-e29b-41d4-a716-446655440009",
             alt: "graph",
             uploading: false,
           },
@@ -521,7 +535,9 @@ describe("stripTransientImages", () => {
     const out = stripTransientImages(doc());
     expect(out.dropped).toBe(2);
     expect(out.doc.content?.map((n) => n.type)).toEqual(["paragraph", "image", "paragraph"]);
-    expect(out.doc.content?.[1]?.attrs?.["assetId"]).toBe("asset-9");
+    expect(out.doc.content?.[1]?.attrs?.["assetId"]).toBe(
+      "550e8400-e29b-41d4-a716-446655440009"
+    );
   });
 
   it("leaves no transient image src behind (no-persist property)", () => {
@@ -531,8 +547,20 @@ describe("stripTransientImages", () => {
         { type: "paragraph", content: [{ type: "text", text: "plain words here" }] },
         { type: "image", attrs: { src: "BLOB:upper", assetId: null } },
         { type: "image", attrs: { src: "DATA:image/gif;base64,xx", assetId: null } },
-        { type: "image", attrs: { src: "blob:keep-but-resolved", assetId: "asset-1" } },
-        { type: "image", attrs: { src: "https://cdn.test/ok.png", assetId: "asset-2" } },
+        {
+          type: "image",
+          attrs: {
+            src: "blob:keep-but-resolved",
+            assetId: "550e8400-e29b-41d4-a716-446655440001",
+          },
+        },
+        {
+          type: "image",
+          attrs: {
+            src: "https://cdn.test/ok.png",
+            assetId: "550e8400-e29b-41d4-a716-446655440002",
+          },
+        },
       ],
     };
     const out = stripTransientImages(noisy);
@@ -547,8 +575,8 @@ describe("stripTransientImages", () => {
       expect(/^(blob:|data:)/i.test(src) && !hasAsset).toBe(false);
     }
     // Resolved nodes survive.
-    expect(JSON.stringify(out.doc)).toContain("asset-1");
-    expect(JSON.stringify(out.doc)).toContain("asset-2");
+    expect(JSON.stringify(out.doc)).toContain("550e8400-e29b-41d4-a716-446655440001");
+    expect(JSON.stringify(out.doc)).toContain("550e8400-e29b-41d4-a716-446655440002");
   });
 
   it("never throws on unknown shapes and passes them through", () => {

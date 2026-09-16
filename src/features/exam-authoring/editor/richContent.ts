@@ -5,6 +5,7 @@ import type {
   StructuredContent,
 } from "../contracts/assessment";
 import { withRichContentIdentities } from './richContentIdentity';
+import { validateDurableImageSource } from "./ingestion/domain/imagePolicy";
 
 const textNode = (text: string): RichTextNode => ({ type: "text", text });
 const paragraph = (text: string): RichTextNode => ({
@@ -24,16 +25,20 @@ function legacyNodeToRich(node: ContentNode): RichTextNode {
       };
     case "equation":
       return { type: node.display ? "blockMath" : "inlineMath", attrs: { latex: node.latex } };
-    case "image":
+    case "image": {
+      const source = assetSource(node.assetId);
+      const validation = validateDurableImageSource(node.assetId);
+      const assetId = validation.ok && validation.kind === "asset" ? node.assetId : null;
       return {
         type: "image",
         attrs: {
-          src: assetSource(node.assetId),
-          assetId: node.assetId,
+          src: source,
+          assetId,
           alt: node.alt,
           caption: node.caption ?? null,
         },
       };
+    }
     case "table":
       return {
         type: "table",
@@ -49,10 +54,10 @@ function legacyNodeToRich(node: ContentNode): RichTextNode {
 }
 
 export function assetSource(assetId: string): string {
-  if (/^https?:\/\//i.test(assetId) || assetId.startsWith("data:") || assetId.startsWith("/")) {
-    return assetId;
-  }
-  return `/api/v1/media/${encodeURIComponent(assetId)}`;
+  const validation = validateDurableImageSource(assetId);
+  if (!validation.ok) return "";
+  if (validation.kind === "https" || validation.kind === "relative") return assetId.trim();
+  return `/api/v1/media/${encodeURIComponent(assetId.trim())}`;
 }
 
 export function documentFromStructuredContent(content: StructuredContent | null | undefined): RichTextDocument {

@@ -108,7 +108,12 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	s.Proctor = proctor.NewService(s.Tx, pool, s.Terminal, nil, assign).SetOutboxExecOnly(cfg.OutboxExecOnly)
 	s.Grading = grading.NewService(pool, s.Tx)
 	s.Results = results.NewService(pool)
-	s.Media = media.NewService(pool, s.Tx, objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot))
+	s.Media = media.NewServiceWithRemoteFetcher(
+		pool,
+		s.Tx,
+		objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot),
+		media.NewHTTPRemoteImageFetcher(media.RemoteImageFetcherOptions{}),
+	)
 	s.Library = library.NewService(pool, s.Tx)
 	s.AnswerHistory = answerhistory.NewService(pool)
 	s.AccessLinks = accesslinks.NewService(pool, s.Tx)

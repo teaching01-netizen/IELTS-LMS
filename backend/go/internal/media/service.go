@@ -47,14 +47,28 @@ const (
 
 // Service wires media transitions explicitly.
 type Service struct {
-	db     *sql.DB
-	runner *tx.Runner
-	store  objectstore.Store
+	db            *sql.DB
+	runner        *tx.Runner
+	store         objectstore.Store
+	remoteFetcher RemoteImageFetcher
 }
 
-// NewService wires dependencies explicitly.
+// NewService wires the core media dependencies. URL imports remain disabled
+// unless the composition root supplies a RemoteImageFetcher.
 func NewService(db *sql.DB, runner *tx.Runner, store objectstore.Store) *Service {
-	return &Service{db: db, runner: runner, store: store}
+	return NewServiceWithRemoteFetcher(db, runner, store, nil)
+}
+
+// NewServiceWithRemoteFetcher is the composition seam for bounded HTTPS image
+// imports. Production callers should pass NewHTTPRemoteImageFetcher here;
+// tests can inject a deterministic fake.
+func NewServiceWithRemoteFetcher(
+	db *sql.DB,
+	runner *tx.Runner,
+	store objectstore.Store,
+	fetcher RemoteImageFetcher,
+) *Service {
+	return &Service{db: db, runner: runner, store: store, remoteFetcher: fetcher}
 }
 
 // Asset is the media_assets row projection.
@@ -93,6 +107,13 @@ type CreateRequest struct {
 type CompleteRequest struct {
 	SizeBytes int64
 	Checksum  string
+}
+
+// ImportURLRequest describes a remote image that must become a managed asset.
+type ImportURLRequest struct {
+	OwnerKind string
+	OwnerID   string
+	URL       string
 }
 
 func validationError(msg string) *apperrors.Error {
@@ -253,6 +274,71 @@ func (s *Service) CompleteUpload(ctx context.Context, assetID string, req Comple
 		return nil
 	})
 	return out, err
+}
+
+// ImportURL fetches an HTTPS image through the SSRF-safe network port and
+// routes the bytes through the same MIME, magic, dimension, checksum, and
+// finalization path as a browser upload.
+func (s *Service) ImportURL(ctx context.Context, req ImportURLRequest) (Asset, error) {
+	ownerKind := strings.TrimSpace(req.OwnerKind)
+	ownerID := strings.TrimSpace(req.OwnerID)
+	if ownerKind == "" || ownerID == "" {
+		return Asset{}, validationError("Upload owner is required.")
+	}
+	if s.store == nil {
+		return Asset{}, serviceUnavailable()
+	}
+	if err := s.checkOwner(ctx, ownerKind, ownerID); err != nil {
+		return Asset{}, err
+	}
+	if s.remoteFetcher == nil {
+		return Asset{}, serviceUnavailable()
+	}
+	fetched, err := s.remoteFetcher.Fetch(ctx, req.URL, MaxUploadBytes)
+	if err != nil {
+		return Asset{}, validationError("The remote image could not be imported.")
+	}
+	contentType := strings.ToLower(strings.TrimSpace(fetched.ContentType))
+	if err := validateImageContentType(contentType); err != nil {
+		return Asset{}, err
+	}
+	if len(fetched.Body) == 0 {
+		return Asset{}, validationError("The remote image must not be empty.")
+	}
+	if len(fetched.Body) > MaxUploadBytes {
+		return Asset{}, apperrors.New(apperrors.CodePayloadTooLarge, fmt.Sprintf("Upload exceeds the %d byte limit.", MaxUploadBytes))
+	}
+	if err := validateImageMagic(fetched.Body, contentType); err != nil {
+		return Asset{}, err
+	}
+	if err := validateDecodedImageLimits(fetched.Body, contentType); err != nil {
+		return Asset{}, err
+	}
+	fileName := strings.TrimSpace(fetched.FileName)
+	if err := validateFileName(fileName); err != nil {
+		return Asset{}, err
+	}
+	digest := sha256.Sum256(fetched.Body)
+	checksum := fmt.Sprintf("%x", digest[:])
+	sizeBytes := int64(len(fetched.Body))
+	intent, err := s.CreateUpload(ctx, CreateRequest{
+		OwnerKind:   ownerKind,
+		OwnerID:     ownerID,
+		ContentType: contentType,
+		FileName:    fileName,
+		Checksum:    &checksum,
+		SizeBytes:   &sizeBytes,
+	})
+	if err != nil {
+		return Asset{}, err
+	}
+	if err := s.UploadBytes(ctx, intent.Asset.ID, fetched.Body, contentType); err != nil {
+		return Asset{}, err
+	}
+	return s.CompleteUpload(ctx, intent.Asset.ID, CompleteRequest{
+		SizeBytes: sizeBytes,
+		Checksum:  checksum,
+	})
 }
 
 // GetAsset loads one asset or returns NOT_FOUND.

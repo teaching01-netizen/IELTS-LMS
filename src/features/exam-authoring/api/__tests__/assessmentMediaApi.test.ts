@@ -9,7 +9,11 @@ vi.mock("../../infrastructure/examAuthoringBackendGateway", () => ({
 }));
 
 import { apiClient } from "../../../../shared/api/apiClient";
-import { getAssessmentMediaAsset, uploadAssessmentAsset } from "../assessmentMediaApi";
+import {
+  getAssessmentMediaAsset,
+  importAssessmentImageUrl,
+  uploadAssessmentAsset,
+} from "../assessmentMediaApi";
 
 describe("assessment media API", () => {
   beforeEach(() => {
@@ -90,6 +94,26 @@ describe("assessment media API", () => {
     );
     expect(file.arrayBuffer).not.toHaveBeenCalled();
     expect(backendPost).not.toHaveBeenCalled();
+  });
+
+  it("imports an HTTPS image through the managed media endpoint", async () => {
+    const asset = {
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      contentType: "image/png",
+      fileName: "diagram.png",
+      uploadStatus: "finalized",
+      downloadUrl: "/api/v1/media/550e8400-e29b-41d4-a716-446655440000/content",
+    };
+    backendPost.mockResolvedValueOnce(asset);
+
+    await expect(
+      importAssessmentImageUrl("https://cdn.example.test/diagram.png", "question-1")
+    ).resolves.toEqual(asset);
+    expect(backendPost).toHaveBeenCalledWith("/v1/media/import-url", {
+      ownerKind: "assessment_question",
+      ownerId: "question-1",
+      url: "https://cdn.example.test/diagram.png",
+    });
   });
 
   it("deduplicates concurrent lookups for the same immutable asset", async () => {
