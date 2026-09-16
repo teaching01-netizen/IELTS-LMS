@@ -978,12 +978,6 @@ func (c Config) ValidateForRuntime() error {
 	if strings.TrimSpace(c.AuthSecret) == "" || c.AuthSecret == "dev-secret-change-me" || len(c.AuthSecret) < 32 {
 		return fmt.Errorf("AUTH_SECRET must be set to a strong value of at least 32 characters")
 	}
-	env := strings.ToLower(c.Environment)
-	if env == "production" {
-		if c.MasterKeyEnabled {
-			return fmt.Errorf("MASTER_KEY_ENABLED must be false in production")
-		}
-	}
 	if c.BackgroundMode != BackgroundContinuous && c.BackgroundMode != BackgroundActivityDriven {
 		return fmt.Errorf("invalid BACKGROUND_RUNTIME_MODE %q", c.BackgroundMode)
 	}

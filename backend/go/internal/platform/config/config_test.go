@@ -105,8 +105,9 @@ func TestValidateForRuntime(t *testing.T) {
 	}
 	prod.AuthSecret = "test-only-auth-secret-32-chars-min!!"
 	prod.MasterKeyEnabled = true
-	if err := prod.ValidateForRuntime(); err == nil {
-		t.Fatal("expected production master-key rejection")
+	prod.MasterKeyPassword = "production-test-master-password"
+	if err := prod.ValidateForRuntime(); err != nil {
+		t.Fatalf("production master key with password rejected: %v", err)
 	}
 	// Master key without a password is a misconfiguration in every
 	// environment (fail closed): enabling it must require a password.
