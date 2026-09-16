@@ -64,6 +64,7 @@ COPY --from=frontend-builder /app/package.json /app/package.json
 COPY --from=frontend-builder /app/services/authoring-coedit/tsconfig.json /app/services/authoring-coedit/tsconfig.json
 COPY --from=frontend-builder /app/services/authoring-coedit/src /app/services/authoring-coedit/src
 COPY --from=frontend-builder /app/src/features/exam-authoring/editor/schema /app/src/features/exam-authoring/editor/schema
+COPY --from=frontend-builder /app/src/features/exam-authoring/editor/ingestion/domain /app/src/features/exam-authoring/editor/ingestion/domain
 COPY --from=frontend-builder /app/src/features/exam-authoring/editor/richContent.ts /app/src/features/exam-authoring/editor/richContent.ts
 COPY --from=frontend-builder /app/src/features/exam-authoring/editor/richContentIdentity.ts /app/src/features/exam-authoring/editor/richContentIdentity.ts
 COPY --from=frontend-builder /app/src/features/exam-authoring/contracts /app/src/features/exam-authoring/contracts
