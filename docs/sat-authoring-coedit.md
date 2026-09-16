@@ -24,8 +24,14 @@ share the two dedicated secrets.
 
 Run exactly one backend replica when authoring co-editing is enabled. The
 singleton lock intentionally prevents two containers from serving the same
-rooms. The standalone `services/authoring-coedit/Dockerfile` remains available
-for deployments that choose to scale or operate the co-edit runtime separately.
+rooms. `backend/Dockerfile` is the ONLY image that carries this service, and
+`services/authoring-coedit/src/__tests__/imageContents.test.ts` refuses a build
+whose COPY list is missing a file the runtime imports — the image is built from
+the repository root, and every cross-package module has to be named there
+explicitly. Operate the co-edit runtime separately by running this same image,
+not by maintaining a second Dockerfile: a list that no deployment builds can be
+kept up to date while the deployed one rots, and the container then fails to
+resolve a module at startup.
 
 ## Where things live
 

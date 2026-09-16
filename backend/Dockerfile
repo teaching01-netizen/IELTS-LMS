@@ -70,6 +70,7 @@ COPY --from=frontend-builder /app/src/features/exam-authoring/editor/richContent
 COPY --from=frontend-builder /app/src/features/exam-authoring/contracts /app/src/features/exam-authoring/contracts
 COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/workspaceCommands.ts /app/src/features/exam-authoring/realtime/coedit/workspaceCommands.ts
 COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/workspaceSeed.ts /app/src/features/exam-authoring/realtime/coedit/workspaceSeed.ts
+COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/storeRequest.ts /app/src/features/exam-authoring/realtime/coedit/storeRequest.ts
 COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/protocol.ts /app/src/features/exam-authoring/realtime/coedit/protocol.ts
 COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/documentIdentity.ts /app/src/features/exam-authoring/realtime/coedit/documentIdentity.ts
 COPY backend/go/migrations /app/migrations
