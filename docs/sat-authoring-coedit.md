@@ -9,6 +9,20 @@ file that enforces it, so a claim that stops being true is a bug in a specific
 place rather than a stale sentence. The guards in the last section exist because
 prose cannot be executed.
 
+## Deployment topology
+
+The production backend image embeds the Hocuspocus process from
+`services/authoring-coedit/` and supervises it beside the Go API and worker via
+`backend/Dockerfile`. It is therefore one deployable backend service, while
+the co-edit runtime remains a separate child process with its own singleton
+room lock. Set the `AUTHORING_COEDIT_*` variables in the backend deployment;
+the Go API and embedded process must share the two dedicated secrets.
+
+Run exactly one backend replica when authoring co-editing is enabled. The
+singleton lock intentionally prevents two containers from serving the same
+rooms. The standalone `services/authoring-coedit/Dockerfile` remains available
+for deployments that choose to scale or operate the co-edit runtime separately.
+
 ## Where things live
 
 | Concern | Owner |
