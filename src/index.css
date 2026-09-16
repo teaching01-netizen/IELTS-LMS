@@ -3304,6 +3304,18 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   gap: 2px;
 }
 
+/* The contextual label ("Table", "Equation", "Image") names the set like a
+ * toolbar section header: quiet, never competing with the content line. */
+.sat-rich-editor__context-label {
+  margin-right: var(--spacing-1);
+  padding-inline: var(--spacing-1);
+  color: var(--color-gray-500);
+  font-size: var(--text-au-11);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 /* Groups are separated by space, not by lines: style / format / math / insert /
  * more must read as distinct sets rather than one long string of controls. */
 .sat-rich-editor__toolbar-group + .sat-rich-editor__toolbar-group {

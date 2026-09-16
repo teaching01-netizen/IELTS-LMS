@@ -43,10 +43,10 @@ describe("collaborative composer history", () => {
 });
 
 describe("SAT rich question composer capabilities", () => {
-  it("shows only five default controls plus overflow", async () => {
+  it("shows the standard control set with visible undo and redo", async () => {
     render(<RichQuestionComposer value={plainContentFromText("Hello")} onChange={vi.fn()} label="Question" />);
     const toolbar=await screen.findByRole("toolbar", {name:"Formatting tools"});
-    expect(within(toolbar).getAllByRole("button")).toHaveLength(5);
+    expect(within(toolbar).getAllByRole("button")).toHaveLength(7);
     expect(within(toolbar).getByRole("combobox", {name:"Text style"})).toBeInTheDocument();
   });
   it("retains a persisted text-block identity when the editor loads", async () => {
