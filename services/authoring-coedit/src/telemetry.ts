@@ -102,6 +102,8 @@ const METRIC_HELP: Record<string, string> = {
   authoring_coedit_documents_current: "Active in-memory collaborative documents.",
   authoring_coedit_auth_total: "Co-edit authentication attempts by outcome.",
   authoring_coedit_store_total: "Co-edit store attempts by outcome.",
+  authoring_coedit_store_retry_total:
+    "Automatic retries of a transiently failed store by outcome (accepted, rejected, or skipped once the bounded ladder is exhausted).",
   authoring_coedit_store_duration_seconds: "Co-edit store duration histogram bucket.",
   authoring_coedit_state_bytes: "Collaborative document state size histogram bucket.",
   authoring_coedit_reconnect_total: "Client reconnects by outcome.",

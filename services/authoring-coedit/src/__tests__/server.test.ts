@@ -51,6 +51,18 @@ function seedOutcomeCount(outcome: "accepted" | "rejected" | "duplicate" | "conf
   return line ? Number(line.slice(prefix.length)) : 0;
 }
 
+/**
+ * The retry dimension of the store path. This is the counter that says a
+ * failure was recovered WITHOUT the author acting, which is the whole point of
+ * the ladder; the store counter alone cannot tell an automatic retry from a
+ * store an edit triggered.
+ */
+function storeRetryOutcomeCount(outcome: "accepted" | "rejected" | "skipped"): number {
+  const prefix = `authoring_coedit_store_retry_total{outcome="${outcome}"} `;
+  const line = metrics.render().split("\n").find((entry) => entry.startsWith(prefix));
+  return line ? Number(line.slice(prefix.length)) : 0;
+}
+
 const TOKEN_SECRET = "t".repeat(40);
 const SERVICE_SECRET = "s".repeat(40);
 const DOCUMENT_UUID = "2f1b6c1e-6a0a-4a5b-9f0e-9d3a2f4c5b6d";
@@ -131,6 +143,11 @@ interface FakeGo {
   unauthorized: number;
   /** While true every store is refused the way Go refuses a stale fence. */
   refuseStores: boolean;
+  /**
+   * Upcoming stores answered with a transient 5xx, as a backend restart does.
+   * `Number.POSITIVE_INFINITY` means "until the test says otherwise".
+   */
+  transientStoreFailures: number;
   close(): Promise<void>;
 }
 
@@ -148,6 +165,7 @@ async function startFakeGo(
     lifecycle: options.lifecycle ?? "initializing",
     unauthorized: 0,
     refuseStores: false,
+    transientStoreFailures: 0,
     close: async () => {},
   };
 
@@ -235,6 +253,17 @@ async function startFakeGo(
       }
       case "/internal/authoring-coedit/store": {
         state.stores.push(body);
+        if (state.transientStoreFailures > 0) {
+          // The backend being briefly away: 5xx, which is the ONLY failure a
+          // store may be retried on. `Infinity - 1` stays Infinity.
+          state.transientStoreFailures -= 1;
+          respond(res, 503, {
+            code: "SERVICE_UNAVAILABLE",
+            message: "The authoring backend is restarting.",
+            requestId: "req-store-unavailable",
+          });
+          return;
+        }
         if (state.refuseStores) {
           // Go's real refusal, in Go's real shape: the private surface writes
           // the error envelope FLAT (httpx.WriteError + apperrors.Envelope).
@@ -314,7 +343,13 @@ afterEach(async () => {
 });
 
 async function startService(
-  options: { lock?: FakeLock; lifecycle?: "initializing" | "active" | "closed"; go?: FakeGo } = {},
+  options: {
+    lock?: FakeLock;
+    lifecycle?: "initializing" | "active" | "closed";
+    go?: FakeGo;
+    /** A short retry ladder, so the backoff is exercised without waiting it out. */
+    retryDelaysMs?: readonly number[];
+  } = {},
 ): Promise<Running> {
   const go = options.go ?? (await startFakeGo({ ...(options.lifecycle ? { lifecycle: options.lifecycle } : {}) }));
   const lock = options.lock ?? new FakeLock();
@@ -330,7 +365,10 @@ async function startService(
     lockTimeoutSeconds: 5,
     allowedOrigin: "",
   };
-  const service = createCoeditService(config, { lock });
+  const service = createCoeditService(config, {
+    lock,
+    ...(options.retryDelaysMs ? { storeRetryDelaysMs: options.retryDelaysMs } : {}),
+  });
   // Hocuspocus resolves port 0 to a real port; read it after listening.
   await service.start();
   const port = (service.server.address as { port: number }).port;
@@ -850,6 +888,138 @@ describe("service integration", () => {
     // An observer's room has nothing to commit on its behalf, and its write
     // refusal already has its own path.
     expect(running.go.stores.length).toBe(storesBefore);
+  });
+
+  it("retries a transiently failed store by itself, so the author never reaches for Retry", async () => {
+    // The point of the ladder: a backend that blinked must not leave the author
+    // holding the only copy of their work. No second edit, no store request, no
+    // user action — the room commits it.
+    const running = await startService({ retryDelaysMs: [30, 60] });
+    const alice = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-alice" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    const frames: string[] = [];
+    alice.on("stateless", ({ payload }: { payload: string }) => frames.push(payload));
+    await waitFor(() => alice.isSynced, 5_000, "workspace client");
+
+    const storesBefore = running.go.stores.length;
+    const acceptedBefore = storeRetryOutcomeCount("accepted");
+    // Briefly away, as a restarting backend is: the store this edit triggers
+    // gets a 5xx, which is the only failure the ladder may act on.
+    running.go.transientStoreFailures = 1;
+    alice.document.getMap("workspace").set("ui/selectedQuestionId", JSON.stringify("q-1"));
+    await waitFor(() => running.go.stores.length > storesBefore, 5_000, "the failed store");
+
+    // Nothing else happens here: the retry is the service's, not the author's.
+    await waitFor(
+      () => storeRetryOutcomeCount("accepted") > acceptedBefore,
+      5_000,
+      "the automatic retry to be accepted",
+    );
+    expect(running.go.committedState).not.toBeNull();
+    // The retry commits the LIVE document, so the tab is acknowledged for the
+    // state it actually holds and the save area can reach Saved.
+    const vector = encodeStateVectorBase64(alice.document);
+    await waitFor(
+      () =>
+        frames.some((frame) => {
+          const parsed = JSON.parse(frame) as { type?: string; stateVector?: string };
+          return parsed.type === "coedit.ack" && parsed.stateVector === vector;
+        }),
+      5_000,
+      "the acknowledgement from the retry",
+    );
+  });
+
+  it("never retries a refused store, so a fence is not looped against", async () => {
+    // A refusal is not a transient condition. Re-sending a fenced hash, an
+    // oversized document, or a frozen room can never succeed, and looping on one
+    // is what leaves an author watching a save that never finishes. The recovery
+    // there is the refusal frame (and the editor's export offer), not a retry.
+    const running = await startService({ retryDelaysMs: [30, 60, 90] });
+    const alice = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-alice" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => alice.isSynced, 5_000, "workspace client");
+
+    const storesBefore = running.go.stores.length;
+    const acceptedBefore = storeRetryOutcomeCount("accepted");
+    running.go.refuseStores = true;
+    alice.document.getMap("workspace").set("ui/selectedQuestionId", JSON.stringify("q-1"));
+    await waitFor(() => running.go.stores.length > storesBefore, 5_000, "the refused store");
+    const refusedAt = running.go.stores.length;
+
+    // Longer than the whole ladder: a fence must not be re-attempted at all.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(running.go.stores.length).toBe(refusedAt);
+    expect(storeRetryOutcomeCount("accepted")).toBe(acceptedBefore);
+  });
+
+  it("stops after the bounded ladder instead of hammering a backend that is down", async () => {
+    // "Bounded" is the load-bearing word: a service that keeps retrying a dead
+    // backend turns one outage into a stampede from every open room, and hides
+    // the failure from the author instead of showing it.
+    const running = await startService({ retryDelaysMs: [20, 40] });
+    const alice = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-alice" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => alice.isSynced, 5_000, "workspace client");
+
+    const storesBefore = running.go.stores.length;
+    const skippedBefore = storeRetryOutcomeCount("skipped");
+    const rejectedBefore = storeRetryOutcomeCount("rejected");
+    running.go.transientStoreFailures = Number.POSITIVE_INFINITY;
+    alice.document.getMap("workspace").set("ui/selectedQuestionId", JSON.stringify("q-1"));
+
+    await waitFor(
+      () => storeRetryOutcomeCount("skipped") > skippedBefore,
+      5_000,
+      "the exhausted ladder",
+    );
+    // One attempt, one per rung, and then no more: two rungs failed (each is
+    // accounted for), and the ladder stopped rather than starting over.
+    const attempts = running.go.stores.length - storesBefore;
+    expect(attempts).toBe(3);
+    expect(storeRetryOutcomeCount("rejected")).toBe(rejectedBefore + 2);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(running.go.stores.length - storesBefore).toBe(attempts);
+  });
+
+  it("starts a fresh ladder once the backend is back, instead of staying exhausted", async () => {
+    // Exhaustion belongs to one outage, not to the room forever. A spent ladder
+    // left behind would make every later failure answer "exhausted", so a room
+    // whose backend recovered could never be saved again — by an edit, or by the
+    // author's own Retry.
+    const running = await startService({ retryDelaysMs: [20, 40] });
+    const alice = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-alice" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => alice.isSynced, 5_000, "workspace client");
+
+    const skippedBefore = storeRetryOutcomeCount("skipped");
+    running.go.transientStoreFailures = Number.POSITIVE_INFINITY;
+    alice.document.getMap("workspace").set("ui/selectedQuestionId", JSON.stringify("q-1"));
+    await waitFor(
+      () => storeRetryOutcomeCount("skipped") > skippedBefore,
+      5_000,
+      "the exhausted ladder",
+    );
+
+    // The backend comes back, and the author asks for their work to be saved.
+    running.go.transientStoreFailures = 1;
+    const acceptedBefore = storeRetryOutcomeCount("accepted");
+    alice.sendStateless(JSON.stringify(createCoeditStoreRequest(WORKSPACE_DOCUMENT_NAME)));
+
+    await waitFor(
+      () => storeRetryOutcomeCount("accepted") > acceptedBefore,
+      5_000,
+      "a fresh ladder to commit the work",
+    );
+    expect(running.go.committedState).not.toBeNull();
   });
 
   it("treats a retried seed as the same proposal and refuses a read token's seed", async () => {

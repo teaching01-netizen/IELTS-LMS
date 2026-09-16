@@ -24,13 +24,13 @@ import {
   promptSchema,
   RICH_ROOT_PREFIX,
 } from "./documentCodec.js";
-import { GoAuthoringClient } from "./goAuthoringClient.js";
+import { GoAuthoringClient, GoRequestError } from "./goAuthoringClient.js";
 import {
   CONTROL_PATHS,
   LifecycleController,
   type CoeditConnectionContext,
 } from "./lifecycleControl.js";
-import { CoeditPersistence, type CoeditLoadMetadata } from "./persistence.js";
+import { CoeditPersistence, type CoeditLoadMetadata, type StoreHookInput } from "./persistence.js";
 import { SingletonLock } from "./singletonLock.js";
 import { log, metrics } from "./telemetry.js";
 import { documentFromStructuredContent } from "./richTextSchema.js";
@@ -107,11 +107,36 @@ export const CONTROL_REQUEST_PATHS = new Set<string>([
   CONTROL_PATHS.close,
 ]);
 
+/**
+ * Backoff ladder for a store that failed for a TRANSIENT reason.
+ *
+ * The only failures retried here are the ones where the backend was briefly
+ * away — Go answered 5xx, or could not be reached at all (`GoRequestError`
+ * marks exactly those retryable). A REFUSED write is never retried: a fenced
+ * hash, a revision conflict, a freeze, a closed room, and an oversized document
+ * cannot be satisfied by trying again, and looping against one is what leaves an
+ * author watching a save that never completes. Those keep the recovery path
+ * they already have (the refusal frame, and the editor's export/review offer).
+ *
+ * Bounded on purpose: three attempts over ~13s covers the window a deploy, a
+ * restart, or a dropped connection occupies, and then the editor's own Retry and
+ * the recovery copy are the way forward. Each attempt re-projects the live
+ * document, so a success on any rung commits the newest state, not the state
+ * that happened to be there when the first attempt failed.
+ */
+export const STORE_RETRY_DELAYS_MS: readonly number[] = [1_000, 3_000, 9_000];
+
 export interface CoeditServiceDeps {
   fetchImpl?: typeof fetch;
   now?: () => number;
   /** Overridable so tests can exercise contention and lock loss without MySQL. */
   lock?: LockLike;
+  /**
+   * Retry ladder for a transiently failed store. Injected so a test can prove
+   * the retry happens without waiting out the production backoff; the default is
+   * the shipped ladder above.
+   */
+  storeRetryDelaysMs?: readonly number[];
 }
 
 export interface LockLike {
@@ -161,11 +186,25 @@ export class CoeditService {
    * apply again if the room reloads without it.
    */
   private readonly appliedSeeds = new Map<string, Set<string>>();
+  /**
+   * One pending store retry per room, with the rung it is on.
+   *
+   * Keyed by room so a room can never accumulate timers: a new failure replaces
+   * the pending attempt (and advances the ladder) instead of adding a second
+   * one, which is what keeps a failing backend from being hammered by an
+   * unbounded number of retries for the same rooms.
+   */
+  private readonly storeRetries = new Map<
+    string,
+    { attempts: number; timer: ReturnType<typeof setTimeout> }
+  >();
+  private readonly storeRetryDelays: readonly number[];
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: CoeditServiceConfig, deps: CoeditServiceDeps = {}) {
     this.config = config;
     this.now = deps.now ?? (() => Date.now());
+    this.storeRetryDelays = deps.storeRetryDelaysMs ?? STORE_RETRY_DELAYS_MS;
     this.go = new GoAuthoringClient({
       baseUrl: config.goBaseUrl,
       serviceSecret: config.serviceSecret,
@@ -241,6 +280,9 @@ export class CoeditService {
   async stop(): Promise<"clean" | "timeout"> {
     if (this.shuttingDown) return "clean";
     this.shuttingDown = true;
+    // Pending retries belong to a process that is leaving: the flush below is
+    // the last store this process attempts.
+    this.clearStoreRetries();
     if (this.refreshTimer) {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
@@ -312,6 +354,7 @@ export class CoeditService {
   private onLockLost(reason: string): void {
     if (this.lockLost) return;
     this.lockLost = true;
+    this.clearStoreRetries();
     log("error", "authoring-coedit lost the singleton lock", {
       event: "singleton_lock_lost",
       reason,
@@ -647,7 +690,7 @@ export class CoeditService {
         metrics.incCounter("authoring_coedit_state_bytes", {
           le: sizeBucket(encodeStateAsUpdate(document).byteLength),
         });
-        await this.persistence.store({ documentName, document, context: lastContext });
+        await this.storeRoom({ documentName, document, context: lastContext });
       },
 
       /**
@@ -751,8 +794,9 @@ export class CoeditService {
       }
       // A seed is not acknowledged merely because it entered the live Y.Doc.
       // Store it through the same hash-checked path before treating it as
-      // accepted; a failure leaves the document dirty for Hocuspocus retry.
-      await this.persistence.store({
+      // accepted; a failure leaves the document dirty, and a transient one is
+      // retried on the shared ladder rather than left to the author.
+      await this.storeRoom({
         documentName,
         document,
         context: connection.context,
@@ -806,7 +850,7 @@ export class CoeditService {
       return;
     }
     try {
-      await this.persistence.store({ documentName, document, context: connection.context });
+      await this.storeRoom({ documentName, document, context: connection.context });
     } catch (error) {
       // Never rethrown into the stateless hook: a rejection there is an
       // unhandled rejection and takes the process down (see `applyWorkspaceSeed`),
@@ -817,6 +861,136 @@ export class CoeditService {
         stage: "store",
       });
     }
+  }
+
+  /**
+   * Stores one room, and arranges another attempt when the failure was the
+   * backend being briefly away.
+   *
+   * Every store in this service goes through here, so the retry policy is a
+   * property of storing rather than of one caller: an edit, a seed proposal, and
+   * an author's Retry all recover the same way when the backend blinks. The
+   * error still propagates, because the callers' contracts depend on it —
+   * Hocuspocus keeps the document dirty when the store throws instead of
+   * unloading it, and the seed path must not treat an unpersisted proposal as
+   * applied.
+   */
+  private async storeRoom(input: StoreHookInput): Promise<void> {
+    try {
+      await this.persistence.store(input);
+      this.cancelStoreRetry(input.documentName);
+    } catch (error) {
+      this.scheduleStoreRetry(input, error);
+      throw error;
+    }
+  }
+
+  /** Queues at most one pending retry per room, on the next rung of the ladder. */
+  private scheduleStoreRetry(input: StoreHookInput, error: unknown): void {
+    if (this.shuttingDown || this.lockLost) return;
+    // A refusal is not a retryable condition; see STORE_RETRY_DELAYS_MS.
+    if (!(error instanceof GoRequestError) || !error.retryable) return;
+    const pending = this.storeRetries.get(input.documentName);
+    const attempts = pending?.attempts ?? 0;
+    const delayMs = this.storeRetryDelays[attempts];
+    if (delayMs === undefined) {
+      // Bounded ladder exhausted. The author already has the failure on screen
+      // and can Retry, which starts a fresh ladder — hence the entry is dropped
+      // rather than kept at its last rung: a spent ladder left in the map would
+      // answer every FUTURE failure with "exhausted", so a room whose backend
+      // came back could never be retried again, by anyone.
+      this.storeRetries.delete(input.documentName);
+      metrics.incCounter("authoring_coedit_store_retry_total", { outcome: "skipped" });
+      log("warn", "co-edit store retries exhausted", {
+        event: "store_retry",
+        outcome: "skipped",
+        count: attempts,
+        stage: "store",
+      });
+      return;
+    }
+    if (pending) clearTimeout(pending.timer);
+    const timer = setTimeout(() => {
+      void this.retryStore(input);
+    }, delayMs);
+    timer.unref?.();
+    this.storeRetries.set(input.documentName, { attempts: attempts + 1, timer });
+    log("info", "co-edit store retry scheduled", {
+      event: "store_retry",
+      outcome: "accepted",
+      attempt: attempts + 1,
+      durationMs: delayMs,
+      stage: "store",
+    });
+  }
+
+  /**
+   * One rung of the retry ladder.
+   *
+   * The room may have moved on between the failure and the attempt — closed,
+   * frozen, or unloaded and reopened — and each of those means the stored copy
+   * must NOT be written from here: a freeze or close refuses writes outright, and
+   * a reopened room owns a DIFFERENT in-memory document, so committing the
+   * discarded one would overwrite state the new room has already synced.
+   *
+   * The pending entry STAYS in the map while this rung runs: it is the ladder's
+   * position, and a failure here has to continue from it. Clearing it first
+   * would restart every rung at the bottom, which is an unbounded retry wearing
+   * a bounded ladder's clothes.
+   */
+  private async retryStore(input: StoreHookInput): Promise<void> {
+    if (this.shuttingDown || this.lockLost) {
+      this.cancelStoreRetry(input.documentName);
+      return;
+    }
+    if (this.lifecycle.isClosed(input.documentName) || this.lifecycle.isReadOnly(input.documentName)) {
+      this.cancelStoreRetry(input.documentName);
+      return;
+    }
+    const live = this.server.hocuspocus.documents.get(input.documentName) as unknown as
+      | Y.Doc
+      | undefined;
+    if (live !== input.document) {
+      // The room was unloaded and reopened; its ladder belongs to a document
+      // that no longer exists.
+      this.cancelStoreRetry(input.documentName);
+      return;
+    }
+    try {
+      await this.persistence.store(input);
+      this.cancelStoreRetry(input.documentName);
+      metrics.incCounter("authoring_coedit_store_retry_total", { outcome: "accepted" });
+      log("info", "co-edit store retry accepted", {
+        event: "store_retry",
+        outcome: "accepted",
+        stage: "store",
+      });
+    } catch (error) {
+      metrics.incCounter("authoring_coedit_store_retry_total", { outcome: "rejected" });
+      // The rung is logged by the store hook it failed in; this line only
+      // accounts for the retry dimension.
+      log("warn", "co-edit store retry rejected", {
+        event: "store_retry",
+        outcome: "rejected",
+        reason: error instanceof Error ? error.message : "other",
+        stage: "store",
+      });
+      this.scheduleStoreRetry(input, error);
+    }
+  }
+
+  /** A successful store ends the ladder for its room. */
+  private cancelStoreRetry(documentName: string): void {
+    const pending = this.storeRetries.get(documentName);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.storeRetries.delete(documentName);
+  }
+
+  /** Shutdown and lock loss cancel every pending attempt: this process is done. */
+  private clearStoreRetries(): void {
+    for (const pending of this.storeRetries.values()) clearTimeout(pending.timer);
+    this.storeRetries.clear();
   }
 
   /**
