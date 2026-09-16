@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
 import { assessmentKeys } from "../api/assessmentQueries";
@@ -66,6 +66,14 @@ export function useAuthoringSaveRouting(
   } = input;
 
   const fieldWriter = resolveFieldWriter({ workspaceRoomActive, promptRoomActive });
+  // The LIVE selection, read after an await. The callback closure holds the
+  // question this save started for, which is what the write must be attributed
+  // to — this ref is how the resolution learns whether the author is still
+  // looking at it.
+  const selectedExamQuestionIdRef = useRef(selectedExamQuestionId);
+  useEffect(() => {
+    selectedExamQuestionIdRef.current = selectedExamQuestionId;
+  }, [selectedExamQuestionId]);
 
   const saveDraft = useCallback(
     async (revision: QuestionRevision) => {
@@ -125,16 +133,27 @@ export function useAuthoringSaveRouting(
         // the collaborative document already owns the only changed field.
         return undefined;
       }
-      promptFreeBaselineRef.current = saved;
-      // The baseline advances to the server revision, but the PROMPT keeps the
-      // projection the room owns: a partial field write answers with the
-      // server's materialized (and therefore older) prompt, and copying that
-      // into the draft would show the author stale text in preview/validation
-      // and make their next keystroke read as a field change rather than the
-      // prompt-only edit it is.
-      setDraft(
-        fieldWriter === "prompt-room" ? { ...saved, prompt: revision.prompt } : saved
-      );
+      // Installing the answer into the OPEN draft is only correct while the
+      // author is still on the question this save was for. The editor renders
+      // whatever `draft` holds and takes its header from the SELECTED module, so
+      // a writeback that lands after a switch repaints the question the author
+      // moved to with the one they left: the Math prompt and its answer appeared
+      // inside a Reading & Writing question, and because this save had just been
+      // acknowledged it even read as Saved. The write itself is real and stays
+      // attributed to its own question (summary, acknowledgement, cache) below.
+      const stillOpen = selectedExamQuestionIdRef.current === examQuestionId;
+      if (stillOpen) {
+        promptFreeBaselineRef.current = saved;
+        // The baseline advances to the server revision, but the PROMPT keeps the
+        // projection the room owns: a partial field write answers with the
+        // server's materialized (and therefore older) prompt, and copying that
+        // into the draft would show the author stale text in preview/validation
+        // and make their next keystroke read as a field change rather than the
+        // prompt-only edit it is.
+        setDraft(
+          fieldWriter === "prompt-room" ? { ...saved, prompt: revision.prompt } : saved
+        );
+      }
       // The author's OWN save must never read as a remote revision. `setDraft`
       // and the query-cache write land in one batch, so the divergence hook
       // re-seeds with `base = saved` while this entry still holds the edited

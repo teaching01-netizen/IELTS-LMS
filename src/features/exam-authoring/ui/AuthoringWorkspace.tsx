@@ -78,6 +78,7 @@ import {
   summaryFromRevision,
 } from "./authoringWorkspaceSurfaces";
 import { useAuthoringSaveRouting } from "./useAuthoringSaveRouting";
+import { useModuleQuestionSelection } from "./moduleQuestionMemory";
 import { useCoeditRecoveryAndPresence } from "./useCoeditRecoveryAndPresence";
 import {
   COEDIT_MUTATION_FLUSH_TIMEOUT_MS,
@@ -325,6 +326,19 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     selectedModule?.questions.findIndex(
       (question) => question.examQuestionId === selectedExamQuestionId
     ) ?? -1;
+  // The selected question is kept inside the selected module, and each module
+  // remembers the question it was left on. Without this a section or module
+  // switch could leave the previous module's question selected under the new
+  // module's header, which is how a Math question appeared inside a Reading &
+  // Writing module.
+  const { entryQuestionFor } = useModuleQuestionSelection({
+    module: selectedModule,
+    selectedExamQuestionId,
+    onAdoptQuestion: (examQuestionId) => {
+      setDraft(null);
+      setSelectedExamQuestionId(examQuestionId);
+    },
+  });
   const selectedQuestionIssues = draft
     ? validateSatQuestion(draft.metadata.sectionKey, draft)
     : [];
@@ -1273,9 +1287,12 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       selectionAnchorRef.current = null;
       setSelectedModuleId(moduleId);
       setDraft(null);
-      setSelectedExamQuestionId(module?.questions[0]?.examQuestionId ?? null);
+      // Entering a module returns to the question the author was last on there,
+      // not to its first question and never to the question of the module they
+      // came from.
+      setSelectedExamQuestionId(entryQuestionFor(module ?? null));
     },
-    [flushBeforeNavigation, selectedModuleId, shell]
+    [entryQuestionFor, flushBeforeNavigation, selectedModuleId, shell]
   );
 
   const handleChange = useCallback(

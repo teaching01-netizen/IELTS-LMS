@@ -89,40 +89,32 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
   const selectionMode = selecting || props.selectedQuestionIds.size > 0;
   const moduleId = props.module.id;
 
-  // Per-module memory: last selected question and scroll offset, restored on
-  // return so switching Module 1 -> 2 -> 1 never jumps back to question 1.
-  const memoryRef = useRef<Map<string, { questionId: string; scrollTop: number }>>(new Map());
+  // Per-module SCROLL memory: a module is re-entered at the offset it was left
+  // at. Which question is restored belongs to the workspace — this rail reported
+  // the remembered question itself before, which made two components write the
+  // selection and let any module change that did not travel through the rail
+  // keep the previous module's question.
+  const scrollMemoryRef = useRef<Map<string, number>>(new Map());
   const activeModuleRef = useRef(moduleId);
-  const suppressRestoreRef = useRef(false);
 
   useLayoutEffect(() => {
     const previous = activeModuleRef.current;
-    if (previous !== moduleId) {
-      const list = listRef.current;
-      if (list) memoryRef.current.set(previous, { questionId: selectedId ?? "", scrollTop: list.scrollTop });
-      const remembered = memoryRef.current.get(moduleId);
-      activeModuleRef.current = moduleId;
-      if (remembered) {
-        if (remembered.questionId && remembered.questionId !== selectedId) {
-          suppressRestoreRef.current = true;
-          props.onSelectQuestion(remembered.questionId);
-        }
-        window.requestAnimationFrame(() => {
-          const target = listRef.current;
-          if (target && Math.abs(target.scrollTop - remembered.scrollTop) > 1) {
-            target.scrollTop = remembered.scrollTop;
-          }
-        });
+    if (previous === moduleId) return;
+    const list = listRef.current;
+    if (list) scrollMemoryRef.current.set(previous, list.scrollTop);
+    activeModuleRef.current = moduleId;
+    const remembered = scrollMemoryRef.current.get(moduleId);
+    if (remembered === undefined) return;
+    window.requestAnimationFrame(() => {
+      const target = listRef.current;
+      if (target && Math.abs(target.scrollTop - remembered) > 1) {
+        target.scrollTop = remembered;
       }
-    }
-  }, [moduleId, props, selectedId]);
+    });
+  }, [moduleId]);
 
   useEffect(() => {
     if (!selectedId) return;
-    if (suppressRestoreRef.current) {
-      suppressRestoreRef.current = false;
-      return;
-    }
     const row = listRef.current?.querySelector<HTMLElement>(
       '[data-question-list-row="' + CSS.escape(selectedId) + '"]',
     );

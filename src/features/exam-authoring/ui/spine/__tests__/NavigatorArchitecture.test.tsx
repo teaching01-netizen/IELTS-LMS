@@ -134,17 +134,19 @@ describe("Navigator architecture", () => {
     expect(screen.getByRole("tab", { name: /Module 1, 1 of 3 questions ready/i })).toBeInTheDocument();
   });
 
-  it("restores the remembered question when returning to a module", () => {
+  it("never writes the selection itself when the module changes", () => {
+    // Remembering which question a module was left on is navigation state, and
+    // the workspace owns it: the rail reporting it here made two components
+    // write the same state, so a module switch that did not travel through the
+    // rail (a section tab, a deep link) could leave the previous module's
+    // question open. The rail renders `selectedQuestionId` and restores scroll.
     const onSelectQuestion = vi.fn();
     const { rerender } = render(rail({ onSelectQuestion, selectedQuestionId: "q-1" }));
-    // User selects question 2 in Module 1, then switches to Module 2
     rerender(rail({ onSelectQuestion, selectedQuestionId: "q-2", module: rwModules[0]! }));
     rerender(rail({ onSelectQuestion, selectedQuestionId: "q-2", module: rwModules[1]! }));
     rerender(rail({ onSelectQuestion, selectedQuestionId: "q-3", module: rwModules[1]! }));
-    // Returning to Module 1 should restore question 2, not question 1
     rerender(rail({ onSelectQuestion, selectedQuestionId: "q-3", module: rwModules[0]! }));
-    const calls = onSelectQuestion.mock.calls.map((call) => call[0]);
-    expect(calls).toContain("q-2");
+    expect(onSelectQuestion).not.toHaveBeenCalled();
   });
 
   it("keeps module controls outside the scrolling question list", () => {
