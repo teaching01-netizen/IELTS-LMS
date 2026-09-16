@@ -906,18 +906,23 @@ func enforceExportRateLimit(app *App, w http.ResponseWriter, r *http.Request) bo
 		local := app.Limiter.Allow(httpx.RateLimitConfig{
 			MaxRequests: app.Config.RateLimitExportPerUser,
 			Window:      time.Duration(app.Config.RateLimitExportPerUserWindowSecs) * time.Second,
+			Tier:        "results-export",
 		}, key)
 		if !local.Allowed {
-			w.Header().Set("Retry-After", retryAfterSeconds(local.RetryAfter))
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeRateLimitExceeded, "Too many export attempts."))
+			httpx.WriteRateLimitExceeded(w, r, "results-export", "user", local.RetryAfter)
 			return false
 		}
 	}
 	if app.ExportLimiter != nil && !app.Config.RateLimitLocalOnly() {
 		allowed, retryAfter, err := app.ExportLimiter.Check(r.Context(), actor.UserID)
-		if err == nil && !allowed {
-			w.Header().Set("Retry-After", retryAfterSeconds(retryAfter))
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeRateLimitExceeded, "Too many export attempts."))
+		if err != nil {
+			telemetry.IncCounter(
+				telemetry.MRatelimitDBErrorTotal,
+				"tier", "results-export",
+				"key_class", "user",
+			)
+		} else if !allowed {
+			httpx.WriteRateLimitExceeded(w, r, "results-export", "user", retryAfter)
 			return false
 		}
 	}

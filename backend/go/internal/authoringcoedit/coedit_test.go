@@ -158,6 +158,24 @@ func TestParseDocumentName(t *testing.T) {
 	}
 }
 
+func TestSanitizeDocumentNamesAcceptsPromptAndWorkspaceRooms(t *testing.T) {
+	prompt, err := NewDocumentName("11111111-2222-3333-4444-555555555555")
+	if err != nil {
+		t.Fatalf("prompt name: %v", err)
+	}
+	workspace, err := NewWorkspaceDocumentName("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	if err != nil {
+		t.Fatalf("workspace name: %v", err)
+	}
+	got, err := SanitizeDocumentNames([]string{string(prompt), string(workspace), string(prompt)})
+	if err != nil {
+		t.Fatalf("sanitize: %v", err)
+	}
+	if len(got) != 2 || got[0] != string(prompt) || got[1] != string(workspace) {
+		t.Fatalf("sanitized names = %#v", got)
+	}
+}
+
 func TestLifecycleTransitions(t *testing.T) {
 	cases := []struct {
 		from, to LifecycleState

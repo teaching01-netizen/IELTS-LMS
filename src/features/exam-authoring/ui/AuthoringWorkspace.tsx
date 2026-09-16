@@ -1,22 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import {
-  AlertCircle,
-  ListChecks,
-  PencilLine,
-} from "lucide-react";
 import type {
   AssessmentAuthoringShell,
   AssessmentQuestionDetail,
-  AssessmentQuestionSummary,
   AssessmentValidationIssue,
   BatchQuestionDraft,
   BulkQuestionAction,
   QuestionRevision,
   SatWorkbookCommitResult,
   SatWorkbookUndoState,
-  StructuredContent,
 } from "../contracts/assessment";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
 import {
@@ -35,12 +28,7 @@ import {
 } from "../api/assessmentQueries";
 import { isBackendNotFound } from "../infrastructure/examAuthoringBackendGateway";
 import { useQuestionAutosave } from "../hooks/useQuestionAutosave";
-import {
-  coeditDisplayStatusFor,
-  coeditSaveStatusFor,
-  combineSaveStatus,
-  type CoeditSaveDisplayStatus,
-} from "./spine/coeditSaveTruth";
+import { combineSaveStatus } from "./spine/coeditSaveTruth";
 import {
   authorForActor,
   classifyQuestionFields,
@@ -73,11 +61,6 @@ import {
   STRUCTURAL_COPY,
   questionLabel,
 } from "./collaboration/collaborationCopy";
-import {
-  hasStructuredContent,
-  plainTextFromContent,
-  supportsFastPlainEditing,
-} from "../editor/richContent";
 import { validateSatQuestion } from "../providers/sat/satProvider";
 import { QuestionImportSheet } from "../import/QuestionImportSheet";
 import { SatWorkbookImportSheet } from "../import/SatWorkbookImportSheet";
@@ -87,6 +70,28 @@ import { WorkbookImportUndoBanner } from "./WorkbookImportUndoBanner";
 import { useOptionalAuthSession } from "../../auth/api/authSession";
 import { buildStaffDraftKey } from "../../../utils/staffDraftKey";
 import { AuthoringConfirmDialog, restoreAuthoringFocus } from "./authoringPrimitives";
+import {
+  EditorSkeleton,
+  EmptyEditor,
+  IssuesPane,
+  QuestionLoadError,
+  summaryFromRevision,
+} from "./authoringWorkspaceSurfaces";
+import { useAuthoringSaveRouting } from "./useAuthoringSaveRouting";
+import { useCoeditRecoveryAndPresence } from "./useCoeditRecoveryAndPresence";
+import {
+  COEDIT_MUTATION_FLUSH_TIMEOUT_MS,
+  COEDIT_ROUTE_FLUSH_TIMEOUT_MS,
+  coeditRoomBlockMessage,
+  coeditRoomShouldWarnBeforeUnload,
+} from "./collaboration/coeditNavigationGate";
+import { examKeys } from "../api/examQueries";
+import { useWorkspaceProjectionWrites } from "./useWorkspaceProjectionWrites";
+import {
+  isQuestionWorkspaceScalar,
+  normalizeQuestionRevision,
+  questionWorkspaceScalar,
+} from "./authoringWorkspaceModel";
 import {
   SatAuthoringErrorSurface,
   SatAuthoringLoadingSurface,
@@ -105,7 +110,6 @@ import {
   isPromptOnlyChange,
   colorForActor,
   resolveCoeditEnabled,
-  savePromptFreeFields,
   usePromptCoediting,
   useSatAuthoringCollaboration,
   type CoeditClientCapability,
@@ -140,236 +144,6 @@ export interface AuthoringWorkspaceProps {
 }
 
 type WorkspaceMode = "build" | "overview" | "issues";
-
-type QuestionWorkspaceScalar = {
-  questionType: QuestionRevision["questionType"];
-  answer: QuestionRevision["answer"] | { kind: "single_choice"; options: Array<{ id: string }>; correctOptionId: string | null };
-  metadata: QuestionRevision["metadata"];
-  accessibility: QuestionRevision["accessibility"];
-  isPretest?: boolean;
-};
-
-function questionWorkspaceScalar(question: QuestionRevision, isPretest?: boolean): QuestionWorkspaceScalar {
-  const answer = question.answer.kind === "single_choice"
-    ? {
-        kind: "single_choice" as const,
-        options: question.answer.options.map(({ id }) => ({ id })),
-        correctOptionId: question.answer.correctOptionId,
-      }
-    : question.answer;
-  return {
-    questionType: question.questionType,
-    answer,
-    metadata: question.metadata,
-    accessibility: question.accessibility,
-    ...(isPretest === undefined ? {} : { isPretest }),
-  };
-}
-
-function emptyWorkspaceContent(): QuestionRevision["prompt"] {
-  return {
-    version: 2,
-    nodes: [],
-    document: { type: "doc", content: [{ type: "paragraph" }] },
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeStructuredContent(value: unknown): StructuredContent {
-  if (!isRecord(value)) return emptyWorkspaceContent();
-  if (value["version"] === 2 && isRecord(value["document"]) && value["document"]["type"] === "doc") {
-    return {
-      version: 2,
-      nodes: Array.isArray(value["nodes"]) ? value["nodes"] as StructuredContent["nodes"] : [],
-      document: value["document"] as unknown as StructuredContent["document"],
-    };
-  }
-  if (value["version"] === 1 && Array.isArray(value["nodes"])) {
-    return value as unknown as StructuredContent;
-  }
-  return emptyWorkspaceContent();
-}
-
-/** API/database rows can contain pre-v2 or partially shaped rich fields. */
-function normalizeQuestionRevision(question: QuestionRevision): QuestionRevision {
-  const raw = question as unknown as Record<string, unknown>;
-  const rawMetadata = isRecord(raw["metadata"]) ? raw["metadata"] : {};
-  const rawAccessibility = isRecord(raw["accessibility"]) ? raw["accessibility"] : {};
-  const rawAnswer = isRecord(raw["answer"]) ? raw["answer"] : {};
-  const answer = rawAnswer["kind"] === "student_produced_response"
-    ? {
-        kind: "student_produced_response" as const,
-        acceptedResponses: Array.isArray(rawAnswer["acceptedResponses"])
-          ? rawAnswer["acceptedResponses"].filter((value): value is string => typeof value === "string")
-          : [],
-        normalizeFraction: rawAnswer["normalizeFraction"] !== false,
-        normalizeDecimal: rawAnswer["normalizeDecimal"] !== false,
-        numericTolerance: typeof rawAnswer["numericTolerance"] === "string" ? rawAnswer["numericTolerance"] : null,
-      }
-    : {
-        kind: "single_choice" as const,
-        options: (Array.isArray(rawAnswer["options"]) ? rawAnswer["options"] : []).map((option, index) => {
-          const rawOption = isRecord(option) ? option : {};
-          return {
-            id: typeof rawOption["id"] === "string" && rawOption["id"].trim()
-              ? rawOption["id"]
-              : String.fromCharCode(65 + index),
-            content: normalizeStructuredContent(rawOption["content"]),
-          };
-        }),
-        correctOptionId: typeof rawAnswer["correctOptionId"] === "string" ? rawAnswer["correctOptionId"] : null,
-      };
-  return {
-    ...question,
-    questionType: question.questionType === "student_produced_response" || question.questionType === "single_choice"
-      ? question.questionType
-      : answer.kind,
-    stimulus: normalizeStructuredContent(raw["stimulus"]),
-    prompt: normalizeStructuredContent(raw["prompt"]),
-    rationale: normalizeStructuredContent(raw["rationale"]),
-    answer,
-    metadata: {
-      sectionKey: typeof rawMetadata["sectionKey"] === "string" ? rawMetadata["sectionKey"] : "reading-writing",
-      domain: typeof rawMetadata["domain"] === "string" ? rawMetadata["domain"] : null,
-      skill: typeof rawMetadata["skill"] === "string" ? rawMetadata["skill"] : null,
-      difficulty: rawMetadata["difficulty"] === "easy" || rawMetadata["difficulty"] === "hard" ? rawMetadata["difficulty"] : "medium",
-      tags: Array.isArray(rawMetadata["tags"])
-        ? rawMetadata["tags"].filter((value): value is string => typeof value === "string")
-        : [],
-    },
-    accessibility: {
-      longDescription: typeof rawAccessibility["longDescription"] === "string" ? rawAccessibility["longDescription"] : null,
-    },
-  };
-}
-
-function isQuestionWorkspaceScalar(value: unknown): value is QuestionWorkspaceScalar {
-  if (value === null || typeof value !== "object") return false;
-  const candidate = value as Record<string, unknown>;
-  return (
-    (candidate["questionType"] === "single_choice" || candidate["questionType"] === "student_produced_response") &&
-    candidate["answer"] !== null &&
-    typeof candidate["answer"] === "object" &&
-    candidate["metadata"] !== null &&
-    typeof candidate["metadata"] === "object" &&
-    candidate["accessibility"] !== null &&
-    typeof candidate["accessibility"] === "object" &&
-    (candidate["isPretest"] === undefined || typeof candidate["isPretest"] === "boolean")
-  );
-}
-
-type QuestionWorkspaceRich = {
-  prompt?: StructuredContent;
-  stimulus?: StructuredContent;
-  rationale?: StructuredContent;
-  choices: Record<string, StructuredContent>;
-};
-
-function isWorkspaceRichContent(value: unknown): value is StructuredContent {
-  if (value === null || typeof value !== "object") return false;
-  const candidate = value as Record<string, unknown>;
-  return (
-    candidate["version"] === 2 &&
-    candidate["nodes"] !== null &&
-    Array.isArray(candidate["nodes"]) &&
-    candidate["document"] !== null &&
-    typeof candidate["document"] === "object"
-  );
-}
-
-function questionWorkspaceRich(
-  values: Record<string, unknown>,
-  questionPath: string,
-): QuestionWorkspaceRich | null {
-  const prefix = `rich:${questionPath}/`;
-  const result: QuestionWorkspaceRich = { choices: {} };
-  let found = false;
-  const prompt = values[`${prefix}prompt`];
-  if (isWorkspaceRichContent(prompt)) {
-    result.prompt = prompt;
-    found = true;
-  }
-  const stimulus = values[`${prefix}stimulus`];
-  if (isWorkspaceRichContent(stimulus)) {
-    result.stimulus = stimulus;
-    found = true;
-  }
-  const rationale = values[`${prefix}rationale`];
-  if (isWorkspaceRichContent(rationale)) {
-    result.rationale = rationale;
-    found = true;
-  }
-  for (const [path, value] of Object.entries(values)) {
-    if (!path.startsWith(`${prefix}choice/`)) continue;
-    const optionId = path.slice(`${prefix}choice/`.length);
-    if (!optionId || !isWorkspaceRichContent(value)) continue;
-    result.choices[optionId] = value;
-    found = true;
-  }
-  return found ? result : null;
-}
-
-function applyQuestionWorkspaceRich(
-  question: QuestionRevision,
-  rich: QuestionWorkspaceRich,
-): QuestionRevision {
-  const next: QuestionRevision = {
-    ...question,
-    ...(rich.prompt ? { prompt: rich.prompt } : {}),
-    ...(rich.stimulus ? { stimulus: rich.stimulus } : {}),
-    ...(rich.rationale ? { rationale: rich.rationale } : {}),
-  };
-  if (next.answer.kind !== "single_choice") return next;
-  return {
-    ...next,
-    answer: {
-      ...next.answer,
-      options: next.answer.options.map((option) =>
-        (() => {
-          const content = rich.choices[option.id];
-          return content ? { ...option, content } : option;
-        })(),
-      ),
-    },
-  };
-}
-
-function applyQuestionWorkspaceScalar(
-  question: QuestionRevision,
-  scalar: QuestionWorkspaceScalar,
-): QuestionRevision {
-  if (scalar.answer.kind === "single_choice") {
-    const currentOptions = question.answer.kind === "single_choice" ? question.answer.options : [];
-    return {
-      ...question,
-      questionType: scalar.questionType,
-      answer: {
-        kind: "single_choice",
-        options: scalar.answer.options.map(({ id }) => ({
-          id,
-          content: currentOptions.find((option) => option.id === id)?.content ?? {
-            version: 2,
-            nodes: [],
-            document: { type: "doc", content: [{ type: "paragraph" }] },
-          },
-        })),
-        correctOptionId: scalar.answer.correctOptionId,
-      },
-      metadata: scalar.metadata,
-      accessibility: scalar.accessibility,
-    };
-  }
-  return {
-    ...question,
-    questionType: scalar.questionType,
-    answer: scalar.answer,
-    metadata: scalar.metadata,
-    accessibility: scalar.accessibility,
-  };
-}
 
 export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProps) {
   const queryClient = useQueryClient();
@@ -435,12 +209,11 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const draftProtectedRef = useRef(false);
   // Prompt co-editing (2026-09-13 design). `saveDraft` and `handleChange` are
   // declared BEFORE the co-edit hook, so both read through refs that the
-  // effects below keep current: whether the collaborative document owns the
-  // prompt right now, and the last server-acknowledged revision the prompt-free
-  // field diff is measured against.
-  const coeditOwnsPromptRef = useRef(false);
+  // effects below keep current: which writer owns the open question's fields
+  // (resolved once, in the effect, by resolveFieldWriter), and the last
+  // server-acknowledged revision the prompt-free field diff is measured
+  // against.
   const promptFreeBaselineRef = useRef<QuestionRevision | null>(null);
-  const localWorkspaceScalarRef = useRef<{ questionId: string; json: string } | null>(null);
   const conflictOpenerRef = useRef<HTMLElement | null>(null);
   const overlayStack = useOverlayStack();
   const [previewOpen, setPreviewOpen] = useOverlayToggle(overlayStack,"preview","sheet");
@@ -459,7 +232,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const [focusField, setFocusField] = useState<string | null>(null);
   const [inspectorOpen,setInspectorOpen]=useState(false);
   const [inspectorModal,setInspectorModal]=useState(false);
-  const [coeditSaveClock, setCoeditSaveClock] = useState(() => Date.now());
   const inspectorOpener=useRef<HTMLElement|null>(null);
   const {requestOpen:requestOverlay,close:closeOverlay}=overlayStack;
   const openInspector=useCallback(()=>{
@@ -624,6 +396,55 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     }
   }, [queryClient, selectedModule, selectedModuleIndex]);
 
+  // Prompt co-editing (2026-09-13 design). The workspace is the composition
+  // owner: it mounts exactly one provider for the selected question and
+  // threads the binding into the spine as a PROP. Nothing below this level
+  // imports Yjs or Hocuspocus.
+  //
+  // `server` is optimistic on purpose: we cannot know the server posture until
+  // we ask, and a server that cannot offer co-editing answers with a typed
+  // unavailable error that the hook degrades into "disabled" without showing
+  // the author anything. Every OTHER gate is checked before we ask at all.
+  const coeditCapability = useMemo<CoeditClientCapability>(
+    () => ({
+      server: true,
+      // Prompt co-editing is a product default now; no Vite flag is required
+      // to expose the collaborative header/editor.
+      frontendEnabled: true,
+      // A selected question in the shell IS in the current editable draft
+      // (the shell only ever exposes the draft); a published/replaced draft
+      // de-selects it and the server refuses the token anyway.
+      // The route-level exam workspace owns the selected question whenever the
+      // SAT workspace provider is mounted. Keeping this false prevents a
+      // second question-scoped Hocuspocus room from opening beside it.
+      activeEditableDraft: Boolean(selectedExamQuestionId) && workspaceCollaboration === null,
+      writeCapableRole: sessionRole === "admin" || sessionRole === "builder",
+    }),
+    [
+      selectedExamQuestionId,
+      sessionRole,
+      workspaceCollaboration,
+    ]
+  );
+  const coeditEnabled = resolveCoeditEnabled(coeditCapability);
+  const coedit = usePromptCoediting({
+    examQuestionId: selectedExamQuestionId,
+    capability: coeditCapability,
+  });
+  // A room really exists only once its provider does.
+  const workspaceUiActive = workspaceCollaboration !== null;
+  const coeditRoomOpen = workspaceUiActive
+    ? Boolean(workspaceCollaboration.workspaceSnapshot.ready)
+    : coeditEnabled && coedit.session !== null;
+  // This flag owns the co-edit-only chrome, including the short preparation
+  // window before the provider has produced a session.
+  const coeditUiActive = workspaceUiActive || (coeditEnabled && coedit.status !== "disabled");
+  // The exam-level room is the single realtime transport for SAT authoring.
+  // Starting the legacy event socket beside it creates a second connection
+  // that is intentionally refused by the default server posture and adds
+  // noisy console failures. Non-workspace authoring keeps the old path.
+  const coeditSession = coedit.session;
+
   const updateSummaryCache = useCallback(
     (examQuestionId: string, saved: QuestionRevision) => {
       queryClient.setQueryData<AssessmentAuthoringShell>(assessmentKeys.shell(examId), (current) =>
@@ -652,99 +473,24 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     [examId, queryClient]
   );
 
-  const saveDraft = useCallback(
-    async (revision: QuestionRevision) => {
-      const examQuestionId = selectedExamQuestionId;
-      if (!examQuestionId) throw new Error("Cannot save a question that is not selected.");
-      // Race-recovery freeze (plan §F). Both cases surface as a typed failure
-      // instead of an HTTP write: the published draft is not a valid target and
-      // a remotely deleted question can only answer 404. The author's typed
-      // content is untouched either way — only the WRITE is blocked.
-      if (mutationFrozenRef.current) {
-        throw new Error(
-          "This draft was published. Open the new draft to keep editing."
-        );
-      }
-      if (deletedRemotelyRef.current) {
-        throw new Error(
-          "This question was deleted elsewhere. Copy your work before leaving."
-        );
-      }
-      // Prompt co-editing owns the prompt: save everything ELSE through the
-      // partial endpoint. The legacy full save carries a prompt, so it would be
-      // refused with a typed COEDIT_ACTIVE conflict the moment a co-edit row is
-      // active — turning every non-prompt edit into a visible failure. The
-      // prompt itself is persisted only by the collaborative store path.
-      const saved = coeditOwnsPromptRef.current
-        ? await savePromptFreeFields({
-            examQuestionId,
-            revision,
-            base: promptFreeBaselineRef.current,
-            deps: {
-              saveFields: (revisionId, request) =>
-                assessmentAuthoringApi.saveQuestionRevisionFields(revisionId, request),
-              loadLatest: async (id) => (await assessmentAuthoringApi.getQuestion(id)).question,
-            },
-          })
-        : await assessmentAuthoringApi.saveQuestionRevision(revision.id, {
-            revision: revision.revision,
-            questionType: revision.questionType,
-            stimulus: revision.stimulus,
-            prompt: revision.prompt,
-            answer: revision.answer,
-            rationale: revision.rationale,
-            metadata: revision.metadata,
-            accessibility: revision.accessibility,
-          });
-      if (!saved) {
-        // Nothing outside the prompt changed since the last acknowledgement.
-        // No write happened, so nothing is advanced and nothing is claimed:
-        // the collaborative document already owns the only changed field.
-        return undefined;
-      }
-      promptFreeBaselineRef.current = saved;
-      // The baseline advances to the server revision, but the PROMPT keeps the
-      // projection the room owns: a partial field write answers with the
-      // server's materialized (and therefore older) prompt, and copying that
-      // into the draft would show the author stale text in preview/validation
-      // and make their next keystroke read as a field change rather than the
-      // prompt-only edit it is.
-      setDraft(
-        coeditOwnsPromptRef.current ? { ...saved, prompt: revision.prompt } : saved
-      );
-      // The author's OWN save must never read as a remote revision. `setDraft`
-      // and the query-cache write land in one batch, so the divergence hook
-      // re-seeds with `base = saved` while this entry still holds the edited
-      // draft — and without this ack the base never advances, making the re-seed
-      // indistinguishable from a collaborator's newer revision. The visible
-      // cost of that: the save area claims "a newer version is available" for
-      // the author's own work, and the pause that exists to protect a stale
-      // draft swallows their next edit.
-      divergenceDispatchRef.current({
-        type: "SERVER_ACK",
-        examQuestionId,
-        saved,
-      });
-      if (recoveredQuestionDraftKeyRef.current === questionDraftKey) {
-        recoveredQuestionDraftKeyRef.current = null;
-      }
-      updateSummaryCache(examQuestionId, saved);
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.shell(examId),
-        refetchType: "none",
-      });
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.readinessRoot(examId),
-        refetchType: "none",
-      });
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.release(examId),
-        refetchType: "none",
-      });
-      return saved;
-    },
-    [examId, queryClient, questionDraftKey, selectedExamQuestionId, updateSummaryCache]
-  );
+  // Single ownership + one save path (resolveFieldWriter): the routing policy
+  // and the write it permits are resolved together, in one place, from the two
+  // room facts — not re-decided at each call site.
+  const { fieldWriter, saveDraft } = useAuthoringSaveRouting({
+    examId,
+    queryClient,
+    selectedExamQuestionId,
+    questionDraftKey,
+    workspaceRoomActive: workspaceUiActive,
+    promptRoomActive: coeditEnabled && coedit.session !== null,
+    promptFreeBaselineRef,
+    mutationFrozenRef,
+    deletedRemotelyRef,
+    divergenceDispatchRef,
+    recoveredQuestionDraftKeyRef,
+    setDraft,
+    updateSummaryCache,
+  });
 
   const autosave = useQuestionAutosave({
     save: saveDraft,
@@ -795,60 +541,16 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     () => resolveEffectiveCapabilities(serverCapabilities, realtimeFlags),
     [serverCapabilities, realtimeFlags]
   );
-  const isQuestionDirtyForRealtime = useCallback(
-    (examQuestionId: string) =>
-      examQuestionId === selectedExamQuestionId && autosave.hasPendingChanges,
-    [selectedExamQuestionId, autosave.hasPendingChanges]
-  );
-  // Prompt co-editing (2026-09-13 design). The workspace is the composition
-  // owner: it mounts exactly one provider for the selected question and
-  // threads the binding into the spine as a PROP. Nothing below this level
-  // imports Yjs or Hocuspocus.
-  //
-  // `server` is optimistic on purpose: we cannot know the server posture until
-  // we ask, and a server that cannot offer co-editing answers with a typed
-  // unavailable error that the hook degrades into "disabled" without showing
-  // the author anything. Every OTHER gate is checked before we ask at all.
-  const coeditCapability = useMemo<CoeditClientCapability>(
-    () => ({
-      server: true,
-      // Prompt co-editing is a product default now; no Vite flag is required
-      // to expose the collaborative header/editor.
-      frontendEnabled: true,
-      // A selected question in the shell IS in the current editable draft
-      // (the shell only ever exposes the draft); a published/replaced draft
-      // de-selects it and the server refuses the token anyway.
-      // The route-level exam workspace owns the selected question whenever the
-      // SAT workspace provider is mounted. Keeping this false prevents a
-      // second question-scoped Hocuspocus room from opening beside it.
-      activeEditableDraft: Boolean(selectedExamQuestionId) && workspaceCollaboration === null,
-      writeCapableRole: sessionRole === "admin" || sessionRole === "builder",
-    }),
-    [
-      selectedExamQuestionId,
-      sessionRole,
-      workspaceCollaboration,
-    ]
-  );
-  const coeditEnabled = resolveCoeditEnabled(coeditCapability);
-  const coedit = usePromptCoediting({
-    examQuestionId: selectedExamQuestionId,
-    capability: coeditCapability,
-  });
-  // A room really exists only once its provider does.
-  const workspaceUiActive = workspaceCollaboration !== null;
-  const coeditRoomOpen = workspaceUiActive
-    ? Boolean(workspaceCollaboration.workspaceSnapshot.ready)
-    : coeditEnabled && coedit.session !== null;
-  // This flag owns the co-edit-only chrome, including the short preparation
-  // window before the provider has produced a session.
-  const coeditUiActive = workspaceUiActive || (coeditEnabled && coedit.status !== "disabled");
   // The exam-level room is the single realtime transport for SAT authoring.
   // Starting the legacy event socket beside it creates a second connection
   // that is intentionally refused by the default server posture and adds
   // noisy console failures. Non-workspace authoring keeps the old path.
   const realtimeDeliveryEnabled = !workspaceUiActive && effectiveCapabilities.delivery;
-  const coeditSession = coedit.session;
+  const isQuestionDirtyForRealtime = useCallback(
+    (examQuestionId: string) =>
+      examQuestionId === selectedExamQuestionId && autosave.hasPendingChanges,
+    [selectedExamQuestionId, autosave.hasPendingChanges]
+  );
   // While the token round-trip and initial sync are in flight the prompt must
   // NOT be an editable legacy editor: the room is about to own it, and text
   // typed into an editor that is destroyed a moment later never reaches the
@@ -892,42 +594,10 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     [workspaceCollaboration, workspaceQuestionPath],
   );
 
-  // Read by `saveDraft`/`handleChange`, which are declared above this point.
-  useEffect(() => {
-    coeditOwnsPromptRef.current = workspaceUiActive || coeditRoomOpen;
-  }, [coeditRoomOpen, workspaceUiActive]);
-
   // The save truth of the prompt comes from the co-edit acknowledgement, not
   // from the legacy autosave counter, which knows nothing about the CRDT. Both
   // are combined below by taking the LEAST advanced of the two, so neither can
   // claim "Saved" for work the other is still holding.
-  const coeditSaveStatus = !workspaceUiActive && coeditRoomOpen
-    ? coeditSaveStatusFor(coedit.session?.saveState.name ?? "idle")
-    : null;
-
-  // A room that cannot continue must say so and offer the recovery the design
-  // requires: copy/export the prompt before a replacement draft is opened.
-  const coeditRecovery = workspaceCollaboration?.recovery ?? coeditSession?.recovery ?? null;
-
-  const handleRealtimeLifecycle = useCallback(
-    (signal: "draft-replaced" | "published" | "exam-changed") => {
-      // Re-fetch the shell so the workspace re-resolves the current draft; the
-      // draft binding change re-mounts the socket against the new draft.
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-      if (signal === "published") {
-        setPublishedFrozen(true);
-      }
-      if (signal === "draft-replaced") {
-        // `draft.replaced` is the durable signal for a replacement (design:
-        // "Draft replacement and workbook replacement/undo"). Routing it into
-        // the room makes the export offer appear even if the close frame was
-        // lost, which is the case the socket alone cannot cover.
-        if (workspaceCollaboration) workspaceCollaboration.reportReplaced();
-        else coedit.reportReplaced();
-      }
-    },
-    [coedit, examId, queryClient, workspaceCollaboration]
-  );
 
   // Phase 05 divergence: driven by the Phase 04 reconciler seams, so the
   // decision of WHAT happened stays in one place and this only records state.
@@ -935,57 +605,30 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const [conflictOpen, setConflictOpen] = useState(false);
   const [noticeDismissed, setNoticeDismissed] = useState(false);
 
-  const coeditPendingSince = workspaceCollaboration?.pendingSince ?? coeditSession?.pendingSince ?? null;
-  useEffect(() => {
-    if (coeditPendingSince === null) return undefined;
-    setCoeditSaveClock(Date.now());
-    const timer = globalThis.setInterval(() => setCoeditSaveClock(Date.now()), 250);
-    return () => globalThis.clearInterval(timer);
-  }, [coeditPendingSince]);
-
-  const coeditDisplayStatus: CoeditSaveDisplayStatus | null = workspaceCollaboration
-    ? workspaceCollaboration.status === "error" &&
-      workspaceCollaboration.lifecyclePhase === "active" &&
-      !workspaceCollaboration.workspaceSnapshot.readOnly
-      ? "error"
-      : workspaceCollaboration.status === "preparing"
-        ? "saving"
-        : coeditDisplayStatusFor({
-            saveState: workspaceCollaboration.workspaceSnapshot.saveState,
-            connectionPhase: workspaceCollaboration.connectionPhase,
-            hasEstablishedConnection: workspaceCollaboration.workspaceSnapshot.hasEstablishedConnection,
-            lifecyclePhase: workspaceCollaboration.lifecyclePhase,
-            readOnly: workspaceCollaboration.workspaceSnapshot.readOnly,
-            pendingSince: workspaceCollaboration.pendingSince ?? null,
-            now: coeditSaveClock,
-          })
-    : coeditUiActive
-      ? coedit.error !== null &&
-        (!coeditSession ||
-          (coeditSession.lifecyclePhase === "active" && !coeditSession.readOnly))
-        ? "error"
-        : coeditDisplayStatusFor({
-            saveState: coeditSession?.saveState ?? null,
-            connectionPhase: coeditSession?.connectionPhase ?? "connecting",
-            hasEstablishedConnection: coeditSession?.hasEstablishedConnection ?? false,
-            lifecyclePhase: coeditSession?.lifecyclePhase ?? (publishedFrozen ? "frozen" : "active"),
-            readOnly: Boolean(coeditSession?.readOnly ?? publishedFrozen),
-            pendingSince: coeditPendingSince,
-            autosaveStatus: autosave.status,
-            now: coeditSaveClock,
-          })
-      : null;
-  const collaborationReadOnly = workspaceCollaboration
-    ? workspaceCollaboration.workspaceSnapshot.readOnly || workspaceCollaboration.lifecyclePhase !== "active"
-    : Boolean(coeditSession?.readOnly || publishedFrozen);
-  const collaborationPublished = Boolean(
-    workspaceCollaboration?.workspaceSnapshot.published || coeditSession?.recovery.published,
-  );
-  const collaborationLifecyclePhase =
-    workspaceCollaboration?.lifecyclePhase ?? coeditSession?.lifecyclePhase ?? null;
-  const collaborationIsReadOnly =
-    workspaceCollaboration?.workspaceSnapshot.readOnly ?? coeditSession?.readOnly ?? null;
-  const hasCollaborationSession = Boolean(workspaceCollaboration || coeditSession);
+  const {
+    handleRealtimeLifecycle,
+    coeditSaveStatus,
+    coeditRecovery,
+    coeditRecoverySurface,
+    coeditDisplayStatus,
+    collaborationReadOnly,
+    collaborationPublished,
+    collaborationLifecyclePhase,
+    collaborationIsReadOnly,
+    hasCollaborationSession,
+  } = useCoeditRecoveryAndPresence({
+    examId,
+    queryClient,
+    workspaceCollaboration,
+    coedit,
+    workspaceUiActive,
+    coeditRoomOpen,
+    coeditUiActive,
+    selectedExamQuestionId,
+    autosaveStatus: autosave.status,
+    publishedFrozen,
+    setPublishedFrozen,
+  });
 
   useEffect(() => {
     if (collaborationPublished) {
@@ -1059,103 +702,24 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     () => (questionQuery.data?.question ? normalizeQuestionRevision(questionQuery.data.question) : null),
     [questionQuery.data?.question],
   );
-  const sharedQuestionScalar = useMemo(() => {
-    if (!workspaceCollaboration || !workspaceQuestionPath) return null;
-    const value = workspaceCollaboration.workspaceSnapshot.values[`${workspaceQuestionPath}/scalar`];
-    return isQuestionWorkspaceScalar(value) ? value : null;
-  }, [workspaceCollaboration, workspaceQuestionPath]);
-  const sharedQuestionScalarJson = useMemo(
-    () => (sharedQuestionScalar ? JSON.stringify(sharedQuestionScalar) : null),
-    [sharedQuestionScalar],
-  );
-  const sharedQuestionRich = useMemo(
-    () =>
-      workspaceCollaboration && workspaceQuestionPath
-        ? questionWorkspaceRich(
-            workspaceCollaboration.workspaceSnapshot.values,
-            workspaceQuestionPath,
-          )
-        : null,
-    [
-      workspaceCollaboration,
-      workspaceQuestionPath,
-    ],
-  );
-
-  // The HTTP question is only the seed. Once the exam-level room has synced,
-  // scalar settings are projected into the selected question and all rich
-  // fields bind directly to their shared XML fragments.
-  useEffect(() => {
-    if (
-      !workspaceCollaboration ||
-      !workspaceQuestionPath ||
-      !baseQuestion ||
-      !workspaceCollaboration.workspaceSnapshot.ready
-    ) return;
-    workspaceCollaboration.ensureValue(
-      `${workspaceQuestionPath}/scalar`,
-      questionWorkspaceScalar(baseQuestion, questionQuery.data?.isPretest),
-    );
-    workspaceCollaboration.ensureRichField(`${workspaceQuestionPath}/prompt`, baseQuestion.prompt);
-    workspaceCollaboration.ensureRichField(`${workspaceQuestionPath}/stimulus`, baseQuestion.stimulus);
-    workspaceCollaboration.ensureRichField(`${workspaceQuestionPath}/rationale`, baseQuestion.rationale);
-    if (baseQuestion.answer.kind === "single_choice") {
-      for (const option of baseQuestion.answer.options) {
-        workspaceCollaboration.ensureRichField(
-          `${workspaceQuestionPath}/choice/${option.id}`,
-          option.content,
-        );
-      }
-    }
-  }, [
-    baseQuestion,
-    questionQuery.data?.isPretest,
+  // Reading and writing the open question against the exam room: seeding,
+  // remote projection onto the draft, and the local write path. The hook owns
+  // the "who wrote this value" bookkeeping so no call site re-invents it.
+  const {
+    sharedQuestionScalar,
+    publishScalar: publishWorkspaceScalar,
+    handleLocalRichChange,
+  } = useWorkspaceProjectionWrites({
     workspaceCollaboration,
     workspaceQuestionPath,
-    workspaceCollaboration?.workspaceSnapshot.ready,
-  ]);
-
-  useEffect(() => {
-    if (!draft || !sharedQuestionScalar || !sharedQuestionScalarJson) return;
-    const localWrite = localWorkspaceScalarRef.current;
-    const currentScalarJson = JSON.stringify(questionWorkspaceScalar(draft, sharedQuestionScalar.isPretest));
-    if (
-      localWrite?.questionId === selectedExamQuestionId &&
-      localWrite.json === currentScalarJson
-    ) {
-      if (localWrite.json === sharedQuestionScalarJson) localWorkspaceScalarRef.current = null;
-      return;
-    }
-    if (currentScalarJson === sharedQuestionScalarJson) return;
-    setDraft((current) => {
-      if (!current || current.id !== draft.id) return current;
-      if (JSON.stringify(questionWorkspaceScalar(current, sharedQuestionScalar.isPretest)) === sharedQuestionScalarJson) return current;
-      return applyQuestionWorkspaceScalar(current, sharedQuestionScalar);
-    });
-  }, [draft, selectedExamQuestionId, sharedQuestionScalar, sharedQuestionScalarJson]);
-
-  // A supporting-material or rationale editor may be collapsed locally. Keep
-  // the question projection current from the shared XML roots anyway, so
-  // remote edits are visible as soon as the section is expanded and are also
-  // reflected in preview/validation without requiring a local remount.
-  useEffect(() => {
-    if (!draft || !sharedQuestionRich || !workspaceQuestionPath) return;
-    const next = applyQuestionWorkspaceRich(draft, sharedQuestionRich);
-    if (JSON.stringify(next) === JSON.stringify(draft)) return;
-    setDraft((current) => {
-      if (!current || current.id !== draft.id) return current;
-      const projected = applyQuestionWorkspaceRich(current, sharedQuestionRich);
-      return JSON.stringify(projected) === JSON.stringify(current) ? current : projected;
-    });
-  }, [draft, sharedQuestionRich, workspaceQuestionPath]);
-
-  useEffect(() => {
-    if (!workspaceCollaboration) return;
-    workspaceCollaboration.setPresence({
-      surface: "builder",
-      ...(selectedExamQuestionId ? { questionId: selectedExamQuestionId } : {}),
-    });
-  }, [selectedExamQuestionId, workspaceCollaboration?.setPresence]);
+    selectedExamQuestionId,
+    baseQuestionExamQuestionId: questionQuery.data?.examQuestionId ?? null,
+    baseQuestion,
+    isPretest: questionQuery.data?.isPretest,
+    draft,
+    draftRef,
+    setDraft,
+  });
 
   const { divergence, isDirty: isQuestionDiverged, dispatch: dispatchDivergence } =
     useQuestionDivergence(selectedExamQuestionId, {
@@ -1459,9 +1023,13 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
 
   // Recovery affordance for a room that cannot continue: the local prompt is
   // exportable before a replacement draft is opened, and it is never silently
-  // thrown away (design 2026-09-13, "Offline and recovery behavior").
+  // thrown away ("Offline and recovery behavior", docs/sat-authoring-coedit.md).
   const copyCoeditPrompt = useCallback(async () => {
-    const exported = coeditRecovery?.exportPrompt() ?? null;
+    // A preserved pre-compaction copy is the local work at risk when one exists:
+    // it is exported by its own byte-exact payload rather than the prompt-shaped
+    // projection, which belongs to the live room.
+    const staleCaches = coeditRecovery?.exportStaleCache() ?? null;
+    const exported = staleCaches ?? coeditRecovery?.exportPrompt() ?? null;
     if (exported === null) {
       setNavigationError("There is no local prompt copy to export yet.");
       return;
@@ -1472,6 +1040,13 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     } catch {
       setNavigationError("Copy failed — copy the prompt from the editor before leaving.");
     }
+  }, [coeditRecovery]);
+
+  // Discarding a preserved copy is the author's decision, taken from the
+  // recovery surface's confirm step; nothing else in the workspace removes
+  // local work.
+  const discardCoeditLocalCopy = useCallback(() => {
+    void coeditRecovery?.discardStaleCache().catch(() => undefined);
   }, [coeditRecovery]);
 
   const copyDeviceDraft = useCallback(async () => {
@@ -1559,11 +1134,20 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       />
     ) : null;
 
+  // The room and the legacy queue are independent sources of unsaved work: a
+  // room never enqueues a legacy autosave, and the legacy branch never opens
+  // one. Warning from only one of them would let a browser close discard the
+  // other's content, so each contributes its own truth.
+  const roomNeedsUnloadWarning = workspaceCollaboration
+    ? coeditRoomShouldWarnBeforeUnload(workspaceCollaboration.workspaceSnapshot)
+    : false;
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const shouldWarn =
-      autosave.hasPendingChanges &&
-      (autosave.isOffline || ["unsaved", "saving", "error"].includes(autosave.status));
+      roomNeedsUnloadWarning ||
+      (autosave.hasPendingChanges &&
+        (autosave.isOffline || ["unsaved", "saving", "error"].includes(autosave.status)));
     if (!shouldWarn) return;
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
@@ -1571,13 +1155,45 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     };
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [autosave.hasPendingChanges, autosave.isOffline, autosave.status]);
+  }, [autosave.hasPendingChanges, autosave.isOffline, autosave.status, roomNeedsUnloadWarning]);
 
-  const flushBeforeNavigation = useCallback(async () => {
+  /**
+   * The in-page barrier, run before a question/module switch and before every
+   * HTTP structural mutation.
+   *
+   * `mutation` is the default because most callers are about to change the exam
+   * over HTTP (create, duplicate, delete, reorder, bulk, import, validate), and
+   * the room cannot see those writes: running one while the room has not
+   * committed the same exam applies it to a revision the author has already
+   * moved past.
+   *
+   * `selection` is a move INSIDE the room. The previous question's content
+   * stays in the Y.Doc and in its IndexedDB copy whether or not the network has
+   * acknowledged it, so waiting on the service here would only make switching
+   * slower — and would make it impossible offline, which is the state this
+   * layer exists to survive. The room is still consulted for a genuinely
+   * at-risk state, which is why an author offline in a merely-pending room can
+   * keep working but a refused room cannot.
+   */
+  const flushBeforeNavigation = useCallback(async (intent: "selection" | "mutation" = "mutation") => {
     // Shared scalar and rich fields are sent through the exam-level room. Do
     // not gate navigation on the legacy question autosave queue, which should
     // remain empty while this provider owns the workspace.
-    if (workspaceCollaboration) return true;
+    if (workspaceCollaboration) {
+      if (intent === "selection") return true;
+      const result = await workspaceCollaboration.flushAndWaitForSaved(
+        COEDIT_MUTATION_FLUSH_TIMEOUT_MS,
+      );
+      // Read the snapshot AFTER the wait: a refusal, a freeze, or a fresh
+      // acknowledgement all arrive while it is pending.
+      const block = coeditRoomBlockMessage(
+        workspaceCollaboration.workspaceSnapshot,
+        result.outcome,
+      );
+      if (block === null) return true;
+      setNavigationError(block);
+      return false;
+    }
     if (!draft || autosave.status === "saved") return true;
     const result = await autosave.flushNow(draft);
     if (result.ok) return true;
@@ -1596,12 +1212,46 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     return false;
   }, [autosave, draft, workspaceCollaboration]);
 
+  /**
+   * The route barrier, run before leaving the authoring surface.
+   *
+   * The next screen (exam preview, release, exam library) reads the committed
+   * MySQL projection rather than the room, so nothing less than a durable
+   * acknowledgement of THIS tab's state proves it will show the author's work.
+   * A refusal is not navigated past: the author is told what the next screen
+   * would hide and stays with their content. Query invalidation is awaited
+   * before the route changes so the preview cannot mount on a cached exam
+   * detail still inside its five-minute staleTime.
+   */
+  const flushBeforeRouteChange = useCallback(async (): Promise<boolean> => {
+    if (!workspaceCollaboration) return flushBeforeNavigation("mutation");
+    const result = await workspaceCollaboration.flushAndWaitForSaved(
+      COEDIT_ROUTE_FLUSH_TIMEOUT_MS,
+    );
+    const block = coeditRoomBlockMessage(
+      workspaceCollaboration.workspaceSnapshot,
+      result.outcome,
+    );
+    if (block !== null) {
+      setNavigationError(block);
+      return false;
+    }
+    // A refetch failure must not strand the author here: the room is durable,
+    // which is the promise; freshness is best-effort on top of it.
+    await Promise.allSettled([
+      queryClient.invalidateQueries({ queryKey: examKeys.detail(examId) }),
+      queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) }),
+      queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) }),
+    ]);
+    return true;
+  }, [examId, flushBeforeNavigation, queryClient, workspaceCollaboration]);
+
   const selectQuestion = useCallback(
     async (questionId: string, moduleId = selectedModuleId) => {
       if (rowMutationFlight.current) return false;
       if (questionId === selectedExamQuestionId) return true;
       setNavigationError(null);
-      if (!(await flushBeforeNavigation())) return false;
+      if (!(await flushBeforeNavigation("selection"))) return false;
       if (moduleId) setSelectedModuleId(moduleId);
       setDraft(null);
       setSelectedExamQuestionId(questionId);
@@ -1613,7 +1263,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const selectModule = useCallback(
     async (moduleId: string) => {
       if (rowMutationFlight.current || moduleId === selectedModuleId) return;
-      if (!(await flushBeforeNavigation())) return;
+      if (!(await flushBeforeNavigation("selection"))) return;
       const module = shell?.sections
         .flatMap((section) => section.modules)
         .find((item) => item.id === moduleId);
@@ -1632,35 +1282,11 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     (next: QuestionRevision) => {
       setWorkbookUndo(null);
       setDraft(next);
-      if (workspaceCollaboration && selectedExamQuestionId) {
-        const currentShared = workspaceCollaboration.workspaceSnapshot.values[
-          `question/${selectedExamQuestionId}/scalar`
-        ];
-        const currentSharedIsPretest = isQuestionWorkspaceScalar(currentShared)
-          ? currentShared.isPretest
-          : questionQuery.data?.isPretest;
-        const scalar = questionWorkspaceScalar(next, currentSharedIsPretest);
-        const json = JSON.stringify(scalar);
-        const previous = draftRef.current;
-        const previousScalarJson = previous
-          ? JSON.stringify(questionWorkspaceScalar(previous, currentSharedIsPretest))
-          : null;
-        // Rich-editor projections call this same question-level callback for
-        // remote updates. Only a genuine scalar change may write the scalar
-        // root; otherwise a stale rich projection could overwrite a
-        // collaborator's newer answer/metadata settings.
-        const scalarChanged = previousScalarJson === null
-          ? !isQuestionWorkspaceScalar(currentShared)
-          : previousScalarJson !== json;
-        if (scalarChanged) {
-          localWorkspaceScalarRef.current = { questionId: selectedExamQuestionId, json };
-          workspaceCollaboration.setValue(`question/${selectedExamQuestionId}/scalar`, scalar);
-        }
-        // All workspace fields, including scalar settings, are persisted by
-        // the exact Yjs acknowledgement. Never enqueue a whole-question HTTP
-        // autosave alongside the exam-level room.
-        return;
-      }
+      const writer = fieldWriter;
+      // The exam room persists every field of the question it owns, including
+      // the scalar settings, through its own exact Yjs acknowledgement. Never
+      // enqueue a whole-question HTTP autosave beside it.
+      if (writer === "workspace" && publishWorkspaceScalar(next)) return;
       // While co-editing owns the prompt, a prompt-only change stays OUT of the
       // legacy autosave queue: the Y.Doc is the source of truth for the prompt,
       // the service persists it, and scheduling a whole-question save here
@@ -1668,59 +1294,12 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       // The projection the composer emits is still real — it feeds preview and
       // validation — it just does not schedule a save.
       const baseline = promptFreeBaselineRef.current;
-      if (coeditOwnsPromptRef.current && baseline && isPromptOnlyChange(baseline, next)) {
+      if (writer === "prompt-room" && baseline && isPromptOnlyChange(baseline, next)) {
         return;
       }
       autosave.scheduleAutosave(next);
     },
-    [autosave, questionQuery.data?.isPretest, selectedExamQuestionId, workspaceCollaboration]
-  );
-  const handleLocalRichChange = useCallback(
-    (next: QuestionRevision) => {
-      if (!workspaceCollaboration || !selectedExamQuestionId) return;
-      const path = `question/${selectedExamQuestionId}`;
-      // The editor binding already wrote the field that changed. The explicit
-      // projection also covers non-editor rich actions (for example replacing
-      // a supporting-material starter), but only writes fields whose value
-      // actually changed. Rewriting every rich root from a full question
-      // snapshot here could clobber a collaborator's concurrent edit in a
-      // different field with an older parent render.
-      const previous = draftRef.current;
-      if (!previous || JSON.stringify(previous.prompt) !== JSON.stringify(next.prompt)) {
-        workspaceCollaboration.setRichField(`${path}/prompt`, next.prompt);
-      }
-      if (!previous || JSON.stringify(previous.stimulus) !== JSON.stringify(next.stimulus)) {
-        workspaceCollaboration.setRichField(`${path}/stimulus`, next.stimulus);
-      }
-      if (!previous || JSON.stringify(previous.rationale) !== JSON.stringify(next.rationale)) {
-        workspaceCollaboration.setRichField(`${path}/rationale`, next.rationale);
-      }
-      if (next.answer.kind === "single_choice") {
-        const previousChoices = previous?.answer.kind === "single_choice" ? previous.answer.options : [];
-        const nextChoiceIds = new Set(next.answer.options.map((option) => option.id));
-        for (const option of next.answer.options) {
-          const previousOption = previousChoices.find((candidate) => candidate.id === option.id);
-          if (!previousOption || JSON.stringify(previousOption.content) !== JSON.stringify(option.content)) {
-            workspaceCollaboration.setRichField(`${path}/choice/${option.id}`, option.content);
-          }
-        }
-        // Choice fragments are named by stable option id and therefore outlive
-        // a response-type change. Clear fragments that are no longer part of
-        // the answer so switching back from SPR cannot resurrect old text.
-        for (const option of previousChoices) {
-          if (!nextChoiceIds.has(option.id)) {
-            workspaceCollaboration.setRichField(`${path}/choice/${option.id}`, emptyWorkspaceContent());
-          }
-        }
-      } else if (previous?.answer.kind === "single_choice") {
-        for (const option of previous.answer.options) {
-          workspaceCollaboration.setRichField(`${path}/choice/${option.id}`, emptyWorkspaceContent());
-        }
-      }
-      // The workspace provider owns every rich field, not only the prompt.
-      // Its Yjs store acknowledgement drives the save surface.
-    },
-    [selectedExamQuestionId, workspaceCollaboration],
+    [autosave, fieldWriter, publishWorkspaceScalar]
   );
 
   useEffect(() => {
@@ -2458,17 +2037,17 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               previewDisabled={!shell}
               onOpenFullPreview={() => {
                 void (async () => {
-                  if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/preview`);
+                  if (await flushBeforeRouteChange()) navigate(`/sat/exams/${examId}/preview`);
                 })();
               }}
               onOpenRelease={() => {
                 void (async () => {
-                  if (await flushBeforeNavigation()) navigate(`/sat/exams/${examId}/release`);
+                  if (await flushBeforeRouteChange()) navigate(`/sat/exams/${examId}/release`);
                 })();
               }}
               onBack={() => {
                 void (async () => {
-                  if (await flushBeforeNavigation()) navigate("/sat/exams");
+                  if (await flushBeforeRouteChange()) navigate("/sat/exams");
                 })();
               }}
               onOpenQueue={() => setQuestionListOpen(true)}
@@ -2516,11 +2095,19 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                   {navigationError}
                 </div>
               ) : null}
-              {coeditUiActive && !coeditRecovery?.published && (coeditRecovery?.issue === "closed" || coeditRecovery?.issue === "replaced") ? (
+              {coeditRecoverySurface ? (
                 <CoeditRecoverySurface
-                  onOpenCurrentDraft={openCurrentDraft}
-                  onReviewMyChanges={reviewCoeditChanges}
+                  body={coeditRecoverySurface.body}
+                  // A refused or oversized write has no replacement draft to
+                  // open and no remote rows to review, so those actions are
+                  // absent rather than dead: the work's way out is the export.
+                  {...(coeditRecoverySurface.roomEnded
+                    ? { onOpenCurrentDraft: openCurrentDraft, onReviewMyChanges: reviewCoeditChanges }
+                    : {})}
                   onCopyMyChanges={() => void copyCoeditPrompt()}
+                  {...(coeditRecovery?.canExportStaleCache
+                    ? { onDiscardLocalCopy: discardCoeditLocalCopy }
+                    : {})}
                 />
               ) : null}
               {activeRaceNotice ? (
@@ -2654,8 +2241,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               {id:'delete',label:'Delete question',group:'Question',onSelect:()=>setDeleteTarget(selectedExamQuestionId),disabledReason:!draft?'Select a question first':rowMutationBusy?'Another operation is running':undefined},
               ...([-1,1] as const).map(direction=>({id:direction===-1?'up':'down',label:direction===-1?'Move question up':'Move question down',group:'Question' as const,disabledReason:!draft?'Select a question first':rowMutationBusy?'Another operation is running':!selectedModule.questions[selectedModuleIndex+direction]?'Already at module boundary':undefined,onSelect:()=>{const expected=selectedModule.questions.map(q=>q.examQuestionId),next=[...expected],i=selectedModuleIndex,j=i+direction;const from=next[i],to=next[j];if(!from||!to)return;next[i]=to;next[j]=from;void handleReorder(next,expected).catch(()=>undefined);}})),
               {id:'question-preview',label:'Preview as student',group:'Question',onSelect:()=>setPreviewOpen(true),disabledReason:!draft?'Select a question first':undefined},
-              {id:'preview',label:'Preview exam',group:'Exam',onSelect:()=>{void flushBeforeNavigation().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/preview`);});}},
-              {id:'release',label:'Release exam',group:'Exam',onSelect:()=>{void flushBeforeNavigation().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/release`);});}},
+              {id:'preview',label:'Preview exam',group:'Exam',onSelect:()=>{void flushBeforeRouteChange().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/preview`);});}},
+              {id:'release',label:'Release exam',group:'Exam',onSelect:()=>{void flushBeforeRouteChange().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/release`);});}},
               {id:'overview',label:'Exam overview',group:'Exam',onSelect:()=>setWorkspaceMode('overview')},
               {id:'issues',label:'Review issues',group:'Exam',onSelect:()=>void openIssues()},
               {id:'navigator',label:'Open question navigator',group:'View',onSelect:()=>{setWorkspaceMode('build');if(compactViewport)setQuestionListOpen(true);else searchInputRef.current?.focus();}},
@@ -2742,273 +2329,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
       </div>
     );
   }
-}
-
-function summaryFromRevision(
-  summary: AssessmentQuestionSummary,
-  question: QuestionRevision
-): AssessmentQuestionSummary {
-  const issues = validateSatQuestion(question.metadata.sectionKey, question);
-  const blockingIssueCount = issues.filter((issue) => issue.blocking).length;
-  const hasInvalid = issues.some(
-    (issue) =>
-      issue.blocking && !issue.code.endsWith(".required") && issue.code !== "sat.choice.count"
-  );
-  const readiness = blockingIssueCount === 0 ? "ready" : hasInvalid ? "error" : "incomplete";
-  const answerKeyPreview =
-    question.answer.kind === "single_choice"
-      ? question.answer.correctOptionId
-      : (question.answer.acceptedResponses.find((value) => value.trim()) ?? null);
-  const choicePlain =
-    question.answer.kind !== "single_choice" ||
-    question.answer.options.every((option) => supportsFastPlainEditing(option.content));
-  const contentComplexity =
-    supportsFastPlainEditing(question.stimulus) &&
-    supportsFastPlainEditing(question.prompt) &&
-    supportsFastPlainEditing(question.rationale) &&
-    choicePlain
-      ? "plain"
-      : "rich";
-  return {
-    ...summary,
-    questionRevisionId: question.id,
-    questionType: question.questionType,
-    revision: question.revision,
-    semanticRevision: question.semanticRevision,
-    promptPreview: truncatePreview(plainTextFromContent(question.prompt), 180),
-    answerKeyPreview,
-    domain: question.metadata.domain,
-    skill: question.metadata.skill,
-    difficulty: question.metadata.difficulty,
-    tags: question.metadata.tags,
-    hasStimulus: hasStructuredContent(question.stimulus),
-    contentComplexity,
-    readiness: {
-      status: readiness,
-      blockingIssueCount,
-      warningCount: issues.filter((issue) => !issue.blocking).length,
-    },
-  };
-}
-
-function truncatePreview(value: string, limit: number): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length <= limit
-    ? normalized
-    : `${normalized.slice(0, Math.max(0, limit - 1))}…`;
-}
-
-function IssuesPane({
-  report,
-  loading,
-  onRefresh,
-  onOpenIssue,
-}: {
-  report: { errors: AssessmentValidationIssue[]; warnings: AssessmentValidationIssue[] } | null;
-  loading: boolean;
-  onRefresh: () => void;
-  onOpenIssue: (issue: AssessmentValidationIssue) => void;
-}) {
-  const issues = report ? [...report.errors, ...report.warnings] : [];
-  const errorCount = report?.errors.length ?? 0;
-  const warningCount = report?.warnings.length ?? 0;
-  return (
-    <section
-      className="authoring-issues-pane flex w-[var(--authoring-sidebar-width)] min-w-0 flex-col border-r border-au-separator bg-au-surface"
-      aria-label="SAT authoring issues"
-    >
-      <div className="flex items-center justify-between gap-3 border-b border-au-separator px-4 py-3">
-        <div className="min-w-0">
-          <h2 className="text-[13px] font-semibold tracking-[-0.01em] text-slate-900">Issues</h2>
-          <p className="mt-0.5 text-[11px] text-slate-500">
-            Validation across the current SAT draft
-          </p>
-        </div>
-        <button
-          type="button"
-          disabled={loading}
-          onClick={onRefresh}
-          className="authoring-interactive min-h-9 shrink-0 rounded-[10px] px-3 text-[12px] font-semibold text-slate-600 hover:bg-au-fill disabled:opacity-40"
-        >
-          {loading ? "Checking…" : "Refresh"}
-        </button>
-      </div>
-      {report ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-au-separator px-4 py-2.5">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-au-danger-tint px-2.5 py-1 text-[11px] font-semibold text-au-danger-text">
-            <span className="h-1.5 w-1.5 rounded-full bg-au-danger" aria-hidden="true" />
-            {errorCount} blocking
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-au-warning-tint px-2.5 py-1 text-[11px] font-semibold text-au-warning-text">
-            <span className="h-1.5 w-1.5 rounded-full bg-au-warning" aria-hidden="true" />
-            {warningCount} warnings
-          </span>
-        </div>
-      ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto p-2" aria-live="polite" aria-busy={loading}>
-        {loading && !report ? (
-          <div className="p-6 text-center text-[12px] text-slate-500">
-            Checking every module and question…
-          </div>
-        ) : issues.length ? (
-          issues.map((issue, index) => {
-            const actionable = issue.path.startsWith("examQuestion:");
-            return (
-              <button
-                key={`${issue.code}-${issue.path}-${index}`}
-                type="button"
-                disabled={!actionable}
-                onClick={() => onOpenIssue(issue)}
-                className={`authoring-interactive mb-1.5 flex w-full gap-2.5 rounded-[12px] p-3 text-left ${issue.blocking ? "bg-au-danger-tint" : "bg-au-warning-tint"} ${actionable ? "hover:ring-1 hover:ring-au-separator-strong" : "cursor-default"}`}
-              >
-                <AlertCircle
-                  size={14}
-                  aria-hidden="true"
-                  className={`mt-0.5 shrink-0 ${issue.blocking ? "text-au-danger" : "text-au-warning"}`}
-                />
-                <span className="min-w-0">
-                  <span
-                    className={`block text-[12px] font-semibold leading-5 ${issue.blocking ? "text-au-danger-text" : "text-au-warning-text"}`}
-                  >
-                    {issue.message}
-                  </span>
-                  <span className="mt-1 block truncate text-[10px] text-slate-400">
-                    {actionable ? "Open question and field" : issue.path}
-                  </span>
-                </span>
-              </button>
-            );
-          })
-        ) : report ? (
-          <div className="p-8 text-center">
-            <span
-              className="mx-auto flex h-11 w-11 items-center justify-center rounded-[13px] bg-au-success-tint text-au-success"
-              aria-hidden="true"
-            >
-              <ListChecks size={20} aria-hidden="true" />
-            </span>
-            <p className="mt-3 text-[12px] font-semibold text-slate-800">No validation issues</p>
-            <p className="mt-1 text-[11px] text-slate-500">
-              This SAT draft passes current authoring validation.
-            </p>
-          </div>
-        ) : (
-          <div className="p-8 text-center text-[12px] text-slate-500">
-            Run validation to review authoring issues.
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function EmptyEditor({
-  moduleTitle,
-  onCreate,
-}: {
-  moduleTitle: string | null;
-  onCreate?: () => void;
-}) {
-  return (
-    <div className="flex min-h-full items-center justify-center px-8 pb-24 text-center">
-      <div className="max-w-[320px]">
-        <span
-          className="mx-auto flex h-12 w-12 items-center justify-center rounded-[14px] bg-au-fill text-slate-500"
-          aria-hidden="true"
-        >
-          <PencilLine size={20} strokeWidth={1.8} aria-hidden="true" />
-        </span>
-        <p className="mt-4 text-[15px] font-semibold tracking-[-0.018em] text-slate-900">
-          {moduleTitle ? `Choose a question in ${moduleTitle}` : "Choose a module"}
-        </p>
-        <p className="mt-1.5 text-[12px] leading-5 text-slate-500">
-          The question list is the work queue; the editor opens only the selected item.
-        </p>
-        {onCreate ? (
-          <button
-            type="button"
-            onClick={onCreate}
-            className="authoring-interactive mt-4 inline-flex min-h-10 items-center rounded-[11px] bg-au-accent px-4 text-[12px] font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active"
-          >
-            Create next question
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function QuestionLoadError({
-  error,
-  onRetry,
-}: {
-  error: unknown;
-  onRetry: () => void;
-}) {
-  return (
-    <div className="flex min-h-full items-center justify-center px-6 py-16">
-      <section
-        className="authoring-surface authoring-surface--error w-full max-w-lg p-6 sm:p-8"
-        role="alert"
-      >
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-au-danger-tint text-au-danger-text">
-            <AlertCircle size={18} aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-slate-950">
-              Question could not be loaded
-            </h2>
-            <p className="mt-2 text-[12px] leading-5 text-slate-600">
-              {error instanceof Error ? error.message : "This question is unavailable right now."}
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="authoring-interactive mt-6 inline-flex min-h-10 items-center rounded-[11px] bg-au-accent px-4 text-[12px] font-semibold text-white hover:bg-au-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2"
-        >
-          Retry question
-        </button>
-      </section>
-    </div>
-  );
-}
-
-function EditorSkeleton() {
-  return (
-    <div
-      className="mx-auto my-5 w-[calc(100%-2rem)] max-w-[940px] animate-pulse space-y-6 px-6 pb-24 pt-8 sm:my-7 sm:px-10"
-      role="status"
-      aria-label="Loading question"
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 space-y-2.5">
-          <div className="h-4 w-44 rounded-md bg-au-fill" />
-          <div className="h-3 w-28 rounded-md bg-au-fill" />
-        </div>
-        <div className="flex shrink-0 gap-2">
-          <div className="h-9 w-[104px] rounded-[10px] bg-au-fill" />
-          <div className="h-9 w-9 rounded-[10px] bg-au-fill" />
-        </div>
-      </div>
-      <div className="authoring-metadata-bar h-[58px] rounded-[13px]" />
-      <div className="space-y-2.5">
-        <div className="h-3.5 w-36 rounded bg-au-fill" />
-        <div className="h-[92px] rounded-[12px] bg-au-fill" />
-      </div>
-      <div className="space-y-2.5">
-        <div className="h-3.5 w-24 rounded bg-au-fill" />
-        <div className="h-[112px] rounded-[12px] bg-au-fill" />
-      </div>
-      <div className="space-y-2">
-        {[0, 1, 2, 3].map((item) => (
-          <div key={item} className="h-[58px] rounded-[12px] bg-au-fill" />
-        ))}
-      </div>
-    </div>
-  );
 }
 
 export function getShellProvider(shell: AssessmentAuthoringShell): string {

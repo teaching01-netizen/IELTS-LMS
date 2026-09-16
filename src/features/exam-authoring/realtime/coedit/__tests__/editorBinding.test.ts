@@ -3,12 +3,38 @@ import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import {
   createScopedCaretProvider,
+  isCollaborativeTransaction,
   renderCaretLabel,
   renderCaretSelection,
 } from "../editorBinding";
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+/**
+ * The decision the composer cannot make for itself: the transport is what marks
+ * a transaction as coming from a collaborator, and undo/redo carries the same
+ * mark while remaining an author action.
+ */
+describe("collaborative transaction classification", () => {
+  const transactionWith = (meta: unknown) => ({ getMeta: () => meta });
+
+  it("treats a change-origin transaction as a collaborator's edit", () => {
+    expect(isCollaborativeTransaction(transactionWith({ isChangeOrigin: true }))).toBe(true);
+  });
+
+  it("keeps undo and redo as author actions", () => {
+    expect(
+      isCollaborativeTransaction({ getMeta: () => ({ isChangeOrigin: true, isUndoRedoOperation: true }) }),
+    ).toBe(false);
+  });
+
+  it("treats an unmarked transaction as an author action", () => {
+    for (const meta of [undefined, null, {}, { isUndoRedoOperation: true }, { isChangeOrigin: false }]) {
+      expect(isCollaborativeTransaction(transactionWith(meta)), JSON.stringify(meta)).toBe(false);
+    }
+  });
 });
 
 describe("remote caret label", () => {

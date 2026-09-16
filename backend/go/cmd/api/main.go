@@ -54,6 +54,15 @@ import (
 	"github.com/google/uuid"
 )
 
+// SessionResolver loads a session actor from the request's session cookie.
+// The concrete auth helper accepts a broader auth.Querier surface, so the
+// composition root adapts it to the API's *sql.DB dependency for test seams.
+type SessionResolver func(context.Context, *sql.DB, *auth.SessionCache, config.Config, string, time.Time) (*auth.Session, error)
+
+func defaultSessionResolver(ctx context.Context, db *sql.DB, cache *auth.SessionCache, cfg config.Config, token string, now time.Time) (*auth.Session, error) {
+	return auth.LookupSessionWithCache(ctx, db, cache, cfg, token, now)
+}
+
 // App is the interface-free composition root. Domain services hang off
 // this struct explicitly (no globals); handlers nil-check only for
 // dependency outages and return the stable 503 envelope when required.
@@ -134,6 +143,9 @@ type App struct {
 	// (disabled cache = never stores, never hits = today's behavior).
 	// Wired in BuildApp so authMiddleware serves hits with zero SQL.
 	SessionCache *auth.SessionCache
+	// SessionResolver is injected so middleware-order tests can prove that a
+	// pre-auth rejection avoids session database work.
+	SessionResolver SessionResolver
 	// EntryGate is the plan-D3 per-schedule check-in bucket. Always non-nil
 	// (off = present-but-unused, today's shape untouched). Wired in BuildApp
 	// from ENTRY_PER_SEC_PER_SCHEDULE/ENTRY_BURST.
@@ -194,11 +206,14 @@ func verifyAttemptBearer(app *App, r *http.Request, bearer string) (crypto.Attem
 // It never panics: a nil pool yields an App whose handlers degrade to
 // 503 on DB-dependent probes (readiness) instead of crashing.
 func BuildApp(cfg config.Config, pool *sql.DB) *App {
-	cap := cfg.RateLimitBucketCap
-	if cap <= 0 {
-		cap = 10000
+	maxKeys := cfg.RateLimitMaxKeys
+	if maxKeys <= 0 {
+		maxKeys = cfg.RateLimitBucketCap
 	}
-	app := &App{Config: cfg, DB: pool, Limiter: httpx.NewBucketStore(cap), SessionCache: auth.NewSessionCache(auth.SessionCacheConfig{
+	if maxKeys <= 0 {
+		maxKeys = 10000
+	}
+	app := &App{Config: cfg, DB: pool, Limiter: httpx.NewBucketStore(maxKeys), SessionResolver: defaultSessionResolver, SessionCache: auth.NewSessionCache(auth.SessionCacheConfig{
 		Enabled:           cfg.SessionCacheEnabled,
 		MaxEntries:        cfg.SessionCacheMax,
 		TouchCoalesceSecs: cfg.SessionTouchCoalesce(),
@@ -323,6 +338,9 @@ func main() {
 	if err := cfg.ValidateForRuntime(); err != nil {
 		log.Fatalf("api: invalid config: %v", err)
 	}
+	if err := httpx.SetTrustedProxies(cfg.TrustedProxyCIDRs); err != nil {
+		log.Fatalf("api: invalid trusted proxy configuration: %v", err)
+	}
 	pool, err := db.OpenRole(cfg, db.RoleAPI)
 	if err != nil {
 		log.Fatalf("api: open db: %v", err)
@@ -347,6 +365,15 @@ func main() {
 	if app.CoeditConfigErr != nil {
 		log.Fatalf("api: prompt co-editing misconfigured: %v", app.CoeditConfigErr)
 	}
+	// Recover expired durable freezes before admitting HTTP traffic, then keep
+	// the idempotent pass running while the API is alive. Token handlers repeat
+	// the pass immediately before issuing a room token as a request-path guard.
+	if app.CoeditCapability() {
+		if err := recoverExpiredCoeditFreezes(context.Background(), app); err != nil {
+			log.Printf("api: co-edit freeze recovery unavailable at startup: %v", err)
+		}
+	}
+	stopCoeditRecovery := startCoeditRecoveryLoop(context.Background(), app)
 	// Plan E3: report absorbed tx transients on db_deadlocks_total{kind}.
 	defer installTxRetryHook()()
 	srvCfg := httpx.DefaultServerConfig()
@@ -379,6 +406,7 @@ func main() {
 	// (forwarder) and no reaper ticks (admission) while in-flight
 	// requests finish.
 	app.stopLiveForwarder()
+	stopCoeditRecovery()
 	if app.Admission != nil {
 		app.Admission.Stop()
 	}
@@ -397,7 +425,8 @@ func main() {
 // spec middleware order:
 //
 //	panic recovery > request id > trace > security headers > body limit >
-//	auth > CSRF > rate limit (tiers) > authorization > handler > access log
+//	pre-auth IP guard > auth > CSRF > rate limit (tiers) > authorization >
+//	handler > access log
 //
 // Rate limiting is tiered: auth-critical, anon-auth, authed-reads, polling,
 // heartbeat, writes, each with an independent per-minute quota keyed by user
@@ -430,12 +459,13 @@ func BuildRouter(app *App) http.Handler {
 	// Global ceiling is the largest tier (workbook 64MiB); tighter tiers
 	// re-wrap per group below (a smaller inner cap always wins).
 	r.Use(httpx.BodyLimit(httpx.MaxWorkbookBodyBytes))
-	r.Use(authMiddleware(app))
-	r.Use(csrfMiddleware(app))
 	// Loose local-only backstop across all traffic (abuse floor). It never
 	// touches the distributed counters, so it cannot couple tiers together;
-	// per-tier quotas below are each independently authoritative.
+	// it must run before auth so rejected cookie traffic does not touch the
+	// session store.
 	r.Use(app.Tiers.Middleware(httpx.TierBackstop, httpx.ClientIPKey))
+	r.Use(authMiddleware(app))
+	r.Use(csrfMiddleware(app))
 	// authorize wraps one route handler with the authz first-layer gate
 	// for its exact table key: Public/Bearer entries passthrough to
 	// their handler credential checks, session entries 401 anon and 403
@@ -731,6 +761,9 @@ func BuildRouter(app *App) http.Handler {
 		r.Post("/load", authorize("POST /internal/authoring-coedit/load", coeditLoadHandler(app)))
 		r.Post("/initialize", authorize("POST /internal/authoring-coedit/initialize", coeditInitializeHandler(app)))
 		r.Post("/store", authorize("POST /internal/authoring-coedit/store", coeditStoreHandler(app)))
+		r.Post("/final-store", authorize("POST /internal/authoring-coedit/final-store", coeditFinalStoreHandler(app)))
+		r.Post("/rebase", authorize("POST /internal/authoring-coedit/rebase", coeditRebaseHandler(app)))
+		r.Post("/recover", authorize("POST /internal/authoring-coedit/recover", coeditRecoverHandler(app)))
 	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
@@ -756,7 +789,7 @@ func BuildRouter(app *App) http.Handler {
 // so tests and future admin endpoints can flip posture without rewiring.
 func buildTierSet(app *App) {
 	cfg := app.Config
-	burst := cfg.RateLimitBucketCap
+	burst := cfg.RateLimitBurst
 	if burst < 0 {
 		burst = 0
 	}
@@ -783,11 +816,14 @@ func buildTierSet(app *App) {
 			dbs[tier] = limiter.Check
 		}
 	}
-	cap := cfg.RateLimitBucketCap
-	if cap <= 0 {
-		cap = 10000
+	maxKeys := cfg.RateLimitMaxKeys
+	if maxKeys <= 0 {
+		maxKeys = cfg.RateLimitBucketCap
 	}
-	app.Tiers = httpx.NewTierSet(budgets, dbs, cap)
+	if maxKeys <= 0 {
+		maxKeys = 10000
+	}
+	app.Tiers = httpx.NewTierSet(budgets, dbs, maxKeys)
 	app.Tiers.SetLocalOnly(cfg.RateLimitLocalOnly())
 	// Plan E2 dashboard slice: denials served under exam budgets count
 	// separately from ship-budget denials.
@@ -985,7 +1021,11 @@ func authMiddleware(app *App) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, httpx.CtxActorClass, "anonymous")))
 				return
 			}
-			sess, err := auth.LookupSessionWithCache(ctx, app.DB, app.SessionCache, app.Config, cookie.Value, time.Now().UTC())
+			resolver := app.SessionResolver
+			if resolver == nil {
+				resolver = defaultSessionResolver
+			}
+			sess, err := resolver(ctx, app.DB, app.SessionCache, app.Config, cookie.Value, time.Now().UTC())
 			if err != nil {
 				// DB failure must not authenticate nor masquerade as
 				// anonymous (which downstream maps to 401): report 503

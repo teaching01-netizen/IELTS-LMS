@@ -48,6 +48,23 @@ type WritingDraftPreview = {
   text: string;
 };
 
+/**
+ * Bug 2: per-task writing draft record. Freshness is decided by explicit task
+ * identity plus an acknowledgement comparison against the parent's
+ * `writingAnswers` value — NEVER by string length. The old length heuristic let
+ * a longer incoming server/prop value overwrite the retained native edit, so
+ * the teardown commit re-sent the older text and short corrections (or clears)
+ * were lost.
+ */
+type WritingTaskDraftRecord = {
+  /** Newest text the student produced for this task (native-edit truth). */
+  text: string;
+  /** Monotonic per-task local edit sequence, bumped by every edit/commit/install. */
+  revision: number;
+  /** Revision whose text was already handed to onWritingChange (0 = never). */
+  committedRevision: number;
+};
+
 function normalizeWritingPlainText(value: string): string {
   return value.replace(/\r\n?/g, '\n');
 }
@@ -157,10 +174,12 @@ export function StudentWriting({
   const lastCommittedDraftByTaskRef = useRef<Record<string, string>>({});
   const deferredBlurCommitTimerRef = useRef<number | null>(null);
   const draftCommitTimerRef = useRef<number | null>(null);
-  const liveDraftsByTaskRef = useRef<Record<string, string>>({});
+  const draftRecordsByTaskRef = useRef<Record<string, WritingTaskDraftRecord>>({});
   const editorHasFocusRef = useRef(false);
   const commitEditorDraftRef = useRef<() => void>(() => undefined);
   const previousResolvedTaskIdRef = useRef<string | null>(resolvedCurrentQuestionTaskId);
+  /** Task identity the editor DOM currently holds, for the hydration effect. */
+  const previousHydratedTaskIdRef = useRef<string | null>(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const reviewModalPanelRef = useRef<HTMLDivElement | null>(null);
   const reviewModalTriggerRef = useRef<HTMLElement | null>(null);
@@ -194,9 +213,11 @@ export function StudentWriting({
   const currentTask = writingConfig.tasks.find((t) => t.id === activeTaskId) || writingConfig.tasks[0];
   const readLiveDraftForTask = useCallback(
     (taskId: string) => {
-      const liveDraft = liveDraftsByTaskRef.current[taskId];
-      return typeof liveDraft === 'string'
-        ? liveDraft
+      // The retained native edit for this task is the DOM truth; the prop is
+      // only a fallback until that task has a retained draft.
+      const record = draftRecordsByTaskRef.current[taskId];
+      return typeof record?.text === 'string'
+        ? record.text
         : readWritingAnswerByTaskId(writingAnswers, taskId);
     },
     [writingAnswers],
@@ -214,14 +235,36 @@ export function StudentWriting({
     }
   }, []);
 
+  /**
+   * Bug 2: the single writer of a task's retained draft record. A `committed`
+   * write marks the text as handed to the parent (acknowledgement baseline);
+   * a native edit writes without it, so the record is explicitly newer than
+   * its last commit until a commit (debounce/blur/lifecycle/unmount) follows.
+   */
+  const writeDraftRecord = useCallback(
+    (taskId: string, text: string, options?: { committed?: boolean }): number => {
+      const previousRecord = draftRecordsByTaskRef.current[taskId];
+      const revision = (previousRecord?.revision ?? 0) + 1;
+      draftRecordsByTaskRef.current = {
+        ...draftRecordsByTaskRef.current,
+        [taskId]: {
+          text,
+          revision,
+          committedRevision: options?.committed
+            ? revision
+            : previousRecord?.committedRevision ?? 0,
+        },
+      };
+      return revision;
+    },
+    [],
+  );
+
   const commitDraftText = useCallback(
     (taskId: string, rawText: string, options?: { flushDurability?: boolean }) => {
       const normalizedText = normalizeWritingPlainText(rawText);
       const previous = lastCommittedDraftByTaskRef.current[taskId] ?? '';
-      liveDraftsByTaskRef.current = {
-        ...liveDraftsByTaskRef.current,
-        [taskId]: normalizedText,
-      };
+      writeDraftRecord(taskId, normalizedText, { committed: true });
       if (normalizedText !== previous) {
         onWritingChange(taskId, normalizedText);
         lastCommittedDraftByTaskRef.current[taskId] = normalizedText;
@@ -237,31 +280,55 @@ export function StudentWriting({
       }
       return normalizedText;
     },
-    [attemptContext, onWritingChange, registerLiveWritingAnswer],
+    [attemptContext, onWritingChange, registerLiveWritingAnswer, writeDraftRecord],
   );
 
   const scheduleDraftCommit = useCallback(
     (taskId: string, text: string) => {
       clearScheduledDraftCommit();
+      // Bug 2: the timer carries the revision it was scheduled for. A timer
+      // that fires after a newer edit or an explicit commit is a no-op instead
+      // of a late re-send of older text.
+      const scheduledRevision = draftRecordsByTaskRef.current[taskId]?.revision ?? 0;
       draftCommitTimerRef.current = window.setTimeout(() => {
         draftCommitTimerRef.current = null;
+        const currentRevision = draftRecordsByTaskRef.current[taskId]?.revision ?? 0;
+        if (currentRevision !== scheduledRevision) return;
         commitDraftText(taskId, text, { flushDurability: false });
       }, WRITING_DRAFT_COMMIT_DEBOUNCE_MS);
     },
     [clearScheduledDraftCommit, commitDraftText],
   );
 
+  /**
+   * Bug 4: commit the editor's current text under an EXPLICIT task identity.
+   * The textarea is one uncontrolled node reused across tasks, so a commit must
+   * never infer its owner from whatever `activeTaskId` happens to be when the
+   * callback runs — a task switch commits the outgoing task's DOM under the
+   * outgoing task id, then the incoming task is loaded separately.
+   */
+  const commitEditorDraftForTask = useCallback(
+    (taskId: string) => {
+      const editor = editorRef.current;
+      clearScheduledDraftCommit();
+      // Bug 2: teardown-safe — once the editor is detached (passive unmount
+      // cleanup) the retained per-task native snapshot is committed. Never a
+      // value a stale server push overwrote, and never a silently suppressed
+      // commit that leaves the visible correction unpersisted.
+      const committed = commitDraftText(
+        taskId,
+        editor ? readEditorPlainText(editor) : readLiveDraftForTask(taskId),
+      );
+      if (editor) {
+        writeEditorPlainText(editor, committed);
+      }
+    },
+    [clearScheduledDraftCommit, commitDraftText, readLiveDraftForTask],
+  );
+
   const commitEditorDraft = useCallback(() => {
-    const editor = editorRef.current;
-    clearScheduledDraftCommit();
-    const committed = commitDraftText(
-      activeTaskId,
-      editor ? readEditorPlainText(editor) : readLiveDraftForTask(activeTaskId),
-    );
-    if (editor) {
-      writeEditorPlainText(editor, committed);
-    }
-  }, [activeTaskId, clearScheduledDraftCommit, commitDraftText, readLiveDraftForTask]);
+    commitEditorDraftForTask(activeTaskId);
+  }, [activeTaskId, commitEditorDraftForTask]);
   const selectCompactPane = useCallback(
     (nextPane: WritingPane) => {
       if (nextPane === activeCompactPane) {
@@ -343,46 +410,73 @@ export function StudentWriting({
       resolvedCurrentQuestionTaskId !== activeTaskId &&
       previousResolvedTaskId !== resolvedCurrentQuestionTaskId
     ) {
-      commitEditorDraftRef.current();
+      // Bug 4: the DOM still belongs to `activeTaskId`, so its text is committed
+      // under THAT identity before the switch. The incoming task's own text is
+      // installed by the hydration effect below (see the identity-change path).
+      commitEditorDraftForTask(activeTaskId);
       setActiveTaskId(resolvedCurrentQuestionTaskId);
     }
-  }, [activeTaskId, resolvedCurrentQuestionTaskId]);
+  }, [activeTaskId, commitEditorDraftForTask, resolvedCurrentQuestionTaskId]);
 
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    // Hydration-vs-focus race: compare against the SERVER value (writingAnswers
-    // prop), NOT currentText — currentText derives from liveDraftsByTaskRef, so
-    // using it here echoes local typing back as "server" state. That made the
-    // local-wins condition unreachable and poisoned lastCommitted without
-    // onWritingChange ever firing (killed V2 durability + lifecycle commits).
     const serverText = normalizeWritingPlainText(
       readWritingAnswerByTaskId(writingAnswers, activeTaskId) ?? '',
     );
-    if (editorHasFocusRef.current) {
-      const localDraft = liveDraftsByTaskRef.current[activeTaskId];
-      if (typeof localDraft === 'string' && localDraft !== serverText && serverText.length > localDraft.length) {
-        liveDraftsByTaskRef.current = { ...liveDraftsByTaskRef.current, [activeTaskId]: serverText };
-        setDraftPreview({ taskId: activeTaskId, text: serverText });
+    // Bug 4: a changed task identity is NOT same-task hydration. Focus
+    // protection must never cross it — that is what let a focused switch keep
+    // Task 1's DOM (and then commit it) as Task 2's answer.
+    const taskIdentityChanged = previousHydratedTaskIdRef.current !== activeTaskId;
+    previousHydratedTaskIdRef.current = activeTaskId;
+    // Bug 2: compare against the SERVER value (writingAnswers prop), never
+    // against currentText — currentText derives from the retained draft, so
+    // using it here would echo local typing back as "server" state. Freshness
+    // is the parent's ACKNOWLEDGEMENT of the retained native edit (does the
+    // prop already carry exactly that text?), never a length comparison.
+    const localText = draftRecordsByTaskRef.current[activeTaskId]?.text;
+    const hasUnacknowledgedLocalDraft =
+      typeof localText === 'string' && localText !== serverText;
+    if (!taskIdentityChanged && hasUnacknowledgedLocalDraft) {
+      if (editorHasFocusRef.current) {
+        // Never rewrite the editor under the student's cursor: the retained
+        // native edit stays the DOM truth while focused. Only the preview
+        // follows it, so the word count matches what is on screen.
+        setDraftPreview((current) =>
+          current.taskId === activeTaskId && current.text === localText
+            ? current
+            : { taskId: activeTaskId, text: localText },
+        );
+        return;
       }
+      // Local typing the parent has not acknowledged wins over an older server
+      // snapshot. Keep it in the DOM and leave lastCommitted alone: it is not
+      // committed yet, so the pending debounce / blur / compositionEnd /
+      // lifecycle / unmount-flush commit still fires onWritingChange correctly
+      // (committing here would fire on every keystroke and defeat the debounce).
+      writeEditorPlainText(editor, localText);
+      previousValueRef.current = localText;
+      setDraftPreview((current) =>
+        current.taskId === activeTaskId && current.text === localText
+          ? current
+          : { taskId: activeTaskId, text: localText },
+      );
       return;
     }
-    const localDraft = liveDraftsByTaskRef.current[activeTaskId];
-    const mergedText =
-      typeof localDraft === 'string' && localDraft.length > serverText.length ? localDraft : serverText;
-    if (typeof localDraft === 'string' && localDraft.length > serverText.length) {
-      // Local uncommitted typing wins over an older server snapshot, but it is
-      // NOT yet committed (no onWritingChange fired) — leave lastCommitted
-      // alone so the pending debounce / blur / compositionEnd / unmount-flush
-      // commit still fires onWritingChange correctly. Committing here would
-      // fire onWritingChange on every keystroke and defeat the 300ms debounce.
-    } else {
-      writeEditorPlainText(editor, mergedText);
-      previousValueRef.current = readEditorPlainText(editor);
-      lastCommittedDraftByTaskRef.current[activeTaskId] = readEditorPlainText(editor);
-      setDraftPreview({ taskId: activeTaskId, text: mergedText });
+    // Same task with nothing unacknowledged, or a task identity change: load
+    // THIS task's text into the reused uncontrolled editor — unconditionally,
+    // focused or not. The parent value is adopted as the commit baseline only
+    // when it is the text being installed, so a follow-up blur cannot re-send an
+    // identical value.
+    const installedText = typeof localText === 'string' ? localText : serverText;
+    if (installedText === serverText) {
+      writeDraftRecord(activeTaskId, serverText, { committed: true });
+      lastCommittedDraftByTaskRef.current[activeTaskId] = serverText;
     }
-  }, [activeTaskId, commitDraftText, writingAnswers]);
+    writeEditorPlainText(editor, installedText);
+    previousValueRef.current = installedText;
+    setDraftPreview({ taskId: activeTaskId, text: installedText });
+  }, [activeTaskId, writingAnswers, writeDraftRecord]);
 
   useEffect(() => {
     return () => {
@@ -569,10 +663,9 @@ export function StudentWriting({
     const source = (event?.currentTarget ?? event?.target ?? editorRef.current) as HTMLTextAreaElement | null;
     if (source) {
       const textContent = readEditorPlainText(source);
-      liveDraftsByTaskRef.current = {
-        ...liveDraftsByTaskRef.current,
-        [activeTaskId]: textContent,
-      };
+      // Bug 2: the native edit is retained per task identity and is never
+      // derived from (or overwritten by) the server/prop value.
+      writeDraftRecord(activeTaskId, textContent);
       registerLiveWritingAnswer?.(activeTaskId, textContent);
       setDraftPreview((current) =>
         current.taskId === activeTaskId && current.text === textContent
@@ -581,7 +674,7 @@ export function StudentWriting({
       );
       scheduleDraftCommit(activeTaskId, textContent);
     }
-  }, [activeTaskId, registerLiveWritingAnswer, scheduleDraftCommit]);
+  }, [activeTaskId, registerLiveWritingAnswer, scheduleDraftCommit, writeDraftRecord]);
   const blockWritingEditorInteraction = useCallback((
     event:
       | React.ClipboardEvent<HTMLTextAreaElement>

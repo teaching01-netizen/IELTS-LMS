@@ -345,10 +345,16 @@ test.describe("Digital SAT product workspace", () => {
       await page.getByRole("button", { name: "Start" }).click();
       await expect(page.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
 
+      // Phase 5 entry assertion: the proctor's Start is the ONLY action taken
+      // against the exam. The student page is refreshed (never clicked) and the
+      // module must be OPEN by itself — the previous check accepted any body
+      // text matching /SAT|Reading|Module/, which the directions screen
+      // satisfies too, so it stayed green whether or not entry ever happened
+      // and could not tell a working auto-entry from a stalled one.
       await studentPage.reload();
-      await expect(studentPage.locator("body")).toContainText(/SAT|Reading|Module/i, {
-        timeout: 30_000,
-      });
+      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
+      // The directions entry control must not have been the way in.
+      await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
       const attemptId = await studentPage.evaluate(
         async ({ scheduleId, candidateId }) => {
           const response = await fetch(
@@ -361,6 +367,30 @@ test.describe("Digital SAT product workspace", () => {
       );
       if (!attemptId)
         throw new Error("SAT student attempt did not materialize after proctor start");
+
+      // Server-observable proof of the auto-entry itself: the entry module is
+      // NOT not_started, i.e. the client opened it without a student action.
+      // Nothing else in this test starts the first module (finishCurrentSatSection
+      // runs below), so a not_started state here means auto-entry did not fire.
+      const entryModuleState = await studentPage.evaluate(
+        async ({ scheduleId, attemptId: id, candidateId: student }) => {
+          const delivery = await import(
+            "/src/features/student-delivery/api/assessmentDeliveryApi.ts"
+          );
+          delivery.configureAssessmentDeliveryAttempt(scheduleId, id, student);
+          const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, id);
+          const section =
+            snapshot.sections.find((item) => item.sectionKey === snapshot.timing.stageKey) ??
+            snapshot.sections[0];
+          const entry =
+            section?.modules.find((module) => module.adaptiveRole === "base") ?? section?.modules[0];
+          return (
+            snapshot.attempt.moduleAttempts.find((item) => item.moduleId === entry?.id)?.state ?? null
+          );
+        },
+        { scheduleId, attemptId, candidateId }
+      );
+      expect(entryModuleState).not.toBe("not_started");
 
       const reading = await finishCurrentSatSection(
         studentPage,

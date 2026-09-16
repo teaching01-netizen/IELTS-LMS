@@ -1,9 +1,21 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { signServiceRequest, verifyServiceRequest } from "../authToken.js";
-import { seedYDocFromPrompt, encodeStateAsUpdate, currentStateHash } from "../documentCodec.js";
+import {
+  RICH_ROOT_PREFIX,
+  contentSignature,
+  seedYDocFromPrompt,
+  encodeStateAsUpdate,
+  encodeStateVector,
+  currentStateHash,
+  promptSchema,
+  toBase64,
+} from "../documentCodec.js";
 import { GoAuthoringClient } from "../goAuthoringClient.js";
 import { CoeditPersistence, type CoeditAckPayload } from "../persistence.js";
+import { documentFromStructuredContent } from "../richTextSchema.js";
+import { metrics } from "../telemetry.js";
+import { prosemirrorJSONToYXmlFragment } from "y-prosemirror";
 import type { StructuredContent } from "../../../../src/features/exam-authoring/contracts/assessment.js";
 
 const DOCUMENT_NAME = "coedit:v1:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -74,6 +86,7 @@ function harness(
 const LOAD_PATH = "/internal/authoring-coedit/load";
 const INITIALIZE_PATH = "/internal/authoring-coedit/initialize";
 const STORE_PATH = "/internal/authoring-coedit/store";
+const REBASE_PATH = "/internal/authoring-coedit/rebase";
 
 function emptyLoad(overrides: Record<string, unknown> = {}) {
   return {
@@ -92,7 +105,11 @@ function emptyLoad(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function storeOk(stateHash: string, questionRevision = 5) {
+function storeOk(
+  stateHash: string,
+  questionRevision = 5,
+  durability: { commitSequence?: string; stateEpoch?: string } = {},
+) {
   return {
     documentName: DOCUMENT_NAME,
     stateHash,
@@ -100,6 +117,7 @@ function storeOk(stateHash: string, questionRevision = 5) {
     materializedRevision: questionRevision,
     committed: true,
     duplicate: false,
+    ...durability,
   };
 }
 
@@ -145,6 +163,11 @@ describe("CoeditPersistence.load", () => {
     expect(go.callsTo(INITIALIZE_PATH)).toHaveLength(0);
     expect(go.callsTo(STORE_PATH)).toHaveLength(0);
     expect(persistence.lastCommit(DOCUMENT_NAME)?.stateHash).toBe("committed-hash");
+    // The committed state vector is read from the document that just received
+    // the binary, which is what a client compares its own vector against.
+    expect(persistence.lastCommit(DOCUMENT_NAME)?.stateVector).toBe(
+      toBase64(encodeStateVector(document)),
+    );
     expect(document.getXmlFragment("prompt").length).toBeGreaterThan(0);
   });
 
@@ -167,9 +190,221 @@ describe("CoeditPersistence.load", () => {
   });
 });
 
+const WORKSPACE_DOCUMENT_NAME = "coedit:v2:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+/**
+ * Sessions built the way the browser builds content — through the projection
+ * boundary — so the room carries the generated content identities a real
+ * editor produces. A room of raw Yjs paragraphs would round-trip differently,
+ * and compaction is expected to refuse it rather than rewrite it.
+ */
+function projectedSession(text: string): Y.Doc {
+  return seedYDocFromPrompt({
+    version: 2,
+    nodes: [],
+    document: {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+    },
+  });
+}
+
+/** One session that appends a paragraph to a v1 prompt room. */
+function appendPromptSessions(document: Y.Doc, sessions: number): void {
+  for (let index = 0; index < sessions; index += 1) {
+    const session = projectedSession(`session ${index}`);
+    Y.applyUpdate(document, encodeStateAsUpdate(session));
+    session.destroy();
+  }
+}
+
+/** One session that writes a distinct workspace scalar, so it earns a vector entry. */
+function appendWorkspaceSessions(document: Y.Doc, sessions: number): void {
+  for (let index = 0; index < sessions; index += 1) {
+    const session = new Y.Doc();
+    session.getMap("workspace").set(`session/${index}`, JSON.stringify(index));
+    Y.applyUpdate(document, encodeStateAsUpdate(session));
+    session.destroy();
+  }
+}
+
+/** A v2 workspace room with one scalar, one rich root, and session residue. */
+function workspaceRoom(sessions: number, rawScalar: unknown): Y.Doc {
+  const document = new Y.Doc();
+  const root = document.getMap("workspace");
+  root.set("question/q1/scalar", JSON.stringify({ questionType: "mcq" }));
+  root.set("question/q1/raw", rawScalar);
+  prosemirrorJSONToYXmlFragment(
+    promptSchema(),
+    documentFromStructuredContent(PROMPT),
+    document.getXmlFragment(`${RICH_ROOT_PREFIX}question/q1/prompt`),
+  );
+  appendWorkspaceSessions(document, sessions);
+  return document;
+}
+
+function compactionCount(outcome: "accepted" | "skipped"): number {
+  const match = metrics
+    .render()
+    .match(new RegExp(`authoring_coedit_compaction_total\\{outcome="${outcome}"\\} (\\d+)`));
+  return match ? Number(match[1]) : 0;
+}
+
+function committedLoad(document: Y.Doc, documentName = DOCUMENT_NAME) {
+  return emptyLoad({
+    documentName,
+    lifecycleState: "active",
+    ydocState: Buffer.from(encodeStateAsUpdate(document)).toString("base64"),
+    stateHash: "committed-hash",
+    materializedRevision: 9,
+    questionRevision: 9,
+    stateEpoch: "0",
+    commitSequence: "7",
+    ...(documentName === DOCUMENT_NAME ? {} : { schemaVersion: 2, fieldSet: "workspace" }),
+  });
+}
+
+function rebaseOk(body: Record<string, unknown>, stateEpoch = "1") {
+  return {
+    documentName: body["documentName"],
+    stateHash: body["stateHash"],
+    questionRevision: 9,
+    materializedRevision: 9,
+    stateEpoch,
+    commitSequence: "8",
+    committed: true,
+    duplicate: false,
+  };
+}
+
+/** Big enough that the state vector passes the 2 KiB compaction threshold. */
+const RESIDUE_SESSIONS = 400;
+
+describe("CoeditPersistence.load compaction", () => {
+  it("rebuilds an accumulated history without changing its content", async () => {
+    const prior = seedYDocFromPrompt(PROMPT);
+    appendPromptSessions(prior, RESIDUE_SESSIONS);
+    expect(encodeStateVector(prior).byteLength).toBeGreaterThan(2 << 10);
+    const before = contentSignature(prior);
+    const priorBytes = encodeStateAsUpdate(prior).byteLength;
+
+    const go = harness((path, body) =>
+      path === LOAD_PATH ? { json: committedLoad(prior) } : { json: rebaseOk(body) },
+    );
+    const persistence = new CoeditPersistence(go.client);
+    const document = new Y.Doc();
+    const accepted = compactionCount("accepted");
+
+    await persistence.load({ documentName: DOCUMENT_NAME, document, context: {} });
+
+    expect(compactionCount("accepted")).toBe(accepted + 1);
+    // The content is the same by the service's own projection, which is the
+    // boundary Go materializes and the browser reads back.
+    expect(contentSignature(document)).toBe(before);
+    expect(document.getXmlFragment("prompt").length).toBeGreaterThan(0);
+    // The vector is the point: it collapses to this rebuild's single author.
+    expect(encodeStateVector(document).byteLength).toBeLessThan(16);
+    expect(encodeStateAsUpdate(document).byteLength).toBeLessThan(priorBytes);
+    // Compaction uses the dedicated durable rebase boundary, not an ordinary
+    // store or an in-memory-only replacement.
+    expect(go.callsTo(INITIALIZE_PATH)).toHaveLength(0);
+    expect(go.callsTo(STORE_PATH)).toHaveLength(0);
+    expect(go.callsTo(REBASE_PATH)).toHaveLength(1);
+    expect(persistence.lastCommit(DOCUMENT_NAME)?.stateEpoch).toBe("1");
+  });
+
+  it("rebuilds a workspace room from its own workspace projection", async () => {
+    const prior = workspaceRoom(RESIDUE_SESSIONS, JSON.stringify({ ok: true }));
+    expect(encodeStateVector(prior).byteLength).toBeGreaterThan(2 << 10);
+    const before = contentSignature(prior);
+
+    const go = harness((path, body) =>
+      path === LOAD_PATH
+        ? { json: committedLoad(prior, WORKSPACE_DOCUMENT_NAME) }
+        : { json: rebaseOk(body) },
+    );
+    const persistence = new CoeditPersistence(go.client);
+    const document = new Y.Doc();
+
+    await persistence.load({ documentName: WORKSPACE_DOCUMENT_NAME, document, context: {} });
+
+    expect(contentSignature(document)).toBe(before);
+    expect(encodeStateVector(document).byteLength).toBeLessThan(16);
+    // Both halves of a workspace room survive: the scalar map, the rich root.
+    expect(document.getMap("workspace").get("question/q1/scalar")).toBe(
+      JSON.stringify({ questionType: "mcq" }),
+    );
+    expect(document.getXmlFragment(`${RICH_ROOT_PREFIX}question/q1/prompt`).length).toBeGreaterThan(0);
+    expect(go.callsTo(REBASE_PATH)).toHaveLength(1);
+  });
+
+  it("keeps the committed binary when the projection cannot rebuild it exactly", async () => {
+    // A scalar the projection deliberately drops (it is not JSON): the browser
+    // can still see it, so compaction must refuse rather than rewrite the room
+    // without it.
+    const prior = workspaceRoom(RESIDUE_SESSIONS, "not json");
+    const vectorBytes = encodeStateVector(prior).byteLength;
+    const priorBytes = encodeStateAsUpdate(prior).byteLength;
+    const go = harness((path) => ({
+      json: committedLoad(prior, WORKSPACE_DOCUMENT_NAME),
+    }));
+    const persistence = new CoeditPersistence(go.client);
+    const document = new Y.Doc();
+    const skipped = compactionCount("skipped");
+
+    await persistence.load({ documentName: WORKSPACE_DOCUMENT_NAME, document, context: {} });
+
+    expect(compactionCount("skipped")).toBe(skipped + 1);
+    expect(document.getMap("workspace").get("question/q1/raw")).toBe("not json");
+    expect(encodeStateVector(document).byteLength).toBe(vectorBytes);
+    expect(encodeStateAsUpdate(document).byteLength).toBe(priorBytes);
+  });
+
+  it("keeps the original binary when durable rebase fails", async () => {
+    const prior = seedYDocFromPrompt(PROMPT);
+    appendPromptSessions(prior, RESIDUE_SESSIONS);
+    const priorVector = encodeStateVector(prior);
+    const go = harness((path) =>
+      path === LOAD_PATH
+        ? { json: committedLoad(prior) }
+        : { status: 503, json: { error: { code: "service_unavailable" } } },
+    );
+    const persistence = new CoeditPersistence(go.client);
+    const document = new Y.Doc();
+
+    await persistence.load({ documentName: DOCUMENT_NAME, document, context: {} });
+
+    expect(go.callsTo(REBASE_PATH)).toHaveLength(1);
+    expect(encodeStateVector(document)).toEqual(priorVector);
+    expect(persistence.lastCommit(DOCUMENT_NAME)?.stateHash).toBe("committed-hash");
+  });
+
+  it("leaves a room below the threshold untouched", async () => {
+    const prior = seedYDocFromPrompt(PROMPT);
+    appendPromptSessions(prior, 3);
+    const go = harness(() => ({ json: committedLoad(prior) }));
+    const persistence = new CoeditPersistence(go.client);
+    const document = new Y.Doc();
+    const accepted = compactionCount("accepted");
+    const skipped = compactionCount("skipped");
+
+    await persistence.load({ documentName: DOCUMENT_NAME, document, context: {} });
+
+    expect(compactionCount("accepted")).toBe(accepted);
+    expect(compactionCount("skipped")).toBe(skipped);
+    expect(encodeStateVector(document).byteLength).toBe(encodeStateVector(prior).byteLength);
+  });
+});
+
 describe("CoeditPersistence.store", () => {
   it("sends the previous committed hash and broadcasts a stateless acknowledgement", async () => {
-    const go = harness((_path, body) => ({ json: storeOk(String(body["stateHash"]), 6) }));
+    // The commit sequence is the ordering fact the browser uses when a
+    // materialized revision cannot: two UI-only commits share a revision, so an
+    // acknowledgement without the sequence would leave the newer one
+    // indistinguishable from the older.
+    const go = harness((_path, body) => ({
+      json: storeOk(String(body["stateHash"]), 6, { commitSequence: "7", stateEpoch: "3" }),
+    }));
     const persistence = new CoeditPersistence(go.client);
     const document = seedYDocFromPrompt(PROMPT);
     const acks: Array<{ name: string; payload: CoeditAckPayload }> = [];
@@ -187,11 +422,18 @@ describe("CoeditPersistence.store", () => {
     expect(call?.body["actorId"]).toBe("actor-2");
     expect(String(call?.body["stateHash"])).toBe(currentStateHash(document));
     expect(commit.stateHash).toBe(currentStateHash(document));
+    expect(commit.stateVector).toBe(toBase64(encodeStateVector(document)));
     expect(commit.materializedRevision).toBe(6);
     expect(acks).toHaveLength(1);
     expect(acks[0]?.payload.type).toBe("coedit.ack");
     expect(acks[0]?.payload.stateHash).toBe(commit.stateHash);
+    // The acknowledgement carries the state itself, not only its provenance
+    // hash: that is the identity the browser compares against.
+    expect(acks[0]?.payload.stateVector).toBe(commit.stateVector);
     expect(acks[0]?.payload.questionRevision).toBe(6);
+    expect(acks[0]?.payload.materializedRevision).toBe(6);
+    expect(acks[0]?.payload.commitSequence).toBe("7");
+    expect(acks[0]?.payload.stateEpoch).toBe("3");
   });
 
   it("never converts a failed store into a saved acknowledgement", async () => {
@@ -212,6 +454,25 @@ describe("CoeditPersistence.store", () => {
       requiresResync: false,
     });
     expect(persistence.lastCommit(DOCUMENT_NAME)).toBeNull();
+  });
+
+  it("does not acknowledge a store when the durable hash is not the current document", async () => {
+    const go = harness((_path, body) => ({ json: storeOk("not-the-current-state") }));
+    const persistence = new CoeditPersistence(go.client);
+    const frames: string[] = [];
+    persistence.setBroadcaster((_name, payload) => frames.push(payload));
+
+    await expect(
+      persistence.store({ documentName: DOCUMENT_NAME, document: seedYDocFromPrompt(PROMPT), context: {} }),
+    ).rejects.toThrow("coedit_commit_state_mismatch");
+
+    expect(persistence.lastCommit(DOCUMENT_NAME)).toBeNull();
+    expect(JSON.parse(frames[0] as string)).toMatchObject({
+      type: "coedit.save_failed",
+      retryable: true,
+      reason: null,
+      requiresResync: false,
+    });
   });
 
   it("marks a moved-commit refusal as non-retryable and resync-required", async () => {
@@ -289,6 +550,35 @@ describe("CoeditPersistence.store", () => {
       persistence.store({ documentName: DOCUMENT_NAME, document, context: {} }),
     ).rejects.toThrow(/size limit/);
     expect(go.callsTo(STORE_PATH)).toHaveLength(0);
+  });
+
+  it("announces a size refusal instead of leaving the author with an unsaved draft", async () => {
+    // The refusal is raised here, before Go is called, so nothing else can tell
+    // the browser: without this frame the local content is simply never durable.
+    const go = harness((_path, body) => ({ json: storeOk(String(body["stateHash"])) }));
+    const persistence = new CoeditPersistence(go.client);
+    const frames: string[] = [];
+    persistence.setBroadcaster((_name, payload) => frames.push(payload));
+    const document = seedYDocFromPrompt({
+      version: 2,
+      nodes: [],
+      document: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "y".repeat(1_100_000) }] }],
+      },
+    });
+
+    await expect(
+      persistence.store({ documentName: DOCUMENT_NAME, document, context: {} }),
+    ).rejects.toThrow(/size limit/);
+
+    expect(JSON.parse(frames[0] as string)).toEqual({
+      type: "coedit.save_failed",
+      documentName: DOCUMENT_NAME,
+      retryable: false,
+      reason: "coedit_oversized",
+      requiresResync: false,
+    });
   });
 
   it("forgets a closed room's commit record", async () => {

@@ -7,9 +7,19 @@ import { SatPresenceSurface } from "../motion/SatPresenceSurface";
 
 export const SAT_COMPACT_POPOVER_QUERY = "(max-width: 720px), (max-height: 560px)";
 
+/** Focusable chrome: an outside press on one of these legitimately moves focus. */
+const SAT_INTERACTIVE_SELECTOR =
+  'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
 export interface SatPopoverShellProps {
   open: boolean;
   title: string;
+  /**
+   * Public id for the dialog root element. Triggers must point aria-controls
+   * at THIS element (the role=dialog root), never at an inner scroll body —
+   * and only while the dialog is mounted.
+   */
+  panelId?: string;
   /** Accessible name for the dialog (defaults to title). */
   ariaLabel?: string;
   triggerRef: RefObject<HTMLButtonElement | null>;
@@ -87,6 +97,17 @@ export function SatPopoverShell(props: SatPopoverShellProps): React.JSX.Element 
       if (!(target instanceof Node)) return;
       if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
       onClose();
+      // Outside press on non-interactive chrome: the browser blurs the active
+      // element to <body>, which strands a keyboard user. Presses on another
+      // control keep their own focus; everything else returns to the trigger
+      // (deferred past the native focus change, so it is not overwritten).
+      const pressedInteractive =
+        target instanceof HTMLElement && target.closest(SAT_INTERACTIVE_SELECTOR) !== null;
+      if (pressedInteractive) return;
+      const returnTarget = triggerRef.current;
+      window.requestAnimationFrame(() => {
+        if (returnTarget?.isConnected) returnTarget.focus();
+      });
     };
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("pointerdown", handlePointerDown);
@@ -104,6 +125,7 @@ export function SatPopoverShell(props: SatPopoverShellProps): React.JSX.Element 
     <SatPresenceSurface
       offsetY={compact ? 6 : 3}
       ref={panelRef}
+      id={props.panelId}
       role="dialog"
       aria-modal={compact ? true : undefined}
       aria-label={props.ariaLabel ?? props.title}

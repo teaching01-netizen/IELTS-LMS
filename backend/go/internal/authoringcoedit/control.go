@@ -17,6 +17,7 @@ import (
 const (
 	ControlPathFreeze   = "/control/freeze"
 	ControlPathUnfreeze = "/control/unfreeze"
+	ControlPathRenew    = "/control/renew"
 	ControlPathFlush    = "/control/flush"
 	ControlPathClose    = "/control/close"
 	ControlPathHealthz  = "/healthz"
@@ -27,40 +28,61 @@ const (
 // FreezeRequest asks the service to make the listed rooms read-only, flush
 // provider output, run every pending store hook, and return a manifest.
 type FreezeRequest struct {
-	DocumentNames  []string `json:"documentNames"`
-	DraftVersionID string   `json:"draftVersionId"`
-	Reason         string   `json:"reason"`
+	DocumentNames     []string `json:"documentNames"`
+	DraftVersionID    string   `json:"draftVersionId"`
+	Reason            string   `json:"reason"`
+	FreezeOperationID string   `json:"freezeOperationId,omitempty"`
+	FreezeExpiresAt   int64    `json:"freezeExpiresAt,omitempty"`
 }
 
 // FreezeManifestEntry is one document's committed state as the service last
 // acknowledged it. Go verifies every hash against MySQL before publishing.
 type FreezeManifestEntry struct {
-	DocumentName         string `json:"documentName"`
-	StateHash            string `json:"stateHash"`
-	MaterializedRevision int    `json:"materializedRevision"`
-	QuestionRevision     int    `json:"questionRevision"`
+	DocumentName         string        `json:"documentName"`
+	StateHash            string        `json:"stateHash"`
+	MaterializedRevision int           `json:"materializedRevision"`
+	QuestionRevision     int           `json:"questionRevision"`
+	StateEpoch           DecimalString `json:"stateEpoch,omitempty"`
+	CommitSequence       DecimalString `json:"commitSequence,omitempty"`
+	WorkspaceRevision    int           `json:"workspaceRevision,omitempty"`
 }
 
 // FreezeResponse carries the lease token and the committed manifest.
 type FreezeResponse struct {
-	FreezeToken string                `json:"freezeToken"`
-	Manifest    []FreezeManifestEntry `json:"manifest"`
+	FreezeToken       string                `json:"freezeToken"`
+	FreezeOperationID string                `json:"freezeOperationId,omitempty"`
+	FreezeExpiresAt   int64                 `json:"freezeExpiresAt,omitempty"`
+	Manifest          []FreezeManifestEntry `json:"manifest"`
 }
 
 // UnfreezeRequest releases a freeze lease early (publish failure paths).
 type UnfreezeRequest struct {
-	FreezeToken string `json:"freezeToken"`
+	FreezeToken       string `json:"freezeToken"`
+	FreezeOperationID string `json:"freezeOperationId,omitempty"`
 }
 
-// FlushRequest forces pending store hooks to run without freezing.
+// RenewRequest extends one operation-owned service lease. The durable Go
+// rows are renewed by the orchestration layer before this call, so a failed
+// service renewal leaves the rooms fenced rather than reopening them.
+type RenewRequest struct {
+	FreezeToken       string `json:"freezeToken"`
+	FreezeOperationID string `json:"freezeOperationId,omitempty"`
+	FreezeExpiresAt   int64  `json:"freezeExpiresAt,omitempty"`
+}
+
+// FlushRequest forces pending store hooks to run. When a freeze operation ID
+// is present, the service must use its operation-owned final-store path rather
+// than an ordinary store; this prevents a stale room from crossing the fence.
 type FlushRequest struct {
-	DocumentNames []string `json:"documentNames"`
+	DocumentNames     []string `json:"documentNames"`
+	FreezeOperationID string   `json:"freezeOperationId,omitempty"`
 }
 
 // CloseRequest closes rooms with a closed-vocabulary reason.
 type CloseRequest struct {
-	DocumentNames []string `json:"documentNames"`
-	Reason        string   `json:"reason"`
+	DocumentNames     []string `json:"documentNames"`
+	Reason            string   `json:"reason"`
+	FreezeOperationID string   `json:"freezeOperationId,omitempty"`
 }
 
 // ControlClient is the Go-side client for the private control API. It is
@@ -118,7 +140,14 @@ func (c *ControlClient) Unfreeze(ctx context.Context, req UnfreezeRequest) error
 	return c.do(ctx, http.MethodPost, ControlPathUnfreeze, req, nil)
 }
 
-// Flush forces pending stores to run (shutdown and drain paths).
+// Renew extends a freeze lease without retrying. The caller owns the failure
+// policy and must keep the durable rows fenced if this call fails.
+func (c *ControlClient) Renew(ctx context.Context, req RenewRequest) error {
+	return c.do(ctx, http.MethodPost, ControlPathRenew, req, nil)
+}
+
+// Flush forces pending stores to run (shutdown and drain paths). An operation
+// ID makes a fenced flush a final-store request at the service boundary.
 func (c *ControlClient) Flush(ctx context.Context, req FlushRequest) error {
 	return c.do(ctx, http.MethodPost, ControlPathFlush, req, nil)
 }
@@ -195,7 +224,7 @@ func SanitizeDocumentNames(raw []string) ([]string, error) {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(raw))
 	for _, candidate := range raw {
-		name, _, err := ParseDocumentName(candidate)
+		name, _, _, err := ParseAnyDocumentName(candidate)
 		if err != nil {
 			return nil, New(CodeServiceUnavailable, "Co-editing document name is invalid.")
 		}

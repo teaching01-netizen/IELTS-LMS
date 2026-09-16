@@ -4,6 +4,7 @@ import { SkipFurtherHooksError } from "@hocuspocus/common";
 import {
   OutgoingMessage,
   Server,
+  type Connection,
   type Extension,
   type onAuthenticatePayload,
   type onConnectPayload,
@@ -12,20 +13,36 @@ import {
   type onStoreDocumentPayload,
   type onTokenSyncPayload,
 } from "@hocuspocus/server";
+import { prosemirrorJSONToYXmlFragment } from "y-prosemirror";
+import * as Y from "yjs";
 import { authorizeDocument, TokenError, verifyToken, type TokenClaims } from "./authToken.js";
 import { ConfigError, loadConfig, singletonLockName, type CoeditServiceConfig } from "./config.js";
 import { FIELD_SET_WORKSPACE, MAX_FRAME_BYTES, parseAnyDocumentName } from "./documentIdentity.js";
-import { encodeStateAsUpdate } from "./documentCodec.js";
+import {
+  COEDIT_OVERSIZED_REASON,
+  encodeStateAsUpdate,
+  promptSchema,
+  RICH_ROOT_PREFIX,
+} from "./documentCodec.js";
 import { GoAuthoringClient } from "./goAuthoringClient.js";
 import {
   CONTROL_PATHS,
   LifecycleController,
   type CoeditConnectionContext,
 } from "./lifecycleControl.js";
-import { CoeditPersistence } from "./persistence.js";
+import { CoeditPersistence, type CoeditLoadMetadata } from "./persistence.js";
 import { SingletonLock } from "./singletonLock.js";
 import { log, metrics } from "./telemetry.js";
-import { parseWorkspaceCommand } from "./workspaceCommands.js";
+import { documentFromStructuredContent } from "./richTextSchema.js";
+// The command-envelope vocabulary, builder, and validator are shared with the
+// browser package so the two halves of the relay cannot disagree about what a
+// command is. The service imports the browser module the same way it already
+// imports the browser's rich-text schema.
+import { parseSatWorkspaceCommand } from "../../../src/features/exam-authoring/realtime/coedit/workspaceCommands.js";
+import {
+  parseWorkspaceSeedFrame,
+  type WorkspaceSeedFrame,
+} from "../../../src/features/exam-authoring/realtime/coedit/workspaceSeed.js";
 
 /**
  * Co-edit service process.
@@ -36,8 +53,44 @@ import { parseWorkspaceCommand } from "./workspaceCommands.js";
  * the flush deadline expires.
  */
 export const CONTROL_REQUEST_TIMEOUT_MS = 15_000;
+/** Bounds on the durable-seed ledger: ids only, never content. */
+export const MAX_APPLIED_SEEDS_PER_ROOM = 512;
+export const MAX_SEED_LEDGER_ROOMS = 128;
 export const MAX_UNAUTHENTICATED_QUEUE_BYTES = MAX_FRAME_BYTES * 4;
 export const TOKEN_REFRESH_INTERVAL_MS = 60_000;
+
+/**
+ * Refusal reason sent when the room refused a write outright rather than
+ * failing to persist it (see the `beforeSync` hook below). Mirrored by the
+ * browser package's contracts: the wire string is the shared vocabulary, so
+ * neither side may invent its own.
+ */
+export const COEDIT_WRITE_REFUSED_REASON = "coedit_write_refused";
+
+export {
+  /**
+   * Re-exported so the store path and the browser share one string for the
+   * size refusal; `CodecError.reason` carries it onto the wire.
+   */
+  COEDIT_OVERSIZED_REASON,
+};
+
+/**
+ * y-protocols/sync message types that carry client CONTENT (y-protocols@1.0.7:
+ * 0 = sync step 1, 1 = sync step 2, 2 = update). Step 1 carries only a state
+ * vector, so refusing it would announce a refusal that did not happen.
+ */
+const SYNC_STEP_TWO = 1;
+const SYNC_UPDATE = 2;
+
+/** A refusal the author must be told about, in the existing failure frame. */
+interface CoeditRefusalFrame {
+  type: "coedit.save_failed";
+  documentName: string;
+  retryable: boolean;
+  reason: string | null;
+  requiresResync: boolean;
+}
 const STATE_SIZE_BUCKETS = [4 << 10, 16 << 10, 64 << 10, 256 << 10, 1 << 20, 2 << 20, 4 << 20];
 const RETRYABLE_CLOSE = { code: 1012, reason: "coedit_service_restart" };
 const PERMISSION_DENIED = { code: 4403, reason: "permission-denied" };
@@ -48,6 +101,7 @@ export const CONTROL_REQUEST_PATHS = new Set<string>([
   CONTROL_PATHS.metrics,
   CONTROL_PATHS.freeze,
   CONTROL_PATHS.unfreeze,
+  CONTROL_PATHS.renew,
   CONTROL_PATHS.flush,
   CONTROL_PATHS.close,
 ]);
@@ -85,7 +139,27 @@ export class CoeditService {
   private shuttingDown = false;
   private listening = false;
   private lockLost = false;
-  private readonly pendingTokenSync = new Map<string, number>();
+  /**
+   * Connections awaiting an answer to a token refresh, keyed by document and
+   * socket.
+   *
+   * Membership IS the deadline: a key that is still present at the next tick
+   * means that connection ignored the previous request. A stored timestamp
+   * was carried here before and never read — the interval already is the
+   * deadline, so a second clock could only drift from it.
+   */
+  private readonly pendingTokenSync = new Set<string>();
+  private readonly seedOperations = new Map<string, Promise<void>>();
+  /**
+   * Seed ids whose proposal became durable content, keyed by document name.
+   *
+   * This is what makes a duplicate seed request idempotent instead of a second
+   * arbitration: the id is the deterministic fingerprint of the proposal, so a
+   * retry of the exact same frame is recognizable. Recorded only AFTER the
+   * store succeeds — an applied-then-unpersisted proposal must be allowed to
+   * apply again if the room reloads without it.
+   */
+  private readonly appliedSeeds = new Map<string, Set<string>>();
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: CoeditServiceConfig, deps: CoeditServiceDeps = {}) {
@@ -218,6 +292,11 @@ export class CoeditService {
     })();
     const outcome = await Promise.race([drain, deadline]);
     if (outcome === "timeout") {
+      // The stores themselves are counted by flushAllForShutdown (the store
+      // dimension). This increment is the deadline dimension, so it is the
+      // only one that may be added here: counting `accepted` unconditionally
+      // after this branch reported a breach made every timed-out shutdown
+      // report success as well as failure.
       metrics.incCounter("authoring_coedit_shutdown_flush_total", { outcome: "rejected" });
       log("error", "authoring-coedit shutdown deadline exceeded", {
         event: "shutdown",
@@ -225,7 +304,6 @@ export class CoeditService {
         outcome: "rejected",
       });
     }
-    metrics.incCounter("authoring_coedit_shutdown_flush_total", { outcome: "accepted" });
     return outcome;
   }
 
@@ -264,7 +342,7 @@ export class CoeditService {
           connection.close({ code: 4401, reason: "token-refresh-missing" });
           continue;
         }
-        this.pendingTokenSync.set(key, this.now());
+        this.pendingTokenSync.add(key);
         connection.requestToken();
       }
     }
@@ -327,10 +405,23 @@ export class CoeditService {
           throw permissionDenied(error);
         }
         const name = claims.documentName;
-        if (this.lifecycle.isClosed(name)) {
+        let durable: CoeditLoadMetadata;
+        try {
+          durable = await this.persistence.preloadLifecycle(name);
+          this.lifecycle.hydrateDurableState(name, durable);
+        } catch (error) {
+          metrics.incCounter("authoring_coedit_auth_total", { outcome: "unavailable" });
+          throw permissionDenied(error);
+        }
+        if (this.lifecycle.isClosed(name) || durable.lifecycleState === "closed") {
           metrics.incCounter("authoring_coedit_auth_total", { outcome: "closed" });
           throw permissionDenied(new TokenError("Co-edit document is closed."));
         }
+        if (claims.mode === "write" && this.lifecycle.isReadOnly(name)) {
+          metrics.incCounter("authoring_coedit_auth_total", { outcome: "frozen" });
+          throw permissionDenied(new TokenError("Co-edit document is read-only during its lifecycle transition."));
+        }
+        if (this.server.hocuspocus.documents.has(name)) this.persistence.discardPreloaded(name);
         // Only server-signed identity reaches the connection context. A client
         // cannot nominate its own name, actor id, mode, or document.
         context.actorId = claims.actorId;
@@ -341,7 +432,7 @@ export class CoeditService {
         context["fieldSet"] = claims.fieldSet ?? parseAnyDocumentName(name)?.fieldSet ?? "prompt";
         // Mutating connectionConfig is what Hocuspocus reads when it builds the
         // connection, so a read token is genuinely read-only below the hooks.
-        connectionConfig.readOnly = claims.mode === "read";
+        connectionConfig.readOnly = claims.mode === "read" || this.lifecycle.isReadOnly(name);
         metrics.incCounter("authoring_coedit_auth_total", {
           outcome: "accepted",
           mode: claims.mode,
@@ -373,8 +464,23 @@ export class CoeditService {
         if (claims.mode !== context.mode || claims.actorId !== context.actorId) {
           throw permissionDenied(new TokenError("Co-edit token refresh changed identity."));
         }
-        connectionConfig.readOnly = claims.mode === "read";
-        connection.readOnly = claims.mode === "read";
+        let durable: CoeditLoadMetadata;
+        try {
+          durable = await this.persistence.preloadLifecycle(documentName);
+          this.lifecycle.hydrateDurableState(documentName, durable);
+        } catch (error) {
+          throw permissionDenied(error);
+        } finally {
+          if (this.server.hocuspocus.documents.has(documentName)) this.persistence.discardPreloaded(documentName);
+        }
+        if (this.lifecycle.isClosed(documentName) || durable.lifecycleState === "closed") {
+          throw permissionDenied(new TokenError("Co-edit document is closed."));
+        }
+        if (claims.mode === "write" && this.lifecycle.isReadOnly(documentName)) {
+          throw permissionDenied(new TokenError("Co-edit document is read-only during its lifecycle transition."));
+        }
+        connectionConfig.readOnly = claims.mode === "read" || this.lifecycle.isReadOnly(documentName);
+        connection.readOnly = connectionConfig.readOnly;
         context.displayName = claims.displayName;
       },
 
@@ -386,9 +492,10 @@ export class CoeditService {
 
       connected: async ({ documentName, connection }) => {
         // Loading an already committed document (including the first seed) is
-        // itself durable. Send that exact hash to the new connection so the
+        // itself durable. Send that exact state to the new connection so the
         // browser can render Saved without waiting for an unrelated edit to
         // trigger the first store acknowledgement.
+        //
         const commit = this.persistence.lastCommit(documentName);
         if (!commit) return;
         connection.send(
@@ -397,9 +504,13 @@ export class CoeditService {
               JSON.stringify({
                 type: "coedit.ack",
                 documentName,
+                stateVector: commit.stateVector,
                 stateHash: commit.stateHash,
                 questionRevision: commit.questionRevision,
                 materializedRevision: commit.materializedRevision,
+                ...(commit.stateEpoch === undefined ? {} : { stateEpoch: commit.stateEpoch }),
+                ...(commit.commitSequence === undefined ? {} : { commitSequence: commit.commitSequence }),
+                ...(commit.workspaceRevision === undefined ? {} : { workspaceRevision: commit.workspaceRevision }),
               }),
             )
             .toUint8Array(),
@@ -413,10 +524,74 @@ export class CoeditService {
        */
       onStateless: async ({ documentName, document, connection, payload }) => {
         if (parseAnyDocumentName(documentName)?.fieldSet !== FIELD_SET_WORKSPACE) return;
-        if (connection.readOnly || this.lifecycle.isClosed(documentName) || this.lifecycle.isFrozen(documentName)) return;
-        const command = parseWorkspaceCommand(payload, documentName, connection.context.actorId);
+        const seed = parseWorkspaceSeedFrame(payload, { documentName });
+        if (seed) {
+          if (!this.maySeed(documentName, connection)) {
+            metrics.incCounter("authoring_coedit_seed_total", { outcome: "rejected" });
+            log("warn", "co-edit workspace seed refused", {
+              event: "seed",
+              outcome: "rejected",
+              stage: "store",
+              reason: "other",
+            });
+            return;
+          }
+          await this.applyWorkspaceSeed(documentName, document, connection, seed);
+          return;
+        }
+        if (connection.readOnly || this.lifecycle.isReadOnly(documentName)) return;
+        const command = parseSatWorkspaceCommand(payload, {
+          documentName,
+          // The signed identity, not something the browser asserted: a relayed
+          // notification must come from the actor it claims.
+          ...(connection.context.actorId ? { actorId: connection.context.actorId } : {}),
+        });
         if (!command) return;
         document.broadcastStateless(JSON.stringify(command));
+      },
+
+      /**
+       * Announces a refused write.
+       *
+       * A read-only connection's updates are dropped by Hocuspocus with a
+       * SyncStatus frame carrying `applied: false`, and the browser's provider
+       * only reacts to `applied: true` — it decrements its unsynced counter and
+       * otherwise ignores the frame. So an author whose room went read-only
+       * (a publish freeze marks every connection read-only) is left holding
+       * content the server never applied, with a save status that never leaves
+       * Syncing and no way to learn why. This hook runs BEFORE that guard, so
+       * the refusal is announced in the failure vocabulary the editor already
+       * has, which turns it into the export recovery instead of a dead end.
+       *
+       * Only `connection.readOnly` is treated as a refusal, because that is
+       * exactly when Hocuspocus refuses: a frozen room whose connection is
+       * still writable accepts the update and fails the STORE instead, and that
+       * path already reports itself.
+       */
+      beforeSync: async ({ connection, documentName, type }) => {
+        if (!connection.readOnly) return;
+        if (type !== SYNC_STEP_TWO && type !== SYNC_UPDATE) return;
+        const frame: CoeditRefusalFrame = {
+          type: "coedit.save_failed",
+          documentName,
+          // A verbatim retry cannot succeed: the connection is read-only until
+          // the room changes lifecycle, so the client is told to export rather
+          // than to loop.
+          retryable: false,
+          reason: COEDIT_WRITE_REFUSED_REASON,
+          requiresResync: false,
+        };
+        try {
+          connection.send(
+            new OutgoingMessage(connection.messageAddress)
+              .writeStateless(JSON.stringify(frame))
+              .toUint8Array(),
+          );
+          metrics.incCounter("authoring_coedit_store_total", { outcome: "rejected" });
+        } catch {
+          // A connection that cannot be told recovers on its next reconnect,
+          // which performs the same handshake against the current room state.
+        }
       },
 
       onDisconnect: async ({
@@ -432,7 +607,11 @@ export class CoeditService {
         document,
         context,
       }: onLoadDocumentPayload<CoeditConnectionContext>) => {
-        await this.persistence.load({ documentName, document, context });
+        const metadata = await this.persistence.load({ documentName, document, context });
+        this.lifecycle.hydrateDurableState(documentName, metadata);
+        if (context.mode === "write" && this.lifecycle.isReadOnly(documentName)) {
+          throw new Error("coedit_document_frozen");
+        }
         this.refreshGauges();
       },
 
@@ -444,7 +623,7 @@ export class CoeditService {
         if (this.lifecycle.isClosed(documentName)) {
           throw new Error("coedit_document_closed");
         }
-        if (this.lifecycle.isFrozen(documentName)) {
+        if (this.lifecycle.isReadOnly(documentName)) {
           log("warn", "co-edit store refused while frozen", {
             event: "store_refused",
             outcome: "frozen",
@@ -499,6 +678,137 @@ export class CoeditService {
     if (origin !== allowed) {
       log("warn", "co-edit origin rejected", { event: "auth", outcome: "rejected", reason: "client" });
       throw permissionDenied(new TokenError("Co-edit origin is not allowed."));
+    }
+  }
+
+  /**
+   * A seed is a write, so it must satisfy both write facts: the connection must
+   * not be read-only (its token was minted for `write` and the room is not
+   * frozen), and the SIGNED mode on the connection context — derived during
+   * `onAuthenticate` from the token, never from the browser — must say write.
+   * Checking the context too is what keeps a refreshed read token from turning
+   * into a seeder: the transport flag alone is a mirror, not the authority.
+   */
+  private maySeed(documentName: string, connection: Connection<CoeditConnectionContext>): boolean {
+    return (
+      !connection.readOnly &&
+      connection.context.mode === "write" &&
+      !this.lifecycle.isReadOnly(documentName)
+    );
+  }
+
+  /** Applies one authenticated seed proposal while holding the field lock. */
+  private async applyWorkspaceSeed(
+    documentName: string,
+    document: Y.Doc,
+    connection: Connection<CoeditConnectionContext>,
+    seed: WorkspaceSeedFrame,
+  ): Promise<void> {
+    // One lock per document + root, so two proposals for the SAME root are
+    // serialized while proposals for different roots still make progress
+    // together. "Root already has content" is only decidable inside that
+    // serialization: outside it, both writers read the empty root and both
+    // apply.
+    const lockKey = `${documentName}\u0000${seed.root}\u0000${seed.path}`;
+    await this.withSeedOperation(lockKey, async () => {
+      const durablyApplied = this.appliedSeeds.get(documentName);
+      if (durablyApplied?.has(seed.seedId)) {
+        // The same proposal already became durable content. It is neither a
+        // second author nor a conflict, and re-applying it could only re-derive
+        // the state the store already holds.
+        metrics.incCounter("authoring_coedit_seed_total", { outcome: "duplicate" });
+        return;
+      }
+      if (seed.root === "scalar") {
+        const root = document.getMap<unknown>(FIELD_SET_WORKSPACE);
+        if (root.has(seed.path)) {
+          metrics.incCounter("authoring_coedit_seed_total", { outcome: "conflict" });
+          return;
+        }
+        document.transact(() => {
+          root.set(seed.path, JSON.stringify(seed.value));
+        }, "coedit-seed");
+      } else {
+        const fragment = document.getXmlFragment(`${RICH_ROOT_PREFIX}${seed.path}`);
+        if (fragment.length > 0) {
+          metrics.incCounter("authoring_coedit_seed_total", { outcome: "conflict" });
+          return;
+        }
+        prosemirrorJSONToYXmlFragment(
+          promptSchema(),
+          documentFromStructuredContent(
+            seed.value as Parameters<typeof documentFromStructuredContent>[0],
+          ),
+          fragment,
+        );
+      }
+      // A seed is not acknowledged merely because it entered the live Y.Doc.
+      // Store it through the same hash-checked path before treating it as
+      // accepted; a failure leaves the document dirty for Hocuspocus retry.
+      await this.persistence.store({
+        documentName,
+        document,
+        context: connection.context,
+      });
+      this.recordAppliedSeed(documentName, seed.seedId);
+      metrics.incCounter("authoring_coedit_seed_total", { outcome: "accepted" });
+      log("info", "co-edit workspace seed accepted", {
+        event: "seed",
+        outcome: "accepted",
+        stage: "store",
+        mode: connection.context.mode,
+      });
+    }).catch((error) => {
+      metrics.incCounter("authoring_coedit_seed_total", { outcome: "rejected" });
+      log("warn", "co-edit workspace seed failed", {
+        event: "seed",
+        outcome: "rejected",
+        stage: "store",
+        reason: error instanceof Error ? error.message : "other",
+      });
+      throw error;
+    });
+  }
+
+  /**
+   * Remembers one durably applied seed id, bounded per room so a long-lived
+   * workspace cannot grow this ledger without limit. The oldest rooms are
+   * dropped first; a dropped entry only costs a re-arbitration of a proposal
+   * whose root is already populated, which still resolves to a conflict.
+   */
+  private recordAppliedSeed(documentName: string, seedId: string): void {
+    let applied = this.appliedSeeds.get(documentName);
+    if (!applied) {
+      applied = new Set<string>();
+      this.appliedSeeds.set(documentName, applied);
+    }
+    applied.add(seedId);
+    // A Set preserves insertion order, so the first key is the oldest proposal.
+    while (applied.size > MAX_APPLIED_SEEDS_PER_ROOM) {
+      const oldest = applied.values().next().value;
+      if (typeof oldest !== "string") break;
+      applied.delete(oldest);
+    }
+    while (this.appliedSeeds.size > MAX_SEED_LEDGER_ROOMS) {
+      const oldestRoom = this.appliedSeeds.keys().next().value;
+      if (typeof oldestRoom !== "string") break;
+      this.appliedSeeds.delete(oldestRoom);
+    }
+  }
+
+  private async withSeedOperation<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.seedOperations.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.seedOperations.set(key, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      if (this.seedOperations.get(key) === current) this.seedOperations.delete(key);
+      release();
     }
   }
 }

@@ -1,39 +1,62 @@
 import { formatSatTime } from "../../domain/satTiming";
 import { SAT_COPY } from "../../domain/satCopy";
 
+/**
+ * Entry progress for the between-sections surface (Phase 4).
+ *
+ * The break countdown can legitimately read 0:00 while the server finishes the
+ * section advance, and the module only opens once that lands. Naming the entry
+ * state keeps the surface timer-first while refusing a frozen 0:00 with no
+ * explanation: "starting" is an attempt in flight, "retrying" is an attempt
+ * that settled without opening the module and will be tried again.
+ */
+export type SatBreakEntryProgress = "idle" | "starting" | "retrying";
+
 export function SatBreakScreen({
   nextSectionKey,
   remainingSeconds,
   onContinue,
   mode = "break",
+  entryProgress = "idle",
 }: {
   nextSectionKey: string;
   remainingSeconds: number;
   onContinue?: () => void;
   mode?: "waiting" | "break";
+  entryProgress?: SatBreakEntryProgress;
 }) {
   const waiting = mode === "waiting";
+  const destination = nextSectionKey === "math" ? "Math is next" : "Reading and Writing is next";
+  const progressLabel =
+    entryProgress === "starting"
+      ? SAT_COPY.transitions.startingNextSection
+      : entryProgress === "retrying"
+        ? SAT_COPY.transitions.retryingNextSection
+        : null;
+  const body =
+    entryProgress === "starting"
+      ? SAT_COPY.transitions.startingNextSectionBody
+      : entryProgress === "retrying"
+        ? SAT_COPY.transitions.retryingNextSectionBody
+        : waiting
+          ? "You finished early. The shared section clock is still running, so the break has not started yet."
+          : SAT_COPY.transitions.breakStartsAutomatically;
   return (
     <div className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] pl-[calc(1.25rem+var(--student-safe-left))] pr-[calc(1.25rem+var(--student-safe-right))] pt-[var(--student-safe-top)] pb-[var(--student-safe-bottom)] text-center text-[var(--sat-text)]">
       <main className="w-full max-w-lg border-y border-[var(--sat-divider)] py-10">
         <p className="text-[14px] font-semibold text-[var(--sat-text-secondary)]">
-          {waiting ? SAT_COPY.transitions.waitingForBreak : SAT_COPY.transitions.onBreak}
+          {progressLabel ??
+            (waiting ? SAT_COPY.transitions.waitingForBreak : SAT_COPY.transitions.onBreak)}
         </p>
         <p className="sat-tabular mt-4 text-5xl font-semibold" role="timer" aria-label={"Time remaining " + formatSatTime(remainingSeconds)}>
           {formatSatTime(remainingSeconds)}
         </p>
         <h1 className="mt-6 text-2xl font-semibold tracking-tight">
-          {waiting
-            ? "Scheduled break begins when this timer ends"
-            : nextSectionKey === "math"
-              ? "Math is next"
-              : "Reading and Writing is next"}
+          {/* The early-finish headline only holds while nothing is opening;
+              once entry is progressing the destination is the truth. */}
+          {waiting && !progressLabel ? "Scheduled break begins when this timer ends" : destination}
         </h1>
-        <p className="mt-3 text-[14px] leading-6 text-[var(--sat-text-secondary)]">
-          {waiting
-            ? "You finished early. The shared section clock is still running, so the break has not started yet."
-            : SAT_COPY.transitions.breakStartsAutomatically}
-        </p>
+        <p className="mt-3 text-[14px] leading-6 text-[var(--sat-text-secondary)]">{body}</p>
         <p className="mt-2 text-[14px] leading-6 text-[var(--sat-text-secondary)]">
           {SAT_COPY.transitions.nextOpensAutomatically} {SAT_COPY.transitions.stuckHelp}
         </p>

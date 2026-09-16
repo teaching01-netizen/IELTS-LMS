@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultConfig } from '../../../constants/examDefaults';
 import type { ExamState } from '../../../types';
@@ -393,5 +393,214 @@ describe('StudentWriting lifecycle durability', () => {
     expect(timer).toBeInTheDocument();
     expect(timer).toHaveTextContent('60:00');
     expect(editor).toHaveValue('Isolated draft');
+  });
+});
+
+/**
+ * Bug 2 preservation: freshness is decided by explicit task identity and the
+ * parent's acknowledgement, never by text length. Each case starts from a
+ * stale prop so a length heuristic would pick the wrong side.
+ */
+describe('StudentWriting draft reconciliation (Bug 2 preservation)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function baseProps(onWritingChange: (taskId: string, text: string) => void, currentQuestionId = 'task1') {
+    return {
+      state: createExamState(),
+      onWritingChange,
+      onSubmit: () => undefined,
+      currentQuestionId,
+      onNavigate: () => undefined,
+    };
+  }
+
+  it('commits a shorter focused correction at unmount despite a stale longer prop', () => {
+    vi.useFakeTimers();
+    const onWritingChange = vi.fn();
+    const props = baseProps(onWritingChange);
+    const view = render(<StudentWriting {...props} writingAnswers={{ task1: 'old long answer' }} />);
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+
+    fireEvent.focus(editor);
+    setWritingEditorText(editor, 'new');
+    view.rerender(<StudentWriting {...props} writingAnswers={{ task1: 'old long answer' }} />);
+
+    // The longer stale prop never replaces the retained native edit.
+    expect(editor).toHaveValue('new');
+    view.unmount();
+    expect(onWritingChange).toHaveBeenCalledWith('task1', 'new');
+  });
+
+  it('commits the retained shorter edit on blur despite a stale longer prop', () => {
+    const onWritingChange = vi.fn();
+    const props = baseProps(onWritingChange);
+    const view = render(<StudentWriting {...props} writingAnswers={{ task1: 'long stale answer' }} />);
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+
+    fireEvent.focus(editor);
+    setWritingEditorText(editor, 'short');
+    view.rerender(<StudentWriting {...props} writingAnswers={{ task1: 'long stale answer' }} />);
+    fireEvent.blur(editor);
+
+    expect(onWritingChange).toHaveBeenLastCalledWith('task1', 'short');
+    expect(editor).toHaveValue('short');
+  });
+
+  it('commits a delete-to-empty at unmount despite a stale prop holding the old answer', () => {
+    vi.useFakeTimers();
+    const onWritingChange = vi.fn();
+    const props = baseProps(onWritingChange);
+    const view = render(<StudentWriting {...props} writingAnswers={{ task1: 'previous answer' }} />);
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+
+    fireEvent.focus(editor);
+    setWritingEditorText(editor, '');
+    view.rerender(<StudentWriting {...props} writingAnswers={{ task1: 'previous answer' }} />);
+
+    expect(editor).toHaveValue('');
+    view.unmount();
+    expect(onWritingChange).toHaveBeenCalledWith('task1', '');
+  });
+
+  it('keeps a same-length local edit when a stale prop arrives while unfocused', () => {
+    vi.useFakeTimers();
+    const onWritingChange = vi.fn();
+    const props = baseProps(onWritingChange);
+    const view = render(<StudentWriting {...props} writingAnswers={{ task1: 'OLD' }} />);
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+
+    setWritingEditorText(editor, 'NEW');
+    view.rerender(<StudentWriting {...props} writingAnswers={{ task1: 'OLD' }} />);
+
+    // Equal length is neither older nor newer — the local edit stays.
+    expect(editor).toHaveValue('NEW');
+    vi.runAllTimers();
+    expect(onWritingChange).toHaveBeenCalledWith('task1', 'NEW');
+  });
+
+  it('keeps an append when a shorter stale prop arrives', () => {
+    const onWritingChange = vi.fn();
+    const props = baseProps(onWritingChange);
+    const view = render(<StudentWriting {...props} writingAnswers={{ task1: 'first' }} />);
+    const editor = screen.getByRole('textbox', { name: /writing response/i });
+
+    setWritingEditorText(editor, 'first and more');
+    view.rerender(<StudentWriting {...props} writingAnswers={{ task1: 'first' }} />);
+
+    expect(editor).toHaveValue('first and more');
+  });
+
+  it('treats the echoed prop as acknowledgement: no re-commit, no revert, no duplicate send', () => {
+    vi.useFakeTimers();
+    const commits: Array<[string, string]> = [];
+
+    function Harness() {
+      const [answers, setAnswers] = React.useState<Record<string, string>>({ task1: 'server value' });
+      return (
+        <StudentWriting
+          state={createExamState()}
+          writingAnswers={answers}
+          onWritingChange={(taskId, text) => {
+            commits.push([taskId, text]);
+            setAnswers((current) => ({ ...current, [taskId]: text }));
+          }}
+          onSubmit={() => undefined}
+          currentQuestionId="task1"
+          onNavigate={() => undefined}
+          showSubmitButton={false}
+        />
+      );
+    }
+
+    render(<Harness />);
+    const editor = screen.getByRole('textbox', { name: /writing response/i }) as HTMLTextAreaElement;
+    expect(editor.value).toBe('server value');
+
+    fireEvent.focus(editor);
+    setWritingEditorText(editor, 'correction');
+    fireEvent.blur(editor);
+    expect(commits).toEqual([['task1', 'correction']]);
+
+    vi.runAllTimers();
+    expect(commits).toEqual([['task1', 'correction']]);
+    expect(editor.value).toBe('correction');
+  });
+});
+
+/**
+ * Bug 4 preservation: the textarea is one uncontrolled node reused across
+ * tasks, so task identity is explicit — the outgoing task is committed under
+ * its own id, then the incoming task's text is loaded into the same editor even
+ * while it holds focus.
+ */
+describe('StudentWriting task identity (Bug 4 preservation)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('keeps each task answer under its own identity across a focused external switch', () => {
+    const exam = createExamState();
+    const commits: Array<[string, string]> = [];
+    let navigate: (taskId: string) => void = () => undefined;
+
+    function Harness() {
+      const [answers, setAnswers] = React.useState<Record<string, string>>({
+        task1: 'Answer one',
+        task2: 'Answer two',
+      });
+      const [currentTaskId, setCurrentTaskId] = React.useState('task1');
+      navigate = setCurrentTaskId;
+      return (
+        <StudentWriting
+          state={exam}
+          writingAnswers={answers}
+          onWritingChange={(taskId, text) => {
+            commits.push([taskId, text]);
+            setAnswers((current) => ({ ...current, [taskId]: text }));
+          }}
+          onSubmit={() => undefined}
+          currentQuestionId={currentTaskId}
+          onNavigate={setCurrentTaskId}
+        />
+      );
+    }
+
+    render(<Harness />);
+    const editor = screen.getByRole('textbox', { name: /writing response/i }) as HTMLTextAreaElement;
+    expect(editor.value).toBe('Answer one');
+
+    fireEvent.focus(editor);
+    setWritingEditorText(editor, 'Answer one revised');
+    // External navigation without a blur: the editor keeps the focus.
+    act(() => navigate('task2'));
+
+    // The switch loads Task 2's OWN text, and Task 1's edit was committed
+    // under Task 1 — never as Task 2's answer.
+    expect(editor.dataset.taskId).toBe('task2');
+    expect(editor.value).toBe('Answer two');
+    expect(commits).toEqual([['task1', 'Answer one revised']]);
+
+    // A further keystroke, then blur, stays on Task 2.
+    setWritingEditorText(editor, 'Answer two revised');
+    fireEvent.blur(editor);
+    expect(commits).toEqual([
+      ['task1', 'Answer one revised'],
+      ['task2', 'Answer two revised'],
+    ]);
+
+    // Submit review reads both tasks with their own values.
+    fireEvent.click(screen.getByRole('button', { name: /review & submit/i }));
+    const review = screen.getByRole('dialog');
+    expect(review).toHaveTextContent('Answer one revised');
+    expect(review).toHaveTextContent('Answer two revised');
+
+    // Returning to Task 1 restores its revision — and re-sends nothing.
+    act(() => navigate('task1'));
+    expect(editor.value).toBe('Answer one revised');
+    expect(commits).toHaveLength(2);
   });
 });

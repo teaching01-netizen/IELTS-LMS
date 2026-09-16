@@ -2,8 +2,10 @@ package authoringcoedit
 
 import "strings"
 
-// Env names as operators set them (documented in .env.example). The frontend
-// kill switch is VITE_AUTHORING_REALTIME_COEDITING; the server gates are:
+// Env names as operators set them (documented in .env.example). There is no
+// frontend kill switch: the browser posture is always on and the tokens it
+// needs are minted only when the server gates below admit the caller. The
+// server gates are:
 //
 //	AUTHORING_REALTIME_COEDITING        server capability (token issuance +
 //	                                    co-edit admission + legacy prompt guard)

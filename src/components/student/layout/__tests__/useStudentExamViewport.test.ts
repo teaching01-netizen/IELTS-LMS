@@ -207,6 +207,27 @@ describe('useStudentExamViewport', () => {
     expect(result.current.keyboardOpen).toBe(false);
   });
 
+  it('cleans up viewport listeners when deactivated', () => {
+    installVisualViewport(1024);
+    const { result, rerender } = renderHook(
+      ({ active }: { active: boolean }) => useStudentExamViewport(active),
+      { initialProps: { active: true } },
+    );
+
+    expect(result.current.stableExamHeight).toBe(1024);
+    rerender({ active: false });
+
+    act(() => {
+      visualViewportMock!.height = 580;
+      visualViewportMock!.dispatchResize();
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    expect(result.current.stableExamHeight).toBe(1024);
+    expect(result.current.visualViewportHeight).toBe(1024);
+    expect(result.current.keyboardOpen).toBe(false);
+  });
+
   it('falls back to window.innerHeight when VisualViewport is unavailable', () => {
     Reflect.deleteProperty(window, 'visualViewport');
     const { result } = renderHook(() => useStudentExamViewport(true));

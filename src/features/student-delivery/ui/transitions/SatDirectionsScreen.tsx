@@ -3,6 +3,7 @@ import { hasStructuredContent } from "../../../exam-authoring/api/renderingPubli
 import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
 import type { AssessmentDeliveryModule } from "../../contracts/assessmentDelivery";
 import { studentModuleTitle } from "../../application/satRuntimeSelectors";
+import { canEnterModule } from "../../application/satEntry";
 import { SAT_COPY } from "../../domain/satCopy";
 import { SatCenterModal } from "../primitives/SatCenterModal";
 
@@ -13,6 +14,9 @@ export interface SatDirectionsScreenProps {
   proctorStatus: string;
   isStarting: boolean;
   stageReady?: boolean;
+  // Phase 4: true once auto-entry has tried for this module and did not open it.
+  // The manual start button is recovery from that state, never the required path.
+  entryRecoverable?: boolean | undefined;
   error: string | null;
   onStart: () => void;
   onExit: () => void | Promise<void>;
@@ -24,12 +28,21 @@ export interface SatDirectionsScreenProps {
 }
 
 export function SatDirectionsScreen(props: SatDirectionsScreenProps) {
-  const canStart =
-    Boolean(props.module) &&
-    props.runtimeStatus === "live" &&
-    props.proctorStatus !== "paused" &&
-    props.proctorStatus !== "terminated" &&
-    (props.stageReady ?? true);
+  // One predicate with the automatic entry path (application/satEntry.ts): a
+  // proctor status can no longer enable this button while refusing automatic
+  // entry (idle/connecting used to do exactly that).
+  const moduleEnterable = canEnterModule({
+    module: props.module,
+    runtimeStatus: props.runtimeStatus,
+    proctorStatus: props.proctorStatus,
+    stageReady: props.stageReady,
+  });
+  // Phase 4: automatic entry owns the primary path, so this button is recovery
+  // only — actionable once an attempt has settled without opening the module.
+  const canStart = moduleEnterable && Boolean(props.entryRecoverable);
+  const autoEntryHandling = moduleEnterable && !props.entryRecoverable;
+  const showStarting = props.isStarting || autoEntryHandling;
+  const showStartHint = !canStart && !props.isStarting && !showStarting;
   // Tertiary "Leave exam" path (Phase 6b): leaving mid-directions is a
   // destructive-adjacent exit, so it confirms with saved-state language.
   // Focus moves into the dialog and back on every close path.
@@ -102,12 +115,19 @@ export function SatDirectionsScreen(props: SatDirectionsScreenProps) {
         <p className="mt-5 sat-type-metadata leading-5 text-[var(--sat-text-secondary)]">
           {SAT_COPY.directions.calculatorCleared} {SAT_COPY.directions.timerBegins}
         </p>
+        {showStarting ? (
+          <p className="mt-5 border-l-4 border-[var(--sat-divider)] bg-[var(--sat-surface)] px-4 py-3 sat-type-control-secondary text-[var(--sat-text-secondary)]">
+            {props.isStarting
+              ? SAT_COPY.directions.startingModule
+              : SAT_COPY.directions.autoEntryNotice}
+          </p>
+        ) : null}
         <div className="mt-8 flex flex-wrap gap-3">
           <button
             type="button"
             onClick={props.onStart}
             disabled={!canStart || props.isStarting}
-            aria-describedby={canStart ? undefined : "sat-directions-start-blocked"}
+            aria-describedby={showStartHint ? "sat-directions-start-blocked" : undefined}
             className="sat-touch-target sat-pressable rounded-full bg-[var(--sat-accent)] px-6 sat-type-control-secondary font-semibold text-[var(--sat-accent-text)] hover:bg-[var(--sat-accent-strong)] disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2"
           >
             {props.isStarting
@@ -134,7 +154,7 @@ export function SatDirectionsScreen(props: SatDirectionsScreenProps) {
             {SAT_COPY.directions.leaveExam}
           </button>
         </div>
-        {!canStart && !props.isStarting ? (
+        {showStartHint ? (
           <p id="sat-directions-start-blocked" className="mt-3 sat-type-metadata text-[var(--sat-text-secondary)]">
             {props.proctorStatus === "paused"
               ? SAT_COPY.blocking.pausedBody

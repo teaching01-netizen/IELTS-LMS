@@ -54,6 +54,3 @@ export function sameDocumentName(a: unknown, b: unknown): boolean {
   return a.trim() === b.trim();
 }
 
-export function isWithinFrameLimit(payloadBytes: number): boolean {
-  return payloadBytes <= MAX_FRAME_BYTES;
-}

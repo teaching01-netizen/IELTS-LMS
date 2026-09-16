@@ -39,19 +39,52 @@ groups:
           slo: auth-availability
         annotations:
           summary: "Auth-critical rate-limit denials detected"
-          description: "Session/logout reads are being denied. This is a misconfiguration or attack — never fix by raising only this tier without checking the tier table. See docs/runbooks/exam-day-mysql-scale.md."
-          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+          description: "Session/logout reads are being denied. Check the auth-critical RATE_LIMIT_AUTH_CRITICAL_PER_MIN budget and whether the traffic is abusive before tuning it. See docs/rate-limit-contract.md#failure-mode-runbook."
+          runbook_url: "docs/rate-limit-contract.md#failure-mode-runbook"
+
+      - alert: RateLimitDistributedDBErrors
+        expr: increase(http_ratelimit_db_error_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: page
+          slo: api-availability
+        annotations:
+          summary: "Distributed rate-limit database errors detected"
+          description: "The distributed limiter is falling back to the bounded exact emergency limiter. Check MySQL/TiDB health, db_pool_wait, and the affected tier/key_class; restore the distributed authority before changing RATE_LIMIT_*_PER_MIN or RATE_LIMIT_BURST. See docs/rate-limit-contract.md#failure-mode-runbook."
+          runbook_url: "docs/rate-limit-contract.md#failure-mode-runbook"
+
+      - alert: RateLimitCapacityRejections
+        expr: sum by (tier, key_class) (rate(http_ratelimit_capacity_rejected_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+          slo: api-availability
+        annotations:
+          summary: "Rate-limit key capacity is rejecting active-key admissions"
+          description: "A limiter store has been full for 10 minutes. Break down by tier/key_class, inspect RATE_LIMIT_MAX_KEYS and key churn, and preserve active bucket state; do not tune RATE_LIMIT_BURST as a capacity substitute. See docs/rate-limit-contract.md#failure-mode-runbook."
+          runbook_url: "docs/rate-limit-contract.md#failure-mode-runbook"
 
       - alert: RateLimitTierBurnRate
-        expr: increase(http_ratelimit_denied_total[10m]) >= 50
+        expr: sum by (tier, key_class) (increase(http_ratelimit_denied_total[10m])) >= 50
         for: 5m
         labels:
           severity: warning
           slo: api-availability
         annotations:
           summary: "Rate-limit denials elevated"
-          description: "Check http_ratelimit_denied_total by tier/key_class to find the hot tier, then tune that tier's RATE_LIMIT_*_PER_MIN knob. Do not raise RATE_LIMIT_GLOBAL (single-global mode is removed)."
-          runbook_url: "docs/runbooks/exam-day-mysql-scale.md"
+          description: "A tier/key_class is burning through the 429 budget. Tune the matching RATE_LIMIT_*_PER_MIN knob only after checking whether the traffic is abusive, the key class is correct, and the distributed authority is healthy. Do not raise RATE_LIMIT_GLOBAL; it is deprecated and ignored. See docs/rate-limit-contract.md#failure-mode-runbook."
+          runbook_url: "docs/rate-limit-contract.md#failure-mode-runbook"
+
+      - alert: EntryGateCapacityRejections
+        expr: increase(http_entry_gate_capacity_rejected_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          slo: entry-availability
+        annotations:
+          summary: "Student entry gate is rejecting new schedule keys"
+          description: "The process-local student-entry schedule map is at capacity. Inspect the entry-wave cardinality and MaxSchedules bound; this is admission retry, not a FIFO queue. See docs/rate-limit-contract.md#failure-mode-runbook."
+          runbook_url: "docs/rate-limit-contract.md#failure-mode-runbook"
 
       # NOTE (WS-10a): the previous post-submit grace-rejected series was never
       # emitted by any backend. Rewritten to v2_response_batch_total{outcome="not_writable"} — the real

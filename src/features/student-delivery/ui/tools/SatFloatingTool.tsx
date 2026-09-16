@@ -840,6 +840,14 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   const collapsedEffective = isReference && collapsed && !compact;
   const collapsedSettled = collapsedEffective && !collapsing;
   const renderedH = collapsedEffective ? measureCollapsedH() : geometry.h;
+  // ARIA window-splitter bounds (axe aria-required-attr): a focusable
+  // role="separator" must publish its value and limits. The "se" grip resizes
+  // both axes, so the width carries the separator value and aria-valuetext
+  // reports the real rect for assistive technology.
+  const resizeMin = props.minSize ?? defaultMinSizeForTitle(props.title);
+  const resizeMax =
+    props.maxSize ??
+    defaultMaxSizeForViewport(typeof window === "undefined" ? { w: 0, h: 0 } : viewportSize());
   const collapseClass = !isReference || compact
     ? ""
     : collapsing
@@ -946,6 +954,11 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           role="separator"
           tabIndex={props.disabled ? -1 : 0}
           aria-label={"Resize " + props.title + ". Use arrow keys to resize."}
+          aria-orientation="vertical"
+          aria-valuemin={Math.round(resizeMin.w)}
+          aria-valuemax={Math.round(resizeMax.w)}
+          aria-valuenow={Math.round(geometry.w)}
+          aria-valuetext={`${Math.round(geometry.w)} by ${Math.round(renderedH)} pixels`}
           data-sat-resize-handle="se"
           className="sat-tool-tip-anchor absolute bottom-0 right-0 grid h-11 w-11 cursor-nwse-resize touch-none select-none place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
           onPointerDown={handleResizePointerDown}

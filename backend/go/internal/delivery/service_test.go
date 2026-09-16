@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"regexp"
 	"testing"
 	"time"
@@ -91,6 +92,71 @@ func TestLoadResponsesV2WinsPerQuestion(t *testing.T) {
 	}
 	if string(byQ["eq-legacy-only"].Response) != `"B"` {
 		t.Fatalf("expected legacy-only row preserved, got %+v", byQ["eq-legacy-only"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertDeliveryJSONEqual(t *testing.T, want, got json.RawMessage) {
+	t.Helper()
+	var wantValue, gotValue any
+	if err := json.Unmarshal(want, &wantValue); err != nil {
+		t.Fatalf("decode expected JSON: %v", err)
+	}
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("decode actual JSON %q: %v", string(got), err)
+	}
+	if !reflect.DeepEqual(wantValue, gotValue) {
+		t.Fatalf("JSON mismatch: want %s, got %s", string(want), string(got))
+	}
+}
+
+// Phase 1 acceptance test: the V2 bootstrap projection must preserve the
+// complete canonical answer aggregate, while missing/null optional metadata
+// must become the candidate-facing []/{} defaults.
+func TestLoadResponsesV2ProjectsCompleteEnvelopeAndSafeMetadataDefaults(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := deliverySvc(db)
+
+	canonical := `{"answer":"A","markedForReview":true,"eliminatedOptions":["B"],"annotations":[{"id":"sat-annotations","kind":"sat_annotations","version":2,"legacyQuestionNote":"earlier note","annotations":[{"id":"a1","kind":"highlight","anchor":{"nodeId":"stimulus:p1","startOffset":4,"endOffset":12,"exact":"evidence","prefix":"The ","suffix":" shows"},"note":"Compare claim","createdAt":"2026-09-06T00:00:00Z","updatedAt":"2026-09-06T00:00:00Z"}]}]}`
+	missingOptional := `{"answer":"B","markedForReview":false}`
+	nullOptional := `{"answer":"C","markedForReview":true,"eliminatedOptions":null,"annotations":null}`
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_responses_v2 v LEFT JOIN")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response", "server_revision", "module_attempt_id", "exam_question_id"}).
+			AddRow("eq-full", "mod-1", canonical, 7, "ma-1", "eq-full").
+			AddRow("eq-missing", "mod-1", missingOptional, 8, "ma-1", "eq-missing").
+			AddRow("eq-null", "mod-1", nullOptional, 9, "ma-1", "eq-null"))
+
+	responses, err := svc.loadResponsesV2(context.Background(), "att-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(responses) != 3 {
+		t.Fatalf("expected 3 V2 responses, got %d", len(responses))
+	}
+
+	byQuestion := make(map[string]ResponseSnapshot, len(responses))
+	for _, response := range responses {
+		byQuestion[response.ExamQuestionID] = response
+	}
+
+	full := byQuestion["eq-full"]
+	if string(full.Response) != `"A"` || !full.MarkedForReview {
+		t.Fatalf("full canonical answer/review projection = %+v", full)
+	}
+	assertDeliveryJSONEqual(t, json.RawMessage(`["B"]`), full.EliminatedOptions)
+	assertDeliveryJSONEqual(t, json.RawMessage(`{"version":2,"legacyQuestionNote":"earlier note","annotations":[{"id":"a1","kind":"highlight","anchor":{"nodeId":"stimulus:p1","startOffset":4,"endOffset":12,"exact":"evidence","prefix":"The ","suffix":" shows"},"note":"Compare claim","createdAt":"2026-09-06T00:00:00Z","updatedAt":"2026-09-06T00:00:00Z"}]}`), full.Annotations)
+
+	for _, questionID := range []string{"eq-missing", "eq-null"} {
+		response := byQuestion[questionID]
+		assertDeliveryJSONEqual(t, json.RawMessage(`[]`), response.EliminatedOptions)
+		assertDeliveryJSONEqual(t, json.RawMessage(`{}`), response.Annotations)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

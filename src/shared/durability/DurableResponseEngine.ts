@@ -64,6 +64,21 @@ const MAX_RETRY_ATTEMPTS_PER_DRAIN = 8;
 const MAX_COLLISION_HEALS_PER_DRAIN = 2;
 /** F-A6: authoritative snapshot fetches never hang longer than this. */
 const SNAPSHOT_FETCH_TIMEOUT_MS = 15_000;
+/**
+ * Bug 6: the server rejects an envelope with more than 100 commands outright
+ * (backend/go/internal/attempts/validate.go — MaxBatchCommands) before any
+ * mutation, so one oversized batch strands every otherwise-valid answer.
+ */
+export const MAX_BATCH_COMMANDS = 100;
+/**
+ * Bug 6: the student-mutation body cap is 256 KiB
+ * (backend/go/internal/platform/httpx/httpx.go — MaxStudentBodyBytes). Stay
+ * well below it so the transport wrapper and any proxy overhead cannot push a
+ * legal batch over the server's own limit.
+ */
+export const MAX_BATCH_BODY_BYTES = 192 << 10;
+/** Rough cost of the fixed envelope fields (epochs, braces, quoting). */
+const BATCH_ENVELOPE_OVERHEAD_BYTES = 1_024;
 
 type CommandEpoch = {
   leaseEpoch: number;
@@ -120,6 +135,74 @@ function randomWriteId(): string {
   return `w-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * UTF-8 byte length of an encoded fragment. Deliberately hand-rolled: this
+ * budget runs in browsers/embedded webviews where TextEncoder is not
+ * guaranteed, and the server's cap counts bytes, not UTF-16 code units
+ * (written answers are frequently non-ASCII).
+ */
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) {
+      bytes += 1;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      // Surrogate pair — one 4-byte code point.
+      bytes += 4;
+      index += 1;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+/** Encoded wire size of one command, plus its array separator. */
+function encodedCommandBytes(command: ResponseCommandV2): number {
+  try {
+    const json = JSON.stringify(command);
+    return typeof json === "string" ? utf8ByteLength(json) + 1 : BATCH_ENVELOPE_OVERHEAD_BYTES;
+  } catch {
+    // An unserializable payload cannot be sized, so give it an envelope of its
+    // own and let server validation — not this budget — reject it.
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
+ * Bug 6: split sendable work into envelopes the server's own limits accept.
+ * Order is preserved and every command keeps its write identity (writeId +
+ * clientVersion) with per-command acknowledgements, so chunking never changes
+ * delivery semantics — it only stops one over-cap batch from being rejected as
+ * a whole and retried as a whole forever. A single command that is itself over
+ * the byte budget still travels alone: it can still be rejected, but it can no
+ * longer take its neighbors down with it.
+ */
+export function chunkResponseCommands(
+  commands: readonly ResponseCommandV2[],
+  maxCommands: number = MAX_BATCH_COMMANDS,
+  maxBodyBytes: number = MAX_BATCH_BODY_BYTES
+): ResponseCommandV2[][] {
+  const chunks: ResponseCommandV2[][] = [];
+  let current: ResponseCommandV2[] = [];
+  let bytes = BATCH_ENVELOPE_OVERHEAD_BYTES;
+  for (const command of commands) {
+    const size = encodedCommandBytes(command);
+    if (current.length > 0 && (current.length >= maxCommands || bytes + size > maxBodyBytes)) {
+      chunks.push(current);
+      current = [];
+      bytes = BATCH_ENVELOPE_OVERHEAD_BYTES;
+    }
+    current.push(command);
+    bytes += size;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
 function clonePayload(payload: ResponsePayload): ResponsePayload {
   return {
     answer: Array.isArray(payload.answer) ? [...payload.answer] : payload.answer,
@@ -164,10 +247,17 @@ function isPendingResponseState(value: unknown): value is PendingResponseState {
     Number.isSafeInteger(value["controlEpoch"]) &&
     typeof value["clientVersion"] === "number" &&
     Number.isSafeInteger(value["clientVersion"]) &&
-    // Blocked v0 provisionals (new intent typed on a fenced question) must
-    // stay recoverable as blocked non-sendable drafts — never dropped, never
-    // sent. Unblocked records still require a real issued version.
-    (value["clientVersion"] > 0 || isBlockedInfo(value["blocked"]))
+    // Bug 1: an unversioned record (clientVersion 0) is a LEGAL durable
+    // intent, not garbage — it is the provisional checkpoint written before
+    // asynchronous storage/recovery granted a version. Excluding it here
+    // silently dropped the newest local text on engine replacement. Version
+    // issuance/seeding happens in recoverInternal; zero itself still never
+    // reaches the outbox or the wire.
+    value["clientVersion"] >= 0 &&
+    // A present block marker must be well-formed: recovery branches on it to
+    // decide whether a draft may be minted for the wire or must stay a
+    // reconcilable, non-sendable draft.
+    (value["blocked"] === undefined || isBlockedInfo(value["blocked"]))
   );
 }
 
@@ -377,6 +467,34 @@ export class DurableResponseEngine {
   }
 
   /**
+   * Bug 5: a visible draft the server has not acknowledged. A provisional
+   * intent awaiting its version is deliberately NOT in the outbox or in-flight
+   * maps, so queue size alone cannot answer "is anything still outstanding?".
+   */
+  private hasUnacknowledgedIntent(): boolean {
+    for (const state of this.states.values()) {
+      if (state.pending) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Bug 5: accepting intent can never leave a server-saved claim standing.
+   * Only a matching acknowledgement (or an explicit discard) restores the
+   * server-saved truth; until then the honest state is "kept on this device"
+   * when the intent reached durable storage and "saving" while it has not.
+   * Explicit conflict/blocked/fault states are never downgraded here.
+   */
+  private markPendingIntent(locallyDurable: boolean): void {
+    if (this.syncStatus !== "synced" && this.syncStatus !== "saving") return;
+    const next: DurabilitySyncStatus = locallyDurable ? "saved_locally" : "saving";
+    if (this.syncStatus === next) return;
+    this.syncStatus = next;
+    if (locallyDurable) this.lastError = null;
+    this.notifyStatusChange();
+  }
+
+  /**
    * Adopt an authoritative lifecycle epoch. Writes created under a different
    * epoch are quarantined rather than relabeled and replayed under the new one.
    */
@@ -471,7 +589,12 @@ export class DurableResponseEngine {
     });
     // Teardown-safe intent checkpoint runs inline — never behind the async
     // acceptance chain — so teardown/reload always sees the latest keystroke.
-    this.checkpointIntentSync(questionId, pendingState);
+    const checkpointStored = this.checkpointIntentSync(questionId, pendingState);
+    // Bug 5: accepting intent is not "saved". The provisional write is not in
+    // the outbox yet (its version is allocated only after recovery seeds
+    // versions), so a status that still claims server-saved would be a false
+    // durability signal for the newest keystroke.
+    this.markPendingIntent(checkpointStored);
     if (this.recoveryStarted && !this.recoveryInitialized) this.emitDurabilityEvent("intent_queued_during_recovery", { attemptId: this.attemptId, scheduleId: this.scheduleId });
     this.notifyStateChange();
 
@@ -826,7 +949,13 @@ export class DurableResponseEngine {
       const hasAuthoritativeEpoch = Boolean(snapshot && isSnapshotResponse(snapshot));
       const leaseMatches = pending.leaseEpoch === this.leaseEpoch;
       const controlMatches = pending.controlEpoch === this.controlEpoch;
+      // Bug 1: a never-issued local intent (clientVersion 0) is newer than any
+      // server write by construction — it was accepted locally and died before
+      // the version allocator ran, so it cannot be compared against (or lost
+      // to) a server version. Its version is minted below; zero never flies.
+      const neverIssuedIntent = pending.clientVersion <= 0;
       const serverVersionIsNewer =
+        !neverIssuedIntent &&
         server !== undefined &&
         (server.clientVersion > pending.clientVersion ||
           (server.clientVersion === pending.clientVersion && server.writeId !== pending.writeId));
@@ -885,11 +1014,31 @@ export class DurableResponseEngine {
       // outbox is terminally quarantined via VERSION_COLLISION. Minting above
       // the recovered version is always safe: versions may skip, they may
       // never repeat, and the server's projection prefers lease over version.
-      this.versionTrackers.set(
-        questionId,
-        Math.max(this.versionTrackers.get(questionId) ?? 0, pending.clientVersion)
-      );
       const existing = this.states.get(questionId);
+      if (neverIssuedIntent && !pending.blocked) {
+        // Bug 1: recovery is the only place that can allocate the version the
+        // provisional never received. Mint it above the refreshed floor —
+        // including the snapshot's own server version, so the send can never
+        // draw a VERSION_COLLISION — and refresh both durable copies so a
+        // second reload sees a sendable write instead of a raw zero.
+        const issuedVersion =
+          Math.max(this.versionTrackers.get(questionId) ?? 0, server?.clientVersion ?? 0) + 1;
+        this.versionTrackers.set(questionId, issuedVersion);
+        pending.clientVersion = issuedVersion;
+        this.checkpointIntentSync(questionId, pending);
+        void saveDurableDraft(durableDraftKey(this.attemptId, questionId), pending).catch(
+          () => undefined
+        );
+        this.emitDurabilityEvent("unversioned_intent_recovered", {
+          reason: "UNVERSIONED_INTENT",
+          clientVersion: issuedVersion,
+        });
+      } else {
+        this.versionTrackers.set(
+          questionId,
+          Math.max(this.versionTrackers.get(questionId) ?? 0, pending.clientVersion)
+        );
+      }
       this.states.set(questionId, {
         confirmed: existing?.confirmed ?? null,
         pending,
@@ -901,11 +1050,17 @@ export class DurableResponseEngine {
         response: clonePayload(pending.payload),
       };
       this.outbox.set(questionId, command);
-      this.issuedCommands.set(command.writeId, command);
-      this.commandEpochs.set(command.writeId, {
-        leaseEpoch: pending.leaseEpoch,
-        controlEpoch: pending.controlEpoch,
-      });
+      // A never-issued draft has no server footprint: it can never be
+      // acknowledged, and the epoch sweep below only fences writes that could
+      // have reached the wire. Registering it would tombstone a draft that
+      // was never sent, instead of leaving it visible for reconcile/discard.
+      if (pending.clientVersion > 0) {
+        this.issuedCommands.set(command.writeId, command);
+        this.commandEpochs.set(command.writeId, {
+          leaseEpoch: pending.leaseEpoch,
+          controlEpoch: pending.controlEpoch,
+        });
+      }
     }
 
     // First recovery seeds version ordering exactly once. Later recoveries
@@ -923,6 +1078,12 @@ export class DurableResponseEngine {
     ) {
       this.fenceTerminalSnapshot(serverResponses);
     }
+
+    // Bug 5: a recovered draft is unacknowledged work, so recovery must never
+    // end on a server-saved claim. Recovered drafts are durable by definition
+    // (they came out of storage), so the honest state is "kept on this device"
+    // until the drain acknowledges them.
+    if (this.hasUnacknowledgedIntent()) this.markPendingIntent(true);
 
     this.notifyStateChange();
     this.scheduleDrain();
@@ -1329,7 +1490,9 @@ export class DurableResponseEngine {
       throw lateAcceptanceError;
     }
 
-    if (this.getPendingCount() === 0) {
+    // Bug 5: the terminal receipt clears the server queue, but a draft that is
+    // still visible-unacknowledged must not be reported as server-saved.
+    if (this.getPendingCount() === 0 && !this.hasUnacknowledgedIntent()) {
       this.syncStatus = "synced";
       this.lastError = null;
       this.notifyStatusChange();
@@ -1394,10 +1557,20 @@ export class DurableResponseEngine {
     try {
       while (this.outbox.size > 0 && !this.isDestroyed && !this.submissionPromise) {
         this.inFlight.clear();
+        // Bug 6: claim ONE bounded chunk per iteration. The server rejects an
+        // over-cap envelope (command count or body size) before any mutation,
+        // so claiming the whole outbox would strand every otherwise-valid
+        // answer behind one oversized batch. The outer loop keeps sending
+        // bounded chunks until nothing sendable is left.
+        const sendable: ResponseCommandV2[] = [];
         for (const [questionId, command] of this.outbox) {
           // Blocked drafts stay queued in the outbox map but never fly.
           if (this.isBlockedPending(questionId, command.writeId)) continue;
-          this.inFlight.set(questionId, command);
+          sendable.push(command);
+        }
+        const nextChunk = chunkResponseCommands(sendable)[0] ?? [];
+        for (const command of nextChunk) {
+          this.inFlight.set(command.questionId, command);
         }
         for (const questionId of this.inFlight.keys()) {
           this.outbox.delete(questionId);
@@ -1494,6 +1667,33 @@ export class DurableResponseEngine {
               this.blockQueuedOnControlStale();
               break;
             }
+            // Bug 6: a payload-scoped rejection (one invalid answer, one
+            // unknown question or reused write id) is about THIS envelope, not
+            // the attempt. Quarantine only the chunk that was rejected — still
+            // visible, still audited, never a silent drop — and keep delivering
+            // the other questions' answers instead of stranding the backlog
+            // behind one bad command.
+            if (this.isChunkScopedRejection(errorCode)) {
+              for (const command of this.inFlight.values()) {
+                this.removeCommand(command);
+                this.quarantineEntry(command, errorCode ?? "TERMINAL_CONFLICT");
+              }
+              this.inFlight.clear();
+              // Explicit conflict/fault/blocked states are never downgraded
+              // here — only a plain saved/saving claim is corrected.
+              if (
+                this.syncStatus !== "conflict_fenced" &&
+                this.syncStatus !== "conflict_terminal" &&
+                this.syncStatus !== "durability_fault" &&
+                this.syncStatus !== "blocked_attention"
+              ) {
+                this.syncStatus = "saved_locally";
+                this.lastError =
+                  "One answer was refused by the server and is kept on this device; the rest keep sending.";
+                this.notifyStatusChange();
+              }
+              continue;
+            }
             this.quarantineAllPending(errorCode ?? "TERMINAL_CONFLICT");
             this.syncStatus =
               errorCode === "LEASE_FENCED"
@@ -1532,12 +1732,33 @@ export class DurableResponseEngine {
       if (
         this.outbox.size === 0 &&
         this.inFlight.size === 0 &&
+        // Bug 5: the queue is empty, but a visible draft may still be
+        // unacknowledged (a provisional intent awaiting its version). "Saved"
+        // is a claim about the server, so it needs the queue AND the intents.
+        !this.hasUnacknowledgedIntent() &&
         this.syncStatus !== "conflict_fenced" &&
         this.syncStatus !== "conflict_terminal" &&
         this.syncStatus !== "blocked_attention" &&
         this.syncStatus !== "durability_fault"
       ) {
         this.syncStatus = "synced";
+        this.lastError = null;
+        this.notifyStatusChange();
+      } else if (
+        // Bug 5: nothing left to send and nothing in flight — but a draft is
+        // still unacknowledged. Queue length cannot see it, and claiming
+        // server-saved here is exactly the false durability signal this gate
+        // must never emit.
+        this.outbox.size === 0 &&
+        this.inFlight.size === 0 &&
+        this.hasUnacknowledgedIntent() &&
+        this.syncStatus !== "conflict_fenced" &&
+        this.syncStatus !== "conflict_terminal" &&
+        this.syncStatus !== "blocked_attention" &&
+        this.syncStatus !== "durability_fault" &&
+        this.syncStatus !== "saved_locally"
+      ) {
+        this.syncStatus = "saved_locally";
         this.lastError = null;
         this.notifyStatusChange();
       } else if (
@@ -1804,7 +2025,15 @@ export class DurableResponseEngine {
     ) {
       return;
     }
-    if (this.getBlockedCount() > 0 || this.quarantined.length > 0) return;
+    if (
+      this.getBlockedCount() > 0 ||
+      this.quarantined.length > 0 ||
+      // Bug 5: an unacknowledged draft is not "resolved" either — a fresh ack
+      // for it clears the fence once it actually lands.
+      this.hasUnacknowledgedIntent()
+    ) {
+      return;
+    }
     this.syncStatus = "synced";
     this.lastError = null;
     this.notifyStatusChange();
@@ -1939,9 +2168,13 @@ export class DurableResponseEngine {
     if (!live || live.writeId !== blockedWriteId || !live.blocked) { this.emitDurabilityEvent("reconcile_failed", { reason: "blocked_superseded" }); return false; }
     // Refuse only when the server actually moved past the blocked draft: a
     // different writeId alone is normal (it is the last confirmed write the
-    // blocked draft was edited on top of). Version comparison decides.
+    // blocked draft was edited on top of). Version comparison decides — but a
+    // never-issued draft (clientVersion 0) has no server footprint to lose to:
+    // the mint below starts ABOVE the refreshed floor, so refusing here would
+    // strand the recovered Bug 1 intent as permanently blocked.
     const server = snapshot.responses.find((entry) => entry.questionId === questionId);
-    if (server && server.writeId !== blocked.writeId && server.clientVersion >= live.clientVersion) { this.emitDurabilityEvent("reconcile_failed", { reason: "server_newer" }); return false; }
+    const neverIssuedDraft = live.clientVersion <= 0;
+    if (!neverIssuedDraft && server && server.writeId !== blocked.writeId && server.clientVersion >= live.clientVersion) { this.emitDurabilityEvent("reconcile_failed", { reason: "server_newer" }); return false; }
     // RISK-9/10: re-read the version tracker AFTER the snapshot await —
     // installServerResponse above (and any concurrent recover/ack path)
     // raises the floor. Capture the mint base now and revalidate before
@@ -2043,7 +2276,8 @@ export class DurableResponseEngine {
     this.pruneQuarantined(questionId, "discard");
     this.clearCheckpoint(questionId);
     if (this.getBlockedCount() === 0 && this.syncStatus === "blocked_attention") {
-      this.syncStatus = this.getPendingCount() === 0 ? "synced" : "saved_locally";
+      this.syncStatus =
+        this.getPendingCount() === 0 && !this.hasUnacknowledgedIntent() ? "synced" : "saved_locally";
       this.lastError = null;
       this.notifyStatusChange();
     }
@@ -2271,6 +2505,21 @@ export class DurableResponseEngine {
    * ASSESSMENT_CONFLICT quarantines as terminal = stop, never silent
    * drop, never infinite retry).
    */
+  /**
+   * Bug 6: rejections that are about ONE command in the envelope, never about
+   * the session. The shared error-code map classifies these as per-write
+   * recoveries (fix the payload / refresh / mint a new write id), unlike the
+   * lease, epoch, protocol and assessment codes that fence the whole attempt —
+   * so they must not quarantine every other question's answer with them.
+   */
+  private isChunkScopedRejection(code: string | null): boolean {
+    return (
+      code === "INVALID_RESPONSE" ||
+      code === "QUESTION_NOT_IN_ATTEMPT" ||
+      code === "IDEMPOTENCY_KEY_REUSED"
+    );
+  }
+
   private isTerminalConflict(code: string | null): boolean {
     return (
       code === "LEASE_FENCED" ||

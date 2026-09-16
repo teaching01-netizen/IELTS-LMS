@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -28,6 +29,9 @@ import (
 //	POST /internal/authoring-coedit/load
 //	POST /internal/authoring-coedit/initialize
 //	POST /internal/authoring-coedit/store
+//	POST /internal/authoring-coedit/final-store
+//	POST /internal/authoring-coedit/rebase
+//	POST /internal/authoring-coedit/recover
 //
 // The private calls are signed over method + path + timestamp + body hash and
 // are idempotent, so a replay cannot apply the same state twice.
@@ -64,6 +68,11 @@ func authorCoeditTokenHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, authoringcoedit.ErrServiceDisabled.ToAppError())
 			return
 		}
+		if err := recoverExpiredCoeditFreezes(r.Context(), app); err != nil {
+			authoringcoedit.EmitToken(authoringcoedit.OutcomeUnavailable)
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
+			return
+		}
 		identity, err := app.Authoring.CoeditEnsureDocument(r.Context(), examQuestionID, sess.UserID)
 		if err != nil {
 			authoringcoedit.EmitToken(authoringcoedit.OutcomeRejected)
@@ -90,6 +99,9 @@ func authorCoeditTokenHandler(app *App) http.HandlerFunc {
 			ExamQuestionID:     identity.ExamQuestionID,
 			QuestionRevisionID: identity.QuestionRevisionID,
 			Mode:               mode,
+			StateEpoch:         identity.StateEpoch,
+			CommitSequence:     identity.CommitSequence,
+			WorkspaceRevision:  identity.WorkspaceRevision,
 		})
 		if err != nil {
 			authoringcoedit.EmitToken(authoringcoedit.OutcomeRejected)
@@ -98,16 +110,19 @@ func authorCoeditTokenHandler(app *App) http.HandlerFunc {
 		}
 		authoringcoedit.EmitToken(authoringcoedit.OutcomeAccepted)
 		httpx.WriteJSON(w, http.StatusOK, authoringcoedit.CoeditTokenResponse{
-			Token:         token,
-			DocumentName:  string(identity.DocumentName),
-			ServiceURL:    coeditPublicSocketURL(app, r),
-			ExpiresAt:     claims.ExpiresAt,
-			SchemaVersion: identity.SchemaVersion,
-			FieldSet:      identity.FieldSet,
-			Mode:          string(mode),
-			ActorID:       sess.UserID,
-			DisplayName:   displayName,
-			Capability:    app.CoeditCapability(),
+			Token:             token,
+			DocumentName:      string(identity.DocumentName),
+			ServiceURL:        coeditPublicSocketURL(app, r),
+			ExpiresAt:         claims.ExpiresAt,
+			SchemaVersion:     identity.SchemaVersion,
+			FieldSet:          identity.FieldSet,
+			Mode:              string(mode),
+			ActorID:           sess.UserID,
+			DisplayName:       displayName,
+			Capability:        app.CoeditCapability(),
+			StateEpoch:        identity.StateEpoch,
+			CommitSequence:    identity.CommitSequence,
+			WorkspaceRevision: identity.WorkspaceRevision,
 		})
 	}
 }
@@ -126,6 +141,11 @@ func authorWorkspaceCoeditTokenHandler(app *App) http.HandlerFunc {
 		if !app.CoeditCapability() || app.Authoring == nil {
 			authoringcoedit.EmitToken(authoringcoedit.OutcomeUnavailable)
 			httpx.WriteError(w, r, authoringcoedit.ErrServiceDisabled.ToAppError())
+			return
+		}
+		if err := recoverExpiredCoeditFreezes(r.Context(), app); err != nil {
+			authoringcoedit.EmitToken(authoringcoedit.OutcomeUnavailable)
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
 			return
 		}
 		identity, err := app.Authoring.CoeditEnsureWorkspace(r.Context(), examID, sess.UserID)
@@ -154,6 +174,8 @@ func authorWorkspaceCoeditTokenHandler(app *App) http.HandlerFunc {
 			DisplayName: displayName, OrganizationID: identity.OrganizationID,
 			ExamID: identity.ExamID, DraftVersionID: identity.DraftVersionID,
 			FieldSet: authoringcoedit.FieldSetWorkspace, Mode: mode,
+			StateEpoch: identity.StateEpoch, CommitSequence: identity.CommitSequence,
+			WorkspaceRevision: identity.WorkspaceRevision,
 		})
 		if err != nil {
 			authoringcoedit.EmitToken(authoringcoedit.OutcomeRejected)
@@ -167,6 +189,8 @@ func authorWorkspaceCoeditTokenHandler(app *App) http.HandlerFunc {
 			SchemaVersion: authoringcoedit.WorkspaceSchemaVersion,
 			FieldSet:      authoringcoedit.FieldSetWorkspace, Mode: string(mode),
 			ActorID: sess.UserID, DisplayName: displayName, Capability: app.CoeditCapability(),
+			StateEpoch: identity.StateEpoch, CommitSequence: identity.CommitSequence,
+			WorkspaceRevision: identity.WorkspaceRevision,
 		})
 	}
 }
@@ -387,6 +411,7 @@ func coeditStoreHandler(app *App) http.HandlerFunc {
 			Prompt            json.RawMessage `json:"prompt"`
 			Workspace         json.RawMessage `json:"workspace"`
 			ActorID           string          `json:"actorId"`
+			FreezeOperationID string          `json:"freezeOperationId"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "Invalid store request."))
@@ -396,7 +421,7 @@ func coeditStoreHandler(app *App) http.HandlerFunc {
 			out, err := app.Authoring.CoeditWorkspaceStore(r.Context(), authoring.CoeditStoreRequest{
 				DocumentName: req.DocumentName, PreviousStateHash: req.PreviousStateHash,
 				StateHash: req.StateHash, YdocState: req.YdocState, StateVector: req.StateVector,
-				Workspace: req.Workspace, ActorID: req.ActorID,
+				Workspace: req.Workspace, ActorID: req.ActorID, FreezeOperationID: req.FreezeOperationID,
 			})
 			if err != nil {
 				emitCoeditStoreOutcome(err)
@@ -416,6 +441,7 @@ func coeditStoreHandler(app *App) http.HandlerFunc {
 			Prompt:            req.Prompt,
 			Workspace:         req.Workspace,
 			ActorID:           req.ActorID,
+			FreezeOperationID: req.FreezeOperationID,
 		})
 		if err != nil {
 			emitCoeditStoreOutcome(err)
@@ -425,6 +451,151 @@ func coeditStoreHandler(app *App) http.HandlerFunc {
 		authoringcoedit.EmitStore(authoringcoedit.OutcomeAccepted)
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}
+}
+
+func coeditFinalStoreHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if coeditServiceDisabled(app, w, r) {
+			return
+		}
+		body, ok := requireCoeditService(app, w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			DocumentName      string          `json:"documentName"`
+			PreviousStateHash string          `json:"previousStateHash"`
+			StateHash         string          `json:"stateHash"`
+			YdocState         []byte          `json:"ydocState"`
+			StateVector       []byte          `json:"stateVector"`
+			Prompt            json.RawMessage `json:"prompt"`
+			Workspace         json.RawMessage `json:"workspace"`
+			ActorID           string          `json:"actorId"`
+			FreezeOperationID string          `json:"freezeOperationId"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "Invalid final store request."))
+			return
+		}
+		storeReq := authoring.CoeditStoreRequest{
+			DocumentName: req.DocumentName, PreviousStateHash: req.PreviousStateHash,
+			StateHash: req.StateHash, YdocState: req.YdocState, StateVector: req.StateVector,
+			Prompt: req.Prompt, Workspace: req.Workspace, ActorID: req.ActorID,
+			FreezeOperationID: req.FreezeOperationID,
+		}
+		if _, _, version, parseErr := authoringcoedit.ParseAnyDocumentName(req.DocumentName); parseErr == nil && version == authoringcoedit.WorkspaceSchemaVersion {
+			out, err := app.Authoring.CoeditWorkspaceFinalStore(r.Context(), storeReq)
+			if err != nil {
+				emitCoeditStoreOutcome(err)
+				writeCoeditError(w, r, err)
+				return
+			}
+			authoringcoedit.EmitStore(authoringcoedit.OutcomeAccepted)
+			httpx.WriteJSON(w, http.StatusOK, out)
+			return
+		}
+		out, err := app.Authoring.CoeditFinalStore(r.Context(), storeReq)
+		if err != nil {
+			emitCoeditStoreOutcome(err)
+			writeCoeditError(w, r, err)
+			return
+		}
+		authoringcoedit.EmitStore(authoringcoedit.OutcomeAccepted)
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+func coeditRebaseHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if coeditServiceDisabled(app, w, r) {
+			return
+		}
+		body, ok := requireCoeditService(app, w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			DocumentName       string                        `json:"documentName"`
+			ExpectedStateHash  string                        `json:"expectedStateHash"`
+			ExpectedStateEpoch authoringcoedit.DecimalString `json:"expectedStateEpoch"`
+			StateHash          string                        `json:"stateHash"`
+			YdocState          []byte                        `json:"ydocState"`
+			StateVector        []byte                        `json:"stateVector"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "Invalid rebase request."))
+			return
+		}
+		rebaseReq := authoring.CoeditRebaseRequest{
+			DocumentName: req.DocumentName, ExpectedStateHash: req.ExpectedStateHash,
+			ExpectedStateEpoch: req.ExpectedStateEpoch, StateHash: req.StateHash,
+			YdocState: req.YdocState, StateVector: req.StateVector,
+		}
+		var (
+			out authoring.CoeditStoreResult
+			err error
+		)
+		if _, _, version, parseErr := authoringcoedit.ParseAnyDocumentName(req.DocumentName); parseErr == nil && version == authoringcoedit.WorkspaceSchemaVersion {
+			out, err = app.Authoring.CoeditWorkspaceRebase(r.Context(), rebaseReq)
+		} else {
+			out, err = app.Authoring.CoeditRebase(r.Context(), rebaseReq)
+		}
+		if err != nil {
+			emitCoeditStoreOutcome(err)
+			writeCoeditError(w, r, err)
+			return
+		}
+		authoringcoedit.EmitStore(authoringcoedit.OutcomeAccepted)
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+func coeditRecoverHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if coeditServiceDisabled(app, w, r) {
+			return
+		}
+		body, ok := requireCoeditService(app, w, r)
+		if !ok {
+			return
+		}
+		if value := strings.TrimSpace(string(body)); value != "" && value != "{}" {
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "Invalid recovery request."))
+				return
+			}
+		}
+		documents, err := app.Authoring.CoeditRecoverExpiredFreezes(r.Context())
+		if err != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
+			return
+		}
+		workspaces, err := app.Authoring.CoeditWorkspaceRecoverExpiredFreezes(r.Context())
+		if err != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]int{
+			"documentsRecovered":  len(documents),
+			"workspacesRecovered": len(workspaces),
+		})
+	}
+}
+
+// recoverExpiredCoeditFreezes is intentionally called immediately before a
+// token can create or reuse a room. It is idempotent and keeps a stale
+// freezing row from blocking a new lifecycle indefinitely after a crashed
+// publish process.
+func recoverExpiredCoeditFreezes(ctx context.Context, app *App) error {
+	if app == nil || app.Authoring == nil {
+		return apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable.")
+	}
+	if _, err := app.Authoring.CoeditRecoverExpiredFreezes(ctx); err != nil {
+		return err
+	}
+	_, err := app.Authoring.CoeditWorkspaceRecoverExpiredFreezes(ctx)
+	return err
 }
 
 func emitCoeditStoreOutcome(err error) {
@@ -440,7 +611,9 @@ func emitCoeditStoreOutcome(err error) {
 			authoringcoedit.EmitStore(authoringcoedit.OutcomeOversized)
 			return
 		case authoringcoedit.CodePreviousHashMismatch, authoringcoedit.CodeRevisionConflict,
-			authoringcoedit.CodeSeedConflict, authoringcoedit.CodeActiveConflict:
+			authoringcoedit.CodeSeedConflict, authoringcoedit.CodeActiveConflict,
+			authoringcoedit.CodeFreezeConflict, authoringcoedit.CodeEpochMismatch,
+			authoringcoedit.CodeFinalStoreRequired, authoringcoedit.CodeStaleCache:
 			authoringcoedit.EmitStore(authoringcoedit.OutcomeConflict)
 			return
 		}

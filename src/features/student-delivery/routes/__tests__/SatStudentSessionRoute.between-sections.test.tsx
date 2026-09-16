@@ -194,11 +194,22 @@ function routeProps() {
   } as unknown as Record<string, never>;
 }
 
-function seed(data: AssessmentDeliveryBootstrap | null, pending: {
-  breakSeconds: number;
-  waitSeconds: number;
-}) {
-  const state = directionsState();
+interface EntryOptions {
+  /** "break" renders the live break branch instead of the directions branch. */
+  phase?: "directions" | "break";
+  isStarting?: boolean;
+  autoEntryRecoverable?: boolean;
+}
+
+function seed(
+  data: AssessmentDeliveryBootstrap | null,
+  pending: {
+    breakSeconds: number;
+    waitSeconds: number;
+  },
+  entry: EntryOptions = {},
+) {
+  const state = { ...directionsState(), phase: entry.phase ?? "directions" };
   const module = data ? (data.sections[0]?.modules[0] ?? null) : null;
   controllerMock.current = {
     state,
@@ -207,7 +218,8 @@ function seed(data: AssessmentDeliveryBootstrap | null, pending: {
     error: null,
     setError: () => undefined,
     isSubmitting: false,
-    isStarting: false,
+    isStarting: entry.isStarting ?? false,
+    autoEntryRecoverable: entry.autoEntryRecoverable ?? false,
     pendingModule: module,
     pendingBreakSeconds: pending.breakSeconds,
     pendingSectionWaitSeconds: pending.waitSeconds,
@@ -238,8 +250,12 @@ function seed(data: AssessmentDeliveryBootstrap | null, pending: {
   };
 }
 
-function renderRoute(data: AssessmentDeliveryBootstrap, pending: { breakSeconds: number; waitSeconds: number }) {
-  seed(data, pending);
+function renderRoute(
+  data: AssessmentDeliveryBootstrap,
+  pending: { breakSeconds: number; waitSeconds: number },
+  entry: EntryOptions = {},
+) {
+  seed(data, pending, entry);
   return render(<SatStudentSessionRoute {...(routeProps() as never)} />);
 }
 
@@ -268,5 +284,32 @@ describe("SatStudentSessionRoute between-sections window", () => {
     expect(screen.getByText("Waiting for the break to start")).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveTextContent("5:00");
     expect(screen.queryByText("On break")).not.toBeInTheDocument();
+  });
+
+  // Phase 4 (kill the silent 0:00): the countdown reaches zero while the server
+  // is still advancing the section. The surface must name the entry progress
+  // instead of freezing at 0:00 with no explanation and no path forward.
+  it("explains the run-out break with the entry progress, not a frozen 0:00", () => {
+    renderRoute(
+      mathData(),
+      { breakSeconds: 0, waitSeconds: 0 },
+      { phase: "break", autoEntryRecoverable: true },
+    );
+
+    expect(screen.getByRole("timer")).toHaveTextContent("0:00");
+    expect(screen.getByText("Still opening your next section")).toBeInTheDocument();
+    expect(screen.getByText(/Keep this screen open/)).toBeInTheDocument();
+    // The recovery path stays named. No button: entry is automatic, and only
+    // the preview route passes an advance handler.
+    expect(screen.getByText(/wait 30 seconds then reload/)).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByText("On break")).not.toBeInTheDocument();
+  });
+
+  it("announces the entry attempt while it is still in flight", () => {
+    renderRoute(mathData(), { breakSeconds: 0, waitSeconds: 0 }, { phase: "break", isStarting: true });
+
+    expect(screen.getByText("Starting your next section")).toBeInTheDocument();
+    expect(screen.getByRole("timer")).toHaveTextContent("0:00");
   });
 });

@@ -1,4 +1,17 @@
 import type { CompareFieldKey, FieldFate } from "../../realtime/threeWayCompare";
+import { COEDIT_STALE_CACHE_MESSAGE } from "../../realtime/coedit/contracts";
+import type { CoeditLifecycleIssue } from "../../realtime/coedit/contracts";
+
+/**
+ * The issues that offer the export recovery. A room that merely reconnects, or
+ * a session that expired, must never show it: the work is not at risk there.
+ * `stale_cache` belongs here because the work at risk is the preserved local
+ * copy, not the room — the room is durable, the copy is not reconciled.
+ */
+export type CoeditRecoveryIssue = Extract<
+  CoeditLifecycleIssue,
+  "closed" | "replaced" | "oversized" | "rejected" | "stale_cache"
+>;
 
 /**
  * Single source of collaboration UX strings. Tests assert against these, so a
@@ -52,10 +65,31 @@ export const PUBLISH_COPY = {
   openCurrentDraft: "Open current draft",
   reviewMyChanges: "Review my changes",
   copyMyWork: "Copy my work",
+  /**
+   * Discarding a preserved local copy is deliberate and two-step: the copy only
+   * exists because the room does not hold it.
+   */
+  discardLocalCopy: "Discard local copy",
+  confirmDiscardLocalCopy: "Yes, discard it",
   readOnlyNotice: "Published — read-only",
   /** Freeze reason surfaces as a title on every disabled mutation control. */
   frozenTitle: "Draft is no longer editable — published",
 } as const;
+
+/**
+ * Body of the recovery surface, per issue. The mandatory key phrase is that
+ * the work is still available on this device — every one of these is shown
+ * while the editor still holds content the server does not have.
+ */
+export const COEDIT_RECOVERY_COPY: Record<CoeditRecoveryIssue, string> = {
+  closed: PUBLISH_COPY.recoveryBody,
+  replaced: PUBLISH_COPY.recoveryBody,
+  stale_cache: COEDIT_STALE_CACHE_MESSAGE,
+  oversized:
+    "This prompt is too large to save as one collaborative document. Your changes are still available on this device.",
+  rejected:
+    "The collaboration service did not accept your latest changes. Your changes are still available on this device.",
+};
 
 export const STRUCTURAL_COPY = {
   movedTo: (where: string) => `Moved to ${where}`,

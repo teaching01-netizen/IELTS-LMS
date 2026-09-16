@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -706,7 +705,7 @@ var studentEntryRateLimiter = httpx.NewBucketStore(10000)
 
 // studentEntryBucket allows 30 entry attempts per minute per email+IP key.
 func studentEntryBucket(key string) httpx.RateLimitResult {
-	return studentEntryRateLimiter.Allow(httpx.RateLimitConfig{MaxRequests: 30, Window: time.Minute}, key)
+	return studentEntryRateLimiter.Allow(httpx.RateLimitConfig{MaxRequests: 30, Window: time.Minute, Tier: "student-entry"}, key)
 }
 
 // isStudentEntryAccountAllowed gates entry on account state only: any ACTIVE
@@ -851,20 +850,15 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 		// mirroring the Rust per-IP/per-schedule student-entry tiers).
 		entryKey := "entry:" + strings.ToLower(strings.TrimSpace(body.Email)) + "|" + httpx.ClientIPKey(r)
 		if res := studentEntryBucket(entryKey); !res.Allowed {
-			err := apperrors.New(apperrors.CodeRateLimitExceeded, "Too many check-in attempts.")
-			err.Details = map[string]any{"retryAfterSeconds": int(res.RetryAfter.Seconds()) + 1}
-			httpx.WriteError(w, r, err)
+			httpx.WriteRateLimitExceeded(w, r, "student-entry", "ip", res.RetryAfter)
 			return
 		}
 		// Plan D3: per-schedule check-in bucket (ENTRY_GATE=on). Over-limit
-		// check-ins get 429 + {retryAfterSecs, queuePosition} instead of a
-		// DB conflict storm on the schedule row. Off (default) = skipped.
+		// check-ins get a bounded 429 + Retry-After instead of a DB conflict
+		// storm on the schedule row. Off (default) = skipped.
 		if app.Config.EntryGateEnabled && app.EntryGate != nil && scheduleID != "" {
 			if gres := app.EntryGate.Allow(scheduleID, time.Now().UTC()); !gres.Allowed {
-				w.Header().Set("Retry-After", strconv.FormatInt(gres.RetryAfterSecs, 10))
-				err := apperrors.New(apperrors.CodeRateLimitExceeded, "Check-in is queued; please retry.")
-				err.Details = map[string]any{"tier": "student-entry", "retryAfterSecs": gres.RetryAfterSecs, "queuePosition": gres.QueuePosition}
-				httpx.WriteError(w, r, err)
+				httpx.WriteRateLimitExceeded(w, r, "student-entry", "schedule", time.Duration(gres.RetryAfterSecs)*time.Second)
 				return
 			}
 		}

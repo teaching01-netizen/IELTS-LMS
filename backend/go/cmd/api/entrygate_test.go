@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// D3 RED: fresh gate admits up to burst, then 429s with honest retryAfter.
+// D3: fresh gate admits up to burst, then 429s with honest retryAfter.
 func TestEntryGateBurstThen429(t *testing.T) {
 	g := newEntryGate(entryGateConfig{PerSec: 10, Burst: 3})
 	for i := 0; i < 3; i++ {
@@ -21,8 +21,8 @@ func TestEntryGateBurstThen429(t *testing.T) {
 	if res.RetryAfterSecs < 1 {
 		t.Fatalf("retryAfter must be honest (>=1s at 10/s), got %d", res.RetryAfterSecs)
 	}
-	if res.QueuePosition < 1 {
-		t.Fatalf("queue position must be set, got %d", res.QueuePosition)
+	if res.CapacityLimited {
+		t.Fatal("token exhaustion must not be reported as schedule-capacity exhaustion")
 	}
 }
 
@@ -53,5 +53,39 @@ func TestEntryGateIsolation(t *testing.T) {
 	}
 	if !g.Allow("cold", now).Allowed {
 		t.Fatalf("cold schedule must admit")
+	}
+}
+
+func TestEntryGateCapacityRejectsWithoutCreatingActiveSchedule(t *testing.T) {
+	g := newEntryGate(entryGateConfig{PerSec: 10, Burst: 1, MaxSchedules: 1})
+	now := time.Now()
+	if !g.Allow("hot", now).Allowed {
+		t.Fatal("first schedule must admit")
+	}
+
+	res := g.Allow("cold", now)
+	if res.Allowed || !res.CapacityLimited {
+		t.Fatalf("active schedule cap must reject as capacity-limited: %+v", res)
+	}
+	if res.RetryAfterSecs < 1 {
+		t.Fatalf("capacity rejection must be retryable, got %d seconds", res.RetryAfterSecs)
+	}
+	if len(g.buckets) != 1 {
+		t.Fatalf("capacity rejection must not create a schedule entry, entries=%d", len(g.buckets))
+	}
+}
+
+func TestEntryGateEvictsIdleScheduleBeforeRejectingCapacity(t *testing.T) {
+	g := newEntryGate(entryGateConfig{PerSec: 10, Burst: 1, MaxSchedules: 1, IdleAfter: time.Second})
+	start := time.Now()
+	if !g.Allow("old", start).Allowed {
+		t.Fatal("old schedule must admit")
+	}
+
+	if res := g.Allow("new", start.Add(2*time.Second)); !res.Allowed {
+		t.Fatalf("idle schedule must be evicted so new schedule can admit: %+v", res)
+	}
+	if len(g.buckets) != 1 {
+		t.Fatalf("idle eviction must preserve the schedule cap, entries=%d", len(g.buckets))
 	}
 }

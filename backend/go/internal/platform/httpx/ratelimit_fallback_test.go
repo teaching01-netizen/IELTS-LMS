@@ -97,7 +97,7 @@ func TestDBRateLimiterDBErrorKeepsLocalVerdict(t *testing.T) {
 // TCP peer is a trusted proxy; otherwise RemoteAddr is authoritative.
 func TestClientIPKeyTrustedProxy(t *testing.T) {
 	SetTrustedProxies([]string{"10.0.0.0/8"})
-	defer SetTrustedProxies([]string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
+	defer SetTrustedProxies([]string{"127.0.0.0/8", "::1/128"})
 	mk := func(remote, xff string) string {
 		req, _ := http.NewRequest("GET", "/", nil)
 		req.RemoteAddr = remote

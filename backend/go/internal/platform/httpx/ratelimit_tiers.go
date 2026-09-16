@@ -64,17 +64,19 @@ func UserOrIPKey(lookup SessionLookup) KeyFunc {
 }
 
 // AttemptOrUserOrIPKey keys student/attempt-bearer traffic by a truncated
-// hash of the bearer, falling back to user then IP. The raw bearer never
-// appears in the bucket key (and therefore never in counters or logs).
+// hash of the bearer, falling back to user then IP. Bearer identity wins over
+// the session user because the bearer identifies the attempt being mutated.
+// The raw bearer never appears in the bucket key (and therefore never in
+// counters or logs).
 func AttemptOrUserOrIPKey(lookup SessionLookup) KeyFunc {
 	return func(r *http.Request) string {
+		if h := bearerHash(r); h != "" {
+			return "attempt:" + h
+		}
 		if lookup != nil {
 			if userID, ok := lookup(r); ok && strings.TrimSpace(userID) != "" {
 				return "attempt-user:" + strings.TrimSpace(userID)
 			}
-		}
-		if h := bearerHash(r); h != "" {
-			return "attempt:" + h
 		}
 		return ClientIPKey(r)
 	}
@@ -97,14 +99,20 @@ func bearerHash(r *http.Request) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// TierSet is a named collection of per-tier limiters sharing one BucketStore
-// cap namespace but independent token buckets per (tier, key). Each request
-// passing through a tier middleware produces at most one DB verdict (zero
-// in local-only mode, exactly one in dual mode when a checker is wired).
+type tierRuntime struct {
+	tier      string
+	budget    TierBudget
+	prefilter *BucketStore
+	emergency *BucketStore
+	db        DBChecker
+}
+
+// TierSet is a named collection of independent per-tier limiter runtimes.
+// Each runtime owns a cheap dual-mode prefilter and an exact local emergency
+// limiter, so one tier cannot evict another tier's active buckets.
 type TierSet struct {
-	budgets map[string]TierBudget
-	local   *BucketStore
-	dbs     map[string]DBChecker
+	budgets  map[string]TierBudget
+	runtimes map[string]*tierRuntime
 	// localOnly drops the distributed verdict (plan A1 single-deploy:
 	// local IS global when exactly one app process serves traffic).
 	// Default false = dual (behavior-preserving). Guarded by mutex so
@@ -113,34 +121,61 @@ type TierSet struct {
 	localOnly bool
 }
 
-// NewTierSet builds a tier set. A nil db map entry means local-only (used
-// for the loose global backstop, which never touches distributed counters).
+// NewTierSet builds a tier set. A nil db map entry uses the exact emergency
+// limiter because no distributed verdict is available (including backstop).
 func NewTierSet(budgets map[string]TierBudget, dbs map[string]DBChecker, storeCap int) *TierSet {
 	if storeCap <= 0 {
 		storeCap = 10000
 	}
+	normalized := make(map[string]TierBudget, len(budgets))
+	runtimes := make(map[string]*tierRuntime, len(budgets))
+	for tier, budget := range budgets {
+		if budget.PerMin <= 0 {
+			budget.PerMin = 1
+		}
+		if budget.Window <= 0 {
+			budget.Window = time.Minute
+		}
+		if budget.Burst < 0 {
+			budget.Burst = 0
+		}
+		normalized[tier] = budget
+		runtimes[tier] = &tierRuntime{
+			tier:      tier,
+			budget:    budget,
+			prefilter: NewBucketStore(storeCap),
+			emergency: NewBucketStore(storeCap),
+			db:        dbs[tier],
+		}
+	}
 	return &TierSet{
-		budgets: budgets,
-		local:   NewBucketStore(storeCap),
-		dbs:     dbs,
+		budgets:  normalized,
+		runtimes: runtimes,
+	}
+}
+
+func (r *tierRuntime) exactConfig() RateLimitConfig {
+	return RateLimitConfig{
+		MaxRequests: r.budget.PerMin,
+		Window:      r.budget.Window,
+		Burst:       r.budget.Burst,
+		Tier:        r.tier,
+	}
+}
+
+func (r *tierRuntime) prefilterConfig() RateLimitConfig {
+	return RateLimitConfig{
+		MaxRequests: r.budget.PerMin * PrefilterMultiple,
+		Window:      r.budget.Window,
+		Burst:       r.budget.Burst * PrefilterMultiple,
+		Tier:        r.tier,
 	}
 }
 
 // Middleware enforces one tier with the given key func. An empty key bypasses
 // limiting (used for health-probe exemption).
 func (t *TierSet) Middleware(tier string, keyFn KeyFunc) func(http.Handler) http.Handler {
-	budget := t.budgets[tier]
-	if budget.PerMin <= 0 {
-		budget.PerMin = 1
-	}
-	if budget.Window <= 0 {
-		budget.Window = time.Minute
-	}
-	localCfg := RateLimitConfig{
-		MaxRequests: budget.PerMin * PrefilterMultiple,
-		Window:      budget.Window,
-		Burst:       budget.Burst * PrefilterMultiple,
-	}
+	runtime := t.runtimes[tier]
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := ""
@@ -151,31 +186,48 @@ func (t *TierSet) Middleware(tier string, keyFn KeyFunc) func(http.Handler) http
 				next.ServeHTTP(w, r)
 				return
 			}
-			namespaced := tier + "|" + key
-			if res := t.local.Allow(localCfg, namespaced); !res.Allowed {
-				denyTierRateLimit(w, r, tier, keyClassOf(key), res.RetryAfter)
+			if runtime == nil {
+				// An unconfigured tier must fail closed rather than silently
+				// bypassing rate limiting.
+				denyTierRateLimit(w, r, tier, keyClassOf(key), time.Second)
 				return
 			}
+
 			// Per-request read (one RLock): SetLocalOnly flips apply to
 			// already-mounted middleware without a restart.
 			t.mu.RLock()
 			localOnly := t.localOnly
 			t.mu.RUnlock()
-			dbCheck := t.dbs[tier]
-			if localOnly {
-				dbCheck = nil
-			}
-			if dbCheck != nil {
-				allowed, retryAfter, err := dbCheck(r.Context(), namespaced)
-				if err != nil {
-					// Fail-safe (existing invariant): a DB outage must not
-					// open the gate nor fail the request — keep the
-					// local prefilter verdict (allowed here).
-					_ = err
-				} else if !allowed {
-					denyTierRateLimit(w, r, tier, keyClassOf(key), retryAfter)
+			if localOnly || runtime.db == nil {
+				if res := runtime.emergency.Allow(runtime.exactConfig(), key); !res.Allowed {
+					denyTierRateLimit(w, r, tier, keyClassOf(key), res.RetryAfter)
 					return
 				}
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if res := runtime.prefilter.Allow(runtime.prefilterConfig(), key); !res.Allowed {
+				denyTierRateLimit(w, r, tier, keyClassOf(key), res.RetryAfter)
+				return
+			}
+
+			allowed, retryAfter, err := runtime.db(r.Context(), tier+"|"+key)
+			if err != nil {
+				telemetry.IncCounter(
+					telemetry.MRatelimitDBErrorTotal,
+					"tier", tier,
+					"key_class", keyClassOf(key),
+				)
+				// A DB outage switches to the exact bounded emergency limiter;
+				// the 2x prefilter is never authoritative during an outage.
+				if res := runtime.emergency.Allow(runtime.exactConfig(), key); !res.Allowed {
+					denyTierRateLimit(w, r, tier, keyClassOf(key), res.RetryAfter)
+					return
+				}
+			} else if !allowed {
+				denyTierRateLimit(w, r, tier, keyClassOf(key), retryAfter)
+				return
 			}
 			next.ServeHTTP(w, r)
 		})
@@ -213,7 +265,13 @@ func (t *TierSet) DBCheckerCount() int {
 	}
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return len(t.dbs)
+	count := 0
+	for _, runtime := range t.runtimes {
+		if runtime.db != nil {
+			count++
+		}
+	}
+	return count
 }
 
 // HasTier reports whether a tier has a budget configured.
@@ -255,7 +313,8 @@ func TierBudgetsFromConfig(perMin map[string]int, burst int) map[string]TierBudg
 func keyClassOf(key string) string {
 	switch {
 	case strings.HasPrefix(key, "user:"),
-		strings.HasPrefix(key, "attempt-user:"):
+		strings.HasPrefix(key, "attempt-user:"),
+		strings.HasPrefix(key, "export:"):
 		return "user"
 	case strings.HasPrefix(key, "attempt:"):
 		return "attempt"

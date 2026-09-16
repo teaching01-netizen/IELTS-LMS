@@ -1420,7 +1420,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-ref-collapse-fade: 90ms;
   --sat-ref-collapse-clip: 90ms;
   --sat-ref-collapse-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  /* Exam chrome heights (mirror SatExamTopBar sm:h-[96px] and SatExamFooter
+  /* Exam chrome heights (mirror SatExamTopBar lg:h-[96px] and SatExamFooter
    * min-h-[70px]): single source of truth for the Phase 02 safe-area clamp.
    * Update together if the chrome heights change. */
   --sat-exam-header-height: 96px;
@@ -1506,6 +1506,28 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   line-height: var(--sat-reading-line-height);
 }
 
+.sat-ui.sat-exam-shell {
+  min-width: 0;
+  width: 100%;
+  height: var(--student-exam-height, 100dvh);
+  max-height: var(--student-exam-height, 100dvh);
+}
+
+.sat-ui.sat-review-page {
+  min-width: 0;
+  width: 100%;
+  height: var(--student-exam-height, 100dvh);
+  max-height: var(--student-exam-height, 100dvh);
+}
+
+/* Keep the SAT footer row in the grid while the keyboard owns the visible
+   viewport. Hiding it with visibility preserves the exam's stable geometry;
+   display:none would collapse the auto row and move the question surface. */
+.sat-ui.sat-exam-shell[data-sat-keyboard-open='true'] .sat-exam-footer {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .sat-exam-topbar {
   padding-left: calc(1rem + var(--student-safe-left));
   padding-right: calc(1rem + var(--student-safe-right));
@@ -1534,6 +1556,14 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   padding-left: calc(1rem + var(--student-safe-left));
   padding-right: calc(1rem + var(--student-safe-right));
   padding-bottom: calc(0.5rem + var(--student-safe-bottom));
+}
+
+@media (max-width: 1023px) {
+  .sat-exam-topbar > div,
+  .sat-exam-footer > div {
+    min-width: 0;
+    width: 100%;
+  }
 }
 
 .sat-dialog-backdrop {
@@ -1974,7 +2004,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   outline-offset: var(--sat-focus-offset, 2px);
 }
 
-@media (min-width: 640px) {
+@media (min-width: 1024px) {
   .sat-exam-topbar {
     padding-left: calc(1.5rem + var(--student-safe-left));
     padding-right: calc(1.5rem + var(--student-safe-right));

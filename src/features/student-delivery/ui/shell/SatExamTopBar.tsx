@@ -57,13 +57,13 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
 
   return (
     <header
-      className="sat-exam-topbar relative z-[60] border-b border-[var(--sat-divider-strong)] bg-[var(--sat-shell-bg)]"
+      className="sat-exam-topbar relative z-[60] min-w-0 border-b border-[var(--sat-divider-strong)] bg-[var(--sat-shell-bg)]"
       role="banner"
     >
       {/* Bluebook 3-anchor header: context | independently-centered timer | tools. Mobile keeps 2-row stacking. */}
-      <div className="mx-auto grid min-h-[96px] max-w-[1440px] grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] items-center gap-x-2 py-1 sm:h-[96px] sm:min-h-0 sm:grid-cols-[minmax(280px,1fr)_180px_minmax(280px,1fr)] sm:grid-rows-1 sm:gap-3 sm:py-0">
-        <div className="sat-popover-anchor relative col-start-1 row-start-1 flex min-w-0 items-center gap-2 self-stretch sm:col-auto sm:row-auto sm:block sm:py-3">
-          <p className="sat-type-body truncate font-semibold leading-6 text-[var(--sat-text)]">
+      <div className="mx-auto grid min-h-0 min-w-0 max-w-[1440px] grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] items-center gap-x-2 py-1 lg:h-[96px] lg:min-h-0 lg:grid-cols-[minmax(280px,1fr)_180px_minmax(280px,1fr)] lg:grid-rows-1 lg:gap-3 lg:py-0">
+        <div className="sat-popover-anchor relative col-start-1 row-start-1 flex min-w-0 items-center gap-2 self-stretch lg:col-auto lg:row-auto lg:block lg:py-3">
+          <p className="sat-type-body min-w-0 truncate font-semibold leading-6 text-[var(--sat-text)]">
             {props.sectionLabel}
           </p>
           <button
@@ -72,7 +72,9 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
             data-sat-focus="topbar-directions"
             onClick={props.onToggleDirections}
             aria-expanded={props.directionsOpen}
-            aria-controls={directionsId}
+            // Closed triggers expose no target at all: the panel unmounts, so
+            // an unconditional aria-controls would dangle (Task 6).
+            aria-controls={props.directionsOpen ? directionsId : undefined}
             aria-haspopup="dialog"
             className="sat-touch-target sat-pressable inline-flex shrink-0 items-center gap-1 sat-type-control-secondary font-medium text-[var(--sat-text)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
           >
@@ -88,7 +90,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
           />
         </div>
 
-        <div className="col-start-2 row-start-1 flex min-w-[84px] flex-col items-center justify-center self-stretch text-center sm:col-auto sm:row-auto sm:min-w-[96px]">
+        <div className="col-start-2 row-start-1 flex min-w-[84px] flex-col items-center justify-center self-stretch text-center lg:col-auto lg:row-auto lg:min-w-[96px]">
           <span
             className="sat-tabular sat-type-timer font-semibold text-[var(--sat-text)]"
             role="timer"
@@ -122,7 +124,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
           </button>
         </div>
 
-        <div className="relative col-span-2 row-start-2 flex min-w-0 items-center justify-end gap-1 self-stretch sm:col-span-1 sm:col-start-auto sm:row-start-auto" role="group" aria-label="Test tools">
+        <div className="relative col-span-2 row-start-2 flex min-w-0 flex-wrap items-center justify-end gap-1 self-stretch lg:col-span-1 lg:col-start-auto lg:row-start-auto lg:flex-nowrap" role="group" aria-label="Test tools">
           {/* Annotation tools and Question note (freeform per-question panel)
               are separate top-bar entries. The note is always reachable when
               available, never gated on an annotation mode. */}
@@ -217,7 +219,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
               aria-haspopup="menu"
               aria-label={SAT_COPY.more.triggerLabel}
               data-sat-focus="topbar-more"
-              className="sat-touch-target sat-pressable flex min-w-11 flex-col items-center justify-center gap-1 px-2 sat-type-control-secondary font-medium text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] sm:h-[66px] sm:min-w-[68px]"
+              className="sat-touch-target sat-pressable flex min-w-11 flex-col items-center justify-center gap-1 px-2 sat-type-control-secondary font-medium text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] lg:h-[66px] lg:min-w-[68px]"
             >
               <EllipsisVertical className="h-5 w-5" aria-hidden="true" />
               <span className="hidden max-w-[80px] truncate min-[420px]:inline">{SAT_COPY.more.trigger}</span>
@@ -263,7 +265,7 @@ function TopToolButton({
       disabled={disabled}
       aria-pressed={pressed}
       aria-label={hasIndicator === true ? label + ", has note" : label}
-      className="sat-touch-target sat-pressable relative flex min-w-11 items-center justify-center gap-1.5 px-2 min-[420px]:min-w-[72px] sat-type-control-secondary font-medium text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] sm:h-[66px] sm:min-w-[68px] sm:flex-col sm:gap-1"
+      className="sat-touch-target sat-pressable relative flex min-w-11 items-center justify-center gap-1.5 px-2 min-[420px]:min-w-[72px] sat-type-control-secondary font-medium text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] lg:h-[66px] lg:min-w-[68px] lg:flex-col lg:gap-1"
     >
       {icon}
       <span className="hidden max-w-[80px] truncate text-[13px] min-[420px]:inline">{label}</span>

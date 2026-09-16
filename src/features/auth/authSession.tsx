@@ -70,10 +70,31 @@ function isRateLimitedError(error: unknown): boolean {
 
 function rateLimitWaitMs(error: unknown): number {
   const record = error as Record<string, unknown>;
-  const details = record['details'] as Record<string, unknown> | undefined;
-  const retryAfter =
-    record['retryAfter'] ?? details?.['retryAfterSeconds'] ?? details?.['retryAfter'];
-  const secs = typeof retryAfter === 'number' && retryAfter > 0 ? retryAfter : 1;
+  const details =
+    (record['details'] as Record<string, unknown> | undefined) ??
+    (record['backendDetails'] as Record<string, unknown> | undefined);
+  const headers = record['headers'];
+  const headerRetryAfter =
+    headers && typeof headers === 'object' && 'get' in headers && typeof headers.get === 'function'
+      ? (headers.get('Retry-After') ?? headers.get('retry-after'))
+      : headers && typeof headers === 'object'
+        ? ((headers as Record<string, unknown>)['Retry-After'] ??
+          (headers as Record<string, unknown>)['retry-after'])
+        : undefined;
+  const candidates = [
+    record['retryAfterSeconds'],
+    record['retryAfterSecs'],
+    record['retryAfter'],
+    details?.['retryAfterSeconds'],
+    details?.['retryAfterSecs'],
+    details?.['retryAfter'],
+    headerRetryAfter,
+  ];
+  const retryAfter = candidates.find((value) => {
+    const seconds = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(seconds) && seconds > 0;
+  });
+  const secs = retryAfter === undefined ? 1 : Number(retryAfter);
   return Math.min(secs, 30) * 1000;
 }
 

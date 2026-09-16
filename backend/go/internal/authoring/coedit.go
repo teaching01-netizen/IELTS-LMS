@@ -25,7 +25,7 @@ import (
 // the question revision bump, and the event row to commit in ONE transaction.
 // Splitting them across packages would mean either exporting the tx-level
 // helpers or accepting two commits, and the design explicitly forbids the
-// second.
+// second ("Single ownership per field", docs/sat-authoring-coedit.md).
 //
 // The protocol vocabulary (tokens, signatures, identity, control client,
 // metrics) lives in authoringcoedit and is imported here.
@@ -53,23 +53,32 @@ type CoeditDocument struct {
 	// (a lifecycle flush after the editor's connection context is gone).
 	LastActorID string
 	UpdatedAt   time.Time
+	StateEpoch  uint64
+	// CommitSequence orders every accepted durable Yjs state, including
+	// workspace/UI-only commits that do not create a question revision.
+	CommitSequence    uint64
+	FreezeOperationID *string
+	FreezeExpiresAt   *time.Time
 }
 
 const coeditDocumentColumns = `id, organization_id, exam_id, draft_version_id, exam_question_id,
  question_revision_id, schema_version, field_set, lifecycle_state, seed_revision,
  materialized_revision, ydoc_state, state_vector, state_hash, previous_state_hash,
- closed_reason, last_actor_id, updated_at`
+ closed_reason, last_actor_id, updated_at, state_epoch, commit_sequence,
+ freeze_operation_id, freeze_expires_at`
 
 func scanCoeditDocument(row interface {
 	Scan(dest ...any) error
 }) (CoeditDocument, error) {
 	var doc CoeditDocument
-	var org, examQuestionID, questionRevisionID, closedReason, lastActor sql.NullString
+	var org, examQuestionID, questionRevisionID, closedReason, lastActor, freezeOperationID sql.NullString
+	var freezeExpiresAt sql.NullTime
 	var state string
 	err := row.Scan(&doc.ID, &org, &doc.ExamID, &doc.DraftVersionID, &examQuestionID,
 		&questionRevisionID, &doc.SchemaVersion, &doc.FieldSet, &state, &doc.SeedRevision,
 		&doc.MaterializedRevision, &doc.YdocState, &doc.StateVector, &doc.StateHash,
-		&doc.PreviousStateHash, &closedReason, &lastActor, &doc.UpdatedAt)
+		&doc.PreviousStateHash, &closedReason, &lastActor, &doc.UpdatedAt,
+		&doc.StateEpoch, &doc.CommitSequence, &freezeOperationID, &freezeExpiresAt)
 	if err != nil {
 		return CoeditDocument{}, err
 	}
@@ -89,6 +98,16 @@ func scanCoeditDocument(row interface {
 	}
 	if lastActor.Valid {
 		doc.LastActorID = strings.TrimSpace(lastActor.String)
+	}
+	if freezeOperationID.Valid {
+		value := strings.TrimSpace(freezeOperationID.String)
+		if value != "" {
+			doc.FreezeOperationID = &value
+		}
+	}
+	if freezeExpiresAt.Valid {
+		value := freezeExpiresAt.Time
+		doc.FreezeExpiresAt = &value
 	}
 	parsed, err := authoringcoedit.ParseLifecycleState(state)
 	if err != nil {
@@ -110,17 +129,25 @@ type CoeditSeed struct {
 // never rendered as an editable prompt while seed status is unresolved, so
 // either YdocState or Seed is always populated.
 type CoeditLoadResult struct {
-	DocumentName         string      `json:"documentName"`
-	LifecycleState       string      `json:"lifecycleState"`
-	YdocState            []byte      `json:"ydocState"`
-	StateVector          []byte      `json:"stateVector"`
-	StateHash            string      `json:"stateHash"`
-	MaterializedRevision int         `json:"materializedRevision"`
-	QuestionRevision     int         `json:"questionRevision"`
-	SchemaVersion        int         `json:"schemaVersion"`
-	FieldSet             string      `json:"fieldSet"`
-	ClosedReason         *string     `json:"closedReason"`
-	Seed                 *CoeditSeed `json:"seed"`
+	DocumentName         string `json:"documentName"`
+	LifecycleState       string `json:"lifecycleState"`
+	YdocState            []byte `json:"ydocState"`
+	StateVector          []byte `json:"stateVector"`
+	StateHash            string `json:"stateHash"`
+	MaterializedRevision int    `json:"materializedRevision"`
+	QuestionRevision     int    `json:"questionRevision"`
+	// These fields are additive during the epoch/sequence rollout. Workspace
+	// callers must use WorkspaceRevision instead of treating a workspace commit
+	// as a question revision.
+	StateEpoch        authoringcoedit.DecimalString `json:"stateEpoch,omitempty"`
+	CommitSequence    authoringcoedit.DecimalString `json:"commitSequence,omitempty"`
+	WorkspaceRevision int                           `json:"workspaceRevision,omitempty"`
+	FreezeOperationID string                        `json:"freezeOperationId,omitempty"`
+	FreezeExpiresAt   int64                         `json:"freezeExpiresAt,omitempty"`
+	SchemaVersion     int                           `json:"schemaVersion"`
+	FieldSet          string                        `json:"fieldSet"`
+	ClosedReason      *string                       `json:"closedReason"`
+	Seed              *CoeditSeed                   `json:"seed"`
 }
 
 // CoeditInitializeRequest is the private initialize call. Go stores the binary
@@ -149,20 +176,40 @@ type CoeditStoreRequest struct {
 	Prompt            json.RawMessage
 	Workspace         json.RawMessage
 	ActorID           string
+	FreezeOperationID string
 }
 
-// CoeditStoreResult is the stateless acknowledgement broadcast to browsers.
-// A browser marks Saved only when StateHash equals the hash of its CURRENT
-// state vector.
+// CoeditStoreResult is the private store acknowledgement. The service turns it
+// into the stateless browser `coedit.ack` frame and attaches the committed
+// state VECTOR, which is the identity a browser compares against its own to
+// decide Saved (see docs/sat-authoring-coedit.md). StateHash is durable
+// provenance stored beside the binary; it never decides Saved.
 type CoeditStoreResult struct {
-	DocumentName         string `json:"documentName"`
-	StateHash            string `json:"stateHash"`
-	QuestionRevision     int    `json:"questionRevision"`
-	MaterializedRevision int    `json:"materializedRevision"`
+	DocumentName         string                        `json:"documentName"`
+	StateHash            string                        `json:"stateHash"`
+	QuestionRevision     int                           `json:"questionRevision"`
+	MaterializedRevision int                           `json:"materializedRevision"`
+	StateEpoch           authoringcoedit.DecimalString `json:"stateEpoch,omitempty"`
+	CommitSequence       authoringcoedit.DecimalString `json:"commitSequence,omitempty"`
+	WorkspaceRevision    int                           `json:"workspaceRevision,omitempty"`
+	FreezeOperationID    string                        `json:"freezeOperationId,omitempty"`
+	FreezeExpiresAt      int64                         `json:"freezeExpiresAt,omitempty"`
 	// Committed is false when the incoming state hash was already current
 	// (idempotent replay) or when the request only seeded the document.
 	Committed bool `json:"committed"`
 	Duplicate bool `json:"duplicate"`
+}
+
+// CoeditRebaseRequest replaces a compacted durable Y.Doc under an explicit
+// old-hash/epoch fence. It intentionally carries no prompt or workspace
+// projection: compaction changes the binary representation, not domain data.
+type CoeditRebaseRequest struct {
+	DocumentName       string
+	ExpectedStateHash  string
+	ExpectedStateEpoch authoringcoedit.DecimalString
+	StateHash          string
+	YdocState          []byte
+	StateVector        []byte
 }
 
 // coeditQuestionContext is the server-resolved binding for one exam question.
@@ -241,6 +288,8 @@ func coeditIdentityFromDocument(doc CoeditDocument) authoringcoedit.Identity {
 		SeedRevision:         doc.SeedRevision,
 		MaterializedRevision: doc.MaterializedRevision,
 		ClosedReason:         closed,
+		StateEpoch:           coeditDecimal(doc.StateEpoch),
+		CommitSequence:       coeditDecimal(doc.CommitSequence),
 	}
 }
 
@@ -371,6 +420,10 @@ func (s *Service) coeditBuildLoadResult(ctx context.Context, doc CoeditDocument)
 		StateHash:            hex.EncodeToString(doc.StateHash),
 		MaterializedRevision: doc.MaterializedRevision,
 		QuestionRevision:     doc.MaterializedRevision,
+		StateEpoch:           coeditDecimal(doc.StateEpoch),
+		CommitSequence:       coeditDecimal(doc.CommitSequence),
+		FreezeOperationID:    coeditFreezeOperationID(doc),
+		FreezeExpiresAt:      coeditFreezeExpiresAt(doc),
 		SchemaVersion:        doc.SchemaVersion,
 		FieldSet:             doc.FieldSet,
 		ClosedReason:         doc.ClosedReason,
@@ -449,11 +502,14 @@ func (s *Service) CoeditInitialize(ctx context.Context, req CoeditInitializeRequ
 		if doc.LifecycleState == authoringcoedit.StateClosed {
 			return authoringcoedit.New(authoringcoedit.CodeDocumentClosed, "This prompt's collaboration session was closed.")
 		}
-		if err := s.assertCoeditBindingLocked(ctx, q, doc); err != nil {
-			return err
-		}
 		if !authoringcoedit.CanTransition(doc.LifecycleState, authoringcoedit.StateActive) {
 			return authoringcoedit.New(authoringcoedit.CodeDocumentFrozen, "This prompt is being published; try again in a moment.")
+		}
+		if doc.LifecycleState == authoringcoedit.StateFreezing || doc.LifecycleState == authoringcoedit.StateFrozen {
+			return authoringcoedit.New(authoringcoedit.CodeDocumentFrozen, "This prompt is being published; try again in a moment.")
+		}
+		if err := s.assertCoeditBindingLocked(ctx, q, doc); err != nil {
+			return err
 		}
 		// Compare-and-set: an existing binary state means another seed won.
 		if len(doc.YdocState) > 0 {
@@ -475,14 +531,16 @@ func (s *Service) CoeditInitialize(ctx context.Context, req CoeditInitializeRequ
 			return err
 		}
 		if _, err := q.ExecContext(ctx, `UPDATE authoring_coedit_documents
- SET ydoc_state = ?, state_vector = ?, state_hash = ?, lifecycle_state = ?, last_actor_id = ?, updated_at = NOW(6)
- WHERE id = ?`, req.YdocState, req.StateVector, hash, string(authoringcoedit.StateActive), req.ActorID, id); err != nil {
+	 SET ydoc_state = ?, state_vector = ?, state_hash = ?, lifecycle_state = ?,
+	     commit_sequence = commit_sequence + 1, last_actor_id = ?, updated_at = NOW(6)
+	 WHERE id = ?`, req.YdocState, req.StateVector, hash, string(authoringcoedit.StateActive), req.ActorID, id); err != nil {
 			return err
 		}
 		doc.YdocState = req.YdocState
 		doc.StateVector = req.StateVector
 		doc.StateHash = hash
 		doc.LifecycleState = authoringcoedit.StateActive
+		doc.CommitSequence++
 		out = coeditResultFromDocument(doc, false)
 		return nil
 	})
@@ -521,17 +579,31 @@ func (s *Service) assertCoeditBindingLocked(ctx context.Context, q tx.Tx, doc Co
 	return nil
 }
 
-// CoeditStore commits a collaborative prompt change. It is the single writer
-// of assessment_question_revisions.prompt for an active room, and it commits
-// the binary state, the prompt projection, the question revision bump, the
-// draft revision bump, and the content-free authoring event atomically.
+// CoeditStore commits a collaborative prompt change while the durable row is
+// active. A freezing row must use CoeditFinalStore; ordinary stores remain
+// rejected so a stale connection cannot cross the lifecycle fence.
 func (s *Service) CoeditStore(ctx context.Context, req CoeditStoreRequest) (CoeditStoreResult, error) {
+	return s.coeditStore(ctx, req, false)
+}
+
+// CoeditFinalStore commits the last state observed by an owned freeze. It
+// shares the ordinary prompt/hash/projection/event transaction but deliberately
+// leaves the row in freezing until the lifecycle owner closes or aborts it.
+func (s *Service) CoeditFinalStore(ctx context.Context, req CoeditStoreRequest) (CoeditStoreResult, error) {
+	return s.coeditStore(ctx, req, true)
+}
+
+func (s *Service) coeditStore(ctx context.Context, req CoeditStoreRequest, final bool) (CoeditStoreResult, error) {
 	if err := validateCoeditSizes(req.YdocState, req.StateVector, req.Prompt); err != nil {
 		return CoeditStoreResult{}, err
 	}
 	_, id, err := authoringcoedit.ParseDocumentName(req.DocumentName)
 	if err != nil {
 		return CoeditStoreResult{}, authoringcoedit.New(authoringcoedit.CodeNotEditableDraft, "Unknown co-edit document.")
+	}
+	if final && strings.TrimSpace(req.FreezeOperationID) == "" {
+		return CoeditStoreResult{}, authoringcoedit.New(authoringcoedit.CodeFreezeConflict,
+			"A freeze operation is required for the final store.")
 	}
 	emission := &eventEmission{}
 	var out CoeditStoreResult
@@ -543,11 +615,27 @@ func (s *Service) CoeditStore(ctx context.Context, req CoeditStoreRequest) (Coed
 			}
 			return err
 		}
-		switch doc.LifecycleState {
-		case authoringcoedit.StateClosed:
+		if doc.LifecycleState == authoringcoedit.StateClosed {
 			return authoringcoedit.New(authoringcoedit.CodeDocumentClosed, "This prompt's collaboration session was closed.")
-		case authoringcoedit.StateFreezing, authoringcoedit.StateFrozen:
-			return authoringcoedit.New(authoringcoedit.CodeDocumentFrozen, "This prompt is being published; try again in a moment.")
+		}
+		if final {
+			if doc.LifecycleState != authoringcoedit.StateFreezing {
+				return authoringcoedit.New(authoringcoedit.CodeFinalStoreRequired,
+					"The final store is only valid for a freezing collaboration session.")
+			}
+			if coeditFreezeOperationID(doc) != strings.TrimSpace(req.FreezeOperationID) {
+				return authoringcoedit.New(authoringcoedit.CodeFreezeConflict,
+					"Another lifecycle operation owns this collaboration session.")
+			}
+			if !lifecycleLeaseActive(doc.FreezeExpiresAt) {
+				return authoringcoedit.New(authoringcoedit.CodeFreezeConflict,
+					"The collaboration freeze lease has expired; start a new lifecycle operation.")
+			}
+		} else {
+			switch doc.LifecycleState {
+			case authoringcoedit.StateFreezing, authoringcoedit.StateFrozen:
+				return authoringcoedit.New(authoringcoedit.CodeDocumentFrozen, "This prompt is being published; try again in a moment.")
+			}
 		}
 		if err := s.assertCoeditBindingLocked(ctx, q, doc); err != nil {
 			return err
@@ -556,13 +644,12 @@ func (s *Service) CoeditStore(ctx context.Context, req CoeditStoreRequest) (Coed
 		if err != nil {
 			return err
 		}
-		// Idempotent same-hash store: acknowledge without a revision bump.
+		// Idempotent same-hash store: acknowledge without a revision bump or
+		// sequence change. The response still carries the current fence metadata.
 		if len(doc.StateHash) > 0 && stringEqualBytes(doc.StateHash, incomingHash) {
 			out = coeditResultFromDocument(doc, true)
 			return nil
 		}
-		// Previous-hash fence. A missing previous hash is only legal for the
-		// very first store (initializing -> active transition).
 		if len(doc.StateHash) > 0 {
 			previous, err := decodeStateHash(req.PreviousStateHash)
 			if err != nil || !stringEqualBytes(doc.StateHash, previous) {
@@ -580,18 +667,10 @@ func (s *Service) CoeditStore(ctx context.Context, req CoeditStoreRequest) (Coed
 					"Question changed before collaboration could start; refresh before retrying.")
 			}
 		}
-		// Attribution. The actor normally arrives from the token-derived
-		// connection context. A lifecycle flush (freeze/close) can store after
-		// that context is gone, and the service then sends no actor — but an
-		// unattributable store must never lose a durable write: fall back to the
-		// staff user this room last resolved, which the server itself recorded.
 		actorID := strings.TrimSpace(req.ActorID)
 		if actorID == "" {
 			actorID = doc.LastActorID
 		}
-		// touchQuestionDraft bumps the draft revision and refuses a question
-		// outside an editable draft. It must run before the scope read so the
-		// emitted event carries the post-bump draft revision.
 		if err := touchQuestionDraft(ctx, q, doc.ExamQuestionID); err != nil {
 			return err
 		}
@@ -604,17 +683,18 @@ func (s *Service) CoeditStore(ctx context.Context, req CoeditStoreRequest) (Coed
 		if err := q.QueryRowContext(ctx, `SELECT revision FROM assessment_question_revisions WHERE id = ?`, doc.QuestionRevisionID).Scan(&newRevision); err != nil {
 			return err
 		}
+		lifecycle := authoringcoedit.StateActive
+		if final {
+			lifecycle = authoringcoedit.StateFreezing
+		}
 		if _, err := q.ExecContext(ctx, `UPDATE authoring_coedit_documents
  SET ydoc_state = ?, state_vector = ?, previous_state_hash = state_hash, state_hash = ?,
-     lifecycle_state = ?, materialized_revision = ?, last_actor_id = ?, updated_at = NOW(6)
- WHERE id = ?`, req.YdocState, req.StateVector, incomingHash, string(authoringcoedit.StateActive),
+     lifecycle_state = ?, materialized_revision = ?, commit_sequence = commit_sequence + 1,
+     last_actor_id = ?, updated_at = NOW(6)
+ WHERE id = ?`, req.YdocState, req.StateVector, incomingHash, string(lifecycle),
 			newRevision, actorID, id); err != nil {
 			return err
 		}
-		// An authoring event requires a resolved staff actor. With none — a room
-		// no client ever authenticated — there is no authorship to publish, so
-		// the store still commits and acknowledges instead of failing the whole
-		// transaction for an attribution reason.
 		if s.eventsOn() && actorID != "" {
 			scope, err := resolveQuestionScopeTx(ctx, q, doc.ExamQuestionID)
 			if err != nil {
@@ -624,7 +704,11 @@ func (s *Service) CoeditStore(ctx context.Context, req CoeditStoreRequest) (Coed
 			if err != nil {
 				return err
 			}
-			if err := s.appendAuthoringEventTx(ctx, q, emission, "coedit_store", scope, authoringrealtime.EventInput{
+			source := "coedit_store"
+			if final {
+				source = "coedit_final_store"
+			}
+			if err := s.appendAuthoringEventTx(ctx, q, emission, source, scope, authoringrealtime.EventInput{
 				Kind:    authoringrealtime.KindQuestionChanged,
 				ActorID: actorID,
 				Entity: authoringrealtime.Entity{
@@ -640,10 +724,13 @@ func (s *Service) CoeditStore(ctx context.Context, req CoeditStoreRequest) (Coed
 				return err
 			}
 		}
+		doc.PreviousStateHash = append([]byte(nil), doc.StateHash...)
 		doc.YdocState = req.YdocState
 		doc.StateVector = req.StateVector
 		doc.StateHash = incomingHash
 		doc.MaterializedRevision = newRevision
+		doc.CommitSequence++
+		doc.LifecycleState = lifecycle
 		out = coeditResultFromDocument(doc, false)
 		return nil
 	})
@@ -681,6 +768,10 @@ func coeditResultFromDocument(doc CoeditDocument, duplicate bool) CoeditStoreRes
 		StateHash:            hex.EncodeToString(doc.StateHash),
 		QuestionRevision:     doc.MaterializedRevision,
 		MaterializedRevision: doc.MaterializedRevision,
+		StateEpoch:           coeditDecimal(doc.StateEpoch),
+		CommitSequence:       coeditDecimal(doc.CommitSequence),
+		FreezeOperationID:    coeditFreezeOperationID(doc),
+		FreezeExpiresAt:      coeditFreezeExpiresAt(doc),
 		Committed:            !duplicate,
 		Duplicate:            duplicate,
 	}
@@ -726,16 +817,19 @@ func stringEqualBytes(a, b []byte) bool {
 	return true
 }
 
-// CoeditActiveForQuestion reports whether an unclosed co-edit document exists
-// for an exam question. The legacy full-revision save path refuses a
-// prompt-bearing write while this is true, so a mixed-version client cannot
-// silently clobber a collaborative prompt.
-func (s *Service) CoeditActiveForQuestion(ctx context.Context, examQuestionID string) (bool, error) {
-	if s == nil || s.db == nil {
-		return false, nil
-	}
-	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (
+// activeCoeditRoomQuery is the ONE definition of "an unclosed room covers this
+// exam question". There are two room families and both own question content:
+//
+//   - v1 question-scoped prompt documents (authoring_coedit_documents), and
+//   - v2 exam-level workspace rooms (authoring_coedit_workspaces), which carry
+//     the question's rich roots AND its scalar record, so they own the same
+//     columns a legacy full-revision save writes.
+//
+// A guard that listed only the first family was blind to the second: an active
+// exam room accepted a legacy prompt-bearing write and the stale full-column
+// snapshot then raced the CRDT store. Both the read-only pre-check and the
+// in-transaction guard run THIS query, so they cannot disagree.
+const activeCoeditRoomQuery = `SELECT COUNT(*) FROM (
  SELECT id FROM authoring_coedit_documents
   WHERE exam_question_id = ? AND lifecycle_state <> ?
  UNION ALL
@@ -749,16 +843,37 @@ func (s *Service) CoeditActiveForQuestion(ctx context.Context, examQuestionID st
   WHERE eq.id = ? AND v.is_draft = TRUE AND v.is_published = FALSE
     AND e.current_draft_version_id = v.id
     AND w.lifecycle_state <> ?
-) active_rooms`,
-		strings.TrimSpace(examQuestionID), string(authoringcoedit.StateClosed),
-		strings.TrimSpace(examQuestionID), string(authoringcoedit.StateClosed)).Scan(&count)
-	if err != nil {
+) active_rooms`
+
+// activeCoeditRoomExistsTx answers activeCoeditRoomQuery on any handle: a
+// *sql.DB for the pre-check, or the save transaction's own Tx so a staggered
+// deployment cannot interleave a legacy write with a collaborative one.
+//
+// A missing table means the migration is not applied; that is not "an active
+// room", so it must not block a legacy write.
+func activeCoeditRoomExistsTx(ctx context.Context, q tx.Tx, examQuestionID string) (bool, error) {
+	id := strings.TrimSpace(examQuestionID)
+	var count int
+	if err := q.QueryRowContext(ctx, activeCoeditRoomQuery,
+		id, string(authoringcoedit.StateClosed),
+		id, string(authoringcoedit.StateClosed)).Scan(&count); err != nil {
 		if isMissingTable(err) {
 			return false, nil
 		}
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// CoeditActiveForQuestion reports whether an unclosed room exists for an exam
+// question. The legacy full-revision save path refuses a prompt-bearing write
+// while this is true, so a mixed-version client cannot silently clobber a
+// collaborative prompt.
+func (s *Service) CoeditActiveForQuestion(ctx context.Context, examQuestionID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, nil
+	}
+	return activeCoeditRoomExistsTx(ctx, s.db, examQuestionID)
 }
 
 // CoeditActiveDocuments lists unclosed documents for a draft (freeze inputs).
@@ -771,10 +886,11 @@ func (s *Service) CoeditActiveDocuments(ctx context.Context, draftVersionID stri
  WHERE draft_version_id = (SELECT scope_id FROM coedit_scope)
    AND lifecycle_state <> (SELECT closed_state FROM coedit_scope)
  UNION ALL
- SELECT id, organization_id, exam_id, draft_version_id, NULL, NULL,
-        schema_version, field_set, lifecycle_state, 0, materialized_revision,
-        ydoc_state, state_vector, state_hash, previous_state_hash,
-        closed_reason, last_actor_id, updated_at
+	 SELECT id, organization_id, exam_id, draft_version_id, NULL, NULL,
+	        schema_version, field_set, lifecycle_state, 0, materialized_revision,
+	        ydoc_state, state_vector, state_hash, previous_state_hash,
+	        closed_reason, last_actor_id, updated_at, state_epoch, commit_sequence,
+	        freeze_operation_id, freeze_expires_at
    FROM authoring_coedit_workspaces
   WHERE draft_version_id = (SELECT scope_id FROM coedit_scope)
     AND lifecycle_state <> (SELECT closed_state FROM coedit_scope) ORDER BY id ASC`,
@@ -808,10 +924,11 @@ func (s *Service) CoeditDocumentsForExam(ctx context.Context, examID string) ([]
  WHERE exam_id = (SELECT scope_id FROM coedit_scope)
    AND lifecycle_state <> (SELECT closed_state FROM coedit_scope)
  UNION ALL
- SELECT id, organization_id, exam_id, draft_version_id, NULL, NULL,
-        schema_version, field_set, lifecycle_state, 0, materialized_revision,
-        ydoc_state, state_vector, state_hash, previous_state_hash,
-        closed_reason, last_actor_id, updated_at
+	 SELECT id, organization_id, exam_id, draft_version_id, NULL, NULL,
+	        schema_version, field_set, lifecycle_state, 0, materialized_revision,
+	        ydoc_state, state_vector, state_hash, previous_state_hash,
+	        closed_reason, last_actor_id, updated_at, state_epoch, commit_sequence,
+	        freeze_operation_id, freeze_expires_at
    FROM authoring_coedit_workspaces
   WHERE exam_id = (SELECT scope_id FROM coedit_scope)
     AND lifecycle_state <> (SELECT closed_state FROM coedit_scope) ORDER BY id ASC`,
@@ -832,44 +949,6 @@ func (s *Service) CoeditDocumentsForExam(ctx context.Context, examID string) ([]
 		out = append(out, doc)
 	}
 	return out, rows.Err()
-}
-
-// CoeditMarkFreezing moves active documents to freezing. It is idempotent.
-func (s *Service) CoeditMarkFreezing(ctx context.Context, documentIDs []string) error {
-	if len(documentIDs) == 0 {
-		return nil
-	}
-	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		for _, id := range documentIDs {
-			if _, err := q.ExecContext(ctx, `UPDATE authoring_coedit_documents
- SET lifecycle_state = ?, updated_at = NOW(6)
- WHERE id = ? AND lifecycle_state IN (?, ?)`,
-				string(authoringcoedit.StateFreezing), id,
-				string(authoringcoedit.StateActive), string(authoringcoedit.StateInitializing)); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-// CoeditReopenActive moves freezing documents back to active (freeze abort).
-func (s *Service) CoeditReopenActive(ctx context.Context, documentIDs []string) error {
-	if len(documentIDs) == 0 {
-		return nil
-	}
-	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		for _, id := range documentIDs {
-			if _, err := q.ExecContext(ctx, `UPDATE authoring_coedit_documents
- SET lifecycle_state = ?, updated_at = NOW(6)
- WHERE id = ? AND lifecycle_state IN (?, ?)`,
-				string(authoringcoedit.StateActive), id,
-				string(authoringcoedit.StateFreezing), string(authoringcoedit.StateFrozen)); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 }
 
 // CoeditCloseDocuments closes documents with a closed-vocabulary reason.
@@ -915,7 +994,8 @@ func (s *Service) CoeditCloseByScope(ctx context.Context, draftVersionID string,
 // CoeditVerifyManifest verifies every freeze-manifest hash and materialized
 // revision against MySQL. Publish proceeds only when all entries match: a
 // manifest claiming a state MySQL never committed is exactly the split-room
-// condition the design halts on.
+// condition the design halts on ("Rooms, leases, freeze / flush / close",
+// docs/sat-authoring-coedit.md).
 func (s *Service) CoeditVerifyManifest(ctx context.Context, manifest []authoringcoedit.FreezeManifestEntry) error {
 	for _, entry := range manifest {
 		_, id, schemaVersion, err := authoringcoedit.ParseAnyDocumentName(entry.DocumentName)
@@ -939,6 +1019,10 @@ func (s *Service) CoeditVerifyManifest(ctx context.Context, manifest []authoring
 				return authoringcoedit.New(authoringcoedit.CodeRevisionConflict,
 					"Collaboration state changed during publish; try again.")
 			}
+			if err := verifyCoeditManifestCounters(entry, doc.StateEpoch, doc.CommitSequence, doc.MaterializedRevision); err != nil {
+				authoringcoedit.EmitManifestMismatch()
+				return err
+			}
 			continue
 		}
 		doc, err := s.coeditLoadDocument(ctx, id)
@@ -957,6 +1041,136 @@ func (s *Service) CoeditVerifyManifest(ctx context.Context, manifest []authoring
 			return authoringcoedit.New(authoringcoedit.CodeRevisionConflict,
 				"Collaboration state changed during publish; try again.")
 		}
+		if err := verifyCoeditManifestCounters(entry, coeditDecimal(doc.StateEpoch), coeditDecimal(doc.CommitSequence), 0); err != nil {
+			authoringcoedit.EmitManifestMismatch()
+			return err
+		}
+	}
+	return nil
+}
+
+// CoeditVerifyManifestOwned verifies the service manifest and the durable
+// lifecycle fence in one transaction. The row locks close the race where a
+// token/recovery request could otherwise change ownership between a manifest
+// read and the publish decision.
+func (s *Service) CoeditVerifyManifestOwned(ctx context.Context, expectedNames []authoringcoedit.DocumentName, manifest []authoringcoedit.FreezeManifestEntry, operation authoringcoedit.CoeditLifecycleOperation) error {
+	if err := requireFreshFreezeOperation(operation); err != nil {
+		authoringcoedit.EmitManifestMismatch()
+		return err
+	}
+	expected := make(map[string]struct{}, len(expectedNames))
+	for _, raw := range expectedNames {
+		name, _, _, err := authoringcoedit.ParseAnyDocumentName(string(raw))
+		if err != nil {
+			authoringcoedit.EmitManifestMismatch()
+			return authoringcoedit.New(authoringcoedit.CodeSignatureInvalid, "Freeze manifest contains an unknown document.")
+		}
+		expected[string(name)] = struct{}{}
+	}
+	if len(expected) != len(manifest) {
+		authoringcoedit.EmitManifestMismatch()
+		return authoringcoedit.New(authoringcoedit.CodeRevisionConflict, "Collaboration rooms changed during publish; try again.")
+	}
+
+	seen := make(map[string]struct{}, len(manifest))
+	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		for _, entry := range manifest {
+			name, id, schemaVersion, err := authoringcoedit.ParseAnyDocumentName(entry.DocumentName)
+			if err != nil {
+				return authoringcoedit.New(authoringcoedit.CodeSignatureInvalid, "Freeze manifest contains an unknown document.")
+			}
+			if _, ok := expected[string(name)]; !ok {
+				return authoringcoedit.New(authoringcoedit.CodeRevisionConflict, "Freeze manifest contains an unexpected room.")
+			}
+			if _, duplicate := seen[string(name)]; duplicate {
+				return authoringcoedit.New(authoringcoedit.CodeRevisionConflict, "Freeze manifest contains a duplicate room.")
+			}
+			seen[string(name)] = struct{}{}
+
+			if schemaVersion == authoringcoedit.WorkspaceSchemaVersion {
+				doc, err := selectCoeditWorkspaceByID(ctx, q, id, true)
+				if err == sql.ErrNoRows {
+					return authoringcoedit.New(authoringcoedit.CodeNotEditableDraft, "Unknown co-edit workspace.")
+				}
+				if err != nil {
+					return err
+				}
+				if err := verifyOwnedWorkspaceManifestEntry(entry, doc, operation); err != nil {
+					return err
+				}
+				continue
+			}
+
+			doc, err := selectCoeditDocumentByID(ctx, q, id, true)
+			if err == sql.ErrNoRows {
+				return authoringcoedit.New(authoringcoedit.CodeNotEditableDraft, "Unknown co-edit document.")
+			}
+			if err != nil {
+				return err
+			}
+			if err := verifyOwnedDocumentManifestEntry(entry, doc, operation); err != nil {
+				return err
+			}
+		}
+		if len(seen) != len(expected) {
+			return authoringcoedit.New(authoringcoedit.CodeRevisionConflict, "Freeze manifest is incomplete; try again.")
+		}
+		return nil
+	})
+	if err != nil {
+		authoringcoedit.EmitManifestMismatch()
+	}
+	return err
+}
+
+func verifyOwnedDocumentManifestEntry(entry authoringcoedit.FreezeManifestEntry, doc CoeditDocument, operation authoringcoedit.CoeditLifecycleOperation) error {
+	if err := verifyOwnedLifecycle(doc.LifecycleState, coeditFreezeOperationID(doc), doc.FreezeExpiresAt, operation); err != nil {
+		return err
+	}
+	if !strings.EqualFold(hex.EncodeToString(doc.StateHash), strings.TrimSpace(entry.StateHash)) {
+		return authoringcoedit.New(authoringcoedit.CodeRevisionConflict, "Collaboration state changed during publish; try again.")
+	}
+	if entry.MaterializedRevision != 0 && entry.MaterializedRevision != doc.MaterializedRevision {
+		return authoringcoedit.New(authoringcoedit.CodeRevisionConflict, "Collaboration state changed during publish; try again.")
+	}
+	return verifyCoeditManifestCounters(entry, coeditDecimal(doc.StateEpoch), coeditDecimal(doc.CommitSequence), 0)
+}
+
+func verifyOwnedWorkspaceManifestEntry(entry authoringcoedit.FreezeManifestEntry, doc CoeditWorkspaceDocument, operation authoringcoedit.CoeditLifecycleOperation) error {
+	if err := verifyOwnedLifecycle(doc.LifecycleState, coeditFreezeOperationIDWorkspace(doc), doc.FreezeExpiresAt, operation); err != nil {
+		return err
+	}
+	if !strings.EqualFold(hex.EncodeToString(doc.StateHash), strings.TrimSpace(entry.StateHash)) {
+		return authoringcoedit.New(authoringcoedit.CodeRevisionConflict, "Collaboration state changed during publish; try again.")
+	}
+	if entry.MaterializedRevision != 0 && entry.MaterializedRevision != doc.MaterializedRevision {
+		return authoringcoedit.New(authoringcoedit.CodeRevisionConflict, "Collaboration state changed during publish; try again.")
+	}
+	return verifyCoeditManifestCounters(entry, coeditDecimal(doc.StateEpoch), coeditDecimal(doc.CommitSequence), doc.MaterializedRevision)
+}
+
+func verifyOwnedLifecycle(state authoringcoedit.LifecycleState, owner string, expiresAt *time.Time, operation authoringcoedit.CoeditLifecycleOperation) error {
+	if state == authoringcoedit.StateClosed {
+		return authoringcoedit.New(authoringcoedit.CodeDocumentClosed, "This collaboration session was closed.")
+	}
+	if state != authoringcoedit.StateFreezing || owner != operation.FreezeOperationID || !lifecycleLeaseActive(expiresAt) {
+		return authoringcoedit.New(authoringcoedit.CodeFreezeConflict, "Another lifecycle operation owns this collaboration session.")
+	}
+	return nil
+}
+
+func verifyCoeditManifestCounters(entry authoringcoedit.FreezeManifestEntry, stateEpoch, commitSequence authoringcoedit.DecimalString, workspaceRevision int) error {
+	if entry.StateEpoch != "" && string(entry.StateEpoch) != string(stateEpoch) {
+		return authoringcoedit.New(authoringcoedit.CodeEpochMismatch,
+			"Collaboration state changed during publish; try again.")
+	}
+	if entry.CommitSequence != "" && string(entry.CommitSequence) != string(commitSequence) {
+		return authoringcoedit.New(authoringcoedit.CodeRevisionConflict,
+			"Collaboration state changed during publish; try again.")
+	}
+	if entry.WorkspaceRevision != 0 && entry.WorkspaceRevision != workspaceRevision {
+		return authoringcoedit.New(authoringcoedit.CodeRevisionConflict,
+			"Collaboration state changed during publish; try again.")
 	}
 	return nil
 }
@@ -1139,34 +1353,9 @@ func (s *Service) coeditGuardTx(ctx context.Context, q tx.Tx, examQuestionID str
 	if len(strings.TrimSpace(string(draft.Prompt))) == 0 {
 		return nil
 	}
-	var count int
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM authoring_coedit_documents
- WHERE exam_question_id = ? AND lifecycle_state <> ?`,
-		examQuestionID, string(authoringcoedit.StateClosed)).Scan(&count); err != nil {
-		if isMissingTable(err) {
-			return nil
-		}
-		return err
-	}
-	if count > 0 {
-		authoringcoedit.EmitGuard(authoringcoedit.OutcomeConflict)
-		return authoringcoedit.New(authoringcoedit.CodeActiveConflict,
-			"This prompt is being edited collaboratively. Use the collaborative editor or refresh to continue.")
-	}
-	return nil
-}
-
-// CoeditGuardLegacyPromptWrite is the read-only pre-check used by callers that
-// need to refuse before decoding a full draft body. The authoritative check is
-// coeditGuardTx inside the save transaction.
-func (s *Service) CoeditGuardLegacyPromptWrite(ctx context.Context, examQuestionID string, draft QuestionDraft) error {
-	if s == nil || !s.coeditEnabled {
-		return nil
-	}
-	if len(strings.TrimSpace(string(draft.Prompt))) == 0 {
-		return nil
-	}
-	active, err := s.CoeditActiveForQuestion(ctx, examQuestionID)
+	// activeCoeditRoomExistsTx is the same union the read-only pre-check uses,
+	// so an exam-level workspace room refuses a legacy prompt write here too.
+	active, err := activeCoeditRoomExistsTx(ctx, q, examQuestionID)
 	if err != nil {
 		return err
 	}
@@ -1175,6 +1364,11 @@ func (s *Service) CoeditGuardLegacyPromptWrite(ctx context.Context, examQuestion
 		return authoringcoedit.New(authoringcoedit.CodeActiveConflict,
 			"This prompt is being edited collaboratively. Use the collaborative editor or refresh to continue.")
 	}
-	authoringcoedit.EmitGuard(authoringcoedit.OutcomeAccepted)
 	return nil
 }
+
+// Legacy prompt-bearing writes have exactly one pre-check —
+// CoeditActiveForQuestion — and exactly one authoritative guard, coeditGuardTx
+// inside the save transaction. Both run activeCoeditRoomQuery. A second
+// pre-check wrapper lived here and was never called by production code, which
+// made it a second place for the definition to drift.

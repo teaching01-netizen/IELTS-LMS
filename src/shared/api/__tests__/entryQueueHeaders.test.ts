@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { apiClient } from '../apiClient';
 
 // Plan C3/D3: the 429 Retry-After header must survive into ApiError.details
-// so the entry queue countdown auto-retries at the server's cadence.
-describe('entry queue Retry-After surfacing', () => {
+// under the canonical retryAfterSeconds name without inventing a tier.
+describe('429 Retry-After surfacing', () => {
   it('copies the Retry-After header into error details on 429', async () => {
     const body = JSON.stringify({
       success: false,
-      error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Check-in is queued; please retry.' },
+      error: { code: 'RATE_LIMIT_EXCEEDED', message: 'High traffic; please retry.' },
     });
     (globalThis as unknown as { fetch: typeof fetch }).fetch = (async () =>
       new Response(body, {
@@ -25,8 +25,9 @@ describe('entry queue Retry-After surfacing', () => {
         (error as { details?: Record<string, unknown> }).details ??
         (error as { backendDetails?: Record<string, unknown> }).backendDetails ??
         {};
-      expect(details['retryAfterSecs']).toBe(7);
-      expect(details['tier']).toBe('student-entry');
+      expect(details['retryAfterSeconds']).toBe(7);
+      expect(details['retryAfterSecs']).toBeUndefined();
+      expect(details['tier']).toBeUndefined();
     }
   });
 });

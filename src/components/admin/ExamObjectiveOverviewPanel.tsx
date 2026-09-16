@@ -12,6 +12,7 @@ import type {
 } from '../../types/grading';
 import { examRepository } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import { gradingRepository, gradingService } from '../../features/grading/infrastructure/gradingGateway';
+import { gradingErrorMessage } from '../../services/gradingService';
 import { sanitizeAcceptedAnswers } from '../../utils/acceptedAnswers';
 import type {
   ExamObjectiveOverviewBundle,
@@ -167,7 +168,9 @@ export function ExamObjectiveOverviewPanel({
         if (integrityResult?.success && integrityResult.data) {
           setIntegrityOverview(integrityResult.data);
         } else if (integrityResult && !integrityResult.success) {
-          setIntegrityError(integrityResult.error ?? 'Failed to load persisted integrity audit.');
+          setIntegrityError(
+            gradingErrorMessage(integrityResult.error, 'Failed to load persisted integrity audit.'),
+          );
         }
         if (overridesResult?.success && overridesResult.data) {
           setOverrides(overridesResult.data);
@@ -284,7 +287,9 @@ export function ExamObjectiveOverviewPanel({
           change.request,
         );
         if (!result.success || !result.data) {
-          throw new Error(result.error ?? 'Failed to update answer key for the whole exam.');
+          throw new Error(
+            gradingErrorMessage(result.error, 'Failed to update answer key for the whole exam.'),
+          );
         }
       }
 

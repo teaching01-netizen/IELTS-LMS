@@ -12,7 +12,8 @@ export type ArchitectureRuleName =
   | 'feature-isolation'
   | 'domain-purity'
   | 'legacy-services'
-  | 'forbidden-browser-boundaries';
+  | 'forbidden-browser-boundaries'
+  | 'coedit-transport-boundary';
 
 export type ArchitectureViolation = Readonly<{
   rule: ArchitectureRuleName;
@@ -39,6 +40,20 @@ const frameworkPackagePrefixes = [
   'zustand',
 ] as const;
 const browserBoundaryPackagePrefixes = ['react', 'react-dom', 'react-router-dom', '@tanstack/'] as const;
+// The CRDT/transport stack. It is confined to
+// `src/features/exam-authoring/realtime/coedit` so the editors, the workspace,
+// and every other feature talk to a collaborative document through the co-edit
+// package's own vocabulary instead of through Yjs. See
+// `collectCoeditTransportBoundaryViolations`.
+const collaborativeTransportPackagePrefixes = [
+  'yjs',
+  'y-prosemirror',
+  'y-indexeddb',
+  'y-protocols',
+  '@hocuspocus/',
+  '@tiptap/extension-collaboration',
+  '@tiptap/extension-collaboration-caret',
+] as const;
 const browserGlobalPattern = /\b(window|document|navigator|localStorage|sessionStorage)\b/g;
 
 function toProjectPath(absolutePath: string): string {
@@ -84,6 +99,10 @@ export function isFrameworkPackage(specifier: string): boolean {
 
 export function isBrowserBoundaryPackage(specifier: string): boolean {
   return isPackageFromPrefixes(specifier, browserBoundaryPackagePrefixes);
+}
+
+export function isCollaborativeTransportPackage(specifier: string): boolean {
+  return isPackageFromPrefixes(specifier, collaborativeTransportPackagePrefixes);
 }
 
 function resolveImportTarget(file: string, specifier: string): string | null {

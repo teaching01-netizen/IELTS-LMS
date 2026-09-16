@@ -52,6 +52,30 @@ describe("SatPopoverShell focus contract", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("puts the trigger's panel id on the dialog root, never an inner body", () => {
+    render(<SatExamShell {...shellProps()} />);
+    const trigger = screen.getByRole("button", { name: "Directions" });
+    fireEvent.click(trigger);
+    const panelId = trigger.getAttribute("aria-controls");
+    expect(panelId).toBeTruthy();
+    expect(document.querySelectorAll(`[id="${panelId}"]`)).toHaveLength(1);
+    const dialog = screen.getByRole("dialog", { name: "Directions" });
+    expect(dialog).toHaveAttribute("id", panelId);
+    expect(dialog.querySelector(`[id="${panelId}"]`)).toBeNull();
+  });
+
+  it("returns focus to the trigger when an outside press closes the panel", async () => {
+    render(<SatExamShell {...shellProps()} />);
+    const trigger = screen.getByRole("button", { name: "Directions" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog", { name: "Directions" })).toBeInTheDocument();
+    fireEvent.pointerDown(document.body);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Directions" })).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
   it("moves focus into Display settings on open", async () => {
     render(<SatExamShell {...shellProps()} />);
     fireEvent.click(screen.getByRole("button", { name: "Display" }));

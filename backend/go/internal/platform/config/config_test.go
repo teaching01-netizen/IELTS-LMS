@@ -5,6 +5,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
+	t.Setenv("TRUSTED_PROXIES", "")
 	c := Load()
 	if c.APIPort != 4000 {
 		t.Fatalf("default port = %d", c.APIPort)
@@ -26,8 +27,26 @@ func TestLoadDefaults(t *testing.T) {
 	if c.WorkerFallbackIntervalSecs != 10 || c.LiveUpdatePollIntervalMs != 250 || c.AutoSubmitBatchSize != 50 {
 		t.Fatalf("Rust worker defaults changed: %+v", c)
 	}
-	if c.RateLimitBucketCap != 10000 || c.RateLimitExportPerUser != 3 || c.RateLimitExportPerUserWindowSecs != 300 {
+	if c.RateLimitBucketCap != 10000 || c.RateLimitMaxKeys != 10000 || c.RateLimitBurst != 0 || c.RateLimitExportPerUser != 3 || c.RateLimitExportPerUserWindowSecs != 300 {
 		t.Fatalf("Rust rate-limit defaults changed: %+v", c)
+	}
+	if len(c.TrustedProxyCIDRs) != 2 || c.TrustedProxyCIDRs[0] != "127.0.0.0/8" || c.TrustedProxyCIDRs[1] != "::1/128" {
+		t.Fatalf("trusted-proxy defaults must be loopback only: %v", c.TrustedProxyCIDRs)
+	}
+}
+
+func TestTrustedProxyConfig(t *testing.T) {
+	t.Setenv("TRUSTED_PROXIES", "10.0.0.0/8, 2001:db8::/32")
+	c := Load()
+	if len(c.TrustedProxyCIDRs) != 2 || c.TrustedProxyCIDRs[0] != "10.0.0.0/8" || c.TrustedProxyCIDRs[1] != "2001:db8::/32" {
+		t.Fatalf("trusted-proxy env parsing changed: %v", c.TrustedProxyCIDRs)
+	}
+
+	c.DatabaseURL = "user:pass@tcp(localhost:3306)/db?parseTime=true"
+	c.AuthSecret = "test-only-auth-secret-32-chars-min"
+	c.TrustedProxyCIDRs = []string{"not-a-cidr"}
+	if err := c.ValidateForRuntime(); err == nil {
+		t.Fatal("invalid TRUSTED_PROXIES CIDR must fail runtime validation")
 	}
 }
 

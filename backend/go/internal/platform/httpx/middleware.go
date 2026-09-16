@@ -21,10 +21,10 @@ import (
 )
 
 // Middleware execution order (spec): panic recovery > request id > trace >
-// security headers > body limit > auth > CSRF > rate limit > authorization >
-// handler > access log. Recovery/RequestID/SecurityHeaders/AccessLog/BodyLimit
-// live here; auth/CSRF/authorization are route-scoped (see internal/auth and
-// the router wiring in cmd/api).
+// security headers > body limit > pre-auth IP guard > auth > CSRF > rate limit >
+// authorization > handler > access log. Recovery/RequestID/SecurityHeaders/
+// AccessLog/BodyLimit live here; the pre-auth guard, auth, CSRF, and
+// authorization are wired by cmd/api.
 
 type ctxKey string
 
@@ -351,13 +351,17 @@ type RateLimitConfig struct {
 	MaxRequests int
 	Window      time.Duration
 	Burst       int
+	// Tier is an optional low-cardinality metric label for capacity events.
+	// It must never contain an identity, token, email, or IP address.
+	Tier string
 }
 
 // RateLimitResult is the outcome of an Allow call.
 type RateLimitResult struct {
-	Allowed    bool
-	Remaining  int
-	RetryAfter time.Duration
+	Allowed         bool
+	Remaining       int
+	RetryAfter      time.Duration
+	CapacityLimited bool
 }
 
 // TokenBucket is a single in-memory token bucket.
@@ -372,6 +376,17 @@ type TokenBucket struct {
 
 func (b *TokenBucket) capacity() float64 { return float64(b.max + b.burst) }
 
+func (b *TokenBucket) refillRatePerSecond() float64 {
+	if b.max <= 0 || b.window <= 0 {
+		return 1
+	}
+	rate := float64(b.max) / b.window.Seconds()
+	if rate <= 0 {
+		return 1
+	}
+	return rate
+}
+
 func (b *TokenBucket) allow(now time.Time) RateLimitResult {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -381,20 +396,14 @@ func (b *TokenBucket) allow(now time.Time) RateLimitResult {
 	}
 	if elapsed := now.Sub(b.lastRefill); elapsed > 0 {
 		cap := b.capacity()
-		if b.window > 0 {
-			b.tokens += elapsed.Seconds() * (cap / b.window.Seconds())
-			if b.tokens > cap {
-				b.tokens = cap
-			}
+		b.tokens += elapsed.Seconds() * b.refillRatePerSecond()
+		if b.tokens > cap {
+			b.tokens = cap
 		}
 		b.lastRefill = now
 	}
 	if b.tokens < 1 {
-		cap := b.capacity()
-		perSec := cap / b.window.Seconds()
-		if perSec <= 0 {
-			perSec = 1
-		}
+		perSec := b.refillRatePerSecond()
 		return RateLimitResult{Allowed: false, RetryAfter: time.Duration(((1 - b.tokens) / perSec) * float64(time.Second))}
 	}
 	b.tokens--
@@ -405,19 +414,85 @@ func (b *TokenBucket) allow(now time.Time) RateLimitResult {
 	return RateLimitResult{Allowed: true, Remaining: rem}
 }
 
-// BucketStore holds per-key buckets with a cap and idle eviction.
-type BucketStore struct {
-	mu      sync.Mutex
-	buckets map[string]*TokenBucket
-	cap     int
+type bucketEntry struct {
+	bucket   *TokenBucket
+	lastSeen time.Time
 }
 
-// NewBucketStore creates a store capped at cap keys (default 10000).
-func NewBucketStore(cap int) *BucketStore {
-	if cap <= 0 {
-		cap = 10000
+// BucketStore holds per-key buckets with a cap and idle eviction.
+type BucketStore struct {
+	mu        sync.Mutex
+	buckets   map[string]*bucketEntry
+	maxKeys   int
+	idleAfter time.Duration
+	now       func() time.Time
+}
+
+// NewBucketStore creates a store capped at maxKeys keys (default 10000).
+func NewBucketStore(maxKeys int) *BucketStore {
+	return newBucketStoreWithClock(maxKeys, time.Minute, time.Now)
+}
+
+func newBucketStoreWithClock(maxKeys int, idleAfter time.Duration, now func() time.Time) *BucketStore {
+	if maxKeys <= 0 {
+		maxKeys = 10000
 	}
-	return &BucketStore{buckets: map[string]*TokenBucket{}, cap: cap}
+	if idleAfter <= 0 {
+		idleAfter = time.Minute
+	}
+	if now == nil {
+		now = time.Now
+	}
+	return &BucketStore{
+		buckets:   map[string]*bucketEntry{},
+		maxKeys:   maxKeys,
+		idleAfter: idleAfter,
+		now:       now,
+	}
+}
+
+func (s *BucketStore) currentTime() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+func (s *BucketStore) idleTTL(cfg RateLimitConfig) time.Duration {
+	if cfg.Window > s.idleAfter {
+		return cfg.Window
+	}
+	return s.idleAfter
+}
+
+func rateLimitMetricTier(tier string) string {
+	switch strings.TrimSpace(tier) {
+	case TierAuthCritical, TierAnonAuth, TierAuthedReads, TierPolling,
+		TierHeartbeat, TierWrites, TierBackstop, "student-entry", "results-export":
+		return strings.TrimSpace(tier)
+	}
+	return "unclassified"
+}
+
+func (s *BucketStore) evictIdleLocked(now time.Time, idleAfter time.Duration) bool {
+	var oldestKey string
+	var oldestSeen time.Time
+	found := false
+	for key, entry := range s.buckets {
+		if entry == nil || now.Sub(entry.lastSeen) < idleAfter {
+			continue
+		}
+		if !found || entry.lastSeen.Before(oldestSeen) {
+			oldestKey = key
+			oldestSeen = entry.lastSeen
+			found = true
+		}
+	}
+	if !found {
+		return false
+	}
+	delete(s.buckets, oldestKey)
+	return true
 }
 
 // KeyFunc derives the bucket key for a request. Empty means "no limiting"
@@ -425,7 +500,7 @@ func NewBucketStore(cap int) *BucketStore {
 type KeyFunc func(r *http.Request) string
 
 // TrustedProxies lists peer CIDRs whose X-Forwarded-For we honor (set via
-// SetTrustedProxies; default loopback + link-local only). An XFF value is
+// SetTrustedProxies; default loopback only). An XFF value is
 // trusted ONLY when the direct TCP peer (RemoteAddr) is a trusted proxy;
 // otherwise the left-most XFF entry is attacker-controlled and RemoteAddr
 // is used. This keeps per-IP rate-limit buckets unspoofable from the open
@@ -435,12 +510,12 @@ var trustedProxiesMu = struct {
 	nets []*net.IPNet
 }{nets: defaultTrustedProxies()}
 
-// defaultTrustedProxies trusts only local peers (loopback/link-local);
+// defaultTrustedProxies trusts only loopback peers;
 // deployments behind a platform LB must call SetTrustedProxies with the
 // LB/proxy CIDRs so XFF is honored exactly there.
 func defaultTrustedProxies() []*net.IPNet {
 	var out []*net.IPNet
-	for _, c := range []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
+	for _, c := range []string{"127.0.0.0/8", "::1/128"} {
 		if _, n, err := net.ParseCIDR(c); err == nil {
 			out = append(out, n)
 		}
@@ -449,21 +524,25 @@ func defaultTrustedProxies() []*net.IPNet {
 }
 
 // SetTrustedProxies replaces the trusted-proxy CIDR list (e.g. from
-// TRUSTED_PROXIES env parsing at startup). Invalid CIDRs are ignored.
-func SetTrustedProxies(cidrs []string) {
+// TRUSTED_PROXIES env parsing at startup). Invalid CIDRs leave the current
+// configuration unchanged and return an error.
+func SetTrustedProxies(cidrs []string) error {
 	var nets []*net.IPNet
 	for _, c := range cidrs {
 		c = strings.TrimSpace(c)
 		if c == "" {
 			continue
 		}
-		if _, n, err := net.ParseCIDR(c); err == nil {
-			nets = append(nets, n)
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			return fmt.Errorf("invalid trusted proxy CIDR %q: %w", c, err)
 		}
+		nets = append(nets, n)
 	}
 	trustedProxiesMu.Lock()
 	trustedProxiesMu.nets = nets
 	trustedProxiesMu.Unlock()
+	return nil
 }
 
 // peerIsTrustedProxy reports whether the direct TCP peer is trusted.
@@ -517,6 +596,10 @@ func ClientIPKey(r *http.Request) string {
 // Allow checks one key against cfg outside HTTP middleware (for
 // handler-level tiers such as anonymous entry per-email+IP gates).
 func (s *BucketStore) Allow(cfg RateLimitConfig, key string) RateLimitResult {
+	return s.allowAt(cfg, key, s.currentTime())
+}
+
+func (s *BucketStore) allowAt(cfg RateLimitConfig, key string, now time.Time) RateLimitResult {
 	if cfg.MaxRequests <= 0 {
 		cfg.MaxRequests = 1
 	}
@@ -524,19 +607,36 @@ func (s *BucketStore) Allow(cfg RateLimitConfig, key string) RateLimitResult {
 		cfg.Window = time.Minute
 	}
 	s.mu.Lock()
-	b, ok := s.buckets[key]
+	if s.buckets == nil {
+		s.buckets = map[string]*bucketEntry{}
+	}
+	if s.maxKeys <= 0 {
+		s.maxKeys = 10000
+	}
+	if s.idleAfter <= 0 {
+		s.idleAfter = time.Minute
+	}
+	entry, ok := s.buckets[key]
 	if !ok {
-		if len(s.buckets) >= s.cap {
-			for k := range s.buckets {
-				delete(s.buckets, k)
-				break
-			}
+		if len(s.buckets) >= s.maxKeys && !s.evictIdleLocked(now, s.idleTTL(cfg)) {
+			s.mu.Unlock()
+			telemetry.IncCounter(
+				telemetry.MRatelimitCapacityTotal,
+				"tier", rateLimitMetricTier(cfg.Tier),
+				"key_class", keyClassOf(key),
+			)
+			return RateLimitResult{RetryAfter: time.Second, CapacityLimited: true}
 		}
-		b = &TokenBucket{max: cfg.MaxRequests, window: cfg.Window, burst: cfg.Burst}
-		s.buckets[key] = b
+		entry = &bucketEntry{
+			bucket:   &TokenBucket{max: cfg.MaxRequests, window: cfg.Window, burst: cfg.Burst},
+			lastSeen: now,
+		}
+		s.buckets[key] = entry
+	} else {
+		entry.lastSeen = now
 	}
 	s.mu.Unlock()
-	return b.allow(time.Now())
+	return entry.bucket.allow(now)
 }
 
 // RateLimit is token-bucket middleware: in-memory per-key buckets with
@@ -561,21 +661,7 @@ func (s *BucketStore) RateLimit(cfg RateLimitConfig, keyFn KeyFunc, dbLimited fu
 				next.ServeHTTP(w, r)
 				return
 			}
-			s.mu.Lock()
-			b, ok := s.buckets[key]
-			if !ok {
-				if len(s.buckets) >= s.cap {
-					// Evict one arbitrary entry to stay bounded.
-					for k := range s.buckets {
-						delete(s.buckets, k)
-						break
-					}
-				}
-				b = &TokenBucket{max: cfg.MaxRequests, window: cfg.Window, burst: cfg.Burst}
-				s.buckets[key] = b
-			}
-			s.mu.Unlock()
-			res := b.allow(time.Now())
+			res := s.allowAt(cfg, key, s.currentTime())
 			if !res.Allowed {
 				denyRateLimit(w, r, res.RetryAfter)
 				return
@@ -598,6 +684,14 @@ func (s *BucketStore) RateLimit(cfg RateLimitConfig, keyFn KeyFunc, dbLimited fu
 
 func denyRateLimit(w http.ResponseWriter, r *http.Request, retryAfter time.Duration) {
 	denyRateLimitWithTier(w, r, "", retryAfter)
+}
+
+// WriteRateLimitExceeded renders the canonical rate-limit envelope for
+// handler-level limiters that run after route middleware (for example export
+// and student-entry gates). It keeps headers, body details, telemetry, and
+// structured logging identical to route-tier denials.
+func WriteRateLimitExceeded(w http.ResponseWriter, r *http.Request, tier, keyClass string, retryAfter time.Duration) {
+	denyTierRateLimit(w, r, tier, keyClass, retryAfter)
 }
 
 // denyRateLimitWithTier renders the stable 429 envelope. The core fields

@@ -5,7 +5,7 @@ import { breakRemainingSeconds, formatSatTime, mergeAuthoritativeTiming, snapsho
 import { resolveAuthoritativeRemainingSeconds } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { resolveSatToolCapabilities, toggleSatActiveTool } from './satTools';
 import type { AssessmentDeliveryBootstrap, AssessmentDeliveryModule, AssessmentModuleAttemptSnapshot, AssessmentTimingSnapshot } from '../contracts/assessmentDelivery';
-import { shouldAutoStartInitialModule, shouldAutoStartNextSectionAfterBreak } from '../application/satRuntimeSelectors';
+import { deriveSatEntryDecision, type SatEntryDecisionInput } from '../application/satEntry';
 
 describe('SAT delivery domain', () => {
   it('normalizes module tool policy without opening a tool', () => {
@@ -192,7 +192,7 @@ describe('SAT delivery domain', () => {
     expect(ended.waitingForNextSection).toBe(false);
   });
 
-  it('auto-starts only the first SAT module after the proctor makes the runtime live', () => {
+  it('auto-enters the first SAT module only after the proctor makes the runtime live', () => {
     const module = { id: 'rw-m1', adaptiveRole: 'base' } as AssessmentDeliveryModule;
     const pendingAttempt: AssessmentModuleAttemptSnapshot = {
       id: 'attempt-module', moduleId: module.id, state: 'not_started', allocatedSeconds: 600,
@@ -205,25 +205,43 @@ describe('SAT delivery domain', () => {
       proctorStatus: 'active',
       attempt: { moduleAttempts: [pendingAttempt] },
     } as AssessmentDeliveryBootstrap;
+    const entry = (overrides: Partial<SatEntryDecisionInput> = {}) =>
+      deriveSatEntryDecision({
+        data, module, sectionDisplayOrder: 0, stageReady: true,
+        breakSeconds: 0, sectionWaitSeconds: 0, phase: 'directions', ...overrides,
+      });
 
-    expect(shouldAutoStartInitialModule(data, module, 0, true)).toBe(true);
-    expect(shouldAutoStartInitialModule(data, module, 1, true)).toBe(false);
-    expect(shouldAutoStartInitialModule(data, module, 0, false)).toBe(false);
-    expect(shouldAutoStartInitialModule(
-      { ...data, scheduleRuntimeStatus: 'scheduled' }, module, 0, true,
-    )).toBe(false);
-    expect(shouldAutoStartInitialModule(
-      {
+    expect(entry()).toMatchObject({ shouldStart: true, reason: 'initial-entry' });
+    // Section 0 only opens from the directions screen.
+    expect(entry({ phase: 'break' })).toMatchObject({
+      shouldStart: false, reason: 'initial-entry-not-on-directions',
+    });
+    expect(entry({ stageReady: false })).toMatchObject({ shouldStart: false, reason: 'stage-not-ready' });
+    expect(entry({ data: { ...data, scheduleRuntimeStatus: 'scheduled' } })).toMatchObject({
+      shouldStart: false, reason: 'runtime-not-live',
+    });
+    // idle/connecting are legal attempt statuses but not a live exam: automatic
+    // entry and the manual button now share this one verdict.
+    expect(entry({ data: { ...data, proctorStatus: 'idle' } })).toMatchObject({
+      shouldStart: false, reason: 'proctor-blocked',
+    });
+    expect(entry({ module: { ...module, adaptiveRole: 'higher_branch' } })).toMatchObject({
+      shouldStart: false, reason: 'not-base-module',
+    });
+    expect(entry({
+      data: {
         ...data,
         attempt: { ...data.attempt, moduleAttempts: [{ ...pendingAttempt, startedAt: '2026-08-30T03:00:00Z', state: 'active' }] },
       },
-      module,
-      0,
-      true,
-    )).toBe(false);
+    })).toMatchObject({ shouldStart: false, reason: 'already-started' });
+    // The branch is the section, not the phase: a later section reached from
+    // the directions screen is the next-section rule.
+    expect(entry({ sectionDisplayOrder: 1 })).toMatchObject({
+      shouldStart: true, reason: 'next-section-entry',
+    });
   });
 
-  it('auto-starts the next SAT section only after the authoritative break has ended', () => {
+  it('auto-enters the next SAT section only after the authoritative break has ended', () => {
     const module = { id: 'math-m1', adaptiveRole: 'base' } as AssessmentDeliveryModule;
     const pendingAttempt: AssessmentModuleAttemptSnapshot = {
       id: 'math-attempt', moduleId: module.id, state: 'not_started', allocatedSeconds: 600,
@@ -236,17 +254,41 @@ describe('SAT delivery domain', () => {
       proctorStatus: 'active',
       attempt: { moduleAttempts: [pendingAttempt] },
     } as AssessmentDeliveryBootstrap;
+    const entry = (overrides: Partial<SatEntryDecisionInput> = {}) =>
+      deriveSatEntryDecision({
+        data, module, sectionDisplayOrder: 1, stageReady: true,
+        breakSeconds: 0, sectionWaitSeconds: 0, phase: 'break', ...overrides,
+      });
 
-    expect(shouldAutoStartNextSectionAfterBreak(data, module, 1, true, 0, 0)).toBe(true);
-    expect(shouldAutoStartNextSectionAfterBreak(data, module, 1, true, 600, 0)).toBe(false);
-    expect(shouldAutoStartNextSectionAfterBreak(data, module, 1, true, 0, 300)).toBe(false);
-    expect(shouldAutoStartNextSectionAfterBreak(data, module, 1, false, 0, 0)).toBe(false);
-    expect(shouldAutoStartNextSectionAfterBreak(
-      { ...data, scheduleRuntimeStatus: 'paused' }, module, 1, true, 0, 0,
-    )).toBe(false);
-    expect(shouldAutoStartNextSectionAfterBreak(
-      data, { ...module, adaptiveRole: 'higher_branch' }, 1, true, 0, 0,
-    )).toBe(false);
+    expect(entry()).toMatchObject({ shouldStart: true, reason: 'next-section-entry' });
+    expect(entry({ phase: 'directions' })).toMatchObject({ shouldStart: true });
+    expect(entry({ breakSeconds: 600 })).toMatchObject({
+      shouldStart: false, reason: 'break-active',
+    });
+    expect(entry({ sectionWaitSeconds: 300 })).toMatchObject({
+      shouldStart: false, reason: 'section-wait',
+    });
+    expect(entry({ stageReady: false })).toMatchObject({
+      shouldStart: false, reason: 'stage-not-ready',
+    });
+    expect(entry({ data: { ...data, scheduleRuntimeStatus: 'paused' } })).toMatchObject({
+      shouldStart: false, reason: 'runtime-not-live',
+    });
+    expect(entry({ data: { ...data, proctorStatus: 'paused' } })).toMatchObject({
+      shouldStart: false, reason: 'proctor-blocked',
+    });
+    expect(entry({ module: { ...module, adaptiveRole: 'higher_branch' } })).toMatchObject({
+      shouldStart: false, reason: 'not-base-module',
+    });
+    expect(entry({ sectionDisplayOrder: null })).toMatchObject({
+      shouldStart: false, reason: 'unknown-section',
+    });
+    expect(entry({
+      data: {
+        ...data,
+        attempt: { ...data.attempt, moduleAttempts: [{ ...pendingAttempt, startedAt: '2026-08-30T04:00:00Z', state: 'active' }] },
+      },
+    })).toMatchObject({ shouldStart: false, reason: 'already-started' });
   });
 
 });

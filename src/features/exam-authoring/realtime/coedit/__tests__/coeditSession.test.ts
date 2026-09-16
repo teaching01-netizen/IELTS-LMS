@@ -1,20 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as Y from "yjs";
 import {
   COEDIT_LIFECYCLE_CLOSE_PREFIX,
+  COEDIT_OVERSIZED_REASON,
+  COEDIT_WRITE_REFUSED_REASON,
   INITIAL_SAVE_STATE,
   coeditLifecycleFromCloseReason,
+  coeditRecoveryFromSaveFailure,
   colorForActor,
   parseCoeditSaveFailureMessage,
   parseCoeditLifecycleMessage,
   resolveCoeditEnabled,
   type CoeditClientCapability,
   type CoeditSaveStateName,
+  type CoeditSaveFailureMessage,
 } from "../contracts";
-import { isSameDocument, parseCoeditDocumentName } from "../documentIdentity";
-import { resolveCoeditFrontendFlag, VITE_AUTHORING_REALTIME_COEDITING } from "../flags";
+import { parseCoeditDocumentName } from "../documentIdentity";
 import { deriveSaveState } from "../saveState";
-import { sha256Hex } from "../stateHash";
-import { CoeditUnavailableError, requestCoeditToken, scheduleTokenRefresh } from "../tokenApi";
+import { encodeStateVectorBase64, toBase64 } from "../stateVector";
+import { CoeditUnavailableError, requestCoeditToken } from "../tokenApi";
 
 const backendPost = vi.fn();
 vi.mock("../../../infrastructure/examAuthoringBackendGateway", () => ({
@@ -60,14 +64,6 @@ describe("co-edit enablement", () => {
     expect(resolveCoeditEnabled(capability({ frontendEnabled: false }))).toBe(false);
   });
 
-  it("keeps the frontend co-edit posture enabled without Vite configuration", () => {
-    expect(resolveCoeditFrontendFlag()).toBe(true);
-    expect(resolveCoeditFrontendFlag({ [VITE_AUTHORING_REALTIME_COEDITING]: "true" })).toBe(true);
-    expect(resolveCoeditFrontendFlag({ [VITE_AUTHORING_REALTIME_COEDITING]: "1" })).toBe(true);
-    expect(resolveCoeditFrontendFlag({ [VITE_AUTHORING_REALTIME_COEDITING]: "on" })).toBe(true);
-    expect(resolveCoeditFrontendFlag({ [VITE_AUTHORING_REALTIME_COEDITING]: "no" })).toBe(true);
-    expect(resolveCoeditFrontendFlag({ [VITE_AUTHORING_REALTIME_COEDITING]: true })).toBe(true);
-  });
 });
 
 describe("document identity", () => {
@@ -79,19 +75,12 @@ describe("document identity", () => {
     expect(parseCoeditDocumentName("exam-question:1")).toBeNull();
     expect(parseCoeditDocumentName("coedit:v1:has space")).toBeNull();
   });
-
-  it("compares names exactly, and never treats a missing name as equal", () => {
-    expect(isSameDocument("coedit:v1:a", " coedit:v1:a ")).toBe(true);
-    expect(isSameDocument("coedit:v1:a", "coedit:v1:b")).toBe(false);
-    expect(isSameDocument(null, "coedit:v1:a")).toBe(false);
-    expect(isSameDocument("coedit:v1:a", undefined)).toBe(false);
-  });
 });
 
 describe("save state", () => {
   const base = {
-    localStateHash: "hash-a",
-    acknowledgedStateHash: "hash-a",
+    localStateVector: "vector-a",
+    acknowledgedStateVector: "vector-a",
     questionRevision: 4,
     connected: true,
     inFlight: false,
@@ -102,25 +91,25 @@ describe("save state", () => {
   it("starts idle before any sync", () => {
     const state = deriveSaveState({
       ...base,
-      localStateHash: null,
-      acknowledgedStateHash: null,
+      localStateVector: null,
+      acknowledgedStateVector: null,
       connected: false,
     });
     expect(state.name).toBe("unsaved");
     expect(state.message).toMatch(/Reconnecting/);
   });
 
-  it("reports saved only for the acknowledged current hash", () => {
+  it("reports saved only for the acknowledged current state vector", () => {
     expect(deriveSaveState({ ...base }).name).toBe("saved");
   });
 
-  it("never moves newer work to saved when an older hash was acknowledged", () => {
+  it("never moves newer work to saved when an older vector was acknowledged", () => {
     // The acknowledgement arrived, then the author kept typing. A stale ack
     // must not label the newer state durable.
     const state = deriveSaveState({
       ...base,
-      localStateHash: "hash-b",
-      acknowledgedStateHash: "hash-a",
+      localStateVector: "vector-b",
+      acknowledgedStateVector: "vector-a",
     });
     expect(state.name).toBe("unsaved");
     expect(state.questionRevision).toBe(4);
@@ -129,8 +118,8 @@ describe("save state", () => {
   it("shows syncing while a store is in flight", () => {
     const state = deriveSaveState({
       ...base,
-      localStateHash: "hash-b",
-      acknowledgedStateHash: "hash-a",
+      localStateVector: "vector-b",
+      acknowledgedStateVector: "vector-a",
       inFlight: true,
     });
     expect(state.name).toBe("syncing");
@@ -195,30 +184,94 @@ describe("save state", () => {
 
   it("keeps every state free of transport internals", () => {
     // The workspace renders this through the one save-area vocabulary in
-    // connectionCopy; nothing here may leak a document name or a state hash.
+    // connectionCopy; nothing here may leak a document name or a state vector.
     for (const name of ["idle", "unsaved", "syncing", "saved"] as CoeditSaveStateName[]) {
       const state = deriveSaveState({ ...INITIAL_SAVE_STATE, name });
-      expect(state.message ?? "").not.toMatch(/coedit:|hash-/);
+      expect(state.message ?? "").not.toMatch(/coedit:|vector-/);
     }
   });
 });
 
-describe("state hashing", () => {
-  it("matches the server's SHA-256 for the empty and known vectors", () => {
-    expect(sha256Hex(new Uint8Array())).toBe(
-      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    );
-    expect(sha256Hex(new TextEncoder().encode("abc"))).toBe(
-      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-    );
+/**
+ * One prior browser session: merging these into a room is what an IndexedDB
+ * replay (or a returning author) does, and each one adds a client id to the
+ * state vector, which is what made the vector length cross the lengths that the
+ * removed client-side SHA-256 padded differently (55 mod 64).
+ */
+function mergePriorSessions(doc: Y.Doc, sessions: number): void {
+  for (let index = 0; index < sessions; index += 1) {
+    const prior = new Y.Doc();
+    prior.getMap(`prior-session-${index}`).set("k", index);
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(prior));
+  }
+  doc.getXmlFragment("prompt").insert(0, [new Y.XmlElement("paragraph")]);
+}
+
+describe("state vector identity", () => {
+  it("encodes base64 exactly as the service does", () => {
+    // Standard alphabet with padding, byte-for-byte what Buffer.toString does
+    // on the service side; a mismatch here would break the comparison silently.
+    expect(toBase64(new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]))).toBe("AAECAwQFBgcICQ==");
+    expect(toBase64(new Uint8Array())).toBe("");
   });
 
-  it("is a pure hex digest of the exact bytes", () => {
-    const first = sha256Hex(new Uint8Array([1, 2, 3]));
-    const second = sha256Hex(new Uint8Array([1, 2, 4]));
-    expect(first).toMatch(/^[0-9a-f]{64}$/);
-    expect(first).not.toBe(second);
-    expect(sha256Hex(new Uint8Array([1, 2, 3]))).toBe(first);
+  it("round-trips every byte for the lengths at and around the old failure", () => {
+    for (const length of [1, 54, 55, 56, 63, 64, 119, 183]) {
+      const bytes = Uint8Array.from({ length }, (_value, index) => (index * 7 + 3) & 255);
+      const decoded = atob(toBase64(bytes));
+      expect(decoded.length).toBe(length);
+      for (let index = 0; index < length; index += 1) {
+        expect(decoded.charCodeAt(index)).toBe(bytes[index]);
+      }
+    }
+  });
+
+  it("reaches saved for a real vector from a room with prior sessions", () => {
+    const doc = new Y.Doc();
+    mergePriorSessions(doc, 3);
+    const vector = encodeStateVectorBase64(doc);
+    expect(vector.length).toBeGreaterThan(0);
+
+    const state = deriveSaveState({
+      localStateVector: vector,
+      acknowledgedStateVector: vector,
+      questionRevision: 4,
+      connected: true,
+      inFlight: false,
+      error: null,
+      lifecycle: null,
+    });
+    expect(state.name).toBe("saved");
+    // The same vector, unacknowledged, must not claim durability.
+    expect(
+      deriveSaveState({
+        localStateVector: vector,
+        acknowledgedStateVector: null,
+        questionRevision: 4,
+        connected: true,
+        inFlight: false,
+        error: null,
+        lifecycle: null,
+      }).name,
+    ).toBe("unsaved");
+
+    // The lengths at which the removed client-side SHA-256 padded differently
+    // from the service's, so a committed room could never show Saved. Save
+    // truth must not depend on the length of anything.
+    for (const byteLength of [55, 119, 183]) {
+      const padded = toBase64(Uint8Array.from({ length: byteLength }, (_value, index) => (index * 7 + 3) & 255));
+      expect(
+        deriveSaveState({
+          localStateVector: padded,
+          acknowledgedStateVector: padded,
+          questionRevision: 4,
+          connected: true,
+          inFlight: false,
+          error: null,
+          lifecycle: null,
+        }).name,
+      ).toBe("saved");
+    }
   });
 });
 
@@ -322,6 +375,48 @@ describe("persistence failure messages", () => {
   });
 });
 
+describe("refusal recovery", () => {
+  const failure = (overrides: Partial<CoeditSaveFailureMessage> = {}): CoeditSaveFailureMessage => ({
+    type: "coedit.save_failed",
+    documentName: "coedit:v1:doc-1",
+    retryable: false,
+    reason: null,
+    requiresResync: false,
+    ...overrides,
+  });
+
+  it("offers the export for a commit that moved past this room", () => {
+    const recovery = coeditRecoveryFromSaveFailure(
+      failure({ reason: "coedit_previous_hash_mismatch", requiresResync: true }),
+    );
+    expect(recovery?.issue).toBe("rejected");
+    expect(recovery?.message).toMatch(/Reload the prompt/);
+  });
+
+  it("offers the export for a write the room refused outright", () => {
+    // The reason string the service sends (mirrored in its beforeSync hook).
+    expect(COEDIT_WRITE_REFUSED_REASON).toBe("coedit_write_refused");
+    const recovery = coeditRecoveryFromSaveFailure(failure({ reason: COEDIT_WRITE_REFUSED_REASON }));
+    expect(recovery?.issue).toBe("rejected");
+    expect(recovery?.message).toMatch(/refused your latest changes/);
+    expect(recovery?.message).toMatch(/Copy them out/);
+  });
+
+  it("names the size refusal as its own issue", () => {
+    expect(COEDIT_OVERSIZED_REASON).toBe("coedit_oversized");
+    const recovery = coeditRecoveryFromSaveFailure(failure({ reason: COEDIT_OVERSIZED_REASON }));
+    expect(recovery?.issue).toBe("oversized");
+    expect(recovery?.message).toMatch(/too large to save as one collaborative document/);
+  });
+
+  it("leaves an unexplained failure on the retry path", () => {
+    // No special recovery: a transient failure must not claim the work is at
+    // risk in ways the author cannot act on.
+    expect(coeditRecoveryFromSaveFailure(failure({ retryable: true }))).toBeNull();
+    expect(coeditRecoveryFromSaveFailure(failure({ reason: "coedit_revision_conflict" }))).toBeNull();
+  });
+});
+
 describe("token api", () => {
   const valid = {
     token: "body.signature",
@@ -373,27 +468,3 @@ describe("token api", () => {
   });
 });
 
-describe("token refresh scheduling", () => {
-  it("refreshes ahead of expiry and never later than five seconds out", () => {
-    vi.useFakeTimers();
-    const now = 1_000_000_000_000;
-    const onRefresh = vi.fn();
-    const cancel = scheduleTokenRefresh(now / 1000 + 300, onRefresh, () => now);
-
-    vi.advanceTimersByTime(239_000);
-    expect(onRefresh).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1_000);
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-    cancel();
-  });
-
-  it("returns a cancel function so a StrictMode double mount cannot leak a timer", () => {
-    vi.useFakeTimers();
-    const now = 1_000_000_000_000;
-    const onRefresh = vi.fn();
-    const cancel = scheduleTokenRefresh(now / 1000 + 300, onRefresh, () => now);
-    cancel();
-    vi.advanceTimersByTime(600_000);
-    expect(onRefresh).not.toHaveBeenCalled();
-  });
-});

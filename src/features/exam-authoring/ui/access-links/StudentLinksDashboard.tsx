@@ -110,10 +110,19 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     return [...byId.values()];
   }, [exam.id, sharedValues, sourceLinks, version?.id]);
 
+  // Link rows are seeded through the room's arbiter like every other shared
+  // value: the overview query only proposes the first copy, and the readiness
+  // barrier (initial sync plus the IndexedDB replay) keeps that proposal from
+  // racing the replayed local cache.
   useEffect(() => {
-    if (!collaboration?.workspaceSnapshot.ready) return;
-    for (const link of sourceLinks) collaboration.ensureValue(`access/${link.id}`, link);
-  }, [collaboration, collaboration?.workspaceSnapshot.ready, sourceLinks]);
+    if (!collaboration?.workspaceSnapshot.ready || !collaboration.workspaceSnapshot.localReady) return;
+    for (const link of sourceLinks) collaboration.seedValue(`access/${link.id}`, link);
+  }, [
+    collaboration,
+    collaboration?.workspaceSnapshot.localReady,
+    collaboration?.workspaceSnapshot.ready,
+    sourceLinks,
+  ]);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");

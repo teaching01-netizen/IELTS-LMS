@@ -17,7 +17,7 @@ import { createDefaultConfig } from '../../../../constants/examDefaults';
 import type { ExamState } from '../../../../types';
 import type { StudentAttempt } from '../../../../types/studentAttempt';
 import { StudentAttemptProvider, useStudentAttempt } from '../StudentAttemptProvider';
-import { StudentRuntimeProvider } from '../StudentRuntimeProvider';
+import { StudentRuntimeProvider, useStudentRuntimeSession } from '../StudentRuntimeProvider';
 
 const mocks = vi.hoisted(() => ({
   transport: {
@@ -135,6 +135,102 @@ describe('IELTS visible state preservation', () => {
     // Live input wins over the older recovered draft — never rolled back.
     await waitFor(() => expect(hook.result.current.state.attempt?.answers.q1).toBe('newly typed'));
     expect(hook.result.current.state.attempt?.flags.q1).toBe(true);
+    hook.unmount();
+  });
+
+  it('Bug 5: a provisional edit awaiting its version is never reported as saved', async () => {
+    const heldSnapshot = deferred<[]>();
+    mocks.transport.fetchSnapshot.mockReturnValue(heldSnapshot.promise);
+    // The acknowledgement that is allowed to restore the server-saved truth.
+    mocks.transport.sendBatch.mockImplementation(
+      async (
+        _attemptId: string,
+        req: { commands: Array<{ writeId: string; questionId: string; clientVersion: number; response: unknown }> },
+      ) => ({
+        attemptRevision: 1,
+        serverTime: new Date().toISOString(),
+        acknowledgements: req.commands.map((command) => ({
+          writeId: command.writeId,
+          questionId: command.questionId,
+          clientVersion: command.clientVersion,
+          outcome: 'applied' as const,
+          serverRevision: 1,
+          canonicalResponse: command.response,
+          contentHash: 'hash-status',
+        })),
+      }),
+    );
+    const currentAttempt = attempt('status-provider');
+    const state = examState();
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <StudentRuntimeProvider state={state} onExit={() => {}} attemptSnapshot={currentAttempt}>
+        <StudentAttemptProvider scheduleId="schedule" attemptSnapshot={currentAttempt}>{children}</StudentAttemptProvider>
+      </StudentRuntimeProvider>
+    );
+    const hook = renderHook(() => ({ attempt: useStudentAttempt(), runtime: useStudentRuntimeSession() }), { wrapper });
+    await waitFor(() => expect(mocks.transport.fetchSnapshot).toHaveBeenCalled());
+    // Nothing outstanding: the prior state really is saved.
+    expect(hook.result.current.runtime.state.attemptSyncState).toBe('saved');
+
+    act(() => {
+      hook.result.current.attempt.actions.persistAnswer('q1', 'student latest');
+    });
+    expect(hook.result.current.attempt.state.attempt?.answers.q1).toBe('student latest');
+    // Visible and checkpointed, but the intent has no version and no outbox
+    // entry yet — so the runtime must stop claiming the server has it.
+    await waitFor(() => expect(hook.result.current.runtime.state.attemptSyncState).not.toBe('saved'));
+
+    // Resolving the snapshot issues the version; the acknowledgement is what
+    // restores the server-saved truth, so the state is never sticky.
+    await act(async () => { heldSnapshot.resolve([]); });
+    await waitFor(() => expect(hook.result.current.runtime.state.attemptSyncState).toBe('saved'));
+    hook.unmount();
+  });
+
+  it('Bug 1: a control-epoch refresh mid-recovery keeps the typed answer over the older server value', async () => {
+    const heldFirstSnapshot = deferred<[]>();
+    const serverAck = {
+      questionId: 'q1',
+      writeId: 'server-write',
+      clientVersion: 1,
+      serverRevision: 1,
+      outcome: 'applied' as const,
+      contentHash: 'hash-epoch',
+      canonicalResponse: {
+        answer: 'server old',
+        markedForReview: false,
+        eliminatedOptions: [],
+        annotations: [],
+      },
+    };
+    mocks.transport.fetchSnapshot
+      .mockReturnValueOnce(heldFirstSnapshot.promise)
+      .mockResolvedValue({
+        attemptId: 'epoch-provider', protocolVersion: 2, deliveryStatus: 'running',
+        leaseEpoch: 1, controlEpoch: 2, attemptRevision: 1, responses: [serverAck],
+      });
+    let currentAttempt = attempt('epoch-provider');
+    const state = examState();
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <StudentRuntimeProvider state={state} onExit={() => {}} attemptSnapshot={currentAttempt}>
+        <StudentAttemptProvider scheduleId="schedule" attemptSnapshot={currentAttempt}>{children}</StudentAttemptProvider>
+      </StudentRuntimeProvider>
+    );
+    const hook = renderHook(() => useStudentAttempt(), { wrapper });
+    await waitFor(() => expect(mocks.transport.fetchSnapshot).toHaveBeenCalledTimes(1));
+    act(() => {
+      hook.result.current.actions.persistAnswer('q1', 'student latest');
+    });
+    expect(hook.result.current.state.attempt?.answers.q1).toBe('student latest');
+    // A proctor warning bumps the control epoch: the provider destroys and
+    // rebuilds the engine while the first snapshot is still held open.
+    currentAttempt = { ...currentAttempt, controlEpoch: 2 };
+    hook.rerender();
+    await waitFor(() => expect(mocks.transport.fetchSnapshot).toHaveBeenCalledTimes(2));
+    await act(async () => { heldFirstSnapshot.resolve([]); });
+    // The replacement engine recovers the newest local intent (kept visible)
+    // instead of publishing the older server answer.
+    await waitFor(() => expect(hook.result.current.state.attempt?.answers.q1).toBe('student latest'));
     hook.unmount();
   });
 });

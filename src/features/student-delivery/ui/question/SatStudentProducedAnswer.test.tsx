@@ -7,8 +7,26 @@ describe("SatStudentProducedAnswer (validate-then-announce)", () => {
     render(<SatStudentProducedAnswer questionId="q1" value="" disabled={false} onChange={vi.fn()} />);
     const input = screen.getByRole("textbox", { name: "Enter your answer" });
     expect(input).toHaveAttribute("aria-describedby", expect.stringContaining("help"));
+    expect(input).toHaveAttribute("inputmode", "text");
+    expect(input).toHaveAttribute("enterkeyhint", "done");
+    expect(input).toHaveAttribute("maxlength", "6");
+    expect(input).toHaveClass("h-12");
     expect(input).not.toHaveAttribute("aria-invalid");
     expect(screen.getByText(/Fractions use a\/b/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["a decimal", "12.5"],
+    ["a fraction", "1/2"],
+    ["a leading-minus response", "-12.3"],
+  ])("accepts %s without announcing an error on blur", (_description, value) => {
+    render(<SatStudentProducedAnswer questionId="q1" value={value} disabled={false} onChange={vi.fn()} />);
+    const input = screen.getByRole("textbox", { name: "Enter your answer" });
+
+    fireEvent.blur(input);
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(input).not.toHaveAttribute("aria-invalid");
   });
 
   it("stays silent while typing and on empty blur (unanswered is legal)", () => {
@@ -19,6 +37,7 @@ describe("SatStudentProducedAnswer (validate-then-announce)", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     fireEvent.blur(input);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(input).not.toHaveAttribute("aria-invalid");
   });
 
   it("announces a plain-language error on blur for an invalid draft", () => {

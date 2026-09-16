@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   CodecError,
+  RICH_ROOT_PREFIX,
   applyBinaryState,
   assertStateWithinLimit,
   currentStateHash,
@@ -10,10 +11,13 @@ import {
   hashStateVector,
   projectPrompt,
   projectPromptJson,
+  projectWorkspace,
   promptSchema,
   seedYDocFromPrompt,
   toBase64,
 } from "../documentCodec.js";
+import { documentFromStructuredContent } from "../richTextSchema.js";
+import { prosemirrorJSONToYXmlFragment } from "y-prosemirror";
 import type {
   RichTextDocument,
   RichTextNode,
@@ -223,6 +227,33 @@ describe("state hashing and binary reload", () => {
     });
     expect(encodeStateAsUpdate(reloaded).byteLength).toBeGreaterThan(committed.byteLength);
     expect(collect((projectPrompt(reloaded).document as RichTextDocument))).toBeTruthy();
+  });
+});
+
+describe("workspace projection across a binary reload", () => {
+  it("includes every rich root of a document that was just loaded from binary", () => {
+    // Regression: Yjs creates a root it meets while APPLYING an update as a
+    // bare AbstractType placeholder, so `shared instanceof Y.XmlFragment` over
+    // ydoc.share was false for every rich fragment of a live room. The durable
+    // workspace_json then lost every rich field, and the service's own
+    // compaction could not see them either.
+    const source = new Y.Doc();
+    source.getMap("workspace").set("question/q1/scalar", JSON.stringify({ questionType: "mcq" }));
+    prosemirrorJSONToYXmlFragment(
+      promptSchema(),
+      documentFromStructuredContent(FULL_VOCABULARY),
+      source.getXmlFragment(`${RICH_ROOT_PREFIX}question/q1/prompt`),
+    );
+
+    const reloaded = new Y.Doc();
+    applyBinaryState(reloaded, encodeStateAsUpdate(source));
+
+    // Nothing may materialize the fragment first: asking for it by class is
+    // exactly what would hide this bug.
+    const projection = projectWorkspace(reloaded);
+    expect(projection["question/q1/scalar"]).toEqual({ questionType: "mcq" });
+    expect(Object.keys(projection)).toContain(`${RICH_ROOT_PREFIX}question/q1/prompt`);
+    expect(projection).toEqual(projectWorkspace(source));
   });
 });
 

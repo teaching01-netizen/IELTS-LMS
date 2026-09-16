@@ -1,15 +1,147 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 async function openSatHarness(
   page: Page,
-  options: { mode?: "reading" | "math"; paused?: boolean; tool?: "calculator" | "reference" } = {}
+  options: {
+    mode?: "reading" | "math" | "spr";
+    paused?: boolean;
+    tool?: "calculator" | "reference";
+  } = {}
 ) {
   const params = new URLSearchParams();
-  if (options.mode === "math") params.set("mode", "math");
+  if (options.mode && options.mode !== "reading") params.set("mode", options.mode);
   if (options.paused) params.set("paused", "1");
   if (options.tool) params.set("tool", options.tool);
   await page.goto(`/__dev/sat-accessibility${params.size ? `?${params.toString()}` : ""}`);
   await expect(page.getByTestId("sat-exam-shell")).toBeVisible();
+}
+
+type AxeViolation = { id: string; impact: string | null; targets: string[] };
+
+let axeSourceCache: string | null = null;
+
+/**
+ * axe-core ships transitively (eslint-plugin-jsx-a11y / storybook a11y); the
+ * SAT profile injects the installed build instead of adding a second copy.
+ * A missing build is a hard, explicit harness failure — never a silent skip.
+ */
+function axeSource(): string {
+  if (axeSourceCache !== null) return axeSourceCache;
+  const candidate = resolve(process.cwd(), "node_modules/axe-core/axe.min.js");
+  if (!existsSync(candidate)) {
+    throw new Error(
+      `axe-core is not installed at ${candidate}. Run 'bun install' before the SAT accessibility profile.`,
+    );
+  }
+  axeSourceCache = readFileSync(candidate, "utf8");
+  return axeSourceCache;
+}
+
+async function axeViolations(page: Page): Promise<AxeViolation[]> {
+  if (!(await page.evaluate(() => Boolean((window as unknown as { axe?: unknown }).axe)))) {
+    await page.addScriptTag({ content: axeSource() });
+  }
+  return page.evaluate(async () => {
+    const axe = (window as unknown as { axe: { run: (context: Element, options: unknown) => Promise<unknown> } }).axe;
+    const results = (await axe.run(document.body, {
+      resultTypes: ["violations"],
+      rules: {
+        // SAT colors resolve through CSS custom properties; axe's contrast
+        // math cannot follow var() chains, so contrast stays the documented
+        // manual token check (plan §2 Semantics gate) instead of a flaky rule.
+        "color-contrast": { enabled: false },
+      },
+    })) as {
+      violations: Array<{ id: string; impact?: string | null; nodes: Array<{ target: string[] }> }>;
+    };
+    return results.violations.map((violation) => ({
+      id: violation.id,
+      impact: violation.impact ?? null,
+      targets: violation.nodes.map((node) => node.target.join(" ")),
+    }));
+  });
+}
+
+async function expectNoSeriousAxeViolations(page: Page, surface: string) {
+  const blocking = (await axeViolations(page)).filter(
+    (violation) => violation.impact === "critical" || violation.impact === "serious",
+  );
+  expect(blocking, `axe reported critical/serious violations in ${surface}`).toEqual([]);
+}
+
+/** Every aria-controls in the document must resolve to exactly one mounted element. */
+async function expectNoDanglingAriaControls(page: Page) {
+  const issues = await page.evaluate(() => {
+    const problems: string[] = [];
+    for (const trigger of Array.from(document.querySelectorAll<HTMLElement>("[aria-controls]"))) {
+      const label =
+        trigger.getAttribute("aria-label") ?? trigger.textContent?.trim() ?? "unnamed trigger";
+      const ids = (trigger.getAttribute("aria-controls") ?? "").split(/\s+/).filter(Boolean);
+      if (ids.length === 0) problems.push(`${label}: empty aria-controls`);
+      for (const id of ids) {
+        const targets = document.querySelectorAll(`[id="${id}"]`);
+        if (targets.length !== 1) {
+          problems.push(`${label}: aria-controls="${id}" resolves to ${targets.length} elements`);
+        }
+      }
+    }
+    return problems;
+  });
+  expect(issues).toEqual([]);
+}
+
+async function installVisualViewportShim(page: Page) {
+  await page.addInitScript(() => {
+    const listeners = new Map<string, Set<EventListener>>();
+    let overriddenHeight: number | null = null;
+    const visualViewportShim = {
+      width: window.innerWidth,
+      get height() {
+        // Mobile emulation can expose a pre-meta-viewport height during the
+        // init script. Read the settled layout viewport until the test
+        // explicitly simulates a keyboard reduction.
+        return overriddenHeight ?? window.innerHeight;
+      },
+      offsetLeft: 0,
+      offsetTop: 0,
+      pageLeft: 0,
+      pageTop: 0,
+      scale: 1,
+      addEventListener(type: string, listener: EventListener | null) {
+        if (!listener) return;
+        const entries = listeners.get(type) ?? new Set<EventListener>();
+        entries.add(listener);
+        listeners.set(type, entries);
+      },
+      removeEventListener(type: string, listener: EventListener | null) {
+        if (!listener) return;
+        listeners.get(type)?.delete(listener);
+      },
+      dispatchEvent(event: Event) {
+        for (const listener of listeners.get(event.type) ?? []) listener(event);
+        return true;
+      },
+    };
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: visualViewportShim,
+    });
+    Object.defineProperty(window, "__satVisualViewportTest", {
+      configurable: true,
+      value: {
+        setHeight(height: number) {
+          overriddenHeight = height;
+          visualViewportShim.dispatchEvent(new Event("resize"));
+        },
+        restore() {
+          overriddenHeight = null;
+          visualViewportShim.dispatchEvent(new Event("resize"));
+        },
+      },
+    });
+  });
 }
 
 async function expectVisibleButtonsAtLeast44(page: Page) {
@@ -59,6 +191,42 @@ async function expectButtonsDoNotOverlap(page: Page, scopeSelector: string) {
     return failures;
   });
   expect(overlaps).toEqual([]);
+}
+
+async function expectSatViewportContained(page: Page) {
+  const failures = await page.evaluate(() => {
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const selectors = [
+      ".sat-exam-shell",
+      ".sat-exam-topbar",
+      "#sat-question-content",
+      ".sat-exam-footer",
+      '[data-sat-focus="topbar-more"]',
+      '[data-sat-focus="footer-navigator"]',
+    ];
+    return selectors.flatMap((selector) =>
+      Array.from(document.querySelectorAll<HTMLElement>(selector)).flatMap((element) => {
+        const rect = element.getBoundingClientRect();
+        const visible = getComputedStyle(element).visibility !== "hidden";
+        if (!visible || rect.width === 0 || rect.height === 0) return [];
+        return rect.left >= -1 &&
+          rect.top >= -1 &&
+          rect.right <= viewport.width + 1 &&
+          rect.bottom <= viewport.height + 1
+          ? []
+          : [
+              {
+                selector,
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+              },
+            ];
+      })
+    );
+  });
+  expect(failures).toEqual([]);
 }
 
 async function selectStimulusText(page: Page, requested: string) {
@@ -521,6 +689,26 @@ test.describe("SAT student accessibility and layout", () => {
     }
   });
 
+  test("viewport containment keeps Math and Reading/Writing controls on screen at tablet widths", async ({
+    page,
+  }) => {
+    for (const mode of ["reading", "math"] as const) {
+      for (const viewport of [
+        { width: 639, height: 900 },
+        { width: 640, height: 900 },
+        { width: 700, height: 900 },
+        { width: 768, height: 1024 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await openSatHarness(page, { mode });
+        await expectSatViewportContained(page);
+        await expectButtonsDoNotOverlap(page, ".sat-exam-topbar");
+        await expectButtonsDoNotOverlap(page, ".sat-exam-footer");
+        await expectVisibleButtonsAtLeast44(page);
+      }
+    }
+  });
+
   test("mobile and iPad orientation matrix stays contained and touch-safe", async ({ page }) => {
     for (const viewport of [
       { width: 375, height: 667 },
@@ -596,6 +784,169 @@ test.describe("SAT student accessibility and layout", () => {
     // the pill-vs-step overlap resolves with the Phase 6 footer reflow.
     await expectVisibleButtonsAtLeast44(page);
     await expect(page.getByRole("button", { name: "Next" })).toBeVisible();
+  });
+
+  test("footer position text remains complete at 200 percent", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openSatHarness(page, { mode: "math" });
+    await page.addStyleTag({
+      content:
+        ".sat-ui { --sat-type-body: 2.125rem; --sat-type-control-primary: 1.875rem; " +
+        "--sat-type-control-secondary: 1.75rem; --sat-type-metadata: 1.625rem; " +
+        "--sat-type-timer: 2.5rem; --sat-type-input: 2.25rem; --sat-type-reference: 2rem; }",
+    });
+
+    for (const viewport of [
+      { width: 320, height: 568 },
+      { width: 390, height: 844 },
+      { width: 640, height: 900 },
+      { width: 700, height: 900 },
+      { width: 768, height: 1024 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const positionLabel = page.locator(
+        '[data-sat-focus="footer-navigator"] [data-sat-position-label]:visible'
+      );
+      await expect(positionLabel).toBeVisible();
+      const expectedLabel = viewport.width < 420 ? "1/3" : "Question 1 of 3";
+      const visibleText = await positionLabel.evaluate((element) =>
+        (element as HTMLElement).innerText.trim()
+      );
+      expect(visibleText).toBe(expectedLabel);
+      const metrics = await positionLabel.evaluate((element) => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      }));
+      expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+    }
+  });
+
+  test("reference header controls meet the SAT touch target", async ({ page }) => {
+    await page.setViewportSize({ width: 1194, height: 834 });
+    await openSatHarness(page, { mode: "math", tool: "reference" });
+
+    const controls = page.locator(
+      '[data-sat-tool-window="Reference Sheet"] button[data-sat-tool-collapse], ' +
+        '[data-sat-tool-window="Reference Sheet"] button[data-sat-tool-close]'
+    );
+    await expect(controls).toHaveCount(2);
+    for (let index = 0; index < 2; index += 1) {
+      const control = controls.nth(index);
+      await expect(control).toBeVisible();
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test("software keyboard freezes the SAT shell and reveals the SPR control in its pane", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installVisualViewportShim(page);
+    await openSatHarness(page, { mode: "spr" });
+
+    const shell = page.getByTestId("sat-exam-shell");
+    const footer = page.locator(".sat-exam-footer");
+    const spr = page.getByRole("textbox", { name: "Enter your answer" });
+    const timer = page.locator('[role="timer"]').first();
+    await expect(spr).toBeVisible();
+    await spr.fill("17");
+    const timerBefore = await timer.textContent();
+
+    const before = await shell.evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      scrollY: window.scrollY,
+    }));
+    expect(before.height).toBeGreaterThan(0);
+
+    await spr.focus();
+    await page.evaluate(() => {
+      const testViewport = (
+        window as typeof window & {
+          __satVisualViewportTest: { setHeight: (height: number) => void };
+        }
+      ).__satVisualViewportTest;
+      testViewport.setHeight(660);
+    });
+
+    await expect(shell).toHaveAttribute("data-sat-keyboard-open", "true");
+    const keyboardState = await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('[id^="sat-spr-"]');
+      const owner = input?.closest<HTMLElement>("[data-student-exam-scroll-owner]");
+      const rect = input?.getBoundingClientRect();
+      const visualViewport = window.visualViewport;
+      const footer = document.querySelector<HTMLElement>(".sat-exam-footer");
+      return {
+        inputBottom: rect?.bottom ?? Number.POSITIVE_INFINITY,
+        visibleBottom: (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? 0),
+        paneScrollTop: owner?.scrollTop ?? 0,
+        documentScrollY: window.scrollY,
+        shellHeight: document.querySelector<HTMLElement>("[data-testid='sat-exam-shell']")
+          ?.getBoundingClientRect().height,
+        footer: footer
+          ? {
+              display: getComputedStyle(footer).display,
+              visibility: getComputedStyle(footer).visibility,
+              pointerEvents: getComputedStyle(footer).pointerEvents,
+              height: footer.getBoundingClientRect().height,
+            }
+          : null,
+      };
+    });
+    expect(keyboardState.paneScrollTop).toBeGreaterThan(0);
+    expect(keyboardState.inputBottom).toBeLessThanOrEqual(keyboardState.visibleBottom - 12 + 1);
+    expect(keyboardState.documentScrollY).toBe(0);
+    await expect(spr).toHaveValue("17");
+    await expect(timer).toHaveText(timerBefore ?? "");
+    expect(keyboardState.shellHeight).toBeCloseTo(before.height, 0);
+    expect(keyboardState.footer).toMatchObject({
+      visibility: "hidden",
+      pointerEvents: "none",
+    });
+    expect(keyboardState.footer?.display).not.toBe("none");
+    expect(keyboardState.footer?.height).toBeGreaterThan(0);
+
+    await page.evaluate(() => {
+      const testViewport = (
+        window as typeof window & {
+          __satVisualViewportTest: { restore: () => void };
+        }
+      ).__satVisualViewportTest;
+      testViewport.restore();
+    });
+    await expect(shell).toHaveAttribute("data-sat-keyboard-open", "false");
+    await expect(footer).toHaveCSS("visibility", "visible");
+    const after = await shell.evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      scrollY: window.scrollY,
+    }));
+    expect(after.height).toBeCloseTo(before.height, 0);
+    expect(after.scrollY).toBe(0);
+  });
+
+  test("mobile SPR accepts a fraction without losing the slash or announcing a false error", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openSatHarness(page, { mode: "spr" });
+
+    const spr = page.getByRole("textbox", { name: "Enter your answer" });
+    await expect(spr).toHaveAttribute("inputmode", "text");
+    await expect(spr).toHaveAttribute("enterkeyhint", "done");
+
+    // Fill the browser input contract directly; the assertion must not depend
+    // on any vendor-specific virtual-keyboard layout.
+    await spr.fill("1/2");
+    await expect(spr).toHaveValue("1/2");
+    await spr.blur();
+    await expect(spr).not.toHaveAttribute("aria-invalid", "true");
+    await expect(page.locator('[role="alert"]')).toHaveCount(0);
+
+    const box = await spr.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
   });
 
   test("Reading preferences apply live, preserve answers, persist across reload, and reset cleanly", async ({
@@ -954,18 +1305,25 @@ test.describe("SAT student accessibility and layout", () => {
     const questionSurface = page.locator('[data-sat-question-presentation="instant"]');
     await expect(questionSurface).toHaveCount(1);
     await expect(page.locator("[data-sat-question-transition]")).toHaveCount(0);
-    await expect(page.getByLabel("Question 2", { exact: true })).toBeVisible();
+    // Task 6: the question number is a real h2 heading, not a labelled div.
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Question 2", exact: true }),
+    ).toBeVisible();
     expect(await questionSurface.evaluate((element) => getComputedStyle(element).transform)).toBe(
       "none"
     );
 
     await page.getByRole("button", { name: "Previous" }).click();
-    await expect(page.getByLabel("Question 1", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Question 1", exact: true }),
+    ).toBeVisible();
     await expect(page.locator("[data-sat-question-transition]")).toHaveCount(0);
 
     await page.getByRole("button", { name: /open question navigator/i }).click();
     await page.getByRole("button", { name: /Question 3, unanswered/i }).click();
-    await expect(page.getByLabel("Question 3", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Question 3", exact: true }),
+    ).toBeVisible();
     await expect(page.locator("[data-sat-question-transition]")).toHaveCount(0);
   });
 
@@ -977,7 +1335,9 @@ test.describe("SAT student accessibility and layout", () => {
     await openSatHarness(page, { mode: "math" });
 
     await page.getByRole("button", { name: "Next" }).click();
-    await expect(page.getByLabel("Question 2", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Question 2", exact: true }),
+    ).toBeVisible();
     await expect(page.locator("[data-sat-question-transition]")).toHaveCount(0);
     const surface = page.locator('[data-sat-question-presentation="instant"]');
     expect(await surface.evaluate((element) => getComputedStyle(element).transform)).toBe("none");
@@ -990,5 +1350,139 @@ test.describe("SAT student accessibility and layout", () => {
       return value.endsWith("ms") ? parsed / 1000 : parsed;
     });
     expect(animationSeconds).toBeLessThanOrEqual(0.0001);
+  });
+
+  test("ARIA semantics: question headings and dialog triggers resolve to the dialog root", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openSatHarness(page);
+
+    // Task 6: the question number is a semantic heading, not a labelled div.
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Question 1", exact: true }),
+    ).toBeVisible();
+    // Closed triggers expose no aria-controls, so nothing can dangle.
+    await expectNoDanglingAriaControls(page);
+
+    const directions = page.getByRole("button", { name: "Directions" }).first();
+    await directions.click();
+    await expect(directions).toHaveAttribute("aria-expanded", "true");
+    const directionsPanelId = await directions.getAttribute("aria-controls");
+    expect(directionsPanelId).toBeTruthy();
+    await expect(page.getByRole("dialog", { name: "Directions" })).toHaveAttribute(
+      "id",
+      directionsPanelId!,
+    );
+    expect(await page.locator(`[id="${directionsPanelId}"]`).count()).toBe(1);
+    await expectNoDanglingAriaControls(page);
+    await page.keyboard.press("Escape");
+    await expect(directions).toHaveAttribute("aria-expanded", "false");
+    expect(await directions.getAttribute("aria-controls")).toBeNull();
+
+    const navigator = page.getByRole("button", { name: /open question navigator/i });
+    await navigator.click();
+    await expect(navigator).toHaveAttribute("aria-expanded", "true");
+    const navigatorPanelId = await navigator.getAttribute("aria-controls");
+    expect(navigatorPanelId).toBeTruthy();
+    const navigatorDialog = page.getByRole("dialog", { name: /Questions$/ });
+    await expect(navigatorDialog).toHaveAttribute("id", navigatorPanelId!);
+    expect(await page.locator(`[id="${navigatorPanelId}"]`).count()).toBe(1);
+    // Named by its own visible title — never a hidden duplicate label.
+    const titleId = await navigatorDialog.getAttribute("aria-labelledby");
+    expect(titleId).toBeTruthy();
+    await expect(page.locator(`h2[id="${titleId}"]`)).toHaveText(/Questions$/);
+    await expectNoDanglingAriaControls(page);
+  });
+
+  test("axe: every SAT surface reports no critical or serious violations", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openSatHarness(page);
+    await expectNoSeriousAxeViolations(page, "module shell with no dialog open");
+
+    await page.getByRole("button", { name: "Directions" }).first().click();
+    await expectNoSeriousAxeViolations(page, "Directions dialog");
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: "Display", exact: true }).click();
+    await expectNoSeriousAxeViolations(page, "Display settings dialog");
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: /Question note/ }).click();
+    await expectNoSeriousAxeViolations(page, "Question note dialog");
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: /open question navigator/i }).click();
+    await expectNoSeriousAxeViolations(page, "question navigator");
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: "More tools" }).click();
+    await expectNoSeriousAxeViolations(page, "More menu");
+    await page.keyboard.press("Escape");
+
+    // Reference Sheet is a Math-only floating tool. It is closed through its
+    // own toolbar trigger: idle Escape is a deliberate no-op on this surface
+    // (timed-exam safety), and the desktop corner resize zone currently
+    // intercepts the header close control's centre — measured 2026-09-16 and
+    // recorded for the Task 8 hit-area rework rather than papered over here.
+    await openSatHarness(page, { mode: "math" });
+    const referenceTrigger = page.getByRole("button", { name: "Reference", exact: true });
+    await referenceTrigger.click();
+    await expect(page.getByRole("dialog", { name: "Reference Sheet" })).toBeVisible();
+    await expectNoSeriousAxeViolations(page, "Reference Sheet");
+    await referenceTrigger.click();
+    await expect(page.getByRole("dialog", { name: "Reference Sheet" })).toHaveCount(0);
+
+    // Compact presentations.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openSatHarness(page);
+    await expectNoSeriousAxeViolations(page, "compact module shell");
+    await page.getByRole("button", { name: "Directions" }).first().click();
+    await expectNoSeriousAxeViolations(page, "compact Directions sheet");
+    await page.getByRole("button", { name: "Close directions" }).click();
+
+    // State surfaces that own their own semantics.
+    await openSatHarness(page, { mode: "spr" });
+    await expectNoSeriousAxeViolations(page, "student-produced response");
+    await openSatHarness(page, { paused: true });
+    await expectNoSeriousAxeViolations(page, "proctor pause");
+  });
+
+  test("focus return: SAT dialogs restore trigger focus after every close path", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openSatHarness(page);
+
+    const directions = page.getByRole("button", { name: "Directions" }).first();
+    const directionsDialog = page.getByRole("dialog", { name: "Directions" });
+
+    await directions.click();
+    await page.keyboard.press("Escape");
+    await expect(directionsDialog).toHaveCount(0);
+    await expect(directions).toBeFocused();
+
+    await directions.click();
+    // A press on non-interactive chrome is the outside-click path.
+    await page.locator(".sat-exam-topbar p").first().click();
+    await expect(directionsDialog).toHaveCount(0);
+    await expect(directions).toBeFocused();
+
+    await directions.click();
+    await page.getByRole("button", { name: "Close directions" }).click();
+    await expect(directionsDialog).toHaveCount(0);
+    await expect(directions).toBeFocused();
+
+    const navigator = page.getByRole("button", { name: /open question navigator/i });
+    const navigatorDialog = page.getByRole("dialog", { name: /Questions$/ });
+    await navigator.click();
+    await page.keyboard.press("Escape");
+    await expect(navigatorDialog).toHaveCount(0);
+    await expect(navigator).toBeFocused();
+
+    await navigator.click();
+    await page.getByRole("button", { name: "Close question navigator" }).click();
+    await expect(navigatorDialog).toHaveCount(0);
+    await expect(navigator).toBeFocused();
   });
 });

@@ -49,8 +49,13 @@ export function SatRoot() {
   const { session, logout } = useAuthSession();
   const navItems = useMemo(() => navForRole(session?.user.role), [session?.user.role]);
   const displayName = session?.user.displayName?.trim() || session?.user.email || 'Staff';
+  // Every surface that renders exam content stays inside ONE collaboration
+  // boundary. `preview` belongs here even though it only reads: leaving it out
+  // unmounted the boundary on the way there, so the room was torn down and
+  // re-opened (with a fresh token and a fresh local replay) on the way back,
+  // and any edit the author had not yet acknowledged went with it.
   const authoringExamMatch = location.pathname.match(
-    /^\/sat\/exams\/([^/]+)(?:\/(release|access))?\/?$/,
+    /^\/sat\/exams\/([^/]+)(?:\/(release|preview|access))?\/?$/,
   );
   const collaborationExamId = authoringExamMatch?.[1]
     ? decodeURIComponent(authoringExamMatch[1])

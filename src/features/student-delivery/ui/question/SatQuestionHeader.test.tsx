@@ -16,6 +16,18 @@ function renderHeader(mode: boolean) {
   );
 }
 
+describe("SatQuestionHeader question semantics", () => {
+  it("exposes the question number as real h2 heading text", () => {
+    renderHeader(false);
+    const heading = screen.getByRole("heading", { level: 2, name: "Question 3" });
+    // Visible glyph is the number only; the "Question " prefix is sr-only.
+    expect(heading).toHaveTextContent("3");
+    expect(heading).not.toHaveAttribute("aria-label");
+    expect(heading.className).toContain("w-11");
+    expect(heading.className).toContain("place-items-center");
+  });
+});
+
 describe("SatQuestionHeader eliminator (Phase 6e endgame)", () => {
   it("carries a visible static label in both states", () => {
     const { unmount } = renderHeader(false);

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"example.com/ielts-proctoring/internal/authoringcoedit"
 	"example.com/ielts-proctoring/internal/authoringrealtime"
@@ -35,21 +36,28 @@ type CoeditWorkspaceDocument struct {
 	MaterializedRevision int
 	LastActorID          string
 	ClosedReason         *string
+	StateEpoch           uint64
+	CommitSequence       uint64
+	FreezeOperationID    *string
+	FreezeExpiresAt      *time.Time
 }
 
 const coeditWorkspaceColumns = `id, organization_id, exam_id, draft_version_id,
  schema_version, field_set, lifecycle_state, ydoc_state, state_vector,
  state_hash, previous_state_hash, workspace_json, materialized_revision,
- last_actor_id, closed_reason`
+	 last_actor_id, closed_reason, state_epoch, commit_sequence,
+	 freeze_operation_id, freeze_expires_at`
 
 func scanCoeditWorkspace(row interface{ Scan(dest ...any) error }) (CoeditWorkspaceDocument, error) {
 	var out CoeditWorkspaceDocument
-	var org, actor, reason sql.NullString
+	var org, actor, reason, freezeOperationID sql.NullString
+	var freezeExpiresAt sql.NullTime
 	var state string
 	if err := row.Scan(&out.ID, &org, &out.ExamID, &out.DraftVersionID,
 		&out.SchemaVersion, &out.FieldSet, &state, &out.YdocState, &out.StateVector,
 		&out.StateHash, &out.PreviousStateHash, &out.WorkspaceJSON,
-		&out.MaterializedRevision, &actor, &reason); err != nil {
+		&out.MaterializedRevision, &actor, &reason, &out.StateEpoch,
+		&out.CommitSequence, &freezeOperationID, &freezeExpiresAt); err != nil {
 		return CoeditWorkspaceDocument{}, err
 	}
 	if org.Valid {
@@ -62,6 +70,16 @@ func scanCoeditWorkspace(row interface{ Scan(dest ...any) error }) (CoeditWorksp
 	if reason.Valid {
 		value := reason.String
 		out.ClosedReason = &value
+	}
+	if freezeOperationID.Valid {
+		value := strings.TrimSpace(freezeOperationID.String)
+		if value != "" {
+			out.FreezeOperationID = &value
+		}
+	}
+	if freezeExpiresAt.Valid {
+		value := freezeExpiresAt.Time
+		out.FreezeExpiresAt = &value
 	}
 	parsed, err := authoringcoedit.ParseLifecycleState(state)
 	if err != nil {
@@ -91,6 +109,9 @@ func workspaceIdentity(doc CoeditWorkspaceDocument) authoringcoedit.Identity {
 		LifecycleState:       doc.LifecycleState,
 		MaterializedRevision: doc.MaterializedRevision,
 		ClosedReason:         closed,
+		StateEpoch:           coeditDecimal(doc.StateEpoch),
+		CommitSequence:       coeditDecimal(doc.CommitSequence),
+		WorkspaceRevision:    doc.MaterializedRevision,
 	}
 }
 
@@ -213,6 +234,11 @@ func (s *Service) CoeditWorkspaceLoad(ctx context.Context, documentName string) 
 		StateHash:            hex.EncodeToString(doc.StateHash),
 		MaterializedRevision: doc.MaterializedRevision,
 		QuestionRevision:     doc.MaterializedRevision,
+		StateEpoch:           coeditDecimal(doc.StateEpoch),
+		CommitSequence:       coeditDecimal(doc.CommitSequence),
+		WorkspaceRevision:    doc.MaterializedRevision,
+		FreezeOperationID:    coeditFreezeOperationIDWorkspace(doc),
+		FreezeExpiresAt:      coeditFreezeExpiresAtWorkspace(doc),
 		SchemaVersion:        doc.SchemaVersion, FieldSet: doc.FieldSet,
 		ClosedReason: doc.ClosedReason,
 	}, nil
@@ -247,19 +273,26 @@ func (s *Service) CoeditWorkspaceInitialize(ctx context.Context, req CoeditIniti
 		if doc.LifecycleState == authoringcoedit.StateClosed {
 			return authoringcoedit.New(authoringcoedit.CodeDocumentClosed, "This SAT draft collaboration session was closed.")
 		}
+		if !authoringcoedit.CanTransition(doc.LifecycleState, authoringcoedit.StateActive) ||
+			doc.LifecycleState == authoringcoedit.StateFreezing ||
+			doc.LifecycleState == authoringcoedit.StateFrozen {
+			return authoringcoedit.New(authoringcoedit.CodeDocumentFrozen, "This SAT draft is being published; try again in a moment.")
+		}
 		if len(doc.YdocState) > 0 {
 			out = workspaceResultFromDocument(doc, true)
 			return nil
 		}
 		if _, err := q.ExecContext(ctx, `UPDATE authoring_coedit_workspaces
- SET ydoc_state = ?, state_vector = ?, state_hash = ?, workspace_json = ?,
-     lifecycle_state = ?, last_actor_id = ?, updated_at = NOW(6) WHERE id = ?`,
+	 SET ydoc_state = ?, state_vector = ?, state_hash = ?, workspace_json = ?,
+	     lifecycle_state = ?, commit_sequence = commit_sequence + 1,
+	     last_actor_id = ?, updated_at = NOW(6) WHERE id = ?`,
 			req.YdocState, req.StateVector, hash, nonEmptyJSON(req.Workspace),
 			string(authoringcoedit.StateActive), req.ActorID, id); err != nil {
 			return err
 		}
 		doc.YdocState, doc.StateVector, doc.StateHash, doc.WorkspaceJSON = req.YdocState, req.StateVector, hash, req.Workspace
 		doc.LifecycleState = authoringcoedit.StateActive
+		doc.CommitSequence++
 		out = workspaceResultFromDocument(doc, false)
 		return nil
 	})
@@ -267,12 +300,26 @@ func (s *Service) CoeditWorkspaceInitialize(ctx context.Context, req CoeditIniti
 }
 
 func (s *Service) CoeditWorkspaceStore(ctx context.Context, req CoeditStoreRequest) (CoeditStoreResult, error) {
+	return s.coeditWorkspaceStore(ctx, req, false)
+}
+
+// CoeditWorkspaceFinalStore persists the last owned freeze snapshot and keeps
+// the workspace row fenced until its lifecycle operation closes or aborts it.
+func (s *Service) CoeditWorkspaceFinalStore(ctx context.Context, req CoeditStoreRequest) (CoeditStoreResult, error) {
+	return s.coeditWorkspaceStore(ctx, req, true)
+}
+
+func (s *Service) coeditWorkspaceStore(ctx context.Context, req CoeditStoreRequest, final bool) (CoeditStoreResult, error) {
 	if err := validateCoeditWorkspaceSizes(req.YdocState, req.StateVector, req.Workspace); err != nil {
 		return CoeditStoreResult{}, err
 	}
 	_, id, err := authoringcoedit.ParseWorkspaceDocumentName(req.DocumentName)
 	if err != nil {
 		return CoeditStoreResult{}, authoringcoedit.New(authoringcoedit.CodeNotEditableDraft, "Unknown co-edit workspace.")
+	}
+	if final && strings.TrimSpace(req.FreezeOperationID) == "" {
+		return CoeditStoreResult{}, authoringcoedit.New(authoringcoedit.CodeFreezeConflict,
+			"A freeze operation is required for the final store.")
 	}
 	incoming, err := decodeStateHash(req.StateHash)
 	if err != nil {
@@ -295,7 +342,20 @@ func (s *Service) CoeditWorkspaceStore(ctx context.Context, req CoeditStoreReque
 		if doc.LifecycleState == authoringcoedit.StateClosed {
 			return authoringcoedit.New(authoringcoedit.CodeDocumentClosed, "This SAT draft collaboration session was closed.")
 		}
-		if doc.LifecycleState == authoringcoedit.StateFreezing || doc.LifecycleState == authoringcoedit.StateFrozen {
+		if final {
+			if doc.LifecycleState != authoringcoedit.StateFreezing {
+				return authoringcoedit.New(authoringcoedit.CodeFinalStoreRequired,
+					"The final store is only valid for a freezing collaboration session.")
+			}
+			if coeditFreezeOperationIDWorkspace(doc) != strings.TrimSpace(req.FreezeOperationID) {
+				return authoringcoedit.New(authoringcoedit.CodeFreezeConflict,
+					"Another lifecycle operation owns this collaboration session.")
+			}
+			if !lifecycleLeaseActive(doc.FreezeExpiresAt) {
+				return authoringcoedit.New(authoringcoedit.CodeFreezeConflict,
+					"The collaboration freeze lease has expired; start a new lifecycle operation.")
+			}
+		} else if doc.LifecycleState == authoringcoedit.StateFreezing || doc.LifecycleState == authoringcoedit.StateFrozen {
 			return authoringcoedit.New(authoringcoedit.CodeDocumentFrozen, "This SAT draft is being published; try again in a moment.")
 		}
 		if len(doc.StateHash) > 0 && stringEqualBytes(doc.StateHash, incoming) {
@@ -306,20 +366,31 @@ func (s *Service) CoeditWorkspaceStore(ctx context.Context, req CoeditStoreReque
 			return authoringcoedit.New(authoringcoedit.CodePreviousHashMismatch, "Collaboration state advanced elsewhere; reconnect before continuing.")
 		}
 		actorID := firstNonEmpty(req.ActorID, doc.LastActorID)
-		if err := s.materializeWorkspaceTx(ctx, q, doc, req.Workspace, actorID, incoming, emission); err != nil {
+		changed, err := s.materializeWorkspaceTx(ctx, q, doc, req.Workspace, actorID, incoming, emission)
+		if err != nil {
 			return err
 		}
-		nextRevision := doc.MaterializedRevision + 1
+		nextRevision := doc.MaterializedRevision
+		if changed {
+			nextRevision++
+		}
+		lifecycle := authoringcoedit.StateActive
+		if final {
+			lifecycle = authoringcoedit.StateFreezing
+		}
 		if _, err := q.ExecContext(ctx, `UPDATE authoring_coedit_workspaces
  SET ydoc_state = ?, state_vector = ?, previous_state_hash = state_hash,
      state_hash = ?, workspace_json = ?, lifecycle_state = ?,
-     materialized_revision = ?, last_actor_id = ?, updated_at = NOW(6)
+     materialized_revision = ?, commit_sequence = commit_sequence + 1,
+     last_actor_id = ?, updated_at = NOW(6)
  WHERE id = ?`, req.YdocState, req.StateVector, incoming, nonEmptyJSON(req.Workspace),
-			string(authoringcoedit.StateActive), nextRevision, actorID, id); err != nil {
+			string(lifecycle), nextRevision, actorID, id); err != nil {
 			return err
 		}
+		doc.PreviousStateHash = append([]byte(nil), doc.StateHash...)
 		doc.YdocState, doc.StateVector, doc.StateHash, doc.WorkspaceJSON = req.YdocState, req.StateVector, incoming, req.Workspace
-		doc.MaterializedRevision, doc.LifecycleState = nextRevision, authoringcoedit.StateActive
+		doc.MaterializedRevision, doc.LifecycleState = nextRevision, lifecycle
+		doc.CommitSequence++
 		out = workspaceResultFromDocument(doc, false)
 		return nil
 	})
@@ -369,14 +440,15 @@ func (s *Service) materializeWorkspaceTx(
 	actorID string,
 	stateHash []byte,
 	emission *eventEmission,
-) error {
+) (bool, error) {
 	projections, err := parseWorkspaceQuestionProjection(workspace)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(projections) == 0 {
-		return nil
+		return false, nil
 	}
+	changed := false
 
 	questionIDs := make([]string, 0, len(projections))
 	for questionID := range projections {
@@ -396,7 +468,7 @@ func (s *Service) materializeWorkspaceTx(
 			continue
 		}
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		next := row
@@ -420,7 +492,7 @@ func (s *Service) materializeWorkspaceTx(
 		if projection.metadataPresent {
 			metadata, err := normalizeSATQuestionMetadata(projection.metadata)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if !workspaceJSONEqual(row.metadata, metadata) {
 				next.metadata = cloneJSON(metadata)
@@ -435,7 +507,7 @@ func (s *Service) materializeWorkspaceTx(
 		if projection.answerPresent || len(projection.choices) > 0 {
 			answer, err := mergeWorkspaceAnswer(row.answer, projection.answer, projection.answerPresent, projection.choices)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if !workspaceJSONEqual(row.answer, answer) {
 				next.answer = cloneJSON(answer)
@@ -449,9 +521,10 @@ func (s *Service) materializeWorkspaceTx(
 		if len(changedFields) == 0 {
 			continue
 		}
+		changed = true
 
 		if err := touchQuestionDraft(ctx, q, examQuestionID); err != nil {
-			return err
+			return false, err
 		}
 		if _, err := q.ExecContext(ctx, `UPDATE assessment_question_revisions
  SET question_type = ?, stimulus = ?, prompt = ?, answer_definition = ?,
@@ -460,19 +533,19 @@ func (s *Service) materializeWorkspaceTx(
  WHERE id = ?`, next.questionType, nonEmptyJSON(next.stimulus), nonEmptyJSON(next.prompt),
 			nonEmptyJSON(next.answer), nonEmptyJSON(next.rationale), nonEmptyJSON(next.metadata),
 			nonEmptyJSON(next.accessibility), nullableActor(actorID), next.revisionID); err != nil {
-			return err
+			return false, err
 		}
 		if projection.isPretest != nil && row.isPretest != *projection.isPretest {
 			if _, err := q.ExecContext(ctx, `UPDATE assessment_exam_questions
  SET is_pretest = ?, updated_at = NOW(6) WHERE id = ?`, next.isPretest, examQuestionID); err != nil {
-				return err
+				return false, err
 			}
 		}
 
 		if s.eventsOn() && strings.TrimSpace(actorID) != "" {
 			scope, err := resolveQuestionScopeTx(ctx, q, examQuestionID)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if err := s.appendAuthoringEventTx(ctx, q, emission, "coedit_workspace_store", scope, authoringrealtime.EventInput{
 				Kind:    authoringrealtime.KindQuestionChanged,
@@ -487,11 +560,11 @@ func (s *Service) materializeWorkspaceTx(
 				ChangedFields: authoringrealtime.NewChangedFields(changedFields...),
 				CausationID:   coeditCausationID(stateHash),
 			}); err != nil {
-				return err
+				return false, err
 			}
 		}
 	}
-	return nil
+	return changed, nil
 }
 
 func loadWorkspaceQuestionTx(ctx context.Context, q tx.Tx, examQuestionID, draftVersionID string) (workspaceQuestionRow, error) {
@@ -731,47 +804,6 @@ func nullableActor(actorID string) any {
 	return actorID
 }
 
-// CoeditWorkspaceMarkFreezing moves exam-level rooms to the staged publish
-// state. The service also freezes the live Hocuspocus room; this durable flag
-// keeps a restarted service from accepting a store during the same window.
-func (s *Service) CoeditWorkspaceMarkFreezing(ctx context.Context, documentIDs []string) error {
-	if len(documentIDs) == 0 {
-		return nil
-	}
-	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		for _, id := range documentIDs {
-			if _, err := q.ExecContext(ctx, `UPDATE authoring_coedit_workspaces
- SET lifecycle_state = ?, updated_at = NOW(6)
- WHERE id = ? AND lifecycle_state IN (?, ?)`,
-				string(authoringcoedit.StateFreezing), id,
-				string(authoringcoedit.StateActive), string(authoringcoedit.StateInitializing)); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-// CoeditWorkspaceReopenActive restores workspace rooms after a failed or
-// cancelled publish. It is intentionally idempotent for lease recovery.
-func (s *Service) CoeditWorkspaceReopenActive(ctx context.Context, documentIDs []string) error {
-	if len(documentIDs) == 0 {
-		return nil
-	}
-	return s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		for _, id := range documentIDs {
-			if _, err := q.ExecContext(ctx, `UPDATE authoring_coedit_workspaces
- SET lifecycle_state = ?, updated_at = NOW(6)
- WHERE id = ? AND lifecycle_state IN (?, ?)`,
-				string(authoringcoedit.StateActive), id,
-				string(authoringcoedit.StateFreezing), string(authoringcoedit.StateFrozen)); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
 // CoeditWorkspaceCloseDocuments permanently closes exam-level rooms after the
 // authoritative mutation has committed.
 func (s *Service) CoeditWorkspaceCloseDocuments(ctx context.Context, documentIDs []string, reason authoringcoedit.CloseReason) error {
@@ -801,6 +833,11 @@ func workspaceResultFromDocument(doc CoeditWorkspaceDocument, duplicate bool) Co
 		StateHash:            hex.EncodeToString(doc.StateHash),
 		QuestionRevision:     doc.MaterializedRevision,
 		MaterializedRevision: doc.MaterializedRevision,
+		StateEpoch:           coeditDecimal(doc.StateEpoch),
+		CommitSequence:       coeditDecimal(doc.CommitSequence),
+		WorkspaceRevision:    doc.MaterializedRevision,
+		FreezeOperationID:    coeditFreezeOperationIDWorkspace(doc),
+		FreezeExpiresAt:      coeditFreezeExpiresAtWorkspace(doc),
 		Committed:            !duplicate, Duplicate: duplicate,
 	}
 }

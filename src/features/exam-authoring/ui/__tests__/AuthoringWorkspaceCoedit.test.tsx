@@ -11,7 +11,7 @@
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import type {
@@ -22,9 +22,10 @@ import type {
   StructuredContent,
 } from "../../contracts/assessment";
 import { plainContentFromText } from "../../editor/richContent";
-import { stateVectorHash } from "../../realtime/coedit/saveState";
+import { encodeStateVectorBase64 } from "../../realtime/coedit/stateVector";
 
 const DOCUMENT_NAME = "coedit:v1:2f1b6c1e-6a0a-4a5b-9f0e-9d3a2f4c5b6d";
+const WORKSPACE_DOCUMENT_NAME = "coedit:v2:9c2f5a44-1f6e-4c31-8b0d-77e0c2b41a53";
 
 interface FakeTransport {
   name: string;
@@ -35,8 +36,8 @@ interface FakeTransport {
   sync: () => void;
   /** Transport status, as the real provider reports it. */
   status: (status: string) => void;
-  /** The server acknowledged a committed state hash. */
-  ack: (payload: { stateHash: string; questionRevision?: number }) => void;
+  /** The server acknowledged a committed state vector. */
+  ack: (payload: { stateVector: string; questionRevision?: number }) => void;
   /** The service rejected the session (expired, or the room is gone). */
   authenticationFailed: () => void;
   /** The socket dropped. */
@@ -134,11 +135,12 @@ vi.mock("@hocuspocus/provider", async () => {
         payload: JSON.stringify(payload),
       });
     }
-    ack(payload: { stateHash: string; questionRevision?: number }): void {
+    ack(payload: { stateVector: string; questionRevision?: number }): void {
       this.stateless({
         type: "coedit.ack",
         documentName: this.name,
-        stateHash: payload.stateHash,
+        stateVector: payload.stateVector,
+        stateHash: "provenance-only",
         questionRevision: payload.questionRevision ?? 2,
         materializedRevision: payload.questionRevision ?? 2,
       });
@@ -230,6 +232,7 @@ vi.mock("../spine/SpineQuestionView", async () => {
 });
 
 import { AuthoringWorkspace } from "../AuthoringWorkspace";
+import { SatAuthoringCollaborationBoundary } from "../../realtime/coedit";
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -465,16 +468,20 @@ function setupDefaults(): void {
 
   // The token endpoint is the private boundary Go owns. The fake answers with
   // the real wire shape, including the opaque name the service parses.
-  (harness.backendPost as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(
-    () => {
+  // The exam-level room answers on the exam route with the v2 workspace
+  // document; the question-scoped room keeps the v1 prompt document. One mock
+  // serves both because both are the same private Go boundary.
+  (harness.backendPost as unknown as { mockImplementation: (f: (path: string) => unknown) => void }).mockImplementation(
+    (path: string) => {
       harness.tokenRequests += 1;
+      const workspace = typeof path === "string" && path.includes("/exams/");
       return Promise.resolve({
         token: "coedit-token",
-        documentName: DOCUMENT_NAME,
+        documentName: workspace ? WORKSPACE_DOCUMENT_NAME : DOCUMENT_NAME,
         serviceUrl: "ws://127.0.0.1:1235",
         expiresAt: Math.floor(Date.now() / 1000) + 300,
-        schemaVersion: 1,
-        fieldSet: "prompt",
+        schemaVersion: workspace ? 2 : 1,
+        fieldSet: workspace ? "workspace" : "prompt",
         mode: "write",
         actorId: "staff-1",
         displayName: "Staff One",
@@ -487,7 +494,6 @@ function setupDefaults(): void {
 beforeEach(() => {
   vi.stubEnv("VITE_AUTHORING_REALTIME_EVENTS", "true");
   vi.stubEnv("VITE_AUTHORING_REALTIME_DELIVERY", "true");
-  vi.stubEnv("VITE_AUTHORING_REALTIME_COEDITING", "true");
   setupDefaults();
 });
 
@@ -526,6 +532,96 @@ async function renderWithRoom(): Promise<{
   await waitFor(() => expect(harness.spineProps.at(-1)?.promptCollaboration).toBeTruthy());
   const editor = await screen.findByRole("textbox", { name: "Question prompt" });
   return { transport, editor, view };
+}
+
+/**
+ * Renders the workspace the way every SAT authoring route does: inside the
+ * exam-level collaboration boundary, so the EXAM room is the one that opens.
+ */
+async function renderWithWorkspaceRoom(): Promise<{
+  transport: FakeTransport;
+  view: ReturnType<typeof render>;
+}> {
+  const view = render(treeWithWorkspaceRoom());
+  await waitFor(() => expect(harness.transports).toHaveLength(1), { timeout: 5_000 });
+  const transport = harness.transports[0]!;
+  await act(async () => {
+    transport.status("connected");
+    transport.sync();
+  });
+  await waitFor(() => expect(harness.spineProps.at(-1)?.promptCollaboration).toBeTruthy());
+  return { transport, view };
+}
+
+function treeWithWorkspaceRoom() {
+  return (
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
+        <SatAuthoringCollaborationBoundary examId="exam-1">
+          <AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />
+        </SatAuthoringCollaborationBoundary>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+/**
+ * The same workspace with real routes, so a navigation it performs can land on
+ * a screen this test can see. Mirrors `SatRoot`, where the boundary wraps the
+ * outlet and therefore survives the route change.
+ */
+function treeWithRoutes() {
+  return (
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
+        <Routes>
+          <Route
+            path="/sat/exams/:examId"
+            element={
+              <SatAuthoringCollaborationBoundary examId="exam-1">
+                <AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />
+              </SatAuthoringCollaborationBoundary>
+            }
+          />
+          <Route path="/sat/exams/:examId/preview" element={<div>Preview landed</div>} />
+          <Route path="/sat/exams/:examId/release" element={<div>Release landed</div>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+/**
+ * Renders with routes and opens the exam room the way the real app does.
+ *
+ * The service sends the durable commit's state vector on connect; the fake
+ * transport does the same here, because "Saved" and the navigation gate both
+ * read that acknowledgement rather than assuming it.
+ */
+async function renderWorkspaceRoomWithRoutes(): Promise<{ transport: FakeTransport }> {
+  const view = render(treeWithRoutes());
+  await waitFor(() => expect(harness.transports).toHaveLength(1), { timeout: 5_000 });
+  const transport = harness.transports[0]!;
+  await act(async () => {
+    transport.status("connected");
+    transport.sync();
+  });
+  await act(async () => {
+    transport.ack({ stateVector: encodeStateVectorBase64(transport.document) });
+  });
+  await waitFor(() => expect(harness.spineProps.at(-1)?.promptCollaboration).toBeTruthy());
+  return { transport };
+}
+
+/** One room edit through the shared document, which is what moves the vector. */
+function editWorkspaceRoom(transport: FakeTransport): void {
+  transport.document.transact(() => {
+    transport.document.getMap("workspace").set("ui/probe", "edited");
+  });
 }
 
 function autosaveOptions(): {
@@ -671,6 +767,53 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
     });
   });
 
+  describe("single ownership while the exam room is active", () => {
+    it("performs no HTTP field write for the question the room owns", async () => {
+      const { transport } = await renderWithWorkspaceRoom();
+      expect(transport.name).toBe(WORKSPACE_DOCUMENT_NAME);
+      const draft = currentDraft();
+      const edited: QuestionRevision = {
+        ...draft,
+        metadata: { ...draft.metadata, difficulty: "hard" },
+      };
+      harness.api.saveQuestionRevisionFields.mockResolvedValue({ ...edited, revision: 2 });
+
+      let result: QuestionRevision | void | undefined;
+      await act(async () => {
+        result = await autosaveOptions().save(edited);
+      });
+
+      // The room stores the scalar record and the rich roots, and the service
+      // materializes the same columns, so a partial write here would be a
+      // second writer whose stale full-column snapshot races the CRDT.
+      expect(harness.api.saveQuestionRevisionFields).not.toHaveBeenCalled();
+      expect(harness.api.saveQuestionRevision).not.toHaveBeenCalled();
+      // `undefined` is the contract the autosave caller turns into "nothing to
+      // write": no write happened, so no revision is claimed or advanced.
+      expect(result).toBeUndefined();
+    });
+
+    it("still writes through the partial endpoint when only the prompt room is open", async () => {
+      // The control for the assertion above: the same autosave call DOES write
+      // when the question-scoped room is the writer, because that room owns the
+      // prompt alone and every other field still needs the HTTP endpoint.
+      await renderWithRoom();
+      const draft = currentDraft();
+      const edited: QuestionRevision = {
+        ...draft,
+        metadata: { ...draft.metadata, difficulty: "hard" },
+      };
+      harness.api.saveQuestionRevisionFields.mockResolvedValue({ ...edited, revision: 2 });
+
+      await act(async () => {
+        await autosaveOptions().save(edited);
+      });
+
+      expect(harness.api.saveQuestionRevisionFields).toHaveBeenCalledTimes(1);
+      expect(harness.api.saveQuestionRevision).not.toHaveBeenCalled();
+    });
+  });
+
   describe("one save truth", () => {
     it("does not report Saved while the collaborative prompt is unacknowledged", async () => {
       const { transport } = await renderWithRoom();
@@ -689,7 +832,7 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
         writeIntoRoom(transport, "typed in the room");
       });
       await act(async () => {
-        transport.ack({ stateHash: stateVectorHash(Y.encodeStateVector(transport.document)) });
+        transport.ack({ stateVector: encodeStateVectorBase64(transport.document) });
       });
       await waitFor(() => expect(saveStatusText()).toContain("Saved"));
 
@@ -709,7 +852,7 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       // Unacknowledged: no claim of durability yet.
       expect(saveStatusText()).not.toContain("Saved");
       await act(async () => {
-        transport.ack({ stateHash: stateVectorHash(Y.encodeStateVector(transport.document)) });
+        transport.ack({ stateVector: encodeStateVectorBase64(transport.document) });
       });
       await waitFor(() => expect(saveStatusText()).toContain("Saved"));
     });
@@ -823,6 +966,99 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       await waitFor(() => expect(written).toHaveLength(1));
       // The export is the room's own content, not a stale HTTP projection.
       expect(written[0]).toContain("typed in the room");
+    });
+
+    it("offers the export when the room refused a write", async () => {
+      const { transport } = await renderWithRoom();
+      await act(async () => {
+        writeIntoRoom(transport, "typed while the room refused writes");
+        transport.stateless({
+          type: "coedit.save_failed",
+          documentName: DOCUMENT_NAME,
+          retryable: false,
+          reason: "coedit_write_refused",
+          requiresResync: false,
+        });
+      });
+
+      const recovery = await screen.findByTestId("coedit-recovery-surface");
+      expect(recovery).toHaveTextContent(
+        "The collaboration service did not accept your latest changes.",
+      );
+      // The work is local and real, so the export is offered; a retry and a
+      // replacement draft would both be untrue of this state.
+      expect(within(recovery).getByRole("button", { name: "Copy my work" })).toBeInTheDocument();
+      expect(within(recovery).queryByRole("button", { name: "Open current draft" })).toBeNull();
+      expect(within(recovery).queryByRole("button", { name: "Review my changes" })).toBeNull();
+      expect(saveStatusText()).not.toContain("Saved");
+    });
+
+    it("explains a room too large to save as one document", async () => {
+      const { transport } = await renderWithRoom();
+      await act(async () => {
+        transport.stateless({
+          type: "coedit.save_failed",
+          documentName: DOCUMENT_NAME,
+          retryable: false,
+          reason: "coedit_oversized",
+          requiresResync: false,
+        });
+      });
+
+      // Previously a dead end: the browser vocabulary had `oversized` and
+      // nothing ever produced it, so this refusal was an unexplained failure.
+      const recovery = await screen.findByTestId("coedit-recovery-surface");
+      expect(recovery).toHaveTextContent("too large to save as one collaborative document");
+      expect(within(recovery).getByRole("button", { name: "Copy my work" })).toBeInTheDocument();
+      expect(saveStatusText()).not.toContain("Saved");
+    });
+
+    it("offers the export in the exam workspace when the workspace room refuses a write", async () => {
+      // The SAT builder's real surface is the exam-level room, so the same
+      // refusal must reach the same recovery decision there.
+      const { transport } = await renderWithWorkspaceRoom();
+      await act(async () => {
+        transport.stateless({
+          type: "coedit.save_failed",
+          documentName: WORKSPACE_DOCUMENT_NAME,
+          retryable: false,
+          reason: "coedit_write_refused",
+          requiresResync: false,
+        });
+      });
+
+      const recovery = await screen.findByTestId("coedit-recovery-surface");
+      expect(recovery).toHaveTextContent(
+        "The collaboration service did not accept your latest changes.",
+      );
+      expect(within(recovery).getByRole("button", { name: "Copy my work" })).toBeInTheDocument();
+    });
+
+    it("stops offering the recovery once the refused work is committed", async () => {
+      const { transport } = await renderWithRoom();
+      await act(async () => {
+        writeIntoRoom(transport, "typed while the room refused writes");
+        transport.stateless({
+          type: "coedit.save_failed",
+          documentName: DOCUMENT_NAME,
+          retryable: false,
+          reason: "coedit_write_refused",
+          requiresResync: false,
+        });
+      });
+      expect(await screen.findByTestId("coedit-recovery-surface")).toBeInTheDocument();
+
+      await act(async () => {
+        transport.ack({
+          stateVector: encodeStateVectorBase64(transport.document),
+          questionRevision: 7,
+        });
+      });
+
+      // The exact current state is committed, so the alarm is no longer true:
+      // leaving it up would send the author to copy work the server already has.
+      await waitFor(() => expect(screen.queryByTestId("coedit-recovery-surface")).toBeNull());
+      await waitFor(() => expect(saveStatusText()).toContain("Saved"));
     });
 
     it("offers the export for a room closed by any other lifecycle reason", async () => {
@@ -957,6 +1193,60 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       // down: otherwise the newer prompt projection is silently discarded.
       await waitFor(() => expect(promptText(currentDraft().prompt)).toContain("typed in the room"));
       expect(promptText(currentDraft().prompt)).not.toContain("Rewritten on the server");
+    });
+  });
+
+  /**
+   * The route barrier.
+   *
+   * Exam preview, release, and the exam library all read the committed MySQL
+   * projection rather than the open room. These tests drive the real header
+   * action and the real gate: a room whose own state is not durable must not
+   * hand the author to a screen that cannot show their work.
+   */
+  describe("leaving the workspace", () => {
+    it("navigates once this tab's exact room state is durable", async () => {
+      await renderWorkspaceRoomWithRoutes();
+      fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
+      await waitFor(() => expect(screen.getByText("Preview landed")).toBeInTheDocument());
+    });
+
+    it("refuses to leave while the room cannot reach the service", async () => {
+      const { transport } = await renderWorkspaceRoomWithRoutes();
+      await act(async () => {
+        editWorkspaceRoom(transport);
+      });
+      await act(async () => {
+        transport.drop();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
+
+      // The author keeps their editor and is told why: the next screen reads
+      // MySQL, and this tab's work has not reached it.
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/You are offline/));
+      expect(screen.queryByText("Preview landed")).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Question prompt" })).toBeInTheDocument();
+    });
+
+    it("does not leave when the room refused the latest changes", async () => {
+      await renderWorkspaceRoomWithRoutes();
+      const { transport } = { transport: harness.transports[0]! };
+      await act(async () => {
+        editWorkspaceRoom(transport);
+      });
+      await act(async () => {
+        transport.stateless({
+          type: "coedit.save_failed",
+          documentName: WORKSPACE_DOCUMENT_NAME,
+          reason: "coedit_write_refused",
+          retryable: false,
+        });
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+      expect(screen.queryByText("Preview landed")).not.toBeInTheDocument();
     });
   });
 });

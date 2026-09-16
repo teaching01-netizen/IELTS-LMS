@@ -36,7 +36,7 @@ import {
   type ImageRejectCode,
 } from "./ingestion/adapters/imageValidation";
 import { SAT_IMAGE_POLICY, validateDurableImageSource } from "./ingestion/domain/imagePolicy";
-import { ySyncPluginKey } from "y-prosemirror";
+import { isCollaborativeTransaction } from "../realtime/coedit";
 
 // The node/mark vocabulary comes from ./schema/richTextSchema.ts, the exact
 // same list the Hocuspocus co-editing service builds. The browser substitutes
@@ -52,7 +52,7 @@ const baseExtensions = [
 
 // Collaborative variant: Yjs owns history once Collaboration is bound, so
 // StarterKit's undo/redo must NOT be registered. Two independent history stacks
-// corrupt each other's undo (design 2026-09-13, "Frontend ownership").
+// corrupt each other's undo ("Frontend ownership", docs/sat-authoring-coedit.md).
 const collaborativeBaseExtensions = [
   RichContentIdentity,
   ...richTextSchemaExtensions({ identity: false, math: false, image: false, history: false }),
@@ -345,15 +345,12 @@ export function RichQuestionComposer({
         const next = structuredContentFromDocument(doc);
         onChange(next);
         if (collaboration) {
-          // y-prosemirror marks transactions produced by a Yjs observer as
-          // change-origin. Undo/redo is also marked that way, but remains an
-          // author action and must be persisted, so only the non-undo remote
-          // branch is filtered out.
-          const syncMeta = transaction.getMeta(ySyncPluginKey) as
-            | { isChangeOrigin?: boolean; isUndoRedoOperation?: boolean }
-            | undefined;
-          const isRemote = Boolean(syncMeta?.isChangeOrigin && !syncMeta?.isUndoRedoOperation);
-          if (!isRemote) onLocalChangeRef.current?.(next);
+          // A collaborator's edit arrives as a transaction the author did not
+          // make, and must not be persisted as one. Undo/redo also arrives
+          // marked, but IS an author action. Which transactions carry that mark
+          // is the co-editing package's business — this file stays free of the
+          // transport, and the architecture rule keeps it that way.
+          if (!isCollaborativeTransaction(transaction)) onLocalChangeRef.current?.(next);
         } else {
           onLocalChangeRef.current?.(next);
         }

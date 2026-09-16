@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"example.com/ielts-proctoring/internal/platform/config"
@@ -90,5 +92,39 @@ func TestBuildTierSetDualNilDBStaysLocalOnly(t *testing.T) {
 	}
 	if n := app.Tiers.DBCheckerCount(); n != 0 {
 		t.Fatalf("nil DB must wire 0 DB checkers, got %d", n)
+	}
+}
+
+func TestBuildTierSetUsesIndependentMaxKeysAndBurstConfig(t *testing.T) {
+	cfg := config.Load()
+	cfg.RateLimitMode = config.RateLimitModeLocal
+	cfg.RateLimitMaxKeys = 1
+	cfg.RateLimitBurst = 0
+	cfg.RateLimitWritesPerMin = 1
+	app := &App{Config: cfg}
+	buildTierSet(app)
+
+	handler := app.Tiers.Middleware(httpx.TierWrites, func(r *http.Request) string {
+		return r.URL.Path
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/key-a", nil))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first configured key must pass, got %d", first.Code)
+	}
+
+	secondKey := httptest.NewRecorder()
+	handler.ServeHTTP(secondKey, httptest.NewRequest(http.MethodPost, "/key-b", nil))
+	if secondKey.Code != http.StatusTooManyRequests {
+		t.Fatalf("second active key must hit the configured store cap, got %d", secondKey.Code)
+	}
+
+	activeKey := httptest.NewRecorder()
+	handler.ServeHTTP(activeKey, httptest.NewRequest(http.MethodPost, "/key-a", nil))
+	if activeKey.Code != http.StatusTooManyRequests {
+		t.Fatalf("active key must retain its exact quota, got %d", activeKey.Code)
 	}
 }

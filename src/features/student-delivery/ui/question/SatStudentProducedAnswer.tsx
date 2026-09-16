@@ -58,7 +58,8 @@ export function SatStudentProducedAnswer({
           }}
           onBlur={commitOnBlur}
           disabled={disabled}
-          inputMode="decimal"
+          inputMode="text"
+          enterKeyHint="done"
           autoComplete="off"
           spellCheck={false}
           maxLength={6}

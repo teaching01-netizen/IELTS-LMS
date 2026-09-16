@@ -23,6 +23,7 @@ import {
   mapScheduleStatusToGradingStatus,
 } from './gradingFilters';
 import { isPreviewRuntimeCohortName } from '../features/builder/services/previewRuntimeSessionService';
+import { ApiError } from '../shared/api-client/errors';
 import {
   GradingSession,
   StudentSubmission,
@@ -53,7 +54,26 @@ import {
 export interface GradingServiceResult<T = unknown> {
   success: boolean;
   data?: T;
-  error?: string;
+  error?: unknown;
+}
+
+function gradingServiceError(fallback: string, error: unknown): unknown {
+  // Preserve only rate-limit ApiErrors for the client retry predicate. Other
+  // service failures keep the historical human-readable string contract.
+  if (error instanceof ApiError && error.status === 429) {
+    return error;
+  }
+  return `${fallback}: ${error instanceof Error ? error.message : String(error)}`;
+}
+
+export function gradingErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === 'string' && error.length > 0) {
+    return error;
+  }
+  if (error instanceof Error && error.message.length > 0) {
+    return error.message;
+  }
+  return fallback;
 }
 
 /**
@@ -124,7 +144,7 @@ export class GradingService {
       
       return { success: true, data: sessions };
     } catch (error) {
-      return { success: false, error: `Failed to build grading sessions: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to build grading sessions', error) };
     }
   }
   
@@ -147,7 +167,7 @@ export class GradingService {
       
       return { success: true, data: sessions };
     } catch (error) {
-      return { success: false, error: `Failed to get session queue: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to get session queue', error) };
     }
   }
   
@@ -165,7 +185,7 @@ export class GradingService {
       const data = await gradingRepository.getSessionQueuePage(page, pageSize, options?.searchQuery);
       return { success: true, data };
     } catch (error) {
-      return { success: false, error: `Failed to load grading session queue: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to load grading session queue', error) };
     }
   }
 
@@ -189,7 +209,7 @@ export class GradingService {
       
       return { success: true, data: summary };
     } catch (error) {
-      return { success: false, error: `Failed to get queue summary: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to get queue summary', error) };
     }
   }
   
@@ -212,7 +232,7 @@ export class GradingService {
       
       return { success: true, data: submissions };
     } catch (error) {
-      return { success: false, error: `Failed to get session submissions: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to get session submissions', error) };
     }
   }
 
@@ -225,7 +245,7 @@ export class GradingService {
       );
       return { success: true, data: overrides };
     } catch (error) {
-      return { success: false, error: `Failed to load objective overrides: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to load objective overrides', error) };
     }
   }
 
@@ -238,7 +258,7 @@ export class GradingService {
       );
       return { success: true, data: source };
     } catch (error) {
-      return { success: false, error: `Failed to load objective grading source: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to load objective grading source', error) };
     }
   }
 
@@ -251,7 +271,7 @@ export class GradingService {
       );
       return { success: true, data: overview };
     } catch (error) {
-      return { success: false, error: `Failed to load objective integrity: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to load objective integrity', error) };
     }
   }
 
@@ -264,7 +284,7 @@ export class GradingService {
       const reports = await backendGet<ActScienceScoreReport[]>('/v1/results/act-science');
       return { success: true, data: reports };
     } catch (error) {
-      return { success: false, error: `Failed to load ACT Science reports: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to load ACT Science reports', error) };
     }
   }
 
@@ -280,7 +300,7 @@ export class GradingService {
       );
       return { success: true, data: response };
     } catch (error) {
-      return { success: false, error: `Failed to update objective override: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to update objective override', error) };
     }
   }
 
@@ -296,7 +316,7 @@ export class GradingService {
       );
       return { success: true, data: response };
     } catch (error) {
-      return { success: false, error: `Failed to delete objective override: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to delete objective override', error) };
     }
   }
 
@@ -311,7 +331,7 @@ export class GradingService {
       );
       return { success: true, data: response };
     } catch (error) {
-      return { success: false, error: `Failed to regrade objective sections: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to regrade objective sections', error) };
     }
   }
 
@@ -329,7 +349,7 @@ export class GradingService {
       await gradingRepository.saveSectionSubmission(response);
       return { success: true, data: response };
     } catch (error) {
-      return { success: false, error: `Failed to update student answer correctness: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to update student answer correctness', error) };
     }
   }
   
@@ -386,7 +406,7 @@ export class GradingService {
       
       return { success: true, data: submission };
     } catch (error) {
-      return { success: false, error: `Failed to create submission: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to create submission', error) };
     }
   }
   
@@ -487,7 +507,7 @@ export class GradingService {
       await gradingRepository.saveReviewDraft(draft);
       return { success: true, data: draft };
     } catch (error) {
-      return { success: false, error: `Failed to start review: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to start review', error) };
     }
   }
   
@@ -525,7 +545,7 @@ export class GradingService {
       await this.logReviewEvent(draft.submissionId, teacherId, teacherName, 'draft_saved');
       return { success: true, data: savedDraft };
     } catch (error) {
-      return { success: false, error: `Failed to save draft: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to save draft', error) };
     }
   }
   
@@ -571,7 +591,7 @@ export class GradingService {
       
       return { success: true, data: annotation };
     } catch (error) {
-      return { success: false, error: `Failed to add annotation: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to add annotation', error) };
     }
   }
   
@@ -623,7 +643,7 @@ export class GradingService {
       
       return { success: true };
     } catch (error) {
-      return { success: false, error: `Failed to finalize review: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to finalize review', error) };
     }
   }
   
@@ -648,7 +668,7 @@ export class GradingService {
       await gradingRepository.saveReviewDraft(draft);
       return { success: true, data: draft };
     } catch (error) {
-      return { success: false, error: `Failed to reopen review: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to reopen review', error) };
     }
   }
   
@@ -671,7 +691,7 @@ export class GradingService {
       await gradingRepository.saveReviewDraft(draft);
       return { success: true, data: draft };
     } catch (error) {
-      return { success: false, error: `Failed to mark grading complete: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to mark grading complete', error) };
     }
   }
   
@@ -694,7 +714,7 @@ export class GradingService {
       await gradingRepository.saveReviewDraft(draft);
       return { success: true, data: draft };
     } catch (error) {
-      return { success: false, error: `Failed to mark ready to release: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to mark ready to release', error) };
     }
   }
   
@@ -718,7 +738,7 @@ export class GradingService {
       await gradingRepository.saveStudentResult(result);
       return { success: true, data: result };
     } catch (error) {
-      return { success: false, error: `Failed to release result: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to release result', error) };
     }
   }
   
@@ -743,7 +763,7 @@ export class GradingService {
       await gradingRepository.saveReviewDraft(draft);
       return { success: true, data: draft };
     } catch (error) {
-      return { success: false, error: `Failed to schedule release: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to schedule release', error) };
     }
   }
   
@@ -808,7 +828,7 @@ export class GradingService {
       
       return { success: true, data: draft };
     } catch (error) {
-      return { success: false, error: `Failed to reopen result: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to reopen result', error) };
     }
   }
   
@@ -840,7 +860,7 @@ export class GradingService {
       
       return { success: true, data: nextSubmission || null };
     } catch (error) {
-      return { success: false, error: `Failed to get next ungraded student: ${error}` };
+      return { success: false, error: gradingServiceError('Failed to get next ungraded student', error) };
     }
   }
   

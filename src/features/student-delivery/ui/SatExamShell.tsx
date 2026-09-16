@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { SAT_TIMER_AUTO_REVEAL_SECONDS, shouldAutoRevealTimer } from "../domain/satTiming";
 import type { StructuredContent } from "../../exam-authoring/api/assessmentContracts";
 import type { SatQuestionNavigationItem } from "../domain/satSelectors";
@@ -29,6 +29,10 @@ export interface SatExamShellProps {
   directions: StructuredContent | null;
   remainingLabel: string;
   remainingSeconds?: number | undefined;
+  /** Stable layout viewport height in px; null keeps the 100dvh fallback. */
+  examHeight?: number | null | undefined;
+  /** True while the visual viewport indicates an open software keyboard. */
+  keyboardOpen?: boolean | undefined;
   candidateName: string;
   questionIndex: number;
   questionCount: number;
@@ -246,13 +250,19 @@ export function SatExamShell(props: SatExamShellProps) {
   const toggleReference = () => {
     props.onToggleReference();
   };
+  const shellStyle: CSSProperties | undefined =
+    props.examHeight !== null && Number.isFinite(props.examHeight)
+      ? ({ ["--student-exam-height" as string]: `${props.examHeight}px` } as CSSProperties)
+      : undefined;
 
   return (
     <SatContrastContext.Provider value={props.readingPreferences.contrastMode ?? 'default'}>
     <div
-      className="sat-ui sat-exam-shell grid h-[100dvh] min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-shell-bg)] text-[var(--sat-text)]"
+      className="sat-ui sat-exam-shell grid h-[100dvh] min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-shell-bg)] text-[var(--sat-text)]"
       data-testid="sat-exam-shell"
       data-sat-contrast={props.readingPreferences.contrastMode ?? 'default'}
+      data-sat-keyboard-open={props.keyboardOpen ? "true" : "false"}
+      style={shellStyle}
     >
     {/* Blocking inert covers the whole exam grid (Phase 0.6, corrected Phase 1
         review): while a proctor pause is active NOTHING exam-interactive —
@@ -264,7 +274,7 @@ export function SatExamShell(props: SatExamShellProps) {
     <div
       data-testid="sat-exam-blocked-region"
       inert={props.blocked}
-      className="contents"
+      className="contents min-w-0"
     >
       <SatExamTopBar
         sectionLabel={props.sectionLabel}
@@ -332,12 +342,14 @@ export function SatExamShell(props: SatExamShellProps) {
 
       {/* Bluebook document: the exam body stays white inside pale-blue chrome. */}
       <main
-        className="relative min-h-0 overflow-hidden bg-[var(--sat-body-bg)]"
+        className="relative min-h-0 min-w-0 overflow-hidden bg-[var(--sat-body-bg)]"
         id="sat-question-content"
         data-sat-question-presentation="instant"
       >
         <SatAnnotationModeContext.Provider value={props.blocked || !notesAvailable ? 'none' : annotationMode}>
-          <div data-sat-content-zoom={props.readingPreferences.examZoom ?? 1}
+          <div
+            className="h-full min-w-0"
+            data-sat-content-zoom={props.readingPreferences.examZoom ?? 1}
             style={{ zoom: props.readingPreferences.examZoom ?? 1, width: '100%', height: '100%' }}>
             {props.children}
           </div>

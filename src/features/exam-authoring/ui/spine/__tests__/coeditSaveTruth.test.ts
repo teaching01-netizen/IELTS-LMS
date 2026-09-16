@@ -47,8 +47,8 @@ describe("combineSaveStatus", () => {
 describe("coeditDisplayStatusFor", () => {
   const state = (name: CoeditSaveState["name"]): CoeditSaveState => ({
     name,
-    localStateHash: name === "saved" ? "hash-current" : "hash-new",
-    acknowledgedStateHash: name === "saved" ? "hash-current" : "hash-old",
+    localStateVector: name === "saved" ? "vector-current" : "vector-new",
+    acknowledgedStateVector: name === "saved" ? "vector-current" : "vector-old",
     questionRevision: 4,
     message: null,
     retryable: name === "error",

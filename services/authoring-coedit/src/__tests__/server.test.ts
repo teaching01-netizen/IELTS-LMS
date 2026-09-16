@@ -8,11 +8,51 @@ import type { CoeditServiceConfig } from "../config.js";
 import { hashStateVector } from "../documentCodec.js";
 import { createCoeditService, type CoeditService, type LockLike } from "../main.js";
 import type { StructuredContent } from "../../../../src/features/exam-authoring/contracts/assessment.js";
+// The browser's own identity encoder, imported into the real service test on
+// purpose: the save-truth comparison spans this boundary, and keeping both
+// halves in one file is what makes a divergence impossible to miss.
+import { encodeStateVectorBase64 } from "../../../../src/features/exam-authoring/realtime/coedit/stateVector.js";
+import { deriveSaveState } from "../../../../src/features/exam-authoring/realtime/coedit/saveState.js";
+import {
+  coeditRecoveryFromSaveFailure,
+  parseCoeditSaveFailureMessage,
+} from "../../../../src/features/exam-authoring/realtime/coedit/contracts.js";
+// The command envelope is validated by ONE module that both halves import; the
+// relay test below drives the real socket with the browser's own builder.
+import { createSatWorkspaceCommand } from "../../../../src/features/exam-authoring/realtime/coedit/workspaceCommands.js";
+import { createWorkspaceSeedFrame } from "../../../../src/features/exam-authoring/realtime/coedit/workspaceSeed.js";
+import { metrics } from "../telemetry.js";
+
+/**
+ * Resolves the refusal the SERVICE sent through the CLIENT's own parser and
+ * mapping, so a change to either half of the wire contract fails here rather
+ * than in a browser nobody is watching.
+ */
+function refusalRecoveryFrom(frames: string[]) {
+  for (const frame of frames) {
+    const parsed = parseCoeditSaveFailureMessage(JSON.parse(frame));
+    if (parsed && parsed.reason === "coedit_write_refused") {
+      return { parsed, recovery: coeditRecoveryFromSaveFailure(parsed) };
+    }
+  }
+  return null;
+}
+
+/**
+ * One seed counter series from the service's own exposition. The registry is
+ * process-wide, so every assertion is a delta rather than an absolute value.
+ */
+function seedOutcomeCount(outcome: "accepted" | "rejected" | "duplicate" | "conflict"): number {
+  const prefix = `authoring_coedit_seed_total{outcome="${outcome}"} `;
+  const line = metrics.render().split("\n").find((entry) => entry.startsWith(prefix));
+  return line ? Number(line.slice(prefix.length)) : 0;
+}
 
 const TOKEN_SECRET = "t".repeat(40);
 const SERVICE_SECRET = "s".repeat(40);
 const DOCUMENT_UUID = "2f1b6c1e-6a0a-4a5b-9f0e-9d3a2f4c5b6d";
 const DOCUMENT_NAME = `coedit:v1:${DOCUMENT_UUID}`;
+const WORKSPACE_DOCUMENT_NAME = `coedit:v2:${DOCUMENT_UUID}`;
 
 const PROMPT: StructuredContent = {
   version: 2,
@@ -31,11 +71,24 @@ interface Claims {
   organizationId: string | null;
   examId: string;
   draftVersionId: string;
+  /** Empty for a workspace (v2) token: the exam room is not question-scoped. */
   examQuestionId: string;
   questionRevisionId: string;
+  fieldSet?: "prompt" | "workspace";
   mode: "write" | "read";
   issuedAt: number;
   expiresAt: number;
+}
+
+/** The exam-level (v2) room token: no question claims, explicit field set. */
+function workspaceClaims(overrides: Partial<Claims> = {}): Partial<Claims> {
+  return {
+    documentName: WORKSPACE_DOCUMENT_NAME,
+    fieldSet: "workspace",
+    examQuestionId: "",
+    questionRevisionId: "",
+    ...overrides,
+  };
 }
 
 function mintToken(overrides: Partial<Claims> = {}): string {
@@ -71,12 +124,14 @@ interface FakeGo {
   committedState: Buffer | null;
   committedHash: string | null;
   materializedPrompt: StructuredContent | null;
-  lifecycle: "initializing" | "active" | "closed";
+  lifecycle: "initializing" | "active" | "freezing" | "frozen" | "closed";
   unauthorized: number;
   close(): Promise<void>;
 }
 
-async function startFakeGo(options: { lifecycle?: "initializing" | "active" | "closed" } = {}): Promise<FakeGo> {
+async function startFakeGo(
+  options: { lifecycle?: "initializing" | "active" | "freezing" | "frozen" | "closed" } = {},
+): Promise<FakeGo> {
   const state: FakeGo = {
     url: "",
     loads: [],
@@ -92,7 +147,7 @@ async function startFakeGo(options: { lifecycle?: "initializing" | "active" | "c
 
   // Per-document lifecycle: a close on one room must not close a neighbouring
   // room, and a document that was closed once is never reopened.
-  const byName = new Map<string, "initializing" | "active" | "closed">();
+  const byName = new Map<string, "initializing" | "active" | "freezing" | "frozen" | "closed">();
   const lifecycleOf = (name: string) => byName.get(name) ?? state.lifecycle;
   const markActive = (name: string) => byName.set(name, "active");
   // Committed binary state is per document, exactly as MySQL stores it. The
@@ -318,6 +373,51 @@ function appendParagraph(document: Y.Doc, value: string): void {
   });
 }
 
+/**
+ * One prior author session: a Yjs client whose contribution to a room's state
+ * vector is measured in isolation before it is applied. The client id width is
+ * random per document, so measuring first is what makes the walk deterministic.
+ */
+function paddingSession(items: number): { document: Y.Doc; contribution: number } {
+  const document = new Y.Doc();
+  const entries = document.getMap("prior-session");
+  for (let index = 0; index < items; index += 1) entries.set(`k${index}`, index);
+  // One count byte, then this client's (id width + clock width) entry.
+  return { document, contribution: Y.encodeStateVector(document).length - 1 };
+}
+
+/**
+ * Grows a room's state vector to the next length congruent to 55 mod 64 — the
+ * lengths at which the removed client-side SHA-256 padded differently from the
+ * service's, so the room could commit every edit and still never show Saved.
+ *
+ * Each step merges one more prior author session, exactly what a returning
+ * browser leaves behind in IndexedDB. A session contributes 5..8 bytes (client
+ * id varint + clock varint) and every width in that range is cheap to build, so
+ * the residue can always be closed instead of hoped for.
+ */
+function padStateVectorToOldFailureLength(document: Y.Doc): number {
+  const updateForContribution = (wanted: number): Uint8Array => {
+    for (const items of [1, 128, 16384]) {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const session = paddingSession(items);
+        if (session.contribution !== wanted) continue;
+        return Y.encodeStateAsUpdate(session.document);
+      }
+    }
+    throw new Error(`no prior session contributes exactly ${wanted} bytes`);
+  };
+
+  const residue = (): number => (((55 - Y.encodeStateVector(document).length) % 64) + 64) % 64;
+  let needed = residue();
+  for (let step = 0; needed !== 0 && step < 64; step += 1) {
+    const wanted = needed >= 5 && needed <= 8 ? needed : 6;
+    Y.applyUpdate(document, updateForContribution(wanted));
+    needed = residue();
+  }
+  return Y.encodeStateVector(document).length;
+}
+
 describe("service integration", () => {
   it("seeds a first-time document and stores an edit with a matching acknowledgement", async () => {
     const running = await startService();
@@ -342,7 +442,12 @@ describe("service integration", () => {
     appendParagraph(provider.document, "Alice was here");
     await waitFor(() => acks.length > 0, 5_000, "store acknowledgement");
 
-    const ack = JSON.parse(acks[0] as string) as { type: string; stateHash: string; questionRevision: number };
+    const ack = JSON.parse(acks[0] as string) as {
+      type: string;
+      stateVector: string;
+      stateHash: string;
+      questionRevision: number;
+    };
     expect(ack.type).toBe("coedit.ack");
     expect(running.go.stores.length).toBeGreaterThan(0);
     expect(paragraphText(provider.document)).toContain("Alice was here");
@@ -351,7 +456,127 @@ describe("service integration", () => {
     expect(ack.stateHash).toBe(String(running.go.stores.at(-1)?.["stateHash"]));
     expect(ack.questionRevision).toBe(2);
     expect(hashStateVector(Y.encodeStateVector(provider.document))).toBe(ack.stateHash);
+    // Identity: the browser encodes the same bytes the service acknowledged, so
+    // the comparison is byte equality and never depends on a second digest
+    // implementation agreeing with node:crypto.
+    expect(ack.stateVector).toBe(encodeStateVectorBase64(provider.document));
     expect(JSON.stringify(running.go.materializedPrompt)).toContain("Alice was here");
+  });
+
+  it("acknowledges a reloading client's committed state without a new edit", async () => {
+    // Reload, restart, second tab: the browser opens a room MySQL already
+    // holds and has nothing of its own to send. Without the connect-time
+    // acknowledgement the editor would sit at Syncing until the next edit
+    // happened to trigger a store — the design requires `Saved` to be reachable
+    // from what is already durable.
+    const running = await startService();
+    const author = connect(running, { token: mintToken() });
+    await waitFor(() => author.isSynced, 5_000, "author sync");
+    appendParagraph(author.document, "Committed before the reload");
+    await waitFor(() => running.go.stores.length > 0, 5_000, "first store");
+    const storesAfterEdit = running.go.stores.length;
+    const committed = encodeStateVectorBase64(author.document);
+
+    const reloaded = connect(running, { token: mintToken() });
+    const acks: string[] = [];
+    reloaded.on("stateless", ({ payload }: { payload: string }) => acks.push(payload));
+    await waitFor(() => reloaded.isSynced, 5_000, "reload sync");
+
+    const acknowledgement = (payload: string): { type?: string; stateVector?: string } => {
+      try {
+        return JSON.parse(payload) as { type?: string; stateVector?: string };
+      } catch {
+        return {};
+      }
+    };
+    // Waited for, not assumed: the ack and the sync step race on the wire, and
+    // the identity only means something once this tab holds the state.
+    await waitFor(
+      () =>
+        acks.some(
+          (payload) =>
+            acknowledgement(payload).type === "coedit.ack" &&
+            acknowledgement(payload).stateVector === encodeStateVectorBase64(reloaded.document),
+        ),
+      10_000,
+      "reload acknowledgement of the committed state",
+    );
+
+    const ack = acks.map(acknowledgement).find((parsed) => parsed.type === "coedit.ack");
+    expect(ack?.stateVector).toBe(committed);
+    expect(paragraphText(reloaded.document)).toContain("Committed before the reload");
+    // The reload itself stored nothing: reading a durable room must not write.
+    expect(running.go.stores.length).toBe(storesAfterEdit);
+    // And the two facts the editor joins are now both true, with no edit.
+    expect(
+      deriveSaveState({
+        localStateVector: encodeStateVectorBase64(reloaded.document),
+        acknowledgedStateVector: ack?.stateVector ?? "",
+        questionRevision: 1,
+        connected: true,
+        inFlight: false,
+        error: null,
+        lifecycle: null,
+      }).name,
+    ).toBe("saved");
+  });
+
+  it("reaches Saved for a state vector at the length that broke the old client hash", async () => {
+    // Regression guard for the identity this replaced. The browser used to hash
+    // its state vector with its own SHA-256 and compare digests with the
+    // service\u0027s node:crypto. At 55 bytes (mod 64) the two implementations
+    // padded differently, so the room committed every edit and still never
+    // showed Saved. The identity is now the vector itself, so equality holds at
+    // every length — including this one.
+    const running = await startService();
+    const document = new Y.Doc();
+    const provider = connect(running, { token: mintToken(), document });
+    await waitFor(() => provider.isSynced, 5_000, "initial sync");
+
+    const acks: Array<{ stateVector: string }> = [];
+    provider.on("stateless", ({ payload }: { payload: string }) => {
+      try {
+        const parsed = JSON.parse(payload) as { type?: string; stateVector?: string };
+        if (parsed.type === "coedit.ack" && typeof parsed.stateVector === "string") {
+          acks.push({ stateVector: parsed.stateVector });
+        }
+      } catch {
+        // Frame types we do not define are not acknowledgements.
+      }
+    });
+
+    // This tab\u0027s own client id joins the vector with its first local edit.
+    appendParagraph(document, "padded by a returning author");
+    const length = padStateVectorToOldFailureLength(document);
+    expect(length % 64).toBe(55);
+
+    const local = encodeStateVectorBase64(document);
+    await waitFor(
+      () => acks.some((ack) => ack.stateVector === local),
+      10_000,
+      "acknowledgement of the padded state vector",
+    );
+
+    const accepted = acks.find((ack) => ack.stateVector === local);
+    expect(accepted).toBeDefined();
+    // The two facts the editor joins to render Saved: the service acknowledged
+    // exactly this state, and the save-state machine agrees.
+    expect(accepted?.stateVector).toBe(encodeStateVectorBase64(document));
+    // The identity is the state itself. A 64-character hex digest is exactly
+    // what used to be compared here, and what silently disagreed at this
+    // length, so pin that no digest is involved.
+    expect(accepted?.stateVector).not.toMatch(/^[0-9a-f]{64}$/);
+    expect(
+      deriveSaveState({
+        localStateVector: local,
+        acknowledgedStateVector: accepted?.stateVector ?? "",
+        questionRevision: 2,
+        connected: true,
+        inFlight: false,
+        error: null,
+        lifecycle: null,
+      }).name,
+    ).toBe("saved");
   });
 
   it("connects an observer read-only and refuses its writes", async () => {
@@ -366,12 +591,191 @@ describe("service integration", () => {
     expect(observer.authorizedScope).toBe("readonly");
 
     const storesBefore = running.go.stores.length;
+    const frames: string[] = [];
+    observer.on("stateless", ({ payload }: { payload: string }) => frames.push(payload));
     appendParagraph(observer.document, "Observer should not persist");
+    await waitFor(
+      () => refusalRecoveryFrom(frames) !== null,
+      5_000,
+      "the refusal announcement for a refused observer write",
+    );
     await new Promise((resolve) => setTimeout(resolve, 600));
 
     expect(running.go.stores.length).toBe(storesBefore);
     expect(JSON.stringify(running.go.materializedPrompt)).not.toContain("Observer should not persist");
     expect(paragraphText(author.document)).not.toContain("Observer should not persist");
+    // Hocuspocus refuses the update with a SyncStatus frame the provider
+    // ignores, so without this announcement the author keeps a draft the server
+    // does not have and a status that never leaves Syncing. The frame carries
+    // the export recovery, not a retry that cannot succeed.
+    const refusal = refusalRecoveryFrom(frames);
+    expect(refusal?.parsed).toMatchObject({
+      type: "coedit.save_failed",
+      documentName: DOCUMENT_NAME,
+      retryable: false,
+      requiresResync: false,
+    });
+    expect(refusal?.recovery?.issue).toBe("rejected");
+    expect(refusal?.recovery?.message).toMatch(/not saved/);
+  });
+
+  it("relays a validated workspace command and drops a forged one", async () => {
+    const running = await startService();
+    const author = connect(running, {
+      token: mintToken(workspaceClaims()),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => author.isSynced, 5_000, "author sync");
+    const peer = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-bob" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    const observer = connect(running, {
+      token: mintToken(workspaceClaims({ mode: "read", actorId: "actor-obs" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => peer.isSynced && observer.isSynced, 5_000, "peer sync");
+
+    const received: string[] = [];
+    peer.on("stateless", ({ payload }: { payload: string }) => received.push(payload));
+
+    const command = createSatWorkspaceCommand({
+      documentName: WORKSPACE_DOCUMENT_NAME,
+      actorId: "actor-alice",
+      command: "question.deleted",
+      payload: { questionId: "q-1" },
+    });
+    author.sendStateless(JSON.stringify(command));
+    await waitFor(
+      () => received.some((payload) => JSON.parse(payload).commandId === command.commandId),
+      5_000,
+      "the relayed command",
+    );
+
+    // A forged actor: the browser cannot relay as somebody else, because the
+    // service binds the connection's signed identity to the envelope.
+    const forged = { ...command, actorId: "actor-mallory", commandId: "forged-1" };
+    author.sendStateless(JSON.stringify(forged));
+    // A read-only connection cannot relay at all.
+    observer.sendStateless(JSON.stringify({ ...command, commandId: "read-only-1" }));
+    // A command for another room is not a command for this one.
+    author.sendStateless(
+      JSON.stringify({ ...command, documentName: DOCUMENT_NAME, commandId: "foreign-1" }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(received.map((payload) => JSON.parse(payload).commandId)).toEqual([command.commandId]);
+  });
+
+  it("arbitrates concurrent workspace seeds and never relays the seed proposal", async () => {
+    const running = await startService();
+    const alice = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-alice" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    const bob = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-bob" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => alice.isSynced && bob.isSynced, 5_000, "workspace seed clients");
+
+    const received: string[] = [];
+    bob.on("stateless", ({ payload }: { payload: string }) => received.push(payload));
+    const first = createWorkspaceSeedFrame({
+      documentName: WORKSPACE_DOCUMENT_NAME,
+      root: "scalar",
+      path: "question/q1/scalar",
+      value: { source: "alice" },
+      sourceQuestionRevision: 1,
+    });
+    const second = createWorkspaceSeedFrame({
+      documentName: WORKSPACE_DOCUMENT_NAME,
+      root: "scalar",
+      path: "question/q1/scalar",
+      value: { source: "bob" },
+      sourceQuestionRevision: 1,
+    });
+    alice.sendStateless(JSON.stringify(first));
+    bob.sendStateless(JSON.stringify(second));
+
+    await waitFor(
+      () => running.go.stores.length > 0 && running.go.committedState !== null,
+      5_000,
+      "durable workspace seed",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const committed = new Y.Doc();
+    Y.applyUpdate(committed, running.go.committedState as Buffer);
+    const stored = committed.getMap("workspace").get("question/q1/scalar");
+    expect([JSON.stringify({ source: "alice" }), JSON.stringify({ source: "bob" })]).toContain(stored);
+    expect(received.some((payload) => JSON.parse(payload).type === "coedit.seed")).toBe(false);
+  });
+
+  it("treats a retried seed as the same proposal and refuses a read token's seed", async () => {
+    const running = await startService();
+    const alice = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-alice" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    const observer = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-obs", mode: "read" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => alice.isSynced && observer.isSynced, 5_000, "seed clients");
+    const rejectedBefore = seedOutcomeCount("rejected");
+    const acceptedBefore = seedOutcomeCount("accepted");
+    const duplicateBefore = seedOutcomeCount("duplicate");
+
+    const seed = createWorkspaceSeedFrame({
+      documentName: WORKSPACE_DOCUMENT_NAME,
+      root: "scalar",
+      path: "question/q1/scalar",
+      value: { source: "alice" },
+    });
+
+    // A seed is a write, so a read token cannot make one even in the room it is
+    // allowed to observe.
+    observer.sendStateless(JSON.stringify(seed));
+    await waitFor(
+      () => seedOutcomeCount("rejected") === rejectedBefore + 1,
+      5_000,
+      "the refused read-token seed",
+    );
+
+    alice.sendStateless(JSON.stringify(seed));
+    await waitFor(
+      () => seedOutcomeCount("accepted") === acceptedBefore + 1,
+      5_000,
+      "the accepted seed",
+    );
+    // The proposer learns the value from the ROOM, not from its own write: the
+    // accepted seed reaches it as the same Yjs update every other author gets.
+    await waitFor(
+      () =>
+        alice.document.getMap("workspace").get("question/q1/scalar") ===
+        JSON.stringify({ source: "alice" }),
+      5_000,
+      "the applied seed reaching the proposer",
+    );
+
+    // The same deterministic seed id again is the SAME proposal, so it is
+    // recognized above the root check and never re-applied: a reconnect or a
+    // retry after a lost frame cannot double a seed.
+    alice.sendStateless(JSON.stringify(seed));
+    await waitFor(
+      () => seedOutcomeCount("duplicate") === duplicateBefore + 1,
+      5_000,
+      "the duplicate seed",
+    );
+    expect(seedOutcomeCount("accepted")).toBe(acceptedBefore + 1);
+
+    const room = running.service.server.hocuspocus.documents.get(
+      WORKSPACE_DOCUMENT_NAME,
+    ) as unknown as Y.Doc;
+    expect(room.getMap("workspace").get("question/q1/scalar")).toBe(
+      JSON.stringify({ source: "alice" }),
+    );
   });
 
   it("rejects a token minted for a different room", async () => {
@@ -396,6 +800,50 @@ describe("service integration", () => {
 
     await waitFor(() => reasons.length > 0 || go.unauthorized > 0, 5_000, "closed document refusal");
     expect(provider.isSynced).toBe(false);
+  });
+
+  it("rejects a new write token while the durable row is frozen", async () => {
+    const go = await startFakeGo({ lifecycle: "frozen" });
+    const running = await startService({ go });
+    const reasons: string[] = [];
+    const provider = connect(running, { token: mintToken() });
+    provider.on("authenticationFailed", ({ reason }: { reason: string }) => reasons.push(reason));
+
+    await waitFor(() => reasons.length > 0, 5_000, "durable freeze refusal");
+
+    expect(provider.isSynced).toBe(false);
+    expect(go.loads).toHaveLength(1);
+  });
+
+  it("keeps a read observer read-only after an in-memory freeze is released", async () => {
+    const running = await startService();
+    const author = connect(running, { token: mintToken() });
+    await waitFor(() => author.isSynced, 5_000, "author sync");
+
+    const frozen = await controlCall(running, "/control/freeze", { documentNames: [DOCUMENT_NAME] });
+    expect(frozen.status).toBe(200);
+    const observer = connect(running, {
+      token: mintToken({ mode: "read", actorId: "actor-observer" }),
+    });
+    await waitFor(() => observer.isSynced, 5_000, "observer sync during freeze");
+    const unfrozen = await controlCall(running, "/control/unfreeze", {
+      freezeToken: frozen.body["freezeToken"],
+    });
+    expect(unfrozen.status).toBe(200);
+
+    const storesBefore = running.go.stores.length;
+    const frames: string[] = [];
+    observer.on("stateless", ({ payload }: { payload: string }) => frames.push(payload));
+    appendParagraph(observer.document, "read observer must stay read-only");
+    await waitFor(
+      () => refusalRecoveryFrom(frames) !== null,
+      5_000,
+      "read-only refusal after unfreeze",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(observer.authorizedScope).toBe("readonly");
+    expect(running.go.stores.length).toBe(storesBefore);
   });
 
   it("derives awareness identity on the server and drops client-defined fields", async () => {
@@ -435,11 +883,27 @@ describe("service integration", () => {
     expect(manifest[0]?.stateHash).toBe(String(running.go.committedHash));
     expect(running.go.unauthorized).toBe(0);
 
-    // Edits while frozen are refused, not silently dropped: nothing new reaches Go.
+    const renewed = await controlCall(running, "/control/renew", {
+      freezeToken: frozen.body["freezeToken"],
+      freezeExpiresAt: Math.floor(Date.now() / 1000) + 30,
+    });
+    expect(renewed.status).toBe(200);
+
+    // Edits while frozen are refused, not silently dropped: nothing new reaches
+    // Go, and the author is TOLD the write was refused (a freeze makes every
+    // connection read-only, which is exactly when Hocuspocus drops an update).
     const storesWhileFrozen = running.go.stores.length;
+    const framesWhileFrozen: string[] = [];
+    author.on("stateless", ({ payload }: { payload: string }) => framesWhileFrozen.push(payload));
     appendParagraph(author.document, "Edit during publish");
+    await waitFor(
+      () => refusalRecoveryFrom(framesWhileFrozen) !== null,
+      5_000,
+      "the refusal announcement for a frozen-room edit",
+    );
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(running.go.stores.length).toBe(storesWhileFrozen);
+    expect(refusalRecoveryFrom(framesWhileFrozen)?.recovery?.issue).toBe("rejected");
 
     const unfrozen = await controlCall(running, "/control/unfreeze", {
       freezeToken: frozen.body["freezeToken"],

@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type CSSProperties } from "react";
 import { Bookmark } from "lucide-react";
 import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
 import { SAT_COPY, satSubmitConfirmSummary, satSubmitConfirmTitle, satWaitingForSavesLabel } from "../../domain/satCopy";
@@ -16,6 +16,10 @@ export interface SatReviewPageProps {
   remainingLabel: string;
   /** Live seconds for the shared 300s/60s threshold announcer (announce-only on review). */
   remainingSeconds?: number | undefined;
+  /** Stable layout viewport height in px; null keeps the 100dvh fallback. */
+  examHeight?: number | null | undefined;
+  /** True while the visual viewport indicates an open software keyboard. */
+  keyboardOpen?: boolean | undefined;
   items: readonly SatQuestionNavigationItem[];
   answeredCount: number;
   isSubmitting: boolean;
@@ -73,6 +77,10 @@ export function SatReviewPage(props: SatReviewPageProps) {
     props.currentQuestionIndex !== undefined
       ? "Back to question " + (props.currentQuestionIndex + 1)
       : SAT_COPY.navigation.backToQuestions;
+  const reviewStyle: CSSProperties | undefined =
+    props.examHeight !== null && Number.isFinite(props.examHeight)
+      ? ({ ["--student-exam-height" as string]: `${props.examHeight}px` } as CSSProperties)
+      : undefined;
 
   const openConfirm = (): void => {
     if (hardBlocked || submitting) return;
@@ -80,7 +88,11 @@ export function SatReviewPage(props: SatReviewPageProps) {
   };
 
   return (
-    <div className="sat-ui grid h-[100dvh] min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-background)] text-[var(--sat-text)]">
+    <div
+      className="sat-ui sat-review-page grid h-[100dvh] min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[var(--sat-background)] text-[var(--sat-text)]"
+      data-sat-keyboard-open={props.keyboardOpen ? "true" : "false"}
+      style={reviewStyle}
+    >
       <header className="border-b border-[var(--sat-divider)] pl-[calc(1.5rem+var(--student-safe-left))] pr-[calc(1.5rem+var(--student-safe-right))] pt-[var(--student-safe-top)]">
         <div className="mx-auto flex h-[82px] max-w-[1180px] items-center justify-between gap-4">
           <div>

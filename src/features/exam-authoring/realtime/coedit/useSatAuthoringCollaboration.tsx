@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { StructuredContent } from "../../contracts/assessment";
-import type { CoeditLifecycleIssue } from "./contracts";
+import type { CoeditFlushResult, CoeditLifecycleIssue } from "./contracts";
 import { CoeditUnavailableError, requestWorkspaceCoeditToken } from "./tokenApi";
 import {
   SatAuthoringWorkspaceProvider,
@@ -25,14 +25,30 @@ export interface SatAuthoringCollaborationValue {
   retry: () => void;
   setValue: (path: string, value: unknown) => void;
   setValues: (values: Record<string, unknown>) => void;
-  ensureValue: (path: string, value: unknown) => void;
-  ensureRichField: (path: string, content: StructuredContent) => void;
+  /**
+   * Proposes the first value for an empty shared path. The room arbitrates it
+   * (see `SatAuthoringWorkspaceProvider.seedValue`); `sourceQuestionRevision`
+   * ties the proposal to the revision it was derived from. False means no
+   * proposal was sent — a read-only session, or a path that is already
+   * populated.
+   */
+  seedValue: (path: string, value: unknown, sourceQuestionRevision?: number) => boolean;
+  seedRichField: (
+    path: string,
+    content: StructuredContent,
+    sourceQuestionRevision?: number,
+  ) => boolean;
   setRichField: (path: string, content: StructuredContent) => void;
   publishCommand: (
     command: SatWorkspaceCommandName,
     payload: Record<string, unknown>,
   ) => boolean;
   fieldBinding: (path: string) => WorkspaceFieldBinding | null;
+  /**
+   * Flushes the exam room and resolves once this tab's exact state is durable.
+   * Navigation must await it: nothing else proves the room reached MySQL.
+   */
+  flushAndWaitForSaved: (timeoutMs: number) => Promise<CoeditFlushResult>;
   setPresence: (target: { surface: "builder" | "release" | "access"; questionId?: string; fieldPath?: string }) => void;
   recovery: WorkspaceRecovery | null;
   reportReplaced: () => void;
@@ -40,14 +56,16 @@ export interface SatAuthoringCollaborationValue {
 
 const EMPTY_SNAPSHOT: WorkspaceCoeditSnapshot = {
   ready: false,
+  localReady: false,
   connectionPhase: "connecting",
   hasEstablishedConnection: false,
   lifecyclePhase: "active",
   readOnly: true,
+  writeCapable: false,
   saveState: {
     name: "idle",
-    localStateHash: null,
-    acknowledgedStateHash: null,
+    localStateVector: null,
+    acknowledgedStateVector: null,
     questionRevision: null,
     message: null,
     retryable: false,
@@ -86,6 +104,9 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
           documentName: token.documentName,
           serviceUrl: token.serviceUrl,
           token: { token: token.token, expiresAt: token.expiresAt },
+          // The epoch namespaces the local recovery cache; a legacy server omits
+          // it and the provider falls back to epoch zero.
+          ...(token.stateEpoch === undefined ? {} : { stateEpoch: token.stateEpoch }),
           self: { actorId: token.actorId, displayName: token.displayName },
           readOnly: token.mode !== "write",
           refreshToken: async () => {
@@ -158,8 +179,16 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
     const current = providerRef.current;
     if (current && !current.session.readOnly && current.session.lifecyclePhase === "active") current.setValues(values);
   }, []);
-  const ensureValue = useCallback((path: string, value: unknown) => providerRef.current?.ensureValue(path, value), []);
-  const ensureRichField = useCallback((path: string, content: StructuredContent) => providerRef.current?.ensureRichField(path, content), []);
+  const seedValue = useCallback(
+    (path: string, value: unknown, sourceQuestionRevision?: number) =>
+      providerRef.current?.seedValue(path, value, sourceQuestionRevision) ?? false,
+    [],
+  );
+  const seedRichField = useCallback(
+    (path: string, content: StructuredContent, sourceQuestionRevision?: number) =>
+      providerRef.current?.seedRichField(path, content, sourceQuestionRevision) ?? false,
+    [],
+  );
   const setRichField = useCallback((path: string, content: StructuredContent) => {
     const current = providerRef.current;
     if (current && !current.session.readOnly && current.session.lifecyclePhase === "active") {
@@ -175,6 +204,18 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
     [],
   );
   const fieldBinding = useCallback((path: string) => providerRef.current?.fieldBinding(path) ?? null, []);
+  const flushAndWaitForSaved = useCallback(
+    (timeoutMs: number): Promise<CoeditFlushResult> => {
+      const current = providerRef.current;
+      // No provider means there is no room to flush, and no work that could be
+      // waiting on one: report the only honest state rather than a timeout.
+      if (!current) {
+        return Promise.resolve({ outcome: "saved", saved: true, stateVector: null });
+      }
+      return current.flushAndWaitForSaved(timeoutMs);
+    },
+    [],
+  );
   const setPresence = useCallback((target: { surface: "builder" | "release" | "access"; questionId?: string; fieldPath?: string }) => providerRef.current?.setPresence(target), []);
   const reportReplaced = useCallback(() => providerRef.current?.reportReplaced(), []);
 
@@ -192,15 +233,16 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
     retry,
     setValue,
     setValues,
-    ensureValue,
-    ensureRichField,
+    seedValue,
+    seedRichField,
     setRichField,
     publishCommand,
     fieldBinding,
+    flushAndWaitForSaved,
     setPresence,
     recovery: providerRef.current?.recovery ?? null,
     reportReplaced,
-  }), [ensureRichField, ensureValue, error, examId, fieldBinding, publishCommand, reportReplaced, retry, setPresence, setRichField, setValue, setValues, snapshot, status]);
+  }), [error, examId, fieldBinding, flushAndWaitForSaved, publishCommand, reportReplaced, retry, seedRichField, seedValue, setPresence, setRichField, setValue, setValues, snapshot, status]);
 
   return <SatAuthoringCollaborationContext.Provider value={value}>{children}</SatAuthoringCollaborationContext.Provider>;
 }

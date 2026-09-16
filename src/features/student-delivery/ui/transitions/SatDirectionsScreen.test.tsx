@@ -43,6 +43,28 @@ describe("SatDirectionsScreen gate (Phase 6b)", () => {
     expect(screen.getByText(/Paused by the proctor/)).toBeInTheDocument();
   });
 
+  // Phase 4: automatic entry owns the primary path; the button is recovery only.
+  it("says the module is opening instead of asking the student to press start", () => {
+    renderScreen({ isStarting: true });
+
+    expect(screen.getByText("Starting your module…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Starting/ })).toBeDisabled();
+  });
+
+  it("keeps the start button disabled until auto-entry has failed", () => {
+    renderScreen();
+
+    expect(screen.getByRole("button", { name: /Begin module/ })).toBeDisabled();
+    expect(screen.getByText(/opens automatically/)).toBeInTheDocument();
+  });
+
+  it("enables the start button as recovery once auto-entry has failed", () => {
+    renderScreen({ entryRecoverable: true });
+
+    expect(screen.getByRole("button", { name: /Begin module/ })).toBeEnabled();
+    expect(screen.queryByText(/opens automatically/)).not.toBeInTheDocument();
+  });
+
   it("confirms Leave exam with saved-state language and focus round-trip", async () => {
     renderScreen();
     const leave = screen.getByRole("button", { name: "Leave exam" });

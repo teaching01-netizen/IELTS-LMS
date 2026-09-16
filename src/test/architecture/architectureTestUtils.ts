@@ -6,12 +6,17 @@ export {
   loadArchitectureBaseline,
 } from './architectureBaseline';
 export {
+  collectCoeditTransportBoundaryViolations,
   collectDomainPurityViolations,
   collectFeatureIsolationViolations,
   collectForbiddenBrowserBoundaryViolations,
   collectLayerDependencyViolations,
   collectLegacyServiceViolations,
 } from './architectureRules';
-export { isBrowserBoundaryPackage, readProductionSourceFiles } from './architectureScanner';
+export {
+  isBrowserBoundaryPackage,
+  isCollaborativeTransportPackage,
+  readProductionSourceFiles,
+} from './architectureScanner';
 export type { ArchitectureBaseline } from './architectureBaseline';
 export type { ArchitectureRuleName, ArchitectureViolation } from './architectureScanner';

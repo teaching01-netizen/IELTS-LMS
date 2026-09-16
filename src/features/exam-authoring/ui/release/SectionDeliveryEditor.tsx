@@ -77,10 +77,19 @@ function SectionDeliveryEditorInner({
     [base?.durationSeconds, higher?.durationSeconds, lower?.durationSeconds, routing?.minimumCorrectForHigher, section.breakAfterSeconds],
   );
 
+  // The room arbitrates the first value for this section; the readiness barrier
+  // (initial sync plus the IndexedDB replay) keeps the proposal from racing the
+  // replayed local cache. A populated path is skipped inside the provider.
   useEffect(() => {
-    if (!collaboration?.workspaceSnapshot.ready) return;
-    collaboration.ensureValue(sharedPath, deliverySeed);
-  }, [collaboration, collaboration?.workspaceSnapshot.ready, deliverySeed, sharedPath]);
+    if (!collaboration?.workspaceSnapshot.ready || !collaboration.workspaceSnapshot.localReady) return;
+    collaboration.seedValue(sharedPath, deliverySeed);
+  }, [
+    collaboration,
+    collaboration?.workspaceSnapshot.localReady,
+    collaboration?.workspaceSnapshot.ready,
+    deliverySeed,
+    sharedPath,
+  ]);
 
   useEffect(() => {
     if (sharedDelivery === null || typeof sharedDelivery !== "object") return;

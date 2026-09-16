@@ -5,9 +5,9 @@ import { parseEntryQueueError } from '../entryQueueRetry';
 // ({code, message, details: {retryAfterSeconds, tier}} — apperrors.Envelope,
 // pinned server-side by denyalenvelope_test.go). The parser must read the
 // flat shape: retryAfterSeconds (server spelling) AND retryAfterSecs
-// (entry-gate spelling). A parser that only reads one spelling drops the
-// other's cadence and falls back to the 5s default — the queue countdown
-// lies on exam day. RED: both spellings + header fallback.
+// (legacy compatibility). A parser that only reads one spelling drops the
+// other's cadence and falls back to the 5s default — bounded retry lies on
+// exam day. RED: both spellings + header fallback.
 describe('entry queue flat-envelope parse (plan E2)', () => {
   it('reads the server flat envelope (retryAfterSeconds spelling)', () => {
     const queue = parseEntryQueueError({
@@ -18,13 +18,14 @@ describe('entry queue flat-envelope parse (plan E2)', () => {
     expect(queue).toMatchObject({ queued: true, retryAfterSecs: 2 });
   });
 
-  it('reads the entry-gate spelling (retryAfterSecs + queuePosition)', () => {
+	it('reads the canonical entry-gate retry field without a queue position', () => {
     const queue = parseEntryQueueError({
       status: 429,
       code: 'RATE_LIMIT_EXCEEDED',
-      details: { tier: 'student-entry', retryAfterSecs: 7, queuePosition: 42 },
+      details: { tier: 'student-entry', retryAfterSeconds: 7 },
     });
-    expect(queue).toMatchObject({ queued: true, retryAfterSecs: 7, queuePosition: 42 });
+    expect(queue).toMatchObject({ queued: true, retryAfterSecs: 7 });
+    expect(queue).not.toHaveProperty('queuePosition');
   });
 
   // NOTE: all three pass today — the parser already reads both

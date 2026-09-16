@@ -2,12 +2,14 @@ import type { Extensions } from "@tiptap/core";
 import { Collaboration } from "@tiptap/extension-collaboration";
 import { CollaborationCaret } from "@tiptap/extension-collaboration-caret";
 import type { Awareness } from "y-protocols/awareness";
+import { ySyncPluginKey } from "y-prosemirror";
 import type { PromptCoeditingSession } from "./contracts";
 import type { PromptCoeditProvider } from "./provider";
 
 /**
- * Builds the Tiptap extensions that bind the `prompt` field to the shared
- * Y.Doc.
+ * Binds a rich-text field to a named XML fragment in the shared Y.Doc. With no
+ * `field` this is the v1 `prompt` binding; the workspace passes each field's
+ * own root.
  *
  * Only this package knows about Yjs/Hocuspocus: the composer receives an
  * opaque `Extensions` array and remains transport-agnostic.
@@ -15,17 +17,9 @@ import type { PromptCoeditProvider } from "./provider";
  * History note: the composer disables StarterKit's undo/redo in collaborative
  * mode (see richTextSchema `history: false`). Yjs owns history once
  * Collaboration is bound; two independent history stacks corrupt each other's
- * undo, which is exactly the class of bug the design's "no independent
- * history" requirement targets.
+ * undo, which is exactly the class of bug the "Frontend ownership"
+ * requirement targets (docs/sat-authoring-coedit.md).
  */
-export function promptCollaborationExtensions(input: {
-  session: PromptCoeditingSession;
-  provider: PromptCoeditProvider;
-}): Extensions {
-  return collaborationExtensions(input);
-}
-
-/** Binds any rich-text field to a named XML fragment in the same Y.Doc. */
 export function collaborationExtensions(input: {
   session: PromptCoeditingSession;
   provider: PromptCoeditProvider;
@@ -53,6 +47,34 @@ export function collaborationExtensions(input: {
       selectionRender: (user) => renderCaretSelection(user),
     }),
   ];
+}
+
+/** The one transaction detail this package needs from a rich-text editor. */
+export interface CollaborativeTransactionLike {
+  getMeta(key: unknown): unknown;
+}
+
+/**
+ * Whether a transaction is a collaborator's update rather than an author action.
+ *
+ * y-prosemirror marks every transaction its observer produces as change-origin.
+ * Undo/redo is marked the same way, but remains an author action that must be
+ * persisted, so only the non-undo branch counts as remote.
+ *
+ * The composer needs this answer and cannot produce it: deciding it means
+ * knowing how the CRDT binding marks its transactions, which is the same
+ * knowledge as importing `y-prosemirror`. Asking it here keeps the composer
+ * asking about transactions instead of about Yjs, and the
+ * `coedit-transport-boundary` architecture rule forbids the import outside this
+ * package precisely so it cannot drift back.
+ */
+export function isCollaborativeTransaction(
+  transaction: CollaborativeTransactionLike,
+): boolean {
+  const meta = transaction.getMeta(ySyncPluginKey) as
+    | { isChangeOrigin?: boolean; isUndoRedoOperation?: boolean }
+    | undefined;
+  return Boolean(meta?.isChangeOrigin && !meta?.isUndoRedoOperation);
 }
 
 interface ScopedAwareness {

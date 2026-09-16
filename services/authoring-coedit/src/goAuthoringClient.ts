@@ -1,5 +1,6 @@
 import { SERVICE_SIGNATURE_HEADER, SERVICE_TIMESTAMP_HEADER, signServiceRequest } from "./authToken.js";
 import { metrics } from "./telemetry.js";
+import type { CoeditDecimalString } from "../../../src/features/exam-authoring/realtime/coedit/protocol.js";
 
 /**
  * Bounded, authenticated calls to the private Go endpoints.
@@ -13,6 +14,8 @@ export const GO_PATHS = {
   load: "/internal/authoring-coedit/load",
   initialize: "/internal/authoring-coedit/initialize",
   store: "/internal/authoring-coedit/store",
+  finalStore: "/internal/authoring-coedit/final-store",
+  rebase: "/internal/authoring-coedit/rebase",
 } as const;
 
 export interface GoSeed {
@@ -33,6 +36,12 @@ export interface GoLoadResult {
   fieldSet: string;
   closedReason: string | null;
   seed: GoSeed | null;
+  /** Additive lifecycle metadata; omitted by pre-epoch Go deployments. */
+  freezeOperationId?: string;
+  freezeExpiresAt?: number;
+  stateEpoch?: CoeditDecimalString;
+  commitSequence?: CoeditDecimalString;
+  workspaceRevision?: number;
 }
 
 export interface GoStoreResult {
@@ -42,6 +51,11 @@ export interface GoStoreResult {
   materializedRevision: number;
   committed: boolean;
   duplicate: boolean;
+  freezeOperationId?: string;
+  freezeExpiresAt?: number;
+  stateEpoch?: CoeditDecimalString;
+  commitSequence?: CoeditDecimalString;
+  workspaceRevision?: number;
 }
 
 export class GoRequestError extends Error {
@@ -99,15 +113,41 @@ export class GoAuthoringClient {
     prompt: unknown;
     workspace?: unknown;
     actorId: string;
+    freezeOperationId?: string;
   }): Promise<GoStoreResult> {
     return this.request<GoStoreResult>("POST", GO_PATHS.store, body, "store");
+  }
+
+  finalStore(body: {
+    documentName: string;
+    previousStateHash: string;
+    stateHash: string;
+    ydocState: string;
+    stateVector: string;
+    prompt: unknown;
+    workspace?: unknown;
+    actorId: string;
+    freezeOperationId: string;
+  }): Promise<GoStoreResult> {
+    return this.request<GoStoreResult>("POST", GO_PATHS.finalStore, body, "final-store");
+  }
+
+  rebase(body: {
+    documentName: string;
+    expectedStateHash: string;
+    expectedStateEpoch: CoeditDecimalString;
+    stateHash: string;
+    ydocState: string;
+    stateVector: string;
+  }): Promise<GoStoreResult> {
+    return this.request<GoStoreResult>("POST", GO_PATHS.rebase, body, "rebase");
   }
 
   private async request<T>(
     method: string,
     path: string,
     body: unknown,
-    stage: "load" | "initialize" | "store",
+    stage: "load" | "initialize" | "store" | "final-store" | "rebase",
   ): Promise<T> {
     const payload = JSON.stringify(body ?? {});
     const nowSeconds = Math.floor((this.options.now?.() ?? Date.now()) / 1000);
@@ -134,9 +174,12 @@ export class GoAuthoringClient {
       });
       if (!response.ok) {
         const reason = await readCoeditReason(response);
-        // A closed/frozen/fenced document is a CLIENT outcome: retrying it
-        // verbatim would just repeat the refusal.
+        // A lifecycle fence, stale epoch, or closed document is a CLIENT
+        // outcome: retrying it verbatim would just repeat the refusal. In
+        // particular, a 5xx carrying a durable lifecycle reason must not be
+        // mistaken for a transient network failure.
         const retryable = response.status >= 500;
+        const lifecycleRefusal = reason !== null && NON_RETRYABLE_REASONS.has(reason);
         metrics.incCounter("authoring_coedit_store_total", {
           outcome: retryable ? "unavailable" : "rejected",
         });
@@ -144,7 +187,7 @@ export class GoAuthoringClient {
           response.status,
           reason,
           `Go ${stage} endpoint returned ${response.status}.`,
-          retryable,
+          retryable && !lifecycleRefusal,
         );
       }
       return (await response.json()) as T;
@@ -157,6 +200,18 @@ export class GoAuthoringClient {
     }
   }
 }
+
+const NON_RETRYABLE_REASONS: ReadonlySet<string> = new Set([
+  "coedit_document_closed",
+  "coedit_document_frozen",
+  "coedit_epoch_mismatch",
+  "coedit_final_store_required",
+  "coedit_freeze_conflict",
+  "coedit_previous_hash_mismatch",
+  "coedit_revision_conflict",
+  "coedit_seed_conflict",
+  "coedit_stale_cache",
+]);
 
 async function readCoeditReason(response: Response): Promise<string | null> {
   try {

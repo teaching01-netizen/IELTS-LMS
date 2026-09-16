@@ -3,12 +3,16 @@ import {
   addImportViolations,
   featureName,
   isBrowserBoundaryPackage,
+  isCollaborativeTransportPackage,
   isFrameworkPackage,
   isPathUnder,
   sortViolations,
   type ArchitectureViolation,
   type SourceImport,
 } from './architectureScanner';
+
+/** The one package allowed to know the collaborative transport. */
+const COEDIT_PACKAGE_ROOT = 'src/features/exam-authoring/realtime/coedit';
 
 function isDomainFile(file: string): boolean {
   return isPathUnder(file, 'src/features') && file.includes('/domain/');
@@ -109,6 +113,24 @@ export function collectLegacyServiceViolations(
       isPathUnder(file, 'src/features/builder/infrastructure');
     return approvedAdapter ? null : target;
   });
+  return sortViolations(violations);
+}
+
+export function collectCoeditTransportBoundaryViolations(
+  sourceFiles: readonly string[],
+): readonly ArchitectureViolation[] {
+  const violations = addImportViolations(
+    'coedit-transport-boundary',
+    sourceFiles,
+    (file, sourceImport) => {
+      if (isPathUnder(file, COEDIT_PACKAGE_ROOT)) {
+        return null;
+      }
+      return isCollaborativeTransportPackage(sourceImport.specifier)
+        ? `package:${sourceImport.specifier}`
+        : null;
+    },
+  );
   return sortViolations(violations);
 }
 

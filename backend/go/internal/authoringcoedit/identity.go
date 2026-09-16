@@ -1,7 +1,7 @@
 // Package authoringcoedit owns the protocol-level vocabulary of SAT prompt
 // co-editing: opaque document identity, the lifecycle/close-reason closed
 // vocabularies, short-lived browser tokens, private service signatures, and
-// the size limits the design pins.
+// the size limits the design pins ("Capacity", docs/sat-authoring-coedit.md).
 //
 // It deliberately holds no database code and does not import the authoring
 // package. The atomic prompt/revision/event write lives in
@@ -48,8 +48,14 @@ const (
 	MaxPromptJSONBytes = 1 << 20
 	// MaxFrameBytes caps a single WebSocket message (2 MiB).
 	MaxFrameBytes = 2 << 20
-	// MaxStateVectorBytes matches the VARBINARY(4096) column.
-	MaxStateVectorBytes = 4096
+	// MaxStateVectorBytes matches the widened VARBINARY(8192) column (0063).
+	//
+	// The vector is a per-writer client-id ledger, so it grows with sessions
+	// rather than with content and is the one state field that gets worse on a
+	// room that is merely long-lived. 8192 is headroom: the Hocuspocus service
+	// compacts a document once its vector passes 2 KiB, so a room should never
+	// reach this limit without first failing to compact.
+	MaxStateVectorBytes = 8192
 	// MaxSeedPromptBytes bounds what the load endpoint will hand to Hocuspocus
 	// for seeding; anything bigger can never round-trip under the cap above.
 	MaxSeedPromptBytes = MaxPromptJSONBytes
@@ -99,6 +105,17 @@ const (
 	StateClosed       LifecycleState = "closed"
 )
 
+// ErrInvalidLifecycleOperation is returned by lifecycle boundaries when a
+// caller attempts to fence or release a room without an operation owner.
+// Keeping this error in the protocol package prevents callers from silently
+// falling back to the old unscoped reopen behavior.
+var ErrInvalidLifecycleOperation = errors.New("invalid co-edit lifecycle operation")
+
+// ErrLifecycleOperationConflict identifies a room already owned by another
+// lifecycle operation. The database service wraps it in CodeFreezeConflict
+// when it can provide the stable application error vocabulary.
+var ErrLifecycleOperationConflict = errors.New("co-edit lifecycle operation conflict")
+
 // ParseLifecycleState accepts only the closed vocabulary.
 func ParseLifecycleState(raw string) (LifecycleState, error) {
 	switch LifecycleState(strings.TrimSpace(raw)) {
@@ -125,9 +142,10 @@ func CanTransition(from, to LifecycleState) bool {
 	}
 	switch from {
 	case StateInitializing:
-		// initialize -> active, or a seed that is closed/replaced before it
-		// ever went live.
-		return to == StateActive || to == StateFrozen || to == StateClosed
+		// A room may be fenced before its first seed wins. It still cannot be
+		// initialized while fenced; the persistence boundary applies that
+		// operation-specific rule before using this generic transition check.
+		return to == StateActive || to == StateFreezing || to == StateClosed
 	case StateActive:
 		return to == StateFreezing || to == StateClosed
 	case StateFreezing:
@@ -256,6 +274,11 @@ type CoeditTokenResponse struct {
 	// Capability mirrors the effective server posture so a client that cached
 	// a stale flag cannot keep trying to open rooms.
 	Capability bool `json:"capability"`
+	// Lifecycle counters are additive so old clients can continue to consume
+	// token responses while the epoch/sequence rollout is staged.
+	StateEpoch        DecimalString `json:"stateEpoch,omitempty"`
+	CommitSequence    DecimalString `json:"commitSequence,omitempty"`
+	WorkspaceRevision int           `json:"workspaceRevision,omitempty"`
 }
 
 // Identity is the server-resolved binding of a document to domain
@@ -276,6 +299,9 @@ type Identity struct {
 	SeedRevision         int            `json:"seedRevision"`
 	MaterializedRevision int            `json:"materializedRevision"`
 	ClosedReason         *CloseReason   `json:"closedReason"`
+	StateEpoch           DecimalString  `json:"stateEpoch,omitempty"`
+	CommitSequence       DecimalString  `json:"commitSequence,omitempty"`
+	WorkspaceRevision    int            `json:"workspaceRevision,omitempty"`
 }
 
 // Role names mirrored from internal/auth (duplicated so this package stays

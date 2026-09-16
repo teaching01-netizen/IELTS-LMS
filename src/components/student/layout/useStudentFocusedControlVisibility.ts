@@ -8,11 +8,17 @@ const EXAM_SCROLL_OWNER_SELECTOR = [
   '.student-listening-question-pane',
   '[data-student-zoom-scroll]',
 ].join(', ');
+const EXPLICIT_EXAM_SCROLL_OWNER_SELECTOR = '[data-student-exam-scroll-owner]';
 
 /** Keep the control this far above the keyboard edge. */
 const REVEAL_MARGIN_PX = 12;
 
 function findNearestExamScrollOwner(element: Element): HTMLElement | null {
+  const explicitOwner = element.closest<HTMLElement>(EXPLICIT_EXAM_SCROLL_OWNER_SELECTOR);
+  if (explicitOwner) {
+    return explicitOwner;
+  }
+
   let current: Element | null = element;
   while (current && current !== document.body) {
     if (current instanceof HTMLElement) {

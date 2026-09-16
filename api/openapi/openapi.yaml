@@ -94,7 +94,7 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
-        "429": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /auth/student/schedules/{id}:
     get:
       security: []
@@ -1290,7 +1290,7 @@ paths:
               schema: { type: array, items: { type: object, additionalProperties: true } }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
-        "429": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /grading/submissions/{submissionId}:
     get:
       tags: [grading]
@@ -1542,7 +1542,7 @@ paths:
                 $ref: "#/components/schemas/LegacyResultsExport"
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
-        "429": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /results/export-profile:
     post:
       tags: [results]
@@ -1566,7 +1566,7 @@ paths:
               schema: { type: array, items: { type: object, additionalProperties: true } }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
-        "429": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /results/{resultId}/events:
     get:
       tags: [results]
@@ -2228,6 +2228,57 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
         "413": { $ref: "#/components/responses/Error" }
+  /internal/authoring-coedit/final-store:
+    post:
+      tags: [authoring-coedit-internal]
+      summary: Commit the last state owned by a lifecycle freeze (private)
+      description: |
+        Operation-owned final store for a room that is durably fenced in
+        freezing state. The operation ID is required and the row remains
+        fenced until the Go lifecycle owner closes or aborts it.
+      responses:
+        "200":
+          description: Final state committed or already current
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+  /internal/authoring-coedit/rebase:
+    post:
+      tags: [authoring-coedit-internal]
+      summary: Install a compacted durable Yjs state (private)
+      description: |
+        Compare-and-set rebase guarded by the expected state hash and epoch.
+        It changes only durable binary state and counters; domain projections
+        and question revisions are preserved.
+      responses:
+        "200":
+          description: Rebased state committed
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+  /internal/authoring-coedit/recover:
+    post:
+      tags: [authoring-coedit-internal]
+      summary: Recover expired durable freeze rows (private)
+      description: |
+        Idempotently reopens only expired freezing rows. Ambiguous frozen rows
+        are never reopened automatically.
+      responses:
+        "200":
+          description: Recovery counts
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /assessment-authoring/exams/{examId}/sections/{sectionId}/delivery-settings:
     patch:
       tags: [authoring]
@@ -3798,6 +3849,21 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    RateLimited:
+      description: Rate-limit denial; retry after the advertised number of seconds.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+        Retry-After:
+          description: Integer number of seconds before the client should retry.
+          required: true
+          schema: { type: integer, format: int32, minimum: 1 }
+        X-RateLimit-Tier:
+          description: Low-cardinality limiter tier that denied the request.
+          required: false
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
     ErrorEnvelope:
       type: object
@@ -3845,7 +3911,16 @@ components:
               SERVICE_RECOVERY_FAILED,
             ]
         message: { type: string }
-        details: { type: object, additionalProperties: true }
+        details:
+          type: object
+          description: >-
+            Rate-limit errors include retryAfterSeconds as integer seconds;
+            tier denials also include the tier string. Other error codes may
+            use additional domain-specific detail fields.
+          properties:
+            retryAfterSeconds: { type: integer, minimum: 1 }
+            tier: { type: string }
+          additionalProperties: true
         requestId: { type: string }
     Actor:
       type: object

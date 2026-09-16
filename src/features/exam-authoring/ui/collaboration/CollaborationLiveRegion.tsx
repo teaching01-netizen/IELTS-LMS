@@ -63,6 +63,12 @@ export function CollaborationLiveRegion({
     let message: string | null = null;
     if (prior.recoveryIssue !== next.recoveryIssue && (next.recoveryIssue === "closed" || next.recoveryIssue === "replaced")) {
       message = "A newer version is active. Your unsaved changes are still available.";
+    } else if (
+      prior.recoveryIssue !== next.recoveryIssue &&
+      (next.recoveryIssue === "oversized" || next.recoveryIssue === "rejected")
+    ) {
+      // Spoken, not shown: the recovery surface carries the same fact visually.
+      message = "Some changes could not be saved. They are kept on this device.";
     } else if (prior.lifecyclePhase !== next.lifecyclePhase && next.lifecyclePhase === "freezing") {
       message = "Finishing changes.";
     } else if (prior.lifecyclePhase !== next.lifecyclePhase && next.lifecyclePhase === "frozen") {

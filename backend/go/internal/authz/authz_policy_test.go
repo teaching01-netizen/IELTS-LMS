@@ -164,6 +164,9 @@ var expectedFullPaths = []string{
 	"POST /internal/authoring-coedit/load",
 	"POST /internal/authoring-coedit/initialize",
 	"POST /internal/authoring-coedit/store",
+	"POST /internal/authoring-coedit/final-store",
+	"POST /internal/authoring-coedit/rebase",
+	"POST /internal/authoring-coedit/recover",
 }
 
 func TestTableCompleteness(t *testing.T) {

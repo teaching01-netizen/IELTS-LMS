@@ -119,3 +119,65 @@ func TestOpenAPICoversRouter(t *testing.T) {
 		t.Fatalf("absolute authoring/release paths missing from spec: %v", missingAbs)
 	}
 }
+
+func TestOpenAPIRateLimitedResponseContract(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "api", "openapi", "openapi.yaml"))
+	if err != nil {
+		t.Skipf("openapi spec not found (monorepo layout): %v", err)
+	}
+	body := string(raw)
+	for _, needle := range []string{
+		"    RateLimited:\n",
+		"        Retry-After:",
+		"        X-RateLimit-Tier:",
+		"schema: { $ref: \"#/components/schemas/ErrorEnvelope\" }",
+		"retryAfterSeconds:",
+		"tier:",
+	} {
+		if !strings.Contains(body, needle) {
+			t.Errorf("OpenAPI rate-limit contract is missing %q", needle)
+		}
+	}
+
+	rateLimitedPaths := []string{
+		"/auth/student/entry",
+		"/grading/export",
+		"/results/export",
+		"/results/export-profile",
+	}
+	for _, path := range rateLimitedPaths {
+		start := strings.Index(body, "  "+path+":")
+		if start < 0 {
+			t.Errorf("rate-limited path %s is missing from OpenAPI", path)
+			continue
+		}
+		end := len(body)
+		if next := strings.Index(body[start+1:], "\n  /"); next >= 0 {
+			end = start + 1 + next
+		}
+		block := body[start:end]
+		want := "\"429\": { $ref: \"#/components/responses/RateLimited\" }"
+		if !strings.Contains(block, want) {
+			t.Errorf("rate-limited path %s must reference components/responses/RateLimited", path)
+		}
+	}
+	if got := strings.Count(body, "\"429\": { $ref: \"#/components/responses/RateLimited\" }"); got != len(rateLimitedPaths) {
+		t.Fatalf("expected one reusable RateLimited ref for each rate-limited endpoint, got %d", got)
+	}
+}
+
+func TestRateLimitRuntimeValidationPrecedesRouterConstruction(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	validate := strings.Index(body, "cfg.ValidateForRuntime()")
+	buildRouter := strings.Index(body, "BuildRouter(app)")
+	if validate < 0 || buildRouter < 0 {
+		t.Fatalf("startup must contain both runtime validation and router construction")
+	}
+	if validate > buildRouter {
+		t.Fatalf("invalid configuration must be rejected before router construction")
+	}
+}

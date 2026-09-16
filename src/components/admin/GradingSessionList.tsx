@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Search, Clock, Users, AlertCircle, ArrowRight, Calendar, Download, ChevronLeft, ChevronRight, RotateCw, X } from 'lucide-react';
 import type { GradingSession, SessionQueuePagination } from '../../types/grading';
 import { gradingService } from '../../features/grading/infrastructure/gradingGateway';
+import { gradingErrorMessage } from '../../services/gradingService';
 import { TableLoadingSkeleton } from '@components/ui';
 import { seedDevelopmentFixtures } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import { downloadCsv } from '../../utils/csvExport';
@@ -74,7 +75,7 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
         setPagination(result.data.pagination);
       } else {
         setSessions([]);
-        setLoadError(result.error ?? 'Failed to load grading sessions.');
+        setLoadError(gradingErrorMessage(result.error, 'Failed to load grading sessions.'));
       }
     } catch (error) {
       if (seq !== loadSeqRef.current) {
@@ -181,7 +182,7 @@ export const GradingSessionList = React.memo(function GradingSessionList({ onSes
     try {
       const result = await gradingService.getSessionQueue();
       if (!result.success || !result.data) {
-        throw new Error(result.error ?? 'Failed to load sessions for export.');
+        throw new Error(gradingErrorMessage(result.error, 'Failed to load sessions for export.'));
       }
       const rows = result.data;
       const datePart = new Date().toISOString().split('T')[0] ?? 'export';

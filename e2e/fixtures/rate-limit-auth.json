@@ -1,0 +1,15 @@
+{
+  "sessionCookie": {
+    "name": "session",
+    "value": "rate-limit-session-fixture",
+    "domain": "localhost",
+    "path": "/"
+  },
+  "csrfCookie": {
+    "name": "csrf",
+    "value": "rate-limit-csrf-fixture",
+    "domain": "localhost",
+    "path": "/"
+  },
+  "bearerToken": "rate-limit-attempt-fixture"
+}

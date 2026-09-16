@@ -69,4 +69,36 @@ describe("ProviderPreviewRoute", () => {
     renderRoute();
     expect(screen.getByText("legacy-runtime-preview")).toBeInTheDocument();
   });
+
+  it("waits for the refetch of a stale cached exam instead of rendering it", () => {
+    // The authoring route invalidates this key before it navigates here. A
+    // cached entry that is stale AND refetching would otherwise render the exam
+    // as it was before the author's last edits, which is the one thing this
+    // screen exists to show.
+    useExamQueryMock.mockReturnValue({
+      data: baseExam,
+      isLoading: false,
+      isStale: true,
+      isFetching: true,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderRoute();
+    expect(screen.queryByText("sat-full-preview")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("Loading preview…")).toBeInTheDocument();
+  });
+
+  it("renders a fresh cached exam without waiting for another read", () => {
+    useExamQueryMock.mockReturnValue({
+      data: baseExam,
+      isLoading: false,
+      isStale: false,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderRoute();
+    expect(screen.getByText("sat-full-preview")).toBeInTheDocument();
+  });
 });

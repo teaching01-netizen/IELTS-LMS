@@ -27,6 +27,14 @@ const (
 	CodePreviousHashMismatch DomainCode = "coedit_previous_hash_mismatch"
 	// CodeSeedConflict: the seed revision no longer matches the mapping.
 	CodeSeedConflict DomainCode = "coedit_seed_conflict"
+	// CodeFreezeConflict: another lifecycle operation owns the room fence.
+	CodeFreezeConflict DomainCode = "coedit_freeze_conflict"
+	// CodeEpochMismatch: a rebase/cache client used an obsolete state epoch.
+	CodeEpochMismatch DomainCode = "coedit_epoch_mismatch"
+	// CodeFinalStoreRequired: a fenced room must use the operation-owned path.
+	CodeFinalStoreRequired DomainCode = "coedit_final_store_required"
+	// CodeStaleCache: local recovery metadata belongs to an older room epoch.
+	CodeStaleCache DomainCode = "coedit_stale_cache"
 	// CodeOversized: binary state or materialized prompt exceeded a limit.
 	CodeOversized DomainCode = "coedit_oversized"
 	// CodeActiveConflict: a legacy prompt-bearing write hit an active room.
@@ -43,6 +51,7 @@ const (
 var AllDomainCodes = []DomainCode{
 	CodeDisabled, CodeNotEditableDraft, CodeDocumentClosed, CodeDocumentFrozen,
 	CodeRevisionConflict, CodePreviousHashMismatch, CodeSeedConflict,
+	CodeFreezeConflict, CodeEpochMismatch, CodeFinalStoreRequired, CodeStaleCache,
 	CodeOversized, CodeActiveConflict, CodeSignatureInvalid,
 	CodeServiceUnavailable, CodePermissionDenied,
 }
@@ -93,6 +102,7 @@ func (c DomainCode) httpStatus() int {
 	case CodeNotEditableDraft, CodeSignatureInvalid:
 		return http.StatusNotFound
 	case CodeRevisionConflict, CodePreviousHashMismatch, CodeSeedConflict,
+		CodeFreezeConflict, CodeEpochMismatch, CodeFinalStoreRequired, CodeStaleCache,
 		CodeActiveConflict, CodeDocumentFrozen:
 		return http.StatusConflict
 	case CodeDocumentClosed:
@@ -113,6 +123,7 @@ func (c DomainCode) appCode() apperrors.Code {
 	case CodeNotEditableDraft, CodeSignatureInvalid, CodeDocumentClosed:
 		return apperrors.CodeNotFound
 	case CodeRevisionConflict, CodePreviousHashMismatch, CodeSeedConflict,
+		CodeFreezeConflict, CodeEpochMismatch, CodeFinalStoreRequired, CodeStaleCache,
 		CodeActiveConflict, CodeDocumentFrozen:
 		return apperrors.CodeAssessmentConflict
 	case CodeOversized:

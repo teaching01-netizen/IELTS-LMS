@@ -2,6 +2,7 @@ import { backendPost } from "../../infrastructure/examAuthoringBackendGateway";
 import { ApiError } from "../../../../shared/api-client/errors";
 import type { CoeditTokenResponse } from "./contracts";
 import { parseCoeditDocumentName, parseAnyDocumentName } from "./documentIdentity";
+import { isCoeditDecimalString } from "./protocol";
 
 /**
  * Raised when the SERVER cannot offer co-editing right now (capability off,
@@ -34,6 +35,18 @@ function assertUsable(response: CoeditTokenResponse): CoeditTokenResponse {
   if (response.mode !== "write" && response.mode !== "read") {
     throw new Error("Co-edit token response carried an unsupported mode.");
   }
+  if (response.stateEpoch !== undefined && !isCoeditDecimalString(response.stateEpoch)) {
+    throw new Error("Co-edit token response carried an invalid state epoch.");
+  }
+  if (response.commitSequence !== undefined && !isCoeditDecimalString(response.commitSequence)) {
+    throw new Error("Co-edit token response carried an invalid commit sequence.");
+  }
+  if (
+    response.workspaceRevision !== undefined &&
+    (!Number.isSafeInteger(response.workspaceRevision) || response.workspaceRevision < 0)
+  ) {
+    throw new Error("Co-edit token response carried an invalid workspace revision.");
+  }
   return response;
 }
 
@@ -47,6 +60,18 @@ function assertWorkspaceUsable(response: CoeditTokenResponse): CoeditTokenRespon
   if (response.fieldSet !== "workspace") throw new Error("Co-edit workspace token requested an unsupported field set.");
   if (!response.actorId) throw new Error("Co-edit token response carried no server-derived identity.");
   if (response.mode !== "write" && response.mode !== "read") throw new Error("Co-edit token response carried an unsupported mode.");
+  if (response.stateEpoch !== undefined && !isCoeditDecimalString(response.stateEpoch)) {
+    throw new Error("Co-edit workspace token carried an invalid state epoch.");
+  }
+  if (response.commitSequence !== undefined && !isCoeditDecimalString(response.commitSequence)) {
+    throw new Error("Co-edit workspace token carried an invalid commit sequence.");
+  }
+  if (
+    response.workspaceRevision !== undefined &&
+    (!Number.isSafeInteger(response.workspaceRevision) || response.workspaceRevision < 0)
+  ) {
+    throw new Error("Co-edit workspace token carried an invalid workspace revision.");
+  }
   return response;
 }
 
@@ -99,21 +124,11 @@ export async function requestWorkspaceCoeditToken(examId: string): Promise<Coedi
   }
 }
 
-/** Milliseconds before expiry at which the provider should refresh. */
-export const COEDIT_TOKEN_REFRESH_LEAD_MS = 60_000;
-
 /**
- * Schedules refreshes so the provider always holds a token valid for at least
- * the refresh lead. Returns a cancel function; the caller MUST call it on
- * teardown or a StrictMode double mount leaks a timer.
+ * Milliseconds before expiry at which the provider asks for a new token.
+ *
+ * The provider owns refresh scheduling (`PromptCoeditProvider.armTokenRefresh`
+ * on a fixed interval plus a pre-expiry check in `requestToken`); a second
+ * timer-based scheduler used to live here and nothing called it.
  */
-export function scheduleTokenRefresh(
-  expiresAtSeconds: number,
-  onRefresh: () => void,
-  now: () => number = Date.now
-): () => void {
-  const refreshAtMs = expiresAtSeconds * 1000 - COEDIT_TOKEN_REFRESH_LEAD_MS;
-  const delay = Math.max(5_000, refreshAtMs - now());
-  const timer = setTimeout(onRefresh, delay);
-  return () => clearTimeout(timer);
-}
+export const COEDIT_TOKEN_REFRESH_LEAD_MS = 60_000;

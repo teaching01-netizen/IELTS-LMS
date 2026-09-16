@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
 
 var errTierTestDB = errors.New("tier test db down")
@@ -84,6 +86,18 @@ func TestTierKeyFuncsClassify(t *testing.T) {
 	garbage.Header.Set("Authorization", "not-a-bearer")
 	if got := AttemptOrUserOrIPKey(lookupWithUser(""))(garbage); got != "ip:198.51.100.9" {
 		t.Fatalf("garbage bearer must fall back to IP, got %q", got)
+	}
+}
+
+func TestAttemptKeyUsesBearerBeforeSessionUser(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/attempt", nil)
+	req.Header.Set("Authorization", "Bearer attempt-secret")
+
+	got := AttemptOrUserOrIPKey(lookupWithUser("user-1"))(req)
+	sum := sha256.Sum256([]byte("attempt-secret"))
+	want := "attempt:" + hex.EncodeToString(sum[:])[:16]
+	if got != want {
+		t.Fatalf("bearer identity must win over cookie user: got %q want %q", got, want)
 	}
 }
 
@@ -167,6 +181,92 @@ func TestTierSetDBErrorKeepsLocalVerdict(t *testing.T) {
 	rec := doTierRequest(ts.Middleware(TierPolling, func(r *http.Request) string { return "k" })(okTierHandler()), "GET", "/p")
 	if rec.Code != 200 {
 		t.Fatalf("DB error must keep local allow verdict, got %d", rec.Code)
+	}
+}
+
+func TestTierSetDBErrorUsesEmergencyBudget(t *testing.T) {
+	db := &countingDBChecker{fail: true}
+	ts := NewTierSet(
+		map[string]TierBudget{TierPolling: {PerMin: 2, Window: time.Minute}},
+		map[string]DBChecker{TierPolling: db.check},
+		100,
+	)
+	handler := ts.Middleware(TierPolling, func(*http.Request) string { return "user:u1" })(okTierHandler())
+
+	for i := 0; i < 2; i++ {
+		if rec := doTierRequest(handler, "GET", "/polling"); rec.Code != http.StatusOK {
+			t.Fatalf("request %d must pass within the emergency budget, got %d", i, rec.Code)
+		}
+	}
+	if rec := doTierRequest(handler, "GET", "/polling"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("DB-error emergency budget must deny the third request, got %d", rec.Code)
+	}
+	if db.calls != 3 {
+		t.Fatalf("prefilter should admit the third request before emergency denial, DB calls=%d", db.calls)
+	}
+}
+
+func TestTierSetEmitsDBErrorAndCapacityMetricsWithoutIdentityLabels(t *testing.T) {
+	reg := telemetry.NewRegistry()
+	old := telemetry.DefaultRegistry
+	telemetry.DefaultRegistry = reg
+	defer func() { telemetry.DefaultRegistry = old }()
+
+	db := &countingDBChecker{fail: true}
+	dual := NewTierSet(
+		map[string]TierBudget{TierPolling: {PerMin: 10, Window: time.Minute}},
+		map[string]DBChecker{TierPolling: db.check},
+		10,
+	)
+	if rec := doTierRequest(dual.Middleware(TierPolling, func(*http.Request) string { return "user:user-1" })(okTierHandler()), "GET", "/polling"); rec.Code != http.StatusOK {
+		t.Fatalf("DB-error request should use the emergency allow path, got %d", rec.Code)
+	}
+	if got := telemetry.CounterValueForTest(reg, telemetry.MRatelimitDBErrorTotal, "tier", TierPolling, "key_class", "user"); got != 1 {
+		t.Fatalf("DB-error metric must count the fallback, got %v", got)
+	}
+
+	local := NewTierSet(
+		map[string]TierBudget{TierWrites: {PerMin: 10, Window: time.Minute}},
+		nil,
+		1,
+	)
+	local.SetLocalOnly(true)
+	h := local.Middleware(TierWrites, func(r *http.Request) string { return r.URL.Path })(okTierHandler())
+	if rec := doTierRequest(h, "POST", "/first"); rec.Code != http.StatusOK {
+		t.Fatalf("first key should be admitted, got %d", rec.Code)
+	}
+	if rec := doTierRequest(h, "POST", "/second"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("new key at capacity should be rejected, got %d", rec.Code)
+	}
+	if got := telemetry.CounterValueForTest(reg, telemetry.MRatelimitCapacityTotal, "tier", TierWrites, "key_class", "ip"); got != 1 {
+		t.Fatalf("capacity metric must count the rejected active-key admission, got %v", got)
+	}
+	if snapshot := reg.Snapshot(); tierTestContainsStr(snapshot, "user:user-1") || tierTestContainsStr(snapshot, "198.51.100.9") {
+		t.Fatalf("rate-limit metrics must not contain identity values:\n%s", snapshot)
+	}
+}
+
+func TestTierStoresAreIndependent(t *testing.T) {
+	ts := NewTierSet(
+		map[string]TierBudget{
+			TierPolling: {PerMin: 1, Window: time.Minute},
+			TierWrites:  {PerMin: 1, Window: time.Minute},
+		},
+		nil,
+		1,
+	)
+	ts.SetLocalOnly(true)
+	polling := ts.Middleware(TierPolling, func(*http.Request) string { return "user:u1" })(okTierHandler())
+	writes := ts.Middleware(TierWrites, func(*http.Request) string { return "user:u1" })(okTierHandler())
+
+	if rec := doTierRequest(polling, "GET", "/polling"); rec.Code != http.StatusOK {
+		t.Fatalf("first polling request must pass, got %d", rec.Code)
+	}
+	if rec := doTierRequest(writes, "POST", "/writes"); rec.Code != http.StatusOK {
+		t.Fatalf("first writes request must pass, got %d", rec.Code)
+	}
+	if rec := doTierRequest(polling, "GET", "/polling"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("polling cap must preserve its active bucket, got %d", rec.Code)
 	}
 }
 

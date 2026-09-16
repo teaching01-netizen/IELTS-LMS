@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
+import type { AssessmentDeliveryBootstrap, AssessmentResponseSnapshot } from "../../contracts/assessmentDelivery";
 import { useSatExamController } from "../useSatExamController";
 
 /**
@@ -208,6 +208,20 @@ function modulePayload(opts: {
   return p;
 }
 
+function runtimeResponse(overrides: Record<string, unknown> = {}): AssessmentResponseSnapshot {
+  return {
+    id: "v2:q1",
+    moduleAttemptId: "ma-current",
+    examQuestionId: "q1",
+    response: "A",
+    markedForReview: false,
+    eliminatedOptions: [],
+    annotations: {},
+    revision: 7,
+    ...overrides,
+  } as unknown as AssessmentResponseSnapshot;
+}
+
 describe("useSatExamController convergence (Phase 04)", () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -218,6 +232,8 @@ describe("useSatExamController convergence (Phase 04)", () => {
     gatewayMocks.submitModule.mockReset();
     gatewayMocks.submitAssessment.mockReset();
     persistenceMock.hydrateBootstrap.mockReset();
+    persistenceMock.visibleDrafts = {};
+    persistenceMock.pendingDrafts = {};
     persistenceMock.flush.mockResolvedValue(undefined);
     persistenceMock.submit.mockResolvedValue({} as never);
   });
@@ -339,6 +355,144 @@ describe("useSatExamController convergence (Phase 04)", () => {
     });
     expect(hook.result.current.data).toBe(firstData);
     expect(hook.result.current.remainingSeconds).toBe(firstRemaining);
+  });
+
+  it("hydrates the complete V2 response aggregate into the active module", async () => {
+    const first = modulePayload({
+      currentModuleId: "m-1",
+      currentModuleKey: "rw-m1",
+      currentState: "active",
+    });
+    first.attempt.responses = [
+      runtimeResponse({
+        response: "A",
+        markedForReview: true,
+        eliminatedOptions: ["B"],
+        annotations: {
+          version: 2,
+          annotations: [],
+          legacyQuestionNote: "Compare the evidence",
+        },
+      }),
+    ];
+    gatewayMocks.bootstrap.mockResolvedValue(first);
+    gatewayMocks.startModule.mockResolvedValue(first);
+    const hook = renderHook(() =>
+      useSatExamController({
+        scheduleId: "schedule",
+        attemptId: "attempt-a",
+        candidateId: "candidate",
+      }),
+    );
+    await waitFor(() => expect(hook.result.current.data).not.toBeNull());
+    await act(async () => {
+      await hook.result.current.commands.startPendingModule();
+    });
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(hook.result.current.state.responses.q1).toMatchObject({
+      answer: "A",
+      markedForReview: true,
+      eliminatedOptionIds: ["B"],
+      annotations: {
+        version: 2,
+        annotations: [],
+        legacyQuestionNote: "Compare the evidence",
+      },
+    });
+  });
+
+  it.each([
+    {
+      label: "missing optional fields",
+      response: { response: "B", markedForReview: false, eliminatedOptions: undefined, annotations: undefined },
+    },
+    {
+      label: "null optional fields",
+      response: { response: "C", markedForReview: true, eliminatedOptions: null, annotations: null },
+    },
+  ])("defaults $label during module hydration", async ({ response }) => {
+    const bootstrap = modulePayload({
+      currentModuleId: "m-1",
+      currentModuleKey: "rw-m1",
+      currentState: "not_started",
+    });
+    const started = modulePayload({
+      currentModuleId: "m-1",
+      currentModuleKey: "rw-m1",
+      currentState: "active",
+    });
+    bootstrap.attempt.responses = [runtimeResponse(response)];
+    started.attempt.responses = bootstrap.attempt.responses;
+    gatewayMocks.bootstrap.mockResolvedValue(bootstrap);
+    gatewayMocks.startModule.mockResolvedValue(started);
+    const hook = renderHook(() =>
+      useSatExamController({
+        scheduleId: "schedule",
+        attemptId: "attempt-a",
+        candidateId: "candidate",
+      }),
+    );
+    await waitFor(() => expect(hook.result.current.data).not.toBeNull());
+    let outcome: Awaited<ReturnType<typeof hook.result.current.commands.startPendingModule>>;
+    await act(async () => {
+      outcome = await hook.result.current.commands.startPendingModule();
+    });
+    expect(outcome).toBe("opened");
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(hook.result.current.state.responses.q1).toMatchObject({
+      answer: response.response,
+      markedForReview: response.markedForReview,
+      eliminatedOptionIds: [],
+      annotations: {
+        version: 2,
+        annotations: [],
+        legacyQuestionNote: "",
+      },
+    });
+  });
+
+  it("keeps a newer visible local draft ahead of a stale bootstrap response", async () => {
+    const first = modulePayload({
+      currentModuleId: "m-1",
+      currentModuleKey: "rw-m1",
+      currentState: "active",
+    });
+    first.attempt.responses = [runtimeResponse({ response: "server-stale", revision: 2 })];
+    persistenceMock.visibleDrafts = {
+      q1: {
+        questionId: "q1",
+        answer: "local-newer",
+        markedForReview: true,
+        eliminatedOptionIds: ["B"],
+        annotations: {
+          version: 2,
+          annotations: [],
+          legacyQuestionNote: "local note",
+        },
+      },
+    };
+    gatewayMocks.bootstrap.mockResolvedValue(first);
+    gatewayMocks.startModule.mockResolvedValue(first);
+    const hook = renderHook(() =>
+      useSatExamController({
+        scheduleId: "schedule",
+        attemptId: "attempt-a",
+        candidateId: "candidate",
+      }),
+    );
+    await waitFor(() => expect(hook.result.current.data).not.toBeNull());
+    await act(async () => {
+      await hook.result.current.commands.startPendingModule();
+    });
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(hook.result.current.state.responses.q1).toMatchObject({
+      answer: "local-newer",
+      markedForReview: true,
+      eliminatedOptionIds: ["B"],
+      annotations: {
+        legacyQuestionNote: "local note",
+      },
+    });
   });
 
   it("T5b: 304 rejection surfaces null with no error when surfaceError=false", async () => {

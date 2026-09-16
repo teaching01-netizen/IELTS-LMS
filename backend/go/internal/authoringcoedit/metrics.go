@@ -74,3 +74,9 @@ func EmitLifecycle(reason CloseReason, outcome Outcome) {
 func EmitManifestMismatch() {
 	telemetry.IncCounter(telemetry.MCoeditGoFreezeManifestMis, "outcome", string(OutcomeConflict))
 }
+
+// EmitFreezeRecovery records an automatic recovery of an expired freezing row.
+// Frozen rows never use this metric because they require explicit reconciliation.
+func EmitFreezeRecovery() {
+	telemetry.IncCounter(telemetry.MCoeditGoFreezeRecovery, "outcome", "expired")
+}

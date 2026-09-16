@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -44,6 +45,7 @@ type fakeControlService struct {
 	freezeToken string
 	manifest    []authoringcoedit.FreezeManifestEntry
 	failFreeze  bool
+	failClose   bool
 	unsigned    int
 }
 
@@ -76,6 +78,7 @@ func newFakeControlService(t *testing.T) *fakeControlService {
 		service.mu.Lock()
 		service.paths = append(service.paths, r.URL.Path)
 		fail := service.failFreeze
+		closeFails := service.failClose
 		manifest := service.manifest
 		token := service.freezeToken
 		service.mu.Unlock()
@@ -88,6 +91,13 @@ func newFakeControlService(t *testing.T) *fakeControlService {
 				return
 			}
 			writeJSON(t, w, authoringcoedit.FreezeResponse{FreezeToken: token, Manifest: manifest})
+		case authoringcoedit.ControlPathClose:
+			if closeFails {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+				return
+			}
+			writeJSON(t, w, map[string]any{"ok": true})
 		default:
 			writeJSON(t, w, map[string]any{"ok": true})
 		}
@@ -151,6 +161,9 @@ func writeJSON(t *testing.T, w http.ResponseWriter, payload any) {
 // sqlmock-backed one, and whose control client points at the fake service.
 func coeditApp(t *testing.T, control *fakeControlService) (*App, sqlmock.Sqlmock) {
 	t.Helper()
+	previousOperationID := coeditLifecycleOperationID
+	coeditLifecycleOperationID = func() string { return "phase4-test-operation" }
+	t.Cleanup(func() { coeditLifecycleOperationID = previousOperationID })
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -198,10 +211,11 @@ func coeditDocumentRows(t *testing.T) *sqlmock.Rows {
 	return sqlmock.NewRows([]string{"id", "organization_id", "exam_id", "draft_version_id", "exam_question_id",
 		"question_revision_id", "schema_version", "field_set", "lifecycle_state", "seed_revision",
 		"materialized_revision", "ydoc_state", "state_vector", "state_hash", "previous_state_hash",
-		"closed_reason", "last_actor_id", "updated_at"}).
+		"closed_reason", "last_actor_id", "updated_at", "state_epoch", "commit_sequence",
+		"freeze_operation_id", "freeze_expires_at"}).
 		AddRow(coeditTestDocID, "org-1", coeditTestExamID, "draft-1", "eq-1", coeditTestRevisionID,
-			authoringcoedit.SchemaVersion, authoringcoedit.FieldSetPrompt, "active", 4, 4,
-			[]byte("state"), []byte("vector"), mustHash(t), nil, nil, coeditTestActorID, time.Now())
+			authoringcoedit.SchemaVersion, authoringcoedit.FieldSetPrompt, "freezing", 4, 4,
+			[]byte("state"), []byte("vector"), mustHash(t), nil, nil, coeditTestActorID, time.Now(), uint64(0), uint64(0), "phase4-test-operation", time.Now().Add(time.Minute))
 }
 
 func mustHash(t *testing.T) []byte {
@@ -218,7 +232,9 @@ func expectFreezing(t *testing.T, mock sqlmock.Sqlmock) {
 	t.Helper()
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("SET lifecycle_state = ?")).WithArgs("freezing", coeditTestDocID, "active", "initializing").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("SET lifecycle_state = ?, freeze_operation_id = ?, freeze_expires_at = ?")).
+		WithArgs("freezing", sqlmock.AnyArg(), sqlmock.AnyArg(), coeditTestDocID, "active", "initializing").
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 }
 
@@ -226,18 +242,61 @@ func expectReopen(t *testing.T, mock sqlmock.Sqlmock) {
 	t.Helper()
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("SET lifecycle_state = ?")).WithArgs("active", coeditTestDocID, "freezing", "frozen").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("SET lifecycle_state = ?, freeze_operation_id = NULL, freeze_expires_at = NULL")).
+		WithArgs("active", coeditTestDocID, "freezing", "frozen", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 }
 
 func expectCloseDocuments(t *testing.T, mock sqlmock.Sqlmock, reason authoringcoedit.CloseReason) {
 	t.Helper()
+	expectFamilyClose(t, mock, "authoring_coedit_documents", reason, nil)
+}
+
+// expectWorkspaceCloseDocuments asserts the EXAM ROOM family's close. The two
+// families' statements differ only by their table, so the expectation has to
+// name the table to prove which one ran.
+func expectWorkspaceCloseDocuments(t *testing.T, mock sqlmock.Sqlmock, reason authoringcoedit.CloseReason) {
+	t.Helper()
+	expectFamilyClose(t, mock, "authoring_coedit_workspaces", reason, nil)
+}
+
+// expectFamilyClose asserts one room family's close transaction, optionally
+// making its UPDATE fail so a caller's independence can be observed.
+func expectFamilyClose(
+	t *testing.T,
+	mock sqlmock.Sqlmock,
+	table string,
+	reason authoringcoedit.CloseReason,
+	failure error,
+) {
+	t.Helper()
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("SET lifecycle_state = \\?, closed_reason = \\?").
-		WithArgs("closed", string(reason), coeditTestDocID, "closed").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectation := mock.ExpectExec(regexp.QuoteMeta("UPDATE " + table)).
+		WithArgs("closed", string(reason), coeditTestDocID, "closed")
+	if failure != nil {
+		expectation.WillReturnError(failure)
+		mock.ExpectRollback()
+		return
+	}
+	expectation.WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
+}
+
+// coeditTestFamilies builds one document name per room family: the v1
+// question-scoped prompt room and the v2 exam-level workspace room.
+func coeditTestFamilies(t *testing.T) []authoringcoedit.DocumentName {
+	t.Helper()
+	prompt, err := authoringcoedit.NewDocumentName(coeditTestDocID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := authoringcoedit.NewWorkspaceDocumentName(coeditTestDocID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []authoringcoedit.DocumentName{prompt, workspace}
 }
 
 func expectManifestLoad(t *testing.T, mock sqlmock.Sqlmock) {
@@ -248,6 +307,16 @@ func expectManifestLoad(t *testing.T, mock sqlmock.Sqlmock) {
 		WithArgs(coeditTestDocID).
 		WillReturnRows(coeditDocumentRows(t))
 	mock.ExpectCommit()
+}
+
+func expectManifestMismatchRollback(t *testing.T, mock sqlmock.Sqlmock) {
+	t.Helper()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM authoring_coedit_documents WHERE id = ?")).
+		WithArgs(coeditTestDocID).
+		WillReturnRows(coeditDocumentRows(t))
+	mock.ExpectRollback()
 }
 
 // --- capability posture ----------------------------------------------------
@@ -325,7 +394,7 @@ func TestPublishGuardRejectsAMismatchedManifest(t *testing.T) {
 	mock.ExpectQuery("FROM authoring_coedit_documents").WithArgs(coeditTestExamID, "closed").
 		WillReturnRows(coeditDocumentRows(t))
 	expectFreezing(t, mock)
-	expectManifestLoad(t, mock)
+	expectManifestMismatchRollback(t, mock)
 	expectReopen(t, mock)
 	ran := false
 
@@ -401,6 +470,7 @@ func TestScopeCloseGuardFlushesThenClosesWithTheMatchingReason(t *testing.T) {
 	mock.ExpectQuery("FROM authoring_coedit_documents").WithArgs("draft-1", "closed").
 		WillReturnRows(coeditDocumentRows(t))
 	expectFreezing(t, mock)
+	expectManifestLoad(t, mock)
 	expectCloseDocuments(t, mock, authoringcoedit.CloseDraftReplaced)
 	ran := false
 
@@ -412,8 +482,8 @@ func TestScopeCloseGuardFlushesThenClosesWithTheMatchingReason(t *testing.T) {
 	if !ran {
 		t.Fatal("the destructive mutation must run after the flush")
 	}
-	if !control.seen(authoringcoedit.ControlPathFlush) {
-		t.Fatalf("draft replacement must flush provider output, saw %v", control.calls())
+	if control.seen(authoringcoedit.ControlPathFlush) {
+		t.Fatalf("fenced replacement must use the operation-owned freeze/final-store path, saw %v", control.calls())
 	}
 	if !control.seen(authoringcoedit.ControlPathClose) {
 		t.Fatal("draft replacement must close the affected rooms")
@@ -426,6 +496,7 @@ func TestScopeCloseGuardLeavesRoomsOpenWhenTheMutationFails(t *testing.T) {
 	mock.ExpectQuery("FROM authoring_coedit_documents").WithArgs("draft-1", "closed").
 		WillReturnRows(coeditDocumentRows(t))
 	expectFreezing(t, mock)
+	expectManifestLoad(t, mock)
 	expectReopen(t, mock)
 
 	rec := httptest.NewRecorder()
@@ -435,6 +506,70 @@ func TestScopeCloseGuardLeavesRoomsOpenWhenTheMutationFails(t *testing.T) {
 
 	if control.seen(authoringcoedit.ControlPathClose) {
 		t.Fatal("a failed replacement must not close the rooms")
+	}
+}
+
+// --- v1/v2 close independence ---------------------------------------------
+//
+// Both room families are closed for one destructive mutation, in two separate
+// service calls over two tables: v1 question-scoped prompt rooms and the v2
+// exam-level workspace room. An early return or an else-if between them would
+// leave the workspace open on a draft that was just replaced — and the next
+// open would rebind it, which is the stale-write condition the freeze protocol
+// exists to prevent. These tests pin that neither family hides behind the
+// other's failure.
+
+func TestCloseAfterSuccessClosesTheWorkspaceWhenThePromptCloseFails(t *testing.T) {
+	control := newFakeControlService(t)
+	app, mock := coeditApp(t, control)
+
+	expectFamilyClose(t, mock, "authoring_coedit_documents", authoringcoedit.CloseDraftReplaced,
+		errors.New("prompt close exploded"))
+	expectWorkspaceCloseDocuments(t, mock, authoringcoedit.CloseDraftReplaced)
+
+	err := coeditCloseAfterSuccess(context.Background(), app, coeditTestFamilies(t),
+		authoringcoedit.CoeditLifecycleOperation{FreezeOperationID: "phase4-test-operation"},
+		authoringcoedit.CloseDraftReplaced)
+	if err == nil {
+		t.Fatal("a failed durable close must be reported, not swallowed")
+	}
+	if !control.seen(authoringcoedit.ControlPathClose) {
+		t.Fatalf("the affected rooms must be closed through the service, saw %v", control.calls())
+	}
+}
+
+func TestCloseAfterSuccessClosesThePromptRoomWhenTheWorkspaceCloseFails(t *testing.T) {
+	control := newFakeControlService(t)
+	app, mock := coeditApp(t, control)
+
+	expectCloseDocuments(t, mock, authoringcoedit.CloseWorkbookReplaced)
+	expectFamilyClose(t, mock, "authoring_coedit_workspaces", authoringcoedit.CloseWorkbookReplaced,
+		errors.New("workspace close exploded"))
+
+	err := coeditCloseAfterSuccess(context.Background(), app, coeditTestFamilies(t),
+		authoringcoedit.CoeditLifecycleOperation{FreezeOperationID: "phase4-test-operation"},
+		authoringcoedit.CloseWorkbookReplaced)
+	if err == nil {
+		t.Fatal("a failed durable close must be reported, not swallowed")
+	}
+}
+
+func TestCloseAfterSuccessStillClosesBothFamiliesWhenTheServiceCloseFails(t *testing.T) {
+	control := newFakeControlService(t)
+	control.failClose = true
+	app, mock := coeditApp(t, control)
+
+	// The durable close is attempted even though the live room cannot be told:
+	// the destructive mutation already committed, so a room left writable in
+	// MySQL would be the stale writer on the next open.
+	expectCloseDocuments(t, mock, authoringcoedit.CloseExamPublished)
+	expectWorkspaceCloseDocuments(t, mock, authoringcoedit.CloseExamPublished)
+
+	err := coeditCloseAfterSuccess(context.Background(), app, coeditTestFamilies(t),
+		authoringcoedit.CoeditLifecycleOperation{FreezeOperationID: "phase4-test-operation"},
+		authoringcoedit.CloseExamPublished)
+	if err == nil {
+		t.Fatal("an unreachable control service must surface as an error")
 	}
 }
 
@@ -473,6 +608,7 @@ func TestQuestionDeleteGuardClosesTheRoomWithQuestionDeleted(t *testing.T) {
 	mock.ExpectQuery("FROM authoring_coedit_documents").WithArgs(coeditTestExamID, "closed").
 		WillReturnRows(coeditDocumentRows(t))
 	expectFreezing(t, mock)
+	expectManifestLoad(t, mock)
 	expectCloseDocuments(t, mock, authoringcoedit.CloseQuestionDeleted)
 	ran := false
 
@@ -501,9 +637,26 @@ func TestControlClientSignsEveryCall(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := app.CoeditControl.Renew(context.Background(), authoringcoedit.RenewRequest{
+		FreezeToken:       "lease-1",
+		FreezeOperationID: "phase4-test-operation",
+		FreezeExpiresAt:   time.Now().Add(time.Minute).Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	control.mu.Lock()
 	defer control.mu.Unlock()
 	if control.unsigned != 0 {
 		t.Fatalf("every private call must be signed, saw %d unsigned", control.unsigned)
+	}
+	foundRenew := false
+	for _, path := range control.paths {
+		if path == authoringcoedit.ControlPathRenew {
+			foundRenew = true
+			break
+		}
+	}
+	if !foundRenew {
+		t.Fatalf("renew call was not sent, saw %v", control.paths)
 	}
 }

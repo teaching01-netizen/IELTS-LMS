@@ -88,6 +88,11 @@ export const SAT_COPY = {
   },
   directions: {
     beginModule: "Begin module",
+    // Phase 4 (kill the silent 0:00): auto-entry owns the primary path, so the
+    // screen says the module is opening and the button is recovery-only.
+    startingModule: "Starting your module" + "…",
+    autoEntryNotice:
+      "Your module opens automatically. If it does not, this button becomes available.",
     timerBegins: "The timer begins when you start.",
     leaveExam: "Leave exam",
     starting: "Starting" + "\u2026",
@@ -102,6 +107,15 @@ export const SAT_COPY = {
   transitions: {
     waitingForBreak: "Waiting for the break to start",
     onBreak: "On break",
+    // Phase 4: the break countdown can legitimately read 0:00 while the server
+    // finishes the section advance, so the surface names the entry progress
+    // rather than freezing there with no explanation.
+    startingNextSection: "Starting your next section",
+    startingNextSectionBody:
+      "You do not need to do anything. This screen continues on its own.",
+    retryingNextSection: "Still opening your next section",
+    retryingNextSectionBody:
+      "Your answers are safe. Keep this screen open and it continues automatically.",
     breakStartsAutomatically: "The break starts automatically. You do not need to do anything.",
     nextOpensAutomatically: "Your next section opens automatically when this ends.",
     stuckHelp: "If this reaches zero and nothing happens, wait 30 seconds then reload \u2014 answers are saved.",

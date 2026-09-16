@@ -1,13 +1,11 @@
-// Entry queue retry (plan C3/D3): the check-in wave is a queue, not an
-// outage. ENTRY_GATE over-limit check-ins get 429 + {tier: student-entry,
-// retryAfterSecs, queuePosition} + Retry-After header. Clients render the
-// position + countdown and auto-retry at Retry-After with jitter — never
-// tight-retry (that recreates the DB storm the gate absorbed).
+// Entry admission retry (plan C3/D3): the check-in wave is bounded retry,
+// not a server-owned queue. ENTRY_GATE over-limit check-ins get 429 +
+// {tier: student-entry, retryAfterSeconds} + Retry-After header. Clients
+// retry at that floor with jitter — never tight-retry.
 
 export interface EntryQueueState {
   queued: boolean;
   retryAfterSecs: number;
-  queuePosition: number | null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -33,12 +31,12 @@ function headerRetryAfter(error: unknown): number | null {
   return null;
 }
 
-// parseEntryQueueError maps a failed studentEntry call to queue state.
-// queued=false means surface the error immediately (not a queue signal).
-// Only HTTP 429 (or RATE_LIMIT_EXCEEDED codes) queue; everything else
+// parseEntryQueueError maps a failed studentEntry call to bounded retry state.
+// queued=false means surface the error immediately (not a retry signal).
+// Only HTTP 429 (or RATE_LIMIT_EXCEEDED codes) enter retry; everything else
 // passes through as a hard error.
 export function parseEntryQueueError(error: unknown): EntryQueueState {
-  const idle: EntryQueueState = { queued: false, retryAfterSecs: 0, queuePosition: null };
+  const idle: EntryQueueState = { queued: false, retryAfterSecs: 0 };
   const rec = asRecord(error);
   if (!rec) {
     return idle;
@@ -54,11 +52,9 @@ export function parseEntryQueueError(error: unknown): EntryQueueState {
   const fromDetails =
     finiteNumber(details['retryAfterSecs']) ?? finiteNumber(details['retryAfterSeconds']);
   const retryAfterSecs = fromDetails ?? headerRetryAfter(error) ?? 5;
-  const queuePosition = finiteNumber(details['queuePosition']);
   return {
     queued: true,
     retryAfterSecs: Math.max(1, Math.floor(retryAfterSecs)),
-    queuePosition: queuePosition !== null ? Math.max(1, Math.floor(queuePosition)) : null,
   };
 }
 

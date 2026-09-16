@@ -1,4 +1,7 @@
 import { useMemo, useState } from "react";
+import { useStudentExamPageLock } from "@components/student/layout/useStudentExamPageLock";
+import { useStudentExamViewport } from "@components/student/layout/useStudentExamViewport";
+import { useStudentFocusedControlVisibility } from "@components/student/layout/useStudentFocusedControlVisibility";
 import type { DeliveredQuestion } from "../../../features/student-delivery/contracts/assessmentDelivery";
 import type { SatQuestionResponseDraft } from "../../../features/student-delivery/domain/satResponses";
 import { useSatReadingPreferences } from "../../../features/student-delivery/hooks/useSatReadingPreferences";
@@ -85,9 +88,23 @@ const mathQuestion: DeliveredQuestion = {
   },
 };
 
+const sprQuestion: DeliveredQuestion = {
+  ...readingQuestion,
+  examQuestionId: "debug-spr-q1",
+  questionId: "debug-spr-question",
+  questionType: "student_produced_response",
+  answer: {
+    kind: "student_produced_response",
+    normalizeFraction: true,
+    normalizeDecimal: true,
+    numericTolerance: null,
+  },
+};
+
 export function SatAccessibilityDebugRoute() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const math = params.get("mode") === "math";
+  const spr = params.get("mode") === "spr";
   const paused = params.get("paused") === "1";
   const initialTool =
     params.get("tool") === "calculator"
@@ -102,14 +119,21 @@ export function SatAccessibilityDebugRoute() {
   const [questionIndex, setQuestionIndex] = useState(0);
   const [eliminationMode, setEliminationMode] = useState(false);
   const reading = useSatReadingPreferences("debug-schedule", "debug-attempt");
+  const examViewport = useStudentExamViewport(true);
+  useStudentExamPageLock(true);
+  useStudentFocusedControlVisibility(examViewport.keyboardOpen);
   const [response, setResponse] = useState<SatQuestionResponseDraft>({
-    questionId: math ? mathQuestion.examQuestionId : readingQuestion.examQuestionId,
+    questionId: math
+      ? mathQuestion.examQuestionId
+      : spr
+        ? sprQuestion.examQuestionId
+        : readingQuestion.examQuestionId,
     answer: "",
     markedForReview: false,
     eliminatedOptionIds: [],
     annotations: { version: 2, annotations: [], legacyQuestionNote: "" },
   });
-  const question = math ? mathQuestion : readingQuestion;
+  const question = math ? mathQuestion : spr ? sprQuestion : readingQuestion;
   const navigationItems = [0, 1, 2].map((index) => ({
     id: `debug-${index}`,
     index,
@@ -130,6 +154,8 @@ export function SatAccessibilityDebugRoute() {
         )}
         remainingLabel="27:14"
         remainingSeconds={1634}
+        examHeight={examViewport.stableExamHeight}
+        keyboardOpen={examViewport.keyboardOpen}
         candidateName="Accessibility Candidate"
         questionIndex={questionIndex}
         questionCount={3}

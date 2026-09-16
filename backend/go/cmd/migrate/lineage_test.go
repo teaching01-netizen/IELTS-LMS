@@ -49,11 +49,14 @@ func migDir(t *testing.T) string {
 // (answer fencing columns) — count/max bumped 58->59. SAT authoring realtime
 // Phase 02 landed 0060 (authoring replay indexes) — count/max bumped 59->60.
 // Authoring prompt co-editing landed 0061 (co-edit documents) — count/max
-// bumped 60->61.
+// bumped 60->61. SAT authoring workspaces landed 0062 (exam-level co-edit
+// rooms), co-edit capacity landed 0063 (state_vector width), and lifecycle /
+// epoch metadata landed 0064 — count/max bumped 61->64; 0062 shipped without
+// bumping the pin, which this update also repairs.
 // Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 61
-	pinnedMigrationMax   = 61
+	pinnedMigrationFiles = 64
+	pinnedMigrationMax   = 64
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

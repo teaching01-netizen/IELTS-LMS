@@ -25,6 +25,16 @@ COPY services/authoring-coedit/src ./services/authoring-coedit/src
 COPY src/features/exam-authoring/editor/schema ./src/features/exam-authoring/editor/schema
 COPY src/features/exam-authoring/editor/richContent.ts src/features/exam-authoring/editor/richContentIdentity.ts ./src/features/exam-authoring/editor/
 COPY src/features/exam-authoring/contracts ./src/features/exam-authoring/contracts
+# The ONE workspace-command envelope. The service validates the frames it
+# relays with the same module the browser provider parses them with, so a
+# command cannot be acceptable at one end and rejected at the other. That file
+# must therefore exist in this image; it is dependency-free by construction.
+COPY src/features/exam-authoring/realtime/coedit/workspaceCommands.ts ./src/features/exam-authoring/realtime/coedit/
+COPY src/features/exam-authoring/realtime/coedit/workspaceSeed.ts ./src/features/exam-authoring/realtime/coedit/
+# Durable epoch/cache metadata is dependency-free, but it validates the same
+# opaque room names as the browser contract, so its small identity dependency
+# travels with it into the image as well.
+COPY src/features/exam-authoring/realtime/coedit/protocol.ts src/features/exam-authoring/realtime/coedit/documentIdentity.ts ./src/features/exam-authoring/realtime/coedit/
 
 EXPOSE 1235
 

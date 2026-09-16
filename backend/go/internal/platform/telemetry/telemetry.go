@@ -37,6 +37,8 @@ var metricHelpText = map[string]string{
 	MProjectionLag:                 "Grading projection lag in seconds.",
 	MGradingProjectionCorrupt:      "Total corrupt grading result projections by column.",
 	MRatelimitDeniedTotal:          "Total rate-limit denials by tier and key class.",
+	MRatelimitDBErrorTotal:         "Total distributed rate-limit database errors by tier and key class.",
+	MRatelimitCapacityTotal:        "Total rate-limit capacity rejections by tier and key class.",
 	MAuthoringOpTotal:              "Total authoring mutations by operation and outcome (save, create, batch, bulk, commit, publish).",
 	MAuthoringEventPublishTotal:    "Total authoring realtime events appended in-tx by operation and outcome.",
 	MAuthoringEventPublishFailures: "Total authoring realtime event append failures by operation (rolls the mutation back).", MAuthoringWSConnectionsCurrent: "Authoring sockets currently subscribed, sampled at every accept and close.",
@@ -56,7 +58,8 @@ var metricHelpText = map[string]string{
 	MPresenceTouch:                     "Total presence memory touches (D2 zero-SQL beats).",
 	MPresenceFlush:                     "Total presence flush batches (D2 60s drain).",
 	MEntryGateAdmit:                    "Total entry-gate admissions (D3 check-ins).",
-	MEntryGateQueued:                   "Total entry-gate 429s with queue position (D3).",
+	MEntryGateQueued:                   "Total entry-gate bounded-retry 429s (D3).",
+	MEntryGateCapacityTotal:            "Total entry-gate capacity rejections by tier and key class.",
 	MRollupRefresh:                     "Total proctor rollup refreshes (D4 worker).",
 	MRollupLag:                         "Freshness in seconds of the proctor rollup row (D4 lag).",
 	MShedExam:                          "Total requests served under exam shed budgets (E2).",
@@ -72,6 +75,7 @@ var metricHelpText = map[string]string{
 	MPresenceFlushRows:                 "Total presence rows flushed to the DB (D2 drain size).",
 	MOutboxClaimed:                     "Total outbox events claimed by the worker.",
 	MOutboxAcked:                       "Total outbox events acknowledged by the worker.",
+	MCoeditGoFreezeRecovery:            "Total co-edit freezing rows recovered after their lifecycle lease expired.",
 }
 
 // Metric name constants (plan 69).
@@ -123,16 +127,17 @@ const (
 	MWSLeaseFailures  = "websocket_lease_acquire_failures_total"
 	MWSSlowDisconnect = "websocket_slow_client_disconnects_total"
 
-	MVersionCacheHit  = "version_cache_hit_total"
-	MVersionCacheMiss = "version_cache_miss_total"
-	MPresenceTouch    = "presence_touch_total"
-	MPresenceFlush    = "presence_flush_total"
-	MEntryGateAdmit   = "entry_gate_admit_total"
-	MEntryGateQueued  = "entry_gate_queued_total"
-	MRollupRefresh    = "proctor_rollup_refresh_total"
-	MRollupLag        = "proctor_rollup_lag_seconds"
-	MShedExam         = "shed_exam_requests_total"
-	MQueryTimeout     = "query_budget_exhausted_total"
+	MVersionCacheHit        = "version_cache_hit_total"
+	MVersionCacheMiss       = "version_cache_miss_total"
+	MPresenceTouch          = "presence_touch_total"
+	MPresenceFlush          = "presence_flush_total"
+	MEntryGateAdmit         = "entry_gate_admit_total"
+	MEntryGateQueued        = "entry_gate_queued_total"
+	MEntryGateCapacityTotal = "http_entry_gate_capacity_rejected_total"
+	MRollupRefresh          = "proctor_rollup_refresh_total"
+	MRollupLag              = "proctor_rollup_lag_seconds"
+	MShedExam               = "shed_exam_requests_total"
+	MQueryTimeout           = "query_budget_exhausted_total"
 
 	MSessionCacheHit   = "session_cache_hit_total"
 	MSessionCacheMiss  = "session_cache_miss_total"
@@ -146,7 +151,9 @@ const (
 	MOutboxClaimed     = "outbox_claimed_total"
 	MOutboxAcked       = "outbox_acked_total"
 
-	MRatelimitDeniedTotal = "http_ratelimit_denied_total"
+	MRatelimitDeniedTotal   = "http_ratelimit_denied_total"
+	MRatelimitDBErrorTotal  = "http_ratelimit_db_error_total"
+	MRatelimitCapacityTotal = "http_ratelimit_capacity_rejected_total"
 
 	MAuthoringOpTotal = "authoring_operation_total"
 	// Phase 02 publish-side series: outcome rate of the in-tx event append,
@@ -221,6 +228,7 @@ const (
 	MCoeditGoGuardTotal        = "authoring_coedit_go_guard_total"
 	MCoeditGoLifecycleTotal    = "authoring_coedit_go_lifecycle_total"
 	MCoeditGoFreezeManifestMis = "authoring_coedit_go_manifest_mismatch_total"
+	MCoeditGoFreezeRecovery    = "authoring_coedit_go_freeze_recovery_total"
 )
 
 // V2 batch outcome label values.
@@ -314,6 +322,7 @@ func Names() []string {
 		MPresenceFlush,
 		MEntryGateAdmit,
 		MEntryGateQueued,
+		MEntryGateCapacityTotal,
 		MRollupRefresh,
 		MRollupLag,
 		MShedExam,
@@ -330,6 +339,8 @@ func Names() []string {
 		MOutboxClaimed,
 		MOutboxAcked,
 		MRatelimitDeniedTotal,
+		MRatelimitDBErrorTotal,
+		MRatelimitCapacityTotal,
 		MAuthoringOpTotal,
 		MAuthoringEventPublishTotal,
 		MAuthoringEventPublishFailures,
@@ -362,5 +373,6 @@ func Names() []string {
 		MCoeditGoGuardTotal,
 		MCoeditGoLifecycleTotal,
 		MCoeditGoFreezeManifestMis,
+		MCoeditGoFreezeRecovery,
 	}
 }

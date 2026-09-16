@@ -14,12 +14,14 @@ export interface SatQuestionHeaderProps {
 export function SatQuestionHeader(props: SatQuestionHeaderProps) {
   return (
     <div className="flex min-h-11 items-stretch border-b border-[var(--sat-divider)] bg-[var(--sat-surface-subtle)]">
-      <div
-        className="grid w-11 shrink-0 place-items-center bg-[var(--sat-text)] sat-type-control-primary font-semibold text-[var(--sat-background)]"
-        aria-label={`Question ${props.questionNumber}`}
-      >
+      {/* Semantic question heading (mobile a11y Task 6): the number cell is a
+          real h2 whose accessible name is "Question N" from real text — never
+          an aria-label on a generic div. The "Question " prefix is sr-only so
+          the visible Bluebook cell keeps its number-only styling. */}
+      <h2 className="grid w-11 shrink-0 place-items-center bg-[var(--sat-text)] sat-type-control-primary font-semibold text-[var(--sat-background)]">
+        <span className="sr-only">Question </span>
         {props.questionNumber}
-      </div>
+      </h2>
       <button
         type="button"
         onClick={props.onToggleReview}

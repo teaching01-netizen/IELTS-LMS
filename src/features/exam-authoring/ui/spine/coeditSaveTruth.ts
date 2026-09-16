@@ -17,8 +17,11 @@ export type { CoeditSaveDisplayStatus } from "../../realtime/connectionCopy";
  * is always the LEAST advanced of the two: a prompt acknowledgement can never
  * mark a pending field patch saved, and a field save can never mark an
  * unacknowledged prompt saved. This is the UI half of the design rule "a client
- * may show Saved only after receiving an acknowledgement for the exact
- * state-vector hash" (2026-09-13 design).
+ * may show Saved only after receiving an acknowledgement for its exact current
+ * state VECTOR" — see "Save truth: the state vector" in
+ * docs/sat-authoring-coedit.md. (The rule used to be written with "hash"; the
+ * identity has been the vector itself since the two SHA-256 implementations
+ * disagreed at some lengths and left rooms permanently unsaved.)
  */
 
 /**

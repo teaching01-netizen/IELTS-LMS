@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { ProtectedInput } from '../ProtectedInput';
 
@@ -405,5 +405,142 @@ describe('ProtectedInput', () => {
 
     expect(input.value).toBe(longWord);
     expect(onLiveValueChange).toHaveBeenLastCalledWith(longWord);
+  });
+});
+
+/**
+ * Bug 3 preservation: a native edit React never observed must survive an
+ * unrelated parent render — which re-applies the controlled value over the DOM
+ * — and still reach the answer owner on blur/lifecycle. A genuine controlled
+ * value change (hydration) must still win, so stale rescue text is never
+ * replayed over a fresh server value (FIX-02).
+ */
+describe('ProtectedInput native intent retention (Bug 3 preservation)', () => {
+  afterEach(() => {
+    saveStudentAuditEventMock.mockReset();
+    flushAnswerDurabilityNowMock.mockReset();
+    vi.restoreAllMocks();
+  });
+
+  function renderControlledInput(initialValue: string) {
+    const commits: string[] = [];
+    let redraw: () => void = () => undefined;
+
+    function Harness() {
+      const [answer, setAnswer] = React.useState(initialValue);
+      const [renderCount, setRenderCount] = React.useState(0);
+      redraw = () => setRenderCount((count) => count + 1);
+      return (
+        <ProtectedInput
+          security={{ preventAutofill: true, preventAutocorrect: true } as any}
+          name="answer"
+          value={answer}
+          data-render={renderCount}
+          onChange={(event) => {
+            commits.push(event.target.value);
+            setAnswer(event.target.value);
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+    return { commits, redraw };
+  }
+
+  it('commits a DOM-ahead native edit after an unrelated parent render resets the input', () => {
+    const { commits, redraw } = renderControlledInput('base');
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const typed = 'base plus unseen typing';
+
+    // Native-only edit: the DOM advances while React never sees a change.
+    input.value = typed;
+    act(() => redraw());
+    fireEvent.blur(input);
+
+    expect(commits).toEqual([typed]);
+    expect(input.value).toBe(typed);
+  });
+
+  it('commits the retained native edit on pagehide after an unrelated parent render', () => {
+    const { commits, redraw } = renderControlledInput('base');
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+
+    input.value = 'lifecycle recovery';
+    act(() => redraw());
+    fireEvent(window, new Event('pagehide'));
+
+    expect(commits).toEqual(['lifecycle recovery']);
+    expect(flushAnswerDurabilityNowMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('commits a native clear of the answer after an unrelated parent render', () => {
+    const { commits, redraw } = renderControlledInput('previous answer');
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+
+    input.value = '';
+    act(() => redraw());
+    fireEvent.blur(input);
+
+    expect(commits).toEqual(['']);
+    expect(input.value).toBe('');
+  });
+
+  it('never replays a retained edit onto a reused control for another question', () => {
+    const commits: string[] = [];
+
+    function SlotHarness({ name, value }: { name: string; value: string }) {
+      return (
+        <ProtectedInput
+          security={{ preventAutofill: true, preventAutocorrect: true } as any}
+          name={name}
+          value={value}
+          onChange={(event) => {
+            commits.push(`${name}:${event.target.value}`);
+          }}
+        />
+      );
+    }
+
+    const view = render(<SlotHarness name="q1" value="same" />);
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    input.value = 'typed for q1';
+
+    // The same DOM node is reused for q2, whose answer happens to be identical:
+    // the q1 edit must not be committed to q2.
+    view.rerender(<SlotHarness name="q2" value="same" />);
+    fireEvent.blur(input);
+
+    expect(commits).toEqual([]);
+    expect(input.value).toBe('same');
+  });
+
+  it('does not replay a pre-hydration native edit over a controlled value change', () => {
+    const commits: string[] = [];
+
+    function HydrationHarness({ value }: { value: string }) {
+      return (
+        <ProtectedInput
+          security={{ preventAutofill: true, preventAutocorrect: true } as any}
+          name="answer"
+          value={value}
+          onChange={(event) => {
+            commits.push(event.target.value);
+          }}
+        />
+      );
+    }
+
+    const view = render(<HydrationHarness value="abc" />);
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    input.value = 'abcd';
+
+    // Server hydration replaces the answer while the DOM holds an uncommitted
+    // edit: the controlled value change is the acknowledgement/supersede point.
+    view.rerender(<HydrationHarness value="hydrated" />);
+    fireEvent.blur(input);
+
+    expect(commits).toEqual([]);
+    expect(input.value).toBe('hydrated');
   });
 });

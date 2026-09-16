@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useAuthSession, type StudentQueuedAdmission } from "../../auth/api/authSession";
+import { useAuthSession } from "../../auth/api/authSession";
 import { studentAttemptRepository } from "@student/application/studentAttemptFacade";
 import {
   getStudentEntrySchedule,
@@ -102,103 +102,15 @@ function loadCandidateProfile(
   }
 }
 
-const QUEUE_TICKET_STORAGE_PREFIX = "ielts-student-queue-ticket:";
-const QUEUE_POLL_FLOOR_MS = 500;
-const QUEUE_POLL_DEFAULT_MS = 1500;
-
-interface PersistedStudentQueue {
-  ticket: StudentQueuedAdmission;
-  payload: EntryFormData;
-}
+const QUEUE_POLL_FLOOR_MS = 1000;
 
 interface QueuePollFailure {
   message: string;
-  ticketId: string;
-  position: number;
   attempts: number;
 }
 
-function queueStorageKey(scheduleId: string): string {
-  return `${QUEUE_TICKET_STORAGE_PREFIX}${scheduleId}`;
-}
-
-function isPersistedStudentQueue(value: unknown): value is PersistedStudentQueue {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const candidate = value as { ticket?: unknown; payload?: unknown };
-  if (typeof candidate.ticket !== "object" || candidate.ticket === null) {
-    return false;
-  }
-  if (typeof candidate.payload !== "object" || candidate.payload === null) {
-    return false;
-  }
-  const ticket = candidate.ticket as { state?: unknown; ticketId?: unknown; position?: unknown };
-  const payload = candidate.payload as {
-    wcode?: unknown;
-    email?: unknown;
-    studentName?: unknown;
-    nickname?: unknown;
-    ieltsCourse?: unknown;
-  };
-  return (
-    ticket.state === "queued" &&
-    typeof ticket.ticketId === "string" &&
-    ticket.ticketId.length > 0 &&
-    typeof ticket.position === "number" &&
-    typeof payload.wcode === "string" &&
-    payload.wcode.length > 0 &&
-    typeof payload.email === "string" &&
-    typeof payload.studentName === "string" &&
-    typeof payload.nickname === "string" &&
-    typeof payload.ieltsCourse === "string"
-  );
-}
-
-function loadPersistedStudentQueue(scheduleId: string): PersistedStudentQueue | null {
-  if (!scheduleId || typeof window === "undefined") {
-    return null;
-  }
-  try {
-    const raw = window.sessionStorage.getItem(queueStorageKey(scheduleId));
-    if (!raw) {
-      return null;
-    }
-    const parsed: unknown = JSON.parse(raw);
-    return isPersistedStudentQueue(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function persistStudentQueue(
-  scheduleId: string,
-  ticket: StudentQueuedAdmission,
-  payload: EntryFormData
-): void {
-  if (!scheduleId || typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.sessionStorage.setItem(queueStorageKey(scheduleId), JSON.stringify({ ticket, payload }));
-  } catch {
-    // Queue polling still works in memory when storage is unavailable.
-  }
-}
-
-function clearPersistedStudentQueue(scheduleId: string): void {
-  if (!scheduleId || typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.sessionStorage.removeItem(queueStorageKey(scheduleId));
-  } catch {
-    // Storage cleanup is best-effort.
-  }
-}
-
-function queueEtaSeconds(pollAfterMs: number | undefined): number {
-  const floored = Math.max(QUEUE_POLL_FLOOR_MS, pollAfterMs || QUEUE_POLL_DEFAULT_MS);
+function queueEtaSeconds(retryAfterMs: number): number {
+  const floored = Math.max(QUEUE_POLL_FLOOR_MS, retryAfterMs);
   return Math.max(1, Math.round(floored / 1000));
 }
 
@@ -317,12 +229,8 @@ export function StudentEntryRoute() {
     return stored ? normalizeAccessCode(stored) : "";
   }, [scheduleId, searchParams]);
 
-  const [restoredQueue] = useState<PersistedStudentQueue | null>(() =>
-    scheduleId ? loadPersistedStudentQueue(scheduleId) : null
-  );
   const [formData, setFormData] = useState<EntryFormData>(
-    () =>
-      restoredQueue?.payload ?? {
+    () => ({
         wcode: initialWcode,
         email:
           scheduleId && initialWcode
@@ -340,63 +248,30 @@ export function StudentEntryRoute() {
           scheduleId && initialWcode
             ? (loadCandidateProfile(scheduleId, initialWcode)?.ieltsCourse ?? "")
             : "",
-      }
+      })
   );
   const [errors, setErrors] = useState<Partial<Record<keyof EntryFormData, string>>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [queuedAdmission, setQueuedAdmission] = useState<StudentQueuedAdmission | null>(
-    () => restoredQueue?.ticket ?? null
-  );
-  const [queuedPayload, setQueuedPayload] = useState<EntryFormData | null>(
-    () => restoredQueue?.payload ?? null
-  );
+  const [queuedAdmission, setQueuedAdmission] = useState(false);
+  const [queuedPayload, setQueuedPayload] = useState<EntryFormData | null>(null);
+  const [queueRetryAfterMs, setQueueRetryAfterMs] = useState(QUEUE_POLL_FLOOR_MS);
   const submittingRef = useRef(false);
   const [queuePollFailure, setQueuePollFailure] = useState<QueuePollFailure | null>(null);
-  const [lastQueuedTicket, setLastQueuedTicket] = useState<StudentQueuedAdmission | null>(
-    () => restoredQueue?.ticket ?? null
-  );
   const pollAttemptsRef = useRef(0);
 
   const mountSnapshotRef = useRef({
     initialWcode,
     scheduleId,
-    hadRestoredQueue: Boolean(restoredQueue),
   });
   useEffect(() => {
-    // Skip reset while the mounted schedule/wcode still matches the restored
-    // queue ticket, so a reload resumes polling instead of wiping the
-    // recovered position. Any in-place schedule/wcode change falls through
-    // and clears the queue. Snapshot comparison (not a one-shot flag) keeps
-    // this correct under StrictMode double-effect invocation.
+    // Skip reset while the mounted schedule/wcode still matches the initial
+    // form. Any in-place schedule/wcode change resets the retry payload and
+    // queue state. Snapshot comparison keeps this correct under StrictMode
+    // double-effect invocation.
     const snapshot = mountSnapshotRef.current;
-    if (
-      snapshot.hadRestoredQueue &&
-      scheduleId === snapshot.scheduleId &&
-      initialWcode === snapshot.initialWcode
-    ) {
+    if (scheduleId === snapshot.scheduleId && initialWcode === snapshot.initialWcode) {
       return;
-    }
-    // Navigated to a different schedule that already holds a persisted
-    // ticket (e.g. back-navigation): restore it instead of wiping it.
-    if (scheduleId && scheduleId !== snapshot.scheduleId) {
-      const persisted = loadPersistedStudentQueue(scheduleId);
-      if (persisted) {
-        setFormData(persisted.payload);
-        setErrors({});
-        setSubmitError(null);
-        setQueuedAdmission(persisted.ticket);
-        setQueuedPayload(persisted.payload);
-        setLastQueuedTicket(persisted.ticket);
-        setQueuePollFailure(null);
-        pollAttemptsRef.current = 0;
-        mountSnapshotRef.current = {
-          initialWcode,
-          scheduleId,
-          hadRestoredQueue: true,
-        };
-        return;
-      }
     }
     const profile =
       scheduleId && initialWcode ? loadCandidateProfile(scheduleId, initialWcode) : null;
@@ -410,14 +285,12 @@ export function StudentEntryRoute() {
     });
     setErrors({});
     setSubmitError(null);
-    setQueuedAdmission(null);
+    setQueuedAdmission(false);
     setQueuedPayload(null);
+    setQueueRetryAfterMs(QUEUE_POLL_FLOOR_MS);
     setQueuePollFailure(null);
-    setLastQueuedTicket(null);
     pollAttemptsRef.current = 0;
-    if (scheduleId) {
-      clearPersistedStudentQueue(scheduleId);
-    }
+    mountSnapshotRef.current = { initialWcode, scheduleId };
   }, [initialWcode, scheduleId]);
 
   useEffect(() => {
@@ -516,7 +389,9 @@ export function StudentEntryRoute() {
     submittingRef.current = true;
     setIsLoading(true);
     setSubmitError(null);
-    setQueuedAdmission(null);
+    setQueuedAdmission(false);
+    setQueuedPayload(null);
+    setQueueRetryAfterMs(QUEUE_POLL_FLOOR_MS);
     setQueuePollFailure(null);
 
     try {
@@ -537,14 +412,14 @@ export function StudentEntryRoute() {
           ieltsCourse: normalizedIeltsCourse,
         };
         pollAttemptsRef.current = 0;
-        setQueuedAdmission(result);
+        setQueuedAdmission(true);
         setQueuedPayload(payload);
-        setLastQueuedTicket(result);
-        persistStudentQueue(scheduleId, result, payload);
+        setQueueRetryAfterMs(entryQueueDelayMs(Math.ceil(result.pollAfterMs / 1000)));
         return;
       }
 
-      clearPersistedStudentQueue(scheduleId);
+      setQueuedAdmission(false);
+      setQueuedPayload(null);
       storeLastWcode(scheduleId, normalizedWcode);
       storeCandidateProfile(scheduleId, normalizedWcode, {
         studentName: normalizedName,
@@ -554,22 +429,11 @@ export function StudentEntryRoute() {
       });
       navigate(buildStudentRoute(scheduleId, normalizedWcode));
     } catch (error) {
-      // Plan C3/D3: ENTRY_GATE 429s are a queue, not a failure. Render the
-      // position + countdown and auto-retry at the server's Retry-After
-      // (jittered, never tight). Anything else surfaces immediately.
+      // Plan C3/D3: ENTRY_GATE 429s are bounded retry, not a server-owned
+      // queue. Keep the submitted payload in memory and retry at the
+      // server's Retry-After (jittered, never tight). Anything else surfaces.
       const queue = parseEntryQueueError(error);
       if (queue.queued) {
-        const waitMs = entryQueueDelayMs(queue.retryAfterSecs);
-        const queuedAt = new Date().toISOString();
-        const ticket: StudentQueuedAdmission = {
-          state: "queued",
-          ticketId: `gate-${scheduleId}-${Date.now()}`,
-          scheduleId,
-          wcode: normalizedWcode,
-          position: queue.queuePosition ?? 1,
-          pollAfterMs: waitMs,
-          queuedAt,
-        };
         const payload = {
           wcode: normalizedWcode,
           email: normalizedEmail,
@@ -578,10 +442,9 @@ export function StudentEntryRoute() {
           ieltsCourse: normalizedIeltsCourse,
         };
         pollAttemptsRef.current = 0;
-        setQueuedAdmission(ticket);
+        setQueuedAdmission(true);
         setQueuedPayload(payload);
-        setLastQueuedTicket(ticket);
-        persistStudentQueue(scheduleId, ticket, payload);
+        setQueueRetryAfterMs(entryQueueDelayMs(queue.retryAfterSecs));
         setSubmitError(null);
       } else {
         setSubmitError(error instanceof Error ? error.message : "Check-in failed. Please try again.");
@@ -593,23 +456,20 @@ export function StudentEntryRoute() {
   };
 
   const handleRetryQueue = () => {
-    if (isLoading || !scheduleId || !queuedPayload || !lastQueuedTicket) {
+    if (isLoading || !scheduleId || !queuedPayload) {
       return;
     }
     setSubmitError(null);
     setQueuePollFailure(null);
-    setQueuedAdmission(lastQueuedTicket);
-    persistStudentQueue(scheduleId, lastQueuedTicket, queuedPayload);
+    setQueuedAdmission(true);
+    setQueueRetryAfterMs(QUEUE_POLL_FLOOR_MS);
   };
 
   const handleLeaveQueue = () => {
-    if (scheduleId) {
-      clearPersistedStudentQueue(scheduleId);
-    }
     pollAttemptsRef.current = 0;
-    setQueuedAdmission(null);
+    setQueuedAdmission(false);
     setQueuedPayload(null);
-    setLastQueuedTicket(null);
+    setQueueRetryAfterMs(QUEUE_POLL_FLOOR_MS);
     setQueuePollFailure(null);
     setSubmitError(null);
   };
@@ -620,11 +480,7 @@ export function StudentEntryRoute() {
     }
 
     let cancelled = false;
-    const pollAfterMs = Math.max(
-      QUEUE_POLL_FLOOR_MS,
-      queuedAdmission.pollAfterMs || QUEUE_POLL_DEFAULT_MS
-    );
-    const ticketAtPollStart = queuedAdmission;
+    const pollAfterMs = Math.max(QUEUE_POLL_FLOOR_MS, queueRetryAfterMs);
     const timer = window.setTimeout(async () => {
       pollAttemptsRef.current += 1;
       try {
@@ -641,13 +497,14 @@ export function StudentEntryRoute() {
           return;
         }
         if ("state" in result && result.state === "queued") {
-          setQueuedAdmission(result);
-          setLastQueuedTicket(result);
-          persistStudentQueue(scheduleId, result, queuedPayload);
+          setQueuedAdmission(true);
+          setQueueRetryAfterMs(entryQueueDelayMs(Math.ceil(result.pollAfterMs / 1000)));
           return;
         }
 
-        clearPersistedStudentQueue(scheduleId);
+        setQueuedAdmission(false);
+        setQueuedPayload(null);
+        setQueuePollFailure(null);
         storeLastWcode(scheduleId, queuedPayload.wcode);
         storeCandidateProfile(scheduleId, queuedPayload.wcode, {
           studentName: queuedPayload.studentName,
@@ -658,18 +515,21 @@ export function StudentEntryRoute() {
         navigate(buildStudentRoute(scheduleId, queuedPayload.wcode));
       } catch (error) {
         if (!cancelled) {
+          const queue = parseEntryQueueError(error);
+          if (queue.queued) {
+            setQueuedAdmission(true);
+            setQueueRetryAfterMs(entryQueueDelayMs(queue.retryAfterSecs));
+            setQueuePollFailure(null);
+            setSubmitError(null);
+            return;
+          }
           const message =
-            error instanceof Error ? error.message : "Admission polling failed. Please retry.";
-          // S3-C2: a failed poll must not dead-lock the form. Clear the
-          // blocking queued state but keep the ticket + payload so Retry can
-          // resume polling and Leave can discard the ticket.
-          setQueuedAdmission(null);
-          setQueuePollFailure({
-            message,
-            ticketId: ticketAtPollStart.ticketId,
-            position: ticketAtPollStart.position,
-            attempts: pollAttemptsRef.current,
-          });
+            error instanceof Error ? error.message : "Admission retry failed. Please retry.";
+          // A non-rate-limit poll failure must not dead-lock the form. Clear
+          // the blocking retry state but keep the last submitted payload so
+          // Retry can resume and Leave can discard it.
+          setQueuedAdmission(false);
+          setQueuePollFailure({ message, attempts: pollAttemptsRef.current });
           setSubmitError(message);
         }
       }
@@ -679,7 +539,16 @@ export function StudentEntryRoute() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [isSat, navigate, queuedAdmission, queuedPayload, queuePollFailure, scheduleId, studentEntry]);
+  }, [
+    isSat,
+    navigate,
+    queuePollFailure,
+    queueRetryAfterMs,
+    queuedAdmission,
+    queuedPayload,
+    scheduleId,
+    studentEntry,
+  ]);
 
   if (availabilityGate && !queuedAdmission && !queuePollFailure) {
     return (
@@ -706,18 +575,17 @@ export function StudentEntryRoute() {
         {queuedAdmission && (
           <div aria-live="polite" className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
             <p className="text-sm text-blue-700">
-              You are in queue. Position: {queuedAdmission.position}
+              High traffic; retrying in {queueEtaSeconds(queueRetryAfterMs)} seconds.
             </p>
             <p className="mt-1 text-xs text-blue-600">
-              Ticket ref: {queuedAdmission.ticketId} · Checking again in ~
-              {queueEtaSeconds(queuedAdmission.pollAfterMs)}s. Keep this tab open.
+              We&apos;ll retry automatically. You can leave and try again later.
             </p>
             <button
               type="button"
               onClick={handleLeaveQueue}
               className="mt-2 text-xs font-medium text-blue-700 underline hover:text-blue-900"
             >
-              Leave queue
+              Leave and edit
             </button>
           </div>
         )}
@@ -728,13 +596,12 @@ export function StudentEntryRoute() {
             className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-md"
           >
             <p className="text-sm font-medium text-amber-800">
-              Queue check failed after {queuePollFailure.attempts}{" "}
+              Retry failed after {queuePollFailure.attempts}{" "}
               {queuePollFailure.attempts === 1 ? "attempt" : "attempts"}
             </p>
             <p className="mt-1 text-xs text-amber-700">
-              Ticket ref: {queuePollFailure.ticketId} · Position at failure:{" "}
-              {queuePollFailure.position}. Your details are saved — retry to keep your place or
-              leave the queue to edit the form.
+              {queuePollFailure.message} Your details are still here — retry to try again or
+              leave to edit the form.
             </p>
             <div className="mt-3 flex gap-2">
               <button
@@ -749,7 +616,7 @@ export function StudentEntryRoute() {
                 onClick={handleLeaveQueue}
                 className="bg-white text-sm py-1.5 px-3 rounded-md border border-gray-300 hover:bg-gray-50"
               >
-                Leave queue
+                Leave and edit
               </button>
             </div>
           </div>

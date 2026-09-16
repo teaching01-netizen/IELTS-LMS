@@ -11,6 +11,7 @@ import {
   WritingAnnotation, DrawingAnnotation, CommentBankItem, WritingAnswers
 } from '../../types/grading';
 import { gradingService, gradingRepository } from '../../features/grading/infrastructure/gradingGateway';
+import { gradingErrorMessage } from '../../services/gradingService';
 import { examRepository, hydrateExamState } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import type { ExamState, WritingTaskContent } from '../../types';
 import { WritingAnnotationCanvas } from './WritingAnnotationCanvas';
@@ -400,7 +401,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           ),
         );
       } else {
-        setObjectiveOverrideError(result.error ?? 'Failed to update answer correctness.');
+        setObjectiveOverrideError(
+          gradingErrorMessage(result.error, 'Failed to update answer correctness.'),
+        );
       }
     } catch (error) {
       setObjectiveOverrideError(
@@ -428,7 +431,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       if (result.success && result.data) {
         setReviewDraft(result.data);
       } else {
-        throw new Error(result.error ?? 'Failed to mark grading complete');
+        throw new Error(gradingErrorMessage(result.error, 'Failed to mark grading complete'));
       }
     } catch (error) {
       logger.error('Failed to mark grading complete:', error);
@@ -451,7 +454,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       if (result.success && result.data) {
         setReviewDraft(result.data);
       } else {
-        throw new Error(result.error ?? 'Failed to mark ready to release');
+        throw new Error(gradingErrorMessage(result.error, 'Failed to mark ready to release'));
       }
     } catch (error) {
       logger.error('Failed to mark ready to release:', error);
@@ -473,13 +476,13 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         false,
       );
       if (!result.success) {
-        const releaseMessage = result.error ?? 'Failed to release result';
+        const releaseMessage = gradingErrorMessage(result.error, 'Failed to release result');
         if (requiresExplicitReleaseOverride(releaseMessage)) {
           // C15: explicit override needs app-modal confirmation, never window.confirm.
           setOverrideConfirmOpen(true);
           return;
         }
-        throw new Error(result.error ?? 'Failed to release result');
+        throw new Error(releaseMessage);
       }
       await loadData();
     } catch (error) {
@@ -505,7 +508,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       if (result.success) {
         await loadData();
       } else {
-        throw new Error(result.error ?? 'Failed to release result');
+        throw new Error(gradingErrorMessage(result.error, 'Failed to release result'));
       }
     } catch (error) {
       logger.error('Failed to release result:', error);
@@ -564,7 +567,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       if (result.success && result.data) {
         setReviewDraft(result.data);
       } else {
-        throw new Error(result.error ?? 'Failed to schedule release');
+        throw new Error(gradingErrorMessage(result.error, 'Failed to schedule release'));
       }
     } catch (error) {
       logger.error('Failed to schedule release:', error);
@@ -588,7 +591,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       if (result.success && result.data) {
         setReviewDraft(result.data);
       } else {
-        throw new Error(result.error ?? 'Failed to reopen review');
+        throw new Error(gradingErrorMessage(result.error, 'Failed to reopen review'));
       }
     } catch (error) {
       logger.error('Failed to reopen review:', error);

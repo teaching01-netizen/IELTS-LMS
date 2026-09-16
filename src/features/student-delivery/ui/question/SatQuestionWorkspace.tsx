@@ -28,8 +28,9 @@ export function SatQuestionWorkspace({
   if (!split) {
     return (
       <div
-        className="sat-reading-surface h-full min-h-0 overflow-y-auto bg-[var(--sat-background)]"
+        className="sat-reading-surface h-full min-h-0 min-w-0 overflow-y-auto bg-[var(--sat-background)]"
         data-sat-question-scroll
+        data-student-exam-scroll-owner
         style={readingStyle}
       >
         <div className="mx-auto w-full max-w-[760px] px-5 py-6 sm:px-8 sm:py-8">{question}</div>
@@ -41,7 +42,7 @@ export function SatQuestionWorkspace({
   return (
     <div
       ref={splitContainerRef}
-      className="sat-reading-surface grid h-full min-h-0 overflow-hidden bg-[var(--sat-background)]"
+      className="sat-reading-surface grid h-full min-h-0 min-w-0 overflow-hidden bg-[var(--sat-background)]"
       data-sat-reading-split
       style={{
         ...readingStyle,
@@ -51,9 +52,10 @@ export function SatQuestionWorkspace({
       }}
     >
       <section
-        className="min-h-0 overflow-y-auto px-5 py-6 md:px-10 md:py-8"
+        className="min-h-0 min-w-0 overflow-y-auto px-5 py-6 md:px-10 md:py-8"
         aria-label={stimulusLabel}
         data-sat-passage-scroll
+        data-student-exam-scroll-owner
       >
         <div className="mx-auto max-w-[660px] sat-exam-prose sat-type-body text-[var(--sat-text)]">
           {stimulus}
@@ -66,9 +68,10 @@ export function SatQuestionWorkspace({
         onChange={onSplitRatioChange}
       /> : null}
       <section
-        className="min-h-0 overflow-y-auto px-5 py-5 md:px-10 md:py-8"
+        className="min-h-0 min-w-0 overflow-y-auto px-5 py-5 md:px-10 md:py-8"
         aria-label="Question"
         data-sat-question-scroll
+        data-student-exam-scroll-owner
       >
         <div className="mx-auto max-w-[650px]">{question}</div>
       </section>

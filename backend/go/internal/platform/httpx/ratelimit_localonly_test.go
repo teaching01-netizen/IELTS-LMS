@@ -47,33 +47,27 @@ func TestTierLocalOnlyStillShedsFlood(t *testing.T) {
 	}
 }
 
-// A1 RED: local-only parity — same stream, dual-vs-local agree on allow/deny classes.
-func TestTierLocalOnlyParityWithDual(t *testing.T) {
-	budgets := map[string]TierBudget{TierPolling: {PerMin: 4, Window: time.Minute}}
-	key := func(r *http.Request) string { return "user:parity" }
-	mkdual := func() (*TierSet, *countingDBChecker) {
-		db := &countingDBChecker{allow: true}
-		return NewTierSet(budgets, map[string]DBChecker{TierPolling: db.check}, 100), db
-	}
-	dual, _ := mkdual()
-	local, _ := mkdual()
-	local.SetLocalOnly(true)
-	hd := dual.Middleware(TierPolling, key)(okTierHandler())
-	hl := local.Middleware(TierPolling, key)(okTierHandler())
-	// Prefilter budget = 4 * PrefilterMultiple(2) = 8: first 8 allow on both,
-	// 9th denies on both (local prefilter is the binding constraint while
-	// the DB allows, so classes must match exactly).
-	for i := 0; i < 8; i++ {
-		rd := doTierRequest(hd, "GET", "/p")
-		rl := doTierRequest(hl, "GET", "/p")
-		if rd.Code != 200 || rl.Code != 200 {
-			t.Fatalf("request %d: dual=%d local=%d, want 200/200", i, rd.Code, rl.Code)
+// A1: local-only is an exact single-process limiter, not the dual-mode flood
+// prefilter.
+func TestTierLocalOnlyUsesConfiguredBudget(t *testing.T) {
+	tiers := NewTierSet(
+		map[string]TierBudget{TierWrites: {PerMin: 2, Window: time.Minute}},
+		nil,
+		10,
+	)
+	tiers.SetLocalOnly(true)
+	handler := tiers.Middleware(TierWrites, func(*http.Request) string {
+		return "user:u1"
+	})(okTierHandler())
+
+	allowed := 0
+	for i := 0; i < 5; i++ {
+		if rec := doTierRequest(handler, "POST", "/writes"); rec.Code == http.StatusOK {
+			allowed++
 		}
 	}
-	rd := doTierRequest(hd, "GET", "/p")
-	rl := doTierRequest(hl, "GET", "/p")
-	if rd.Code != 429 || rl.Code != 429 {
-		t.Fatalf("flood: dual=%d local=%d, want 429/429", rd.Code, rl.Code)
+	if allowed != 2 {
+		t.Fatalf("local mode must allow exactly PerMin requests, got %d", allowed)
 	}
 }
 

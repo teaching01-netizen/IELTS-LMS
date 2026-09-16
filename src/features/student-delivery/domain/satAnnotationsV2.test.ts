@@ -66,6 +66,16 @@ describe('satResponses v2 annotations', () => {
     expect(normalized.annotations[0]?.id).toBe(created.id);
   });
 
+  it('repairs null-like public boundary values to an empty v2 annotation object', () => {
+    for (const value of [null, undefined, 'malformed', 42, []]) {
+      expect(normalizeSatAnnotations(value as unknown as Record<string, unknown>)).toEqual({
+        version: 2,
+        annotations: [],
+        legacyQuestionNote: '',
+      });
+    }
+  });
+
   it('splits overlapping highlight and underline ranges into segments', () => {
     const segments = applySatAnnotationsToText('abcdefghij', [
       createSatTextAnnotation({ kind: 'highlight', nodeId: 'p', startOffset: 2, endOffset: 7, exact: 'cdefg' }),

@@ -32,9 +32,12 @@ import { SatQuestionRenderer } from "../ui/question/SatQuestionRenderer";
 import { SatReviewPage } from "../ui/review/SatReviewPage";
 import { SatCalculatorPanel } from "../ui/tools/SatCalculatorPanel";
 import { SatReferenceSheetPanel } from "../ui/tools/SatReferenceSheetPanel";
-import { SatBreakScreen } from "../ui/transitions/SatBreakScreen";
+import { SatBreakScreen, type SatBreakEntryProgress } from "../ui/transitions/SatBreakScreen";
 import { SatCompleteScreen, SatTerminatedScreen } from "../ui/transitions/SatCompleteScreen";
 import { SatDirectionsScreen } from "../ui/transitions/SatDirectionsScreen";
+import { useStudentExamPageLock } from "@components/student/layout/useStudentExamPageLock";
+import { useStudentExamViewport } from "@components/student/layout/useStudentExamViewport";
+import { useStudentFocusedControlVisibility } from "@components/student/layout/useStudentFocusedControlVisibility";
 import {
   SatBlockingOverlay,
   SatControlBanner,
@@ -103,6 +106,18 @@ export function SatStudentSessionRoute({
   const [breakVeilOpen, setBreakVeilOpen] = useState(false);
 
   const { state, data, result, error, commands, persistence } = exam;
+  // Phase 4: the between-sections surfaces must never freeze at a 0:00 countdown
+  // with no explanation — an entry in flight says so, and an attempt that
+  // settled without opening the module says it is still retrying.
+  const breakEntryProgress: SatBreakEntryProgress = exam.isStarting
+    ? "starting"
+    : exam.autoEntryRecoverable
+      ? "retrying"
+      : "idle";
+  const examViewportActive = state.phase === "module" || state.phase === "review";
+  const examViewport = useStudentExamViewport(examViewportActive);
+  useStudentExamPageLock(examViewportActive);
+  useStudentFocusedControlVisibility(examViewportActive && examViewport.keyboardOpen);
   // Phase 04 hold-previous-UI vessel: a render-time fallback (ref, not
   // state — holding must not itself trigger renders or reset clocks).
   // Updated only on successful module/review renders; cleared on identity
@@ -270,6 +285,7 @@ export function SatStudentSessionRoute({
           nextSectionKey={pendingSection?.sectionKey === "math" ? "math" : "reading-writing"}
           remainingSeconds={exam.pendingSectionWaitSeconds}
           mode="waiting"
+          entryProgress={breakEntryProgress}
         />
       );
     }
@@ -278,6 +294,7 @@ export function SatStudentSessionRoute({
         <SatBreakScreen
           nextSectionKey={pendingSection?.sectionKey === "math" ? "math" : "reading-writing"}
           remainingSeconds={exam.pendingBreakSeconds}
+          entryProgress={breakEntryProgress}
         />
       );
     }
@@ -304,6 +321,7 @@ export function SatStudentSessionRoute({
         proctorStatus={data.proctorStatus}
         isStarting={exam.isStarting}
         stageReady={exam.pendingStageReady}
+        entryRecoverable={exam.autoEntryRecoverable}
         error={error}
         onStart={() => void commands.startPendingModule()}
         onExit={onExit}
@@ -325,6 +343,7 @@ export function SatStudentSessionRoute({
           waitingForScheduledBreak ? exam.pendingSectionWaitSeconds : exam.pendingBreakSeconds
         }
         mode={waitingForScheduledBreak ? "waiting" : "break"}
+        entryProgress={breakEntryProgress}
       />
     );
   }
@@ -432,6 +451,8 @@ export function SatStudentSessionRoute({
           moduleTitle={studentModuleTitle(exam.stateModule)}
           remainingLabel={formatSatTime(exam.remainingSeconds)}
           remainingSeconds={exam.remainingSeconds}
+          examHeight={examViewport.stableExamHeight}
+          keyboardOpen={examViewport.keyboardOpen}
           items={navigationItems}
           answeredCount={answeredCount}
           isSubmitting={exam.isSubmitting}
@@ -513,6 +534,8 @@ export function SatStudentSessionRoute({
         directions={directions}
         remainingLabel={formatSatTime(exam.remainingSeconds)}
         remainingSeconds={exam.remainingSeconds}
+        examHeight={examViewport.stableExamHeight}
+        keyboardOpen={examViewport.keyboardOpen}
         candidateName={data.candidateName}
         questionIndex={state.questionIndex}
         questionCount={state.questionIds.length}

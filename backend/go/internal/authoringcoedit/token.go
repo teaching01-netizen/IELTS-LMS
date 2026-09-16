@@ -30,6 +30,11 @@ type TokenClaims struct {
 	Mode      AuthMode `json:"mode"`
 	IssuedAt  int64    `json:"issuedAt"`
 	ExpiresAt int64    `json:"expiresAt"`
+	// StateEpoch is signed with the token once epoch-aware cache recovery is
+	// enabled. It is additive so epoch-zero legacy tokens remain verifiable.
+	StateEpoch        DecimalString `json:"stateEpoch,omitempty"`
+	CommitSequence    DecimalString `json:"commitSequence,omitempty"`
+	WorkspaceRevision int           `json:"workspaceRevision,omitempty"`
 }
 
 // TokenVersion is the only accepted claim version.
@@ -105,6 +110,11 @@ func (t *TokenIssuer) Mint(claims TokenClaims) (string, TokenClaims, error) {
 	if schemaVersion == WorkspaceSchemaVersion && claims.FieldSet != FieldSetWorkspace {
 		return "", TokenClaims{}, ErrTokenInvalid
 	}
+	if (claims.StateEpoch != "" && !IsDecimalString(string(claims.StateEpoch))) ||
+		(claims.CommitSequence != "" && !IsDecimalString(string(claims.CommitSequence))) ||
+		claims.WorkspaceRevision < 0 {
+		return "", TokenClaims{}, ErrTokenInvalid
+	}
 	if strings.TrimSpace(claims.ActorID) == "" {
 		return "", TokenClaims{}, ErrTokenInvalid
 	}
@@ -160,6 +170,11 @@ func (t *TokenIssuer) Verify(token string) (TokenClaims, error) {
 	}
 	if (schemaVersion == SchemaVersion && claims.FieldSet != FieldSetPrompt) ||
 		(schemaVersion == WorkspaceSchemaVersion && claims.FieldSet != FieldSetWorkspace) {
+		return TokenClaims{}, ErrTokenInvalid
+	}
+	if (claims.StateEpoch != "" && !IsDecimalString(string(claims.StateEpoch))) ||
+		(claims.CommitSequence != "" && !IsDecimalString(string(claims.CommitSequence))) ||
+		claims.WorkspaceRevision < 0 {
 		return TokenClaims{}, ErrTokenInvalid
 	}
 	if strings.TrimSpace(claims.ActorID) == "" || strings.TrimSpace(claims.ExamID) == "" ||

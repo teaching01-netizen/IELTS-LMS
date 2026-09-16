@@ -15,6 +15,10 @@ class FakeConnection {
   readOnly = false;
   socketId = "socket-1";
   closed = false;
+  context: CoeditConnectionContext;
+  constructor(mode: "write" | "read" = "write") {
+    this.context = { mode };
+  }
   close(event?: { code?: number; reason?: string }): void {
     this.closed = true;
     this.lastClose = event ?? null;
@@ -62,7 +66,10 @@ interface Harness {
   controller: LifecycleController;
   hocuspocus: FakeHocuspocus;
   stores: string[];
+  finalStores: string[];
   forgotten: string[];
+  /** Documents whose durable commit this process had to read from Go. */
+  refreshed: string[];
 }
 
 const servers: Server[] = [];
@@ -74,18 +81,55 @@ afterEach(async () => {
 });
 
 async function harness(
-  overrides: { ready?: boolean; shuttingDown?: boolean; freezeLeaseSeconds?: number } = {},
+  overrides: {
+    ready?: boolean;
+    shuttingDown?: boolean;
+    freezeLeaseSeconds?: number;
+    storeDelayMs?: number;
+    /** Makes the operation-owned final store fail, for fault injection. */
+    finalStoreError?: Error;
+    /**
+     * A durable commit that exists in MySQL for a room this process never
+     * loaded. The real `refreshCommit` reads it back on demand, which is how a
+     * freeze can describe a room whose document is not in memory.
+     */
+    durableWithoutRoom?: CoeditCommit;
+  } = {},
 ): Promise<Harness> {
   const hocuspocus = new FakeHocuspocus();
   const stores: string[] = [];
+  const finalStores: string[] = [];
   const forgotten: string[] = [];
+  const refreshed: string[] = [];
   const commits = new Map<string, CoeditCommit>();
   const persistence = {
     lastCommit: (name: string) => commits.get(name) ?? null,
+    refreshCommit: async (name: string) => {
+      refreshed.push(name);
+      if (overrides.durableWithoutRoom) commits.set(name, overrides.durableWithoutRoom);
+      return undefined;
+    },
     store: async ({ documentName }: { documentName: string }) => {
+      if (overrides.storeDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, overrides.storeDelayMs));
+      }
       stores.push(documentName);
       const commit: CoeditCommit = {
         stateHash: `hash-${stores.length}`,
+        stateVector: `vector-${stores.length}`,
+        questionRevision: 7,
+        materializedRevision: 7,
+        acknowledgedAt: 0,
+      };
+      commits.set(documentName, commit);
+      return commit;
+    },
+    finalStore: async ({ documentName }: { documentName: string }, _freezeOperationId: string) => {
+      finalStores.push(documentName);
+      if (overrides.finalStoreError) throw overrides.finalStoreError;
+      const commit: CoeditCommit = {
+        stateHash: `final-hash-${finalStores.length}`,
+        stateVector: `final-vector-${finalStores.length}`,
         questionRevision: 7,
         materializedRevision: 7,
         acknowledgedAt: 0,
@@ -119,7 +163,7 @@ async function harness(
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
-  return { url: `http://127.0.0.1:${port}`, controller, hocuspocus, stores, forgotten };
+  return { url: `http://127.0.0.1:${port}`, controller, hocuspocus, stores, finalStores, forgotten, refreshed };
 }
 
 async function control(
@@ -195,6 +239,12 @@ describe("control surface", () => {
     expect(expired.status).toBe(403);
   });
 
+  it("rejects an oversized control body before parsing or authenticating it", async () => {
+    const harnessed = await harness();
+    const response = await control(harnessed, CONTROL_PATHS.freeze, "x".repeat(1 << 20));
+    expect(response.status).toBe(413);
+  });
+
   it("rejects a document name outside the frozen vocabulary", async () => {
     const harnessed = await harness();
     const response = await control(harnessed, CONTROL_PATHS.freeze, { documentNames: ["exam:1"] });
@@ -244,6 +294,24 @@ describe("freeze", () => {
     });
   });
 
+  it("keeps a read token read-only after a publish freeze is released", async () => {
+    const harnessed = await harness();
+    const document = harnessed.hocuspocus.add(DOCUMENT_NAME);
+    const readConnection = new FakeConnection("read");
+    document.connections.clear();
+    document.connections.set(readConnection, { clients: new Set([1]) });
+
+    const frozen = await control(harnessed, CONTROL_PATHS.freeze, { documentNames: [DOCUMENT_NAME] });
+    expect(readConnection.readOnly).toBe(true);
+
+    const unfrozen = await control(harnessed, CONTROL_PATHS.unfreeze, {
+      freezeToken: frozen.body["freezeToken"],
+    });
+
+    expect(unfrozen.status).toBe(200);
+    expect(readConnection.readOnly).toBe(true);
+  });
+
   it("auto-unfreezes when the lease expires, so a crashed publish cannot brick a draft", async () => {
     const harnessed = await harness({ freezeLeaseSeconds: 0.05 });
     const document = harnessed.hocuspocus.add(DOCUMENT_NAME);
@@ -270,9 +338,151 @@ describe("freeze", () => {
     expect(harnessed.stores).toHaveLength(1);
   });
 
+  it("uses the operation-owned final store and renews only for its owner", async () => {
+    const harnessed = await harness();
+    harnessed.hocuspocus.add(DOCUMENT_NAME);
+    const operation = {
+      documentNames: [DOCUMENT_NAME],
+      freezeOperationId: "operation-1",
+      freezeExpiresAt: NOW_SECONDS + 30,
+    };
+
+    const frozen = await control(harnessed, CONTROL_PATHS.freeze, operation);
+    expect(frozen.status).toBe(200);
+    expect(harnessed.finalStores).toEqual([DOCUMENT_NAME]);
+    expect(harnessed.stores).toEqual([]);
+    expect(frozen.body["freezeOperationId"]).toBe("operation-1");
+    expect(frozen.body["freezeExpiresAt"]).toBe(NOW_SECONDS + 30);
+
+    const overlap = await control(harnessed, CONTROL_PATHS.freeze, operation);
+    expect(overlap.status).toBe(409);
+
+    const missingOwner = await control(harnessed, CONTROL_PATHS.renew, {
+      freezeToken: frozen.body["freezeToken"],
+      freezeExpiresAt: NOW_SECONDS + 40,
+    });
+    expect(missingOwner.status).toBe(409);
+
+    const wrongOwner = await control(harnessed, CONTROL_PATHS.renew, {
+      freezeToken: frozen.body["freezeToken"],
+      freezeOperationId: "operation-2",
+      freezeExpiresAt: NOW_SECONDS + 40,
+    });
+    expect(wrongOwner.status).toBe(409);
+
+    const renewed = await control(harnessed, CONTROL_PATHS.renew, {
+      freezeToken: frozen.body["freezeToken"],
+      freezeOperationId: "operation-1",
+      freezeExpiresAt: NOW_SECONDS + 40,
+    });
+    expect(renewed.status).toBe(200);
+    expect(renewed.body["freezeOperationId"]).toBe("operation-1");
+    expect(renewed.body["freezeExpiresAt"]).toBe(NOW_SECONDS + 40);
+
+    const wrongUnfreeze = await control(harnessed, CONTROL_PATHS.unfreeze, {
+      freezeToken: frozen.body["freezeToken"],
+      freezeOperationId: "operation-2",
+    });
+    expect(wrongUnfreeze.status).toBe(409);
+
+    const unownedUnfreeze = await control(harnessed, CONTROL_PATHS.unfreeze, {
+      freezeToken: frozen.body["freezeToken"],
+    });
+    expect(unownedUnfreeze.status).toBe(409);
+
+    const released = await control(harnessed, CONTROL_PATHS.unfreeze, {
+      freezeToken: frozen.body["freezeToken"],
+      freezeOperationId: "operation-1",
+    });
+    expect(released.status).toBe(200);
+  });
+
+  it("describes a room that has no live document from its durable commit", async () => {
+    // An unloaded room is the common case after a service restart: MySQL still
+    // holds the committed state, but this process never loaded the document.
+    // The freeze must still produce a manifest Go can verify against the row,
+    // or a publish would be blocked by a room nobody can flush.
+    const durable: CoeditCommit = {
+      stateHash: "durable-hash-from-mysql",
+      stateVector: "durable-vector-from-mysql",
+      questionRevision: 5,
+      materializedRevision: 5,
+      acknowledgedAt: 0,
+    };
+    const harnessed = await harness({ durableWithoutRoom: durable });
+
+    const frozen = await control(harnessed, CONTROL_PATHS.freeze, {
+      documentNames: [DOCUMENT_NAME],
+      freezeOperationId: "operation-1",
+    });
+
+    expect(frozen.status).toBe(200);
+    // The durable commit was read back rather than assumed...
+    expect(harnessed.refreshed).toEqual([DOCUMENT_NAME]);
+    // ...and nothing was final-stored, because there is no live document to
+    // store: a manifest entry below is the durable row's own commit.
+    expect(harnessed.finalStores).toEqual([]);
+    expect(harnessed.stores).toEqual([]);
+    expect(frozen.body["manifest"]).toEqual([
+      {
+        documentName: DOCUMENT_NAME,
+        stateHash: durable.stateHash,
+        materializedRevision: durable.materializedRevision,
+        questionRevision: durable.questionRevision,
+      },
+    ]);
+    // The room is fenced for the operation even without a document in memory,
+    // so a connection arriving mid-publish is still refused.
+    expect(harnessed.controller.isFrozen(DOCUMENT_NAME)).toBe(true);
+    expect(harnessed.controller.isReadOnly(DOCUMENT_NAME)).toBe(true);
+  });
+
+  it("rolls a failed final store back to a writable active room", async () => {
+    // Fault injection for the freeze itself: the operation-owned final store is
+    // the one step that can fail while every room is already read-only and the
+    // durable rows already say `freezing`. Leaving that state behind would be a
+    // half-frozen draft that accepts no edits and cannot be published.
+    const harnessed = await harness({ finalStoreError: new Error("final store failed") });
+    const document = harnessed.hocuspocus.add(DOCUMENT_NAME);
+
+    const frozen = await control(harnessed, CONTROL_PATHS.freeze, {
+      documentNames: [DOCUMENT_NAME],
+      freezeOperationId: "operation-1",
+    });
+
+    expect(frozen.status).toBe(503);
+    expect(harnessed.finalStores).toEqual([DOCUMENT_NAME]);
+    expect(harnessed.controller.isFrozen(DOCUMENT_NAME)).toBe(false);
+    expect(harnessed.controller.isReadOnly(DOCUMENT_NAME)).toBe(false);
+    expect(document.getConnections().every((connection) => connection.readOnly)).toBe(false);
+
+    // The proof that no half-frozen room remains: an ORDINARY flush is accepted
+    // again. A room still flagged frozen would refuse it (the store hook checks
+    // exactly this flag), so this is the difference between a draft that
+    // recovered and one that is quietly stuck.
+    const retried = await control(harnessed, CONTROL_PATHS.flush, {
+      documentNames: [DOCUMENT_NAME],
+    });
+    expect(retried.status).toBe(200);
+    expect(harnessed.stores).toEqual([DOCUMENT_NAME]);
+  });
+
   it("refuses a freeze with no documents", async () => {
     const harnessed = await harness();
     expect((await control(harnessed, CONTROL_PATHS.freeze, { documentNames: [] })).status).toBe(422);
+  });
+
+  it("conflicts overlapping freeze operations while the first flush is pending", async () => {
+    const harnessed = await harness({ storeDelayMs: 40 });
+    harnessed.hocuspocus.add(DOCUMENT_NAME);
+
+    const first = control(harnessed, CONTROL_PATHS.freeze, { documentNames: [DOCUMENT_NAME] });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = await control(harnessed, CONTROL_PATHS.freeze, { documentNames: [DOCUMENT_NAME] });
+    const firstResult = await first;
+
+    expect(firstResult.status).toBe(200);
+    expect(second.status).toBe(409);
   });
 });
 

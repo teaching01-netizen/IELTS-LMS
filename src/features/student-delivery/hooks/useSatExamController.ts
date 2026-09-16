@@ -42,15 +42,15 @@ import {
   matchesFinalModuleState,
   moduleForAttempt,
   sectionForModule,
-  shouldAutoStartInitialModule,
-  shouldAutoStartNextSectionAfterBreak,
 } from "../application/satRuntimeSelectors";
+import { deriveSatEntryDecision, type SatEntryOutcome } from "../application/satEntry";
 import { seedMatchesIdentity, type SatBootstrapSeed } from "../bootstrap/satBootstrapSeed";
 import {
   isEquivalentBootstrap,
   SERVER_NOW_SKIP_TOLERANCE_MS,
 } from "../application/satBootstrapEquality";
 import { useSatIntegrityControl } from "./useSatIntegrityControl";
+import { useSatModuleEntry } from "./useSatModuleEntry";
 import { useSatResponsePersistence } from "./useSatResponsePersistence";
 
 /**
@@ -63,6 +63,14 @@ import { useSatResponsePersistence } from "./useSatResponsePersistence";
 function isSectionClosingRejection(error: unknown): boolean {
   return hasBackendStatusCode(error, 409);
 }
+
+/**
+ * Break-end pull window (Phase 3): at most one forced refresh per runtime
+ * revision, and never faster than this. The section advance is system-driven,
+ * so it does not ride the parent poll's control-command fast lane, and the
+ * student would otherwise sit at 0:00 until that poll's steady cadence fires.
+ */
+const SAT_BREAK_END_PULL_WINDOW_MS = 2_000;
 
 export interface UseSatExamControllerOptions {
   scheduleId: string;
@@ -109,8 +117,6 @@ export function useSatExamController({
   const [isStarting, setIsStarting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const timeoutSubmissionKeyRef = useRef<string | null>(null);
-  const initialAutoStartKeyRef = useRef<string | null>(null);
-  const nextSectionAutoStartRef = useRef<{ key: string; attemptedAt: number } | null>(null);
   const finalizationInFlightRef = useRef<Promise<AssessmentResult | null> | null>(null);
   const finalizationRecoveryKeyRef = useRef<string | null>(null);
   const identityGenerationRef = useRef(0);
@@ -147,8 +153,6 @@ export function useSatExamController({
     setAutoSubmitted(false);
     setAnswersRecorded(false);
     timeoutSubmissionKeyRef.current = null;
-    initialAutoStartKeyRef.current = null;
-    nextSectionAutoStartRef.current = null;
     dataRef.current = null;
     dispatch({ type: "recover", state: createSatRunnerState(scheduleId, candidateId) });
     // Phase 04: clear the commit-layer dedupe refs on identity rotation so a
@@ -736,8 +740,16 @@ export function useSatExamController({
       ? authoritativeRemainingSeconds
       : 0;
 
-  const startPendingModule = useCallback(async () => {
-    if (!data || !pendingModule || isStarting) return;
+  /**
+   * Starts the pending module and reports what actually happened:
+   *  - "opened": the module resolved active and the runner routed into it;
+   *  - "noop":   a guard stopped us, or the response did not open the module;
+   *  - "failed": the call rejected (the student-facing error is set here).
+   * Callers use this to decide whether the entry attempt may be retried, so a
+   * failure or an inert response can never be mistaken for a completed entry.
+   */
+  const startPendingModule = useCallback(async (): Promise<SatEntryOutcome> => {
+    if (!data || !pendingModule || isStarting) return "noop";
     const generation = identityGenerationRef.current;
     setIsStarting(true);
     setError(null);
@@ -748,8 +760,8 @@ export function useSatExamController({
       // Phase 04 atomic start: commit data first (stale/equivalent losers
       // still route locally — startModule responses carry the started
       // attempt even at equal runtimeRevision).
-      if (identityGenerationRef.current !== generation) return;
-      if (payload.scheduleId !== scheduleId || payload.attempt.id !== attemptId) return;
+      if (identityGenerationRef.current !== generation) return "noop";
+      if (payload.scheduleId !== scheduleId || payload.attempt.id !== attemptId) return "noop";
       const current = dataRef.current;
       const timing = mergeAuthoritativeTiming(current?.timing ?? null, payload.timing);
       const merged = timing === payload.timing ? payload : { ...payload, timing };
@@ -761,87 +773,80 @@ export function useSatExamController({
       hydrateBootstrap(payload);
       const activeAttempt = findActiveAttempt(merged);
       const activeModule = moduleForAttempt(merged, activeAttempt);
-      if (activeModule) startModuleFrom(merged, activeModule);
+      // A resolved call that did not open a module is not a completed entry:
+      // report it retryable instead of burning the entry attempt.
+      if (!activeModule) return "noop";
+      startModuleFrom(merged, activeModule);
+      return "opened";
     } catch (startError) {
       if (identityGenerationRef.current === generation) {
-        setError(
-          startError instanceof Error ? startError.message : "The SAT module could not be started."
-        );
+        // Phase 3: a conflict on entry means the server is still advancing the
+        // section this module belongs to (SECTION_NOT_ACTIVE / RUNTIME_NOT_LIVE
+        // at a transition). The attempt stays retryable, so say nothing and let
+        // the next one land — a transition race is never a student error.
+        if (!isSectionClosingRejection(startError)) {
+          setError(
+            startError instanceof Error ? startError.message : "The SAT module could not be started."
+          );
+        }
       }
+      return "failed";
     } finally {
       if (identityGenerationRef.current === generation) setIsStarting(false);
     }
   }, [attemptId, data, hydrateBootstrap, isStarting, pendingModule, scheduleId, startModuleFrom]);
 
+  // Phase 3 (client-forced break end): once the authoritative break has run
+  // out, pull the advanced projection ourselves instead of waiting out the
+  // parent's steady cadence. Throttled to the window above and to one pull per
+  // revision, so a late advance cannot become a request storm.
+  const breakEndPullRef = useRef<{ key: string; firedAt: number } | null>(null);
   useEffect(() => {
-    if (
-      !data ||
-      state.phase !== "directions" ||
-      !pendingModule ||
-      !shouldAutoStartInitialModule(
-        data,
-        pendingModule,
-        pendingSection?.displayOrder ?? null,
-        pendingStageReady
-      )
-    ) {
+    if (!data || !waitingForNextSection) return;
+    if (data.scheduleRuntimeStatus !== "live") return;
+    if (nextSectionStartSeconds > 0) return;
+    const key = `${identityKey}:${effectiveTiming?.runtimeRevision ?? data.timing.runtimeRevision}`;
+    const firedAt = now;
+    const lastPull = breakEndPullRef.current;
+    if (lastPull?.key === key && firedAt - lastPull.firedAt < SAT_BREAK_END_PULL_WINDOW_MS) {
       return;
     }
-    const autoStartKey = `${attemptId}:${pendingModule.id}`;
-    if (initialAutoStartKeyRef.current === autoStartKey) return;
-    initialAutoStartKeyRef.current = autoStartKey;
-    void startPendingModule();
+    breakEndPullRef.current = { key, firedAt };
+    void refresh(false);
   }, [
-    attemptId,
-    data,
-    pendingModule,
-    pendingSection,
-    pendingStageReady,
-    startPendingModule,
-    state.phase,
-  ]);
-
-  useEffect(() => {
-    if (
-      !data ||
-      !pendingModule ||
-      !["break", "directions"].includes(state.phase) ||
-      isStarting ||
-      !shouldAutoStartNextSectionAfterBreak(
-        data,
-        pendingModule,
-        pendingSection?.displayOrder ?? null,
-        pendingStageReady,
-        pendingBreakSeconds,
-        pendingSectionWaitSeconds
-      )
-    ) {
-      return;
-    }
-
-    const autoStartKey = `${attemptId}:${pendingModule.id}:${effectiveTiming?.runtimeRevision ?? "legacy"}`;
-    const lastAttempt = nextSectionAutoStartRef.current;
-    const attemptedAt = Date.now();
-    if (lastAttempt?.key === autoStartKey && attemptedAt - lastAttempt.attemptedAt < 2_000) {
-      return;
-    }
-
-    nextSectionAutoStartRef.current = { key: autoStartKey, attemptedAt };
-    void startPendingModule();
-  }, [
-    attemptId,
     data,
     effectiveTiming?.runtimeRevision,
-    isStarting,
+    identityKey,
+    nextSectionStartSeconds,
     now,
-    pendingBreakSeconds,
-    pendingModule,
-    pendingSection,
-    pendingSectionWaitSeconds,
-    pendingStageReady,
-    startPendingModule,
-    state.phase,
+    refresh,
+    waitingForNextSection,
   ]);
+
+  // One owner for entry (Phase 2): the pure decision from
+  // application/satEntry.ts plus the dedupe/retry/start in useSatModuleEntry.
+  // The first module (the proctor's Start) and every later section (the end of
+  // the authoritative break) run through this single path.
+  const entryDecision = deriveSatEntryDecision({
+    data,
+    module: pendingModule,
+    sectionDisplayOrder: pendingSection?.displayOrder ?? null,
+    stageReady: pendingStageReady,
+    breakSeconds: pendingBreakSeconds,
+    sectionWaitSeconds: pendingSectionWaitSeconds,
+    phase: state.phase,
+  });
+
+  // Phase 4: the entry surface is what the student sees when the break
+  // countdown has run out but the module has not opened — recovery state for
+  // the surfaces, never a silent 0:00.
+  const entrySurface = useSatModuleEntry({
+    identity: identityKey,
+    enabled: entryDecision.shouldStart,
+    entryKey: pendingModule ? `${attemptId}:${pendingModule.id}` : null,
+    now,
+    startModule: startPendingModule,
+  });
 
   const finalizeAssessment = useCallback(
     (generation: number, assessmentId: string): Promise<AssessmentResult | null> => {
@@ -1350,6 +1355,7 @@ export function useSatExamController({
     pendingBreakSeconds,
     pendingSectionWaitSeconds,
     pendingStageReady,
+    autoEntryRecoverable: entrySurface.recoverable,
     effectiveTiming,
     stateModule,
     stateModuleAttempt,

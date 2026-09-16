@@ -8,10 +8,14 @@ const navigateMock = vi.fn();
 const studentEntryMock = vi.fn();
 const getStudentEntryScheduleMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../infrastructure/studentEntryGateway", () => ({
-  getStudentEntrySchedule: getStudentEntryScheduleMock,
-  isStudentEntryScheduleBlockedError: () => false,
-}));
+vi.mock("../../infrastructure/studentEntryGateway", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../infrastructure/studentEntryGateway")>();
+  return {
+    ...actual,
+    getStudentEntrySchedule: getStudentEntryScheduleMock,
+    isStudentEntryScheduleBlockedError: () => false,
+  };
+});
 
 vi.mock("../../../auth/authSession", () => ({
   useAuthSession: () => ({ studentEntry: studentEntryMock }),
@@ -284,17 +288,13 @@ describe("StudentEntryRoute", () => {
     });
   });
 
-  it("shows queue position and keeps polling until admission is granted", async () => {
+  it("shows bounded retry state and keeps polling until admission is granted", async () => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440123";
     studentEntryMock
-      .mockResolvedValueOnce({
-        state: "queued",
-        ticketId: "ticket-1",
-        scheduleId,
-        wcode: "W250334",
-        position: 3,
-        pollAfterMs: 10,
-        queuedAt: "2026-05-08T00:00:00.000Z",
+      .mockRejectedValueOnce({
+        status: 429,
+        code: "RATE_LIMIT_EXCEEDED",
+        details: { tier: "student-entry", retryAfterSeconds: 1 },
       })
       .mockResolvedValueOnce({
         user: {
@@ -312,27 +312,25 @@ describe("StudentEntryRoute", () => {
     submitForm();
 
     await waitFor(() => {
-      expect(screen.getByText(/you are in queue/i)).toBeInTheDocument();
-      expect(screen.getByText(/position: 3/i)).toBeInTheDocument();
+      expect(screen.getByText(/high traffic/i)).toBeInTheDocument();
+      expect(screen.queryByText(/position:/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/keep your place/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/ticket/i)).not.toBeInTheDocument();
     });
 
     await waitFor(() => {
       expect(studentEntryMock).toHaveBeenCalledTimes(2);
       expect(navigateMock).toHaveBeenCalledWith(`/student/${scheduleId}/W250334`);
-    });
+    }, { timeout: 4000 });
   });
 
   it("recovers from a failed admission poll with working Retry and Leave-queue actions", async () => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440130";
     studentEntryMock
-      .mockResolvedValueOnce({
-        state: "queued",
-        ticketId: "ticket-retry-1",
-        scheduleId,
-        wcode: "W250334",
-        position: 2,
-        pollAfterMs: 500,
-        queuedAt: "2026-05-08T00:00:00.000Z",
+      .mockRejectedValueOnce({
+        status: 429,
+        code: "RATE_LIMIT_EXCEEDED",
+        details: { tier: "student-entry", retryAfterSeconds: 1 },
       })
       .mockRejectedValueOnce(new Error("poll boom"))
       .mockResolvedValue({
@@ -351,12 +349,13 @@ describe("StudentEntryRoute", () => {
     submitForm();
 
     await waitFor(() => {
-      expect(screen.getByText(/ticket ref: ticket-retry-1/i)).toBeInTheDocument();
-    });
+      expect(screen.getByText(/high traffic/i)).toBeInTheDocument();
+    }, { timeout: 2000 });
 
     const retryButton = await screen.findByRole("button", { name: /^retry$/i }, { timeout: 3000 });
-    expect(screen.getByText(/queue check failed after 1 attempt/i)).toBeInTheDocument();
-    expect(screen.getByText(/position at failure: 2/i)).toBeInTheDocument();
+    expect(screen.getByText(/retry failed after 1 attempt/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/poll boom/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/position:|ticket|keep your place/i)).not.toBeInTheDocument();
     // S3-C2: a failed poll must not dead-lock the form behind queue state.
     expect(screen.getByLabelText(/email/i)).not.toBeDisabled();
     expect(screen.getByRole("button", { name: /continue/i })).not.toBeDisabled();
@@ -369,20 +368,16 @@ describe("StudentEntryRoute", () => {
       },
       { timeout: 3000 }
     );
-    expect(window.sessionStorage.getItem(`ielts-student-queue-ticket:${scheduleId}`)).toBeNull();
+    expect(window.sessionStorage.length).toBe(0);
   });
 
-  it("leaves the queue after a failed poll and clears the persisted ticket", async () => {
+  it("leaves bounded retry state after a failed poll and clears the payload", async () => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440131";
     studentEntryMock
-      .mockResolvedValueOnce({
-        state: "queued",
-        ticketId: "ticket-leave-1",
-        scheduleId,
-        wcode: "W250334",
-        position: 4,
-        pollAfterMs: 500,
-        queuedAt: "2026-05-08T00:00:00.000Z",
+      .mockRejectedValueOnce({
+        status: 429,
+        code: "RATE_LIMIT_EXCEEDED",
+        details: { tier: "student-entry", retryAfterSeconds: 1 },
       })
       .mockRejectedValueOnce(new Error("poll boom"));
 
@@ -390,92 +385,34 @@ describe("StudentEntryRoute", () => {
     submitForm();
 
     await screen.findByRole("button", { name: /^retry$/i }, { timeout: 3000 });
-    expect(
-      window.sessionStorage.getItem(`ielts-student-queue-ticket:${scheduleId}`)
-    ).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /leave queue/i }));
+    fireEvent.click(screen.getByRole("button", { name: /leave and edit/i }));
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: /^retry$/i })).not.toBeInTheDocument();
     });
-    expect(window.sessionStorage.getItem(`ielts-student-queue-ticket:${scheduleId}`)).toBeNull();
+    expect(window.sessionStorage.length).toBe(0);
     expect(screen.getByLabelText(/email/i)).not.toBeDisabled();
     expect(screen.getByRole("button", { name: /continue/i })).not.toBeDisabled();
   });
 
-  it("persists the queue ticket so a reload resumes polling from the stored position", async () => {
+  it("does not persist a server-owned queue position or ticket", async () => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440132";
     studentEntryMock
-      .mockResolvedValueOnce({
-        state: "queued",
-        ticketId: "ticket-reload-1",
-        scheduleId,
-        wcode: "W250334",
-        position: 5,
-        pollAfterMs: 10_000,
-        queuedAt: "2026-05-08T00:00:00.000Z",
-      })
-      .mockResolvedValue({
-        user: {
-          id: "student-1",
-          email: "student@example.com",
-          displayName: "Student One",
-          role: "student",
-          state: "active",
-        },
-        csrfToken: "csrf-1",
-        expiresAt: "2026-01-01T12:00:00.000Z",
+      .mockRejectedValueOnce({
+        status: 429,
+        code: "RATE_LIMIT_EXCEEDED",
+        details: { tier: "student-entry", retryAfterSeconds: 30 },
       });
 
-    const first = render(
-      <MemoryRouter initialEntries={[`/student/${scheduleId}`]}>
-        <Routes>
-          <Route path="/student/:scheduleId" element={<StudentEntryRoute />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderRoute(scheduleId);
     submitForm();
 
-    // S3-C3: the ticket must reach sessionStorage before any reload.
     await waitFor(() => {
-      expect(
-        window.sessionStorage.getItem(`ielts-student-queue-ticket:${scheduleId}`)
-      ).not.toBeNull();
+      expect(screen.getByText(/high traffic/i)).toBeInTheDocument();
     });
-    const stored = window.sessionStorage.getItem(`ielts-student-queue-ticket:${scheduleId}`);
-    expect(JSON.parse(stored ?? "")).toMatchObject({
-      ticket: { ticketId: "ticket-reload-1", position: 5 },
-    });
-    expect(studentEntryMock).toHaveBeenCalledTimes(1);
-
-    // Simulate a reload: unmount, shorten the persisted poll delay so the
-    // resumed poll fires inside the test timeout, then mount fresh.
-    first.unmount();
-    const persistedRaw = window.sessionStorage.getItem(`ielts-student-queue-ticket:${scheduleId}`);
-    const persisted = JSON.parse(persistedRaw ?? "{}");
-    window.sessionStorage.setItem(
-      `ielts-student-queue-ticket:${scheduleId}`,
-      JSON.stringify({ ...persisted, ticket: { ...persisted.ticket, pollAfterMs: 500 } })
-    );
-    render(
-      <MemoryRouter initialEntries={[`/student/${scheduleId}`]}>
-        <Routes>
-          <Route path="/student/:scheduleId" element={<StudentEntryRoute />} />
-        </Routes>
-      </MemoryRouter>
-    );
-
-    // The recovered banner shows the persisted position without a new submit.
-    await waitFor(() => {
-      expect(screen.getByText(/ticket ref: ticket-reload-1/i)).toBeInTheDocument();
-      expect(screen.getByText(/position: 5/i)).toBeInTheDocument();
-    });
-    expect(studentEntryMock).toHaveBeenCalledTimes(1);
-
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith(`/student/${scheduleId}/W250334`);
-    });
+    expect(window.sessionStorage.length).toBe(0);
+    expect(screen.queryByText(/position:|ticket|keep your place/i)).not.toBeInTheDocument();
   });
 
   it("accepts non-Wcode formatted access codes", async () => {

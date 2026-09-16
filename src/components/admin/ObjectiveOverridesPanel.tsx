@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, ChevronRight, ListChecks, LoaderCircle, Mo
 import type { ExamState, ModuleType } from '../../types';
 import { examRepository, getStudentQuestionsForModule } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import { gradingService } from '../../features/grading/infrastructure/gradingGateway';
+import { gradingErrorMessage } from '../../services/gradingService';
 import type {
   GradingScheduleObjectiveOverrideRow,
   ObjectiveOverrideDeleteRequest,
@@ -290,7 +291,9 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
         setOverrides(overrideResult.data);
         setRefreshError(null);
       } else {
-        setRefreshError(overrideResult.error ?? 'The overrides list could not be refreshed.');
+        setRefreshError(
+          gradingErrorMessage(overrideResult.error, 'The overrides list could not be refreshed.'),
+        );
       }
     } catch (error) {
       if (isStale()) return;
@@ -355,7 +358,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
 
       const result = await gradingService.upsertObjectiveOverride(scheduleId, selected.descriptor.id, payload);
       if (!result.success || !result.data) {
-        throw new Error(result.error ?? 'Failed to save override');
+        throw new Error(gradingErrorMessage(result.error, 'Failed to save override'));
       }
       setMutationResult(result.data);
       await refreshOverrides();
@@ -382,7 +385,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
       const payload: ObjectiveOverrideDeleteRequest = { reason: form.reason };
       const result = await gradingService.deleteObjectiveOverride(scheduleId, selected.descriptor.id, payload);
       if (!result.success || !result.data) {
-        throw new Error(result.error ?? 'Failed to delete override');
+        throw new Error(gradingErrorMessage(result.error, 'Failed to delete override'));
       }
       setMutationResult(result.data);
       await refreshOverrides();
@@ -402,7 +405,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
       const reason = `Manual refresh (${new Date().toISOString()})`;
       const result = await gradingService.regradeObjectiveLatestDraft(scheduleId, { reason });
       if (!result.success || !result.data) {
-        throw new Error(result.error ?? 'Failed to regrade objective sections');
+        throw new Error(gradingErrorMessage(result.error, 'Failed to regrade objective sections'));
       }
       setScheduleRegradeResult(result.data);
       if (props.examId) {

@@ -36,7 +36,3 @@ export function parseAnyDocumentName(raw: unknown): ParsedAnyDocumentName | null
   return { documentName: name, documentId, schemaVersion: 2, fieldSet: "workspace" };
 }
 
-export function isSameDocument(a: string | null | undefined, b: string | null | undefined): boolean {
-  if (!a || !b) return false;
-  return a.trim() === b.trim();
-}

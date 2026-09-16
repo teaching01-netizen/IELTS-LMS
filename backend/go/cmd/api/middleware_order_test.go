@@ -1,8 +1,8 @@
 package main
 
 // Plan invariant I4: BuildRouter middleware order must stay
-// recovery > request-id > trace > security > body-limit > auth > CSRF >
-// rate-limit > authorization > handler > access-log. A reorder (e.g.
+// recovery > request-id > trace > security > body-limit > pre-auth IP guard >
+// auth > CSRF > route rate-limit > authorization > handler > access-log. A reorder (e.g.
 // auth before request-id, or access-log before auth) silently breaks
 // request tracing, CSRF posture, or 429 observability.
 //

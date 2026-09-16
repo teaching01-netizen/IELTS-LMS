@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -22,6 +23,8 @@ const (
 	defaultCoeditTokenSecret   = "local-coedit-token-secret-not-for-production-2026"
 	defaultCoeditServiceSecret = "local-coedit-service-secret-not-for-production-2026"
 )
+
+var defaultTrustedProxyCIDRs = []string{"127.0.0.0/8", "::1/128"}
 
 // AttemptVerifyMode selects the attempt-bearer verification posture (A3).
 // Strict keeps today's DB binding; stateless drops the per-request SELECT.
@@ -362,6 +365,10 @@ type Config struct {
 	APIHost string
 	APIPort int
 
+	// TrustedProxyCIDRs controls which direct peers may supply a trusted
+	// X-Forwarded-For chain. Empty environment uses loopback only.
+	TrustedProxyCIDRs []string
+
 	DatabaseURL       string
 	DatabaseDirectURL string
 	DBPoolMax         int
@@ -445,8 +452,11 @@ type Config struct {
 	AuthoringWSReplayBound  int
 	AuthoringWSMaxFrameSize int
 
-	RateLimitGlobalPerMin            int
+	// RateLimitBucketCap is the deprecated compatibility alias for
+	// RateLimitMaxKeys. It is never used as burst capacity.
 	RateLimitBucketCap               int
+	RateLimitMaxKeys                 int
+	RateLimitBurst                   int
 	RateLimitExportPerUser           int
 	RateLimitExportPerUserWindowSecs int
 
@@ -555,7 +565,7 @@ type Config struct {
 	// (default) = today's shape (only the email+IP limiter). On = in-memory
 	// token bucket per schedule (ENTRY_PER_SEC_PER_SCHEDULE sustained,
 	// ENTRY_BURST absorbency); over-limit check-ins get 429 with
-	// {retryAfterSecs, queuePosition} instead of a DB conflict storm.
+	// {retryAfterSeconds} + Retry-After instead of a DB conflict storm.
 	// Rollback = off.
 	EntryGateEnabled bool
 	// EntryPerSec/EntryBurst tune the D3 bucket (defaults 500/2000).
@@ -627,6 +637,18 @@ func productionLike(environment string) bool {
 	}
 }
 
+func trustedProxyCIDRsFromEnv() []string {
+	raw := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES"))
+	if raw == "" {
+		return append([]string(nil), defaultTrustedProxyCIDRs...)
+	}
+	parts := strings.Split(raw, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
+}
+
 // coeditSecret keeps local development zero-config while preserving the
 // dedicated-secret requirement anywhere that could be a shared deployment.
 func coeditSecret(key, fallback, environment string) string {
@@ -649,16 +671,31 @@ func resourceDefault(profile string, normal, low int) int {
 }
 
 // deriveTierLimit reads an explicit per-tier budget, falling back to the
-// provided default when the env var is unset or unparsable. A legacy-only
-// deployment (only RATE_LIMIT_GLOBAL set) therefore still boots with sane
-// per-tier budgets instead of zero-value (deny-all) tiers.
-func deriveTierLimit(key string, global int, def int) int {
+// provided default when the env var is unset or unparsable. Per-tier values
+// are authoritative; RATE_LIMIT_GLOBAL is not consulted.
+func deriveTierLimit(key string, def int) int {
 	v := getenvInt(key, -1)
 	if v >= 0 {
 		return v
 	}
-	_ = global
 	return def
+}
+
+func warnLegacyRateLimitGlobalEnv() {
+	if strings.TrimSpace(os.Getenv("RATE_LIMIT_GLOBAL")) != "" {
+		log.Printf("config: RATE_LIMIT_GLOBAL is deprecated and ignored; use per-tier RATE_LIMIT_*_PER_MIN values")
+	}
+}
+
+func rateLimitMaxKeysFromEnv() (maxKeys, legacyCap int) {
+	legacyCap = getenvInt("RATE_LIMIT_BUCKET_CAP", 10000)
+	if strings.TrimSpace(os.Getenv("RATE_LIMIT_BUCKET_CAP")) != "" {
+		log.Printf("config: RATE_LIMIT_BUCKET_CAP is deprecated; use RATE_LIMIT_MAX_KEYS")
+	}
+	if strings.TrimSpace(os.Getenv("RATE_LIMIT_MAX_KEYS")) != "" {
+		return getenvInt("RATE_LIMIT_MAX_KEYS", 10000), legacyCap
+	}
+	return legacyCap, legacyCap
 }
 
 // poolMaxOr falls back to the shared pool max when a role split is unset
@@ -751,12 +788,15 @@ func Load() Config {
 		mode = BackgroundContinuous
 	}
 	environment := getenv("APP_ENV", getenv("ENVIRONMENT", "development"))
+	rateLimitMaxKeys, legacyBucketCap := rateLimitMaxKeysFromEnv()
+	warnLegacyRateLimitGlobalEnv()
 	return Config{
 		APIHost: getenv("API_HOST", "0.0.0.0"),
 		// Platforms such as Railway inject PORT at runtime. Keep API_PORT as
 		// the local/development fallback, but never let it override the
 		// platform-assigned listener port.
-		APIPort: getenvInt("PORT", getenvInt("API_PORT", 4000)),
+		APIPort:           getenvInt("PORT", getenvInt("API_PORT", 4000)),
+		TrustedProxyCIDRs: trustedProxyCIDRsFromEnv(),
 
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
 		DatabaseDirectURL: os.Getenv("DATABASE_DIRECT_URL"),
@@ -842,18 +882,19 @@ func Load() Config {
 		OutboxMaxAttempts:             getenvInt("OUTBOX_MAX_ATTEMPTS", 10),
 		GradingProjectionIntervalSecs: getenvInt("GRADING_PROJECTION_INTERVAL_SECS", 5),
 
-		RateLimitGlobalPerMin:            getenvInt("RATE_LIMIT_GLOBAL", 600),
-		RateLimitBucketCap:               getenvInt("RATE_LIMIT_BUCKET_CAP", 10000),
+		RateLimitBucketCap:               legacyBucketCap,
+		RateLimitMaxKeys:                 rateLimitMaxKeys,
+		RateLimitBurst:                   getenvInt("RATE_LIMIT_BURST", 0),
 		RateLimitExportPerUser:           getenvInt("RATE_LIMIT_EXPORT_PER_USER", 3),
 		RateLimitExportPerUserWindowSecs: getenvInt("RATE_LIMIT_EXPORT_PER_USER_WINDOW_SECS", 300),
 
-		RateLimitAuthCriticalPerMin: deriveTierLimit("RATE_LIMIT_AUTH_CRITICAL_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 120),
-		RateLimitAnonAuthPerMin:     deriveTierLimit("RATE_LIMIT_ANON_AUTH_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 30),
-		RateLimitAuthedReadsPerMin:  deriveTierLimit("RATE_LIMIT_AUTHED_READS_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 300),
-		RateLimitPollingPerMin:      deriveTierLimit("RATE_LIMIT_POLLING_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 240),
-		RateLimitHeartbeatPerMin:    deriveTierLimit("RATE_LIMIT_HEARTBEAT_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 120),
-		RateLimitWritesPerMin:       deriveTierLimit("RATE_LIMIT_WRITES_PER_MIN", getenvInt("RATE_LIMIT_GLOBAL", 600), 120),
-		RateLimitBackstopPerMin:     deriveTierLimit("RATE_LIMIT_BACKSTOP_PER_MIN", 3000, 3000),
+		RateLimitAuthCriticalPerMin: deriveTierLimit("RATE_LIMIT_AUTH_CRITICAL_PER_MIN", 120),
+		RateLimitAnonAuthPerMin:     deriveTierLimit("RATE_LIMIT_ANON_AUTH_PER_MIN", 30),
+		RateLimitAuthedReadsPerMin:  deriveTierLimit("RATE_LIMIT_AUTHED_READS_PER_MIN", 300),
+		RateLimitPollingPerMin:      deriveTierLimit("RATE_LIMIT_POLLING_PER_MIN", 240),
+		RateLimitHeartbeatPerMin:    deriveTierLimit("RATE_LIMIT_HEARTBEAT_PER_MIN", 120),
+		RateLimitWritesPerMin:       deriveTierLimit("RATE_LIMIT_WRITES_PER_MIN", 120),
+		RateLimitBackstopPerMin:     deriveTierLimit("RATE_LIMIT_BACKSTOP_PER_MIN", 3000),
 
 		RateLimitMode: parseRateLimitMode(os.Getenv("RATE_LIMIT_MODE")),
 
@@ -951,6 +992,37 @@ func (c Config) ValidateForRuntime() error {
 	}
 	if c.DBPoolMax <= 0 {
 		return fmt.Errorf("DB_POOL_MAX_CONNECTIONS must be positive")
+	}
+	for _, cidr := range c.TrustedProxyCIDRs {
+		cidr = strings.TrimSpace(cidr)
+		if cidr == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("invalid TRUSTED_PROXIES CIDR %q: %w", cidr, err)
+		}
+	}
+	if c.RateLimitMaxKeys <= 0 {
+		return fmt.Errorf("RATE_LIMIT_MAX_KEYS must be positive")
+	}
+	if c.RateLimitBurst < 0 {
+		return fmt.Errorf("RATE_LIMIT_BURST must be non-negative")
+	}
+	for name, value := range map[string]int{
+		"RATE_LIMIT_AUTH_CRITICAL_PER_MIN": c.RateLimitAuthCriticalPerMin,
+		"RATE_LIMIT_ANON_AUTH_PER_MIN":     c.RateLimitAnonAuthPerMin,
+		"RATE_LIMIT_AUTHED_READS_PER_MIN":  c.RateLimitAuthedReadsPerMin,
+		"RATE_LIMIT_POLLING_PER_MIN":       c.RateLimitPollingPerMin,
+		"RATE_LIMIT_HEARTBEAT_PER_MIN":     c.RateLimitHeartbeatPerMin,
+		"RATE_LIMIT_WRITES_PER_MIN":        c.RateLimitWritesPerMin,
+		"RATE_LIMIT_BACKSTOP_PER_MIN":      c.RateLimitBackstopPerMin,
+	} {
+		if value <= 0 {
+			return fmt.Errorf("%s must be positive", name)
+		}
+	}
+	if c.RateLimitExportPerUser <= 0 || c.RateLimitExportPerUserWindowSecs <= 0 {
+		return fmt.Errorf("RATE_LIMIT_EXPORT_PER_USER and RATE_LIMIT_EXPORT_PER_USER_WINDOW_SECS must be positive")
 	}
 	// Unknown rate-limit modes fail closed: dual|local are the only
 	// deployable postures (an unknown value must never silently degrade

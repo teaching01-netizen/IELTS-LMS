@@ -50,6 +50,14 @@ export function shouldRetryQuery(failureCount: number, error: unknown): boolean 
   return failureCount < DEFAULT_RETRY_CONFIG.retry;
 }
 
+/** Mutation retry policy: one retry for transient failures, never for 429s. */
+export function shouldRetryMutation(failureCount: number, error: unknown): boolean {
+  if (isRateLimitedError(error)) {
+    return false;
+  }
+  return failureCount < 1;
+}
+
 function isRateLimitedError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) {
     return false;
@@ -169,7 +177,7 @@ export function createQueryClient(): QueryClient {
         refetchOnMount: true,
       },
       mutations: {
-        retry: 1,
+        retry: shouldRetryMutation,
       },
     },
     queryCache: new QueryCache({

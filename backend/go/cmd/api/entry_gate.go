@@ -42,13 +42,17 @@ func fastPathResolve(ref schedules.AttemptRef, found bool, err error) (*schedule
 // PerSec admissions with Burst absorbency. Non-positive values fall back to
 // the plan defaults (500/s, burst 2000) — never unbounded, never deny-all.
 type entryGateConfig struct {
-	PerSec float64
-	Burst  float64
+	PerSec       float64
+	Burst        float64
+	MaxSchedules int
+	IdleAfter    time.Duration
 }
 
 const (
-	defaultEntryPerSec = 500
-	defaultEntryBurst  = 2000
+	defaultEntryPerSec       = 500
+	defaultEntryBurst        = 2000
+	defaultEntryMaxSchedules = 10000
+	defaultEntryIdleAfter    = time.Minute
 )
 
 func (c entryGateConfig) normalized() entryGateConfig {
@@ -58,27 +62,34 @@ func (c entryGateConfig) normalized() entryGateConfig {
 	if c.Burst <= 0 {
 		c.Burst = defaultEntryBurst
 	}
+	if c.MaxSchedules <= 0 {
+		c.MaxSchedules = defaultEntryMaxSchedules
+	}
+	if c.IdleAfter <= 0 {
+		c.IdleAfter = defaultEntryIdleAfter
+	}
 	return c
 }
 
-// entryGateResult is the check-in verdict: Allowed, or 429 with an honest
-// RetryAfterSecs (deficit / rate, rounded up) + QueuePosition (waiting
-// deficit, so clients render a queue instead of an outage).
+// entryGateResult is the check-in verdict: Allowed, or a bounded 429 with an
+// honest RetryAfterSecs (deficit / rate, rounded up). CapacityLimited marks a
+// full schedule map where no idle entry could be evicted.
 type entryGateResult struct {
-	Allowed        bool
-	RetryAfterSecs int64
-	QueuePosition  int64
+	Allowed         bool
+	RetryAfterSecs  int64
+	CapacityLimited bool
 }
 
 type entryBucket struct {
-	tokens  float64
-	at      time.Time
-	waiting int64
+	tokens   float64
+	at       time.Time
+	lastSeen time.Time
 }
 
 // entryGate is the in-process per-schedule token bucket (plan D3). One
-// mutex guards all buckets; ops are O(1). Memory is bounded by distinct
-// schedule IDs seen (exam-day cardinality: hundreds, not millions).
+// mutex guards all buckets; ops are O(1). Memory is bounded by MaxSchedules;
+// idle entries are evicted using the same one-minute idle policy as the
+// general BucketStore.
 type entryGate struct {
 	cfg     entryGateConfig
 	mu      sync.Mutex
@@ -89,14 +100,45 @@ func newEntryGate(cfg entryGateConfig) *entryGate {
 	return &entryGate{cfg: cfg.normalized(), buckets: map[string]*entryBucket{}}
 }
 
+func (g *entryGate) evictIdleLocked(now time.Time) bool {
+	var oldestKey string
+	var oldestSeen time.Time
+	found := false
+	for key, bucket := range g.buckets {
+		if bucket == nil || now.Sub(bucket.lastSeen) < g.cfg.IdleAfter {
+			continue
+		}
+		if !found || bucket.lastSeen.Before(oldestSeen) {
+			oldestKey = key
+			oldestSeen = bucket.lastSeen
+			found = true
+		}
+	}
+	if !found {
+		return false
+	}
+	delete(g.buckets, oldestKey)
+	return true
+}
+
 func (g *entryGate) Allow(scheduleID string, now time.Time) entryGateResult {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	b, ok := g.buckets[scheduleID]
 	if !ok {
-		b = &entryBucket{tokens: g.cfg.Burst, at: now}
+		if len(g.buckets) >= g.cfg.MaxSchedules && !g.evictIdleLocked(now) {
+			telemetry.IncCounter(telemetry.MEntryGateQueued)
+			telemetry.IncCounter(
+				telemetry.MEntryGateCapacityTotal,
+				"tier", "student-entry",
+				"key_class", "schedule",
+			)
+			return entryGateResult{RetryAfterSecs: 1, CapacityLimited: true}
+		}
+		b = &entryBucket{tokens: g.cfg.Burst, at: now, lastSeen: now}
 		g.buckets[scheduleID] = b
 	}
+	b.lastSeen = now
 	elapsed := now.Sub(b.at).Seconds()
 	if elapsed > 0 {
 		b.tokens += elapsed * g.cfg.PerSec
@@ -107,13 +149,9 @@ func (g *entryGate) Allow(scheduleID string, now time.Time) entryGateResult {
 	}
 	if b.tokens >= 1 {
 		b.tokens--
-		if b.waiting > 0 {
-			b.waiting--
-		}
 		telemetry.IncCounter(telemetry.MEntryGateAdmit)
 		return entryGateResult{Allowed: true}
 	}
-	b.waiting++
 	deficit := 1 - b.tokens
 	retrySecs := int64(deficit / g.cfg.PerSec)
 	if float64(retrySecs)*g.cfg.PerSec < deficit {
@@ -123,5 +161,5 @@ func (g *entryGate) Allow(scheduleID string, now time.Time) entryGateResult {
 		retrySecs = 1
 	}
 	telemetry.IncCounter(telemetry.MEntryGateQueued)
-	return entryGateResult{Allowed: false, RetryAfterSecs: retrySecs, QueuePosition: b.waiting}
+	return entryGateResult{Allowed: false, RetryAfterSecs: retrySecs}
 }

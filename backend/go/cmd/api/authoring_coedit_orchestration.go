@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/authoringcoedit"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -35,6 +39,8 @@ type coeditStatusRecorder struct {
 	status int
 	buffer bytes.Buffer
 }
+
+var coeditLifecycleOperationID = uuid.NewString
 
 func (rec *coeditStatusRecorder) WriteHeader(status int) {
 	if rec.status == 0 {
@@ -114,6 +120,114 @@ func coeditWorkspaceIDs(names []authoringcoedit.DocumentName) []string {
 	return out
 }
 
+func newCoeditLifecycleOperation() authoringcoedit.CoeditLifecycleOperation {
+	return authoringcoedit.CoeditLifecycleOperation{
+		FreezeOperationID: coeditLifecycleOperationID(),
+		FreezeExpiresAt:   time.Now().UTC().Add(time.Duration(authoringcoedit.FreezeLeaseSeconds) * time.Second).Unix(),
+	}
+}
+
+type coeditLeaseHeartbeat struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+	mu     sync.Mutex
+	err    error
+}
+
+func startCoeditLeaseHeartbeat(ctx context.Context, app *App, ids, workspaceIDs []string, lease string, operation authoringcoedit.CoeditLifecycleOperation) *coeditLeaseHeartbeat {
+	heartbeatCtx, cancel := context.WithCancel(ctx)
+	h := &coeditLeaseHeartbeat{ctx: heartbeatCtx, cancel: cancel, done: make(chan struct{})}
+	go func() {
+		defer close(h.done)
+		interval := time.Duration(authoringcoedit.FreezeLeaseSeconds)*time.Second/2 - time.Second
+		if interval <= 0 {
+			interval = time.Second
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				renewed := operation
+				renewed.FreezeExpiresAt = time.Now().UTC().Add(time.Duration(authoringcoedit.FreezeLeaseSeconds) * time.Second).Unix()
+				if err := app.Authoring.CoeditRenewFreeze(heartbeatCtx, ids, renewed); err != nil {
+					h.setError(err)
+					return
+				}
+				if err := app.Authoring.CoeditWorkspaceRenewFreeze(heartbeatCtx, workspaceIDs, renewed); err != nil {
+					h.setError(err)
+					return
+				}
+				if err := app.CoeditControl.Renew(heartbeatCtx, authoringcoedit.RenewRequest{
+					FreezeToken: lease, FreezeOperationID: operation.FreezeOperationID,
+					FreezeExpiresAt: renewed.FreezeExpiresAt,
+				}); err != nil {
+					h.setError(err)
+					return
+				}
+			}
+		}
+	}()
+	return h
+}
+
+func (h *coeditLeaseHeartbeat) setError(err error) {
+	h.mu.Lock()
+	if h.err == nil {
+		h.err = err
+	}
+	h.mu.Unlock()
+	h.cancel()
+}
+
+func (h *coeditLeaseHeartbeat) stop() error {
+	if h == nil {
+		return nil
+	}
+	h.cancel()
+	<-h.done
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.err
+}
+
+func coeditAbortFreeze(ctx context.Context, app *App, names []authoringcoedit.DocumentName, lease string, operation authoringcoedit.CoeditLifecycleOperation) {
+	if lease != "" {
+		_ = app.CoeditControl.Unfreeze(ctx, authoringcoedit.UnfreezeRequest{
+			FreezeToken: lease, FreezeOperationID: operation.FreezeOperationID,
+		})
+	}
+	ids := coeditDocumentIDs(names)
+	workspaceIDs := coeditWorkspaceIDs(names)
+	// These calls are deliberately independent: a partial v1/v2 cleanup must
+	// never hide the other family behind an else-if or early return.
+	_ = app.Authoring.CoeditAbortFreeze(ctx, ids, operation)
+	_ = app.Authoring.CoeditWorkspaceAbortFreeze(ctx, workspaceIDs, operation)
+}
+
+func coeditCloseAfterSuccess(ctx context.Context, app *App, names []authoringcoedit.DocumentName, operation authoringcoedit.CoeditLifecycleOperation, reason authoringcoedit.CloseReason) error {
+	controlErr := app.CoeditControl.Close(ctx, authoringcoedit.CloseRequest{
+		DocumentNames: coeditNameStrings(names), Reason: string(reason),
+		FreezeOperationID: operation.FreezeOperationID,
+	})
+	ids := coeditDocumentIDs(names)
+	workspaceIDs := coeditWorkspaceIDs(names)
+	// Durable close is attempted even when service close fails. It keeps the
+	// successful destructive mutation fenced instead of reopening stale rooms.
+	documentErr := app.Authoring.CoeditCloseDocuments(ctx, ids, reason)
+	workspaceErr := app.Authoring.CoeditWorkspaceCloseDocuments(ctx, workspaceIDs, reason)
+	if controlErr != nil {
+		return controlErr
+	}
+	if documentErr != nil {
+		return documentErr
+	}
+	return workspaceErr
+}
+
 // coeditPublishGuard implements the publish freeze/flush/commit protocol.
 func coeditPublishGuard(app *App, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -132,82 +246,139 @@ func coeditPublishGuard(app *App, next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		ids := coeditDocumentIDs(names)
-		manifest, lease, ok := coeditFreeze(w, r, app, names, "publish")
+		workspaceIDs := coeditWorkspaceIDs(names)
+		// coeditFreeze verifies both the manifest and the operation owner before
+		// returning, so only the lease is needed here.
+		_, lease, operation, ok := coeditFreeze(w, r, app, names, "publish")
 		if !ok {
 			return
 		}
+		heartbeat := startCoeditLeaseHeartbeat(r.Context(), app, ids, workspaceIDs, lease, operation)
+		defer func() { _ = heartbeat.stop() }()
 		recorder := &coeditStatusRecorder{ResponseWriter: w}
-		next(recorder, r)
+		next(recorder, r.WithContext(heartbeatContext(r.Context(), heartbeat)))
 		if recorder.statusCode() >= 400 {
 			// Publish failed: unfreeze so authors keep working. A failed
 			// unfreeze is recovered by the freeze lease expiry.
-			_ = app.CoeditControl.Unfreeze(r.Context(), authoringcoedit.UnfreezeRequest{FreezeToken: lease})
-			_ = app.Authoring.CoeditReopenActive(r.Context(), ids)
-			_ = app.Authoring.CoeditWorkspaceReopenActive(r.Context(), coeditWorkspaceIDs(names))
+			coeditAbortFreeze(r.Context(), app, names, lease, operation)
 			authoringcoedit.EmitLifecycle(authoringcoedit.CloseExamPublished, authoringcoedit.OutcomeRejected)
 			return
 		}
-		if err := app.CoeditControl.Close(r.Context(), authoringcoedit.CloseRequest{
-			DocumentNames: coeditNameStrings(names),
-			Reason:        string(authoringcoedit.CloseExamPublished),
-		}); err != nil {
-			// The publish committed. Closing is best-effort: the lease and the
-			// next load both refuse a published draft, so a failed close
-			// degrades to a read-only room rather than a correctness hole.
+		if heartbeatErr := heartbeat.stop(); heartbeatErr != nil {
+			// A successful handler response has already committed the mutation;
+			// never reopen its durable rows after a lost heartbeat. Leave them
+			// fenced for explicit recovery/close.
 			authoringcoedit.EmitLifecycle(authoringcoedit.CloseExamPublished, authoringcoedit.OutcomeUnavailable)
+			return
 		}
-		if err := app.Authoring.CoeditCloseDocuments(r.Context(), ids, authoringcoedit.CloseExamPublished); err != nil {
-			authoringcoedit.EmitLifecycle(authoringcoedit.CloseExamPublished, authoringcoedit.OutcomeUnavailable)
-		} else if err := app.Authoring.CoeditWorkspaceCloseDocuments(r.Context(), coeditWorkspaceIDs(names), authoringcoedit.CloseExamPublished); err != nil {
+		if err := coeditCloseAfterSuccess(r.Context(), app, names, operation, authoringcoedit.CloseExamPublished); err != nil {
 			authoringcoedit.EmitLifecycle(authoringcoedit.CloseExamPublished, authoringcoedit.OutcomeUnavailable)
 		} else {
 			authoringcoedit.EmitLifecycle(authoringcoedit.CloseExamPublished, authoringcoedit.OutcomeAccepted)
 		}
-		_ = manifest
 	}
+}
+
+func heartbeatContext(ctx context.Context, heartbeat *coeditLeaseHeartbeat) context.Context {
+	// The heartbeat owns cancellation internally; this helper keeps the request
+	// context stable until the first renewal failure. Long-running handlers that
+	// honor cancellation then stop before committing an unprotected mutation.
+	if heartbeat == nil || heartbeat.ctx == nil {
+		return ctx
+	}
+	return heartbeat.ctx
+}
+
+// startCoeditRecoveryLoop keeps a crashed coordinator from leaving durable
+// freezing rows stuck forever. The loop is cancellable by main during
+// shutdown; token issuance also invokes the same idempotent recovery function
+// immediately before creating a room.
+func startCoeditRecoveryLoop(ctx context.Context, app *App) context.CancelFunc {
+	if app == nil || app.Authoring == nil || !app.CoeditCapability() {
+		return func() {}
+	}
+	loopCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(time.Duration(authoringcoedit.FreezeLeaseSeconds) * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-loopCtx.Done():
+				return
+			case <-ticker.C:
+				recoveryCtx, recoveryCancel := context.WithTimeout(loopCtx, 10*time.Second)
+				if err := recoverExpiredCoeditFreezes(recoveryCtx, app); err != nil && loopCtx.Err() == nil {
+					// A token request will retry this same recovery at the
+					// boundary. Do not make the periodic loop a process killer.
+					// The durable rows remain fenced until a successful pass.
+					log.Printf("api: co-edit freeze recovery pass failed: %v", err)
+				}
+				recoveryCancel()
+			}
+		}
+	}()
+	return cancel
 }
 
 // coeditFreeze freezes rooms, marks rows freezing, and verifies the manifest
 // against MySQL. A failure fails the caller closed with a retryable 503.
-func coeditFreeze(w http.ResponseWriter, r *http.Request, app *App, names []authoringcoedit.DocumentName, reason string) ([]authoringcoedit.FreezeManifestEntry, string, bool) {
+func coeditFreeze(w http.ResponseWriter, r *http.Request, app *App, names []authoringcoedit.DocumentName, reason string) ([]authoringcoedit.FreezeManifestEntry, string, authoringcoedit.CoeditLifecycleOperation, bool) {
 	ids := coeditDocumentIDs(names)
 	workspaceIDs := coeditWorkspaceIDs(names)
-	if err := app.Authoring.CoeditMarkFreezing(r.Context(), ids); err != nil {
+	operation := newCoeditLifecycleOperation()
+	if err := app.Authoring.CoeditMarkFreezing(r.Context(), ids, operation); err != nil {
 		httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
-		return nil, "", false
+		return nil, "", operation, false
 	}
-	if err := app.Authoring.CoeditWorkspaceMarkFreezing(r.Context(), workspaceIDs); err != nil {
-		_ = app.Authoring.CoeditReopenActive(r.Context(), ids)
-		_ = app.Authoring.CoeditWorkspaceReopenActive(r.Context(), workspaceIDs)
+	if err := app.Authoring.CoeditWorkspaceMarkFreezing(r.Context(), workspaceIDs, operation); err != nil {
+		_ = app.Authoring.CoeditAbortFreeze(r.Context(), ids, operation)
+		_ = app.Authoring.CoeditWorkspaceAbortFreeze(r.Context(), workspaceIDs, operation)
 		httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
-		return nil, "", false
+		return nil, "", operation, false
 	}
 	frozen, err := app.CoeditControl.Freeze(r.Context(), authoringcoedit.FreezeRequest{
-		DocumentNames: coeditNameStrings(names),
-		Reason:        reason,
+		DocumentNames:     coeditNameStrings(names),
+		Reason:            reason,
+		FreezeOperationID: operation.FreezeOperationID,
+		FreezeExpiresAt:   operation.FreezeExpiresAt,
 	})
 	if err != nil {
-		_ = app.Authoring.CoeditReopenActive(r.Context(), ids)
-		_ = app.Authoring.CoeditWorkspaceReopenActive(r.Context(), workspaceIDs)
+		_ = app.Authoring.CoeditAbortFreeze(r.Context(), ids, operation)
+		_ = app.Authoring.CoeditWorkspaceAbortFreeze(r.Context(), workspaceIDs, operation)
 		authoringcoedit.EmitLifecycle(authoringcoedit.CloseReason(reason), authoringcoedit.OutcomeUnavailable)
 		writeCoeditError(w, r, err)
-		return nil, "", false
+		return nil, "", operation, false
 	}
-	if err := app.Authoring.CoeditVerifyManifest(r.Context(), frozen.Manifest); err != nil {
-		_ = app.CoeditControl.Unfreeze(r.Context(), authoringcoedit.UnfreezeRequest{FreezeToken: frozen.FreezeToken})
-		_ = app.Authoring.CoeditReopenActive(r.Context(), ids)
-		_ = app.Authoring.CoeditWorkspaceReopenActive(r.Context(), workspaceIDs)
+	if frozen.FreezeOperationID != "" && frozen.FreezeOperationID != operation.FreezeOperationID {
+		coeditAbortFreeze(r.Context(), app, names, frozen.FreezeToken, operation)
 		authoringcoedit.EmitManifestMismatch()
-		writeCoeditError(w, r, err)
-		return nil, "", false
+		writeCoeditError(w, r, authoringcoedit.New(authoringcoedit.CodeFreezeConflict, "The collaboration freeze owner changed; try again.").ToAppError())
+		return nil, "", operation, false
 	}
-	return frozen.Manifest, frozen.FreezeToken, true
+	if strings.TrimSpace(frozen.FreezeToken) == "" {
+		coeditAbortFreeze(r.Context(), app, names, "", operation)
+		authoringcoedit.EmitLifecycle(authoringcoedit.CloseReason(reason), authoringcoedit.OutcomeUnavailable)
+		writeCoeditError(w, r, authoringcoedit.ErrServiceUnavailable)
+		return nil, "", operation, false
+	}
+	if frozen.FreezeExpiresAt != 0 && frozen.FreezeExpiresAt < operation.FreezeExpiresAt {
+		coeditAbortFreeze(r.Context(), app, names, frozen.FreezeToken, operation)
+		authoringcoedit.EmitManifestMismatch()
+		writeCoeditError(w, r, authoringcoedit.New(authoringcoedit.CodeFreezeConflict, "The collaboration freeze lease is too short; try again.").ToAppError())
+		return nil, "", operation, false
+	}
+	if err := app.Authoring.CoeditVerifyManifestOwned(r.Context(), names, frozen.Manifest, operation); err != nil {
+		coeditAbortFreeze(r.Context(), app, names, frozen.FreezeToken, operation)
+		writeCoeditError(w, r, err)
+		return nil, "", operation, false
+	}
+	return frozen.Manifest, frozen.FreezeToken, operation, true
 }
 
-// coeditScopeCloseGuard freezes and flushes the affected rooms before a
-// destructive mutation runs, then closes them afterwards. Unlike publish it
-// does not verify a manifest: the mutation itself is the authority, and the
-// rooms are being torn down rather than snapshotted.
+// coeditScopeCloseGuard freezes and operation-owned-final-stores the affected
+// rooms before a destructive mutation runs, then closes them afterwards. The
+// shared freeze helper verifies the durable ownership boundary for both room
+// families before the mutation is admitted.
 func coeditScopeCloseGuard(app *App, reason authoringcoedit.CloseReason, param string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !app.CoeditCapability() {
@@ -223,44 +394,24 @@ func coeditScopeCloseGuard(app *App, reason authoringcoedit.CloseReason, param s
 			next(w, r)
 			return
 		}
-		ids := coeditDocumentIDs(names)
-		workspaceIDs := coeditWorkspaceIDs(names)
-		if err := app.Authoring.CoeditMarkFreezing(r.Context(), ids); err != nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
+		_, lease, operation, ok := coeditFreeze(w, r, app, names, string(reason))
+		if !ok {
 			return
 		}
-		if err := app.Authoring.CoeditWorkspaceMarkFreezing(r.Context(), workspaceIDs); err != nil {
-			_ = app.Authoring.CoeditReopenActive(r.Context(), ids)
-			_ = app.Authoring.CoeditWorkspaceReopenActive(r.Context(), workspaceIDs)
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
-			return
-		}
-		if err := app.CoeditControl.Flush(r.Context(), authoringcoedit.FlushRequest{
-			DocumentNames: coeditNameStrings(names),
-		}); err != nil {
-			_ = app.Authoring.CoeditReopenActive(r.Context(), ids)
-			_ = app.Authoring.CoeditWorkspaceReopenActive(r.Context(), workspaceIDs)
-			authoringcoedit.EmitLifecycle(reason, authoringcoedit.OutcomeUnavailable)
-			writeCoeditError(w, r, err)
-			return
-		}
+		heartbeat := startCoeditLeaseHeartbeat(r.Context(), app, coeditDocumentIDs(names), coeditWorkspaceIDs(names), lease, operation)
+		defer func() { _ = heartbeat.stop() }()
 		recorder := &coeditStatusRecorder{ResponseWriter: w}
-		next(recorder, r)
+		next(recorder, r.WithContext(heartbeatContext(r.Context(), heartbeat)))
 		if recorder.statusCode() >= 400 {
-			_ = app.Authoring.CoeditReopenActive(r.Context(), ids)
-			_ = app.Authoring.CoeditWorkspaceReopenActive(r.Context(), workspaceIDs)
+			coeditAbortFreeze(r.Context(), app, names, lease, operation)
 			authoringcoedit.EmitLifecycle(reason, authoringcoedit.OutcomeRejected)
 			return
 		}
-		_ = app.CoeditControl.Close(r.Context(), authoringcoedit.CloseRequest{
-			DocumentNames: coeditNameStrings(names),
-			Reason:        string(reason),
-		})
-		if err := app.Authoring.CoeditCloseDocuments(r.Context(), ids, reason); err != nil {
+		if heartbeatErr := heartbeat.stop(); heartbeatErr != nil {
 			authoringcoedit.EmitLifecycle(reason, authoringcoedit.OutcomeUnavailable)
 			return
 		}
-		if err := app.Authoring.CoeditWorkspaceCloseDocuments(r.Context(), workspaceIDs, reason); err != nil {
+		if err := coeditCloseAfterSuccess(r.Context(), app, names, operation, reason); err != nil {
 			authoringcoedit.EmitLifecycle(reason, authoringcoedit.OutcomeUnavailable)
 			return
 		}
@@ -304,48 +455,30 @@ func coeditQuestionDeleteGuard(app *App, next http.HandlerFunc) http.HandlerFunc
 				return
 			}
 		}
-		ids := coeditDocumentIDs(names)
-		workspaceIDs := coeditWorkspaceIDs(names)
-		if len(ids) > 0 {
-			if err := app.Authoring.CoeditMarkFreezing(r.Context(), ids); err != nil {
-				httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
-				return
-			}
+		if len(names) == 0 {
+			next(w, r)
+			return
 		}
-		if len(workspaceIDs) > 0 {
-			if err := app.Authoring.CoeditWorkspaceMarkFreezing(r.Context(), workspaceIDs); err != nil {
-				_ = app.Authoring.CoeditReopenActive(r.Context(), ids)
-				_ = app.Authoring.CoeditWorkspaceReopenActive(r.Context(), workspaceIDs)
-				httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring state is unavailable."))
-				return
-			}
+		_, lease, operation, ok := coeditFreeze(w, r, app, names, string(authoringcoedit.CloseQuestionDeleted))
+		if !ok {
+			return
 		}
-		if len(ids) > 0 || len(workspaceIDs) > 0 {
-			if err := app.CoeditControl.Flush(r.Context(), authoringcoedit.FlushRequest{
-				DocumentNames: coeditNameStrings(names),
-			}); err != nil {
-				_ = app.Authoring.CoeditReopenActive(r.Context(), ids)
-				_ = app.Authoring.CoeditWorkspaceReopenActive(r.Context(), workspaceIDs)
-				authoringcoedit.EmitLifecycle(authoringcoedit.CloseQuestionDeleted, authoringcoedit.OutcomeUnavailable)
-				writeCoeditError(w, r, err)
-				return
-			}
-		}
+		heartbeat := startCoeditLeaseHeartbeat(r.Context(), app, coeditDocumentIDs(names), coeditWorkspaceIDs(names), lease, operation)
+		defer func() { _ = heartbeat.stop() }()
 		recorder := &coeditStatusRecorder{ResponseWriter: w}
-		next(recorder, r)
+		next(recorder, r.WithContext(heartbeatContext(r.Context(), heartbeat)))
 		if recorder.statusCode() >= 400 {
-			_ = app.Authoring.CoeditReopenActive(r.Context(), ids)
-			_ = app.Authoring.CoeditWorkspaceReopenActive(r.Context(), workspaceIDs)
+			coeditAbortFreeze(r.Context(), app, names, lease, operation)
 			authoringcoedit.EmitLifecycle(authoringcoedit.CloseQuestionDeleted, authoringcoedit.OutcomeRejected)
 			return
 		}
-		if len(ids) > 0 || len(workspaceIDs) > 0 {
-			_ = app.CoeditControl.Close(r.Context(), authoringcoedit.CloseRequest{
-				DocumentNames: coeditNameStrings(names),
-				Reason:        string(authoringcoedit.CloseQuestionDeleted),
-			})
-			_ = app.Authoring.CoeditCloseDocuments(r.Context(), ids, authoringcoedit.CloseQuestionDeleted)
-			_ = app.Authoring.CoeditWorkspaceCloseDocuments(r.Context(), workspaceIDs, authoringcoedit.CloseQuestionDeleted)
+		if heartbeatErr := heartbeat.stop(); heartbeatErr != nil {
+			authoringcoedit.EmitLifecycle(authoringcoedit.CloseQuestionDeleted, authoringcoedit.OutcomeUnavailable)
+			return
+		}
+		if err := coeditCloseAfterSuccess(r.Context(), app, names, operation, authoringcoedit.CloseQuestionDeleted); err != nil {
+			authoringcoedit.EmitLifecycle(authoringcoedit.CloseQuestionDeleted, authoringcoedit.OutcomeUnavailable)
+			return
 		}
 		authoringcoedit.EmitLifecycle(authoringcoedit.CloseQuestionDeleted, authoringcoedit.OutcomeAccepted)
 	}

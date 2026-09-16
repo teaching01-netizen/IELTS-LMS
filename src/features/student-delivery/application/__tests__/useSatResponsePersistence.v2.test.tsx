@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useSatResponsePersistence } from '../../hooks/useSatResponsePersistence';
+import type { ResponseBatchRequestV2 } from '@shared/durability/types';
+import { durablePayloadToSatDraft, useSatResponsePersistence } from '../../hooks/useSatResponsePersistence';
 import type { SatDeliveryGateway } from '../ports/SatDeliveryGateway';
 
 const mocks = vi.hoisted(() => ({
@@ -122,6 +123,65 @@ describe('SAT V2 response persistence integration', () => {
       await Promise.resolve();
     });
     expect(hook.result.current.visibleDrafts.q1).toBeUndefined();
+  });
+
+  it('sends the complete hydrated aggregate when only the answer changes', async () => {
+    mocks.transport.fetchSnapshot.mockReset().mockResolvedValue([]);
+    mocks.transport.sendBatch.mockReset().mockImplementation(async (_attemptId: string, request: ResponseBatchRequestV2) => ({
+      attemptRevision: 1,
+      serverTime: new Date().toISOString(),
+      acknowledgements: request.commands.map((command) => ({
+        writeId: command.writeId,
+        questionId: command.questionId,
+        clientVersion: command.clientVersion,
+        outcome: 'applied' as const,
+        serverRevision: 1,
+        canonicalResponse: command.response,
+        contentHash: 'hash',
+      })),
+    }));
+    const hook = renderHook(() =>
+      useSatResponsePersistence({
+        scheduleId: 'schedule',
+        attemptId: 'attempt-round-trip',
+        gateway: gateway(),
+        onSavedRevision: vi.fn(),
+      })
+    );
+    await waitFor(() => expect(mocks.transport.fetchSnapshot).toHaveBeenCalled());
+
+    const hydrated = durablePayloadToSatDraft('q1', {
+      answer: 'old answer',
+      markedForReview: true,
+      eliminatedOptions: ['B'],
+      annotations: [{
+        id: 'sat-annotations',
+        kind: 'sat_annotations',
+        version: 2,
+        legacyQuestionNote: 'earlier note',
+        annotations: [],
+      }],
+    });
+    act(() => {
+      hook.result.current.save({ ...hydrated, answer: 'new answer' });
+    });
+
+    await waitFor(() => expect(mocks.transport.sendBatch).toHaveBeenCalled(), { timeout: 5_000 });
+    const request = mocks.transport.sendBatch.mock.calls[0]?.[1] as ResponseBatchRequestV2;
+    expect(request.commands).toHaveLength(1);
+    expect(request.commands[0]?.response).toEqual({
+      answer: 'new answer',
+      markedForReview: true,
+      eliminatedOptions: ['B'],
+      annotations: [{
+        id: 'sat-annotations',
+        kind: 'sat_annotations',
+        version: 2,
+        legacyQuestionNote: 'earlier note',
+        annotations: [],
+      }],
+    });
+    hook.unmount();
   });
 
   it('surfaces blocked drafts as visible + retryable exam-stress-safe failure and gates submit', async () => {

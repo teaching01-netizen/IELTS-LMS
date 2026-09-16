@@ -18,6 +18,28 @@ describe("SAT transition screens (Phase 6c)", () => {
     expect(screen.getByText(/starts automatically/)).toBeInTheDocument();
   });
 
+  // Phase 4 (kill the silent 0:00): the break countdown can legitimately read
+  // 0:00 while the server finishes the section advance, so the surface names the
+  // entry progress rather than freezing there.
+  it("explains a run-out break with the entry progress instead of a frozen 0:00", () => {
+    const { rerender } = render(
+      <SatBreakScreen nextSectionKey="math" remainingSeconds={0} entryProgress="starting" />
+    );
+    expect(screen.getByRole("timer")).toHaveTextContent("0:00");
+    expect(screen.getByText("Starting your next section")).toBeInTheDocument();
+    expect(screen.getByText(/do not need to do anything/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Math is next" })).toBeInTheDocument();
+    expect(screen.queryByText("On break")).not.toBeInTheDocument();
+
+    rerender(
+      <SatBreakScreen nextSectionKey="math" remainingSeconds={0} entryProgress="retrying" />
+    );
+    expect(screen.getByText("Still opening your next section")).toBeInTheDocument();
+    expect(screen.getByText(/Keep this screen open/)).toBeInTheDocument();
+    // The path forward stays named on the retrying state.
+    expect(screen.getByText(/wait 30 seconds then reload/)).toBeInTheDocument();
+  });
+
   it("names the Continue destination for its section", () => {
     render(
       <SatBreakScreen nextSectionKey="math" remainingSeconds={10} onContinue={vi.fn()} />

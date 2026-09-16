@@ -1,23 +1,11 @@
-import { createHash } from "./stateHash";
 import type { CoeditSaveState, CoeditSaveStateName } from "./contracts";
 import { INITIAL_SAVE_STATE } from "./contracts";
 
-/**
- * Hash of a Yjs state vector, hex encoded.
- *
- * SHA-256 is available in browsers and in Node; the hash only identifies the
- * exact state a client is asking to be acknowledged, so a weaker digest would
- * still be sufficient — we use SHA-256 to keep the identity check simple.
- */
-export function stateVectorHash(encodedStateVector: Uint8Array): string {
-  return createHash(encodedStateVector);
-}
-
 export interface SaveStateInputs {
-  /** Hash of the CURRENT local state vector, or null before first sync. */
-  localStateHash: string | null;
-  /** Hash last acknowledged as committed by Go/MySQL. */
-  acknowledgedStateHash: string | null;
+  /** Base64 state vector of the CURRENT local document, or null before sync. */
+  localStateVector: string | null;
+  /** Base64 state vector last acknowledged as committed by Go/MySQL. */
+  acknowledgedStateVector: string | null;
   /** Question revision carried by that acknowledgement. */
   questionRevision: number | null;
   /** Provider reached the server at least once. */
@@ -34,14 +22,18 @@ export interface SaveStateInputs {
  * Derives the displayed save state.
  *
  * The critical rule: `saved` requires an acknowledgement for the EXACT current
- * state hash. If another local or remote edit advanced the state vector before
- * the acknowledgement arrived, the editor stays `unsaved` — this is what
+ * state vector. If another local or remote edit advanced the state vector
+ * before the acknowledgement arrived, the editor stays `unsaved` — this is what
  * prevents a stale ack from claiming newer work is durable.
+ *
+ * The identity is the state vector itself, not a digest of it: a second hashing
+ * implementation that can disagree with the service's is a correctness risk
+ * with no upside, because equal vectors already mean equal content.
  */
 export function deriveSaveState(inputs: SaveStateInputs): CoeditSaveState {
   const {
-    localStateHash,
-    acknowledgedStateHash,
+    localStateVector,
+    acknowledgedStateVector,
     questionRevision,
     connected,
     inFlight,
@@ -51,8 +43,8 @@ export function deriveSaveState(inputs: SaveStateInputs): CoeditSaveState {
 
   const base: CoeditSaveState = {
     ...INITIAL_SAVE_STATE,
-    localStateHash,
-    acknowledgedStateHash,
+    localStateVector,
+    acknowledgedStateVector,
     questionRevision,
   };
 
@@ -65,10 +57,10 @@ export function deriveSaveState(inputs: SaveStateInputs): CoeditSaveState {
   if (!connected) {
     return { ...base, name: "unsaved", message: "Reconnecting to the collaboration service." };
   }
-  if (localStateHash === null) {
+  if (localStateVector === null) {
     return { ...base, name: "syncing", message: "Syncing the prompt." };
   }
-  if (localStateHash === acknowledgedStateHash) {
+  if (localStateVector === acknowledgedStateVector) {
     return { ...base, name: "saved", message: null };
   }
   if (inFlight) {

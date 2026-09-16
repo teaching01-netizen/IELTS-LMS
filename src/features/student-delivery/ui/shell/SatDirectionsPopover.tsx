@@ -25,6 +25,7 @@ export function SatDirectionsPopover(props: SatDirectionsPopoverProps) {
       open={props.open}
       title="Directions"
       ariaLabel="Directions"
+      panelId={props.id}
       triggerRef={props.triggerRef}
       onClose={props.onClose}
       closeLabel="Close directions"
@@ -32,10 +33,9 @@ export function SatDirectionsPopover(props: SatDirectionsPopoverProps) {
       compactClassName="sat-ui flex max-h-[calc(100dvh-32px-var(--student-safe-top)-var(--student-safe-bottom))] w-full max-w-[680px] flex-col overflow-hidden rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] shadow-[var(--sat-shadow-floating)]"
       backdropClassName="sat-dialog-backdrop fixed inset-0 z-[79] grid place-items-center bg-black/20"
     >
-      <div
-        id={props.id}
-        className="min-h-0 max-h-[56dvh] overflow-y-auto px-5 py-4 text-[15px] leading-7 text-[var(--sat-text)]"
-      >
+      {/* The public id lives on the dialog root (panelId), not here: a trigger
+          aria-controls must resolve to the role=dialog element itself. */}
+      <div className="min-h-0 max-h-[56dvh] overflow-y-auto px-5 py-4 text-[15px] leading-7 text-[var(--sat-text)]">
         {props.instructions ? (
           <StructuredContentRenderer content={props.instructions} />
         ) : (

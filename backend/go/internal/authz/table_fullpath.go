@@ -48,9 +48,12 @@ func init() {
 		// Public at the session layer on purpose: they are authenticated by
 		// the HMAC service signature inside the handler (the browser never
 		// holds AUTHORING_COEDIT_SERVICE_SECRET).
-		"POST /internal/authoring-coedit/load":       {Public: true},
-		"POST /internal/authoring-coedit/initialize": {Public: true},
-		"POST /internal/authoring-coedit/store":      {Public: true},
+		"POST /internal/authoring-coedit/load":        {Public: true},
+		"POST /internal/authoring-coedit/initialize":  {Public: true},
+		"POST /internal/authoring-coedit/store":       {Public: true},
+		"POST /internal/authoring-coedit/final-store": {Public: true},
+		"POST /internal/authoring-coedit/rebase":      {Public: true},
+		"POST /internal/authoring-coedit/recover":     {Public: true},
 	} {
 		fullPathTable[k] = v
 	}

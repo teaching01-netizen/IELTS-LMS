@@ -52,6 +52,101 @@ function props(overrides: Partial<SatExamShellProps> = {}): SatExamShellProps {
 }
 
 describe("SatExamShell", () => {
+  it("keeps compact chrome shrinkable while preserving long section labels", () => {
+    const longSectionLabel = "Section 1, Module 1: Reading and Writing";
+    const { container } = render(<SatExamShell {...props({ sectionLabel: longSectionLabel })} />);
+    const shell = screen.getByTestId("sat-exam-shell");
+    const blockedRegion = screen.getByTestId("sat-exam-blocked-region");
+    const topbar = container.querySelector<HTMLElement>(".sat-exam-topbar > div")!;
+    const footer = container.querySelector<HTMLElement>(".sat-exam-footer > div")!;
+    const main = container.querySelector<HTMLElement>("#sat-question-content")!;
+    const zoom = container.querySelector<HTMLElement>("[data-sat-content-zoom]")!;
+
+    expect(shell).toHaveClass("min-w-0");
+    expect(blockedRegion).toHaveClass("min-w-0");
+    expect(topbar).toHaveClass(
+      "min-w-0",
+      "lg:grid-cols-[minmax(280px,1fr)_180px_minmax(280px,1fr)]"
+    );
+    expect(topbar.className).not.toContain("sm:grid-cols");
+    expect(footer).toHaveClass(
+      "min-w-0",
+      "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]",
+      "lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
+    );
+    expect(footer.className).not.toContain("sm:grid-cols");
+    expect(main).toHaveClass("min-w-0");
+    expect(zoom).toHaveClass("min-w-0");
+    expect(screen.getByText(longSectionLabel)).toHaveTextContent(longSectionLabel);
+  });
+
+  it("keeps the compact navigator label readable while preserving its full accessible name", () => {
+    const { container } = render(<SatExamShell {...props({ questionIndex: 0, questionCount: 3 })} />);
+    const navigator = screen.getByRole("button", {
+      name: "Open question navigator. Question 1 of 3",
+    });
+    const compactLabel = container.querySelector<HTMLElement>(
+      '[data-sat-position-label="compact"]'
+    )!;
+    const labels = navigator.querySelectorAll<HTMLElement>("[data-sat-position-label]");
+
+    expect(navigator).toHaveAttribute(
+      "aria-label",
+      "Open question navigator. Question 1 of 3"
+    );
+    expect(labels).toHaveLength(2);
+    expect(compactLabel).toHaveTextContent("1/3");
+    expect(compactLabel).toHaveClass("whitespace-nowrap", "min-[420px]:hidden");
+    for (const label of labels) {
+      expect(label.className).not.toMatch(/(?:^|\s)(?:truncate|overflow-hidden)(?:\s|$)/);
+    }
+    expect(navigator).not.toHaveClass("truncate", "overflow-hidden");
+    expect(screen.getByRole("button", { name: "Previous question" })).toHaveTextContent("Prev");
+  });
+
+  it("exposes dialog controls only while open, always pointing at the dialog root", () => {
+    const { container } = render(<SatExamShell {...props()} />);
+
+    const directions = screen.getByRole("button", { name: "Directions" });
+    expect(directions).not.toHaveAttribute("aria-controls");
+    fireEvent.click(directions);
+    const directionsPanelId = directions.getAttribute("aria-controls");
+    expect(directionsPanelId).toBeTruthy();
+    const directionsDialog = screen.getByRole("dialog", { name: "Directions" });
+    expect(directionsDialog).toHaveAttribute("id", directionsPanelId);
+    // Exactly one element carries the id, and it is the dialog itself — never
+    // an inner scroll body.
+    expect(document.querySelectorAll(`[id="${directionsPanelId}"]`)).toHaveLength(1);
+    expect(container.querySelector(`[id="${directionsPanelId}"]`)).toBe(directionsDialog);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(directions).not.toHaveAttribute("aria-controls");
+
+    const navigator = screen.getByRole("button", { name: /Open question navigator/ });
+    expect(navigator).not.toHaveAttribute("aria-controls");
+    fireEvent.click(navigator);
+    const navigatorPanelId = navigator.getAttribute("aria-controls");
+    expect(navigatorPanelId).toBeTruthy();
+    const navigatorDialog = screen.getByRole("dialog", { name: /Section 2: Math Questions/ });
+    expect(navigatorDialog).toHaveAttribute("id", navigatorPanelId);
+    expect(document.querySelectorAll(`[id="${navigatorPanelId}"]`)).toHaveLength(1);
+  });
+
+  it("publishes the stable viewport height and keyboard state without remounting the shell", () => {
+    const { rerender } = render(
+      <SatExamShell {...props({ examHeight: 900, keyboardOpen: false })} />,
+    );
+    const shell = screen.getByTestId("sat-exam-shell");
+
+    expect(shell).toHaveStyle("--student-exam-height: 900px");
+    expect(shell).toHaveAttribute("data-sat-keyboard-open", "false");
+
+    rerender(<SatExamShell {...props({ examHeight: 900, keyboardOpen: true })} />);
+
+    expect(screen.getByTestId("sat-exam-shell")).toBe(shell);
+    expect(shell).toHaveStyle("--student-exam-height: 900px");
+    expect(shell).toHaveAttribute("data-sat-keyboard-open", "true");
+  });
+
   it("keeps Highlight armed across questions and exits on Escape", () => {
     const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })} />);
     fireEvent.click(screen.getByRole('button', { name: 'Highlight' }));

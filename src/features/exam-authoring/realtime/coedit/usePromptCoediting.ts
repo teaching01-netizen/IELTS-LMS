@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Extensions } from "@tiptap/core";
 import type { CoeditClientCapability, PromptCoeditingSession } from "./contracts";
 import { resolveCoeditEnabled } from "./contracts";
-import { promptCollaborationExtensions } from "./editorBinding";
+import { collaborationExtensions } from "./editorBinding";
 import {
   PromptCoeditProvider,
   type PromptCoeditProviderOptions,
@@ -101,6 +101,9 @@ export function usePromptCoediting(options: UsePromptCoeditingOptions): UsePromp
           field: "prompt",
           serviceUrl: token.serviceUrl,
           token: { token: token.token, expiresAt: token.expiresAt },
+          // The epoch namespaces the local recovery cache; a legacy server omits
+          // it and the provider falls back to epoch zero.
+          ...(token.stateEpoch === undefined ? {} : { stateEpoch: token.stateEpoch }),
           self: { actorId: token.actorId, displayName: token.displayName },
           readOnly: token.mode !== "write",
           refreshToken: async () => {
@@ -112,8 +115,14 @@ export function usePromptCoediting(options: UsePromptCoeditingOptions): UsePromp
             }
             return { token: refreshed.token, expiresAt: refreshed.expiresAt };
           },
-          onLifecycle: (_issue, message) => {
-            if (active && message) setError(message);
+          onLifecycle: (issue, message) => {
+            if (!active) return;
+            // `none` is the provider clearing a problem it had reported (a
+            // refusal that became durable). The error has to go with it, or
+            // the save area keeps claiming a failure for saved work — the
+            // workspace-level hook already clears on `none`.
+            if (issue === "none") setError(null);
+            else if (message) setError(message);
           },
         };
 
@@ -160,7 +169,7 @@ export function usePromptCoediting(options: UsePromptCoeditingOptions): UsePromp
   const extensions = useMemo(
     () =>
       provider
-        ? promptCollaborationExtensions({ session: provider.session, provider })
+        ? collaborationExtensions({ session: provider.session, provider })
         : null,
     [provider],
   );

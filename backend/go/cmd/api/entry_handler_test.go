@@ -23,7 +23,7 @@ func TestEntryHandlerGateOffSkips(t *testing.T) {
 	_ = http.StatusTooManyRequests // envelope asserted at the gate level
 }
 
-// D3: gate on + exhausted bucket surfaces the queued-429 envelope fields.
+// D3: gate on + exhausted bucket surfaces the retryable 429 fields.
 func TestEntryHandlerGateOn429Shape(t *testing.T) {
 	cfg := config.Load()
 	cfg.EntryGateEnabled = true
@@ -36,9 +36,9 @@ func TestEntryHandlerGateOn429Shape(t *testing.T) {
 	}
 	gres := app.EntryGate.Allow("sched-9", now)
 	if gres.Allowed {
-		t.Fatalf("second immediate check-in must queue")
+		t.Fatalf("second immediate check-in must return bounded retry")
 	}
-	if gres.RetryAfterSecs < 1 || gres.QueuePosition < 1 {
-		t.Fatalf("429 must carry retryAfterSecs + queuePosition: %+v", gres)
+	if gres.RetryAfterSecs < 1 || gres.CapacityLimited {
+		t.Fatalf("429 must carry retryAfterSeconds without capacity exhaustion: %+v", gres)
 	}
 }

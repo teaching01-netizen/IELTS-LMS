@@ -80,7 +80,8 @@ func coeditDocRowWithLastActor(
 	rows := sqlmock.NewRows([]string{"id", "organization_id", "exam_id", "draft_version_id", "exam_question_id",
 		"question_revision_id", "schema_version", "field_set", "lifecycle_state", "seed_revision",
 		"materialized_revision", "ydoc_state", "state_vector", "state_hash", "previous_state_hash",
-		"closed_reason", "last_actor_id", "updated_at"})
+		"closed_reason", "last_actor_id", "updated_at", "state_epoch", "commit_sequence",
+		"freeze_operation_id", "freeze_expires_at"})
 	var closed any
 	if closedReason != nil {
 		closed = *closedReason
@@ -91,7 +92,7 @@ func coeditDocRowWithLastActor(
 	}
 	rows.AddRow(coeditDocID, "org-1", coeditExamID, coeditDraftID, coeditQuestionID,
 		coeditRevisionID, authoringcoedit.SchemaVersion, authoringcoedit.FieldSetPrompt, state, seed,
-		materialized, ydoc, []byte("vector"), hash, nil, closed, lastActor, time.Now())
+		materialized, ydoc, []byte("vector"), hash, nil, closed, lastActor, time.Now(), uint64(0), uint64(0), nil, nil)
 	return rows
 }
 
@@ -816,18 +817,25 @@ func TestCoeditVerifyManifestRejectsUnknownDocumentName(t *testing.T) {
 
 func TestCoeditMarkFreezingAndReopenAreIdempotent(t *testing.T) {
 	svc, mock := contractService(t)
+	operation := authoringcoedit.CoeditLifecycleOperation{
+		FreezeOperationID: "phase3-operation",
+		FreezeExpiresAt:   time.Now().Add(time.Minute).Unix(),
+	}
 	begin(mock)
 	mock.ExpectExec("UPDATE authoring_coedit_documents").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE authoring_coedit_documents").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT lifecycle_state, freeze_operation_id").
+		WithArgs("other").
+		WillReturnRows(sqlmock.NewRows([]string{"lifecycle_state", "freeze_operation_id"}).AddRow("freezing", operation.FreezeOperationID))
 	mock.ExpectCommit()
-	if err := svc.CoeditMarkFreezing(context.Background(), []string{coeditDocID, "other"}); err != nil {
+	if err := svc.CoeditMarkFreezing(context.Background(), []string{coeditDocID, "other"}, operation); err != nil {
 		t.Fatal(err)
 	}
 
 	begin(mock)
 	mock.ExpectExec("UPDATE authoring_coedit_documents").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	if err := svc.CoeditReopenActive(context.Background(), []string{coeditDocID}); err != nil {
+	if err := svc.CoeditReopenActive(context.Background(), []string{coeditDocID}, operation); err != nil {
 		t.Fatal(err)
 	}
 
@@ -971,8 +979,10 @@ func TestLegacyPromptWriteGuardRefusesWhileCoeditIsActive(t *testing.T) {
 	svc, mock := contractService(t)
 	svc = svc.SetCoeditEnabled(true)
 	begin(mock)
-	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM authoring_coedit_documents").
-		WithArgs(coeditQuestionID, string(authoringcoedit.StateClosed)).
+	// Both room families are one query, so the guard takes the shared argument
+	// list even when the unclosed row is a v1 prompt document.
+	mock.ExpectQuery(regexp.QuoteMeta("authoring_coedit_documents")).
+		WithArgs(coeditQuestionID, string(authoringcoedit.StateClosed), coeditQuestionID, string(authoringcoedit.StateClosed)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectRollback()
 
@@ -984,12 +994,52 @@ func TestLegacyPromptWriteGuardRefusesWhileCoeditIsActive(t *testing.T) {
 	}
 }
 
+// The v2 exam-level workspace room owns the same question columns a legacy
+// full-revision save writes, so it must refuse that save too. Pinned to the
+// workspace arm of the union: a guard that queried only
+// authoring_coedit_documents cannot satisfy this expectation, and the row below
+// (a workspace room with no prompt document) was exactly the case that used to
+// be accepted.
+func TestLegacyPromptWriteGuardRefusesWhileWorkspaceRoomIsActive(t *testing.T) {
+	svc, mock := contractService(t)
+	svc = svc.SetCoeditEnabled(true)
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("authoring_coedit_workspaces")).
+		WithArgs(coeditQuestionID, string(authoringcoedit.StateClosed), coeditQuestionID, string(authoringcoedit.StateClosed)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectRollback()
+
+	err := svc.runner.WithTx(context.Background(), func(ctx context.Context, q tx.Tx) error {
+		return svc.coeditGuardTx(ctx, q, coeditQuestionID, defaultSATQuestionDraft(SectionReadingWriting))
+	})
+	if code := coeditCodeOf(t, err); code != authoringcoedit.CodeActiveConflict {
+		t.Fatalf("expected %s, got %s", authoringcoedit.CodeActiveConflict, code)
+	}
+}
+
+// A closed room in EITHER family is not an active room: the guard must accept
+// the legacy write rather than block it forever.
+func TestLegacyPromptWriteGuardAcceptsWhenEveryRoomIsClosed(t *testing.T) {
+	svc, mock := contractService(t)
+	svc = svc.SetCoeditEnabled(true)
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("active_rooms")).
+		WithArgs(coeditQuestionID, string(authoringcoedit.StateClosed), coeditQuestionID, string(authoringcoedit.StateClosed)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectCommit()
+
+	if err := svc.runner.WithTx(context.Background(), func(ctx context.Context, q tx.Tx) error {
+		return svc.coeditGuardTx(ctx, q, coeditQuestionID, defaultSATQuestionDraft(SectionReadingWriting))
+	}); err != nil {
+		t.Fatalf("a closed room must not refuse a legacy write: %v", err)
+	}
+}
+
 func TestLegacyPromptWriteGuardIsSkippedWhenGatedOff(t *testing.T) {
 	svc, mock := contractService(t)
 	draft := defaultSATQuestionDraft(SectionReadingWriting)
-	if err := svc.CoeditGuardLegacyPromptWrite(context.Background(), coeditQuestionID, draft); err != nil {
-		t.Fatalf("flag-off must issue no query and never refuse: %v", err)
-	}
+	// No expectation is registered, so ANY query the flag-off guard issues
+	// surfaces as an error here instead of silently passing.
 	begin(mock)
 	mock.ExpectCommit()
 	if err := svc.runner.WithTx(context.Background(), func(ctx context.Context, q tx.Tx) error {
@@ -1016,14 +1066,18 @@ func TestLegacyPromptWriteGuardAllowsNonPromptDraft(t *testing.T) {
 	}
 }
 
-func TestCoeditGuardPreCheckAcceptsWhenNoRowExists(t *testing.T) {
+func TestCoeditActiveForQuestionAcceptsWhenNoRoomExists(t *testing.T) {
 	svc, mock := contractService(t)
 	svc = svc.SetCoeditEnabled(true)
-	mock.ExpectQuery("SELECT COUNT").
+	mock.ExpectQuery(regexp.QuoteMeta("active_rooms")).
 		WithArgs(coeditQuestionID, string(authoringcoedit.StateClosed), coeditQuestionID, string(authoringcoedit.StateClosed)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	if err := svc.CoeditGuardLegacyPromptWrite(context.Background(), coeditQuestionID, defaultSATQuestionDraft(SectionReadingWriting)); err != nil {
+	active, err := svc.CoeditActiveForQuestion(context.Background(), coeditQuestionID)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if active {
+		t.Fatal("no unclosed room means the question is not actively co-edited")
 	}
 }
 

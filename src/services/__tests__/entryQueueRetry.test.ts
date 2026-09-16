@@ -1,17 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { entryQueueDelayMs, parseEntryQueueError } from '../entryQueueRetry';
 
-// Plan C3: entry 429-with-position renders a queue countdown and auto-retries
-// at Retry-After (never tight-retries). Non-429 errors surface immediately.
+// Plan C3: entry 429s render bounded retry state and auto-retry at Retry-After
+// (never tight-retries). Non-429 errors surface immediately.
 describe('entry queue retry (plan C3)', () => {
   it('parses 429 envelope details into queue state', () => {
     const err = {
       status: 429,
       code: 'RATE_LIMIT_EXCEEDED',
-      details: { tier: 'student-entry', retryAfterSecs: 7, queuePosition: 42 },
+      details: { tier: 'student-entry', retryAfterSeconds: 7 },
     };
     const queue = parseEntryQueueError(err);
-    expect(queue).toMatchObject({ queued: true, retryAfterSecs: 7, queuePosition: 42 });
+    expect(queue).toMatchObject({ queued: true, retryAfterSecs: 7 });
+    expect(queue).not.toHaveProperty('queuePosition');
   });
 
   it('falls back to the Retry-After header when details are absent', () => {

@@ -3,6 +3,8 @@
 // This package is the ONLY place that imports Yjs, Hocuspocus, or y-indexeddb.
 // UI components consume the values below and never touch the CRDT directly.
 import type { Doc } from "yjs";
+import { isCoeditLifecycleOperation } from "./protocol";
+import type { CoeditDecimalString, CoeditLifecycleOperation } from "./protocol";
 
 /** Wire shape of POST /coedit-token. Mirrors authoringcoedit.CoeditTokenResponse. */
 export interface CoeditTokenResponse {
@@ -17,6 +19,12 @@ export interface CoeditTokenResponse {
   actorId: string;
   displayName: string;
   capability: boolean;
+  /** Additive rollout field; absent means a legacy epoch-zero server. */
+  stateEpoch?: CoeditDecimalString;
+  /** Additive rollout field for ordered durable acknowledgements. */
+  commitSequence?: CoeditDecimalString;
+  /** Workspace projection revision; never reinterpret as a prompt revision. */
+  workspaceRevision?: number;
 }
 
 /**
@@ -33,10 +41,10 @@ export type CoeditSaveStateName = "idle" | "unsaved" | "syncing" | "saved" | "er
 
 export interface CoeditSaveState {
   name: CoeditSaveStateName;
-  /** Hash of the local Y.Doc state vector at the last observation. */
-  localStateHash: string | null;
-  /** Hash the server acknowledged as committed (never assumed). */
-  acknowledgedStateHash: string | null;
+  /** Base64 state vector of the local Y.Doc at the last observation. */
+  localStateVector: string | null;
+  /** Base64 state vector the server acknowledged as committed (never assumed). */
+  acknowledgedStateVector: string | null;
   /** Question revision carried by the last acknowledgement. */
   questionRevision: number | null;
   /** Human-readable, content-free status text for the footer. */
@@ -47,8 +55,8 @@ export interface CoeditSaveState {
 
 export const INITIAL_SAVE_STATE: CoeditSaveState = {
   name: "idle",
-  localStateHash: null,
-  acknowledgedStateHash: null,
+  localStateVector: null,
+  acknowledgedStateVector: null,
   questionRevision: null,
   message: null,
   retryable: false,
@@ -68,7 +76,7 @@ export type CoeditConnectionPhase = "connecting" | "connected" | "disconnected";
 export type CoeditLifecyclePhase = "active" | "freezing" | "frozen";
 
 /** Private, stateless service-to-room message used while publishing. */
-export interface CoeditLifecycleMessage {
+export interface CoeditLifecycleMessage extends Partial<CoeditLifecycleOperation> {
   type: "coedit.lifecycle";
   documentName: string;
   phase: "freezing" | "active";
@@ -106,11 +114,28 @@ export function parseCoeditLifecycleMessage(raw: unknown): CoeditLifecycleMessag
   ) {
     return null;
   }
+  const hasOperationMetadata =
+    value["freezeOperationId"] !== undefined || value["freezeExpiresAt"] !== undefined;
+  if (
+    hasOperationMetadata &&
+    !isCoeditLifecycleOperation({
+      freezeOperationId: value["freezeOperationId"],
+      freezeExpiresAt: value["freezeExpiresAt"],
+    })
+  ) {
+    return null;
+  }
   return {
     type: "coedit.lifecycle",
     documentName: value["documentName"],
     phase: value["phase"],
     reason: "publish",
+    ...(hasOperationMetadata
+      ? {
+          freezeOperationId: value["freezeOperationId"] as string,
+          freezeExpiresAt: value["freezeExpiresAt"] as number,
+        }
+      : {}),
   };
 }
 
@@ -135,6 +160,60 @@ export function parseCoeditSaveFailureMessage(raw: unknown): CoeditSaveFailureMe
   };
 }
 
+/**
+ * Failure reasons the service sends in a `coedit.save_failed` frame. Each one
+ * is mirrored on the service side (`COEDIT_WRITE_REFUSED_REASON` in
+ * services/authoring-coedit/src/main.ts, `COEDIT_OVERSIZED_REASON` in
+ * documentCodec.ts) and, for the size refusal, in Go
+ * (authoringcoedit.CodeOversized). A reason outside this vocabulary is
+ * deliberately treated as a generic failure rather than guessed at.
+ */
+export const COEDIT_WRITE_REFUSED_REASON = "coedit_write_refused";
+export const COEDIT_OVERSIZED_REASON = "coedit_oversized";
+
+/**
+ * Resolves a persistence refusal into the recovery the author is shown.
+ *
+ * Three refusals are terminal for the work held by this editor and must offer
+ * the export affordances rather than a retry that cannot succeed:
+ *
+ *   - a stale-hash resync (the row's committed state moved past this room)
+ *   - a write the room refused outright (`coedit_write_refused`, which the
+ *     transport reports to the browser only as an ignored SyncStatus frame)
+ *   - a room over its size limit (`coedit_oversized`), which is not refused but
+ *     cannot be persisted as it stands
+ *
+ * Every other reason stays a transient failure: `null` means "no special
+ * recovery", not "nothing happened".
+ */
+export function coeditRecoveryFromSaveFailure(failure: CoeditSaveFailureMessage): {
+  issue: Extract<CoeditLifecycleIssue, "rejected" | "oversized">;
+  message: string;
+} | null {
+  if (failure.requiresResync) {
+    return {
+      issue: "rejected",
+      message:
+        "This prompt was changed elsewhere and cannot be saved from this editor. Reload the prompt to continue.",
+    };
+  }
+  if (failure.reason === COEDIT_WRITE_REFUSED_REASON) {
+    return {
+      issue: "rejected",
+      message:
+        "The collaboration service refused your latest changes, so they are not saved. Copy them out before leaving.",
+    };
+  }
+  if (failure.reason === COEDIT_OVERSIZED_REASON) {
+    return {
+      issue: "oversized",
+      message:
+        "This prompt is too large to save as one collaborative document. Remove some content, or copy your changes out before leaving.",
+    };
+  }
+  return null;
+}
+
 export type CoeditLifecycleIssue =
   | "none"
   | "closed"
@@ -144,7 +223,63 @@ export type CoeditLifecycleIssue =
   | "service_unavailable"
   | "token_expired"
   | "oversized"
-  | "rejected";
+  | "rejected"
+  /**
+   * A local copy written before a durable compaction still holds content the
+   * room does not have. It is preserved, never merged, and never discarded
+   * without the author seeing it first.
+   */
+  | "stale_cache";
+
+/**
+ * One preserved older-epoch local copy, byte-exact.
+ *
+ * The payload is the Yjs update rather than a rendered projection: the promise
+ * is that the author can get their local work out of the browser unharmed, and
+ * only the bytes keep that promise for rich text with marks and embedded media.
+ */
+export interface CoeditStaleCacheExport {
+  /** Logical room name (opaque; never a domain id). */
+  room: string;
+  /** Epoch of the preserved copy. */
+  stateEpoch: CoeditDecimalString;
+  /** Base64 Yjs update holding everything the copy held. */
+  update: string;
+  /** Base64 state vector of that copy. */
+  stateVector: string;
+}
+
+/**
+ * Why a flush-and-wait ended. Navigation must never treat anything but `saved`
+ * as durable, so the outcome is a closed vocabulary rather than a boolean.
+ */
+export type CoeditFlushOutcome =
+  /** The exact state vector this tab holds is committed. */
+  | "saved"
+  /** Connected, flushed, still not acknowledged when the deadline expired. */
+  | "pending"
+  /** No transport: the work cannot reach the service right now. */
+  | "offline"
+  /** The room refused the work (a fence, or an oversized document). */
+  | "refused"
+  /** A read-only session (observer or frozen room) cannot flush anything. */
+  | "read_only"
+  /** A preserved pre-compaction copy has not been reconciled. */
+  | "stale_cache"
+  /** The room ended (closed or replaced). */
+  | "ended";
+
+export interface CoeditFlushResult {
+  outcome: CoeditFlushOutcome;
+  /** True only for `saved`; the single fact a navigation gate may trust. */
+  saved: boolean;
+  /** The local state vector the result was judged against. */
+  stateVector: string | null;
+}
+
+/** Recovery body for a preserved pre-compaction local copy. */
+export const COEDIT_STALE_CACHE_MESSAGE =
+  "An earlier local copy of this room is still on this device and has content the room does not. Copy it out before discarding it.";
 
 /**
  * Wire prefix the service puts on the close reason when Go deliberately closes
@@ -174,7 +309,8 @@ export const COEDIT_CLOSED_LIFECYCLE: CoeditLifecycleClose = {
 };
 
 /**
- * Resolves a provider close reason into the recovery the design requires.
+ * Resolves a provider close reason into the recovery the design requires
+ * ("Offline and recovery behavior", docs/sat-authoring-coedit.md).
  *
  * A replaced draft is the one case that mixes durable work into a reused exam
  * question, so it offers the prompt for copy/export; every other lifecycle
@@ -211,6 +347,16 @@ export interface CoeditRecovery {
   exportPrompt: () => unknown | null;
   /** Deletes local IndexedDB state after an explicit user discard. */
   discardLocal: () => Promise<void>;
+  /**
+   * True while a preserved pre-compaction copy exists. The copy is exportable
+   * first and discardable only on an explicit user action, so no local work is
+   * ever removed by the client on its own.
+   */
+  canExportStaleCache: boolean;
+  /** Byte-exact copies of every preserved older-epoch cache. */
+  exportStaleCache: () => CoeditStaleCacheExport[] | null;
+  /** Deletes the preserved copies (explicit discard only). */
+  discardStaleCache: () => Promise<void>;
   /** Refetches the HTTP revision and re-mints a token. */
   reload: () => void;
 }
@@ -249,7 +395,10 @@ export interface PromptCoeditingSession {
   self: CoeditSelfIdentity;
   /** Field name inside the Y.Doc (`prompt`). */
   field: string;
-  /** True once the provider completed initial sync (editor may mount). */
+  /**
+   * True once the provider completed initial sync AND replayed its local copy
+   * (the editor may mount).
+   */
   ready: boolean;
   /** Live transport state. */
   connected: boolean;
@@ -258,8 +407,22 @@ export interface PromptCoeditingSession {
   lifecyclePhase: CoeditLifecyclePhase;
   pendingSince?: number;
   lastAckedRevision?: string;
+  stateEpoch?: CoeditDecimalString;
+  commitSequence?: CoeditDecimalString;
+  workspaceRevision?: number;
+  /**
+   * Flushes the transport and resolves once THIS tab's state vector is durable.
+   * Navigation must await it rather than assume `destroy()` persisted anything.
+   */
+  flushAndWaitForSaved: (timeoutMs: number) => Promise<CoeditFlushResult>;
   /** Read-only (observer or frozen room). */
   readOnly: boolean;
+  /**
+   * True when this session's token grants write, even if the room has since
+   * frozen. A caller deciding whether unsynced local content must be protected
+   * (or exported) before leaving reads this: an observer has nothing to lose.
+   */
+  writeCapable: boolean;
   saveState: CoeditSaveState;
   collaborators: CoeditCollaborator[];
   recovery: CoeditRecovery;
@@ -294,3 +457,22 @@ export function resolveCoeditEnabled(capability: CoeditClientCapability): boolea
     capability.writeCapableRole
   );
 }
+
+export type {
+  CoeditDecimalString,
+  CoeditDurabilityMetadata,
+  CoeditLifecycleOperation,
+  CoeditPhase1Reason,
+} from "./protocol";
+export {
+  COEDIT_EPOCH_MISMATCH_REASON,
+  COEDIT_FINAL_STORE_REQUIRED_REASON,
+  COEDIT_FREEZE_CONFLICT_REASON,
+  COEDIT_PHASE1_REASONS,
+  COEDIT_SEED_CONFLICT_REASON,
+  COEDIT_STALE_CACHE_REASON,
+  isCoeditDecimalString,
+  isCoeditLifecycleOperation,
+  isCoeditPhase1Reason,
+  parseCoeditDurabilityMetadata,
+} from "./protocol";

@@ -15,9 +15,9 @@ export class ApiClientError extends ApiError {
   constructor(args: {
     message: string;
     statusCode: number;
-    backendCode: string | undefined;
-    backendDetails: Record<string, unknown> | undefined;
-    backendRequestId: string | undefined;
+    backendCode?: string | undefined;
+    backendDetails?: Record<string, unknown> | undefined;
+    backendRequestId?: string | undefined;
   }) {
     super({
       code: args.backendCode ?? "UNKNOWN",
@@ -208,6 +208,7 @@ class ApiClient {
     const requestId = this.generateRequestId();
 
     let lastError: Error | null = null;
+    let completedAttempts = 0;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       const controller = new AbortController();
@@ -351,6 +352,7 @@ class ApiClient {
           await this.delay(delay);
         }
       } finally {
+        completedAttempts += 1;
         clearTimeout(timeoutId);
         signal?.removeEventListener("abort", forwardExternalAbort);
       }
@@ -360,24 +362,24 @@ class ApiClient {
     const statusCode = ApiClient.getStatusCode(lastError || new Error("Request failed"));
     // Log 401 as warning since it's expected for unauthenticated requests
     if (statusCode === 401) {
-      logWarn("Request failed with 401 Unauthorized", {
-        endpoint,
-        requestId,
-        attempts: retries + 1,
-      });
-    } else if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) {
-      logWarn(lastError?.message ?? "Request failed", {
-        endpoint,
-        requestId,
-        attempts: retries + 1,
-        error: lastError?.message,
-      });
-    } else {
-      logError(lastError || new Error("Request failed after retries"), {
-        endpoint,
-        requestId,
-        attempts: retries + 1,
-      });
+        logWarn("Request failed with 401 Unauthorized", {
+          endpoint,
+          requestId,
+          attempts: completedAttempts,
+        });
+      } else if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) {
+        logWarn(lastError?.message ?? "Request failed", {
+          endpoint,
+          requestId,
+          attempts: completedAttempts,
+          error: lastError?.message,
+        });
+      } else {
+        logError(lastError || new Error("Request failed after retries"), {
+          endpoint,
+          requestId,
+          attempts: completedAttempts,
+        });
     }
 
     if (lastError) {
@@ -445,22 +447,19 @@ class ApiClient {
     const message = parsed.message ?? this.extractErrorMessage(errorData, response.statusText);
     const headerRequestId =
       response.headers.get("X-Request-Id") ?? response.headers.get("x-request-id") ?? undefined;
-    // Plan C3/D3: the entry gate speaks 429 + Retry-After + {tier,
-    // retryAfterSecs, queuePosition}. Some 429s carry no JSON details (tier
-    // middleware), so the header is folded into details — without it the
-    // queue countdown has no cadence and clients tight-retry the storm the
-    // gate absorbed. Header wins only when details lack the field.
+    // Plan C3/D3: the entry gate speaks 429 + Retry-After +
+    // {retryAfterSeconds}. Some 429s carry no JSON details, so the header is
+    // folded into details — without it bounded retry has no cadence and
+    // clients tight-retry the storm the gate absorbed. Header wins only when
+    // details lack either the canonical or legacy field.
     let details = parsed.details;
     if (status === 429) {
       const headerRetry = response.headers.get("Retry-After") ?? response.headers.get("retry-after");
       const retrySecs = headerRetry !== null ? Number(headerRetry) : NaN;
       if (Number.isFinite(retrySecs) && retrySecs > 0) {
         const merged: Record<string, unknown> = { ...(details ?? {}) };
-        if (merged['retryAfterSecs'] === undefined && merged['retryAfterSeconds'] === undefined) {
-          merged['retryAfterSecs'] = Math.floor(retrySecs);
-        }
-        if (merged['tier'] === undefined) {
-          merged['tier'] = 'student-entry';
+        if (merged['retryAfterSeconds'] === undefined && merged['retryAfterSecs'] === undefined) {
+          merged['retryAfterSeconds'] = Math.floor(retrySecs);
         }
         details = merged;
       }

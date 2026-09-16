@@ -43,6 +43,9 @@ const NORMALIZED_LABEL_VALUES: Record<string, readonly string[]> = {
     "accepted",
     "rejected",
     "conflict",
+    // A proposal that already produced durable content: the retry of a seed is
+    // recognized as the same seed rather than as a second author.
+    "duplicate",
     "closed",
     "frozen",
     "unavailable",
@@ -50,6 +53,7 @@ const NORMALIZED_LABEL_VALUES: Record<string, readonly string[]> = {
     "expired",
     "lost",
     "error",
+    "skipped",
     "other",
   ],
   reason: [
@@ -102,6 +106,9 @@ const METRIC_HELP: Record<string, string> = {
   authoring_coedit_state_bytes: "Collaborative document state size histogram bucket.",
   authoring_coedit_reconnect_total: "Client reconnects by outcome.",
   authoring_coedit_freeze_total: "Freeze lifecycle operations by outcome.",
+  authoring_coedit_compaction_total:
+    "Idle-load document compactions by outcome (a skipped compaction keeps the committed binary).",
+  authoring_coedit_seed_total: "Authenticated workspace seed proposals by outcome.",
   authoring_coedit_shutdown_flush_total: "Shutdown flush outcomes.",
   authoring_coedit_lifecycle_close_total: "Room closes by reason.",
 };
@@ -189,10 +196,4 @@ export function log(
   }
   // eslint-disable-next-line no-console
   console.log(JSON.stringify(line));
-}
-
-/** Redacts a token for the rare case an operator needs to correlate one. */
-export function redactToken(token: string | null | undefined): string | null {
-  if (!token) return null;
-  return `redacted:${token.length}`;
 }

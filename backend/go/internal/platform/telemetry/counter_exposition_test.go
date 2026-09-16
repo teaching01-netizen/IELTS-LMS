@@ -26,3 +26,34 @@ func TestCountersRenderInSnapshotExposition(t *testing.T) {
 		t.Fatalf("Snapshot missing counter TYPE header:\n%s", out)
 	}
 }
+
+func TestRateLimitFailureCountersAreRegistered(t *testing.T) {
+	registered := map[string]bool{}
+	for _, name := range Names() {
+		registered[name] = true
+	}
+	for _, name := range []string{
+		MRatelimitDBErrorTotal,
+		MRatelimitCapacityTotal,
+		MEntryGateCapacityTotal,
+	} {
+		if !registered[name] {
+			t.Fatalf("rate-limit counter %q is missing from telemetry.Names", name)
+		}
+	}
+
+	r := NewRegistry()
+	r.IncCounter(MRatelimitDBErrorTotal, "tier", "polling", "key_class", "attempt")
+	r.IncCounter(MRatelimitCapacityTotal, "tier", "writes", "key_class", "user")
+	r.IncCounter(MEntryGateCapacityTotal, "tier", "student-entry", "key_class", "schedule")
+	snapshot := r.Snapshot()
+	for _, name := range []string{
+		MRatelimitDBErrorTotal,
+		MRatelimitCapacityTotal,
+		MEntryGateCapacityTotal,
+	} {
+		if !strings.Contains(snapshot, "# TYPE "+name+" counter") {
+			t.Fatalf("snapshot missing counter type for %q:\n%s", name, snapshot)
+		}
+	}
+}

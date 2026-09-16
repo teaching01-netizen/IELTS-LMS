@@ -4,6 +4,7 @@ import { SharedArray } from 'k6/data';
 import { randomBytes } from 'k6/crypto';
 
 const EXPECT_2XX_OR_409 = http.expectedStatuses({ min: 200, max: 299 }, 409);
+const EXPECT_ENTRY_200_OR_429 = http.expectedStatuses({ min: 200, max: 200 }, 429);
 const DEBUG = __ENV.K6_DEBUG === 'true';
 
 function readJson(path) {
@@ -83,6 +84,26 @@ function csrfHeader(jar, baseUrl) {
 
 function jsonHeaders(extra) {
   return Object.assign({ 'content-type': 'application/json' }, extra || {});
+}
+
+function boundedRetryAfterSeconds(resp) {
+  const headers = (resp && resp.headers) || {};
+  const headerValue = headers['Retry-After'] || headers['retry-after'];
+  const headerSeconds = Number(headerValue);
+  if (Number.isFinite(headerSeconds) && headerSeconds >= 1) {
+    return clampInt(headerSeconds, 1, 65);
+  }
+  try {
+    const body = resp.json();
+    const details = (body && (body.details || (body.error && body.error.details))) || {};
+    const detailSeconds = Number(details.retryAfterSeconds);
+    if (Number.isFinite(detailSeconds) && detailSeconds >= 1) {
+      return clampInt(detailSeconds, 1, 65);
+    }
+  } catch (_) {
+    // The entry check rejects a 429 without a usable retry signal.
+  }
+  return 0;
 }
 
 function pickQuestionIdInSection(snapshot, sectionKey) {
@@ -455,8 +476,8 @@ export function studentFlow() {
   const jitter = computeJitterSeconds(runId, student.wcode, maxJitter);
   sleep(jitter);
 
-  // Plan D3: under ENTRY_GATE the entry wave is a queue, not an outage —
-  // 429s with queuePosition mean the gate held; poll entry until admitted.
+  // Plan D3: under ENTRY_GATE the entry wave is bounded admission — retryable
+  // 429s carry a numeric Retry-After signal; poll entry until admitted.
   let entryResp = http.post(
     `${baseUrl}/api/v1/auth/student/entry`,
     JSON.stringify({
@@ -465,18 +486,14 @@ export function studentFlow() {
       email: student.email,
       studentName: student.fullName,
     }),
-    { jar, headers: jsonHeaders() },
+    { jar, headers: jsonHeaders(), responseCallback: EXPECT_ENTRY_200_OR_429 },
   );
   const entryQueueMaxWait = clampInt(__ENV.K6_ENTRY_QUEUE_MAX_SECONDS || '600', 0, 3600);
   const entryQueueStart = Date.now();
   while (entryResp.status === 429 && (Date.now() - entryQueueStart) / 1000 < entryQueueMaxWait) {
-    let retryAfter = 5;
-    try {
-      const body = entryResp.json();
-      const details = (body && (body.details || (body.error && body.error.details))) || {};
-      if (details.retryAfterSecs) retryAfter = clampInt(details.retryAfterSecs, 1, 60);
-      else if (details.retryAfterSeconds) retryAfter = clampInt(details.retryAfterSeconds, 1, 60);
-    } catch (e) { /* keep default backoff */ }
+    const retryAfter = boundedRetryAfterSeconds(entryResp);
+    check(entryResp, { 'student entry 429 has bounded retry signal': () => retryAfter > 0 });
+    if (retryAfter <= 0) break;
     sleep(retryAfter);
     entryResp = http.post(
       `${baseUrl}/api/v1/auth/student/entry`,
@@ -486,13 +503,18 @@ export function studentFlow() {
         email: student.email,
         studentName: student.fullName,
       }),
-      { jar, headers: jsonHeaders() },
+      { jar, headers: jsonHeaders(), responseCallback: EXPECT_ENTRY_200_OR_429 },
     );
   }
 
+  const finalRetryAfter = entryResp.status === 429 ? boundedRetryAfterSeconds(entryResp) : 0;
   check(entryResp, {
-    'student entry 200': (r) => r.status === 200,
+    'student entry 200 or bounded 429': (r) => r.status === 200 || (r.status === 429 && finalRetryAfter > 0),
   }) || fail(`Student entry failed (${student.wcode}): status=${entryResp.status} body=${entryResp.body.slice(0, 200)}`);
+  if (entryResp.status === 429) {
+    if (DEBUG) console.log(`[student ${__VU}] entry shed after retry budget; retryAfter=${finalRetryAfter}s`);
+    return;
+  }
   if (DEBUG) console.log(`[student ${__VU}] entry ok`);
 
   const clientSessionId = uuidV4();

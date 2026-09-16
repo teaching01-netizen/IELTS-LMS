@@ -105,6 +105,30 @@ describe('durability telemetry (WP7 reason-coded counters)', () => {
     await accepted;
   });
 
+  it('emits unversioned_intent_recovered when recovery mints a version for a provisional draft', async () => {
+    const network = deferred<ResponseSnapshotV2>();
+    const fetchSnapshot = vi.fn().mockReturnValue(network.promise);
+    const first = createEngine({ fetchSnapshot });
+    const recovery = first.engine.recover();
+    await vi.waitFor(() => expect(fetchSnapshot).toHaveBeenCalled());
+    // Accepted while the initial snapshot is held, then torn down before the
+    // version allocator runs: the durable record is still clientVersion 0.
+    const accepted = first.engine.acceptResponse('q1', payload('provisional typing'));
+    first.engine.destroy();
+    network.resolve(runningSnapshot());
+    await recovery;
+    await accepted;
+
+    const second = createEngine();
+    await second.engine.recover();
+    const recovered = second.events.filter((e) => e.name === 'unversioned_intent_recovered');
+    expect(recovered).toHaveLength(1);
+    // Reason-coded metadata only — never answer content.
+    expect(recovered[0]?.fields?.reason).toBe('UNVERSIONED_INTENT');
+    expect(recovered[0]?.fields?.clientVersion).toBeGreaterThan(0);
+    expect(JSON.stringify(recovered[0]?.fields)).not.toContain('provisional typing');
+  });
+
   it('emits control_epoch_blocked per blocked question on a timing-only control bump', async () => {
     const { engine, events } = createEngine({
       fetchSnapshot: vi.fn().mockResolvedValue(runningSnapshot()),

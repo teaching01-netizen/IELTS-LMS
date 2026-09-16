@@ -5,7 +5,7 @@ import type { SessionDetailFilters, ReviewDraft, StudentResult, WritingAnnotatio
 type GradingServiceResult<T> = Readonly<{
   success: boolean;
   data?: T;
-  error?: string;
+  error?: unknown;
 }>;
 
 // Polling cadence for live grading views. Kept at 30s + jitter so a fleet
@@ -32,11 +32,18 @@ export const gradingKeys = {
   reviewDraft: (submissionId: string) => [...gradingKeys.all, 'review-draft', submissionId] as const,
 };
 
-function requireResultData<T>(result: GradingServiceResult<T>, fallbackMessage: string): T {
-  if (!result.success || result.data === undefined) {
-    throw new Error(result.error ?? fallbackMessage);
+function throwResultError(error: unknown, fallbackMessage: string): never {
+  if (error instanceof Error) {
+    throw error;
   }
-  return result.data;
+  throw new Error(typeof error === 'string' ? error : fallbackMessage);
+}
+
+function requireResultData<T>(result: GradingServiceResult<T>, fallbackMessage: string): T {
+  if (result.success && result.data !== undefined) {
+    return result.data;
+  }
+  return throwResultError(result.error, fallbackMessage);
 }
 
 export function useGradingSessions() {
@@ -133,7 +140,9 @@ export function useFinalizeReview(
     ...options,
     mutationFn: ({ submissionId, teacherId, teacherName, reason }) =>
       gradingGateway.service.finalizeReview(submissionId, teacherId, teacherName, reason).then((result) => {
-        if (!result.success) throw new Error(result.error ?? 'Failed to finalize review');
+        if (!result.success) {
+          throwResultError(result.error, 'Failed to finalize review');
+        }
       }),
     onSuccess: (...args) => {
       const variables = args[1];
