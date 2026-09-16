@@ -39,6 +39,7 @@ import { documentFromStructuredContent } from "./richTextSchema.js";
 // command is. The service imports the browser module the same way it already
 // imports the browser's rich-text schema.
 import { parseSatWorkspaceCommand } from "../../../src/features/exam-authoring/realtime/coedit/workspaceCommands.js";
+import { parseCoeditStoreRequest } from "../../../src/features/exam-authoring/realtime/coedit/storeRequest.js";
 import {
   parseWorkspaceSeedFrame,
   type WorkspaceSeedFrame,
@@ -523,6 +524,12 @@ export class CoeditService {
        * workspace, so other open pages can invalidate without reloading.
        */
       onStateless: async ({ documentName, document, connection, payload }) => {
+        // A durable-store request is meaningful in every room type, so it is
+        // handled before the workspace-only frames below.
+        if (parseCoeditStoreRequest(payload, { documentName })) {
+          await this.storeOnRequest(documentName, document, connection);
+          return;
+        }
         if (parseAnyDocumentName(documentName)?.fieldSet !== FIELD_SET_WORKSPACE) return;
         const seed = parseWorkspaceSeedFrame(payload, { documentName });
         if (seed) {
@@ -775,6 +782,41 @@ export class CoeditService {
       // commits it), and the refusal has already been broadcast to the room by
       // the store that failed. Reporting it is the whole correct response.
     });
+  }
+
+  /**
+   * Stores the room's current in-memory state because a client asked.
+   *
+   * This is what an editor's Retry action sends, and it is the only way a client
+   * can make work durable: Hocuspocus stores a document when an update re-arms
+   * its debounce, so a room whose last store failed stays dirty with nothing
+   * scheduled until the author types again. The outcome is not answered here —
+   * `persistence.store` already broadcasts the acknowledgement or the refusal to
+   * the room, which is the vocabulary the save area already reads.
+   */
+  private async storeOnRequest(
+    documentName: string,
+    document: Y.Doc,
+    connection: Connection<CoeditConnectionContext>,
+  ): Promise<void> {
+    if (connection.readOnly || this.lifecycle.isReadOnly(documentName)) {
+      // A room that may not be written to has nothing to commit: the refusal
+      // has its own path, and a read-only connection is reported through the
+      // lifecycle frames the editor already reads.
+      return;
+    }
+    try {
+      await this.persistence.store({ documentName, document, context: connection.context });
+    } catch (error) {
+      // Never rethrown into the stateless hook: a rejection there is an
+      // unhandled rejection and takes the process down (see `applyWorkspaceSeed`),
+      // and the store has already broadcast its refusal to the room.
+      log("warn", "co-edit store request failed", {
+        event: "store_failed",
+        reason: error instanceof Error ? error.message : "other",
+        stage: "store",
+      });
+    }
   }
 
   /**

@@ -27,6 +27,7 @@ import { compareCoeditDecimalStrings, isCoeditDecimalString } from "./protocol";
 import { collaboratorsFromAwareness, sanitizeLocalAwarenessState } from "./presence";
 import { deriveSaveState } from "./saveState";
 import { encodeStateVectorBase64 } from "./stateVector";
+import { createCoeditStoreRequest } from "./storeRequest";
 import { COEDIT_TOKEN_REFRESH_LEAD_MS } from "./tokenApi";
 import {
   parseSatWorkspaceCommand,
@@ -338,7 +339,16 @@ export class PromptCoeditProvider {
     return this.hocuspocus;
   }
 
-  /** Re-open a transport after an inline Retry action. */
+  /**
+   * Re-opens the transport and asks the room to store what this tab holds.
+   *
+   * A reconnect alone was not a retry: the service stores a document only when
+   * an update re-arms its store debounce, so pressing Retry after a failed save
+   * left the status at "Still saving…" with nothing in flight until the author
+   * happened to type again. The request is the honest half of the action — it
+   * makes the work this tab is holding the subject of the next store, and the
+   * ordinary acknowledgement or refusal frame decides the status from there.
+   */
   retry(): void {
     if (this.disposed) return;
     this.lastError = null;
@@ -347,7 +357,31 @@ export class PromptCoeditProvider {
       this.issueMessage = null;
     }
     void this.hocuspocus.connect().catch(() => undefined);
+    this.requestStore();
     this.recompute("status");
+  }
+
+  /**
+   * Asks the service to store this room's current state, if there is anything
+   * to store.
+   *
+   * Returns false when the request is meaningless — a torn-down or terminal
+   * room, a session that may not write, or local state the room has already
+   * acknowledged (nothing is pending, so a store would only send it back). A
+   * request made while the socket is down is queued under the room's own key, so
+   * pressing Retry offline asks once and the frame goes out on reconnect.
+   */
+  private requestStore(): boolean {
+    if (this.disposed || this.isTerminal || this.readOnly || this.options.readOnly) return false;
+    const current = this.currentStateVector();
+    if (this.acknowledgedStateVector !== null && current === this.acknowledgedStateVector) return false;
+    let payload: string;
+    try {
+      payload = JSON.stringify(createCoeditStoreRequest(this.documentName));
+    } catch {
+      return false;
+    }
+    return this.sendStatelessFrame(`store:${this.documentName}`, payload);
   }
 
   /** Relay one already-authorized HTTP mutation to the other open surfaces. */

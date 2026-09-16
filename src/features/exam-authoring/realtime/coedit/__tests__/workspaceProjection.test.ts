@@ -507,3 +507,80 @@ describe("durable acknowledgements and flush", () => {
     });
   });
 });
+
+/**
+ * What the save area's Retry action actually does.
+ *
+ * Reconnecting the transport is not a retry: the service stores a document only
+ * when an update re-arms its store debounce, so a room whose last store failed
+ * stayed at "Still saving…" with nothing in flight until the author typed
+ * again. Retry therefore asks the room to store the state this tab already
+ * holds.
+ */
+describe("authoring save Retry", () => {
+  const framesOn = (transport: FakeTransport): Array<Record<string, unknown>> =>
+    transport.stateless.map((payload) => JSON.parse(payload) as Record<string, unknown>);
+
+  it("asks the room to store unacknowledged work instead of only reconnecting", async () => {
+    const { provider, transport } = openRoom();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    provider.setValue("ui/selectedQuestionId", "q-1");
+    transport.stateless.length = 0;
+
+    provider.retry();
+
+    expect(framesOn(transport)).toEqual([
+      { type: "coedit.store", documentName: DOCUMENT_NAME },
+    ]);
+  });
+
+  it("asks for nothing once the exact current state is acknowledged", async () => {
+    const { provider, transport } = openRoom();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    transport.deliver({
+      type: "coedit.ack",
+      documentName: DOCUMENT_NAME,
+      stateVector: encodeStateVectorBase64(provider.ydoc),
+      stateHash: "a".repeat(64),
+      questionRevision: 1,
+      materializedRevision: 1,
+    });
+    expect(provider.snapshot().saveState.name).toBe("saved");
+    transport.stateless.length = 0;
+
+    provider.retry();
+
+    // Nothing is pending, so there is nothing to store: a request here would
+    // only send the room's own state back to it.
+    expect(framesOn(transport)).toEqual([]);
+  });
+
+  it("holds one request for the room while the socket is down", async () => {
+    const { provider, transport } = openRoom();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    provider.setValue("ui/selectedQuestionId", "q-1");
+    transport.status("disconnected");
+    transport.stateless.length = 0;
+
+    // Retrying offline is a real intent, so it is queued rather than dropped...
+    provider.retry();
+    provider.retry();
+    expect(framesOn(transport)).toEqual([]);
+
+    // ...and the room is asked once, not once per press.
+    transport.status("connected");
+    expect(framesOn(transport)).toEqual([
+      { type: "coedit.store", documentName: DOCUMENT_NAME },
+    ]);
+  });
+
+  it("never asks a room this session may not write to", async () => {
+    const { provider, transport } = openRoom(undefined, { readOnly: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    transport.stateless.length = 0;
+
+    provider.retry();
+
+    expect(framesOn(transport)).toEqual([]);
+  });
+});

@@ -21,6 +21,9 @@ import {
 // relay test below drives the real socket with the browser's own builder.
 import { createSatWorkspaceCommand } from "../../../../src/features/exam-authoring/realtime/coedit/workspaceCommands.js";
 import { createWorkspaceSeedFrame } from "../../../../src/features/exam-authoring/realtime/coedit/workspaceSeed.js";
+// The Retry action's own frame, built by the browser's builder and validated by
+// the service's importer of the same module.
+import { createCoeditStoreRequest } from "../../../../src/features/exam-authoring/realtime/coedit/storeRequest.js";
 import { metrics } from "../telemetry.js";
 
 /**
@@ -784,6 +787,69 @@ describe("service integration", () => {
       5_000,
       "a store after the refused seed",
     );
+  });
+
+  it("stores on request, so a refused save is retried without another edit", async () => {
+    // What the editor's Retry action must achieve: the room was left holding
+    // state it could not make durable, and asking again — with no new edit — has
+    // to commit it. A reconnect alone cannot: Hocuspocus stores a document only
+    // when an update re-arms its debounce, which is why the save area used to
+    // sit at "Still saving…" with nothing in flight.
+    const running = await startService();
+    const alice = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-alice" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    const frames: string[] = [];
+    alice.on("stateless", ({ payload }: { payload: string }) => frames.push(payload));
+    await waitFor(() => alice.isSynced, 5_000, "workspace client");
+
+    // The edit reaches the room; the store it triggers is refused, so the room
+    // holds work that is not durable.
+    running.go.refuseStores = true;
+    alice.document.getMap("workspace").set("ui/selectedQuestionId", JSON.stringify("q-1"));
+    await waitFor(() => running.go.stores.length > 0, 5_000, "the refused store");
+
+    running.go.refuseStores = false;
+    const storesBefore = running.go.stores.length;
+    frames.length = 0;
+    alice.sendStateless(JSON.stringify(createCoeditStoreRequest(WORKSPACE_DOCUMENT_NAME)));
+
+    await waitFor(
+      () => running.go.stores.length > storesBefore,
+      5_000,
+      "the store the retry asked for",
+    );
+    // The request is answered in the ordinary vocabulary, and only for the
+    // state the tab actually holds — the same comparison the browser uses to
+    // decide it may show Saved.
+    const vector = encodeStateVectorBase64(alice.document);
+    await waitFor(
+      () =>
+        frames.some((frame) => {
+          const parsed = JSON.parse(frame) as { type?: string; stateVector?: string };
+          return parsed.type === "coedit.ack" && parsed.stateVector === vector;
+        }),
+      5_000,
+      "the acknowledgement for the requested store",
+    );
+  });
+
+  it("ignores a store request from a read-only observer", async () => {
+    const running = await startService();
+    const observer = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-obs", mode: "read" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => observer.isSynced, 5_000, "observer client");
+
+    const storesBefore = running.go.stores.length;
+    observer.sendStateless(JSON.stringify(createCoeditStoreRequest(WORKSPACE_DOCUMENT_NAME)));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    // An observer's room has nothing to commit on its behalf, and its write
+    // refusal already has its own path.
+    expect(running.go.stores.length).toBe(storesBefore);
   });
 
   it("treats a retried seed as the same proposal and refuses a read token's seed", async () => {

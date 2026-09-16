@@ -35,6 +35,11 @@ COPY src/features/exam-authoring/realtime/coedit/workspaceSeed.ts ./src/features
 # opaque room names as the browser contract, so its small identity dependency
 # travels with it into the image as well.
 COPY src/features/exam-authoring/realtime/coedit/protocol.ts src/features/exam-authoring/realtime/coedit/documentIdentity.ts ./src/features/exam-authoring/realtime/coedit/
+# The editor's Retry action asks the room to store what the tab is holding. That
+# small frame is also defined once, for both halves, and it validates room names
+# through the same identity contract copied above — so it travels into the image
+# alongside them.
+COPY src/features/exam-authoring/realtime/coedit/storeRequest.ts ./src/features/exam-authoring/realtime/coedit/
 
 EXPOSE 1235
 
