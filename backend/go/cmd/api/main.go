@@ -770,6 +770,15 @@ func BuildRouter(app *App) http.Handler {
 		// the child process itself remains bound to the container loopback.
 		r.Get(coeditPublicProxyPath, coeditWebSocketProxy(app))
 	}
+	if frontendDir := strings.TrimSpace(app.Config.FrontendDistDir); frontendDir != "" {
+		// Railway deploys the Vite bundle in this same image. Keep API-owned
+		// paths on the JSON router while serving browser routes from the SPA.
+		frontend := frontendHandler(frontendDir)
+		route(r, http.MethodGet, "/", frontend)
+		route(r, http.MethodGet, "/*", frontend)
+		route(r, http.MethodHead, "/", frontend)
+		route(r, http.MethodHead, "/*", frontend)
+	}
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Route not found."))
