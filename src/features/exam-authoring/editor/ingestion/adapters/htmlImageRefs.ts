@@ -2,6 +2,8 @@
  * Extract image references from pasted HTML before structural sanitization.
  * Image bytes are fetched and validated separately before upload.
  */
+import { SAT_IMAGE_POLICY } from "../domain/imagePolicy";
+
 export interface HtmlImageRef {
   /** Stable within one paste; used to reconnect the fetched file to the AST. */
   refId?: string;
@@ -17,15 +19,17 @@ export interface HtmlImageRefsOutcome {
 export interface MarkHtmlImageRefsOutcome {
   html: string;
   refs: HtmlImageRef[];
+  truncated: number;
 }
 
-export const MAX_HTML_IMAGES = 5;
+export const MAX_HTML_IMAGES = SAT_IMAGE_POLICY.maxImagesPerPaste;
 
 export function extractHtmlImageRefs(
   html: string,
-  maxImages = MAX_HTML_IMAGES
+  maxImages: number = MAX_HTML_IMAGES
 ): HtmlImageRefsOutcome {
-  if (!html.trim() || maxImages <= 0) return { refs: [], truncated: 0 };
+  if (!html.trim()) return { refs: [], truncated: 0 };
+  const limit = Math.max(0, Math.floor(maxImages));
   let body: HTMLElement;
   try {
     const parsed = new DOMParser().parseFromString(html, "text/html");
@@ -42,7 +46,7 @@ export function extractHtmlImageRefs(
     const src = element.getAttribute("src")?.trim() ?? "";
     if (!src || seen.has(src)) continue;
     seen.add(src);
-    if (refs.length >= maxImages) {
+    if (refs.length >= limit) {
       truncated += 1;
       continue;
     }
@@ -70,16 +74,17 @@ export function markHtmlImageRefs(html: string, refs: readonly HtmlImageRef[]): 
  */
 export function markHtmlImageRefsWithOccurrences(
   html: string,
-  refs: readonly HtmlImageRef[]
+  refs: readonly HtmlImageRef[],
+  maxOccurrences = Number.POSITIVE_INFINITY
 ): MarkHtmlImageRefsOutcome {
-  if (!html.trim() || refs.length === 0) return { html, refs: [] };
+  if (!html.trim() || refs.length === 0) return { html, refs: [], truncated: 0 };
   let body: HTMLElement;
   try {
     const parsed = new DOMParser().parseFromString(html, "text/html");
-    if (!parsed.body) return { html, refs: [] };
+    if (!parsed.body) return { html, refs: [], truncated: 0 };
     body = parsed.body;
   } catch {
-    return { html, refs: [] };
+    return { html, refs: [], truncated: 0 };
   }
 
   const bySource = new Map<string, HtmlImageRef>();
@@ -93,12 +98,17 @@ export function markHtmlImageRefsWithOccurrences(
   }
   const occurrences = new Map<string, number>();
   const markerRefs: HtmlImageRef[] = [];
+  let truncated = 0;
   for (const element of Array.from(body.querySelectorAll("img"))) {
     const src = element.getAttribute("src")?.trim() ?? "";
     const ref = bySource.get(src);
     if (!ref?.refId) continue;
     const occurrence = occurrences.get(src) ?? 0;
     occurrences.set(src, occurrence + 1);
+    if (markerRefs.length >= maxOccurrences) {
+      truncated += 1;
+      continue;
+    }
     const refId = occurrence === 0 ? ref.refId : ref.refId + "-occurrence-" + String(occurrence);
     const marker = body.ownerDocument.createElement("span");
     marker.setAttribute("data-sat-image-ref", refId);
@@ -109,5 +119,5 @@ export function markHtmlImageRefsWithOccurrences(
       alt: element.getAttribute("alt")?.trim() ?? ref.alt,
     });
   }
-  return { html: body.innerHTML, refs: markerRefs };
+  return { html: body.innerHTML, refs: markerRefs, truncated };
 }

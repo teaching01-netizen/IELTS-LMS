@@ -21,6 +21,8 @@ export type DiagnosticCode =
   | "import.latex.empty"
   | "import.image.staged"
   | "import.image.rejected"
+  | "import.image.count-limit"
+  | "import.image.aggregate-size"
   | "import.image.alt-required"
   | "import.script.stripped"
   | "import.object.stripped"

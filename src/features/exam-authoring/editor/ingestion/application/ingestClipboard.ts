@@ -20,6 +20,7 @@ import {
 import { fetchHtmlImagesAsFiles } from "../adapters/fetchHtmlImagesAsFiles";
 import type { TextHtmlImageRef } from "../adapters/textHtml";
 import { DIAGNOSTIC_MESSAGES } from "../domain/diagnostics";
+import { SAT_IMAGE_POLICY } from "../domain/imagePolicy";
 
 export type IngestSource =
   "files" | "spreadsheet" | "html+text" | "html" | "text" | "pdf-text" | "empty";
@@ -39,9 +40,16 @@ export interface IngestClipboardResult {
   source: IngestSource;
   pendingImages: PendingImage[];
   rejectedImages: number;
-  warnings: Array<{ code: string; message: string }>;
+  warnings: IngestWarning[];
   transformations: string[];
   stats: { blockCount: number; imageCount: number; mathCount: number; tableCount: number };
+}
+
+export interface IngestWarning {
+  code: string;
+  message: string;
+  count?: number | undefined;
+  reason?: string | undefined;
 }
 
 /** File bytes stay at the application/editor boundary, never in ImportDocument. */
@@ -169,11 +177,68 @@ function withMarkdown(doc: ImportDocument): {
     transformations: [transformation],
   };
 }
-function warning(code: string, count = 1): { code: string; message: string } {
-  const message =
-    DIAGNOSTIC_MESSAGES[code as keyof typeof DIAGNOSTIC_MESSAGES] ??
-    "Some pasted content could not be imported.";
-  return { code, message: count > 1 ? message + " (" + count + ")" : message };
+const IMAGE_COUNT_LIMIT_MESSAGE =
+  DIAGNOSTIC_MESSAGES["import.image.count-limit"];
+const IMAGE_AGGREGATE_LIMIT_MESSAGE = DIAGNOSTIC_MESSAGES["import.image.aggregate-size"];
+
+function imageLimitWarning(
+  code: string,
+  message: string,
+  count: number,
+  reason: string
+): IngestWarning {
+  return { code, message, count, reason };
+}
+
+function imageRejectionWarning(count: number, reason: string): IngestWarning {
+  const noun = count === 1 ? "image" : "images";
+  return {
+    code: "import.image.rejected",
+    message: count + " " + noun + " could not be imported (" + reason + ").",
+    count,
+    reason,
+  };
+}
+
+interface DirectImageSelection {
+  files: File[];
+  rejected: number;
+  bytes: number;
+  warnings: IngestWarning[];
+}
+
+function selectDirectImages(files: File[]): DirectImageSelection {
+  const maxImages = SAT_IMAGE_POLICY.maxImagesPerPaste;
+  const countLimited = Math.max(0, files.length - maxImages);
+  const candidates = files.slice(0, maxImages);
+  const bytes = candidates.reduce((total, file) => total + Math.max(0, file.size), 0);
+  if (bytes > SAT_IMAGE_POLICY.maxPasteBytes) {
+    return {
+      files: [],
+      rejected: files.length,
+      bytes: SAT_IMAGE_POLICY.maxPasteBytes,
+      warnings: [
+        ...(countLimited > 0
+          ? [imageLimitWarning("import.image.count-limit", IMAGE_COUNT_LIMIT_MESSAGE, countLimited, "count")]
+          : []),
+        imageLimitWarning(
+          "import.image.aggregate-size",
+          IMAGE_AGGREGATE_LIMIT_MESSAGE,
+          files.length,
+          "aggregate-size"
+        ),
+      ],
+    };
+  }
+  return {
+    files: candidates,
+    rejected: countLimited,
+    bytes,
+    warnings:
+      countLimited > 0
+        ? [imageLimitWarning("import.image.count-limit", IMAGE_COUNT_LIMIT_MESSAGE, countLimited, "count")]
+        : [],
+  };
 }
 
 export function looksLikePdfCopy(text: string): boolean {
@@ -189,7 +254,9 @@ export function looksLikePdfCopy(text: string): boolean {
 
 async function htmlImages(
   html: string | null,
-  enabled: boolean
+  enabled: boolean,
+  maxImages: number,
+  maxBytes: number
 ): Promise<{
   refs: HtmlImageRef[];
   markedHtml: string | null;
@@ -197,7 +264,7 @@ async function htmlImages(
   imageRefs: ReadonlyMap<string, TextHtmlImageRef>;
   rejected: number;
   transformations: string[];
-  warnings: Array<{ code: string; message: string }>;
+  warnings: IngestWarning[];
 }> {
   if (!html || !enabled)
     return {
@@ -209,8 +276,9 @@ async function htmlImages(
       transformations: [],
       warnings: [],
     };
-  const extracted = extractHtmlImageRefs(html);
-  if (extracted.refs.length === 0 && extracted.truncated === 0)
+  const limited = extractHtmlImageRefs(html, maxImages);
+  const refs = limited.refs;
+  if (limited.refs.length === 0 && limited.truncated === 0)
     return {
       refs: [],
       markedHtml: html,
@@ -220,9 +288,13 @@ async function htmlImages(
       transformations: [],
       warnings: [],
     };
-  const marked = markHtmlImageRefsWithOccurrences(html, extracted.refs);
-  const fetched = await fetchHtmlImagesAsFiles(extracted.refs);
+  const marked = markHtmlImageRefsWithOccurrences(html, refs, maxImages);
+  const fetched = await fetchHtmlImagesAsFiles(refs, {
+    maxImages,
+    maxAggregateBytes: maxBytes,
+  });
   const fetchedBySource = new Map(fetched.images.map((item) => [item.src, item]));
+  const rejectedBySource = new Map(fetched.rejected.map((item) => [item.src, item.reason]));
   const imageRefs = new Map<string, TextHtmlImageRef>();
   for (const ref of marked.refs) {
     if (!ref.refId) continue;
@@ -235,8 +307,34 @@ async function htmlImages(
       alt: ref.alt,
     });
   }
-  const rejected =
-    marked.refs.filter((ref) => !fetchedBySource.has(ref.src)).length + extracted.truncated;
+  const rejectionCounts = new Map<string, number>();
+  for (const ref of marked.refs) {
+    if (!fetchedBySource.has(ref.src)) {
+      const reason = rejectedBySource.get(ref.src) ?? "fetch";
+      rejectionCounts.set(reason, (rejectionCounts.get(reason) ?? 0) + 1);
+    }
+  }
+  const countLimited = limited.truncated + marked.truncated;
+  if (countLimited > 0) rejectionCounts.set("count", countLimited);
+  const rejected = Array.from(rejectionCounts.values()).reduce((total, count) => total + count, 0);
+  const warnings: IngestWarning[] = [];
+  const countRejected = rejectionCounts.get("count") ?? 0;
+  if (countRejected > 0) {
+    warnings.push(imageLimitWarning("import.image.count-limit", IMAGE_COUNT_LIMIT_MESSAGE, countRejected, "count"));
+  }
+  for (const [reason, count] of rejectionCounts) {
+    if (reason === "count") continue;
+    warnings.push(
+      reason === "aggregate-size"
+        ? imageLimitWarning(
+            "import.image.aggregate-size",
+            IMAGE_AGGREGATE_LIMIT_MESSAGE,
+            count,
+            reason
+          )
+        : imageRejectionWarning(count, reason)
+    );
+  }
   const transformations = [
     ...(marked.refs.filter((ref) => fetchedBySource.has(ref.src)).length > 0
       ? [
@@ -256,7 +354,7 @@ async function htmlImages(
     imageRefs,
     rejected,
     transformations,
-    warnings: rejected > 0 ? [warning("import.image.rejected", rejected)] : [],
+    warnings,
   };
 }
 
@@ -265,7 +363,7 @@ function result(
   source: IngestSource,
   pendingImages: PendingImage[],
   rejectedImages: number,
-  warnings: Array<{ code: string; message: string }>,
+  warnings: IngestWarning[],
   transformations: string[]
 ): IngestClipboardResult {
   return {
@@ -298,7 +396,8 @@ export async function ingestClipboard(
     flags.images === false
       ? []
       : req.files.filter((file) => file.type.toLowerCase().startsWith("image/"));
-  const fileImages: PendingImage[] = imageFiles.map((file, index) => ({
+  const directSelection = selectDirectImages(imageFiles);
+  const fileImages: PendingImage[] = directSelection.files.map((file, index) => ({
     refId: "clipboard-image-" + String(index),
     file,
     alt: "",
@@ -311,18 +410,23 @@ export async function ingestClipboard(
     imageRefs: new Map<string, TextHtmlImageRef>() as ReadonlyMap<string, TextHtmlImageRef>,
     rejected: 0,
     transformations: [] as string[],
-    warnings: [] as Array<{ code: string; message: string }>,
+    warnings: [] as IngestWarning[],
   };
   let pendingImages: PendingImage[] = [...fileImages];
-  let baseWarnings: Array<{ code: string; message: string }> = [];
+  let baseWarnings: IngestWarning[] = [...directSelection.warnings];
   let baseTransformations: string[] =
     imageFiles.length > 0 ? ["clipboard.files:" + imageFiles.length] : [];
   let imageResultLoaded = false;
   const loadHtmlImages = async (): Promise<void> => {
     if (imageResultLoaded) return;
-    htmlImageResult = await htmlImages(req.html, flags.images !== false);
+    htmlImageResult = await htmlImages(
+      req.html,
+      flags.images !== false,
+      Math.max(0, SAT_IMAGE_POLICY.maxImagesPerPaste - fileImages.length),
+      Math.max(0, SAT_IMAGE_POLICY.maxPasteBytes - directSelection.bytes)
+    );
     pendingImages = [...fileImages, ...htmlImageResult.pendingImages];
-    baseWarnings = [...htmlImageResult.warnings];
+    baseWarnings = [...directSelection.warnings, ...htmlImageResult.warnings];
     baseTransformations = [
       ...htmlImageResult.transformations,
       ...(imageFiles.length > 0 ? ["clipboard.files:" + imageFiles.length] : []),
@@ -346,7 +450,7 @@ export async function ingestClipboard(
         const upgraded = mathOn
           ? upgradeMathInDocument(sheet.document, target)
           : { document: sheet.document, warnings: [], transformations: [] as string[] };
-        const rejectedImages = htmlImageResult.rejected;
+        const rejectedImages = directSelection.rejected + htmlImageResult.rejected;
         return result(
           appendMissingImages(upgraded.document, pendingImages),
           "spreadsheet",
@@ -365,7 +469,7 @@ export async function ingestClipboard(
           source: "spreadsheet",
           document: appendMissingImages(EMPTY_DOC, pendingImages),
           pendingImages,
-          rejectedImages: htmlImageResult.rejected,
+          rejectedImages: directSelection.rejected + htmlImageResult.rejected,
           warnings: [...baseWarnings, ...sheet.warnings],
           transformations: [...baseTransformations, ...sheet.transformations].filter(
             (item) => item !== "clipboard.files:0"
@@ -433,7 +537,7 @@ export async function ingestClipboard(
     appendMissingImages(upgraded.document, pendingImages),
     source,
     pendingImages,
-    htmlImageResult.rejected,
+    directSelection.rejected + htmlImageResult.rejected,
     warnings,
     transformations
   );

@@ -23,6 +23,44 @@ describe("HTML image references", () => {
 });
 
 describe("fetchHtmlImagesAsFiles", () => {
+  it("starts no more than five HTML image fetches", async () => {
+    const fetchFn = vi.fn<typeof fetch>(async () => response("image bytes", "image/png"));
+    const refs = Array.from({ length: 6 }, (_, index) => ({
+      refId: "html-image-" + String(index),
+      src: "https://cdn.test/" + String(index) + ".png",
+      alt: "",
+    }));
+
+    const out = await fetchHtmlImagesAsFiles(refs, { fetchFn });
+
+    expect(fetchFn).toHaveBeenCalledTimes(5);
+    expect(out.images).toHaveLength(5);
+    expect(out.rejected).toHaveLength(1);
+    expect(out.rejected[0]?.reason).toBe("count");
+  });
+
+  it("does not read a response declared above the remaining aggregate budget", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3, 4, 5, 6]));
+        controller.close();
+      },
+    });
+    const responseBody = new Response(body, {
+      status: 200,
+      headers: { "content-type": "image/png", "content-length": "6" },
+    });
+    const fetchFn = vi.fn<typeof fetch>(async () => responseBody);
+
+    const out = await fetchHtmlImagesAsFiles(
+      [{ src: "https://cdn.test/too-large.png", alt: "" }],
+      { fetchFn, maxAggregateBytes: 5 }
+    );
+
+    expect(out.images).toEqual([]);
+    expect(out.rejected[0]?.reason).toBe("aggregate-size");
+  });
+
   it("decodes an accepted data URL locally without calling fetch", async () => {
     const fetchFn = vi.fn<typeof fetch>();
     const out = await fetchHtmlImagesAsFiles(

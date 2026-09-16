@@ -10,7 +10,10 @@ import { Extension, type Editor } from "@tiptap/react";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import type { RichComposerCapabilities } from "../RichQuestionComposer";
-import type { IngestClipboardResult } from "../ingestion/application/ingestClipboard";
+import type {
+  IngestClipboardResult,
+  IngestWarning,
+} from "../ingestion/application/ingestClipboard";
 import { targetFromView } from "./smartPastePlugin";
 import type { SmartPasteInsertOutcome, SmartPasteTarget } from "./smartPastePlugin";
 
@@ -38,6 +41,7 @@ export interface SmartDropPluginOptions {
         imageCount: number;
         rejectedImageCount: number;
         canUndo: boolean;
+        warnings: IngestWarning[];
       }) => void)
     | undefined;
 }
@@ -110,6 +114,7 @@ export const SmartDropPlugin = Extension.create<SmartDropPluginOptions>({
                     source: result.source,
                     imageCount: Math.max(0, result.stats.imageCount - outcome.rejectedImages),
                     rejectedImageCount,
+                    warnings: result.warnings,
                     canUndo: outcome.handled,
                   });
               } catch {

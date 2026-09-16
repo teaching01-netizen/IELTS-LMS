@@ -1,9 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { createPipelineContext } from "../application/pipelineContext";
 import { ingestClipboard } from "../application/ingestClipboard";
+import { SAT_IMAGE_POLICY } from "../domain/imagePolicy";
 
 const ctx = createPipelineContext({ field: "prompt" });
 const target = { inTable: false, inCodeBlock: false, inChoiceEditor: false };
+
+function imageFile(index: number, size = 1): File {
+  const file = new File(["x"], "image-" + String(index) + ".png", { type: "image/png" });
+  Object.defineProperty(file, "size", { value: size });
+  return file;
+}
+
+function sixValidImageFiles(): File[] {
+  return Array.from({ length: 6 }, (_, index) => imageFile(index));
+}
+
+function filesTotalling(total: number): File[] {
+  const base = Math.floor(total / 5);
+  const remainder = total - base * 5;
+  return Array.from({ length: 5 }, (_, index) => imageFile(index, base + (index === 0 ? remainder : 0)));
+}
 
 describe("ingestClipboard orchestration", () => {
   it("routes html tables to spreadsheet BEFORE the text path", async () => {
@@ -59,6 +76,61 @@ describe("ingestClipboard orchestration", () => {
     expect(res.source).toBe("files");
     expect(res.pendingImages).toHaveLength(1);
   });
+
+  it("accepts at most five images per paste", async () => {
+    const result = await ingestClipboard(
+      { files: sixValidImageFiles(), html: null, text: null, ownerId: "q1", target },
+      ctx
+    );
+
+    expect(result.pendingImages).toHaveLength(5);
+    expect(result.rejectedImages).toBe(1);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ message: "Only 5 images can be inserted at once.", count: 1 })
+    );
+  });
+
+  it("counts direct files and HTML images against one paste limit", async () => {
+    const result = await ingestClipboard(
+      {
+        files: [imageFile(0), imageFile(1), imageFile(2), imageFile(3)],
+        html:
+          '<img src="data:image/png;base64,iVBORw0KGgo=" alt="html-one">' +
+          '<img src="data:image/png;base64,BBBB" alt="html-two">',
+        text: null,
+        ownerId: "q1",
+        target,
+      },
+      ctx
+    );
+
+    expect(result.pendingImages).toHaveLength(5);
+    expect(result.rejectedImages).toBe(1);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ message: "Only 5 images can be inserted at once." })
+    );
+  });
+
+  it("rejects aggregate paste bytes above the bounded budget", async () => {
+    const result = await ingestClipboard(
+      {
+        files: filesTotalling(SAT_IMAGE_POLICY.maxPasteBytes + 1),
+        html: null,
+        text: null,
+        ownerId: "q1",
+        target,
+      },
+      ctx
+    );
+
+    expect(result.pendingImages).toHaveLength(0);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({
+        message: "The pasted images are too large as a group.",
+        reason: "aggregate-size",
+      })
+    );
+  });
   it("does not treat non-image files as image rejections before validation", async () => {
     const file = new File(["plain text"], "notes.txt", { type: "text/plain" });
     const res = await ingestClipboard(
@@ -101,6 +173,27 @@ describe("ingestClipboard orchestration", () => {
     expect(res.pendingImages.map((item) => item.alt)).toEqual(["diagram"]);
     expect(res.rejectedImages).toBe(0);
     expect(res.transformations).toContain("html.image-extracted:1");
+  });
+
+  it("preserves surrounding text when an HTML image fails", async () => {
+    const res = await ingestClipboard(
+      {
+        files: [],
+        html: '<p>before<img src="blob:unsafe" alt="fallback">after</p>',
+        text: null,
+        ownerId: "q1",
+        target,
+      },
+      ctx
+    );
+
+    expect(JSON.stringify(res.document)).toContain("before");
+    expect(JSON.stringify(res.document)).toContain("fallback");
+    expect(JSON.stringify(res.document)).toContain("after");
+    expect(res.rejectedImages).toBe(1);
+    expect(res.warnings).toContainEqual(
+      expect.objectContaining({ reason: "scheme", count: 1 })
+    );
   });
   it("keeps HTML images between surrounding blocks", async () => {
     const res = await ingestClipboard(

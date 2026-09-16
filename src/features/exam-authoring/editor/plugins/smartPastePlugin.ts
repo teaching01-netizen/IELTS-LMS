@@ -12,7 +12,11 @@ import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { Slice } from "@tiptap/pm/model";
 import type { EditorView } from "@tiptap/pm/view";
 import type { RichComposerCapabilities } from "../RichQuestionComposer";
-import type { IngestClipboardResult, IngestSource } from "../ingestion/application/ingestClipboard";
+import type {
+  IngestClipboardResult,
+  IngestSource,
+  IngestWarning,
+} from "../ingestion/application/ingestClipboard";
 import type { ImportDocument } from "../ingestion/domain/importDocument";
 import { destroyTransientUploads } from "../ingestionImagePipe";
 
@@ -35,6 +39,7 @@ export interface SmartPasteInfo {
   needsAltText: boolean;
   canUndo: boolean;
   rejectedImageCount?: number;
+  warnings: IngestWarning[];
   /** Normalized canonical paste (Phase-08 analysis input). Omitted only on legacy call sites. */
   document?: ImportDocument | undefined;
   /** Plain-text projection of the paste for detector convenience. */
@@ -154,6 +159,7 @@ export const SmartPastePlugin = Extension.create<SmartPastePluginOptions>({
                   needsAltText: acceptedImageCount > 0,
                   canUndo: outcome.handled,
                   rejectedImageCount,
+                  warnings: result.warnings,
                   document: result.document,
                   pastedPlainText: text ?? undefined,
                 });

@@ -201,7 +201,14 @@ describe("SmartPastePlugin", () => {
             source: "empty" as const,
             pendingImages: [],
             rejectedImages: 1,
-            warnings: [],
+            warnings: [
+              {
+                code: "import.image.count-limit",
+                message: "Only 5 images can be inserted at once.",
+                count: 1,
+                reason: "count",
+              },
+            ],
             transformations: ["html.image-rejected:1"],
             stats: { blockCount: 0, imageCount: 0, mathCount: 0, tableCount: 0 },
           }),
@@ -219,6 +226,9 @@ describe("SmartPastePlugin", () => {
       );
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(notices[0]).toMatchObject({ rejectedImageCount: 1, canUndo: false });
+      expect(notices[0]).toMatchObject({
+        warnings: [expect.objectContaining({ reason: "count", count: 1 })],
+      });
       expect(event.preventDefault).toHaveBeenCalledTimes(1);
     } finally {
       editor.destroy();
