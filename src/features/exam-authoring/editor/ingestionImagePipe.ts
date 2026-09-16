@@ -166,10 +166,50 @@ function swapAttributesNoHistory(
   editor.view.dispatch(tr);
 }
 
-function failTransientNode(editor: Editor, uploadId: string, message: string): void {
+function failTransientNode(editor: Editor, uploadId: string, message: string): boolean {
   const pos = findTransientPos(editor.state.doc, uploadId);
-  if (pos == null) return;
+  if (pos == null) return false;
   swapAttributesNoHistory(editor, pos, { uploadError: message, uploading: false });
+  return true;
+}
+
+function removePendingUpload(uploadId: string): void {
+  const queueIndex = pendingQueue.indexOf(uploadId);
+  if (queueIndex >= 0) pendingQueue.splice(queueIndex, 1);
+}
+
+/**
+ * Release the registry entry and its object URL exactly once. All cleanup
+ * paths use this boundary so a late promise settlement cannot leak an entry
+ * after its node has been removed.
+ */
+function releaseRegistryEntry(uploadId: string): void {
+  const entry = registry.get(uploadId);
+  if (!entry) {
+    removePendingUpload(uploadId);
+    return;
+  }
+  if (entry.settled) {
+    registry.delete(uploadId);
+    removePendingUpload(uploadId);
+    return;
+  }
+  entry.settled = true;
+  registry.delete(uploadId);
+  removePendingUpload(uploadId);
+  try {
+    entry.revokeObjectUrl(entry.objectUrl);
+  } catch {
+    // Cleanup must not surface a teardown/revocation error to the editor.
+  }
+}
+
+function releaseIfTransientNodeGone(uploadId: string, entry: RegistryEntry): boolean {
+  if (entry.editor.isDestroyed || findTransientPos(entry.editor.state.doc, uploadId) == null) {
+    releaseRegistryEntry(uploadId);
+    return true;
+  }
+  return false;
 }
 
 function pumpQueue(): void {
@@ -188,33 +228,25 @@ async function runUpload(uploadId: string, entry: RegistryEntry): Promise<void> 
   try {
     const asset = await entry.upload(entry.file, entry.ownerId);
     if (entry.settled) return;
+    if (releaseIfTransientNodeGone(uploadId, entry)) return;
     const { editor } = entry;
-    if (editor.isDestroyed) {
-      entry.settled = true;
-      registry.delete(uploadId);
-      entry.revokeObjectUrl(entry.objectUrl);
-      return;
-    }
     const pos = findTransientPos(editor.state.doc, uploadId);
     if (pos == null) {
-      // User deleted the temp node mid-upload: revoke + no-op, no crash.
-      entry.settled = true;
-      registry.delete(uploadId);
-      entry.revokeObjectUrl(entry.objectUrl);
+      releaseRegistryEntry(uploadId);
       return;
     }
     swapAttributesNoHistory(editor, pos, {
       ...buildResolvedImageAttrs(asset, entry.objectUrl),
     });
-    entry.settled = true;
-    registry.delete(uploadId);
-    entry.revokeObjectUrl(entry.objectUrl);
+    releaseRegistryEntry(uploadId);
   } catch (error) {
     if (entry.settled) return;
     const message =
       error instanceof Error && error.message ? error.message : "Image upload failed.";
-    if (!entry.editor.isDestroyed) failTransientNode(entry.editor, uploadId, message);
-    // Keep the registry entry so retry can re-upload the SAME File.
+    if (entry.editor.isDestroyed || !failTransientNode(entry.editor, uploadId, message)) {
+      releaseRegistryEntry(uploadId);
+    }
+    // A live failed node retains the registry entry so retry can re-upload the SAME File.
   } finally {
     activeUploads = Math.max(0, activeUploads - 1);
     pumpQueue();
@@ -270,10 +302,7 @@ export async function prepareClipboardImage(
   registry.set(uploadId, entry);
   let started = false;
   const discard = (): void => {
-    if (entry.settled) return;
-    entry.settled = true;
-    registry.delete(uploadId);
-    entry.revokeObjectUrl(objectUrl);
+    releaseRegistryEntry(uploadId);
   };
   return {
     status: "accepted",
@@ -338,13 +367,29 @@ export async function retryTransientUpload(
 ): Promise<void> {
   const entry = registry.get(uploadId);
   if (!entry) return;
+  if (editor.isDestroyed || findTransientPos(editor.state.doc, uploadId) == null) {
+    releaseRegistryEntry(uploadId);
+    return;
+  }
   entry.ownerId = ownerId;
   if (deps?.upload) entry.upload = deps.upload;
   if (deps?.revokeObjectUrl) entry.revokeObjectUrl = deps.revokeObjectUrl;
   entry.settled = false;
   const pos = findTransientPos(editor.state.doc, uploadId);
-  if (pos != null) swapAttributesNoHistory(editor, pos, { uploadError: null, uploading: true });
+  if (pos == null) return;
+  swapAttributesNoHistory(editor, pos, { uploadError: null, uploading: true });
   enqueueUpload(uploadId);
+}
+
+/** Retry using the owner and File retained by the live registry entry. */
+export async function retryTransientUploadForNode(
+  editor: Editor,
+  uploadId: string,
+  deps?: IngestionImagePipeDeps
+): Promise<void> {
+  const entry = registry.get(uploadId);
+  if (!entry) return;
+  return retryTransientUpload(editor, uploadId, entry.ownerId, deps);
 }
 
 /**
@@ -357,18 +402,12 @@ export function removeTransientImage(
   deps?: Pick<IngestionImagePipeDeps, "revokeObjectUrl">
 ): void {
   const entry = registry.get(uploadId);
-  const revoke = deps?.revokeObjectUrl ?? entry?.revokeObjectUrl ?? defaultRevokeObjectUrl;
+  if (entry && deps?.revokeObjectUrl) entry.revokeObjectUrl = deps.revokeObjectUrl;
   const pos = findTransientPos(editor.state.doc, uploadId);
   if (pos != null) {
     editor.chain().setNodeSelection(pos).deleteSelection().run();
   }
-  if (entry) {
-    entry.settled = true;
-    registry.delete(uploadId);
-    revoke(entry.objectUrl);
-  }
-  const queueIndex = pendingQueue.indexOf(uploadId);
-  if (queueIndex >= 0) pendingQueue.splice(queueIndex, 1);
+  releaseRegistryEntry(uploadId);
 }
 
 /**
@@ -418,11 +457,7 @@ export function stripTransientImagesFromEditor(editor: Editor): number {
   for (const [uploadId, entry] of [...registry]) {
     if (entry.editor !== editor) continue;
     if (findTransientPos(editor.state.doc, uploadId) == null) {
-      entry.settled = true;
-      registry.delete(uploadId);
-      entry.revokeObjectUrl(entry.objectUrl);
-      const queueIndex = pendingQueue.indexOf(uploadId);
-      if (queueIndex >= 0) pendingQueue.splice(queueIndex, 1);
+      releaseRegistryEntry(uploadId);
     }
   }
   return dropped;
@@ -436,21 +471,13 @@ export function stripTransientImagesFromEditor(editor: Editor): number {
 export function destroyTransientUploads(editor: Editor): void {
   for (const [uploadId, entry] of [...registry]) {
     if (entry.editor !== editor) continue;
-    entry.settled = true;
-    registry.delete(uploadId);
-    try {
-      entry.revokeObjectUrl(entry.objectUrl);
-    } catch {
-      // Revoke must never throw during teardown.
-    }
-    const queueIndex = pendingQueue.indexOf(uploadId);
-    if (queueIndex >= 0) pendingQueue.splice(queueIndex, 1);
+    releaseRegistryEntry(uploadId);
   }
 }
 
 /** Test-only: reset module queue/registry between cases. */
 export function __resetImagePipeForTests(): void {
-  registry.clear();
+  for (const uploadId of [...registry.keys()]) releaseRegistryEntry(uploadId);
   pendingQueue.length = 0;
   activeUploads = 0;
 }

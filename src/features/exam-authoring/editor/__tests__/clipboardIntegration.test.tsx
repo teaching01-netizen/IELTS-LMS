@@ -191,6 +191,27 @@ describe("SAT production composer clipboard integration", () => {
     }
   );
 
+  it("renders retry and remove actions for a failed staged image", async () => {
+    const { textbox, editor } = await mountComposer();
+    vi.mocked(uploadAssessmentAsset).mockRejectedValueOnce(new Error("network down"));
+
+    paste(textbox, { files: [imageFile()] });
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry image upload" })).toBeVisible()
+    );
+    expect(screen.getByRole("status", { name: "Upload failed", exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Remove image" })).toBeVisible();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Remove image" }));
+    });
+    await waitFor(() =>
+      expect(editor.getJSON().content?.some((node) => node.type === "image")).toBe(false)
+    );
+    expect(revokeUrl).toHaveBeenCalledWith("blob:clipboard-test");
+  });
+
   it("keeps text and images from the same paste and undoes them together", async () => {
     const { textbox, editor } = await mountComposer();
     await act(async () => {

@@ -203,6 +203,23 @@ describe("success swap keeps single undo", () => {
     expect(imageCount(editor)).toBe(0);
     expect(revoked).toEqual(["blob:pipe-1"]);
   });
+
+  it("releases a removed image after a late upload rejection", async () => {
+    const editor = makeEditor();
+    const gate = deferred<AssessmentMediaAsset>();
+    const upload = vi.fn(() => gate.promise);
+    const out = await pasteClipboardImage(editor, pngFile(), "owner-1", { ...deps(), upload });
+    if (out.status !== "accepted") throw new Error("expected accepted");
+
+    editor.commands.undo();
+    expect(imageCount(editor)).toBe(0);
+    gate.reject(new Error("network down"));
+    await gate.promise.catch(() => {});
+    await flushMicrotasks(20);
+
+    expect(__imagePipeQueueDepthForTests().tracked).toBe(0);
+    expect(revoked).toEqual(["blob:pipe-1"]);
+  });
 });
 
 describe("failure sets inline error; retry re-attempts; remove deletes + revokes", () => {
@@ -232,6 +249,7 @@ describe("failure sets inline error; retry re-attempts; remove deletes + revokes
     attrs = imageAttrs(editor);
     expect(attrs[0]).toMatchObject({ assetId: "asset-2", src: "https://cdn.test/retry.png" });
     expect(upload).toHaveBeenCalledTimes(2);
+    expect(upload.mock.calls[1]?.[0]).toBe(upload.mock.calls[0]?.[0]);
     expect(revoked).toEqual(["blob:pipe-1"]);
   });
 

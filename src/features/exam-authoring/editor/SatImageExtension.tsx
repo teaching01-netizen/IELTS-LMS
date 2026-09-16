@@ -2,13 +2,20 @@ import { useEffect, useState } from "react";
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import { ImageIcon } from "lucide-react";
 import { getAssessmentMediaAsset } from "../api/assessmentMediaApi";
+import {
+  removeTransientImage,
+  retryTransientUploadForNode,
+} from "./ingestionImagePipe";
 import { SatImageNode, isDirectImageSource as isDirectSource } from "./schema/imageNode";
 
-function SatImageNodeView({ node }: NodeViewProps) {
+function SatImageNodeView({ node, editor }: NodeViewProps) {
   const assetId = String(node.attrs["assetId"] ?? "");
   const fallbackSource = String(node.attrs["src"] ?? "");
   const alt = String(node.attrs["alt"] ?? "");
   const caption = node.attrs["caption"] ? String(node.attrs["caption"]) : null;
+  const uploadId = String(node.attrs["uploadId"] ?? "");
+  const uploadError = String(node.attrs["uploadError"] ?? "");
+  const uploadFailed = Boolean(uploadId && uploadError && node.attrs["uploading"] !== true);
   const [source, setSource] = useState(() =>
     isDirectSource(assetId) ? assetId : isDirectSource(fallbackSource) ? fallbackSource : ""
   );
@@ -31,7 +38,37 @@ function SatImageNodeView({ node }: NodeViewProps) {
 
   return (
     <NodeViewWrapper as="figure" className="my-4 space-y-2" data-asset-id={assetId}>
-      {source && !failed ? (
+      {uploadFailed ? (
+        <div className="space-y-3 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <span
+            role="status"
+            aria-live="polite"
+            aria-label="Upload failed"
+            className="block font-medium"
+          >
+            Upload failed
+          </span>
+          <p className="text-xs text-amber-800">{uploadError}</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              aria-label="Retry image upload"
+              className="rounded-md border border-amber-400 bg-white px-3 py-1.5 text-xs font-medium hover:bg-amber-100"
+              onClick={() => void retryTransientUploadForNode(editor, uploadId)}
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              aria-label="Remove image"
+              className="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-medium hover:bg-amber-100"
+              onClick={() => removeTransientImage(editor, uploadId)}
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : source && !failed ? (
         // The error handler only switches to the recoverable missing-visual state;
         // it is not a user interaction listener.
         // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
@@ -59,8 +96,9 @@ function SatImageNodeView({ node }: NodeViewProps) {
 // the Hocuspocus co-editing service converts.
 //
 // The node view is UNCHANGED from before the split: blob: previews are never
-// rendered (the loading placeholder covers uploading); data: stays
-// unrenderable; allowBase64:false untouched.
+// rendered (the loading placeholder covers uploading); failed staged uploads
+// expose retry/remove controls; data: stays unrenderable; allowBase64:false
+// untouched.
 export const SatImage = SatImageNode.extend({
   addNodeView() {
     return ReactNodeViewRenderer(SatImageNodeView);
