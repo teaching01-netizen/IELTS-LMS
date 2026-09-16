@@ -15,7 +15,9 @@ async function openSatHarness(
   if (options.paused) params.set("paused", "1");
   if (options.tool) params.set("tool", options.tool);
   await page.goto(`/__dev/sat-accessibility${params.size ? `?${params.toString()}` : ""}`);
-  await expect(page.getByTestId("sat-exam-shell")).toBeVisible();
+  // First navigation of a run cold-transforms the app (worst in WebKit); the
+  // harness mount is not the assertion under test, so allow it to settle.
+  await expect(page.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 15_000 });
 }
 
 type AxeViolation = { id: string; impact: string | null; targets: string[] };
@@ -40,6 +42,19 @@ function axeSource(): string {
 }
 
 async function axeViolations(page: Page): Promise<AxeViolation[]> {
+  // A Vite HMR reload can destroy the execution context mid-scan (shared dev
+  // server). That is harness noise, not a product failure — retry briefly
+  // instead of reporting a false accessibility verdict.
+  try {
+    return await runAxe(page);
+  } catch (error) {
+    if (!String(error).includes("Execution context was destroyed")) throw error;
+    await page.waitForTimeout(250);
+    return runAxe(page);
+  }
+}
+
+async function runAxe(page: Page): Promise<AxeViolation[]> {
   if (!(await page.evaluate(() => Boolean((window as unknown as { axe?: unknown }).axe)))) {
     await page.addScriptTag({ content: axeSource() });
   }

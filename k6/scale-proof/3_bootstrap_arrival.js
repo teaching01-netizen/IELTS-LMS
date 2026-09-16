@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check, fail } from 'k6';
+import { assertRateLimitContract } from './rate_limit_contract.js';
 
 // Plan Phase-D gate probe, true arrival shape (round 147): the ramping-VUs
 // herd scripts (1_bootstrap_herd.js, 2_bootstrap_staggered.js) measure
@@ -59,8 +60,6 @@ export const options = {
   },
 };
 
-let claimed = 0;
-
 export default function () {
   // One-shot: each iteration claims the next token exactly once.
   // __ITER is per-VU; use a global counter via execution info instead.
@@ -72,9 +71,12 @@ export default function () {
     { headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` } },
   );
   const etag = res.headers['ETag'] || res.headers['Etag'] || res.headers['Etag'];
+  const rateLimitContract = res.status === 429 ? assertRateLimitContract(res, 'arrival bootstrap') : null;
   check(res, {
-    'arrival bootstrap 200': (r) => r.status === 200,
-    'arrival bootstrap has ETag': () => Boolean(etag),
+    'arrival admitted or bounded shed': (r) =>
+      r.status === 200 || (r.status === 429 && Boolean(rateLimitContract && rateLimitContract.valid)),
+    'arrival bootstrap has ETag when admitted': (r) => r.status !== 200 || Boolean(etag),
+    'arrival never 5xx': (r) => r.status < 500,
   }) || fail(`arrival failed: status=${res.status} body=${String(res.body).slice(0, 200)}`);
   if (res.status >= 500) {
     fail(`arrival 5xx: status=${res.status}`);

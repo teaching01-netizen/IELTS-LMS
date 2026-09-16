@@ -1,5 +1,6 @@
 import http from 'k6/http';
-import { check, fail, sleep } from 'k6';
+import { check, fail } from 'k6';
+import { assertRateLimitContract, requestWithRateLimitRetry } from './rate_limit_contract.js';
 
 // Plan E3/D3: entry wave — 5k staggered VUs check in against ONE schedule
 // under ENTRY_GATE=on. The gate bounds the herd: expect 200s + retryable
@@ -8,7 +9,7 @@ import { check, fail, sleep } from 'k6';
 //
 // Required env: K6_BASE_URL, K6_SCHEDULE_ID, K6_ENTRY_CSV_PATH (CSV rows:
 // wcode,email,fullName — one per VU slot, >= VU count). Tune: K6_VUS
-// (default 5000), K6_RAMP (default 2m), K6_ENTRY_QUEUE_MAX_SECONDS.
+// (default 5000), K6_RAMP (default 2m), K6_ENTRY_RETRY_MAX_SECONDS.
 import { SharedArray } from 'k6/data';
 
 function clampInt(value, min, max) {
@@ -68,46 +69,24 @@ function entryOnce(row) {
   );
 }
 
-function boundedRetryAfterSeconds(resp) {
-  const headers = (resp && resp.headers) || {};
-  const headerValue = headers['Retry-After'] || headers['retry-after'];
-  const headerSeconds = Number(headerValue);
-  if (Number.isFinite(headerSeconds) && headerSeconds >= 1) {
-    return clampInt(headerSeconds, 1, 65);
-  }
-  try {
-    const body = resp.json();
-    const details = (body && (body.details || (body.error && body.error.details))) || {};
-    const detailSeconds = Number(details.retryAfterSeconds);
-    if (Number.isFinite(detailSeconds) && detailSeconds >= 1) {
-      return clampInt(detailSeconds, 1, 65);
-    }
-  } catch (_) {
-    // The status check below will reject a 429 without a usable retry signal.
-  }
-  return 0;
-}
-
 export default function () {
   const row = rows[(__VU - 1) % rows.length];
-  const queueMax = clampInt(__ENV.K6_ENTRY_QUEUE_MAX_SECONDS || '600', 0, 3600);
-  const start = Date.now();
-  let resp = entryOnce(row);
-  while (resp.status === 429 && (Date.now() - start) / 1000 < queueMax) {
-    const retryAfter = boundedRetryAfterSeconds(resp);
-    check(resp, { '429 has bounded retry signal': () => retryAfter > 0 });
-    if (retryAfter <= 0) break;
-    sleep(retryAfter);
-    resp = entryOnce(row);
-  }
+  const retryBudget = clampInt(__ENV.K6_ENTRY_RETRY_MAX_SECONDS || '600', 0, 3600);
+  const result = requestWithRateLimitRetry(
+    () => entryOnce(row),
+    retryBudget,
+    `entry ${row.wcode}`,
+  );
+  const resp = result.response;
   if (resp.status >= 500) {
     fail(`entry wave 5xx (${row.wcode}): status=${resp.status} body=${String(resp.body).slice(0, 200)}`);
   }
-  const finalRetryAfter = resp.status === 429 ? boundedRetryAfterSeconds(resp) : 0;
+  const finalContract = resp.status === 429 ? assertRateLimitContract(resp, `entry ${row.wcode}`) : null;
   // 429-after-retry-budget is an honest shed signal only when it carries a
   // bounded retry signal. Only 5xx (fail() above) or unexpected 4xx fail here.
   check(resp, {
-    'entry admitted or bounded retry': (r) => r.status === 200 || (r.status === 429 && finalRetryAfter > 0),
+    'entry admitted or bounded retry': (r) =>
+      r.status === 200 || (r.status === 429 && Boolean(finalContract && finalContract.valid)),
     'entry never 5xx': (r) => r.status < 500,
   });
 }

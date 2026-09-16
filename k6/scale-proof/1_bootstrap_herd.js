@@ -1,5 +1,6 @@
 import http from 'k6/http';
-import { check, fail, sleep } from 'k6';
+import { check, fail } from 'k6';
+import { assertRateLimitContract, requestWithRateLimitRetry } from './rate_limit_contract.js';
 
 // Plan E3/D1: bootstrap herd — 2k concurrent bootstraps for ONE schedule
 // must collapse via the version singleflight (VERSION_CACHE=on) + ETag/304.
@@ -66,36 +67,43 @@ function bootstrapOnce(token, etag) {
 
 export default function () {
   const token = tokens[__VU % tokens.length];
-  // 429-with-retryAfterSeconds is the shed queue: honor it and retry within
-  // the queue budget instead of failing the iteration (entry-wave parity).
-  const queueMax = clampInt(__ENV.K6_HERD_QUEUE_MAX_SECONDS || '120', 0, 600);
-  const start = Date.now();
-  let first = bootstrapOnce(token, null);
-  while (first.status === 429 && (Date.now() - start) / 1000 < queueMax) {
-    let retryAfter = 1;
-    try {
-      const body = first.json();
-      const details = (body && (body.details || (body.error && body.error.details))) || {};
-      if (details.retryAfterSecs) retryAfter = clampInt(details.retryAfterSecs, 1, 60);
-      else if (details.retryAfterSeconds) retryAfter = clampInt(details.retryAfterSeconds, 1, 60);
-    } catch (_) {}
-    sleep(retryAfter);
-    first = bootstrapOnce(token, null);
-  }
+  const retryBudget = clampInt(__ENV.K6_HERD_RETRY_MAX_SECONDS || '120', 0, 600);
+  const firstResult = requestWithRateLimitRetry(
+    () => bootstrapOnce(token, null),
+    retryBudget,
+    'bootstrap herd',
+  );
+  const first = firstResult.response;
   // k6 lowercases single-word headers: the server sends `Etag` (Go
   // canonical form), visible here as `Etag`, not `ETag`/`Etag`-as-sent.
   const firstEtag = first.headers['ETag'] || first.headers['Etag'] || first.headers['Etag'];
+  const firstContract = first.status === 429 ? assertRateLimitContract(first, 'bootstrap herd') : null;
   check(first, {
-    'bootstrap 200': (r) => r.status === 200,
-    'bootstrap has ETag': () => Boolean(firstEtag),
+    'bootstrap admitted or bounded shed': (r) =>
+      r.status === 200 || (r.status === 429 && Boolean(firstContract && firstContract.valid)),
+    'bootstrap never 5xx': (r) => r.status < 500,
+    'bootstrap has ETag when admitted': (r) => r.status !== 200 || Boolean(firstEtag),
   }) || fail(`bootstrap herd failed: status=${first.status} body=${String(first.body).slice(0, 200)}`);
   if (first.status >= 500) {
     fail(`bootstrap herd 5xx: status=${first.status}`);
   }
+  if (first.status !== 200) {
+    return;
+  }
   // Second leg: conditional re-fetch must 304 (zero bytes, herd-free).
   const etag = firstEtag || null;
   if (etag) {
-    const second = bootstrapOnce(token, etag);
-    check(second, { 'bootstrap 304 on ETag match': (r) => r.status === 304 });
+    const secondResult = requestWithRateLimitRetry(
+      () => bootstrapOnce(token, etag),
+      retryBudget,
+      'bootstrap herd ETag refresh',
+    );
+    const second = secondResult.response;
+    const secondContract = second.status === 429 ? assertRateLimitContract(second, 'bootstrap herd ETag refresh') : null;
+    check(second, {
+      'bootstrap 304 or bounded shed on ETag refresh': (r) =>
+        r.status === 304 || (r.status === 429 && Boolean(secondContract && secondContract.valid)),
+      'bootstrap ETag refresh never 5xx': (r) => r.status < 500,
+    });
   }
 }

@@ -402,19 +402,19 @@ git commit -m "fix: make SAT SPR fraction entry mobile-safe"
 - Modify the existing SatQuestionHeader, SatPopoverShell, SatMoreMenu, and SatExamShell tests.
 - Modify e2e/sat-student-accessibility.spec.ts.
 
-- [ ] Replace the question-number div with an h2 that exposes “Question N” through real heading text. Keep the visible number styling and do not retain aria-label on a generic div.
-- [ ] Add panelId?: string to SatPopoverShellProps and apply it to the role=dialog SatPresenceSurface root. Keep the close control and focus return behavior unchanged.
-- [ ] Pass the directions id as panelId and remove the id from the inner scrollable instruction div. The Directions button must control the dialog root, not a descendant.
-- [ ] Set aria-controls conditionally on the Directions and navigator triggers:
+- [x] Replace the question-number div with an h2 that exposes “Question N” through real heading text. Keep the visible number styling and do not retain aria-label on a generic div.
+- [x] Add panelId?: string to SatPopoverShellProps and apply it to the role=dialog SatPresenceSurface root. Keep the close control and focus return behavior unchanged.
+- [x] Pass the directions id as panelId and remove the id from the inner scrollable instruction div. The Directions button must control the dialog root, not a descendant.
+- [x] Set aria-controls conditionally on the Directions and navigator triggers:
 
 ~~~tsx
 aria-controls={open ? panelId : undefined}
 ~~~
 
 Closed triggers must not expose a target that is not mounted. Open targets must have exactly one element with the id and the expected dialog role.
-- [ ] Keep the navigator id on its role=dialog root and assert its title relationship. Do not add a hidden duplicate target just to satisfy a closed aria-controls attribute.
-- [ ] Create a contract test that renders each closed and open state and asserts no dangling aria-controls, exactly one target when open, semantic heading text, and focus return to the trigger after Escape, outside click, and close-button activation.
-- [ ] Run axe-core against Directions, Display, Notes, Navigator, More, Reference, paused, and SPR states. Treat critical/serious violations as failures; record color-contrast as a manual token check if axe cannot resolve a custom property.
+- [x] Keep the navigator id on its role=dialog root and assert its title relationship. Do not add a hidden duplicate target just to satisfy a closed aria-controls attribute.
+- [x] Create a contract test that renders each closed and open state and asserts no dangling aria-controls, exactly one target when open, semantic heading text, and focus return to the trigger after Escape, outside click, and close-button activation.
+- [x] Run axe-core against Directions, Display, Notes, Navigator, More, Reference, paused, and SPR states. Treat critical/serious violations as failures; record color-contrast as a manual token check if axe cannot resolve a custom property.
 
 ~~~bash
 bunx vitest run src/features/student-delivery/ui/__tests__/satAccessibilityContracts.test.tsx src/features/student-delivery/ui/question/SatQuestionHeader.test.tsx src/features/student-delivery/ui/SatPopoverShell.test.tsx --reporter=dot
@@ -427,6 +427,21 @@ bunx playwright test --config=playwright.sat-a11y.config.ts --project=chromium -
 git add src/features/student-delivery/ui/question/SatQuestionHeader.tsx src/features/student-delivery/ui/primitives/SatPopoverShell.tsx src/features/student-delivery/ui/shell/SatDirectionsPopover.tsx src/features/student-delivery/ui/shell/SatExamTopBar.tsx src/features/student-delivery/ui/shell/SatExamFooter.tsx src/features/student-delivery/ui/shell/SatQuestionNavigator.tsx src/features/student-delivery/ui/__tests__/satAccessibilityContracts.test.tsx src/features/student-delivery/ui/question/SatQuestionHeader.test.tsx src/features/student-delivery/ui/SatPopoverShell.test.tsx src/features/student-delivery/ui/shell/SatMoreMenu.test.tsx src/features/student-delivery/ui/SatExamShell.test.tsx e2e/sat-student-accessibility.spec.ts
 git commit -m "fix: repair SAT question and dialog semantics"
 ~~~
+
+**Task 6 verification recorded on 2026-09-16:**
+
+- Semantic heading: the question-number cell is now an `h2` whose accessible name is “Question N” from real text (sr-only “Question ” prefix, visible glyph unchanged, no `aria-label` on a generic div). Every e2e query that used the removed `aria-label` (`page.getByLabel("Question N")`) was migrated to `getByRole("heading", { level: 2, name: "Question N" })`.
+- Dialog relationships: `SatPopoverShell` accepts `panelId` and puts it on the `role=dialog` root; `SatDirectionsPopover` moved the public id from the inner scroll body to that root; the Directions and navigator triggers now set `aria-controls` only while open. The navigator id stays on its own dialog root and its `aria-labelledby` resolves to the visible `h2`.
+- Focus-return gap closed: the shell documented “focus returns on EVERY close path” but only Escape and the close button restored it. Outside presses on non-interactive chrome now return focus to the trigger after the native focus change; presses on another control keep that control's focus (`satAccessibilityContracts.test.tsx` pins both).
+- Contract suite added: `src/features/student-delivery/ui/__tests__/satAccessibilityContracts.test.tsx` (7 tests) covers semantic heading text, no dangling `aria-controls` while closed, exactly one target with the dialog role while open, the navigator title relationship, and focus return after Escape / outside press / close-button for both the popover shell and the navigator.
+- axe gate: the offline harness now injects the installed `node_modules/axe-core/axe.min.js` (transitive via `eslint-plugin-jsx-a11y`; a missing build is an explicit harness failure) and fails on `critical`/`serious` impacts only. `color-contrast` stays a documented manual token check because SAT colors resolve through `var()` chains.
+- axe finding (fixed): the focusable resize grip in `SatFloatingTool` was `role="separator"` with no `aria-valuenow`/`aria-valuemin`/`aria-valuemax` — a critical `aria-required-attr` violation. The grip now publishes `aria-orientation`, its min/max width bounds and `aria-valuenow`/`aria-valuetext` (width/height rect). Owning file: `src/features/student-delivery/ui/tools/SatFloatingTool.tsx`.
+- axe finding (recorded, not fixed — Task 8 owner): the 24px `ne` corner resize zone covers the centre of the Reference Sheet's 32px close control. Measured 2026-09-16 at 1024x768 and 1194x834: close control 32x32, header 32px tall, `ne` zone 24x24 starting 20px from the window's right edge, and `document.elementFromPoint(centre)` returns the `ne` edge. A real click at the control's centre starts a resize instead of closing the sheet, and idle Escape on the Reference sheet is a deliberate no-op, so the toolbar trigger is currently the only reliable close path. Task 8's `SAT_REFERENCE_HEADER_HEIGHT` 32→44 change and 44px header controls move both the centre and the header out of that zone; re-verify with the close-button click in the Task 8/9 matrix.
+- Gates: `satAccessibilityContracts.test.tsx`, `SatQuestionHeader.test.tsx`, `SatPopoverShell.test.tsx` and `SatExamShell.test.tsx` passed 4 files / 40 tests. The focused `ARIA|axe|focus return` command passed 3/3 in Chromium **and** 3/3 in WebKit. SAT-scoped ESLint reported 0 errors and only the pre-existing `SatFloatingTool.tsx:549` hook-dependency warning. `bun run typecheck` reports one unrelated pre-existing error in `services/authoring-coedit/src/persistence.ts` (user-owned coedit service, outside the SAT UI).
+- Harness robustness added while verifying (kept inline, uncommitted): the axe scan retries once when a Vite HMR reload destroys the execution context, and `openSatHarness` allows 15s for the cold first mount (previously the first WebKit test of a run timed out at the default 5s).
+- Full focused feature suite: `bunx vitest run src/features/student-delivery` reports 89 of 91 files passing (586 of 589 tests). The three failures live in user-owned in-flight work committed in `cb01e192` — `hooks/useSatExamController.ts` (+ the new untracked `useSatModuleEntry.ts`) failing two convergence tests, and `domain/satAnnotationsV2.test.ts` failing its null-like boundary repair — and none of the files Task 6 touched import them. They are reported here as a separate baseline, not folded into the SAT semantics result.
+- Not touched on purpose: `shell/SatMoreMenu.test.tsx` — Task 6 changes no More-menu semantics; Task 7 owns that file, its roving tab index, and its browser keyboard coverage.
+- Scope note: `src/features/student-delivery/ui/SatQuestionNavigator.tsx` needed no source change (its id was already on the dialog root); only assertions were added.
 
 ### Task 7 — Complete More-menu keyboard behavior
 

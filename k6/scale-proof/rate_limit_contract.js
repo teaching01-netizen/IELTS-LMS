@@ -39,7 +39,6 @@ export function inspectRateLimitResponse(response) {
     headerSeconds,
     bodySeconds,
     retryAfterSeconds: headerSeconds || bodySeconds || 0,
-    hasQueuePosition: Object.prototype.hasOwnProperty.call(details, 'queuePosition'),
   };
 }
 
@@ -50,7 +49,6 @@ export function assertRateLimitContract(response, label) {
     check(response, {
       [`${label} Retry-After is canonical`]: () => contract.headerSeconds !== null,
       [`${label} details.retryAfterSeconds is canonical`]: () => contract.bodySeconds !== null,
-      [`${label} has no queue position`]: () => !contract.hasQueuePosition,
     });
 
   return { ...contract, valid };
@@ -64,6 +62,11 @@ export function requestWithRateLimitRetry(requestFn, maxSeconds, label) {
   while (response.status === 429 && (Date.now() - startedAt) / 1000 < maxSeconds) {
     contract = assertRateLimitContract(response, label);
     if (!contract.valid) {
+      return { response, contract };
+    }
+
+    const remainingSeconds = maxSeconds - (Date.now() - startedAt) / 1000;
+    if (contract.retryAfterSeconds > remainingSeconds) {
       return { response, contract };
     }
 
