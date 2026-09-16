@@ -289,7 +289,7 @@ func TestUploadBytesOverLimitPayloadTooLarge(t *testing.T) {
 	s, _ := svcWith(db, store)
 	big := make([]byte, MaxUploadBytes+1)
 	if err := s.UploadBytes(context.Background(), "asset-1", big, "image/png"); codeOf(err) != apperrors.CodePayloadTooLarge {
-		t.Fatalf("expected PAYLOAD_TOO_LARGE over 16MB, got %v", err)
+		t.Fatalf("expected PAYLOAD_TOO_LARGE over 10 MiB, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

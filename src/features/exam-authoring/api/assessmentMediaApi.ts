@@ -1,5 +1,6 @@
 import { backendGet, backendPost } from "../infrastructure/examAuthoringBackendGateway";
 import { apiClient } from "../../../shared/api/apiClient";
+import { SAT_IMAGE_POLICY } from "../editor/ingestion/domain/imagePolicy";
 
 export interface AssessmentMediaAsset {
   id: string;
@@ -38,7 +39,7 @@ async function uploadImageAsset(
   ownerId: string
 ): Promise<AssessmentMediaAsset> {
   if (!file.type.startsWith("image/")) throw new Error("Only image files can be inserted here.");
-  if (file.size > 10 * 1024 * 1024) throw new Error("Images must be 10 MB or smaller.");
+  if (file.size > SAT_IMAGE_POLICY.maxBytes) throw new Error("Images must be 10 MiB or smaller.");
 
   const checksumSha256 = await sha256(file);
   if (!checksumSha256) {

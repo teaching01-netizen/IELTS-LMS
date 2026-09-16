@@ -156,7 +156,7 @@ describe("validateClipboardImage magic/mime matrix", () => {
 });
 
 describe("validateClipboardImage size boundary", () => {
-  it("rejects 10 MB + 1 byte with the API-consistent message", async () => {
+  it("rejects 10 MiB + 1 byte with the API-consistent message", async () => {
     let called = 0;
     const loader: BitmapLoader = async () => {
       called += 1;
@@ -169,12 +169,12 @@ describe("validateClipboardImage size boundary", () => {
     expect(out).toMatchObject({
       ok: false,
       code: "size",
-      message: "Images must be 10 MB or smaller.",
+      message: "Images must be 10 MiB or smaller.",
     });
     expect(called).toBe(0);
   });
 
-  it("accepts exactly 10 MB", async () => {
+  it("accepts exactly 10 MiB", async () => {
     const out = await validateClipboardImage(
       makeFile(pngBytes(), "edge.png", "image/png", IMAGE_CAPS.maxBytes),
       sizeLoader(8, 8)
@@ -184,23 +184,23 @@ describe("validateClipboardImage size boundary", () => {
 });
 
 describe("validateClipboardImage dimension/pixel boundaries", () => {
-  it("rejects a 12 000 x 100 strip on dimensions", async () => {
+  it("rejects a 9 000 x 100 strip on dimensions", async () => {
     const out = await validateClipboardImage(
       makeFile(pngBytes(), "strip.png", "image/png"),
-      sizeLoader(12_000, 100)
+      sizeLoader(9_000, 100)
     );
     expect(out).toMatchObject({
       ok: false,
       code: "dimensions",
-      message: "That image is too large to paste (limit 10,000 px per side, 32 megapixels).",
+      message: "That image is too large to paste (limit 8,192 px per side, 25 megapixels).",
     });
   });
 
-  it("accepts exactly 10 000 px per side when pixels fit", async () => {
-    // 10_000 x 3_000 = 30M pixels < 32MP cap.
+  it("accepts exactly 8 192 px per side when pixels fit", async () => {
+    // 8_192 x 3_000 = 24.576M pixels < 25MP cap.
     const out = await validateClipboardImage(
       makeFile(pngBytes(), "edge.png", "image/png"),
-      sizeLoader(10_000, 3_000)
+      sizeLoader(8_192, 3_000)
     );
     expect(out.ok).toBe(true);
   });
@@ -213,7 +213,7 @@ describe("validateClipboardImage dimension/pixel boundaries", () => {
     expect(out).toMatchObject({
       ok: false,
       code: "pixels",
-      message: "That image is too large to paste (limit 10,000 px per side, 32 megapixels).",
+      message: "That image is too large to paste (limit 8,192 px per side, 25 megapixels).",
     });
   });
 });

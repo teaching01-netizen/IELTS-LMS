@@ -2,7 +2,7 @@
 //
 // It mirrors backend/crates/application/src/media.rs: create_upload_intent,
 // complete_upload, and get_asset over media_assets, fronting an
-// objectstore.Store for bytes. Uploads are capped at 16MB; pending rows
+// objectstore.Store for bytes. New uploads are capped at 10 MiB; pending rows
 // older than 24h flip to orphaned and delete_after_at rows are reaped by
 // maintenance.RunMedia (same state vocabulary reused here).
 package media
@@ -26,8 +26,8 @@ import (
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
-// MaxUploadBytes caps a single media object at 16MB.
-const MaxUploadBytes = 16 << 20
+// MaxUploadBytes caps a new media object at 10 MiB.
+const MaxUploadBytes = 10 << 20
 
 // Decoded-image limits bound decompression cost: magic bytes prove the file
 // TYPE, not its pixel cost. DecodeConfig reads headers only (no full
@@ -130,7 +130,7 @@ func scanAsset(row interface {
 const assetColumns = "id, owner_kind, owner_id, content_type, file_name, upload_status, object_key, size_bytes, checksum_sha256, upload_url, download_url"
 
 // CreateUpload stages a pending asset row (mirrors create_upload_intent:
-// path-safe file name, 16MB pre-declared size cap, owner existence check).
+// path-safe file name, 10 MiB pre-declared size cap, owner existence check).
 func (s *Service) CreateUpload(ctx context.Context, req CreateRequest) (UploadIntent, error) {
 	if err := validateFileName(req.FileName); err != nil {
 		return UploadIntent{}, err
@@ -186,7 +186,7 @@ func (s *Service) CreateUpload(ctx context.Context, req CreateRequest) (UploadIn
 }
 
 // CompleteUpload finalizes a pending asset (mirrors complete_upload: required
-// size + checksum, 16MB cap, pending->finalized under row locks; an already
+// size + checksum, 10 MiB cap, pending->finalized under row locks; an already
 // finalized asset with identical metadata replays idempotently).
 func (s *Service) CompleteUpload(ctx context.Context, assetID string, req CompleteRequest) (Asset, error) {
 	if req.SizeBytes < 0 {

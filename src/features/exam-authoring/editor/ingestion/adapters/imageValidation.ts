@@ -12,19 +12,20 @@
  *   uploading nodes carry an objectURL only transiently; stripTransientImages
  *   is the serialize guard that removes them before persist.
  * - Client validation first (MIME + magic bytes, size, dimensions,
- *   pixel/decompression-bomb caps). The 10 MB server gate in
- *   assessmentMediaApi stays authoritative; this mirror only fails fast.
+ *   pixel/decompression-bomb caps). The backend media policy stays
+ *   authoritative; this mirror only fails fast.
  * - Alt text is NOT fabricated here: temp nodes ship alt '' and the existing
  *   sat.accessibility.alt.required validator owns the publish gate.
  */
 import type { RichTextDocument, RichTextNode } from "../../../contracts/assessment";
+import { SAT_IMAGE_POLICY, isAllowedSatImageMime } from "../domain/imagePolicy";
 
 export const IMAGE_CAPS = {
-  maxBytes: 10 * 1024 * 1024,
-  allowedMime: ["image/png", "image/jpeg", "image/webp", "image/gif"],
-  maxDimension: 10_000,
-  maxPixels: 33_554_432,
-  bitmapTimeoutMs: 5_000,
+  maxBytes: SAT_IMAGE_POLICY.maxBytes,
+  allowedMime: SAT_IMAGE_POLICY.allowedMime,
+  maxDimension: SAT_IMAGE_POLICY.maxDimension,
+  maxPixels: SAT_IMAGE_POLICY.maxPixels,
+  bitmapTimeoutMs: SAT_IMAGE_POLICY.maxDecodeMs,
 } as const;
 
 export type AllowedImageMime = (typeof IMAGE_CAPS.allowedMime)[number];
@@ -38,9 +39,9 @@ export type ImageValidation =
 export const IMAGE_REJECT_MESSAGES: Record<ImageRejectCode, string> = {
   mime: "That file is not a supported image (PNG, JPEG, WebP, GIF).",
   magic: "That file is not a supported image (PNG, JPEG, WebP, GIF).",
-  size: "Images must be 10 MB or smaller.",
-  dimensions: "That image is too large to paste (limit 10,000 px per side, 32 megapixels).",
-  pixels: "That image is too large to paste (limit 10,000 px per side, 32 megapixels).",
+  size: "Images must be 10 MiB or smaller.",
+  dimensions: "That image is too large to paste (limit 8,192 px per side, 25 megapixels).",
+  pixels: "That image is too large to paste (limit 8,192 px per side, 25 megapixels).",
   decode: "That image could not be read. Try re-exporting it.",
 };
 
@@ -53,7 +54,7 @@ export type BitmapLoader = (file: File) => Promise<{
 export type BitmapLoaderFactory = () => BitmapLoader | null;
 
 function isAllowedMime(mime: string): mime is AllowedImageMime {
-  return (IMAGE_CAPS.allowedMime as readonly string[]).includes(mime);
+  return isAllowedSatImageMime(mime);
 }
 
 /**
