@@ -1,8 +1,24 @@
 import type { SatTextAnchor } from '../../domain/satResponses';
 
 export interface SatTextSelectionOptions {
-  /** Allow an active paint tool to select through an existing note affordance. */
+  /**
+   * Allow the gesture to select through an existing mark. True for the
+   * selection-first flow: a student extending a selection across an earlier
+   * highlight is expressing a new intent, not tapping that highlight.
+   */
   allowAnnotationControls?: boolean;
+}
+
+/**
+ * True when a pointer target belongs to annotation chrome (contextual toolbar,
+ * touch dock, edit dock, note card) rather than to the passage. The content's
+ * document-level gesture listener uses this to ignore its own controls.
+ */
+export function isSatSelectionInsideAnnotationUi(target: Node): boolean {
+  const element = target.nodeType === Node.ELEMENT_NODE ? (target as Element) : target.parentElement;
+  return element?.closest(
+    '[data-sat-selection-toolbar="true"], [data-sat-touch-dock="true"], [data-sat-annotation-edit-dock="true"], [data-sat-note-card="true"]',
+  ) != null;
 }
 
 export function captureSatTextSelection(root: HTMLElement, region: string, selection: Selection | null, options: SatTextSelectionOptions = {}): SatTextAnchor | null {

@@ -118,13 +118,22 @@ test.describe('SAT answer durability recovery', () => {
       await studentPage.getByRole('button', { name: 'Turn on cross-out mode' }).click();
       await studentPage.getByRole('button', { name: 'Eliminate option B' }).click();
 
-      await studentPage.getByRole('button', { name: 'Highlight', exact: true }).click();
+      // Highlights & Notes is selection-first: selecting the stimulus raises the
+      // labeled controls, and the note rides on the mark it was made from.
       await selectFirstStimulusText(studentPage);
+      await studentPage
+        .getByRole('toolbar', { name: 'Selected text actions' })
+        .getByRole('button', { name: 'Highlight Yellow' })
+        .click();
       await expect(studentPage.locator('[data-sat-highlight="true"]')).toHaveCount(1);
 
-      await studentPage.getByRole('button', { name: 'Question note' }).click();
-      await studentPage.getByRole('textbox', { name: 'Note for this question' }).fill('Keep this evidence.');
-      await studentPage.getByRole('button', { name: 'Save and close' }).click();
+      await selectFirstStimulusText(studentPage);
+      await studentPage
+        .getByRole('toolbar', { name: 'Selected text actions' })
+        .getByRole('button', { name: 'Add note' })
+        .click();
+      await studentPage.locator('#sat-note-on-selection').fill('Keep this evidence.');
+      await studentPage.getByRole('button', { name: 'Done' }).click();
       await waitForSatSaved(studentPage);
 
       let delayedRecovery = false;
@@ -147,11 +156,14 @@ test.describe('SAT answer durability recovery', () => {
       );
       await expect(studentPage.locator('[data-sat-highlight="true"]')).toHaveCount(1);
 
-      await studentPage.getByRole('button', { name: 'Question note' }).click();
-      await expect(studentPage.getByRole('textbox', { name: 'Note for this question' })).toHaveValue(
-        'Keep this evidence.',
-      );
-      await studentPage.getByRole('button', { name: 'Save and close' }).click();
+      // The recovered note is the note attached to the recovered mark.
+      await studentPage.locator('[data-sat-highlight="true"]').first().click();
+      await studentPage
+        .getByRole('toolbar', { name: 'Edit annotation' })
+        .getByRole('button', { name: 'Edit note' })
+        .click();
+      await expect(studentPage.locator('#sat-note-on-selection')).toHaveValue('Keep this evidence.');
+      await studentPage.getByRole('button', { name: 'Done' }).click();
       await radios.nth(2).check();
       await waitForSatSaved(studentPage);
 

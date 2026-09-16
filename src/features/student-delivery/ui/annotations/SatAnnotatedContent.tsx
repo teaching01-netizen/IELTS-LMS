@@ -1,27 +1,37 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StructuredContent } from '../../../exam-authoring/api/assessmentContracts';
 import { StructuredContentRenderer, type StaticStructuredImageEnlargeApi } from '../../../exam-rendering/api/structuredContent';
 import type { StructuredTextRenderer } from '../../../exam-rendering/api/structuredContent';
-import { applySatAnnotationsToText, createSatTextAnnotation, removeSatAnnotationsInRange, resolveSatTextAnchor, type SatQuestionAnnotations, type SatTextAnnotation, type SatTextSegment } from '../../domain/satResponses';
+import { applySatAnnotationsToText, resolveSatTextAnchor, type SatTextAnchor, type SatQuestionAnnotations, type SatTextSegment } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
-import { SatAnnotationModeContext, type SatAnnotationMode } from './SatAnnotationModeContext';
-import { captureSatTextSelection } from './satTextSelection';
+import { satHighlightMarkStyle } from './satAnnotationPalette';
+import { useSatAnnotationView } from './SatAnnotationViewContext';
+import { captureSatTextSelection, isSatSelectionInsideAnnotationUi } from './satTextSelection';
+import { isSatDragRelease, markSatPointerDown, markSatSelectionGestureEnded } from './satSelectionDragGuard';
 
 export const SAT_ANNOTATION_LIMIT = 200;
 
-export function SatAnnotatedContent({ content, annotations, region, enabled, enlarge, onChange, onEditNote, onLimitReached }: {
+/**
+ * Renders annotatable SAT content and owns the text-selection gesture.
+ *
+ * Selection is now the ONLY way to annotate: there is no armed paint tool, so
+ * finishing a selection reports the span upward (the shell raises the
+ * contextual toolbar) instead of applying a mark. Everything that changes an
+ * annotation — ink, underline, note, removal — happens in the shell where the
+ * response is written, so this component stays a renderer plus a gesture
+ * listener.
+ */
+export function SatAnnotatedContent({ content, annotations, region, enabled, enlarge, onLimitReached }: {
   content: StructuredContent;
   annotations: SatQuestionAnnotations;
   region: 'stimulus' | 'prompt';
   enabled: boolean;
   enlarge?: StaticStructuredImageEnlargeApi | undefined;
-  onChange?: ((annotations: SatQuestionAnnotations) => void) | undefined;
-  onEditNote?: ((annotation: SatTextAnnotation) => void) | undefined;
   /** Announced + inline notice when the 200-annotation cap drops a gesture. */
   onLimitReached?: (() => void) | undefined;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const mode = useContext(SatAnnotationModeContext);
+  const view = useSatAnnotationView();
   const [limitNotice, setLimitNotice] = useState(false);
   const limitTimer = useRef<number | null>(null);
   useEffect(() => () => { if (limitTimer.current !== null) window.clearTimeout(limitTimer.current); }, []);
@@ -31,58 +41,66 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
     if (limitTimer.current !== null) window.clearTimeout(limitTimer.current);
     limitTimer.current = window.setTimeout(() => setLimitNotice(false), 6000);
   }, [onLimitReached]);
-  const armedLabel =
-    mode === 'highlight' ? SAT_COPY.annotations.highlightArmed
-    : mode === 'underline' ? SAT_COPY.annotations.underlineArmed
-    : mode === 'note' ? SAT_COPY.annotations.noteArmed
-    : mode === 'erase' ? SAT_COPY.annotations.eraserArmed
-    : null;
+
+  // Live selection reporting through a ref so the listener below never needs
+  // re-binding: re-binding mid-gesture would lose the pointerup that completes
+  // the very selection being captured.
+  const reportSelection = useRef<((anchor: SatTextAnchor) => void) | null>(null);
+  reportSelection.current = view.onSelectionCaptured ?? null;
+
+  /**
+   * Selection gesture. Capture is deliberately passive: a completed selection
+   * only reports the anchor. The one thing the content still enforces here is
+   * the annotation cap, so a student at 200 marks sees the limit notice the
+   * moment they select (rather than after pressing a color that cannot apply).
+   */
   useEffect(() => {
-    if (!enabled || !onChange || mode === 'none') return;
-    const complete = (event: Event) => {
+    if (!enabled) return;
+    const report = (event: Event) => {
       if (!root.current) return;
-      // The mode bar / limit notice render as siblings around the content
-      // root, so pointerup may target them: only ignore targets strictly
-      // OUTSIDE the whole component (the outer wrapper), not outside the
-      // content root itself.
       const scope = root.current.parentElement ?? root.current;
       if (event.type === 'pointerup' && (!(event.target instanceof Node) || !scope.contains(event.target))) return;
-      const anchor = captureSatTextSelection(root.current, region, window.getSelection(), {
-        // Existing note affordances are inline buttons. While the highlight
-        // tool is armed they must remain selectable so a later gesture can
-        // extend or overlap an earlier highlight.
-        allowAnnotationControls: mode === 'highlight',
+      // The contextual toolbar is a sibling of the content; a pointer landing
+      // on it is a command, never a new selection.
+      if (event.target instanceof Node && isSatSelectionInsideAnnotationUi(event.target)) return;
+      const selection = window.getSelection();
+      // Any finished selection retires answer-click safety, even when it cannot
+      // be anchored (a drag across two blocks still ends with a click landing
+      // wherever the finger stopped).
+      if (selection && !selection.isCollapsed) markSatSelectionGestureEnded();
+      const anchor = captureSatTextSelection(root.current, region, selection, {
+        allowAnnotationControls: true,
       });
       if (!anchor) return;
-      if (mode === 'erase') {
-        const next = removeSatAnnotationsInRange(annotations, anchor.nodeId, anchor.startOffset, anchor.endOffset);
-        if (next !== annotations) {
-          onChange(next);
-          window.getSelection()?.removeAllRanges();
-        }
-        return;
-      }
       if (annotations.annotations.length >= SAT_ANNOTATION_LIMIT) {
         flashLimitNotice();
         return;
       }
-      const kind = mode === 'note' ? 'highlight' : mode;
-      const existing = annotations.annotations.find((item) => item.kind === kind && item.anchor.nodeId === anchor.nodeId &&
-        item.anchor.startOffset === anchor.startOffset && item.anchor.endOffset === anchor.endOffset && item.anchor.exact === anchor.exact);
-      const annotation = existing ?? createSatTextAnnotation({ kind, ...anchor });
-      if (!existing) onChange({ ...annotations, annotations: [...annotations.annotations, annotation] });
-      if (mode === 'note') onEditNote?.(annotation);
+      reportSelection.current?.(anchor);
+    };
+    // Where the gesture began, so a release far from it reads as a drag rather
+    // than a tap on whatever mark it happened to end over.
+    const begin = (event: Event) => {
+      // Structural check rather than `instanceof PointerEvent`: the test
+      // renderer exposes a subset of the DOM, and a missing origin reads as a
+      // tap anyway.
+      const { clientX, clientY } = event as PointerEvent;
+      if (typeof clientX !== 'number' || typeof clientY !== 'number') return;
+      markSatPointerDown(clientX, clientY);
     };
     const keyboard = (event: KeyboardEvent) => {
-      if (event.shiftKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) complete(event);
+      if (event.shiftKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) report(event);
     };
-    document.addEventListener('pointerup', complete);
+    document.addEventListener('pointerdown', begin, true);
+    document.addEventListener('pointerup', report);
     document.addEventListener('keyup', keyboard);
     return () => {
-      document.removeEventListener('pointerup', complete);
+      document.removeEventListener('pointerdown', begin, true);
+      document.removeEventListener('pointerup', report);
       document.removeEventListener('keyup', keyboard);
     };
-  }, [annotations, enabled, flashLimitNotice, mode, onChange, onEditNote, region]);
+  }, [annotations, enabled, flashLimitNotice, region]);
+
   const contentKey = JSON.stringify(content);
   const renderText = useMemo<StructuredTextRenderer>(() => {
     const blocks = new Map<string, SatTextSegment[]>();
@@ -100,81 +118,86 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         const start = Math.max(segment.start, startOffset);
         const end = Math.min(segment.end, startOffset + text.length);
         if (end <= start) return [];
-        // In-place note affordance: clicking a highlight opens its note
-        // editor directly — no separate bottom list of quoted text. Marks
-        // without an editor callback stay plain spans (read-only contexts).
-        if (segment.highlight && onEditNote && mode !== 'erase') {
-          const match = annotations.annotations.find((item) => {
-            if (item.anchor.nodeId !== scopedId) return false;
-            const range = resolveSatTextAnchor(blockText, item.anchor);
-            return range !== null && range.start < end && start < range.end;
-          });
-          if (match) {
-            const label = `${match.note ? "Edit note" : "Add note"}: ${match.anchor.exact}`;
-            return <span key={start} role="button" tabIndex={0} data-sat-highlight="true" data-sat-annotation-control="true" data-sat-annotation-note={match.id}
-              onClick={() => onEditNote(match)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') return;
-                event.preventDefault();
-                onEditNote(match);
-              }}
-              aria-label={label} title={label}
-              className="rounded-[2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
-              // Paper highlight (Phase 7, Lane 3): canonical token with
-              // Bluebook paper fallback #FFF2B3 (was #fff1a8).
-              // Keep the control as a real inline fragment so a multi-line
-              // selection paints only its text instead of a full-width form
-              // control. Clone decoration per wrapped line for the same
-              // geometry in Chromium and WebKit.
-              style={{ backgroundColor: 'var(--sat-highlight-background, #FFF2B3)', color: 'var(--sat-highlight-text, #1d1d1f)', boxDecorationBreak: 'clone', WebkitBoxDecorationBreak: 'clone' }}
-            >{text.slice(start - startOffset, end - startOffset)}</span>;
-          }
-        }
-        return <span key={start} data-sat-highlight={segment.highlight || undefined} data-sat-underline={segment.underline || undefined}
-          style={{
-            // Paper highlight (Phase 7, Lane 3): canonical token with
-            // Bluebook paper fallback #FFF2B3 (was #fff1a8).
-            ...(segment.highlight ? { backgroundColor: 'var(--sat-highlight-background, #FFF2B3)', color: 'var(--sat-highlight-text, #1d1d1f)' } : {}),
-            ...(segment.underline ? { textDecorationLine: 'underline', textDecorationColor: 'var(--sat-underline, currentColor)', textDecorationThickness: '2px', textUnderlineOffset: '3px' } : {}),
-          }}
-        >{text.slice(start - startOffset, end - startOffset)}</span>;
+        // In-place affordance: clicking a mark opens its editor directly, where
+        // color / note / removal live. Marks without a live editor stay plain
+        // spans (read-only contexts).
+        const match = segment.highlight || segment.underline
+          ? annotations.annotations.find((item) => {
+              if (item.anchor.nodeId !== scopedId) return false;
+              const range = resolveSatTextAnchor(blockText, item.anchor);
+              return range !== null && range.start < end && start < range.end;
+            })
+          : undefined;
+        const interactive = match !== undefined && view.openEditorActive;
+        const isNoteEdit = typeof match?.note === 'string' && match.note.length > 0;
+        const label = match
+          ? `${match.kind === 'highlight' ? SAT_COPY.annotations.highlight : SAT_COPY.annotations.underline}: ${match.anchor.exact}. ${isNoteEdit ? SAT_COPY.annotations.editNote : SAT_COPY.annotations.addNote}`
+          : undefined;
+        return (
+          <span
+            key={start}
+            // The same mark, in one place: interactive attributes are added when
+            // an editor can open, never rebuilt as a second markup branch.
+            {...(interactive
+              ? {
+                  role: 'button' as const,
+                  tabIndex: 0,
+                  'data-sat-annotation-control': 'true',
+                  'data-sat-annotation-id': match.id,
+                  'data-sat-annotation-note': match.id,
+                  'data-sat-annotation-active': view.activeAnnotationId === match.id ? 'true' : undefined,
+                  'aria-label': label,
+                  title: label,
+                  className: 'rounded-[2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]',
+                  onClick: (event: React.MouseEvent) => {
+                    // A drag that ends on a mark is the student selecting NEW text
+                    // (the selection is already reported); only a real tap opens the
+                    // editor, otherwise the toolbar would vanish under their finger
+                    // and the edit dock would open instead.
+                    if (isSatDragRelease(event.clientX, event.clientY)) return;
+                    view.openEditor(match);
+                  },
+                  onKeyDown: (event: React.KeyboardEvent) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    view.openEditor(match);
+                  },
+                }
+              : {})}
+            data-sat-highlight={segment.highlight ? 'true' : undefined}
+            data-sat-underline={segment.underline ? 'true' : undefined}
+            data-sat-highlight-color={segment.highlight ?? undefined}
+            // Keep the mark a real inline fragment so a multi-line selection
+            // paints only its text instead of a full-width form control, and
+            // clone the decoration per wrapped line for the same geometry in
+            // Chromium and WebKit.
+            style={{
+              ...(segment.highlight ? satHighlightMarkStyle(segment.highlight) : {}),
+              ...(segment.underline ? { textDecorationLine: 'underline', textDecorationColor: 'var(--sat-underline, currentColor)', textDecorationThickness: '2px', textUnderlineOffset: '3px' } : {}),
+              ...(interactive ? { boxDecorationBreak: 'clone' as const, WebkitBoxDecorationBreak: 'clone' as const } : {}),
+              ...(segment.underline && !segment.highlight ? { color: 'inherit' } : {}),
+            }}
+          >
+            {text.slice(start - startOffset, end - startOffset)}
+          </span>
+        );
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- contentKey is the memo input; the raw content object is consumed by the renderer, not read here.
-  }, [annotations, mode, onEditNote, region, contentKey]);
+  }, [annotations, region, contentKey, view.activeAnnotationId, view.openEditorActive, view.openEditor]);
 
-  const eraseArmed = mode === 'erase';
-  // Selection preview (Phase 7): while a paint tool is armed, native text
-  // selection previews the paper token via the ::selection utility rule.
-  // Erase mode opts out (no preview — removal, not paint). Eraser gesture
-  // logic above is untouched.
-  const highlightPreview = mode === 'highlight' || mode === 'underline' || mode === 'note';
-  // No visible mode bar: annotation modes are indicated by the matching
-  // top-bar control's aria-pressed state. The region keeps
-  // data-sat-annotation-mode + aria-describedby for tests and AT; erase keeps
-  // its dashed outline + cell cursor as the non-color cue.
   return (
     <div>
-      {armedLabel && enabled ? (
-        <span id={"sat-annotation-mode-bar-" + region} className="sr-only" role="status" data-testid={"sat-annotation-mode-bar-" + region}>
-          {armedLabel}
-        </span>
-      ) : null}
       <div
         ref={root}
         data-sat-annotation-region={enabled ? region : undefined}
-        data-sat-erase-armed={eraseArmed || undefined}
-        data-sat-annotation-mode={mode}
-        data-sat-highlight-preview={highlightPreview || undefined}
-        aria-describedby={armedLabel && enabled ? "sat-annotation-mode-bar-" + region : undefined}
-        className={eraseArmed ? "rounded-[8px] outline-2 outline-dashed outline-[var(--sat-danger)] outline-offset-4" : undefined}
-        style={eraseArmed ? { cursor: 'cell' } : undefined}
+        data-sat-highlight-preview={enabled ? 'true' : undefined}
+        className="rounded-[8px]"
       >
         <StructuredContentRenderer content={content} renderText={enabled ? renderText : undefined} enlarge={enlarge} />
       </div>
 
       {limitNotice ? (
-        // limit notice deliberately AFTER the content root (see NOTE above).
         <p role="alert" data-testid={"sat-annotation-limit-" + region} className="mb-2 rounded-[8px] border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-3 py-2 text-[13px] font-medium text-[var(--sat-danger)]">
           {SAT_COPY.annotations.limitReached}
         </p>
@@ -182,5 +205,3 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
     </div>
   );
 }
-
-export type { SatAnnotationMode };

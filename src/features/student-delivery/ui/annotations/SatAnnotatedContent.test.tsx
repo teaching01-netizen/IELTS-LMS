@@ -1,134 +1,197 @@
 import { fireEvent, render } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSatTextAnnotation, emptySatAnnotations } from '../../domain/satResponses';
+import { clearSatGestureOrigin, clearSatSelectionGesture, markSatPointerDown } from './satSelectionDragGuard';
 import { SatAnnotatedContent } from './SatAnnotatedContent';
-import { SatAnnotationModeContext } from './SatAnnotationModeContext';
+import { SatAnnotationViewContext, type SatAnnotationView } from './SatAnnotationViewContext';
 
-describe('SAT annotation decoration', () => {
-  it('creates an anchored highlight on selection completion only while the mode is enabled', () => {
-    const onChange = vi.fn();
-    const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text: 'A tree grows.' }] };
-    const annotations = emptySatAnnotations();
-    const view = (mode: 'none' | 'highlight' | 'note' | 'erase') => <SatAnnotationModeContext.Provider value={mode}>
-      <SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled onChange={onChange} />
-    </SatAnnotationModeContext.Provider>;
-    const { container, rerender } = render(view('none'));
-    const select = () => {
-      const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild!;
-      const range = document.createRange();
-      range.setStart(leaf, 2); range.setEnd(leaf, 6);
-      window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
-      fireEvent.pointerUp(container.firstChild!);
-    };
-    select();
-    expect(onChange).not.toHaveBeenCalled();
-    rerender(view('highlight'));
-    select();
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ annotations: [expect.objectContaining({ kind: 'highlight', anchor: {
-      nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree', prefix: 'A ', suffix: ' grows.',
-    } })] }));
-    onChange.mockClear();
-    fireEvent.pointerUp(document);
-    expect(onChange).not.toHaveBeenCalled();
+const content = (text = 'A tree grows.') => ({ version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text }] });
+
+function view(overrides: Partial<SatAnnotationView> = {}): SatAnnotationView {
+  return {
+    activeAnnotationId: null,
+    openEditorActive: true,
+    openEditor: vi.fn(),
+    ...overrides,
+  };
+}
+
+// Gesture state is module-level by design (one gesture at a time); tests must
+// not inherit each other's presses.
+beforeEach(() => {
+  clearSatGestureOrigin();
+  clearSatSelectionGesture();
+});
+
+function renderContent(props: Partial<React.ComponentProps<typeof SatAnnotatedContent>> = {}, annotationView = view()) {
+  return render(
+    <SatAnnotationViewContext.Provider value={annotationView}>
+      <SatAnnotatedContent
+        content={content()}
+        annotations={emptySatAnnotations()}
+        region="stimulus"
+        enabled
+        {...props}
+      />
+    </SatAnnotationViewContext.Provider>,
+  );
+}
+
+/** Select the first `length` characters of the block and finish the gesture. */
+function selectText(container: HTMLElement, from: number, to: number) {
+  const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild!;
+  const range = document.createRange();
+  range.setStart(leaf, from);
+  range.setEnd(leaf, to);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  fireEvent.pointerUp(container.querySelector('[data-sat-annotation-region]')!);
+}
+
+describe('SAT annotation rendering', () => {
+  it('marks the region as annotatable only when the section allows it', () => {
+    const { container } = renderContent();
+    expect(container.querySelector('[data-sat-annotation-region="stimulus"]')).toHaveAttribute('data-sat-highlight-preview', 'true');
+    const { container: readOnly } = renderContent({ enabled: false });
+    expect(readOnly.querySelector('[data-sat-annotation-region]')).toBeNull();
+    expect(readOnly.querySelector('[data-sat-highlight-preview]')).toBeNull();
   });
+
+  it('reports a completed selection upward without applying anything itself', () => {
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ onSelectionCaptured }));
+    selectText(container, 2, 6);
+    expect(onSelectionCaptured).toHaveBeenCalledWith({
+      nodeId: 'stimulus:p',
+      startOffset: 2,
+      endOffset: 6,
+      exact: 'tree',
+      prefix: 'A ',
+      suffix: ' grows.',
+    });
+  });
+
+  it('ignores a collapsed selection and pointers outside the annotatable region', () => {
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ onSelectionCaptured }));
+    // Collapsed range: no intent.
+    const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild!;
+    const collapsed = document.createRange();
+    collapsed.setStart(leaf, 2);
+    collapsed.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(collapsed);
+    fireEvent.pointerUp(container.querySelector('[data-sat-annotation-region]')!);
+    expect(onSelectionCaptured).not.toHaveBeenCalled();
+    // Pointer landing outside the component (the toolbar case) is a command.
+    selectText(container, 2, 6);
+    expect(onSelectionCaptured).toHaveBeenCalledTimes(1);
+  });
+
+  it('never reports a selection while annotations are disabled for this section', () => {
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({ enabled: false }, view({ enabled: false, onSelectionCaptured }));
+    // Disabled sections render plain content: no annotatable text nodes and no
+    // annotation region, so there is nothing to capture form.
+    expect(container.querySelector('[data-content-text-node]')).toBeNull();
+    expect(container.querySelector('[data-sat-annotation-region]')).toBeNull();
+    fireEvent.pointerUp(container.firstElementChild!);
+    expect(onSelectionCaptured).not.toHaveBeenCalled();
+  });
+
   it('recomputes recovered ranges when content changes without a response edit', () => {
     const annotations = emptySatAnnotations();
     annotations.annotations = [createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' })];
-    const content = (text: string) => ({ version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text }] });
-    const { container, rerender } = render(<SatAnnotatedContent content={content('A tree grows.')} annotations={annotations} region="stimulus" enabled />);
+    const { container, rerender } = render(
+      <SatAnnotationViewContext.Provider value={view()}>
+        <SatAnnotatedContent content={content('A tree grows.')} annotations={annotations} region="stimulus" enabled />
+      </SatAnnotationViewContext.Provider>,
+    );
     expect(container.querySelector('[data-sat-highlight]')).toHaveTextContent('tree');
-    rerender(<SatAnnotatedContent content={content('Today a tree grows.')} annotations={annotations} region="stimulus" enabled />);
+    rerender(
+      <SatAnnotationViewContext.Provider value={view()}>
+        <SatAnnotatedContent content={content('Today a tree grows.')} annotations={annotations} region="stimulus" enabled />
+      </SatAnnotationViewContext.Provider>,
+    );
     expect(container.querySelector('[data-sat-highlight]')).toHaveTextContent('tree');
-  });
-  it('paints highlights with the paper token fallback #FFF2B3 and underlines with the text token', () => {
-    const annotations = emptySatAnnotations();
-    annotations.annotations = [
-      createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' }),
-      createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 7, endOffset: 12, exact: 'grows' }),
-    ];
-    const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text: 'A tree grows.' }] };
-    const { container } = render(<SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled />);
-    const styled = [...container.querySelectorAll<HTMLElement>('[data-sat-highlight], [data-sat-underline]')]
-      .map((el) => el.getAttribute('style') ?? '')
-      .join(' ');
-    // Canonical token with Bluebook paper fallback (was #fff1a8).
-    expect(styled).toContain('var(--sat-highlight-background, #FFF2B3)');
-    expect(styled).toContain('var(--sat-underline');
   });
 
-  it('keeps multi-line note affordances as inline accessible controls', () => {
+  it('paints each ink with its own token and underlines with the text token', () => {
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [
+      createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree', color: 'blue' }),
+      createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 7, endOffset: 12, exact: 'grows', color: 'pink' }),
+      createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 0, endOffset: 1, exact: 'A' }),
+    ];
+    const { container } = renderContent({ annotations });
+    const styles = [...container.querySelectorAll<HTMLElement>('[data-sat-highlight], [data-sat-underline]')]
+      .map((element) => element.getAttribute('style') ?? '')
+      .join(' ');
+    // Ink is a token with a paper-compatible fallback, never a literal in TSX.
+    expect(styles).toContain('var(--sat-highlight-bg-blue');
+    expect(styles).toContain('var(--sat-highlight-bg-pink');
+    expect(styles).toContain('var(--sat-underline');
+    expect(container.querySelector('[data-sat-highlight-color="blue"]')).toHaveTextContent('tree');
+    expect(container.querySelector('[data-sat-highlight-color="pink"]')).toHaveTextContent('grows');
+  });
+
+  it('keeps multi-line marks as inline accessible controls that open their editor', () => {
     const text = 'A long supporting-material sentence that wraps across several lines.';
     const annotations = emptySatAnnotations();
     annotations.annotations = [createSatTextAnnotation({
       kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: text.length - 1,
       exact: text.slice(2, -1),
     })];
-    const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text }] };
-    const { container } = render(<SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled onEditNote={vi.fn()} />);
-    const highlight = container.querySelector<HTMLElement>('[data-sat-highlight="true"]');
-
-    expect(highlight?.tagName).toBe('SPAN');
-    expect(highlight).toHaveAttribute('role', 'button');
-    expect(highlight).toHaveAttribute('tabindex', '0');
-    expect(highlight).toHaveAttribute('data-sat-annotation-control', 'true');
-    expect(highlight?.style.boxDecorationBreak).toBe('clone');
-  });
-
-  it('allows highlight selection through an existing note affordance', () => {
-    const onChange = vi.fn();
-    const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text: 'A tree grows.' }] };
-    const annotations = emptySatAnnotations();
-    annotations.annotations = [createSatTextAnnotation({
-      kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree',
-    })];
+    const openEditor = vi.fn();
     const { container } = render(
-      <SatAnnotationModeContext.Provider value="highlight">
-        <SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled onChange={onChange} onEditNote={vi.fn()} />
-      </SatAnnotationModeContext.Provider>,
+      <SatAnnotationViewContext.Provider value={view({ openEditor })}>
+        <SatAnnotatedContent content={content(text)} annotations={annotations} region="stimulus" enabled />
+      </SatAnnotationViewContext.Provider>,
     );
-    const leafOf = (text: string) => [...container.querySelectorAll<HTMLElement>('[data-content-text-node] span')]
-      .find((element) => element.textContent === text && element.firstChild?.nodeType === Node.TEXT_NODE)!.firstChild!;
-    const range = document.createRange();
-    range.setStart(leafOf('tree'), 0);
-    range.setEnd(leafOf(' grows.'), ' grows.'.length);
-    window.getSelection()!.removeAllRanges();
-    window.getSelection()!.addRange(range);
-    fireEvent.pointerUp(container.firstChild!);
-
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ annotations: [
-      expect.objectContaining({ anchor: expect.objectContaining({ exact: 'tree' }) }),
-      expect.objectContaining({ kind: 'highlight', anchor: expect.objectContaining({ exact: 'tree grows.' }) }),
-    ] }));
+    const mark = container.querySelector<HTMLElement>('[data-sat-highlight="true"]')!;
+    expect(mark.tagName).toBe('SPAN');
+    expect(mark).toHaveAttribute('role', 'button');
+    expect(mark).toHaveAttribute('tabindex', '0');
+    expect(mark).toHaveAttribute('data-sat-annotation-control', 'true');
+    expect(mark.style.boxDecorationBreak).toBe('clone');
+    fireEvent.click(mark);
+    expect(openEditor).toHaveBeenCalledWith(annotations.annotations[0]);
+    // Space activates too: the mark is a real control for AT and keyboards.
+    fireEvent.keyDown(mark, { key: ' ' });
+    expect(openEditor).toHaveBeenCalledTimes(2);
   });
 
-  it('removes intersecting marks on selection completion while erase mode is armed', () => {
-    const onChange = vi.fn();
-    const content = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text: 'A tree grows.' }] };
+  it('opens a mark on a tap but leaves a drag ending on it to the new selection', () => {
+    const text = 'A tree grows.';
     const annotations = emptySatAnnotations();
-    annotations.annotations = [
-      createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' }),
-      createSatTextAnnotation({ kind: 'underline', nodeId: 'stimulus:p', startOffset: 7, endOffset: 12, exact: 'grows' }),
-    ];
-    const view = (mode: 'none' | 'highlight' | 'note' | 'erase') => <SatAnnotationModeContext.Provider value={mode}>
-      <SatAnnotatedContent content={content} annotations={annotations} region="stimulus" enabled onChange={onChange} />
-    </SatAnnotationModeContext.Provider>;
-    const { container, rerender } = render(view('none'));
-    rerender(view('erase'));
-    // Decorated text renders as split spans: target the 'tree' span directly.
-    const leafOf = (text: string) => [...container.querySelectorAll('[data-content-text-node] span')]
-      .find((el) => el.textContent === text)!.firstChild!;
-    const range = document.createRange();
-    range.setStart(leafOf('tree'), 0); range.setEnd(leafOf('tree'), 4);
-    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
-    fireEvent.pointerUp(container.firstChild!);
-    expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange.mock.calls[0]![0].annotations).toHaveLength(1);
-    expect(onChange.mock.calls[0]![0].annotations[0]).toMatchObject({ kind: 'underline' });
-    onChange.mockClear();
-    const plain = document.createRange();
-    plain.setStart(leafOf('A '), 0); plain.setEnd(leafOf('A '), 1);
-    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(plain);
-    fireEvent.pointerUp(container.firstChild!);
-    expect(onChange).not.toHaveBeenCalled();
+    annotations.annotations = [createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' })];
+    const openEditor = vi.fn();
+    const { container } = render(
+      <SatAnnotationViewContext.Provider value={view({ openEditor })}>
+        <SatAnnotatedContent content={content(text)} annotations={annotations} region="stimulus" enabled />
+      </SatAnnotationViewContext.Provider>,
+    );
+    const mark = container.querySelector<HTMLElement>('[data-sat-highlight="true"]')!;
+
+    // A press that travelled before releasing is a selection, not a tap: the
+    // student is marking new text, so the editor must not steal the toolbar.
+    markSatPointerDown(10, 200);
+    fireEvent.click(mark, { clientX: 120, clientY: 200 });
+    expect(openEditor).not.toHaveBeenCalled();
+
+    // A press that stayed put is a tap.
+    markSatPointerDown(10, 200);
+    fireEvent.click(mark, { clientX: 12, clientY: 201 });
+    expect(openEditor).toHaveBeenCalledWith(annotations.annotations[0]);
+  });
+
+  it('renders marks as plain decoration in a read-only context', () => {
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' })];
+    // Read-only = marks paint but are not controls (blocked exam, previews).
+    const { container } = renderContent({ annotations }, view({ openEditorActive: false }));
+    const mark = container.querySelector('[data-sat-highlight="true"]')!;
+    expect(mark).not.toHaveAttribute('role');
+    expect(mark).not.toHaveAttribute('data-sat-annotation-control');
   });
 });

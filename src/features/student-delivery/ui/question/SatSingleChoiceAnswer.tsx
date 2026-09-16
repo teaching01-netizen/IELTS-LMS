@@ -1,6 +1,7 @@
 import { CircleSlash2 } from "lucide-react";
 import type { ChoiceOption } from "../../../exam-rendering/api/assessmentContracts";
 import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
+import { isSatSelectionGestureEcho } from "../annotations/satSelectionDragGuard";
 
 export interface SatSingleChoiceAnswerProps {
   questionId: string;
@@ -53,7 +54,15 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                 name={`sat-answer-${props.questionId}`}
                 value={option.id}
                 checked={selected}
-                onChange={() => props.onChange(option.id)}
+                // Answer safety (spec §34): a drag that ends on an answer choice
+                // must never choose it. Touch selection of other text can return
+                // as a click on the row under the finger, so an activation
+                // arriving inside the guard window is treated as the tail of that
+                // selection gesture, not as intent to answer. Read at activation
+                // time on purpose: the gesture lands on the label or its text,
+                // never on this visually hidden input, so arming from a
+                // pointerdown here would never happen.
+                onChange={() => { if (isSatSelectionGestureEcho()) return; props.onChange(option.id); }}
                 aria-labelledby={`${optionLetterId} ${optionContentId}`}
                 aria-describedby={eliminated ? eliminatedStatusId : undefined}
                 className="sr-only"

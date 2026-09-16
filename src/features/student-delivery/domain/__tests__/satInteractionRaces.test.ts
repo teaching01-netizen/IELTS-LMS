@@ -36,6 +36,8 @@ function rwCtx(): SatInteractionContext {
   };
 }
 
+const selectionAnchor = { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' } as const;
+
 function run(events: readonly SatInteractionEvent[], ctx: SatInteractionContext) {
   let state = createSatInteractionState();
   for (const event of events) {
@@ -102,18 +104,24 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
     assertSatInteractionInvariants(editorThenModule, rwCtx());
   });
 
-  it('SELECTING vs QUESTION_CHANGED converges: transient selection never survives scope change', () => {
+  it('SELECTING vs QUESTION_CHANGED converges: the selection never survives scope change', () => {
     const selectingThenNavigate = run(
       [
-        { type: 'ANNOTATION_MODE_CHANGED', mode: 'highlight' },
-        { type: 'TEXT_SELECTION_STARTED' },
+        { type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor },
         { type: 'QUESTION_CHANGED', moduleKey: 'rw-m1', questionId: 'q2' },
       ],
       rwCtx(),
     );
-    expect(selectingThenNavigate.annotation.textSelection).toBe('idle');
-    expect(selectingThenNavigate.annotation.mode).toBe('highlight');
+    expect(selectingThenNavigate.annotation.selection).toBeNull();
     assertSatInteractionInvariants(selectingThenNavigate, rwCtx());
+  });
+
+  it('SELECTING vs MODULE_TRANSITION converges: leaving R&W drops the anchor', () => {
+    const captured = run([{ type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor }], rwCtx());
+    expect(captured.annotation.selection).not.toBeNull();
+    const normalized = normalizeSatInteractionState(captured, mathCtx());
+    expect(normalized.annotation.selection).toBeNull();
+    assertSatInteractionInvariants(normalized, mathCtx());
   });
 
   it('torture sequence never violates an invariant', () => {
@@ -121,8 +129,7 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
       { type: 'NAVIGATOR_OPENED', returnFocus: { type: 'footer', control: 'navigator' } },
       { type: 'CALCULATOR_TOGGLED' },
       { type: 'ESCAPE_HANDLED' },
-      { type: 'ANNOTATION_MODE_CHANGED', mode: 'highlight' },
-      { type: 'TEXT_SELECTION_STARTED' },
+      { type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor },
       {
         type: 'ANNOTATION_NOTE_EDITOR_OPENED',
         annotationId: 'a1',
@@ -137,6 +144,6 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
     ];
     const end = run(torture, mathCtx());
     expect(end.surface.kind).toBe('none');
-    expect(end.annotation.textSelection).toBe('idle');
+    expect(end.annotation.selection).toBeNull();
   });
 });

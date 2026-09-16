@@ -22,6 +22,7 @@ import {
   studentModuleTitle,
 } from "../application/satRuntimeSelectors";
 import { responseForQuestion } from "../domain/satResponses";
+import { satAnnotationEducationKey } from "../infrastructure/satAnnotationEducationStore";
 import { answeredSatQuestionCount, buildSatQuestionNavigationItems } from "../domain/satSelectors";
 import { formatSatTime } from "../domain/satTiming";
 import { resolveSatToolCapabilities } from "../domain/satTools";
@@ -558,6 +559,11 @@ export function SatStudentSessionRoute({
         onNext={commands.nextQuestion}
         onReviewModule={commands.reviewModule}
         onSaveNote={(note) => commands.setAnnotationNote(questionId, note)}
+        annotations={response.annotations}
+        onAnnotationsChange={(annotations) => commands.setAnnotations(questionId, annotations)}
+        onFlushAnnotations={flushAnnotations}
+        answered={Boolean(response.answer.trim())}
+        educationKey={satAnnotationEducationKey(scheduleId, attemptId)}
         onToggleMarkForReview={() => commands.toggleReview(questionId)}
         onToggleEliminationMode={() => setEliminationMode((enabled) => !enabled)}
         helpOpen={helpOpen}
@@ -599,8 +605,6 @@ export function SatStudentSessionRoute({
             reading.setPreferences((current) => ({ ...current, splitRatio }))
           }
           onAnswerChange={(answer) => commands.setAnswer(questionId, answer)}
-          onAnnotationsChange={(annotations) => commands.setAnnotations(questionId, annotations)}
-          onFlushAnnotations={flushAnnotations}
           onToggleReview={() => commands.toggleReview(questionId)}
           onToggleEliminationMode={() => setEliminationMode((enabled) => !enabled)}
           onToggleEliminatedOption={(optionId) =>

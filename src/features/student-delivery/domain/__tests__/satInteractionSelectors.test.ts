@@ -51,4 +51,16 @@ describe('selectSatInteraction (dumb UI contract)', () => {
     expect(view.is.surfaceOpen).toBe(true);
     expect(view).not.toHaveProperty('tools');
   });
+
+  it('exposes the live annotation selection, never a mode', () => {
+    const anchor = { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' };
+    const view = selectSatInteraction(
+      { ...createSatInteractionState(), annotation: { selection: anchor } },
+      { ...ctx(), toolPolicy: { ...ctx().toolPolicy, highlight: true, underline: true, notes: true } },
+    );
+    expect(view.annotation.hasSelection).toBe(true);
+    expect(view.annotation.selection).toEqual(anchor);
+    expect(view).not.toHaveProperty('annotation.mode');
+    expect(selectSatInteraction(createSatInteractionState(), ctx()).annotation.hasSelection).toBe(false);
+  });
 });

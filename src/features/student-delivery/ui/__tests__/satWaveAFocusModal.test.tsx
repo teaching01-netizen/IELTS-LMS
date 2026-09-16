@@ -73,7 +73,9 @@ describe("Wave A R-02 compact single-modal (option ii: tool sheet non-modal)", (
         </SatFloatingTool>
       </>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Question note" }));
+    // Highlights & Notes is one labeled entry; its panel is the question-note
+    // dialog (/Question note/ matches the dialog's accessible name).
+    fireEvent.click(screen.getByRole("button", { name: /^Highlights & Notes/ }));
     expect(await screen.findByRole("dialog", { name: /Question note/ })).toBeInTheDocument();
     const tool = screen.getByRole("dialog", { name: "Calculator" });
     expect(tool).toHaveAttribute("data-sat-tool-presentation", "compact-sheet");
@@ -105,9 +107,9 @@ describe("Wave A R-03 focus return per surface (option A: mounted selectors)", (
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
-  it("notes: open, Escape, focus returns to the Question note trigger", async () => {
+  it("notes: open, Escape, focus returns to the Highlights & Notes trigger", async () => {
     render(<SatExamShell {...shellProps()} />);
-    const trigger = screen.getByRole("button", { name: "Question note" });
+    const trigger = screen.getByRole("button", { name: /^Highlights & Notes/ });
     expect(trigger).toHaveAttribute("data-sat-focus", "topbar-notes");
     fireEvent.click(trigger);
     expect(screen.getByRole("dialog", { name: /Question note/ })).toBeInTheDocument();

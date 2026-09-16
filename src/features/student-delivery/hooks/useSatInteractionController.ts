@@ -10,11 +10,11 @@ import {
   normalizeSatInteractionState,
   satInteractionReducer,
   transitionSatInteraction,
-  type SatAnnotationInteractionMode,
   type SatInteractionContext,
   type SatInteractionFocusTarget,
   type SatInteractionState,
 } from '../domain/satInteractionState';
+import type { SatTextAnchor } from '../domain/satResponses';
 
 export type { SatInteractionFocusTarget, SatInteractionView };
 
@@ -38,10 +38,8 @@ export interface SatInteractionController {
   closeSurface: () => void;
   toggleCalculator: () => void;
   toggleReference: () => void;
-  setAnnotationMode: (mode: SatAnnotationInteractionMode) => void;
-  toggleAnnotationMode: (mode: 'highlight' | 'underline' | 'note' | 'erase') => void;
-  selectionStarted: () => void;
-  selectionCaptured: () => void;
+  /** Selection-first annotation: capture the span the toolbar will act on. */
+  selectionCaptured: (anchor: SatTextAnchor) => void;
   selectionCleared: () => void;
   questionNavigated: (moduleKey: string, questionId: string) => void;
   moduleScopeChanged: (moduleKey: string, questionId: string) => void;
@@ -72,8 +70,8 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
   );
 
   // Keep scope identity in sync with authoritative navigation. Question moves
-  // clear transient selection + close surfaces; module moves additionally
-  // reset annotation mode and close tools (explicit transition contracts).
+  // clear the live annotation selection + close surfaces; module moves reset
+  // the same regions from scratch (explicit transition contracts).
   const scopeKey = `${ctx.moduleKey}::${ctx.questionId}`;
   const scopeKeyRef = useRef(scopeKey);
   const moduleKeyRef = useRef(ctx.moduleKey);
@@ -146,8 +144,8 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
             dispatchEvent({ type: 'TEXT_SELECTION_CLEARED' });
             return;
           case 'DISABLE_LINE_READER':
-          case 'DISABLE_ANNOTATION_MODE':
-            dispatchEvent({ type: 'ANNOTATION_MODE_CHANGED', mode: 'off' });
+            // Line-reader preference state lives outside this machine; the
+            // shell disables it. Nothing to transition here.
             return;
           default:
             return;
@@ -233,26 +231,10 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
   // keep compiling; they are refused no-ops by the intent layer.
   const toggleCalculator = useCallback(() => dispatchIntent({ type: 'CALCULATOR_TOGGLE_REQUESTED' }), [dispatchIntent]);
   const toggleReference = useCallback(() => dispatchIntent({ type: 'REFERENCE_TOGGLE_REQUESTED' }), [dispatchIntent]);
-  const setAnnotationMode = useCallback(
-    (mode: SatAnnotationInteractionMode) => dispatchIntent({ type: 'ANNOTATION_MODE_REQUESTED', mode }),
+  const selectionCaptured = useCallback(
+    (anchor: SatTextAnchor) => dispatchIntent({ type: 'TEXT_SELECTION_CAPTURED', anchor }),
     [dispatchIntent],
   );
-  const toggleAnnotationMode = useCallback(
-    (mode: 'highlight' | 'underline' | 'note' | 'erase') => {
-      // Exclusive toggle: re-pressing the armed mode disarms (matches today's
-      // TopBar setAnnotationMode(current === mode ? 'none' : mode)).
-      const current = stateRef.current;
-      const next = current.annotation.mode === mode ? 'off' : mode;
-      if (next === 'off') {
-        dispatchEvent({ type: 'ANNOTATION_MODE_CHANGED', mode: next });
-        return;
-      }
-      dispatchIntent({ type: 'ANNOTATION_MODE_REQUESTED', mode });
-    },
-    [dispatchEvent, dispatchIntent],
-  );
-  const selectionStarted = useCallback(() => dispatchIntent({ type: 'TEXT_SELECTION_STARTED' }), [dispatchIntent]);
-  const selectionCaptured = useCallback(() => dispatchIntent({ type: 'TEXT_SELECTION_CAPTURED' }), [dispatchIntent]);
   const selectionCleared = useCallback(() => dispatchIntent({ type: 'TEXT_SELECTION_CLEARED' }), [dispatchIntent]);
   const questionNavigated = useCallback(
     (moduleKey: string, questionId: string) =>
@@ -273,10 +255,6 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
       if (action.type === 'IGNORE' || action.type === 'NOOP') return false;
       if (action.type === 'DISABLE_LINE_READER') {
         options.onDisableLineReader?.();
-        return true;
-      }
-      if (action.type === 'DISABLE_ANNOTATION_MODE') {
-        dispatchEvent({ type: 'ANNOTATION_MODE_CHANGED', mode: 'off' });
         return true;
       }
       if (action.type === 'CLOSE_ANNOTATION_EDITOR') {
@@ -314,9 +292,6 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
     closeSurface,
     toggleCalculator,
     toggleReference,
-    setAnnotationMode,
-    toggleAnnotationMode,
-    selectionStarted,
     selectionCaptured,
     selectionCleared,
     questionNavigated,

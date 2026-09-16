@@ -32,8 +32,12 @@ type SATTextAnchor struct {
 }
 
 type SATTextAnnotation struct {
-	ID        string        `json:"id"`
-	Kind      string        `json:"kind"`
+	ID   string        `json:"id"`
+	Kind string        `json:"kind"`
+	// Color is the highlight ink (yellow default). Empty stays valid: every
+	// payload written before colors existed decodes unchanged and renders
+	// yellow on the client.
+	Color     string        `json:"color,omitempty"`
 	Anchor    SATTextAnchor `json:"anchor"`
 	Note      string        `json:"note,omitempty"`
 	CreatedAt string        `json:"createdAt"`

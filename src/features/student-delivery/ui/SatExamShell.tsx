@@ -11,7 +11,6 @@ import { SatNotesPanel } from "./question/SatNotesPanel";
 import { SatExamFooter } from "./shell/SatExamFooter";
 import { SatExamTopBar } from "./shell/SatExamTopBar";
 import { SatQuestionNavigator } from "./shell/SatQuestionNavigator";
-import { SatAnnotationModeContext, type SatAnnotationMode } from './annotations/SatAnnotationModeContext';
 import { SatUnscheduledBreakDialog } from './break/SatUnscheduledBreakDialog';
 import { SatUnscheduledBreakVeil } from './break/SatUnscheduledBreakVeil';
 import { SatHelpModal } from './help/SatHelpModal';
@@ -22,6 +21,20 @@ import type { SatToolActionBinding } from '../domain/satToolActions';
 import { SatMoreMenu } from './shell/SatMoreMenu';
 import { SatLineReader } from './reading/SatLineReader';
 import { SatContrastContext } from './reading/SatContrastContext';
+import { useSatMediaQuery } from './useSatMediaQuery';
+import { useSatAnnotationSurface } from '../hooks/useSatAnnotationSurface';
+import type { SatQuestionAnnotations } from '../domain/satResponses';
+import { SAT_COPY } from '../domain/satCopy';
+import { SatAnnotationEditDock } from './annotations/SatAnnotationEditDock';
+import { SatAnnotationNoteEditor } from './annotations/SatAnnotationNoteEditor';
+import { SatAnnotationViewContext } from './annotations/SatAnnotationViewContext';
+import { SatSelectionActionsPanel } from './annotations/SatSelectionActionsPanel';
+import {
+  SatAnnotationEmptyNotesCoach,
+  SatAnnotationFirstHighlightFeedback,
+  SatAnnotationFirstUseHint,
+  SatAnnotationSelectTextCoach,
+} from './education/SatAnnotationEducationCues';
 
 export interface SatExamShellProps {
   moduleIdentity?: string;
@@ -49,6 +62,22 @@ export interface SatExamShellProps {
   questionNote: string;
   readingPreferences: SatReadingPreferences;
   children: ReactNode;
+  /**
+   * Highlights & Notes: the shell owns annotation mutation so the contextual
+   * toolbar, the dock, and the note card can all write the same response. The
+   * content renderer only paints marks and reports gestures.
+   */
+  annotations?: SatQuestionAnnotations | undefined;
+  onAnnotationsChange?: ((annotations: SatQuestionAnnotations) => void) | undefined;
+
+  onFlushAnnotations?: (() => void) | undefined;
+  /** True once this question has an answer (retires the passive hint). */
+  answered?: boolean | undefined;
+  /**
+   * Education memory key (attempt-scoped, or preview-scoped for staff
+   * previews). Absent = in-memory teaching only.
+   */
+  educationKey?: string | null | undefined;
   onSelectQuestion: (index: number) => void;
   onToggleCalculator: () => void;
   onToggleReference: () => void;
@@ -85,8 +114,9 @@ export interface SatExamShellProps {
 
 export function SatExamShell(props: SatExamShellProps) {
   // Strangler step 1: the interaction machine owns the exclusive surface +
-  // annotation mode; the runner stays authoritative for exam truth. Context is
-  // derived from props every render — never duplicated in interaction state.
+  // the live annotation selection; the runner stays authoritative for exam
+  // truth. Context is derived from props every render — never duplicated in
+  // interaction state.
   // The shell only mounts in module phase (session/preview routes render
   // directions/review/break/complete separately), so phase is 'module'.
   // props.blocked folds pause/submission/lease into the gate (inert +
@@ -121,6 +151,7 @@ export function SatExamShell(props: SatExamShellProps) {
     questionId: `${props.moduleIdentity ?? ''}::${props.questionIndex}`,
   }), [props.blocked, props.calculatorAvailable, props.referenceAvailable, notesAvailable, props.moduleIdentity, props.questionIndex]);
   const interaction = useSatInteractionController(interactionCtx);
+  const touchAnnotations = useSatMediaQuery('(pointer: coarse)');
   const activeOverlay: "directions" | "navigator" | "notes" | "reading" | "more" | null =
     interaction.state.surface.kind === 'reading-settings' ? 'reading'
     : interaction.state.surface.kind === 'question-notes' ? 'notes'
@@ -130,17 +161,53 @@ export function SatExamShell(props: SatExamShellProps) {
     // The annotation note editor is a dialog, not a shell overlay: it must not
     // alias to a TopBar popover.
     : null;
-  const annotationMode: SatAnnotationMode =
-    interaction.state.annotation.mode === 'highlight' ? 'highlight'
-    : interaction.state.annotation.mode === 'underline' ? 'underline'
-    : interaction.state.annotation.mode === 'note' ? 'note'
-    : interaction.state.annotation.mode === 'erase' ? 'erase'
-    : 'none';
   const routeModalOpen = props.helpOpen === true || props.shortcutsOpen === true;
   const floatingToolOpen = props.calculatorOpen || props.referenceOpen;
   // Bluebook 5-minute visual warning visibility (Phase 7 state; effect below).
   // Declared above the Escape partition so the warning branch can read it.
   const [timerWarningVisible, setTimerWarningVisible] = useState(false);
+
+  /* ------------------------------------------------------------------ *
+   * Highlights & Notes (selection-first)
+   *
+   * One owner for the whole annotation surface: marks, chrome, undo, and the
+   * teaching cues all live in useSatAnnotationSurface. The shell renders what
+   * it returns and reports gestures; nothing here writes an annotation twice.
+   * ------------------------------------------------------------------ */
+  const surface = useSatAnnotationSurface({
+    annotations: props.annotations,
+    onAnnotationsChange: props.onAnnotationsChange,
+    onFlushAnnotations: props.onFlushAnnotations,
+    blocked: props.blocked,
+    annotationsAvailable: notesAvailable,
+    educationKey: props.educationKey,
+    answered: props.answered === true,
+    interaction,
+    questionKey: `${props.moduleIdentity ?? ''}::${props.questionIndex}`,
+  });
+  const {
+    selection,
+    annotationView,
+    selectionActions,
+    currentColor,
+    editingMark,
+    closeMarkEditor,
+    recolourMark,
+    underlineMark,
+    openNoteOnMark,
+    removeMark,
+    noteEditorAnnotation,
+    updateNote,
+    undoEntry,
+    undoRemoval,
+    confirmationAnchor,
+    hintVisible,
+    announcement,
+    questionNotes,
+  } = surface;
+  const annotationsWritable = surface.writable;
+  const questionHasAnnotations = props.questionNote.trim().length > 0 || surface.hasAnnotations;
+
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
@@ -154,6 +221,9 @@ export function SatExamShell(props: SatExamShellProps) {
       // performs the dismiss; this branch suppresses the surface-close so
       // exactly one state change happens per press).
       if (timerWarningVisible && !props.blocked) return;
+      // Annotation chrome answers before exam surfaces: the edit dock is the
+      // innermost thing the student opened.
+      if (closeMarkEditor()) return;
       interaction.handleEscape({
         lineReaderEnabled: props.readingPreferences.lineReaderEnabled ?? false,
         onDisableLineReader: () => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: false }),
@@ -162,6 +232,7 @@ export function SatExamShell(props: SatExamShellProps) {
     document.addEventListener('keydown', escape);
     return () => document.removeEventListener('keydown', escape);
   });
+
   const [timerVisible, setTimerVisible] = useState(true);
   const [timerRevealAnnounced, setTimerRevealAnnounced] = useState(false);
   // Bluebook 5-minute visual warning (Phase 7): shown once per module when
@@ -201,9 +272,17 @@ export function SatExamShell(props: SatExamShellProps) {
     calculator: () => props.onToggleCalculator(),
     reference: () => props.onToggleReference(),
     lineReader: () => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: !(props.readingPreferences.lineReaderEnabled ?? false) }),
-    // Highlights arming is shell-interaction state (not runner truth), so the
-    // shortcut converges on the same interaction toggle as the TopBar button.
-    highlights: () => { interaction.closeSurface(); interaction.toggleAnnotationMode('highlight'); },
+    // Highlights & Notes is a surface now, not an armed mode: with a selection
+    // live the shortcut drives the contextual toolbar (the colors are already
+    // one keystroke away); otherwise it opens the notes panel.
+    highlights: () => {
+      if (interaction.state.annotation.selection) {
+        document.querySelector<HTMLButtonElement>('[data-sat-selection-toolbar="true"] button:not([disabled]), [data-sat-touch-dock="true"] button:not([disabled])')?.focus();
+        return;
+      }
+      interaction.closeSurface();
+      interaction.toggleSurface('question-notes');
+    },
     eliminatorMode: () => props.onToggleEliminationMode?.(),
     markForReview: () => props.onToggleMarkForReview?.(),
     questionMenu: () => toggleOverlay("navigator"),
@@ -219,7 +298,7 @@ export function SatExamShell(props: SatExamShellProps) {
     zoomOut: () => props.onZoomOut?.(),
     zoomReset: () => props.onZoomReset?.(),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toggleOverlay/closeSurface are stable-by-contract per render; prefs snapshot is intentional.
-  }), [props.onToggleCalculator, props.onToggleReference, props.readingPreferences, props.onOpenHelp, props.onOpenShortcuts, props.onOpenBreakConfirm, props.onNext, props.onPrevious, props.onNextQuestion, props.onPreviousQuestion, props.onToggleEliminationMode, props.onToggleMarkForReview, props.onZoomIn, props.onZoomOut, props.onZoomReset]);
+  }), [props.onToggleCalculator, props.onToggleReference, props.readingPreferences, props.onOpenHelp, props.onOpenShortcuts, props.onOpenBreakConfirm, props.onNext, props.onPrevious, props.onNextQuestion, props.onPreviousQuestion, props.onToggleEliminationMode, props.onToggleMarkForReview, props.onZoomIn, props.onZoomOut, props.onZoomReset, interaction]);
   useSatShortcuts(!props.blocked, shortcutBinding);
 
   // One tool truth (Phase 9): the runner's activeTools flags (calculatorOpen /
@@ -254,6 +333,9 @@ export function SatExamShell(props: SatExamShellProps) {
     props.examHeight !== null && Number.isFinite(props.examHeight)
       ? ({ ["--student-exam-height" as string]: `${props.examHeight}px` } as CSSProperties)
       : undefined;
+  // Empty-notes coach: shown inside an open, empty Notes panel. It exists to
+  // answer "where are my notes?" for a student who just opened the feature.
+  const showNotesCoach = activeOverlay === 'notes' && questionNotes.length === 0 && props.questionNote.trim().length === 0;
 
   return (
     <SatContrastContext.Provider value={props.readingPreferences.contrastMode ?? 'default'}>
@@ -289,22 +371,9 @@ export function SatExamShell(props: SatExamShellProps) {
         referenceAvailable={props.referenceAvailable}
         referenceOpen={props.referenceOpen}
         notesAvailable={notesAvailable}
-        annotationMode={annotationMode}
-        onToggleHighlights={() => {
-          interaction.closeSurface();
-          interaction.toggleAnnotationMode('highlight');
-        }}
-        onToggleUnderline={() => {
-          interaction.closeSurface();
-          interaction.toggleAnnotationMode('underline');
-        }}
-        onToggleErase={() => {
-          interaction.closeSurface();
-          interaction.toggleAnnotationMode('erase');
-        }}
         notesOpen={activeOverlay === "notes"}
         notesButtonId={notesButtonId}
-        hasQuestionNote={props.questionNote.trim().length > 0}
+        hasAnnotations={questionHasAnnotations}
         readingOpen={activeOverlay === "reading"}
         readingPreferences={props.readingPreferences}
         blocked={props.blocked}
@@ -320,6 +389,10 @@ export function SatExamShell(props: SatExamShellProps) {
         onCloseReading={closeOverlay}
         onReadingPreferencesChange={props.onReadingPreferencesChange}
       />
+      {/* Passive first-use hint (Highlights & Notes): one quiet line, once per
+          attempt, below the tool entry. No scrim, no blocking, no close
+          button — it leaves on its own or the moment the student selects. */}
+      {hintVisible ? <SatAnnotationFirstUseHint /> : null}
       {/* Bluebook More utility center (Phase 1): fixed-position dropdown
           pinned under the top-right More trigger (fixed right/top offsets
           mirror the trigger cell, so the panel can never drop to the shell
@@ -340,20 +413,75 @@ export function SatExamShell(props: SatExamShellProps) {
         onClose={closeOverlay}
       />
 
-      {/* Bluebook document: the exam body stays white inside pale-blue chrome. */}
+      {/* Bluebook document: the exam body stays white inside pale-blue chrome.
+          Annotation overlays are positioned against THIS box (not the zoomed
+          content): the exam zoom transform must never scale a toolbar. */}
       <main
         className="relative min-h-0 min-w-0 overflow-hidden bg-[var(--sat-body-bg)]"
         id="sat-question-content"
         data-sat-question-presentation="instant"
+        data-sat-annotation-bounds="true"
       >
-        <SatAnnotationModeContext.Provider value={props.blocked || !notesAvailable ? 'none' : annotationMode}>
+        <SatAnnotationViewContext.Provider value={annotationView}>
           <div
             className="h-full min-w-0"
             data-sat-content-zoom={props.readingPreferences.examZoom ?? 1}
             style={{ zoom: props.readingPreferences.examZoom ?? 1, width: '100%', height: '100%' }}>
             {props.children}
           </div>
-        </SatAnnotationModeContext.Provider>
+        </SatAnnotationViewContext.Provider>
+        {/* Empty Notes panel coach points at the passage instead of changing
+            it: a label, never a restyle of the student's reading surface. */}
+        {showNotesCoach && surface.hasAnnotations === false ? <SatAnnotationSelectTextCoach /> : null}
+        {/* Contextual annotation tools. Exactly one is mounted at a time:
+            a mark editor when a mark is being changed, otherwise the selection
+            toolbar/dock while a selection is live. */}
+        {editingMark ? (
+          <SatAnnotationEditDock
+            annotation={editingMark}
+            touch={touchAnnotations}
+            disabled={props.blocked || !annotationsWritable}
+            onColor={(color) => recolourMark(editingMark, color)}
+            onUnderline={() => underlineMark(editingMark)}
+            onNote={() => openNoteOnMark(editingMark)}
+            onRemove={() => removeMark(editingMark)}
+          />
+        ) : selection ? (
+          <SatSelectionActionsPanel
+            anchor={selection}
+            currentColor={currentColor}
+            actions={selectionActions}
+            disabled={props.blocked || !annotationsWritable}
+            variant={touchAnnotations ? 'docked' : 'floating'}
+          />
+        ) : null}
+        {confirmationAnchor ? <SatAnnotationFirstHighlightFeedback anchor={confirmationAnchor} /> : null}
+        {/* Removal is forgiving instead of confirmed: one undo, then it is
+            final. Sits in the exam body (never over the footer navigation). */}
+        {undoEntry ? (
+          <div
+            data-sat-undo-toast="true"
+            data-testid="sat-undo-toast"
+            role="status"
+            className="sat-ui absolute bottom-3 left-1/2 z-[80] flex -translate-x-1/2 items-center gap-3 rounded-[8px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-3 py-2 shadow-[var(--sat-shadow-floating)]"
+          >
+            <span className="sat-type-control-secondary font-medium text-[var(--sat-text)]">
+              {undoEntry.annotation.kind === 'highlight' ? SAT_COPY.annotations.removedHighlight : SAT_COPY.annotations.removedUnderline}
+            </span>
+            <button
+              type="button"
+              onClick={undoRemoval}
+              className="sat-touch-target sat-pressable rounded-[6px] px-2 sat-type-control-secondary font-semibold text-[var(--sat-accent-strong)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+            >
+              {SAT_COPY.annotations.undo}
+            </button>
+          </div>
+        ) : null}
+        {/* Polite annotation announcements: assistive tech hears the same
+            cause and effect the ink shows. Visually hidden, one per action. */}
+        <span className="sr-only" role="status" aria-live="polite" data-testid="sat-annotation-announcement">
+          {announcement}
+        </span>
         {notesAvailable && props.readingPreferences.lineReaderEnabled && !props.blocked ? (
           <SatLineReader position={props.readingPreferences.lineReaderPosition ?? 0.5}
             onPositionChange={(lineReaderPosition) => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderPosition })}
@@ -392,9 +520,25 @@ export function SatExamShell(props: SatExamShellProps) {
         disabled={props.blocked}
         readingPreferences={props.readingPreferences}
         returnFocusId={notesButtonId}
+        annotations={questionNotes}
+        onOpenAnnotation={(annotationId) => interaction.openAnnotationNote(annotationId)}
+        emptyState={<SatAnnotationEmptyNotesCoach />}
         onSave={props.onSaveNote}
         onClose={closeOverlay}
       />
+      {/* Note card for the selected text. Opened by the selection toolbar, the
+          dock, or a mark tap; the caret lands in the field so typing starts
+          immediately and "Saved" confirms itself without a Save button. */}
+      {noteEditorAnnotation ? (
+        <SatAnnotationNoteEditor
+          annotation={noteEditorAnnotation}
+          onChange={updateNote}
+          onClose={closeOverlay}
+          onDelete={() => removeMark(noteEditorAnnotation)}
+          onFlush={props.onFlushAnnotations}
+          returnFocusSelector={'[data-sat-focus="topbar-notes"]'}
+        />
+      ) : null}
       {/* Bluebook Help + Shortcuts (Phases 2-3): route-owned open state;
           the shell only presents. Timer continues and answers stay untouched
           by design — these modals never touch exam state. */}

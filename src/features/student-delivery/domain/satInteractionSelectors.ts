@@ -33,8 +33,9 @@ export interface SatInteractionView {
   gate: 'interactive' | 'blocked' | 'terminal';
   surface: SatInteractionState['surface'];
   annotation: {
-    mode: SatInteractionState['annotation']['mode'];
-    selecting: boolean;
+    /** True while a live annotation selection exists (contextual toolbar up). */
+    hasSelection: boolean;
+    selection: SatInteractionState['annotation']['selection'];
   };
 }
 
@@ -71,8 +72,8 @@ export function selectSatInteraction(
     gate,
     surface: state.surface,
     annotation: {
-      mode: state.annotation.mode,
-      selecting: state.annotation.textSelection !== 'idle',
+      hasSelection: state.annotation.selection !== null,
+      selection: state.annotation.selection,
     },
   };
 }

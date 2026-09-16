@@ -130,6 +130,18 @@ func ValidatePayload(p ResponsePayload) error {
 	return nil
 }
 
+// validSATHighlightColor reports whether a stored highlight ink is known.
+// An empty string is valid and means the default ink (yellow), so payloads
+// written before colors existed keep saving unchanged.
+func validSATHighlightColor(color string) bool {
+	switch color {
+	case "", "yellow", "blue", "pink":
+		return true
+	default:
+		return false
+	}
+}
+
 func validateSATAnnotations(a Annotation) error {
 	invalid := func() error {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Invalid SAT annotations.", HTTPStatus: 400}
@@ -142,6 +154,11 @@ func validateSATAnnotations(a Annotation) error {
 	for _, item := range a.Annotations {
 		anchor := item.Anchor
 		if item.ID == "" || len(item.ID) > 80 || seen[item.ID] || (item.Kind != "highlight" && item.Kind != "underline") {
+			return invalid()
+		}
+		// Color only means something on a highlight; an underline carrying ink
+		// is a malformed producer, not a different mark.
+		if !validSATHighlightColor(item.Color) || (item.Color != "" && item.Kind != "highlight") {
 			return invalid()
 		}
 		seen[item.ID] = true

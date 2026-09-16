@@ -1312,6 +1312,21 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-reading-line-height: 1.6;
   --sat-highlight-background: #FFF2B3;
   --sat-highlight-text: #1d1d1f;
+  /* Annotation inks (Highlights & Notes). Yellow IS the canonical token
+   * above; blue and pink add their own pairs so a mark's ink is a token,
+   * never a literal in TSX. Swatches are the darker chip colors that read
+   * as "this is the ink" against the pale exam surface. */
+  --sat-highlight-bg-blue: #D6E6FB;
+  --sat-highlight-text-blue: #1d1d1f;
+  --sat-highlight-bg-pink: #FBDBE6;
+  --sat-highlight-text-pink: #1d1d1f;
+  --sat-swatch-yellow: #F2DE8C;
+  --sat-swatch-blue: #9CC3F2;
+  --sat-swatch-pink: #F0AFC8;
+  --sat-annotation-active-ring: rgba(0, 0, 0, 0.45);
+  /* Annotation chrome motion (C4: exam TSX carries no duration literals). */
+  --sat-motion-annotation: 140ms;
+  --sat-annotation-dock-shadow: 0 -2px 8px rgb(0 0 0 / 12%);
   --sat-note-header: #FFF9D9;
   /* Bluebook selection preview (Phase 7, Lane 3): preview var for the
    * ::selection utility below; defaults to the paper token. No literal
@@ -1437,10 +1452,40 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   text-rendering: optimizeLegibility;
 }
 
-/* Bluebook selection preview (Phase 7, Lane 3): while a highlight tool is
- * armed, native text selection previews the paper token so the drag gesture
- * reads as the mark it will become. Underline tool uses the text token.
- * Eraser behavior untouched (no selection-color change in erase mode). */
+/* Annotation toolbar / dock entrance (Highlights & Notes): a system control
+ * becoming available, not a panel sliding in. 140ms, 4px rise, opacity. */
+@keyframes sat-annotation-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Highlights & Notes: existing marks read as interactive on mouse only — the
+ * pointer plus a subtle ring teaches "tap me to change this" without animating
+ * anything or altering the paper tint. */
+@media (hover: hover) {
+  .sat-ui [data-sat-annotation-control="true"]:hover {
+    box-shadow: inset 0 0 0 1px var(--sat-annotation-active-ring);
+  }
+}
+
+.sat-ui [data-sat-annotation-active="true"] {
+  box-shadow: inset 0 0 0 1px var(--sat-annotation-active-ring);
+}
+
+/* Mark cursor: only marks that can actually be edited advertise a pointer. */
+.sat-ui [data-sat-annotation-control="true"] {
+  cursor: pointer;
+}
+
+/* Selection preview while text is selected in an annotatable region: the
+ * tint previews the ink the next tap will use, so the color controls are never
+ * the first hint of what will happen. */
 .sat-ui [data-sat-highlight-preview="true"]::selection {
   background-color: var(--sat-selection-color, var(--sat-highlight-background, #FFF2B3));
   color: inherit;

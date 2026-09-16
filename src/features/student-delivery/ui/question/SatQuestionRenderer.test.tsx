@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { DeliveredQuestion } from '../../contracts/assessmentDelivery';
-import { createSatTextAnnotation, emptySatQuestionResponse, type SatQuestionResponseDraft } from '../../domain/satResponses';
+import { createSatTextAnnotation, emptySatQuestionResponse } from '../../domain/satResponses';
 import { createSatReadingPreferences } from '../../domain/satReadingPreferences';
+import { SatAnnotationViewContext } from '../annotations/SatAnnotationViewContext';
 import { SatQuestionRenderer } from './SatQuestionRenderer';
 
 const text = { version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'same-id', text: 'A tree grows.' }] };
@@ -44,20 +45,21 @@ describe('SAT annotated question rendering', () => {
   });
 });
 
-describe('annotation editor cleanup on erase', () => {
-  it('closes the note editor when its annotation disappears from props', async () => {
+describe('annotation mark affordances follow the shell view context', () => {
+  it('reports a mark tap upward instead of mutating annotations itself', () => {
+    // The shell owns every annotation write (toolbar, dock, note card), so the
+    // renderer is only a reporter: tapping a mark asks the shell to open it.
     const noted = createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:same-id', startOffset: 0, endOffset: 7, exact: 'A tree ', note: 'Check the evidence' });
-    const seeded = (): SatQuestionResponseDraft => ({ ...emptySatQuestionResponse('q1'), annotations: { version: 2, annotations: [noted], legacyQuestionNote: '' } });
-    const view = (response: SatQuestionResponseDraft) => (
-      <SatQuestionRenderer sectionKey="reading-writing" questionNumber={1} question={question} response={response}
-        eliminationMode={false} disabled={false} readingPreferences={createSatReadingPreferences()}
-        onReadingSplitRatioChange={vi.fn()} onAnswerChange={vi.fn()} onToggleReview={vi.fn()} onToggleEliminationMode={vi.fn()} onToggleEliminatedOption={vi.fn()} />
+    const response = { ...emptySatQuestionResponse('q1'), annotations: { version: 2, annotations: [noted], legacyQuestionNote: '' } };
+    const openEditor = vi.fn();
+    render(
+      <SatAnnotationViewContext.Provider value={{ enabled: true, selection: null, activeAnnotationId: null, openEditorActive: true, openEditor }}>
+        <SatQuestionRenderer sectionKey="reading-writing" questionNumber={1} question={question} response={response}
+          eliminationMode={false} disabled={false} readingPreferences={createSatReadingPreferences()}
+          onReadingSplitRatioChange={vi.fn()} onAnswerChange={vi.fn()} onToggleReview={vi.fn()} onToggleEliminationMode={vi.fn()} onToggleEliminatedOption={vi.fn()} />
+      </SatAnnotationViewContext.Provider>,
     );
-    const { rerender, unmount } = render(view(seeded()));
-    fireEvent.click(screen.getByRole('button', { name: 'Edit note: A tree' }));
-    expect(screen.getByRole('textbox', { name: 'Your note' })).toBeInTheDocument();
-    rerender(view({ ...seeded(), annotations: { version: 2, annotations: [], legacyQuestionNote: '' } }));
-    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Your note' })).not.toBeInTheDocument());
-    unmount();
+    fireEvent.click(screen.getByRole('button', { name: /Highlight: A tree/ }));
+    expect(openEditor).toHaveBeenCalledWith(noted);
   });
 });

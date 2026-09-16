@@ -42,8 +42,22 @@ describe('useSatInteractionController (only public mutation surface)', () => {
     act(() => result.current.toggleCalculator());
     expect(result.current.state).toBe(before);
     expect(result.current.can.annotate).toBe(false);
-    act(() => result.current.setAnnotationMode('highlight'));
-    expect(result.current.state.annotation.mode).toBe('off');
+    // Selection-first: a Math selection is refused by the same capability.
+    act(() => result.current.selectionCaptured({ nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' }));
+    expect(result.current.state.annotation.selection).toBeNull();
+  });
+
+  it('captures a selection in R&W with no armed mode and clears it on demand', () => {
+    const anchor = { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' };
+    const { result } = renderHook(({ ctx }: { ctx: SatInteractionContext }) => useSatInteractionController(ctx), {
+      initialProps: { ctx: { ...mathCtx(), toolPolicy: resolveSatExamToolPolicy('reading-writing', []), sectionKey: 'reading-writing' } },
+    });
+    expect(result.current.is.annotationEditorOpen).toBe(false);
+    act(() => result.current.selectionCaptured(anchor));
+    expect(result.current.state.annotation.selection).toEqual(anchor);
+    expect(result.current.view.annotation.hasSelection).toBe(true);
+    act(() => result.current.selectionCleared());
+    expect(result.current.state.annotation.selection).toBeNull();
   });
 
   it('clears transient UI on scope change and discards all on termination', () => {
@@ -60,23 +74,25 @@ describe('useSatInteractionController (only public mutation surface)', () => {
     expect(result.current.can.answer).toBe(false);
   });
 
-  it('normalizes revoked annotation modes when the module policy changes', () => {
+  it('normalizes a revoked selection away when the module policy changes', () => {
     const { result, rerender } = renderHook(
       ({ ctx }: { ctx: SatInteractionContext }) => useSatInteractionController(ctx),
-      { initialProps: { ctx: mathCtx() } },
+      { initialProps: { ctx: { ...mathCtx(), toolPolicy: resolveSatExamToolPolicy('reading-writing', []), sectionKey: 'reading-writing' } } },
     );
+    act(() => result.current.selectionCaptured({ nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' }));
+    expect(result.current.state.annotation.selection).not.toBeNull();
     rerender({
       ctx: {
         ...mathCtx(),
-        toolPolicy: resolveSatExamToolPolicy('reading-writing', []),
-        sectionKey: 'reading-writing',
-        moduleKey: 'rw-m1',
+        toolPolicy: resolveSatExamToolPolicy('math', ['calculator']),
+        sectionKey: 'math',
+        moduleKey: 'math-m1',
       },
     });
-    expect(result.current.state.annotation.mode).toBe('off');
+    expect(result.current.state.annotation.selection).toBeNull();
   });
 
-  it('arbitrates Escape to exactly one action: surface before mode', () => {
+  it('arbitrates Escape to exactly one action: surface, then selection', () => {
     const { result } = renderHook(({ ctx }: { ctx: SatInteractionContext }) => useSatInteractionController(ctx), {
       initialProps: {
         ctx: {
@@ -90,22 +106,31 @@ describe('useSatInteractionController (only public mutation surface)', () => {
         },
       },
     });
-    act(() => result.current.setAnnotationMode('highlight'));
-    expect(result.current.state.annotation.mode).toBe('highlight');
+    const anchor = { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' };
+    act(() => result.current.selectionCaptured(anchor));
+    expect(result.current.state.annotation.selection).toEqual(anchor);
+    let acted = false;
+    // 1) The selection is the innermost annotation state: Escape clears it.
+    act(() => {
+      acted = result.current.handleEscape();
+    });
+    expect(acted).toBe(true);
+    expect(result.current.state.annotation.selection).toBeNull();
+    // 2) Nothing left to clear.
+    act(() => {
+      acted = result.current.handleEscape();
+    });
+    expect(acted).toBe(false);
+    // 3) Opening a surface drops the selection (one live annotation target),
+    //    and the surface itself is the next thing Escape closes.
+    act(() => result.current.selectionCaptured(anchor));
     act(() => result.current.openNavigator());
     expect(result.current.is.navigatorOpen).toBe(true);
-    let acted = false;
+    expect(result.current.state.annotation.selection).toBeNull();
     act(() => {
       acted = result.current.handleEscape();
     });
     expect(acted).toBe(true);
     expect(result.current.is.navigatorOpen).toBe(false);
-    // Annotation mode persists through navigator Escape (conflict matrix).
-    expect(result.current.state.annotation.mode).toBe('highlight');
-    act(() => {
-      acted = result.current.handleEscape();
-    });
-    expect(acted).toBe(true);
-    expect(result.current.state.annotation.mode).toBe('off');
   });
 });

@@ -157,19 +157,42 @@ export const SAT_COPY = {
     offlineBlocked: "You are offline. Answers are kept on this device.",
     errorBlocked: "Saving needs attention before you can submit.",
   },
+  // Highlights & Notes (self-teaching pass). Every control carries a written
+  // label: the feature is meant to be understood by using it, with no tutorial
+  // to read, so "Add note" always appears next to the note glyph.
   annotations: {
     limitReached: "Note limit reached (200) for this question \u2014 remove one to add another.",
+    // One labeled top-bar entry. Never dynamically shortened: an icon-only
+    // entry would have to be decoded, and decoding is what this pass removes.
+    toolLabel: "Highlights & Notes",
+    toolLabelHasAnnotations: "Highlights & Notes, has annotations",
+    // Action affordance names shared by the toolbar, dock, and edit dock.
     highlight: "Highlight",
     underline: "Underline",
-    eraser: "Eraser",
-    highlightArmed: "Highlighting \u2014 select text.",
-    // Mode strings kept for the sr-only armed status + interaction machine.
-    // The top bar exposes separate annotation and Question note entries; the
-    // highlight/underline armed indicators are silent (no visible bar).
-    underlineArmed: "Underlining \u2014 select text.",
-    noteArmed: "Note mode \u2014 select text to attach a note.",
-    eraserArmed: "Eraser on \u2014 select highlighted or underlined text to remove it.",
-    done: "Done",
+    selectedTextActions: "Selected text actions",
+    editAnnotation: "Edit annotation",
+    // Passive first-use hint: one quiet line under the tool entry, shown once
+    // per attempt, dismissed by the first selection (or the first answer).
+    firstUseHint: "Select text to highlight",
+    // First highlight only: the mark itself is the feedback; this label just
+    // confirms the mental model once and is gone.
+    highlightedConfirmation: "Highlighted",
+    removedHighlight: "Highlight removed",
+    removedUnderline: "Underline removed",
+    undo: "Undo",
+    emptyNotesTitle: "No notes yet",
+    emptyNotesBody: "Select text in the passage, then choose Add note.",
+    selectTextCoach: "Select any text",
+    addNote: "Add note",
+    editNote: "Edit note",
+    // The note field's own teaching: a short human prompt, and the quiet
+    // confirmation that saving happened without a Save button.
+    notePlaceholder: "Add a quick note\u2026",
+    noteSaved: "Saved",
+    removeHighlight: "Remove highlight",
+    removeUnderline: "Remove underline",
+    // Polite announcements (never rendered visually).
+    underlinedAnnouncement: "Text underlined.",
   },
   blocking: {
     pausedTitle: "Your timer is paused",
@@ -246,6 +269,15 @@ export type SatCopy = typeof SAT_COPY;
 
 export function satSelectedTextLabel(quote: string): string {
   return "Selected text: " + quote;
+}
+
+/**
+ * Announced (never displayed) after a highlight lands, so assistive tech hears
+ * the same cause-and-effect the ink shows sighted students.
+ * `colorLabel` is the swatch's written name, e.g. "yellow".
+ */
+export function satHighlightedAnnouncement(colorLabel: string): string {
+  return "Text highlighted " + colorLabel + ".";
 }
 
 export function satBackToQuestionLabel(questionNumber: number): string {

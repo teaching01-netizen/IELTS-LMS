@@ -28,6 +28,53 @@ func TestSATEnvelopeRejectsMalformedAnchorsAndOversizeNotes(t *testing.T) {
 	}
 }
 
+func TestSATEnvelopeAcceptsKnownHighlightColors(t *testing.T) {
+	// Absent color (every pre-color payload) and the three shipped inks are
+	// all valid; only unknown ink is refused.
+	for _, color := range []string{"", "yellow", "blue", "pink"} {
+		an := SATTextAnnotation{ID: "a1", Kind: "highlight", Color: color, Anchor: SATTextAnchor{NodeID: "p1", StartOffset: 0, EndOffset: 4, Exact: "text"}, CreatedAt: "2026-09-06T00:00:00Z", UpdatedAt: "2026-09-06T00:00:00Z"}
+		if err := ValidatePayload(ResponsePayload{Annotations: []Annotation{{ID: "sat-annotations", Kind: "sat_annotations", Version: 2, Annotations: []SATTextAnnotation{an}}}}); err != nil {
+			t.Fatalf("color %q rejected: %v", color, err)
+		}
+	}
+	bad := SATTextAnnotation{ID: "a1", Kind: "highlight", Color: "chartreuse", Anchor: SATTextAnchor{NodeID: "p1", StartOffset: 0, EndOffset: 4, Exact: "text"}, CreatedAt: "2026-09-06T00:00:00Z", UpdatedAt: "2026-09-06T00:00:00Z"}
+	if err := ValidatePayload(ResponsePayload{Annotations: []Annotation{{ID: "sat-annotations", Kind: "sat_annotations", Version: 2, Annotations: []SATTextAnnotation{bad}}}}); err == nil {
+		t.Fatal("unknown highlight color accepted")
+	}
+	// Ink on an underline is malformed: underlines carry no color.
+	underline := SATTextAnnotation{ID: "a1", Kind: "underline", Color: "blue", Anchor: SATTextAnchor{NodeID: "p1", StartOffset: 0, EndOffset: 4, Exact: "text"}, CreatedAt: "2026-09-06T00:00:00Z", UpdatedAt: "2026-09-06T00:00:00Z"}
+	if err := ValidatePayload(ResponsePayload{Annotations: []Annotation{{ID: "sat-annotations", Kind: "sat_annotations", Version: 2, Annotations: []SATTextAnnotation{underline}}}}); err == nil {
+		t.Fatal("colored underline accepted")
+	}
+}
+
+func TestSATColoredHighlightSurvivesCanonicalResponse(t *testing.T) {
+	raw := `{"answer":"A","markedForReview":false,"eliminatedOptions":[],"annotations":[{"id":"sat-annotations","kind":"sat_annotations","version":2,"annotations":[{"id":"a1","kind":"highlight","color":"blue","anchor":{"nodeId":"stimulus:p1","startOffset":4,"endOffset":12,"exact":"evidence"},"createdAt":"2026-09-06T00:00:00Z","updatedAt":"2026-09-06T00:00:00Z"}]}]}`
+	var payload ResponsePayload
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePayload(payload); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := CanonicalJSON(payloadToAny(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(canonical), "\"color\":\"blue\"") {
+		t.Fatalf("highlight color lost during canonicalization: %s", canonical)
+	}
+	// A yellow-less payload must not gain a color key on the way through.
+	plain := SATTextAnnotation{ID: "a1", Kind: "highlight", Anchor: SATTextAnchor{NodeID: "p1", StartOffset: 0, EndOffset: 4, Exact: "text"}, CreatedAt: "2026-09-06T00:00:00Z", UpdatedAt: "2026-09-06T00:00:00Z"}
+	encoded, err := CanonicalJSON(payloadToAny(ResponsePayload{Annotations: []Annotation{{ID: "sat-annotations", Kind: "sat_annotations", Version: 2, Annotations: []SATTextAnnotation{plain}}}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "color") {
+		t.Fatalf("absent color must stay absent: %s", encoded)
+	}
+}
+
 func TestSATAnchoredNoteSurvivesCanonicalResponse(t *testing.T) {
 	raw := `{"answer":"A","markedForReview":false,"eliminatedOptions":[],"annotations":[{"id":"sat-annotations","kind":"sat_annotations","version":2,"legacyQuestionNote":"earlier note","annotations":[{"id":"a1","kind":"highlight","anchor":{"nodeId":"stimulus:p1","startOffset":4,"endOffset":12,"exact":"evidence","prefix":"The ","suffix":" shows"},"note":"Compare claim","createdAt":"2026-09-06T00:00:00Z","updatedAt":"2026-09-06T00:00:00Z"}]}]}`
 	var payload ResponsePayload

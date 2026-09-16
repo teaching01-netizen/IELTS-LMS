@@ -9,6 +9,7 @@ import { answeredSatQuestionCount } from "../domain/satSelectors";
 import { createSatReadingPreferences } from "../domain/satReadingPreferences";
 import { SatExamShell } from "../ui/SatExamShell";
 import { SatQuestionRenderer } from "../ui/question/SatQuestionRenderer";
+import { satAnnotationEducationPreviewKey } from "../infrastructure/satAnnotationEducationStore";
 import { SatReviewPage } from "../ui/review/SatReviewPage";
 import { SatCalculatorPanel } from "../ui/tools/SatCalculatorPanel";
 import { SatReferenceSheetPanel } from "../ui/tools/SatReferenceSheetPanel";
@@ -174,6 +175,12 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
         onNext={preview.commands.nextQuestion}
         onReviewModule={preview.commands.showReview}
         onSaveNote={preview.commands.setNote}
+        annotations={preview.response.annotations}
+        onAnnotationsChange={preview.commands.setAnnotations}
+        answered={Boolean(preview.response.answer.trim())}
+        // Preview teaches nothing: it gets its own key so a staff walkthrough
+        // never consumes a student's first-run cues.
+        educationKey={satAnnotationEducationPreviewKey(examId)}
       >
         <SatQuestionRenderer
           sectionKey={sectionKey(preview.section.sectionKey)}
@@ -187,7 +194,6 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
             setReadingPreferences((current) => ({ ...current, splitRatio }))
           }
           onAnswerChange={preview.commands.setAnswer}
-          onAnnotationsChange={preview.commands.setAnnotations}
           onToggleReview={preview.commands.toggleReview}
           onToggleEliminationMode={() => setEliminationMode((enabled) => !enabled)}
           onToggleEliminatedOption={preview.commands.toggleEliminatedOption}

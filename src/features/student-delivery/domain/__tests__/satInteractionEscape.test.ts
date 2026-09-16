@@ -48,20 +48,18 @@ describe('resolveEscapeAction (exactly one semantic action per press)', () => {
     expect(resolveEscapeAction(state, ctx()).type).toBe('CLOSE_SURFACE');
   });
 
-  it('clears transient selection before disabling a persistent annotation mode', () => {
-    const selecting = {
+  it('clears the live annotation selection before the line reader', () => {
+    const selected = {
       ...createSatInteractionState(),
-      annotation: { mode: 'highlight' as const, textSelection: 'selecting' as const },
+      annotation: { selection: { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' } },
     };
-    expect(resolveEscapeAction(selecting, ctx()).type).toBe('CLEAR_SELECTION');
-    const armed = {
-      ...createSatInteractionState(),
-      annotation: { mode: 'highlight' as const, textSelection: 'idle' as const },
-    };
-    expect(resolveEscapeAction(armed, ctx()).type).toBe('DISABLE_ANNOTATION_MODE');
+    expect(resolveEscapeAction(selected, ctx()).type).toBe('CLEAR_SELECTION');
+    expect(resolveEscapeAction(selected, ctx(), { lineReaderEnabled: true }).type).toBe('CLEAR_SELECTION');
+    // With no selection the line reader is the next thing Escape turns off.
+    expect(resolveEscapeAction(createSatInteractionState(), ctx(), { lineReaderEnabled: true }).type).toBe('DISABLE_LINE_READER');
   });
 
-  it('is a NOOP when nothing is open, armed, or selecting', () => {
+  it('is a NOOP when nothing is open, selected, or reading-aided', () => {
     expect(resolveEscapeAction(createSatInteractionState(), ctx()).type).toBe('NOOP');
   });
 });

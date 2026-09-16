@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useSatMediaQuery } from "../useSatMediaQuery";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
 import { SAT_COPY } from "../../domain/satCopy";
+import { satHighlightInk } from "../annotations/satAnnotationPalette";
+import type { SatTextAnnotation } from "../../domain/satResponses";
 import { satReadingStyle } from "../reading/satReadingStyle";
 import { SatPopoverShell, SAT_COMPACT_POPOVER_QUERY } from "../primitives/SatPopoverShell";
 import type { RefObject } from "react";
@@ -14,19 +16,32 @@ export interface SatNotesPanelProps {
   returnFocusId: string;
   triggerRef?: RefObject<HTMLButtonElement | null>;
   questionNumber?: number;
+  /**
+   * Notes attached to selected passage text, in the order they appear in the
+   * passage. This panel is the student's answer to "what have I marked up?".
+   */
+  annotations?: readonly SatTextAnnotation[] | undefined;
+  /** Open the note card for one anchored note (also emphasizes its source). */
+  onOpenAnnotation?: ((annotationId: string) => void) | undefined;
+  /** Empty-state content, supplied by the caller so this panel stays generic. */
+  emptyState?: ReactNode | undefined;
   onSave: (note: string) => void;
   onClose: () => void;
 }
 
 /**
- * Question note panel — freeform per-question note (Phase 3 copy, Phase 0 focus).
+ * Notes home for the current question (Highlights & Notes).
  *
- * One of the two note concepts: this is the QUESTION note (freeform text for
- * this question), distinct from a NOTE ON SELECTED TEXT (anchored to a
- * passage selection). Title and labels come from the copy table; the focus
- * contract (focus-in on every open, focus-back on every close) comes from
- * SatPopoverShell. The textarea keeps a single label source (wrapping label;
- * no redundant aria-label) with the character count exposed via describedby.
+ * Two note concepts live here on purpose, because students experience them as
+ * one thing called "my notes":
+ * - notes anchored to selected passage text (listed first, each with the ink
+ *   dot of the mark it hangs off and the quoted source), and
+ * - the freeform QUESTION note, which has always persisted per question.
+ *
+ * Title and labels come from the copy table; the focus contract (focus-in on
+ * every open, focus-back on every close) comes from SatPopoverShell. The
+ * textarea keeps a single label source (wrapping label; no redundant
+ * aria-label) with the character count exposed via describedby.
  */
 export function SatNotesPanel(props: SatNotesPanelProps) {
   const [draft, setDraft] = useState(props.note);
@@ -86,6 +101,8 @@ export function SatNotesPanel(props: SatNotesPanelProps) {
 
   const dialogName =
     props.questionNumber !== undefined ? SAT_COPY.questionNote.title + " \u2014 question " + props.questionNumber : SAT_COPY.questionNote.title;
+  const annotations = props.annotations ?? [];
+  const showsEmptyState = annotations.length === 0 && props.note.trim().length === 0;
 
   return (
     <SatPopoverShell
@@ -107,6 +124,38 @@ export function SatNotesPanel(props: SatNotesPanelProps) {
         <span className="sat-type-control-secondary font-semibold text-[var(--sat-text)]">{SAT_COPY.questionNote.fieldLabel}</span>
       </div>
       <div className="p-3" style={panelStyle}>
+        {annotations.length > 0 ? (
+          <ul data-sat-notes-list="true" className="mb-3 flex flex-col gap-2">
+            {annotations.map((annotation) => (
+              <li key={annotation.id}>
+                <button
+                  type="button"
+                  data-sat-note-row={annotation.id}
+                  disabled={props.disabled || !props.onOpenAnnotation}
+                  onClick={() => props.onOpenAnnotation?.(annotation.id)}
+                  className="sat-touch-target sat-pressable flex w-full items-start gap-2 rounded-[6px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] px-2 py-2 text-left hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed disabled:text-[var(--sat-disabled-text)]"
+                >
+                  {/* Same ink dot as the mark in the passage: the visual link
+                      between a note and its source, without drawing a line. */}
+                  <span
+                    aria-hidden="true"
+                    className="mt-1 h-[14px] w-[14px] shrink-0 rounded-full border border-[var(--sat-divider-strong)]"
+                    style={{ backgroundColor: satHighlightInk(annotation.color).swatch }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate sat-type-metadata italic text-[var(--sat-text-secondary)]">
+                      {annotation.anchor.exact}
+                    </span>
+                    <span className="mt-0.5 block line-clamp-2 sat-type-control-secondary text-[var(--sat-text)]">
+                      {annotation.note}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {showsEmptyState && props.emptyState ? props.emptyState : null}
         <label htmlFor="sat-question-note" className="block sat-type-control-secondary font-normal text-[var(--sat-text-secondary)]">
           <span className="sr-only">{SAT_COPY.questionNote.fieldLabel}</span>
           {/* eslint-disable-next-line jsx-a11y/control-has-associated-label -- label text comes from the SAT_COPY table (non-literal); association is real via wrapping label + htmlFor. */}

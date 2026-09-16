@@ -69,13 +69,23 @@ describe('resolveSatInteractionIntent (intent, not mutation)', () => {
     ).toEqual({ type: 'ANNOTATION_NOTE_EDITOR_CLOSED' });
   });
 
-  it('refuses annotation intents outside R&W capability', () => {
+  it('refuses text-selection capture outside R&W capability', () => {
+    // There is no armed mode to request any more: selecting text IS the
+    // intent, and the annotation capability is what gates it.
+    const anchor = { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' } as const;
     expect(
       resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), {
-        type: 'ANNOTATION_MODE_REQUESTED',
-        mode: 'highlight',
+        type: 'TEXT_SELECTION_CAPTURED',
+        anchor,
       }),
     ).toBeNull();
+    const rw = { ...mathCtx(), toolPolicy: { ...mathCtx().toolPolicy, highlight: true, underline: true, notes: true } };
+    expect(
+      resolveSatInteractionIntent(createSatInteractionState(), rw, {
+        type: 'TEXT_SELECTION_CAPTURED',
+        anchor,
+      }),
+    ).toEqual({ type: 'TEXT_SELECTION_CAPTURED', anchor });
   });
 
   it('maps question navigation intent to an explicit scope transition', () => {

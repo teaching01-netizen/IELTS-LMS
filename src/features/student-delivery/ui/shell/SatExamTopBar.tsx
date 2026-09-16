@@ -1,12 +1,11 @@
 import { useId, useRef, type Ref } from "react";
-import { BookOpen, Calculator, ChevronDown, EllipsisVertical, Eraser, Highlighter, Pencil, Underline } from "lucide-react";
+import { BookOpen, Calculator, ChevronDown, EllipsisVertical, Highlighter } from "lucide-react";
 import { SAT_COPY } from "../../domain/satCopy";
 import type { StructuredContent } from "../../../exam-authoring/api/assessmentContracts";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
 import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
 import { SatDirectionsPopover } from "./SatDirectionsPopover";
 import { SatReadingPopover } from "./SatReadingPopover";
-import type { SatAnnotationMode } from '../annotations/SatAnnotationModeContext';
 
 export interface SatExamTopBarProps {
   sectionLabel: string;
@@ -21,14 +20,10 @@ export interface SatExamTopBarProps {
   calculatorOpen: boolean;
   referenceAvailable: boolean;
   referenceOpen: boolean;
-  /** R&W-only. When false the Notes tool is hidden instead of disabled. */
+  /** R&W-only. When false the Highlights & Notes entry is hidden, not disabled. */
   notesAvailable: boolean;
-  /** True when the current question already has a question note (has-note dot). */
-  hasQuestionNote?: boolean | undefined;
-  annotationMode?: SatAnnotationMode;
-  onToggleHighlights?: (() => void) | undefined;
-  onToggleUnderline: () => void;
-  onToggleErase: () => void;
+  /** True when the current question already carries marks or a note (dot). */
+  hasAnnotations?: boolean | undefined;
   notesOpen: boolean;
   notesButtonId: string;
   moreOpen: boolean;
@@ -125,44 +120,22 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
         </div>
 
         <div className="relative col-span-2 row-start-2 flex min-w-0 flex-wrap items-center justify-end gap-1 self-stretch lg:col-span-1 lg:col-start-auto lg:row-start-auto lg:flex-nowrap" role="group" aria-label="Test tools">
-          {/* Annotation tools and Question note (freeform per-question panel)
-              are separate top-bar entries. The note is always reachable when
-              available, never gated on an annotation mode. */}
-          {props.notesAvailable ? (
-            <>
-              <TopToolButton
-                label={SAT_COPY.annotations.highlight}
-                pressed={props.annotationMode === 'highlight'}
-                disabled={props.blocked}
-                onClick={() => props.onToggleHighlights?.()}
-                icon={<Highlighter className="h-5 w-5" aria-hidden="true" />}
-              />
-              <TopToolButton
-                label={SAT_COPY.annotations.underline}
-                pressed={props.annotationMode === 'underline'}
-                disabled={props.blocked}
-                onClick={props.onToggleUnderline}
-                icon={<Underline className="h-5 w-5" aria-hidden="true" />}
-              />
-              <TopToolButton
-                label={SAT_COPY.annotations.eraser}
-                pressed={props.annotationMode === 'erase'}
-                disabled={props.blocked}
-                onClick={props.onToggleErase}
-                icon={<Eraser className="h-5 w-5" aria-hidden="true" />}
-              />
-            </>
-          ) : null}
+          {/* ONE labeled entry for Highlights & Notes. The label is never
+              shortened to an icon-only state: a bare highlighter glyph would
+              have to be decoded, and the whole point of this pass is that a
+              first-time student never has to decode anything. The panel it
+              opens lists anchored notes and the freeform question note. */}
           {props.notesAvailable ? (
             <TopToolButton
               id={props.notesButtonId}
               dataSatFocus="topbar-notes"
-              label="Question note"
+              label={SAT_COPY.annotations.toolLabel}
+              indicatorLabel={SAT_COPY.annotations.toolLabelHasAnnotations}
               pressed={props.notesOpen}
               disabled={props.blocked}
               onClick={props.onToggleNotes}
-              hasIndicator={props.hasQuestionNote}
-              icon={<Pencil className="h-5 w-5" aria-hidden="true" />}
+              hasIndicator={props.hasAnnotations}
+              icon={<Highlighter className="h-5 w-5" aria-hidden="true" />}
             />
           ) : null}
           <div className="sat-popover-anchor relative shrink-0">
@@ -241,6 +214,7 @@ function TopToolButton({
   pressed,
   disabled,
   hasIndicator,
+  indicatorLabel,
   onClick,
 }: {
   id?: string;
@@ -252,6 +226,8 @@ function TopToolButton({
   pressed: boolean;
   disabled: boolean;
   hasIndicator?: boolean | undefined;
+  /** Spoken suffix while the indicator dot is present (defaults to "has note"). */
+  indicatorLabel?: string | undefined;
   onClick: () => void;
 }) {
   return (
@@ -264,7 +240,7 @@ function TopToolButton({
       onClick={onClick}
       disabled={disabled}
       aria-pressed={pressed}
-      aria-label={hasIndicator === true ? label + ", has note" : label}
+      aria-label={hasIndicator === true ? (indicatorLabel ?? label + ", has note") : label}
       className="sat-touch-target sat-pressable relative flex min-w-11 items-center justify-center gap-1.5 px-2 min-[420px]:min-w-[72px] sat-type-control-secondary font-medium text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] lg:h-[66px] lg:min-w-[68px] lg:flex-col lg:gap-1"
     >
       {icon}

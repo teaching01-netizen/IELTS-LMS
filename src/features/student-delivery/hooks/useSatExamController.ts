@@ -568,7 +568,9 @@ export function useSatExamController({
             questionId: response.examQuestionId,
             answer,
             markedForReview: response.markedForReview,
-            eliminatedOptionIds: [...response.eliminatedOptions],
+            // Optional-field defaults (hydration contract): a missing or null
+            // projections field must hydrate as empty, never throw.
+            eliminatedOptionIds: Array.isArray(response.eliminatedOptions) ? [...response.eliminatedOptions] : [],
             annotations: normalizeSatAnnotations(response.annotations),
           },
         });

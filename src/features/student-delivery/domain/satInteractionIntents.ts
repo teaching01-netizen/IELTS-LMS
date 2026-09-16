@@ -1,4 +1,5 @@
 import { satInteractionCan } from './satInteractionGuards';
+import type { SatTextAnchor } from './satResponses';
 import type {
   SatInteractionContext,
   SatInteractionEvent,
@@ -22,13 +23,11 @@ export type SatInteractionIntent =
   | { type: 'ANNOTATION_NOTE_REQUESTED'; annotationId: string; returnFocus?: SatInteractionFocusTarget }
   | { type: 'CALCULATOR_TOGGLE_REQUESTED' }
   | { type: 'REFERENCE_TOGGLE_REQUESTED' }
-  | { type: 'ANNOTATION_MODE_REQUESTED'; mode: 'highlight' | 'underline' | 'note' | 'erase' | 'off' }
   | { type: 'SURFACE_CLOSE_REQUESTED' }
   | { type: 'SURFACE_TOGGLE_REQUESTED'; surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes' | 'more-menu'; returnFocus?: SatInteractionFocusTarget }
   | { type: 'ESCAPE_PRESSED'; lineReaderEnabled?: boolean | undefined }
   | { type: 'QUESTION_NAVIGATION_REQUESTED'; moduleKey: string; questionId: string }
-  | { type: 'TEXT_SELECTION_STARTED' }
-  | { type: 'TEXT_SELECTION_CAPTURED' }
+  | { type: 'TEXT_SELECTION_CAPTURED'; anchor: SatTextAnchor }
   | { type: 'TEXT_SELECTION_CLEARED' }
   | { type: 'ANNOTATION_EDITOR_CLOSED' }
   | { type: 'MODULE_SCOPE_CHANGED'; moduleKey: string; questionId: string }
@@ -59,6 +58,8 @@ function defaultReturnFocus(
  * Conflict matrix (executable policy):
  * - navigator/directions/reading/notes replace each other (exclusive surface)
  * - annotation editor rejects competing surfaces until resolved
+ * - text selection is captured with no armed mode; the annotation capability
+ *   plus the interaction gate are the only preconditions
  * - calculator/reference are runner-owned independent layers; intents refuse them here and opening a tool never closes the exclusive surface (shell coexistence contract).
  * - question navigation clears transient selection, closes editor+panels+navigator
  * - scope change resets harder (annotation off, tools closed)
@@ -119,10 +120,6 @@ export function resolveSatInteractionIntent(
     case 'CALCULATOR_TOGGLE_REQUESTED':
     case 'REFERENCE_TOGGLE_REQUESTED':
       return null;
-    case 'ANNOTATION_MODE_REQUESTED': {
-      if (intent.mode !== 'off' && !satInteractionCan.annotate(state, ctx)) return null;
-      return { type: 'ANNOTATION_MODE_CHANGED', mode: intent.mode };
-    }
     case 'SURFACE_CLOSE_REQUESTED': {
       if (state.surface.kind === 'none') return null;
       return state.surface.kind === 'annotation-note-editor'
@@ -172,11 +169,9 @@ export function resolveSatInteractionIntent(
         moduleKey: intent.moduleKey,
         questionId: intent.questionId,
       };
-    case 'TEXT_SELECTION_STARTED':
-      if (!satInteractionCan.annotate(state, ctx)) return null;
-      return { type: 'TEXT_SELECTION_STARTED' };
     case 'TEXT_SELECTION_CAPTURED':
-      return { type: 'TEXT_SELECTION_CAPTURED' };
+      if (!satInteractionCan.annotate(state, ctx)) return null;
+      return { type: 'TEXT_SELECTION_CAPTURED', anchor: intent.anchor };
     case 'TEXT_SELECTION_CLEARED':
       return { type: 'TEXT_SELECTION_CLEARED' };
     case 'ANNOTATION_EDITOR_CLOSED':

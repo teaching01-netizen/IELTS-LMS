@@ -305,35 +305,111 @@ test.describe("SAT student accessibility and layout", () => {
     await expect.poll(() => passage.evaluate((element) => element.scrollTop)).toBe(scrollTop);
   });
 
-  test('Reading and Writing exposes underline and erases both annotation types', async ({ page }) => {
+  test('selected text raises labeled highlight controls that recolor, underline, and undo removal', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await openSatHarness(page);
 
-    await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Underline', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toBeVisible();
+    // No armed paint tool in the top bar anymore: the controls belong to the
+    // selection, so a first-time student meets them exactly when they are
+    // useful.
+    await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Underline', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await selectStimulusText(page, 'Several');
+    const selectionToolbar = page.getByRole('toolbar', { name: 'Selected text actions' });
+    await expect(selectionToolbar).toBeVisible();
+    // The heading is what links "selected text" to "highlight" unaided.
+    await expect(selectionToolbar).toContainText('Highlight');
+    await selectionToolbar.getByRole('button', { name: 'Highlight Blue' }).click();
     await expect(page.locator('[data-sat-highlight="true"]')).toContainText('Several');
+    await expect(page.locator('[data-sat-highlight="true"]').first()).toHaveAttribute('data-sat-highlight-color', 'blue');
 
-    await page.getByRole('button', { name: 'Underline', exact: true }).click();
+    // Forgiving recolor: one tap on the mark, one tap on the new ink — never
+    // delete-then-redraw.
+    await page.locator('[data-sat-highlight="true"]').first().click();
+    const editDock = page.getByRole('toolbar', { name: 'Edit annotation' });
+    await expect(editDock).toBeVisible();
+    await expect(editDock.getByRole('button', { name: 'Highlight Blue' })).toHaveAttribute('aria-pressed', 'true');
+    await editDock.getByRole('button', { name: 'Highlight Pink' }).click();
+    await expect(page.locator('[data-sat-highlight="true"]').first()).toHaveAttribute('data-sat-highlight-color', 'pink');
+
     await selectStimulusText(page, 'researchers');
+    await page.getByRole('toolbar', { name: 'Selected text actions' }).getByRole('button', { name: 'Underline' }).click();
     await expect(page.locator('[data-sat-underline="true"]')).toContainText('researchers');
 
-    await page.getByRole('button', { name: 'Eraser', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.locator('[data-sat-erase-armed="true"]')).toHaveCount(2);
-
-    await selectStimulusText(page, 'Several');
-    await expect(page.locator('[data-sat-highlight="true"]')).toHaveCount(0);
-    await selectStimulusText(page, 'researchers');
+    // Removal is undoable instead of confirmed, and the mark itself names the
+    // removal after its kind.
+    await page.locator('[data-sat-underline="true"]').first().click();
+    await page.getByRole('toolbar', { name: 'Edit annotation' }).getByRole('button', { name: 'Remove underline' }).click();
     await expect(page.locator('[data-sat-underline="true"]')).toHaveCount(0);
+    await expect(page.getByTestId('sat-undo-toast')).toContainText('Underline removed');
+    await page.getByTestId('sat-undo-toast').getByRole('button', { name: 'Undo' }).click();
+    await expect(page.locator('[data-sat-underline="true"]')).toContainText('researchers');
 
+    // Math keeps the surface entirely: no top-bar entry, no selection tools.
     await openSatHarness(page, { mode: 'math' });
     await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Underline', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Highlights & Notes/ })).toHaveCount(0);
+    await expect(page.locator('[data-sat-annotation-region="stimulus"]')).toHaveCount(0);
+  });
+
+  test('a selection hands the keyboard to the toolbar, and a drag on a mark is not a tap', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 768 });
+    await openSatHarness(page);
+    const passage = page.locator('[data-sat-annotation-region="stimulus"] p').first();
+    const box = (await passage.boundingBox())!;
+
+    await page.mouse.move(box.x + 6, box.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 120, box.y + 12, { steps: 10 });
+    await page.mouse.up();
+    const toolbar = page.getByRole('toolbar', { name: 'Selected text actions' });
+    await expect(toolbar).toBeVisible();
+
+    // The caret lands on the primary action, so the mark is one keystroke away
+    // and the arrow-key walk is reachable at all.
+    await expect(toolbar.getByRole('button', { name: 'Highlight Yellow' })).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(toolbar.getByRole('button', { name: 'Highlight Blue' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-sat-highlight-color="blue"]')).toHaveCount(1);
+
+    // A drag that ends on an existing mark is a student selecting NEW text: the
+    // toolbar must survive and the edit dock must not steal the gesture.
+    const mark = page.locator('[data-sat-highlight="true"]').first();
+    const markBox = (await mark.boundingBox())!;
+    await page.mouse.move(markBox.x + markBox.width - 3, markBox.y + markBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(markBox.x + 2, markBox.y + markBox.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await expect(toolbar).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Edit annotation' })).toHaveCount(0);
+
+    // A real tap still opens the editor, the editor takes the caret, and the
+    // mark itself reads as the one being edited.
+    await mark.click();
+    const editDock = page.getByRole('toolbar', { name: 'Edit annotation' });
+    await expect(editDock).toBeVisible();
+    await expect(editDock.getByRole('button', { name: 'Highlight Yellow' })).toBeFocused();
+    await expect(mark).toHaveAttribute('data-sat-annotation-active', 'true');
+  });
+
+  test('axe: the selection toolbar and the edit dock report no critical or serious violations', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openSatHarness(page);
+
+    await selectStimulusText(page, 'Several');
+    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toBeVisible();
+    await expectNoSeriousAxeViolations(page, 'selection toolbar over a live selection');
+
+    await page.getByRole('toolbar', { name: 'Selected text actions' }).getByRole('button', { name: 'Highlight Yellow' }).click();
+    await page.locator('[data-sat-highlight="true"]').first().click();
+    await expect(page.getByRole('toolbar', { name: 'Edit annotation' })).toBeVisible();
+    await expectNoSeriousAxeViolations(page, 'edit dock for an existing highlight');
   });
 
   test('desktop reading keeps the split divider without layout mode controls', async ({ page }) => {
@@ -381,10 +457,11 @@ test.describe("SAT student accessibility and layout", () => {
     await page.mouse.click(1000, 740);
     await expect(page.getByRole("dialog", { name: "Directions" })).toHaveCount(0);
 
-    // Phase 3: two note concepts — TopBar "Question note" panel (freeform)
-    // vs contextual "Annotate" (note on selected text). This asserts the
-    // panel path: focus-in, autosave draft, Escape focus-back, reopen value.
-    const notes = page.getByRole("button", { name: /Question note/ });
+    // Two note concepts, one entry: the top bar's "Highlights & Notes" panel
+    // lists notes anchored to selected text and keeps the freeform question
+    // note below them. This asserts the panel path: focus-in, autosave draft,
+    // Escape focus-back, reopen value.
+    const notes = page.getByRole("button", { name: /Highlights & Notes/ });
     await notes.click();
     const notesDialog = page.getByRole("dialog", { name: /Question note/ });
     await expect(notesDialog).toBeVisible();
@@ -1070,12 +1147,11 @@ test.describe("SAT student accessibility and layout", () => {
         scrollWidth: document.documentElement.scrollWidth,
       }));
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 1);
-      // KNOWN Phase 6 finding (top-bar crowding): at 200% text the R&W
-      // annotation row (Highlight/Underline/Annotate/Eraser/Line Reader)
-      // overlaps the timer cluster below 1024px ("Hide timer overlaps
-      // Highlight" at 768). Page-level reflow holds (no horizontal
-      // overflow); the overlap resolves with the Phase 6 Tools-overflow
-      // menu. Overlap helper applies at >= 1024px in this 200% loop.
+      // The R&W annotation row is gone from the top bar (one labeled
+      // "Highlights & Notes" entry replaced the armed
+      // Highlight/Underline/Annotate/Eraser cluster), so the old 768px
+      // "Hide timer overlaps Highlight" crowding finding no longer applies.
+      // Overlap helper still runs at >= 1024px in this 200% loop.
       if (viewport.width >= 1024) {
         await expectButtonsDoNotOverlap(page, ".sat-exam-topbar");
         await expectButtonsDoNotOverlap(page, ".sat-exam-footer");
@@ -1091,7 +1167,7 @@ test.describe("SAT student accessibility and layout", () => {
     await page.setViewportSize({ width: 320, height: 568 });
     // Display text-scale also scales the question-note textarea (same
     // reading token): still 200% here, so the note surface must scale too.
-    await page.getByRole("button", { name: /Question note/ }).click();
+    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
     const noteField = page.getByRole("textbox", { name: "Note for this question" });
     const noteSize = await noteField.evaluate((element) =>
       Number.parseFloat(getComputedStyle(element).fontSize)
@@ -1423,8 +1499,8 @@ test.describe("SAT student accessibility and layout", () => {
     await expectNoSeriousAxeViolations(page, "Display settings dialog");
     await page.keyboard.press("Escape");
 
-    await page.getByRole("button", { name: /Question note/ }).click();
-    await expectNoSeriousAxeViolations(page, "Question note dialog");
+    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await expectNoSeriousAxeViolations(page, "Highlights & Notes panel");
     await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: /open question navigator/i }).click();

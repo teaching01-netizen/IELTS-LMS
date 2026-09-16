@@ -183,6 +183,10 @@ export function SatAccessibilityDebugRoute() {
         onSaveNote={(note) =>
           setResponse((current) => ({ ...current, annotations: { ...current.annotations, legacyQuestionNote: note } }))
         }
+        annotations={response.annotations}
+        onAnnotationsChange={(annotations) => setResponse((current) => ({ ...current, annotations }))}
+        answered={Boolean(response.answer.trim())}
+        educationKey="debug-attempt"
       >
         <SatQuestionRenderer
           sectionKey={math ? "math" : "reading-writing"}
@@ -196,7 +200,6 @@ export function SatAccessibilityDebugRoute() {
             reading.setPreferences((current) => ({ ...current, splitRatio }))
           }
           onAnswerChange={(answer) => setResponse((current) => ({ ...current, answer }))}
-          onAnnotationsChange={(annotations) => setResponse((current) => ({ ...current, annotations }))}
           onToggleReview={() =>
             setResponse((current) => ({ ...current, markedForReview: !current.markedForReview }))
           }
