@@ -39,7 +39,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/api ./cmd/api \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/migrate ./cmd/migrate \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/worker ./cmd/worker
 
-FROM debian:bookworm-slim AS runner
+FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
 
@@ -57,8 +57,8 @@ COPY --from=backend-builder /out/worker /app/worker
 COPY --from=frontend-builder /app/dist /app/frontend/dist
 # The frontend builder already installs the root dependency tree used by the
 # co-edit runtime. Copy only its runtime entrypoint, shared wire-format files,
-# and dependencies into the final image.
-COPY --from=frontend-builder /usr/local/bin/bun /usr/local/bin/bun
+# and dependencies into the final image. Hocuspocus must run under Node; its
+# crossws Node adapter intentionally rejects Bun.
 COPY --from=frontend-builder /app/node_modules /app/node_modules
 COPY --from=frontend-builder /app/package.json /app/package.json
 COPY --from=frontend-builder /app/services/authoring-coedit/tsconfig.json /app/services/authoring-coedit/tsconfig.json
@@ -109,7 +109,7 @@ API_PID=$!
 
 # The process has its own singleton lock and exits on lock loss, so duplicate
 # backend replicas must not both claim the same authoring rooms.
-/usr/local/bin/bun run /app/services/authoring-coedit/src/main.ts &
+/usr/local/bin/node /app/node_modules/tsx/dist/cli.mjs /app/services/authoring-coedit/src/main.ts &
 COEDIT_PID=$!
 
 # BACKGROUND_RUNTIME_MODE mirrors the Rust topology. Activity-driven mode is

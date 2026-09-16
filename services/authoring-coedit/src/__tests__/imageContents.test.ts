@@ -23,6 +23,7 @@ import { describe, expect, it } from "vitest";
 
 const SERVICE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const REPO_ROOT = resolve(SERVICE_DIR, "..", "..");
+const RAILWAY_DOCKERFILE = join(REPO_ROOT, "backend", "Dockerfile");
 
 /** COPY sources, repo-relative. The final token of each COPY is its destination. */
 function copiedSources(): string[] {
@@ -107,5 +108,16 @@ describe("co-editing service image", () => {
       .filter((entry) => !isCopied(entry.target, copies))
       .map((entry) => `${entry.target} (imported by ${entry.importer} via ${entry.specifier})`);
     expect(missing).toEqual([]);
+  });
+
+  it("runs Hocuspocus with the Node runtime instead of Bun", () => {
+    const dockerfile = readFileSync(RAILWAY_DOCKERFILE, "utf8");
+    expect(dockerfile).toContain("FROM node:22-bookworm-slim AS runner");
+    expect(dockerfile).toContain(
+      "/usr/local/bin/node /app/node_modules/tsx/dist/cli.mjs /app/services/authoring-coedit/src/main.ts &",
+    );
+    expect(dockerfile).not.toContain(
+      "/usr/local/bin/bun run /app/services/authoring-coedit/src/main.ts &",
+    );
   });
 });
