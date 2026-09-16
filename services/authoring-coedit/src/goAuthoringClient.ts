@@ -213,12 +213,33 @@ const NON_RETRYABLE_REASONS: ReadonlySet<string> = new Set([
   "coedit_stale_cache",
 ]);
 
+/**
+ * Reads the domain reason out of a refused private call.
+ *
+ * The private surface writes Go's error envelope FLAT
+ * (`{code, message, details, requestId}`, see `httpx.WriteError` +
+ * `apperrors.Envelope`). Reading only the nested `{error: {details}}` form —
+ * which the browser-facing envelope uses elsewhere — silently returned null for
+ * every refusal in production, so the service could not tell a resync-required
+ * fence from a transient failure and told the browser to retry a write that
+ * could never be accepted. Both shapes are read here; an unrecognised body is
+ * still reported as "no reason" rather than guessed at.
+ */
 async function readCoeditReason(response: Response): Promise<string | null> {
+  let parsed: unknown;
   try {
-    const parsed = (await response.json()) as { error?: { details?: { coeditReason?: unknown } } };
-    const reason = parsed?.error?.details?.coeditReason;
-    return typeof reason === "string" ? reason : null;
+    parsed = await response.json();
   } catch {
     return null;
   }
+  if (parsed === null || typeof parsed !== "object") return null;
+  const roots: unknown[] = [(parsed as Record<string, unknown>)["error"], parsed];
+  for (const root of roots) {
+    if (root === null || typeof root !== "object") continue;
+    const details = (root as Record<string, unknown>)["details"];
+    if (details === null || typeof details !== "object") continue;
+    const reason = (details as Record<string, unknown>)["coeditReason"];
+    if (typeof reason === "string" && reason.trim() !== "") return reason;
+  }
+  return null;
 }

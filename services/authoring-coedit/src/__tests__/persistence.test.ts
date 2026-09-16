@@ -105,6 +105,18 @@ function emptyLoad(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** One keystroke's worth of content, applied straight to the prompt root. */
+function appendParagraph(document: Y.Doc, value: string): void {
+  const fragment = document.getXmlFragment("prompt");
+  document.transact(() => {
+    const paragraph = new Y.XmlElement("paragraph");
+    const text = new Y.XmlText();
+    text.insert(0, value);
+    paragraph.insert(0, [text]);
+    fragment.insert(fragment.length, [paragraph]);
+  });
+}
+
 function storeOk(
   stateHash: string,
   questionRevision = 5,
@@ -456,8 +468,13 @@ describe("CoeditPersistence.store", () => {
     expect(persistence.lastCommit(DOCUMENT_NAME)).toBeNull();
   });
 
-  it("does not acknowledge a store when the durable hash is not the current document", async () => {
-    const go = harness((_path, body) => ({ json: storeOk("not-the-current-state") }));
+  it("refuses a store whose durable hash is not the state it sent", async () => {
+    // Go acknowledged a state this room never sent: the commit is not evidence
+    // of anything, so it must not become an acknowledgement. (The live document
+    // advancing while the store was in flight is a DIFFERENT condition and is
+    // covered by the test below — the two were conflated and the room became
+    // permanently unsaveable.)
+    const go = harness(() => ({ json: storeOk("a-state-this-room-never-sent") }));
     const persistence = new CoeditPersistence(go.client);
     const frames: string[] = [];
     persistence.setBroadcaster((_name, payload) => frames.push(payload));
@@ -475,13 +492,55 @@ describe("CoeditPersistence.store", () => {
     });
   });
 
+  it("commits a store the author typed over while it was in flight", async () => {
+    // The regression: the durable hash was compared against the LIVE document,
+    // so typing during the ~70ms round trip looked like a commit mismatch. It
+    // was not benign — the commit record was left unadvanced, so the next store
+    // sent a stale previousStateHash that Go fences with
+    // `coedit_previous_hash_mismatch` forever. That is how a room became
+    // permanently unsaveable: "Couldn't save - Retry" that can never succeed.
+    const document = seedYDocFromPrompt(PROMPT);
+    const go = harness((_path, body) => {
+      // The author keeps typing while the store is in flight.
+      appendParagraph(document, "typed while saving");
+      return { json: storeOk(String(body["stateHash"])) };
+    });
+    const persistence = new CoeditPersistence(go.client);
+    const frames: string[] = [];
+    persistence.setBroadcaster((_name, payload) => frames.push(payload));
+
+    await expect(
+      persistence.store({ documentName: DOCUMENT_NAME, document, context: {} }),
+    ).resolves.toBeTruthy();
+
+    const ack = JSON.parse(frames[0] as string) as { type: string; stateHash: string };
+    expect(ack.type).toBe("coedit.ack");
+    // The commit is recorded for the state that was actually stored...
+    expect(persistence.lastCommit(DOCUMENT_NAME)?.stateHash).toBe(ack.stateHash);
+    // ...so the next store fences on that hash instead of the stale one. This
+    // second call is what used to fail forever with `coedit_previous_hash_mismatch`.
+    await expect(
+      persistence.store({ documentName: DOCUMENT_NAME, document, context: {} }),
+    ).resolves.toBeTruthy();
+    expect(go.callsTo(STORE_PATH)[1]?.body["previousStateHash"]).toBe(ack.stateHash);
+  });
+
   it("marks a moved-commit refusal as non-retryable and resync-required", async () => {
     // A service restart empties the in-memory commit map, so the next store
     // sends an empty previousStateHash; the row's committed hash moved on and
-    // the fence refuses. Retrying verbatim can never satisfy it.
+    // the fence refuses. Retrying verbatim can never satisfy it. The body is
+    // the private surface's real shape: Go writes its error envelope FLAT
+    // (httpx.WriteError), and reading only a nested `{error: {details}}` form
+    // silently dropped this reason in production, which turned the refusal
+    // back into an endlessly clickable Retry.
     const go = harness(() => ({
       status: 409,
-      json: { error: { code: "ASSESSMENT_CONFLICT", details: { coeditReason: "coedit_previous_hash_mismatch" } } },
+      json: {
+        code: "ASSESSMENT_CONFLICT",
+        message: "Collaboration state advanced elsewhere; reload the prompt before continuing.",
+        details: { coeditReason: "coedit_previous_hash_mismatch" },
+        requestId: "req-1",
+      },
     }));
     const persistence = new CoeditPersistence(go.client);
     const acks: string[] = [];
@@ -494,6 +553,31 @@ describe("CoeditPersistence.store", () => {
       type: "coedit.save_failed",
       documentName: DOCUMENT_NAME,
       retryable: false,
+      reason: "coedit_previous_hash_mismatch",
+      requiresResync: true,
+    });
+  });
+
+  it("still reads a reason out of a nested error envelope", async () => {
+    // Wire compatibility: a surface that wraps the envelope must not lose the
+    // reason either way round.
+    const go = harness(() => ({
+      status: 409,
+      json: {
+        error: {
+          code: "ASSESSMENT_CONFLICT",
+          details: { coeditReason: "coedit_previous_hash_mismatch" },
+        },
+      },
+    }));
+    const persistence = new CoeditPersistence(go.client);
+    const acks: string[] = [];
+    persistence.setBroadcaster((_name, payload) => acks.push(payload));
+
+    await expect(
+      persistence.store({ documentName: DOCUMENT_NAME, document: seedYDocFromPrompt(PROMPT), context: {} }),
+    ).rejects.toThrow();
+    expect(JSON.parse(acks[0] as string)).toMatchObject({
       reason: "coedit_previous_hash_mismatch",
       requiresResync: true,
     });

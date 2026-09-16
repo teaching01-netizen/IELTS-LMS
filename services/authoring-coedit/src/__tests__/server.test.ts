@@ -126,6 +126,8 @@ interface FakeGo {
   materializedPrompt: StructuredContent | null;
   lifecycle: "initializing" | "active" | "freezing" | "frozen" | "closed";
   unauthorized: number;
+  /** While true every store is refused the way Go refuses a stale fence. */
+  refuseStores: boolean;
   close(): Promise<void>;
 }
 
@@ -142,6 +144,7 @@ async function startFakeGo(
     materializedPrompt: null,
     lifecycle: options.lifecycle ?? "initializing",
     unauthorized: 0,
+    refuseStores: false,
     close: async () => {},
   };
 
@@ -229,6 +232,17 @@ async function startFakeGo(
       }
       case "/internal/authoring-coedit/store": {
         state.stores.push(body);
+        if (state.refuseStores) {
+          // Go's real refusal, in Go's real shape: the private surface writes
+          // the error envelope FLAT (httpx.WriteError + apperrors.Envelope).
+          respond(res, 409, {
+            code: "ASSESSMENT_CONFLICT",
+            message: "Collaboration state advanced elsewhere; reload the prompt before continuing.",
+            details: { coeditReason: "coedit_previous_hash_mismatch" },
+            requestId: "req-store-refused",
+          });
+          return;
+        }
         const entry = commit(String(body["documentName"]), body);
         respond(res, 200, {
           documentName: body["documentName"],
@@ -710,6 +724,66 @@ describe("service integration", () => {
     const stored = committed.getMap("workspace").get("question/q1/scalar");
     expect([JSON.stringify({ source: "alice" }), JSON.stringify({ source: "bob" })]).toContain(stored);
     expect(received.some((payload) => JSON.parse(payload).type === "coedit.seed")).toBe(false);
+  });
+
+  it("reports a refused seed store and stays up instead of dying on it", async () => {
+    // The outage this pins: a seed proposal whose store was refused rejected the
+    // `onStateless` hook. Hocuspocus does not catch a rejected stateless hook,
+    // so it was an unhandled rejection — the service exited, and from then on
+    // every browser got `503` on the co-edit socket, which is what an author
+    // sees as "Couldn't save - Retry" that never comes back with "Still
+    // saving...". One refused proposal must never cost the whole service.
+    const running = await startService();
+    const alice = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-alice" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => alice.isSynced, 5_000, "seed client");
+
+    const received: string[] = [];
+    alice.on("stateless", ({ payload }: { payload: string }) => received.push(payload));
+    const rejectedBefore = seedOutcomeCount("rejected");
+    running.go.refuseStores = true;
+
+    alice.sendStateless(
+      JSON.stringify(
+        createWorkspaceSeedFrame({
+          documentName: WORKSPACE_DOCUMENT_NAME,
+          root: "scalar",
+          path: "question/q1/scalar",
+          value: { source: "alice" },
+          sourceQuestionRevision: 1,
+        }),
+      ),
+    );
+
+    await waitFor(
+      () => seedOutcomeCount("rejected") === rejectedBefore + 1,
+      5_000,
+      "the refused seed store",
+    );
+    // The refusal reaches the editor in the vocabulary it already has (awaited,
+    // because it arrives over the socket and can land just after the metric).
+    await waitFor(
+      () => received.some((payload) => JSON.parse(payload).type === "coedit.save_failed"),
+      5_000,
+      "the refusal frame reaching the proposer",
+    );
+
+    // ...and the room is still serving: the next store is accepted.
+    running.go.refuseStores = false;
+    const storesBefore = running.go.stores.length;
+    const room = running.service.server.hocuspocus.documents.get(
+      WORKSPACE_DOCUMENT_NAME,
+    ) as unknown as Y.Doc;
+    room.transact(() => {
+      room.getMap("workspace").set("question/q2/scalar", JSON.stringify({ source: "alice" }));
+    }, "test-edit");
+    await waitFor(
+      () => running.go.stores.length > storesBefore && running.go.committedState !== null,
+      5_000,
+      "a store after the refused seed",
+    );
   });
 
   it("treats a retried seed as the same proposal and refuses a read token's seed", async () => {

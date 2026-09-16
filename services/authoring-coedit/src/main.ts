@@ -766,7 +766,14 @@ export class CoeditService {
         stage: "store",
         reason: error instanceof Error ? error.message : "other",
       });
-      throw error;
+      // Deliberately NOT rethrown. This runs inside the `onStateless` hook, and
+      // Hocuspocus does not catch a rejected stateless hook: the rejection
+      // reached the process, took the whole service down, and every browser
+      // then got a 503 on the co-edit socket — an author could not save at all
+      // because one seed proposal failed. The proposal is idempotent, its
+      // content is already in the live document (so the next debounced store
+      // commits it), and the refusal has already been broadcast to the room by
+      // the store that failed. Reporting it is the whole correct response.
     });
   }
 

@@ -492,8 +492,19 @@ export class CoeditPersistence {
       const result = finalStore
         ? await this.go.finalStore({ ...storeBody, freezeOperationId })
         : await this.go.store(storeBody);
-      const committedStateHash = currentStateHash(document);
-      if (committedStateHash !== result.stateHash) {
+      // The durable hash must be the hash of the state THIS store sent, not of
+      // the document as it stands now. Comparing against the live document
+      // made every save under active typing look like a mismatch (the author
+      // types during the ~70ms round trip, so the document has already moved
+      // on), and the failure was not benign: the commit below was skipped, so
+      // the next store sent a stale `previousStateHash` that Go fences with
+      // `coedit_previous_hash_mismatch` forever, and a seed that reached this
+      // path rejected the stateless hook that ran it. What must never happen
+      // is still enforced, twice: the acknowledgement carries the committed
+      // state VECTOR, and a client shows Saved only when that vector equals
+      // its own current one (deriveSaveState), so a document that advanced
+      // mid-store stays pending until the next store commits it.
+      if (result.stateHash !== stateHash) {
         throw new Error("coedit_commit_state_mismatch");
       }
       const commit: CoeditCommit = {
