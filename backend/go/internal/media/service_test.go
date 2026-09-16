@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"regexp"
 	"testing"
@@ -237,6 +238,36 @@ func TestCreateUploadRejectsNonImageContentType(t *testing.T) {
 	}
 }
 
+func TestUploadBytesRejectsContentTypeDifferentFromIntent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := &fakeStore{}
+	s, _ := svcWith(db, store)
+
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 1, 1)), nil); err != nil {
+		t.Fatal(err)
+	}
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
+		WillReturnRows(assetRow("asset-1", StatusPending, "media/asset-1/pic.png", "image/png"))
+	mock.ExpectRollback()
+
+	err = s.UploadBytes(context.Background(), "asset-1", encoded.Bytes(), "image/jpeg")
+	if codeOf(err) != apperrors.CodeValidation || err.Error() != "VALIDATION_ERROR: The uploaded content type does not match the upload intent." {
+		t.Fatalf("expected intent content-type validation error, got %v", err)
+	}
+	if store.putKey != "" {
+		t.Fatalf("store.Put must not run on an intent mismatch, got key %q", store.putKey)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestImportURLUsesManagedAssetLifecycle(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -391,7 +422,11 @@ func TestCompleteUploadVerifiesStoredObject(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	body := []byte("uploaded-bytes")
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	body := encoded.Bytes()
 	digest := sha256.Sum256(body)
 	checksum := fmt.Sprintf("%x", digest[:])
 	store := &fakeStore{getBody: body}
@@ -411,6 +446,37 @@ func TestCompleteUploadVerifiesStoredObject(t *testing.T) {
 	}
 	if asset.Status != StatusFinalized || asset.Checksum == nil || *asset.Checksum != checksum {
 		t.Fatalf("unexpected finalized asset: %+v", asset)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCompleteUploadRevalidatesStoredBytes(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 1, 1)), nil); err != nil {
+		t.Fatal(err)
+	}
+	body := encoded.Bytes()
+	checksum := fmt.Sprintf("%x", sha256.Sum256(body))
+	store := &fakeStore{getBody: body}
+	s, _ := svcWith(db, store)
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
+		WillReturnRows(assetRow("asset-1", StatusPending, "media/asset-1/pic.png", "image/png"))
+	mock.ExpectRollback()
+
+	if _, err := s.CompleteUpload(context.Background(), "asset-1", CompleteRequest{
+		SizeBytes: int64(len(body)),
+		Checksum:  checksum,
+	}); codeOf(err) != apperrors.CodeValidation || err.Error() != "VALIDATION_ERROR: The uploaded bytes do not match the declared image type." {
+		t.Fatalf("expected completion image-type validation error, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

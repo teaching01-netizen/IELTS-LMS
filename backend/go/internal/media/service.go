@@ -17,9 +17,11 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"mime"
 	"strings"
 
 	"github.com/google/uuid"
+	_ "golang.org/x/image/webp"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/objectstore"
@@ -30,11 +32,18 @@ import (
 const MaxUploadBytes = 10 << 20
 
 // Decoded-image limits bound decompression cost: magic bytes prove the file
-// TYPE, not its pixel cost. DecodeConfig reads headers only (no full
-// decode). WebP has no stdlib decoder, so it keeps the byte cap alone.
+// TYPE, not its pixel cost. DecodeConfig reads headers only (no full decode).
 const (
 	maxDecodedPixels  = 25_000_000
 	maxImageDimension = 8192
+)
+
+const (
+	unsupportedImageTypeMessage = "Only PNG, JPEG, GIF, or WebP images can be uploaded."
+	imageMagicMismatchMessage   = "The uploaded bytes do not match the declared image type."
+	imageIntentMismatchMessage  = "The uploaded content type does not match the upload intent."
+	imageChecksumMismatchMsg    = "The uploaded object checksum does not match the completion request."
+	imageFinalSizeMismatchMsg   = "The uploaded object size does not match the completion request."
 )
 
 // Upload states (mirrors the media_assets CHECK + maintenance.RunMedia).
@@ -159,7 +168,8 @@ func (s *Service) CreateUpload(ctx context.Context, req CreateRequest) (UploadIn
 	if strings.TrimSpace(req.OwnerKind) == "" || strings.TrimSpace(req.OwnerID) == "" {
 		return UploadIntent{}, validationError("Upload owner is required.")
 	}
-	if err := validateImageContentType(req.ContentType); err != nil {
+	contentType := normalizeContentType(req.ContentType)
+	if err := validateImageContentType(contentType); err != nil {
 		return UploadIntent{}, err
 	}
 	if req.SizeBytes != nil && *req.SizeBytes > MaxUploadBytes {
@@ -187,7 +197,7 @@ func (s *Service) CreateUpload(ctx context.Context, req CreateRequest) (UploadIn
 		}
 	}
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		if _, err := q.ExecContext(ctx, "INSERT INTO media_assets (id, owner_kind, owner_id, content_type, file_name, upload_status, object_key, size_bytes, checksum_sha256, upload_url, delete_after_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY), NOW(), NOW())", assetID, req.OwnerKind, req.OwnerID, req.ContentType, req.FileName, objectKey, nullableInt(req.SizeBytes), nullableStr(checksum), uploadURL); err != nil {
+		if _, err := q.ExecContext(ctx, "INSERT INTO media_assets (id, owner_kind, owner_id, content_type, file_name, upload_status, object_key, size_bytes, checksum_sha256, upload_url, delete_after_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY), NOW(), NOW())", assetID, req.OwnerKind, req.OwnerID, contentType, req.FileName, objectKey, nullableInt(req.SizeBytes), nullableStr(checksum), uploadURL); err != nil {
 			return err
 		}
 		return nil
@@ -199,7 +209,7 @@ func (s *Service) CreateUpload(ctx context.Context, req CreateRequest) (UploadIn
 	if err != nil {
 		return UploadIntent{}, err
 	}
-	headers := map[string]string{"content-type": req.ContentType}
+	headers := map[string]string{"content-type": contentType}
 	if checksum != nil {
 		headers["x-amz-meta-checksum-sha256"] = *checksum
 	}
@@ -243,20 +253,36 @@ func (s *Service) CompleteUpload(ctx context.Context, assetID string, req Comple
 		if s.store == nil {
 			return serviceUnavailable()
 		}
-		if a.SizeBytes != nil && *a.SizeBytes != req.SizeBytes {
-			return validationError("The uploaded object does not match the declared asset metadata.")
-		}
-		if a.Checksum != nil && !strings.EqualFold(*a.Checksum, checksum) {
-			return validationError("The uploaded object does not match the declared asset metadata.")
-		}
 		body, err := s.store.Get(ctx, a.ObjectKey)
 		if err != nil {
 			return serviceUnavailable()
 		}
+		if len(body) > MaxUploadBytes {
+			return uploadTooLargeError()
+		}
+		contentType := normalizeContentType(a.ContentType)
+		if err := validateImageContentType(contentType); err != nil {
+			return err
+		}
+		if err := validateImageMagic(body, contentType); err != nil {
+			return err
+		}
+		if err := validateDecodedImageLimits(body, contentType); err != nil {
+			return err
+		}
+		if a.SizeBytes != nil && *a.SizeBytes != req.SizeBytes {
+			return validationError(imageFinalSizeMismatchMsg)
+		}
+		if a.Checksum != nil && !strings.EqualFold(*a.Checksum, checksum) {
+			return validationError(imageChecksumMismatchMsg)
+		}
 		digest := sha256.Sum256(body)
 		actualChecksum := fmt.Sprintf("%x", digest[:])
-		if int64(len(body)) != req.SizeBytes || !strings.EqualFold(actualChecksum, checksum) {
-			return validationError("The uploaded object metadata does not match the completion request.")
+		if int64(len(body)) != req.SizeBytes {
+			return validationError(imageFinalSizeMismatchMsg)
+		}
+		if !strings.EqualFold(actualChecksum, checksum) {
+			return validationError(imageChecksumMismatchMsg)
 		}
 		downloadURL := fmt.Sprintf("/api/v1/media/%s/content", assetID)
 		res, err := q.ExecContext(ctx, "UPDATE media_assets SET upload_status = 'finalized', size_bytes = ?, checksum_sha256 = ?, download_url = ?, delete_after_at = NULL, updated_at = NOW() WHERE id = ? AND upload_status = 'pending'", req.SizeBytes, checksum, downloadURL, assetID)
@@ -372,23 +398,24 @@ func (s *Service) UploadBytes(ctx context.Context, assetID string, body []byte, 
 		return validationError("The uploaded object must not be empty.")
 	}
 	if len(body) > MaxUploadBytes {
-		return apperrors.New(apperrors.CodePayloadTooLarge, fmt.Sprintf("Upload exceeds the %d byte limit.", MaxUploadBytes))
+		return uploadTooLargeError()
 	}
+	normalizedContentType := normalizeContentType(contentType)
 	// Magic-byte sniff runs before any persistence: the declared MIME must
 	// match the actual bytes, so a renamed .exe/.svg/.html can never pass as
 	// an image. Active image formats (SVG) and non-image content are rejected.
-	if err := validateImageContentType(contentType); err != nil {
+	if err := validateImageContentType(normalizedContentType); err != nil {
 		return err
 	}
-	if err := validateImageMagic(body, contentType); err != nil {
+	if err := validateImageMagic(body, normalizedContentType); err != nil {
 		return err
 	}
-	if err := validateDecodedImageLimits(body, contentType); err != nil {
+	if err := validateDecodedImageLimits(body, normalizedContentType); err != nil {
 		return err
 	}
 	// SELECT ... FOR UPDATE on media_assets serializes upload vs janitor and
 	// captures the object key; the tx only guards the row, not the bytes.
-	var objectKey string
+	var objectKey, intentContentType string
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		a, err := scanAsset(q.QueryRowContext(ctx, "SELECT "+assetColumns+" FROM media_assets WHERE id = ? FOR UPDATE", assetID))
 		if err != nil {
@@ -400,13 +427,17 @@ func (s *Service) UploadBytes(ctx context.Context, assetID string, body []byte, 
 		if a.Status != StatusPending {
 			return validationError("The media asset is no longer accepting uploads.")
 		}
+		intentContentType = normalizeContentType(a.ContentType)
+		if intentContentType != normalizedContentType {
+			return validationError(imageIntentMismatchMessage)
+		}
 		objectKey = a.ObjectKey
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	if err := s.store.Put(ctx, objectKey, body, contentType); err != nil {
+	if err := s.store.Put(ctx, objectKey, body, intentContentType); err != nil {
 		return serviceUnavailable()
 	}
 	return nil
@@ -469,8 +500,8 @@ var allowedImageTypes = map[string]bool{
 }
 
 func validateImageContentType(contentType string) error {
-	if !allowedImageTypes[strings.ToLower(strings.TrimSpace(contentType))] {
-		return validationError("Only PNG, JPEG, GIF, or WebP images can be uploaded.")
+	if !allowedImageTypes[normalizeContentType(contentType)] {
+		return validationError(unsupportedImageTypeMessage)
 	}
 	return nil
 }
@@ -479,7 +510,7 @@ func validateImageContentType(contentType string) error {
 // signature so extension/MIME spoofing cannot smuggle executables, HTML, or
 // SVG through the upload path.
 func validateImageMagic(body []byte, contentType string) error {
-	switch strings.ToLower(strings.TrimSpace(contentType)) {
+	switch normalizeContentType(contentType) {
 	case "image/png":
 		if len(body) >= 8 && body[0] == 0x89 && body[1] == 'P' && body[2] == 'N' && body[3] == 'G' && body[4] == 0x0D && body[5] == 0x0A && body[6] == 0x1A && body[7] == 0x0A {
 			return nil
@@ -497,17 +528,13 @@ func validateImageMagic(body []byte, contentType string) error {
 			return nil
 		}
 	}
-	return validationError("The uploaded bytes do not match the declared image type.")
+	return validationError(imageMagicMismatchMessage)
 }
 
 // validateDecodedImageLimits rejects decompression bombs whose headers
 // claim more than maxDecodedPixels or an 8192px side. Header-only decode:
 // no pixel buffer is allocated. Unknown/truncated headers fail closed.
 func validateDecodedImageLimits(body []byte, contentType string) error {
-	normalized := strings.ToLower(strings.TrimSpace(contentType))
-	if normalized == "image/webp" {
-		return nil
-	}
 	config, _, err := image.DecodeConfig(bytes.NewReader(body))
 	if err != nil {
 		return validationError("The image headers could not be read.")
@@ -515,10 +542,22 @@ func validateDecodedImageLimits(body []byte, contentType string) error {
 	if config.Width <= 0 || config.Height <= 0 || config.Width > maxImageDimension || config.Height > maxImageDimension {
 		return apperrors.New(apperrors.CodePayloadTooLarge, "The image dimensions exceed the supported limit.")
 	}
-	if int64(config.Width)*int64(config.Height) > maxDecodedPixels {
+	if uint64(config.Width)*uint64(config.Height) > maxDecodedPixels {
 		return apperrors.New(apperrors.CodePayloadTooLarge, "The image pixel count exceeds the supported limit.")
 	}
 	return nil
+}
+
+func normalizeContentType(contentType string) string {
+	trimmed := strings.TrimSpace(contentType)
+	if mediaType, _, err := mime.ParseMediaType(trimmed); err == nil {
+		return strings.ToLower(mediaType)
+	}
+	return strings.ToLower(trimmed)
+}
+
+func uploadTooLargeError() *apperrors.Error {
+	return apperrors.New(apperrors.CodePayloadTooLarge, fmt.Sprintf("Upload exceeds the %d byte limit.", MaxUploadBytes))
 }
 
 func validateFileName(name string) error {
