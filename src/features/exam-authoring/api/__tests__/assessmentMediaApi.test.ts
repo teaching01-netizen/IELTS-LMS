@@ -81,6 +81,68 @@ describe("assessment media API", () => {
     );
   });
 
+  it.each([
+    [
+      "PNG",
+      Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      "image/png",
+      "source.png",
+      "asset-exact-png",
+    ],
+    [
+      "JPEG",
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]),
+      "image/jpeg",
+      "source.jpg",
+      "asset-exact-jpeg",
+    ],
+  ] as const)(
+    "sends the exact %s source bytes and completion metadata without re-encoding",
+    async (_label, sourceBytes, contentType, fileName, assetId) => {
+      const sourceBuffer = sourceBytes.slice().buffer;
+      const digestBytes = Uint8Array.from({ length: 32 }, (_, index) => index);
+      const digest = vi.fn().mockResolvedValue(digestBytes.buffer);
+      vi.stubGlobal("crypto", { subtle: { digest } });
+      const uploadResponse = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+      vi.stubGlobal("fetch", uploadResponse);
+      backendPost
+        .mockResolvedValueOnce({
+          asset: { id: assetId },
+          uploadUrl: `/api/v1/media/uploads/${assetId}`,
+          headers: { "content-type": contentType },
+        })
+        .mockResolvedValueOnce({
+          id: assetId,
+          contentType,
+          fileName,
+          uploadStatus: "finalized",
+          downloadUrl: `/api/v1/media/${assetId}/content`,
+        });
+
+      const file = {
+        name: fileName,
+        size: sourceBytes.byteLength,
+        type: contentType,
+        arrayBuffer: vi.fn().mockResolvedValue(sourceBuffer),
+      } as unknown as File;
+
+      await uploadAssessmentAsset(file, "question-exact-bytes");
+
+      expect(digest).toHaveBeenCalledWith("SHA-256", sourceBuffer);
+      const uploadInit = uploadResponse.mock.calls[0]?.[1] as RequestInit;
+      expect(uploadInit.body).toBe(file);
+      expect(new Uint8Array(await (uploadInit.body as File).arrayBuffer())).toEqual(sourceBytes);
+      expect(backendPost).toHaveBeenNthCalledWith(
+        2,
+        `/v1/media/uploads/${assetId}/complete`,
+        {
+          sizeBytes: sourceBytes.byteLength,
+          checksumSha256: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        }
+      );
+    }
+  );
+
   it("rejects unsupported declared MIME before hashing or network upload", async () => {
     const file = {
       name: "diagram.avif",

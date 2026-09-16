@@ -143,6 +143,96 @@ describe("SAT rich question composer capabilities", () => {
     }
   });
 
+  it("uploads a valid dialog file and never persists its preview URL", async () => {
+    const asset = {
+      id: "550e8400-e29b-41d4-a716-446655440001",
+      contentType: "image/png",
+      fileName: "diagram.png",
+      uploadStatus: "finalized",
+      downloadUrl: "/api/v1/media/550e8400-e29b-41d4-a716-446655440001/content",
+    };
+    uploadAssessmentAsset.mockReset().mockResolvedValue(asset);
+    getAssessmentMediaAsset.mockReset().mockResolvedValue(asset);
+    const createObjectURL = vi.fn(() => "blob:dialog-preview");
+    const revokeObjectURL = vi.fn();
+    const previousCreateObjectURL = (URL as typeof URL & {
+      createObjectURL?: typeof createObjectURL;
+    }).createObjectURL;
+    const previousRevokeObjectURL = (URL as typeof URL & {
+      revokeObjectURL?: typeof revokeObjectURL;
+    }).revokeObjectURL;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 120, height: 80, close: vi.fn() }))
+    );
+
+    try {
+      const onChange = vi.fn();
+      render(
+        <RichQuestionComposer
+          value={plainContentFromText("Question prompt")}
+          onChange={onChange}
+          label="Question prompt"
+          assetOwnerId="question-1"
+        />
+      );
+
+      await screen.findByRole("button", { name: "Insert content" });
+      fireEvent.click(screen.getByRole("button", { name: "Insert content" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Insert image or graph" }));
+
+      const file = new File(
+        [
+          Uint8Array.from([
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+          ]),
+        ],
+        "diagram.png",
+        { type: "image/png" }
+      );
+      fireEvent.change(await screen.findByLabelText("Upload image or graph"), {
+        target: { files: [file] },
+      });
+
+      await waitFor(() => expect(uploadAssessmentAsset).toHaveBeenCalledWith(file, "question-1"));
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:dialog-preview");
+      fireEvent.change(screen.getByRole("textbox", { name: /Alternative text/ }), {
+        target: { value: "A coordinate graph" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Insert visual" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(JSON.stringify(onChange.mock.calls)).toContain(asset.id);
+      expect(JSON.stringify(onChange.mock.calls)).not.toContain("blob:dialog-preview");
+    } finally {
+      if (previousCreateObjectURL) {
+        Object.defineProperty(URL, "createObjectURL", {
+          configurable: true,
+          value: previousCreateObjectURL,
+        });
+      } else {
+        delete (URL as typeof URL & { createObjectURL?: typeof createObjectURL }).createObjectURL;
+      }
+      if (previousRevokeObjectURL) {
+        Object.defineProperty(URL, "revokeObjectURL", {
+          configurable: true,
+          value: previousRevokeObjectURL,
+        });
+      } else {
+        delete (URL as typeof URL & { revokeObjectURL?: typeof revokeObjectURL }).revokeObjectURL;
+      }
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("imports an HTTPS dialog source before inserting a managed asset", async () => {
     importAssessmentImageUrl.mockReset().mockResolvedValue({
       id: "550e8400-e29b-41d4-a716-446655440000",

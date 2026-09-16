@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"hash/crc32"
 	"image"
+	"image/color"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"regexp"
@@ -137,6 +139,64 @@ func TestUploadBytesPendingHappyPath(t *testing.T) {
 	}
 	if string(store.putBody) != string(body) || store.putContentType != "image/png" {
 		t.Fatalf("store.Put got wrong body/content-type: %q %q", store.putBody, store.putContentType)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUploadBytesAcceptsValidWebPAndPreservesSource(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := &fakeStore{}
+	s, _ := svcWith(db, store)
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
+		WillReturnRows(assetRow("asset-webp", StatusPending, "media/asset-webp/pic.webp", "image/webp"))
+	mock.ExpectCommit()
+	// A valid 1x1 VP8 WebP fixture. The service must store these exact bytes;
+	// it must not decode and re-encode the source during ingestion.
+	body := []byte{
+		0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+		0x56, 0x50, 0x38, 0x20, 0x18, 0x00, 0x00, 0x00, 0x30, 0x01, 0x00, 0x9d,
+		0x01, 0x2a, 0x01, 0x00, 0x01, 0x00, 0x02, 0x00, 0x34, 0x25, 0xa4, 0x00,
+		0x03, 0x70, 0x00, 0xfe, 0xfb, 0xfd, 0x50, 0x00,
+	}
+	if err := s.UploadBytes(context.Background(), "asset-webp", body, "image/webp"); err != nil {
+		t.Fatalf("UploadBytes valid WebP must succeed: %v", err)
+	}
+	if !bytes.Equal(store.putBody, body) || store.putContentType != "image/webp" {
+		t.Fatalf("store.Put changed the WebP source: content type %q, bytes equal %v", store.putContentType, bytes.Equal(store.putBody, body))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUploadBytesAcceptsValidGIF(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := &fakeStore{}
+	s, _ := svcWith(db, store)
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
+		WillReturnRows(assetRow("asset-gif", StatusPending, "media/asset-gif/pic.gif", "image/gif"))
+	mock.ExpectCommit()
+	var encoded bytes.Buffer
+	if err := gif.Encode(&encoded, image.NewPaletted(image.Rect(0, 0, 1, 1), []color.Color{color.Black}), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UploadBytes(context.Background(), "asset-gif", encoded.Bytes(), "image/gif"); err != nil {
+		t.Fatalf("UploadBytes valid GIF must succeed: %v", err)
+	}
+	if !bytes.Equal(store.putBody, encoded.Bytes()) || store.putContentType != "image/gif" {
+		t.Fatalf("store.Put did not preserve the GIF source")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -477,6 +537,68 @@ func TestCompleteUploadRevalidatesStoredBytes(t *testing.T) {
 		Checksum:  checksum,
 	}); codeOf(err) != apperrors.CodeValidation || err.Error() != "VALIDATION_ERROR: The uploaded bytes do not match the declared image type." {
 		t.Fatalf("expected completion image-type validation error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCompleteUploadRejectsWrongFinalSizeWithoutFinalizing(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	body := encoded.Bytes()
+	checksum := fmt.Sprintf("%x", sha256.Sum256(body))
+	store := &fakeStore{getBody: body}
+	s, _ := svcWith(db, store)
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
+		WillReturnRows(assetRow("asset-1", StatusPending, "media/asset-1/pic.png", "image/png"))
+	mock.ExpectRollback()
+
+	_, err = s.CompleteUpload(context.Background(), "asset-1", CompleteRequest{
+		SizeBytes: int64(len(body)) + 1,
+		Checksum:  checksum,
+	})
+	if codeOf(err) != apperrors.CodeValidation || err.Error() != "VALIDATION_ERROR: The uploaded object size does not match the completion request." {
+		t.Fatalf("expected final-size validation error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCompleteUploadRejectsWrongChecksumWithoutFinalizing(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	body := encoded.Bytes()
+	checksum := fmt.Sprintf("%x", sha256.Sum256(append(append([]byte(nil), body...), 0x01)))
+	store := &fakeStore{getBody: body}
+	s, _ := svcWith(db, store)
+	begin(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ? FOR UPDATE")).
+		WillReturnRows(assetRow("asset-1", StatusPending, "media/asset-1/pic.png", "image/png"))
+	mock.ExpectRollback()
+
+	_, err = s.CompleteUpload(context.Background(), "asset-1", CompleteRequest{
+		SizeBytes: int64(len(body)),
+		Checksum:  checksum,
+	})
+	if codeOf(err) != apperrors.CodeValidation || err.Error() != "VALIDATION_ERROR: The uploaded object checksum does not match the completion request." {
+		t.Fatalf("expected checksum validation error, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
