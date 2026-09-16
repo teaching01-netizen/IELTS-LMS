@@ -8,15 +8,19 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RichTextDocument } from "../../../contracts/assessment";
+import { SAT_IMAGE_POLICY } from "../domain/imagePolicy";
 import {
   IMAGE_CAPS,
   buildResolvedImageAttrs,
   buildTransientImageAttrs,
+  defaultBitmapLoaderFactory,
   loadBitmapSize,
   readMagicBytes,
   stripTransientImages,
+  validateImageUploadInput,
+  validateSatImageFile,
   validateClipboardImage,
   type BitmapLoader,
 } from "../adapters/imageValidation";
@@ -75,7 +79,7 @@ describe("readMagicBytes", () => {
   });
 });
 
-describe("validateClipboardImage allowlist", () => {
+describe("validateSatImageFile allowlist", () => {
   const table: Array<[string, Uint8Array, string]> = [
     ["image/png", pngBytes(), "photo.png"],
     ["image/jpeg", jpegBytes(), "photo.jpg"],
@@ -104,7 +108,7 @@ describe("validateClipboardImage allowlist", () => {
     const out = await validateClipboardImage(makeFile(pngBytes(), "a.bmp", "image/bmp"), loader);
     expect(out.ok).toBe(false);
     if (!out.ok) {
-      expect(out.code).toBe("mime");
+      expect(out.code).toBe("type");
       expect(out.message).toBe("That file is not a supported image (PNG, JPEG, WebP, GIF).");
     }
     expect(called).toBe(0);
@@ -112,7 +116,7 @@ describe("validateClipboardImage allowlist", () => {
 
   it("rejects empty mime as mime", async () => {
     const out = await validateClipboardImage(makeFile(pngBytes(), "a", ""), sizeLoader(4, 4));
-    expect(out).toMatchObject({ ok: false, code: "mime" });
+    expect(out).toMatchObject({ ok: false, code: "type" });
   });
 });
 
@@ -180,6 +184,29 @@ describe("validateClipboardImage size boundary", () => {
       sizeLoader(8, 8)
     );
     expect(out.ok).toBe(true);
+  });
+});
+
+describe("shared SAT file validation boundaries", () => {
+  it.each([
+    [SAT_IMAGE_POLICY.maxBytes + 1, "size"],
+    [SAT_IMAGE_POLICY.maxBytes, null],
+  ] as const)("uses the same byte boundary for clipboard and dialog files", async (size, code) => {
+    const file = makeFile(pngBytes(), "edge.png", "image/png", size);
+    const clipboard = await validateSatImageFile(file, sizeLoader(8, 8));
+    const dialog = await validateImageUploadInput(file, sizeLoader(8, 8));
+
+    expect(clipboard.ok ? null : clipboard.code).toBe(code);
+    expect(dialog.ok ? null : dialog.code).toBe(code);
+  });
+
+  it("rejects unsupported declared MIME before decoding", async () => {
+    const file = makeFile(pngBytes(), "diagram.avif", "image/avif");
+
+    await expect(validateSatImageFile(file, sizeLoader(8, 8))).resolves.toMatchObject({
+      ok: false,
+      code: "type",
+    });
   });
 });
 
@@ -331,6 +358,65 @@ describe("loadBitmapSize", () => {
     const loader: BitmapLoader = () => new Promise(() => {});
     const size = await loadBitmapSize(makeFile(pngBytes(), "a.png", "image/png"), loader, 5);
     expect(size).toBeNull();
+  });
+
+  it("closes a bitmap that resolves after the timeout exactly once", async () => {
+    let resolveBitmap!: (value: { width: number; height: number; close: () => void }) => void;
+    let closed = 0;
+    const loader: BitmapLoader = () =>
+      new Promise((resolve) => {
+        resolveBitmap = resolve;
+      });
+
+    const pending = loadBitmapSize(makeFile(pngBytes(), "late.png", "image/png"), loader, 5);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await expect(pending).resolves.toBeNull();
+
+    resolveBitmap({
+      width: 12,
+      height: 9,
+      close: () => {
+        closed += 1;
+      },
+    });
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    expect(closed).toBe(1);
+  });
+
+  it("revokes a fallback object URL on timeout without double-revoking on late load", async () => {
+    let triggerLoad: (() => void) | null = null;
+    class FakeImage {
+      width = 12;
+      height = 9;
+      naturalWidth = 12;
+      naturalHeight = 9;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_value: string) {
+        triggerLoad = () => this.onload?.();
+      }
+    }
+    const createObjectURL = vi.fn(() => "blob:validation");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("Image", FakeImage);
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+
+    try {
+      const loader = defaultBitmapLoaderFactory();
+      expect(loader).not.toBeNull();
+      const pending = loadBitmapSize(
+        makeFile(pngBytes(), "late.png", "image/png"),
+        loader,
+        5
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await expect(pending).resolves.toBeNull();
+      expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+      triggerLoad?.();
+      expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

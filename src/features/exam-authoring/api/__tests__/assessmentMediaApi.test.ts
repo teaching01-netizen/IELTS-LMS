@@ -52,6 +52,17 @@ describe("assessment media API", () => {
     } as unknown as File;
     await uploadAssessmentAsset(file, "question-1");
 
+    expect(backendPost).toHaveBeenNthCalledWith(
+      1,
+      "/v1/media/uploads",
+      expect.objectContaining({
+        ownerKind: "assessment_question",
+        ownerId: "question-1",
+        contentType: "image/png",
+        sizeBytes: file.size,
+      })
+    );
+
     expect(uploadResponse).toHaveBeenCalledWith(
       "/api/v1/media/uploads/asset-1",
       expect.objectContaining({
@@ -64,6 +75,21 @@ describe("assessment media API", () => {
         body: file,
       })
     );
+  });
+
+  it("rejects unsupported declared MIME before hashing or network upload", async () => {
+    const file = {
+      name: "diagram.avif",
+      size: 11,
+      type: "image/avif",
+      arrayBuffer: vi.fn(),
+    } as unknown as File;
+
+    await expect(uploadAssessmentAsset(file, "question-1")).rejects.toThrow(
+      "Use PNG, JPEG, WebP, or GIF images."
+    );
+    expect(file.arrayBuffer).not.toHaveBeenCalled();
+    expect(backendPost).not.toHaveBeenCalled();
   });
 
   it("deduplicates concurrent lookups for the same immutable asset", async () => {

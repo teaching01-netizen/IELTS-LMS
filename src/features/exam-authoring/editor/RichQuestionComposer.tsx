@@ -29,7 +29,12 @@ import { insertIngestResult } from "./plugins/insertIngestResult";
 import { ingestClipboard } from "./ingestion/application/ingestClipboard";
 import { createPipelineContext } from "./ingestion/application/pipelineContext";
 import { PasteStatus } from "./PasteStatus";
-import { stripTransientImages } from "./ingestion/adapters/imageValidation";
+import {
+  stripTransientImages,
+  validateSatImageFile,
+  type ImageRejectCode,
+} from "./ingestion/adapters/imageValidation";
+import { SAT_IMAGE_POLICY } from "./ingestion/domain/imagePolicy";
 import { ySyncPluginKey } from "y-prosemirror";
 
 // The node/mark vocabulary comes from ./schema/richTextSchema.ts, the exact
@@ -819,8 +824,11 @@ function ImageDialog({
   const [caption, setCaption] = useState(String(target?.attrs["caption"] ?? ""));
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<
+    { code: ImageRejectCode | "upload"; message: string } | null
+  >(null);
 
   const liveTargetAssetId = target
     ? String(editor.state.doc.nodeAt(target.pos)?.attrs["assetId"] ?? "")
@@ -835,28 +843,50 @@ function ImageDialog({
 
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const current = previewUrlRef.current;
+      if (current) URL.revokeObjectURL(current);
+      previewUrlRef.current = null;
     };
-  }, [previewUrl]);
+  }, []);
+
+  const releasePreview = () => {
+    const current = previewUrlRef.current;
+    if (current) URL.revokeObjectURL(current);
+    previewUrlRef.current = null;
+    setPreviewUrl(null);
+  };
 
   const handleUpload = async (file: File) => {
     if (!ownerId) return;
     setUploading(true);
     setUploadError(null);
     try {
+      const validation = await validateSatImageFile(file);
+      if (!validation.ok) {
+        releasePreview();
+        setUploadError({ code: validation.code, message: validation.message });
+        return;
+      }
       const asset = await uploadAssessmentAsset(file, ownerId);
       setAssetId(asset.id);
+      releasePreview();
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : "Image upload failed.");
+      releasePreview();
+      setUploadError({
+        code: "upload",
+        message: error instanceof Error ? error.message : "Image upload failed.",
+      });
     } finally {
       setUploading(false);
     }
   };
 
   const chooseFile = (file: File) => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    releasePreview();
     setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
+    const nextPreviewUrl = URL.createObjectURL(file);
+    previewUrlRef.current = nextPreviewUrl;
+    setPreviewUrl(nextPreviewUrl);
     void handleUpload(file);
   };
 
@@ -871,7 +901,7 @@ function ImageDialog({
             id="sat-visual-upload"
             aria-label="Upload image or graph"
             type="file"
-            accept="image/*"
+            accept={SAT_IMAGE_POLICY.allowedMime.join(",")}
             className="sr-only"
             disabled={uploading}
             onChange={(event) => {
@@ -942,7 +972,7 @@ function ImageDialog({
           role="alert"
           className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-au-danger-tint px-3 py-2 text-xs font-medium text-au-danger-text"
         >
-          <span>{uploadError}</span>
+          <span data-image-error-code={uploadError.code}>{uploadError.message}</span>
           {selectedFile ? (
             <button
               type="button"

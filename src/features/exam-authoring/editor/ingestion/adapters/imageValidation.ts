@@ -30,14 +30,14 @@ export const IMAGE_CAPS = {
 
 export type AllowedImageMime = (typeof IMAGE_CAPS.allowedMime)[number];
 
-export type ImageRejectCode = "mime" | "magic" | "size" | "dimensions" | "pixels" | "decode";
+export type ImageRejectCode = "type" | "magic" | "size" | "dimensions" | "pixels" | "decode";
 
 export type ImageValidation =
   | { ok: true; file: File; mime: string; width: number; height: number; pixels: number }
   | { ok: false; code: ImageRejectCode; message: string };
 
 export const IMAGE_REJECT_MESSAGES: Record<ImageRejectCode, string> = {
-  mime: "That file is not a supported image (PNG, JPEG, WebP, GIF).",
+  type: "That file is not a supported image (PNG, JPEG, WebP, GIF).",
   magic: "That file is not a supported image (PNG, JPEG, WebP, GIF).",
   size: "Images must be 10 MiB or smaller.",
   dimensions: "That image is too large to paste (limit 8,192 px per side, 25 megapixels).",
@@ -45,11 +45,13 @@ export const IMAGE_REJECT_MESSAGES: Record<ImageRejectCode, string> = {
   decode: "That image could not be read. Try re-exporting it.",
 };
 
-export type BitmapLoader = (file: File) => Promise<{
+export type BitmapLoader = ((file: File) => Promise<{
   width: number;
   height: number;
   close?: () => void;
-}>;
+}>) & {
+  cancel?: () => void;
+};
 
 export type BitmapLoaderFactory = () => BitmapLoader | null;
 
@@ -136,20 +138,45 @@ export async function loadBitmapSize(
 ): Promise<BitmapSize | null> {
   if (!loader) return null;
   let bitmap: { width: number; height: number; close?: () => void } | null = null;
+  let finished = false;
+  let timedOut = false;
+  let closed = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const closeBitmap = (candidate: { close?: () => void } | null): void => {
+    if (!candidate || closed) return;
+    closed = true;
+    try {
+      candidate.close?.();
+    } catch {
+      // Bitmap cleanup must never break validation.
+    }
+  };
   try {
-    const pending = loader(file);
+    // Promise.resolve().then() also converts a synchronous loader throw into a
+    // settled promise, so late cleanup follows one path for every loader.
+    const pending = Promise.resolve().then(() => loader(file));
+    const settledPending = pending.then(
+      (value) => {
+        // A decoder can resolve after the timeout has already returned. The
+        // timeout path cannot retain the bitmap, so close it at settlement.
+        if (finished) closeBitmap(value);
+        return { status: "loaded" as const, value };
+      },
+      () => ({ status: "failed" as const, value: null })
+    );
     const result = await Promise.race([
-      pending.then(
-        (value) => ({ status: "loaded" as const, value }),
-        () => ({ status: "failed" as const, value: null })
-      ),
+      settledPending,
       new Promise<{ status: "timeout"; value: null }>((resolve) => {
-        const timer = setTimeout(() => resolve({ status: "timeout", value: null }), timeoutMs);
+        timer = setTimeout(() => resolve({ status: "timeout", value: null }), timeoutMs);
         if (typeof (timer as unknown as { unref?: () => void }).unref === "function") {
           (timer as unknown as { unref: () => void }).unref();
         }
       }),
     ]);
+    if (result.status === "timeout") {
+      timedOut = true;
+      return null;
+    }
     if (result.status !== "loaded" || !result.value) return null;
     bitmap = result.value;
     const { width, height } = bitmap;
@@ -159,11 +186,16 @@ export async function loadBitmapSize(
   } catch {
     return null;
   } finally {
-    try {
-      bitmap?.close?.();
-    } catch {
-      // Bitmap cleanup must never break validation.
+    finished = true;
+    if (timer !== undefined) clearTimeout(timer);
+    if (timedOut) {
+      try {
+        loader.cancel?.();
+      } catch {
+        // Decoder cancellation is best-effort; late settlement still closes.
+      }
     }
+    closeBitmap(bitmap);
   }
 }
 
@@ -204,47 +236,63 @@ export function defaultBitmapLoaderFactory(): BitmapLoader | null {
   };
   const makeUrl = createObjectURL as (file: File) => string;
   const revokeUrl = revokeObjectURL as (url: string) => void;
-  return (file: File) =>
+  const activeCleanups = new Set<() => void>();
+  const loader = ((file: File) =>
     new Promise<{ width: number; height: number }>((resolve, reject) => {
       const image = new ImageClass();
       const url = makeUrl(file);
-      image.onload = () => {
+      let released = false;
+      const release = (): void => {
+        if (released) return;
+        released = true;
+        activeCleanups.delete(release);
         revokeUrl(url);
+      };
+      activeCleanups.add(release);
+      image.onload = () => {
+        release();
         resolve({
           width: image.naturalWidth ?? image.width,
           height: image.naturalHeight ?? image.height,
         });
       };
       image.onerror = () => {
-        revokeUrl(url);
+        release();
         reject(new Error("image decode failed"));
       };
       image.src = url;
-    });
+    })) as BitmapLoader;
+  loader.cancel = (): void => {
+    for (const release of [...activeCleanups]) release();
+  };
+  return loader;
 }
 
-export interface ValidateClipboardImageOptions {
+export interface ValidateSatImageFileOptions {
   loader?: BitmapLoader | null | undefined;
   loaderFactory?: BitmapLoaderFactory | undefined;
   timeoutMs?: number | undefined;
 }
 
+/** Temporary compatibility name for callers that still describe the source as clipboard-only. */
+export type ValidateClipboardImageOptions = ValidateSatImageFileOptions;
+
 /**
- * Synchronously-gated, never-throwing clipboard image validation.
+ * Synchronously-gated, never-throwing SAT image file validation.
  * Order: MIME allowlist -> size -> magic bytes (family must match MIME) ->
  * dimensions via injected BitmapLoader -> dimension + pixel caps.
  */
-export async function validateClipboardImage(
+export async function validateSatImageFile(
   file: File,
-  loaderOrOptions?: BitmapLoader | null | ValidateClipboardImageOptions
+  loaderOrOptions?: BitmapLoader | null | ValidateSatImageFileOptions
 ): Promise<ImageValidation> {
   try {
-    const options: ValidateClipboardImageOptions =
+    const options: ValidateSatImageFileOptions =
       typeof loaderOrOptions === "function" || loaderOrOptions == null
         ? { loader: (loaderOrOptions as BitmapLoader | null | undefined) ?? undefined }
         : loaderOrOptions;
     const mime = (file.type ?? "").toLowerCase().trim();
-    if (!isAllowedMime(mime)) return fail("mime");
+    if (!isAllowedMime(mime)) return fail("type");
     if (typeof file.size === "number" && file.size > IMAGE_CAPS.maxBytes) return fail("size");
 
     const hex = await readMagicBytes(file);
@@ -273,6 +321,15 @@ export async function validateClipboardImage(
     return fail("decode");
   }
 }
+
+/**
+ * Temporary compatibility export for paste/drop callers while they migrate
+ * to the source-agnostic validator name.
+ */
+export const validateClipboardImage = validateSatImageFile;
+
+/** Dialog-facing name for the same policy and decode pipeline. */
+export const validateImageUploadInput = validateSatImageFile;
 
 export interface TransientImageAttrs {
   uploadId: string;

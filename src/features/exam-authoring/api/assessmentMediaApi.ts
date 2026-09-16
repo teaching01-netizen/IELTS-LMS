@@ -1,6 +1,6 @@
 import { backendGet, backendPost } from "../infrastructure/examAuthoringBackendGateway";
 import { apiClient } from "../../../shared/api/apiClient";
-import { SAT_IMAGE_POLICY } from "../editor/ingestion/domain/imagePolicy";
+import { isAllowedSatImageMime, SAT_IMAGE_POLICY } from "../editor/ingestion/domain/imagePolicy";
 
 export interface AssessmentMediaAsset {
   id: string;
@@ -38,7 +38,10 @@ async function uploadImageAsset(
   ownerKind: "assessment_question" | "assessment_import",
   ownerId: string
 ): Promise<AssessmentMediaAsset> {
-  if (!file.type.startsWith("image/")) throw new Error("Only image files can be inserted here.");
+  const contentType = (file.type ?? "").trim().toLowerCase();
+  if (!isAllowedSatImageMime(contentType)) {
+    throw new Error("Use PNG, JPEG, WebP, or GIF images.");
+  }
   if (file.size > SAT_IMAGE_POLICY.maxBytes) throw new Error("Images must be 10 MiB or smaller.");
 
   const checksumSha256 = await sha256(file);
@@ -48,8 +51,9 @@ async function uploadImageAsset(
   const intent = await backendPost<UploadIntent>("/v1/media/uploads", {
     ownerKind,
     ownerId,
-    contentType: file.type || "application/octet-stream",
+    contentType,
     fileName: file.name,
+    sizeBytes: file.size,
     checksumSha256,
   });
   const uploadHeaders = { ...intent.headers };

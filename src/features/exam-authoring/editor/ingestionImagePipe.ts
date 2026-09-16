@@ -29,7 +29,7 @@ import { uploadAssessmentAsset } from "../api/assessmentMediaApi";
 import {
   buildResolvedImageAttrs,
   buildTransientImageAttrs,
-  validateClipboardImage,
+  validateSatImageFile,
   type BitmapLoader,
   type ImageRejectCode,
 } from "./ingestion/adapters/imageValidation";
@@ -54,7 +54,7 @@ export type PreparedClipboardImageResult =
     };
 
 export interface IngestionImagePipeDeps {
-  validate?: typeof validateClipboardImage | undefined;
+  validate?: typeof validateSatImageFile | undefined;
   upload?: typeof uploadAssessmentAsset | undefined;
   createObjectUrl?: ((file: File) => string) | undefined;
   revokeObjectUrl?: ((url: string) => void) | undefined;
@@ -109,7 +109,7 @@ interface ResolvedPipeDeps {
 
 function resolveDeps(deps: IngestionImagePipeDeps | undefined): ResolvedPipeDeps {
   return {
-    validate: deps?.validate ?? validateClipboardImage,
+    validate: deps?.validate ?? validateSatImageFile,
     upload: deps?.upload,
     loader: deps?.loader,
     createObjectUrl: deps?.createObjectUrl ?? defaultCreateObjectUrl,
@@ -239,7 +239,7 @@ export async function prepareClipboardImage(
   alt = ""
 ): Promise<PreparedClipboardImageResult> {
   const resolved = resolveDeps(deps);
-  const validate = resolved.validate ?? validateClipboardImage;
+  const validate = resolved.validate ?? validateSatImageFile;
   const validation =
     resolved.loader !== undefined
       ? await validate(file, { loader: resolved.loader })

@@ -154,7 +154,7 @@ describe("pasteClipboardImage temp insert", () => {
     const out = await pasteClipboardImage(editor, bad, "owner-1", { ...deps(), upload });
     expect(out).toEqual({
       status: "rejected",
-      code: "mime",
+      code: "type",
       message: "That file is not a supported image (PNG, JPEG, WebP, GIF).",
     });
     expect(imageCount(editor)).toBe(0);

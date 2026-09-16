@@ -4,6 +4,11 @@ import type { Extensions } from "@tiptap/core";
 import { Editor } from "@tiptap/core";
 import { plainContentFromText } from "../richContent";
 import { FastQuestionComposer } from "../FastQuestionComposer";
+
+const uploadAssessmentAsset = vi.hoisted(() => vi.fn());
+
+vi.mock("../../api/assessmentMediaApi", () => ({ uploadAssessmentAsset }));
+
 import {
   composerBaseExtensions,
   RichQuestionComposer,
@@ -67,6 +72,69 @@ describe("SAT rich question composer capabilities", () => {
     fireEvent.keyDown(screen.getByRole("menu"), {key:"Escape"});
     fireEvent.click(screen.getByRole("button", {name:"Insert content"}));
     for(const name of ["Insert image or graph", "Code block", "Insert table"]) expect(screen.getByRole("menuitem",{name})).toBeInTheDocument();
+  });
+
+  it("rejects unsupported dialog files before calling the upload API", async () => {
+    uploadAssessmentAsset.mockReset();
+    const createObjectURL = vi.fn(() => "blob:dialog-preview");
+    const revokeObjectURL = vi.fn();
+    const previousCreateObjectURL = (URL as typeof URL & {
+      createObjectURL?: typeof createObjectURL;
+    }).createObjectURL;
+    const previousRevokeObjectURL = (URL as typeof URL & {
+      revokeObjectURL?: typeof revokeObjectURL;
+    }).revokeObjectURL;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+
+    try {
+      render(
+        <RichQuestionComposer
+          value={plainContentFromText("Question prompt")}
+          onChange={vi.fn()}
+          label="Question prompt"
+          assetOwnerId="question-1"
+        />
+      );
+
+      await screen.findByRole("button", { name: "Insert content" });
+      fireEvent.click(screen.getByRole("button", { name: "Insert content" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Insert image or graph" }));
+
+      const file = new File(["not an image"], "diagram.avif", { type: "image/avif" });
+      fireEvent.change(await screen.findByLabelText("Upload image or graph"), {
+        target: { files: [file] },
+      });
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("That file is not a supported image");
+      expect(alert.querySelector("[data-image-error-code='type']")).not.toBeNull();
+      expect(uploadAssessmentAsset).not.toHaveBeenCalled();
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:dialog-preview");
+    } finally {
+      if (previousCreateObjectURL) {
+        Object.defineProperty(URL, "createObjectURL", {
+          configurable: true,
+          value: previousCreateObjectURL,
+        });
+      } else {
+        delete (URL as typeof URL & { createObjectURL?: typeof createObjectURL }).createObjectURL;
+      }
+      if (previousRevokeObjectURL) {
+        Object.defineProperty(URL, "revokeObjectURL", {
+          configurable: true,
+          value: previousRevokeObjectURL,
+        });
+      } else {
+        delete (URL as typeof URL & { revokeObjectURL?: typeof revokeObjectURL }).revokeObjectURL;
+      }
+    }
   });
 
   it("applies the inline placement layout to the equation preview", async () => {

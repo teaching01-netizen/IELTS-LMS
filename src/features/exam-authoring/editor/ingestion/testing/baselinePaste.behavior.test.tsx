@@ -285,7 +285,7 @@ describe("baseline paste behavior (B1-B12, observed)", () => {
     const { readFileSync } = await import("node:fs");
     const source = readFileSync("src/features/exam-authoring/api/assessmentMediaApi.ts", "utf8");
     // Pinned gate strings: phase-06 builds the staged-upload path on top of these.
-    expect(source).toContain("Only image files can be inserted here.");
+    expect(source).toContain("Use PNG, JPEG, WebP, or GIF images.");
     expect(source).toContain("Images must be 10 MiB or smaller.");
     expect(source).toContain("Secure browser cryptography is required for image uploads.");
     expect(source).toContain("ownerKind,");
