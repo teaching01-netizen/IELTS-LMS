@@ -254,7 +254,6 @@ export function RichQuestionComposer({
                 pendingImages: [],
                 warnings: [],
                 transformations: [],
-                pendingImageAlts: [],
                 rejectedImages: 0,
                 stats: { blockCount: 0, imageCount: 0, mathCount: 0, tableCount: 0 },
               }),

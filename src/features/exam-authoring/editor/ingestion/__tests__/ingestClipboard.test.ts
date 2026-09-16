@@ -34,7 +34,7 @@ describe("ingestClipboard orchestration", () => {
     );
     expect(res.source).toBe("spreadsheet");
     expect(res.pendingImages).toHaveLength(2);
-    expect(res.pendingImageAlts).toEqual(["", "table diagram"]);
+    expect(res.pendingImages.map((item) => item.alt)).toEqual(["", "table diagram"]);
   });
   it("upgrades math after html normalization (single parse)", async () => {
     const res = await ingestClipboard(
@@ -83,7 +83,7 @@ describe("ingestClipboard orchestration", () => {
     );
     expect(res.source).toBe("spreadsheet");
     expect(res.pendingImages).toHaveLength(2);
-    expect(res.pendingImageAlts).toEqual(["", "sheet image"]);
+    expect(res.pendingImages.map((item) => item.alt)).toEqual(["", "sheet image"]);
   });
 
   it("extracts a valid HTML data image before HTML sanitization", async () => {
@@ -98,9 +98,88 @@ describe("ingestClipboard orchestration", () => {
       ctx
     );
     expect(res.pendingImages).toHaveLength(1);
-    expect(res.pendingImageAlts).toEqual(["diagram"]);
+    expect(res.pendingImages.map((item) => item.alt)).toEqual(["diagram"]);
     expect(res.rejectedImages).toBe(0);
     expect(res.transformations).toContain("html.image-extracted:1");
+  });
+  it("keeps HTML images between surrounding blocks", async () => {
+    const res = await ingestClipboard(
+      {
+        files: [],
+        html: '<p>before</p><img src="data:image/png;base64,iVBORw0KGgo=" alt="diagram"><p>after</p>',
+        text: "",
+        ownerId: "q1",
+        target,
+      },
+      ctx
+    );
+    expect(res.document.nodes.map((node) => node.kind)).toEqual([
+      "paragraph",
+      "image",
+      "paragraph",
+    ]);
+    expect(res.document.nodes[1]).toMatchObject({ kind: "image", alt: "diagram" });
+    expect(res.document.nodes[1]).toMatchObject({
+      blobRef: { id: res.pendingImages[0]?.refId },
+    });
+  });
+  it("keeps multiple HTML images in source order", async () => {
+    const res = await ingestClipboard(
+      {
+        files: [],
+        html:
+          '<p>one</p><img src="data:image/png;base64,AAAA" alt="first"><p>two</p>' +
+          '<img src="data:image/png;base64,BBBB" alt="second"><p>three</p>',
+        text: "",
+        ownerId: "q1",
+        target,
+      },
+      ctx
+    );
+    expect(res.document.nodes.map((node) => node.kind)).toEqual([
+      "paragraph",
+      "image",
+      "paragraph",
+      "image",
+      "paragraph",
+    ]);
+    expect(
+      res.document.nodes.filter((node) => node.kind === "image").map((node) => node.alt)
+    ).toEqual(["first", "second"]);
+  });
+  it("gives repeated HTML sources separate AST and upload references", async () => {
+    const res = await ingestClipboard(
+      {
+        files: [],
+        html:
+          '<p>one</p><img src="data:image/png;base64,AAAA" alt="first"><p>two</p>' +
+          '<img src="data:image/png;base64,AAAA" alt="second">',
+        text: "",
+        ownerId: "q1",
+        target,
+      },
+      ctx
+    );
+    const images = res.document.nodes.filter((node) => node.kind === "image");
+    expect(images).toHaveLength(2);
+    expect(images.map((node) => node.blobRef?.id)).toEqual([
+      res.pendingImages[0]?.refId,
+      res.pendingImages[1]?.refId,
+    ]);
+    expect(new Set(res.pendingImages.map((item) => item.refId)).size).toBe(2);
+    expect(images.map((node) => node.alt)).toEqual(["first", "second"]);
+  });
+  it("represents file-only paste images explicitly in the import AST", async () => {
+    const file = new File(["bytes"], "shot.png", { type: "image/png" });
+    const res = await ingestClipboard(
+      { files: [file], html: null, text: null, ownerId: "q1", target },
+      ctx
+    );
+    expect(res.document.nodes).toHaveLength(1);
+    expect(res.document.nodes[0]).toMatchObject({
+      kind: "image",
+      blobRef: { id: "clipboard-image-0", mimeType: "image/png", sizeBytes: file.size },
+    });
   });
   it("joins display math split across HTML block elements", async () => {
     const html =

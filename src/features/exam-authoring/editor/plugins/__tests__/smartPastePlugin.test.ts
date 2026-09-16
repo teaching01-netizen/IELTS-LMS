@@ -200,7 +200,6 @@ describe("SmartPastePlugin", () => {
             },
             source: "empty" as const,
             pendingImages: [],
-            pendingImageAlts: [],
             rejectedImages: 1,
             warnings: [],
             transformations: ["html.image-rejected:1"],

@@ -12,8 +12,13 @@ import { pdfCopyToNodes } from "../adapters/pdfCopy";
 import { detectSpreadsheetPayload, spreadsheetClipboardToTable } from "../adapters/spreadsheet";
 import { stitchDisplayMathParagraphs, upgradeMathInDocument } from "../mathIngest";
 import { applyMarkdownInlineToInlines } from "../normalization/markdownInline";
-import { extractHtmlImageRefs } from "../adapters/htmlImageRefs";
+import {
+  extractHtmlImageRefs,
+  markHtmlImageRefsWithOccurrences,
+  type HtmlImageRef,
+} from "../adapters/htmlImageRefs";
 import { fetchHtmlImagesAsFiles } from "../adapters/fetchHtmlImagesAsFiles";
+import type { TextHtmlImageRef } from "../adapters/textHtml";
 import { DIAGNOSTIC_MESSAGES } from "../domain/diagnostics";
 
 export type IngestSource =
@@ -32,12 +37,18 @@ export interface IngestClipboardRequest {
 export interface IngestClipboardResult {
   document: ImportDocument;
   source: IngestSource;
-  pendingImages: File[];
-  pendingImageAlts: string[];
+  pendingImages: PendingImage[];
   rejectedImages: number;
   warnings: Array<{ code: string; message: string }>;
   transformations: string[];
   stats: { blockCount: number; imageCount: number; mathCount: number; tableCount: number };
+}
+
+/** File bytes stay at the application/editor boundary, never in ImportDocument. */
+export interface PendingImage {
+  refId: string;
+  file: File;
+  alt: string;
 }
 
 const EMPTY_DOC: ImportDocument = {
@@ -46,12 +57,14 @@ const EMPTY_DOC: ImportDocument = {
   sourceMeta: { source: "text", confidence: 0, transformations: [] },
 };
 
-function statsOf(doc: ImportDocument, imageCount = 0): IngestClipboardResult["stats"] {
+function statsOf(doc: ImportDocument): IngestClipboardResult["stats"] {
   let tables = 0;
   let equations = 0;
+  let images = 0;
   const visit = (nodes: ImportNode[]): void => {
     for (const node of nodes) {
       if (node.kind === "table") tables += 1;
+      if (node.kind === "image") images += 1;
       if (node.kind === "paragraph" || node.kind === "heading") {
         for (const inline of node.children)
           if (inline.kind === "inlineMath" || inline.kind === "blockMath") equations += 1;
@@ -61,7 +74,46 @@ function statsOf(doc: ImportDocument, imageCount = 0): IngestClipboardResult["st
     }
   };
   visit(doc.nodes);
-  return { blockCount: doc.nodes.length, imageCount, mathCount: equations, tableCount: tables };
+  return {
+    blockCount: doc.nodes.length,
+    imageCount: images,
+    mathCount: equations,
+    tableCount: tables,
+  };
+}
+
+function imageNodeFor(pending: PendingImage): ImportNode {
+  return {
+    kind: "image",
+    blobRef: { id: pending.refId, mimeType: pending.file.type, sizeBytes: pending.file.size },
+    url: null,
+    alt: pending.alt,
+    caption: null,
+    meta: { source: "image", confidence: 2, transformations: [] },
+  };
+}
+
+function imageIdsIn(nodes: ImportNode[], ids: Set<string>): void {
+  for (const node of nodes) {
+    if (node.kind === "image") {
+      if (node.blobRef?.id) ids.add(node.blobRef.id);
+    } else if (node.kind === "bulletList" || node.kind === "orderedList") {
+      for (const item of node.items) imageIdsIn(item, ids);
+    }
+  }
+}
+
+/** Appends only file references that have no positional HTML AST node. */
+function appendMissingImages(
+  doc: ImportDocument,
+  pending: readonly PendingImage[]
+): ImportDocument {
+  if (pending.length === 0) return doc;
+  const present = new Set<string>();
+  imageIdsIn(doc.nodes, present);
+  const missing = pending.filter((item) => !present.has(item.refId)).map(imageNodeFor);
+  if (missing.length === 0) return doc;
+  return { ...doc, nodes: [...doc.nodes, ...missing] };
 }
 
 function normalizeMarkdownInlines(inlines: InlineNode[]): {
@@ -139,26 +191,69 @@ async function htmlImages(
   html: string | null,
   enabled: boolean
 ): Promise<{
-  files: File[];
-  alts: string[];
+  refs: HtmlImageRef[];
+  markedHtml: string | null;
+  pendingImages: PendingImage[];
+  imageRefs: ReadonlyMap<string, TextHtmlImageRef>;
   rejected: number;
   transformations: string[];
   warnings: Array<{ code: string; message: string }>;
 }> {
   if (!html || !enabled)
-    return { files: [], alts: [], rejected: 0, transformations: [], warnings: [] };
+    return {
+      refs: [],
+      markedHtml: null,
+      pendingImages: [],
+      imageRefs: new Map(),
+      rejected: 0,
+      transformations: [],
+      warnings: [],
+    };
   const extracted = extractHtmlImageRefs(html);
   if (extracted.refs.length === 0 && extracted.truncated === 0)
-    return { files: [], alts: [], rejected: 0, transformations: [], warnings: [] };
+    return {
+      refs: [],
+      markedHtml: html,
+      pendingImages: [],
+      imageRefs: new Map(),
+      rejected: 0,
+      transformations: [],
+      warnings: [],
+    };
+  const marked = markHtmlImageRefsWithOccurrences(html, extracted.refs);
   const fetched = await fetchHtmlImagesAsFiles(extracted.refs);
-  const rejected = fetched.rejected.length + extracted.truncated;
+  const fetchedBySource = new Map(fetched.images.map((item) => [item.src, item]));
+  const imageRefs = new Map<string, TextHtmlImageRef>();
+  for (const ref of marked.refs) {
+    if (!ref.refId) continue;
+    const image = fetchedBySource.get(ref.src);
+    imageRefs.set(ref.refId, {
+      refId: ref.refId,
+      blobRef: image
+        ? { id: ref.refId, mimeType: image.file.type, sizeBytes: image.file.size }
+        : null,
+      alt: ref.alt,
+    });
+  }
+  const rejected =
+    marked.refs.filter((ref) => !fetchedBySource.has(ref.src)).length + extracted.truncated;
   const transformations = [
-    ...(fetched.images.length > 0 ? ["html.image-extracted:" + fetched.images.length] : []),
+    ...(marked.refs.filter((ref) => fetchedBySource.has(ref.src)).length > 0
+      ? [
+          "html.image-extracted:" +
+            String(marked.refs.filter((ref) => fetchedBySource.has(ref.src)).length),
+        ]
+      : []),
     ...(rejected > 0 ? ["html.image-rejected:" + rejected] : []),
   ];
   return {
-    files: fetched.images.map((item) => item.file),
-    alts: fetched.images.map((item) => item.alt),
+    refs: marked.refs,
+    markedHtml: marked.html,
+    pendingImages: marked.refs.flatMap((ref) => {
+      const image = fetchedBySource.get(ref.src);
+      return image ? [{ refId: ref.refId ?? image.refId, file: image.file, alt: ref.alt }] : [];
+    }),
+    imageRefs,
     rejected,
     transformations,
     warnings: rejected > 0 ? [warning("import.image.rejected", rejected)] : [],
@@ -168,8 +263,7 @@ async function htmlImages(
 function result(
   document: ImportDocument,
   source: IngestSource,
-  pendingImages: File[],
-  pendingImageAlts: string[],
+  pendingImages: PendingImage[],
   rejectedImages: number,
   warnings: Array<{ code: string; message: string }>,
   transformations: string[]
@@ -178,11 +272,10 @@ function result(
     document,
     source,
     pendingImages,
-    pendingImageAlts,
     rejectedImages,
     warnings,
     transformations,
-    stats: statsOf(document, pendingImages.length),
+    stats: statsOf(document),
   };
 }
 
@@ -195,7 +288,6 @@ export async function ingestClipboard(
     document: EMPTY_DOC,
     source: "empty",
     pendingImages: [],
-    pendingImageAlts: [],
     rejectedImages: 0,
     warnings: [],
     transformations: [],
@@ -206,17 +298,22 @@ export async function ingestClipboard(
     flags.images === false
       ? []
       : req.files.filter((file) => file.type.toLowerCase().startsWith("image/"));
-  const imageAlts = imageFiles.map(() => "");
+  const fileImages: PendingImage[] = imageFiles.map((file, index) => ({
+    refId: "clipboard-image-" + String(index),
+    file,
+    alt: "",
+  }));
   const target = req.target.inChoiceEditor ? "choice" : "rich";
   let htmlImageResult = {
-    files: [] as File[],
-    alts: [] as string[],
+    refs: [] as HtmlImageRef[],
+    markedHtml: null as string | null,
+    pendingImages: [] as PendingImage[],
+    imageRefs: new Map<string, TextHtmlImageRef>() as ReadonlyMap<string, TextHtmlImageRef>,
     rejected: 0,
     transformations: [] as string[],
     warnings: [] as Array<{ code: string; message: string }>,
   };
-  let pendingImages: File[] = [...imageFiles];
-  let pendingImageAlts: string[] = [...imageAlts];
+  let pendingImages: PendingImage[] = [...fileImages];
   let baseWarnings: Array<{ code: string; message: string }> = [];
   let baseTransformations: string[] =
     imageFiles.length > 0 ? ["clipboard.files:" + imageFiles.length] : [];
@@ -224,8 +321,7 @@ export async function ingestClipboard(
   const loadHtmlImages = async (): Promise<void> => {
     if (imageResultLoaded) return;
     htmlImageResult = await htmlImages(req.html, flags.images !== false);
-    pendingImages = [...imageFiles, ...htmlImageResult.files];
-    pendingImageAlts = [...imageAlts, ...htmlImageResult.alts];
+    pendingImages = [...fileImages, ...htmlImageResult.pendingImages];
     baseWarnings = [...htmlImageResult.warnings];
     baseTransformations = [
       ...htmlImageResult.transformations,
@@ -252,10 +348,9 @@ export async function ingestClipboard(
           : { document: sheet.document, warnings: [], transformations: [] as string[] };
         const rejectedImages = htmlImageResult.rejected;
         return result(
-          upgraded.document,
+          appendMissingImages(upgraded.document, pendingImages),
           "spreadsheet",
           pendingImages,
-          pendingImageAlts,
           rejectedImages,
           [...baseWarnings, ...sheet.warnings, ...upgraded.warnings],
           [...baseTransformations, ...sheet.transformations, ...upgraded.transformations].filter(
@@ -268,14 +363,14 @@ export async function ingestClipboard(
         return {
           ...empty,
           source: "spreadsheet",
+          document: appendMissingImages(EMPTY_DOC, pendingImages),
           pendingImages,
-          pendingImageAlts,
           rejectedImages: htmlImageResult.rejected,
           warnings: [...baseWarnings, ...sheet.warnings],
           transformations: [...baseTransformations, ...sheet.transformations].filter(
             (item) => item !== "clipboard.files:0"
           ),
-          stats: statsOf(EMPTY_DOC, pendingImages.length),
+          stats: statsOf(appendMissingImages(EMPTY_DOC, pendingImages)),
         };
       }
     }
@@ -288,7 +383,12 @@ export async function ingestClipboard(
   let parseWarnings: Array<{ code: string; message: string }> = [];
   let parseTransformations: string[] = [];
   if (req.html) {
-    const parsed = parseTextHtml({ kind: "html", html: req.html }, { target }, ctx);
+    const parsed = parseTextHtml(
+      { kind: "html", html: htmlImageResult.markedHtml ?? req.html },
+      { target },
+      ctx,
+      { imageRefs: htmlImageResult.imageRefs }
+    );
     parsedDocument = parsed.document;
     source = req.text ? "html+text" : "html";
     parseWarnings = parsed.warnings;
@@ -330,10 +430,9 @@ export async function ingestClipboard(
   const warnings = [...baseWarnings, ...parseWarnings, ...upgraded.warnings];
   // Image validation is intentionally deferred to the editor-owned upload pipe.
   return result(
-    upgraded.document,
+    appendMissingImages(upgraded.document, pendingImages),
     source,
     pendingImages,
-    pendingImageAlts,
     htmlImageResult.rejected,
     warnings,
     transformations

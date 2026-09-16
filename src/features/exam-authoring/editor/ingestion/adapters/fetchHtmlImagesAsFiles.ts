@@ -4,11 +4,13 @@ import type { HtmlImageRef } from "./htmlImageRefs";
 export type HtmlImageRejectReason =
   "scheme" | "fetch" | "timeout" | "size" | "content-type" | "decode";
 export interface FetchedHtmlImage {
+  refId: string;
   file: File;
   alt: string;
   src: string;
 }
 export interface RejectedHtmlImage {
+  refId: string;
   src: string;
   alt: string;
   reason: HtmlImageRejectReason;
@@ -24,8 +26,16 @@ export interface FetchHtmlImagesOutcome {
 }
 const DEFAULT_TIMEOUT_MS = 8_000;
 
-function rejected(ref: HtmlImageRef, reason: HtmlImageRejectReason): RejectedHtmlImage {
-  return { src: ref.src, alt: ref.alt, reason };
+function refIdFor(ref: HtmlImageRef, fallbackIndex: number): string {
+  return ref.refId ?? "html-image-" + String(fallbackIndex);
+}
+
+function rejected(
+  ref: HtmlImageRef,
+  reason: HtmlImageRejectReason,
+  fallbackIndex: number
+): RejectedHtmlImage {
+  return { refId: refIdFor(ref, fallbackIndex), src: ref.src, alt: ref.alt, reason };
 }
 function extensionForMime(mime: string): string {
   switch (mime) {
@@ -116,23 +126,27 @@ async function fetchOne(
   ref: HtmlImageRef,
   fetchFn: typeof fetch,
   timeoutMs: number,
-  maxBytes: number
+  maxBytes: number,
+  fallbackIndex: number
 ): Promise<FetchedHtmlImage | RejectedHtmlImage> {
+  const refId = refIdFor(ref, fallbackIndex);
   let url: URL;
-  if (!/^https:\/\//i.test(ref.src) && !/^data:/i.test(ref.src)) return rejected(ref, "scheme");
+  if (!/^https:\/\//i.test(ref.src) && !/^data:/i.test(ref.src))
+    return rejected(ref, "scheme", fallbackIndex);
   try {
     url = new URL(ref.src);
   } catch {
-    return rejected(ref, "scheme");
+    return rejected(ref, "scheme", fallbackIndex);
   }
   const scheme = url.protocol.toLowerCase();
-  if (scheme !== "https:" && scheme !== "data:") return rejected(ref, "scheme");
-  if (ref.src.length > maxBytes * 2 + 128) return rejected(ref, "size");
+  if (scheme !== "https:" && scheme !== "data:") return rejected(ref, "scheme", fallbackIndex);
+  if (ref.src.length > maxBytes * 2 + 128) return rejected(ref, "size", fallbackIndex);
   if (scheme === "data:") {
     const decoded = decodeDataUrl(ref.src, maxBytes);
-    if (!decoded.ok) return rejected(ref, decoded.reason);
+    if (!decoded.ok) return rejected(ref, decoded.reason, fallbackIndex);
     const mime = contentType(decoded.blob.type) || dataMime(ref.src) || "";
     return {
+      refId,
       file: new File([decoded.blob], "pasted-image." + extensionForMime(mime), { type: mime }),
       alt: ref.alt,
       src: ref.src,
@@ -152,15 +166,16 @@ async function fetchOne(
       }, timeoutMs);
     });
     const response = await Promise.race([request, timeout]);
-    if (!response.ok) return rejected(ref, "fetch");
+    if (!response.ok) return rejected(ref, "fetch", fallbackIndex);
     const declaredMime =
       contentType(response.headers.get("content-type") ?? "") || dataMime(ref.src) || "";
-    if (!declaredMime.startsWith("image/")) return rejected(ref, "content-type");
+    if (!declaredMime.startsWith("image/")) return rejected(ref, "content-type", fallbackIndex);
     const blob = await readBoundedBlob(response, maxBytes);
-    if (!blob) return rejected(ref, "size");
+    if (!blob) return rejected(ref, "size", fallbackIndex);
     const actualMime = contentType(blob.type);
-    if (!actualMime.startsWith("image/")) return rejected(ref, "content-type");
+    if (!actualMime.startsWith("image/")) return rejected(ref, "content-type", fallbackIndex);
     return {
+      refId,
       file: new File([blob], "pasted-image." + extensionForMime(actualMime), {
         type: actualMime,
       }),
@@ -170,7 +185,8 @@ async function fetchOne(
   } catch (error) {
     return rejected(
       ref,
-      error instanceof Error && error.message === "timeout" ? "timeout" : "fetch"
+      error instanceof Error && error.message === "timeout" ? "timeout" : "fetch",
+      fallbackIndex
     );
   } finally {
     if (timer !== null) clearTimeout(timer);
@@ -183,14 +199,18 @@ export async function fetchHtmlImagesAsFiles(
 ): Promise<FetchHtmlImagesOutcome> {
   const fetchFn = deps.fetchFn ?? globalThis.fetch;
   if (typeof fetchFn !== "function")
-    return { images: [], rejected: refs.map((ref) => rejected(ref, "fetch")) };
+    return {
+      images: [],
+      rejected: refs.map((ref, index) => rejected(ref, "fetch", index)),
+    };
   const outcomes = await Promise.all(
-    refs.map((ref) =>
+    refs.map((ref, index) =>
       fetchOne(
         ref,
         fetchFn,
         deps.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        deps.maxBytes ?? IMAGE_CAPS.maxBytes
+        deps.maxBytes ?? IMAGE_CAPS.maxBytes,
+        index
       )
     )
   );

@@ -9,6 +9,7 @@
  * never silent loss. Links flatten to text (schema has no link node).
  */
 import type {
+  BlobRef,
   ImportDocument,
   ImportMetadata,
   ImportNode,
@@ -33,6 +34,17 @@ export interface TextHtmlOutcome {
   document: ImportDocument;
   warnings: ImportWarning[];
   transformations: string[];
+}
+
+/** Opaque image metadata supplied by the application layer after fetching. */
+export interface TextHtmlImageRef {
+  refId: string;
+  blobRef: BlobRef | null;
+  alt: string;
+}
+
+export interface TextHtmlOptions {
+  imageRefs?: ReadonlyMap<string, TextHtmlImageRef> | undefined;
 }
 
 function warn(code: ImportWarning["code"]): ImportWarning {
@@ -62,17 +74,32 @@ const MARK_BY_TAG: Readonly<Record<string, TextMark>> = Object.freeze({
   code: "code",
 });
 
-const BLOCK_TAGS = new Set(["p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "ul", "ol", "table", "hr"]);
+const BLOCK_TAGS = new Set([
+  "p",
+  "div",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "pre",
+  "ul",
+  "ol",
+  "table",
+  "hr",
+]);
 
 export function parseTextHtml(
   input: TextHtmlInput,
   ctx: TextHtmlContext,
   pipelineCtx?: PipelineContext,
+  options: TextHtmlOptions = {}
 ): TextHtmlOutcome {
   void pipelineCtx;
   void ctx.target;
   if (input.kind === "text") return parsePlainText(input.text);
-  return parseHtml(input.html);
+  return parseHtml(input.html, options);
 }
 
 function emptyOutcome(): TextHtmlOutcome {
@@ -91,13 +118,20 @@ function parsePlainText(text: string): TextHtmlOutcome {
   const runs = normalized.split(/\n{2,}/);
   const nodes: ImportNode[] = [];
   for (const run of runs) {
-    const collapsed = run.replace(/\n/g, " ").replace(/[^\S\n]+/g, " ").trim();
+    const collapsed = run
+      .replace(/\n/g, " ")
+      .replace(/[^\S\n]+/g, " ")
+      .trim();
     if (!collapsed) continue;
     nodes.push({ kind: "paragraph", children: [textNode(collapsed, [], "text")], meta });
   }
   if (nodes.length === 0) return emptyOutcome();
   return {
-    document: { version: 1, nodes, sourceMeta: { source: "text", confidence: 2, transformations: ["text.split-paragraphs"] } },
+    document: {
+      version: 1,
+      nodes,
+      sourceMeta: { source: "text", confidence: 2, transformations: ["text.split-paragraphs"] },
+    },
     warnings: [],
     transformations: ["text.split-paragraphs"],
   };
@@ -109,9 +143,11 @@ interface WalkState {
   degradedTags: Set<string>;
   headingClamped: boolean;
   linkFlattened: boolean;
+  imageRefs: ReadonlyMap<string, TextHtmlImageRef>;
+  tableImageFallbacks: number;
 }
 
-function parseHtml(html: string): TextHtmlOutcome {
+function parseHtml(html: string, options: TextHtmlOptions): TextHtmlOutcome {
   const signal = detectVendor(html);
   const vendor = stripVendorChrome(html, signal);
   const sanitized = sanitizeForIngestion(vendor.html);
@@ -121,10 +157,20 @@ function parseHtml(html: string): TextHtmlOutcome {
     degradedTags: new Set(),
     headingClamped: false,
     linkFlattened: false,
+    imageRefs: options.imageRefs ?? new Map(),
+    tableImageFallbacks: 0,
   };
   if (sanitized.cleanHtml.trim().length === 0) {
-    const meta: ImportMetadata = { source: "html", confidence: 0, transformations: [...state.transformations] };
-    return { document: { version: 1, nodes: [], sourceMeta: meta }, warnings: state.warnings, transformations: state.transformations };
+    const meta: ImportMetadata = {
+      source: "html",
+      confidence: 0,
+      transformations: [...state.transformations],
+    };
+    return {
+      document: { version: 1, nodes: [], sourceMeta: meta },
+      warnings: state.warnings,
+      transformations: state.transformations,
+    };
   }
   let body: HTMLElement;
   try {
@@ -142,6 +188,16 @@ function parseHtml(html: string): TextHtmlOutcome {
     if (kept.length > 0) nodes.push({ kind: "paragraph", children: kept, meta });
     current = [];
   };
+  const appendParts = (parts: MixedPart[]): void => {
+    for (const part of parts) {
+      if (part.kind === "image") {
+        flush();
+        nodes.push(part);
+      } else {
+        current.push(part);
+      }
+    }
+  };
   for (const child of Array.from(body.childNodes)) {
     if (child.nodeType === 3) {
       const t = (child.textContent ?? "").replace(/\s+/g, " ");
@@ -157,57 +213,99 @@ function parseHtml(html: string): TextHtmlOutcome {
     } else if (tag === "br") {
       flush();
     } else {
-      current.push(...inlineChildren(el, [], state));
+      appendParts(collectMixed(el, [], state));
     }
   }
   flush();
   if (state.degradedTags.size > 0) {
-    state.warnings.push({ code: "import.block.degraded", message: DIAGNOSTIC_MESSAGES["import.block.degraded"], count: state.degradedTags.size });
-    state.transformations.push("html.unknown-degraded:" + Array.from(state.degradedTags).sort().join(","));
+    state.warnings.push({
+      code: "import.block.degraded",
+      message: DIAGNOSTIC_MESSAGES["import.block.degraded"],
+      count: state.degradedTags.size,
+    });
+    state.transformations.push(
+      "html.unknown-degraded:" + Array.from(state.degradedTags).sort().join(",")
+    );
   }
   if (state.headingClamped) {
     state.warnings.push(warn("import.heading.clamped"));
     state.transformations.push("html.heading-clamped");
   }
   if (state.linkFlattened) {
-    state.warnings.push({ code: "import.block.degraded", message: DIAGNOSTIC_MESSAGES["import.block.degraded"], count: 1 });
+    state.warnings.push({
+      code: "import.block.degraded",
+      message: DIAGNOSTIC_MESSAGES["import.block.degraded"],
+      count: 1,
+    });
     state.transformations.push("html.link-flattened");
+  }
+  if (state.tableImageFallbacks > 0) {
+    state.warnings.push({
+      code: "import.image.rejected",
+      message:
+        DIAGNOSTIC_MESSAGES["import.image.rejected"] +
+        " (" +
+        String(state.tableImageFallbacks) +
+        ")",
+      count: state.tableImageFallbacks,
+    });
+    state.transformations.push("html.image-table-alt:" + String(state.tableImageFallbacks));
   }
   state.transformations.push("html.walk-blocks");
   return {
-    document: { version: 1, nodes, sourceMeta: { source: "html", confidence: 2, transformations: [...state.transformations] } },
+    document: {
+      version: 1,
+      nodes,
+      sourceMeta: { source: "html", confidence: 2, transformations: [...state.transformations] },
+    },
     warnings: state.warnings,
     transformations: state.transformations,
   };
 }
 
-function inlineChildren(el: Element, marks: TextMark[], state: WalkState): InlineNode[] {
-  const tag = el.tagName.toLowerCase();
-  if (tag === "br") return [];
-  if (tag === "a") {
-    state.linkFlattened = true;
-    return collectInline(el, marks, state);
-  }
-  const mark = MARK_BY_TAG[tag];
-  if (mark) return collectInline(el, [...marks, mark], state);
-  if (tag === "span") {
-    const latex = el.getAttribute("data-sat-latex");
-    if (typeof latex === "string") {
-      return [textNode(el.textContent ?? "", [...marks], "html")];
-    }
-    return collectInline(el, marks, state);
-  }
-  if (tag === "img") {
-    state.degradedTags.add("img");
-    const alt = el.getAttribute("alt") ?? "";
-    return alt.trim() ? [textNode(alt, [...marks], "html")] : [];
-  }
-  state.degradedTags.add(tag);
-  return collectInline(el, marks, state);
+type ImportImageNode = Extract<ImportNode, { kind: "image" }>;
+type MixedPart = InlineNode | ImportImageNode;
+
+function isImportImage(part: MixedPart): part is ImportImageNode {
+  return part.kind === "image";
 }
 
-function collectInline(el: Element, marks: TextMark[], state: WalkState): InlineNode[] {
-  const out: InlineNode[] = [];
+function markerParts(el: Element, marks: TextMark[], state: WalkState): MixedPart[] | null {
+  const refId = el.getAttribute("data-sat-image-ref");
+  if (refId === null) return null;
+  const ref = state.imageRefs.get(refId);
+  if (!ref) {
+    state.degradedTags.add("image-marker");
+    return [];
+  }
+  if (!ref.blobRef) {
+    return ref.alt.trim() ? [textNode(ref.alt, [...marks], "html")] : [];
+  }
+  return [
+    {
+      kind: "image",
+      blobRef: ref.blobRef,
+      url: null,
+      alt: ref.alt,
+      caption: null,
+      meta: metaFor("html"),
+    },
+  ];
+}
+
+function collectMixed(el: Element, marks: TextMark[], state: WalkState): MixedPart[] {
+  const selfMarker = markerParts(el, marks, state);
+  if (selfMarker !== null) return selfMarker;
+  const elementTag = el.tagName.toLowerCase();
+  if (elementTag === "a") state.linkFlattened = true;
+  if (
+    !BLOCK_TAGS.has(elementTag) &&
+    !MARK_BY_TAG[elementTag] &&
+    !["a", "span", "img", "li", "td", "th"].includes(elementTag)
+  ) {
+    state.degradedTags.add(elementTag);
+  }
+  const out: MixedPart[] = [];
   for (const child of Array.from(el.childNodes)) {
     if (child.nodeType === 3) {
       const raw = child.textContent ?? "";
@@ -219,31 +317,89 @@ function collectInline(el: Element, marks: TextMark[], state: WalkState): Inline
     }
     if (child.nodeType !== 1) continue;
     const kid = child as Element;
+    const marker = markerParts(kid, marks, state);
+    if (marker !== null) {
+      out.push(...marker);
+      continue;
+    }
     if (kid.tagName.toLowerCase() === "br") {
       out.push(textNode(" ", [...marks], "html"));
       continue;
     }
-    out.push(...inlineChildren(kid, marks, state));
+    const tag = kid.tagName.toLowerCase();
+    if (tag === "a") {
+      state.linkFlattened = true;
+      out.push(...collectMixed(kid, marks, state));
+      continue;
+    }
+    const mark = MARK_BY_TAG[tag];
+    if (mark) {
+      out.push(...collectMixed(kid, [...marks, mark], state));
+      continue;
+    }
+    if (tag === "span") {
+      const latex = kid.getAttribute("data-sat-latex");
+      if (typeof latex === "string") {
+        out.push(textNode(kid.textContent ?? "", [...marks], "html"));
+      } else {
+        out.push(...collectMixed(kid, marks, state));
+      }
+      continue;
+    }
+    if (tag === "img") {
+      state.degradedTags.add("img");
+      const alt = kid.getAttribute("alt") ?? "";
+      if (alt.trim()) out.push(textNode(alt, [...marks], "html"));
+      continue;
+    }
+    state.degradedTags.add(tag);
+    out.push(...collectMixed(kid, marks, state));
   }
   return out;
+}
+
+function mixedBlockParts(
+  el: Element,
+  state: WalkState,
+  kind: "paragraph" | "heading",
+  level?: 2 | 3
+): ImportNode[] {
+  const meta = metaFor("html");
+  const blocks: ImportNode[] = [];
+  let current: InlineNode[] = [];
+  const flush = (): void => {
+    const kept = current.filter((n) => n.kind !== "text" || n.text.trim().length > 0);
+    if (kept.length > 0) {
+      blocks.push(
+        kind === "heading"
+          ? { kind: "heading", level: level ?? 2, children: kept, meta }
+          : { kind: "paragraph", children: kept, meta }
+      );
+    }
+    current = [];
+  };
+  for (const part of collectMixed(el, [], state)) {
+    if (isImportImage(part)) {
+      flush();
+      blocks.push(part);
+    } else {
+      current.push(part);
+    }
+  }
+  flush();
+  return blocks;
 }
 
 function buildBlock(el: Element, state: WalkState): ImportNode[] {
   const meta = metaFor("html");
   const tag = el.tagName.toLowerCase();
   if (tag === "p" || tag === "div") {
-    const children = collectInline(el, [], state);
-    const kept = children.filter((n) => n.kind !== "text" || n.text.trim().length > 0);
-    if (kept.length === 0) return [];
-    return [{ kind: "paragraph", children: kept, meta }];
+    return mixedBlockParts(el, state, "paragraph");
   }
   if (tag >= "h1" && tag <= "h6") {
     const level = headingLevel(tag);
     if (tag === "h1" || tag === "h4" || tag === "h5" || tag === "h6") state.headingClamped = true;
-    const children = collectInline(el, [], state);
-    const kept = children.filter((n) => n.kind !== "text" || n.text.trim().length > 0);
-    if (kept.length === 0) return [];
-    return [{ kind: "heading", level, children: kept, meta }];
+    return mixedBlockParts(el, state, "heading", level);
   }
   if (tag === "pre") {
     const code = (el.textContent ?? "").replace(/\n+$/, "");
@@ -254,10 +410,7 @@ function buildBlock(el: Element, state: WalkState): ImportNode[] {
   if (tag === "table") return buildTable(el, state);
   if (tag === "hr") return [{ kind: "divider", meta }];
   state.degradedTags.add(tag);
-  const children = collectInline(el, [], state);
-  const kept = children.filter((n) => n.kind !== "text" || n.text.trim().length > 0);
-  if (kept.length === 0) return [];
-  return [{ kind: "paragraph", children: kept, meta }];
+  return mixedBlockParts(el, state, "paragraph");
 }
 
 function buildList(el: Element, ordered: boolean, state: WalkState): ImportNode {
@@ -300,7 +453,14 @@ function buildListItem(li: Element, state: WalkState): ImportNode[] {
       flush();
       blocks.push(...buildBlock(kid, state));
     } else {
-      inline.push(...inlineChildren(kid, [], state));
+      for (const part of collectMixed(kid, [], state)) {
+        if (isImportImage(part)) {
+          flush();
+          blocks.push(part);
+        } else {
+          inline.push(part);
+        }
+      }
     }
   }
   flush();
@@ -324,10 +484,20 @@ function buildTable(el: Element, state: WalkState): ImportNode[] {
       const nested = c.querySelector("table");
       if (nested) {
         state.degradedTags.add("table-nested");
-        cells.push({ children: [textNode((c.textContent ?? "").replace(/\s+/g, " ").trim(), [], "html")] });
+        cells.push({
+          children: [textNode((c.textContent ?? "").replace(/\s+/g, " ").trim(), [], "html")],
+        });
         return;
       }
-      const inlines = collectInline(c, [], state);
+      const inlines: InlineNode[] = [];
+      for (const part of collectMixed(c, [], state)) {
+        if (isImportImage(part)) {
+          state.tableImageFallbacks += 1;
+          if (part.alt?.trim()) inlines.push(textNode(part.alt, [], "html"));
+        } else {
+          inlines.push(part);
+        }
+      }
       const kept = inlines.filter((n) => n.kind !== "text" || n.text.trim().length > 0);
       cells.push({ children: kept.length > 0 ? kept : [textNode("", [], "html")] });
     });

@@ -75,7 +75,13 @@ export function sanitizeForIngestion(dirtyHtml: string): SanitizeOutcome {
   try {
     clean = DOMPurify.sanitize(dirtyHtml, {
       ALLOWED_TAGS: [...ALLOWED_TAGS],
-      ALLOWED_ATTR: ["colspan", "rowspan", "data-sat-latex", "data-sat-display"],
+      ALLOWED_ATTR: [
+        "colspan",
+        "rowspan",
+        "data-sat-latex",
+        "data-sat-display",
+        "data-sat-image-ref",
+      ],
       FORBID_TAGS: [
         "script",
         "style",

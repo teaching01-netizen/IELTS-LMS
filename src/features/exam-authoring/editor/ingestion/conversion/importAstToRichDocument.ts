@@ -23,6 +23,11 @@ export interface TipTapJson {
   text?: string | undefined;
 }
 
+/** Resolves opaque staged image references without coupling conversion to an editor or network. */
+export interface ImportImageResolver {
+  resolve(node: Extract<ImportNode, { kind: "image" }>): TipTapJson | null;
+}
+
 export interface ConversionOutcome {
   doc: TipTapJson;
   mathCount: number;
@@ -40,7 +45,12 @@ const MARK_TO_TIPTAP: Readonly<Record<string, string>> = Object.freeze({
   code: "code",
 });
 
-function convertInline(inline: InlineNode, caps: Readonly<RichComposerCapabilities>, counts: { math: number }, blockOk: boolean): TipTapJson | null {
+function convertInline(
+  inline: InlineNode,
+  caps: Readonly<RichComposerCapabilities>,
+  counts: { math: number },
+  blockOk: boolean
+): TipTapJson | null {
   if (inline.kind === "text") {
     if (!inline.text) return null;
     const marks = inline.marks
@@ -48,7 +58,9 @@ function convertInline(inline: InlineNode, caps: Readonly<RichComposerCapabiliti
       .filter((m): m is string => typeof m === "string")
       .filter((m) => (m === "underline" ? caps.underline : true))
       .map((type) => ({ type }));
-    return marks.length > 0 ? { type: "text", text: inline.text, marks } : { type: "text", text: inline.text };
+    return marks.length > 0
+      ? { type: "text", text: inline.text, marks }
+      : { type: "text", text: inline.text };
   }
   if (!caps.equation) {
     return { type: "text", text: inline.latex, marks: [{ type: "code" }] };
@@ -60,7 +72,12 @@ function convertInline(inline: InlineNode, caps: Readonly<RichComposerCapabiliti
   return { type: "inlineMath", attrs: { latex: inline.latex } };
 }
 
-function convertInlines(inlines: InlineNode[], caps: Readonly<RichComposerCapabilities>, counts: { math: number }, blockOk = false): TipTapJson[] {
+function convertInlines(
+  inlines: InlineNode[],
+  caps: Readonly<RichComposerCapabilities>,
+  counts: { math: number },
+  blockOk = false
+): TipTapJson[] {
   const out: TipTapJson[] = [];
   for (const inline of inlines) {
     const converted = convertInline(inline, caps, counts, blockOk);
@@ -69,7 +86,11 @@ function convertInlines(inlines: InlineNode[], caps: Readonly<RichComposerCapabi
   return out;
 }
 
-function paragraphToBlocks(inlines: InlineNode[], caps: Readonly<RichComposerCapabilities>, counts: { math: number }): TipTapJson[] {
+function paragraphToBlocks(
+  inlines: InlineNode[],
+  caps: Readonly<RichComposerCapabilities>,
+  counts: { math: number }
+): TipTapJson[] {
   const blocks: TipTapJson[] = [];
   let current: InlineNode[] = [];
   const flush = (): void => {
@@ -91,13 +112,23 @@ function paragraphToBlocks(inlines: InlineNode[], caps: Readonly<RichComposerCap
   return blocks;
 }
 
-function paragraphFromInlines(inlines: InlineNode[], caps: Readonly<RichComposerCapabilities>, counts: { math: number }): TipTapJson | null {
+function paragraphFromInlines(
+  inlines: InlineNode[],
+  caps: Readonly<RichComposerCapabilities>,
+  counts: { math: number }
+): TipTapJson | null {
   const content = convertInlines(inlines, caps, counts);
   if (content.length === 0) return null;
   return { type: "paragraph", content };
 }
 
-function convertBlock(node: ImportNode, caps: Readonly<RichComposerCapabilities>, counts: { math: number; images: number; tables: number }, inCell: boolean): TipTapJson[] {
+function convertBlock(
+  node: ImportNode,
+  caps: Readonly<RichComposerCapabilities>,
+  counts: { math: number; images: number; tables: number },
+  inCell: boolean,
+  imageResolver?: ImportImageResolver
+): TipTapJson[] {
   switch (node.kind) {
     case "paragraph": {
       return paragraphToBlocks(node.children, caps, counts);
@@ -116,14 +147,16 @@ function convertBlock(node: ImportNode, caps: Readonly<RichComposerCapabilities>
       if (!caps.lists || inCell) {
         const out: TipTapJson[] = [];
         for (const item of node.items) {
-          for (const block of item) out.push(...convertBlock(block, caps, counts, inCell));
+          for (const block of item)
+            out.push(...convertBlock(block, caps, counts, inCell, imageResolver));
         }
         return out;
       }
       const items: TipTapJson[] = [];
       for (const item of node.items) {
         const content: TipTapJson[] = [];
-        for (const block of item) content.push(...convertBlock(block, caps, counts, false));
+        for (const block of item)
+          content.push(...convertBlock(block, caps, counts, false, imageResolver));
         if (content.length > 0) items.push({ type: "listItem", content });
       }
       if (items.length === 0) return [];
@@ -160,7 +193,10 @@ function convertBlock(node: ImportNode, caps: Readonly<RichComposerCapabilities>
           const cellType = node.headerRow && rowIndex === 0 ? "tableHeader" : "tableCell";
           cells.push({
             type: cellType,
-            content: inlines.length > 0 ? [{ type: "paragraph", content: inlines }] : [{ type: "paragraph" }],
+            content:
+              inlines.length > 0
+                ? [{ type: "paragraph", content: inlines }]
+                : [{ type: "paragraph" }],
           });
         }
         if (cells.length > 0) rows.push({ type: "tableRow", content: cells });
@@ -169,8 +205,19 @@ function convertBlock(node: ImportNode, caps: Readonly<RichComposerCapabilities>
       return [{ type: "table", content: rows }];
     }
     case "image": {
-      if (!caps.image) {
-        if (node.alt?.trim()) return [{ type: "paragraph", content: [{ type: "text", text: node.alt }] }];
+      if (!caps.image || inCell) {
+        if (node.alt?.trim())
+          return [{ type: "paragraph", content: [{ type: "text", text: node.alt }] }];
+        return [];
+      }
+      if (node.blobRef && imageResolver) {
+        const resolved = imageResolver.resolve(node);
+        if (resolved) {
+          counts.images += 1;
+          return [resolved];
+        }
+        if (node.alt?.trim())
+          return [{ type: "paragraph", content: [{ type: "text", text: node.alt }] }];
         return [];
       }
       counts.images += 1;
@@ -198,7 +245,7 @@ function convertBlock(node: ImportNode, caps: Readonly<RichComposerCapabilities>
 
 export function normalizeImportForCapabilities(
   doc: ImportDocument,
-  caps: Readonly<RichComposerCapabilities>,
+  caps: Readonly<RichComposerCapabilities>
 ): { doc: ImportDocument; filtered: string[] } {
   void caps;
   return { doc, filtered: [] };
@@ -207,10 +254,12 @@ export function normalizeImportForCapabilities(
 export function importAstToRichDocument(
   doc: ImportDocument,
   caps: Readonly<RichComposerCapabilities>,
+  imageResolver?: ImportImageResolver
 ): ConversionOutcome {
   const counts = { math: 0, images: 0, tables: 0 };
   const content: TipTapJson[] = [];
-  for (const node of doc.nodes) content.push(...convertBlock(node, caps, counts, false));
+  for (const node of doc.nodes)
+    content.push(...convertBlock(node, caps, counts, false, imageResolver));
   const safe = content.length > 0 ? content : [{ type: "paragraph" as const }];
   return {
     doc: { type: "doc", content: safe },
@@ -224,13 +273,18 @@ export function importAstToRichDocument(
 export function convertForTableCell(
   doc: ImportDocument,
   caps: Readonly<RichComposerCapabilities>,
+  imageResolver?: ImportImageResolver
 ): ConversionOutcome {
   const counts = { math: 0, images: 0, tables: 0 };
   const content: TipTapJson[] = [];
-  for (const node of doc.nodes) content.push(...convertBlock(node, { ...caps, table: false }, counts, true));
+  for (const node of doc.nodes)
+    content.push(...convertBlock(node, { ...caps, table: false }, counts, true, imageResolver));
   const inlines = content.flatMap((n) => (n.type === "paragraph" ? (n.content ?? []) : []));
   return {
-    doc: { type: "doc", content: [{ type: "paragraph", content: inlines.length > 0 ? inlines : undefined }] },
+    doc: {
+      type: "doc",
+      content: [{ type: "paragraph", content: inlines.length > 0 ? inlines : undefined }],
+    },
     mathCount: counts.math,
     imageCount: 0,
     tableCount: 0,

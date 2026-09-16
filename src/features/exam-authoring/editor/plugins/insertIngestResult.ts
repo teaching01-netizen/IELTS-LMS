@@ -12,7 +12,9 @@ import type { RichComposerCapabilities } from "../RichQuestionComposer";
 import type { IngestClipboardResult } from "../ingestion/application/ingestClipboard";
 import {
   convertForTableCell,
+  type ImportImageResolver,
   importAstToRichDocument,
+  type TipTapJson,
 } from "../ingestion/conversion/importAstToRichDocument";
 import { prepareClipboardImage, type PreparedClipboardImageResult } from "../ingestionImagePipe";
 import type { SmartPasteTarget } from "./smartPastePlugin";
@@ -35,31 +37,37 @@ export async function insertIngestResult(
 ): Promise<InsertIngestOutcome> {
   if (editor.isDestroyed) return { handled: false, rejectedImages: 0 };
   const { view } = editor;
-  const preparedImages: Array<Extract<PreparedClipboardImageResult, { status: "accepted" }>> = [];
+  const preparedImages: Array<{
+    refId: string;
+    prepared: Extract<PreparedClipboardImageResult, { status: "accepted" }>;
+  }> = [];
+  const preparedByRef = new Map<
+    string,
+    Extract<PreparedClipboardImageResult, { status: "accepted" }>
+  >();
   let rejectedImages = 0;
 
-  if (result.pendingImages.length > 0 && !opts.capabilities.image) {
+  const canStageImages = opts.capabilities.image && !target.inCodeBlock && !target.inTable;
+  if (result.pendingImages.length > 0 && !canStageImages) {
     rejectedImages += result.pendingImages.length;
-  }
-
-  if (result.pendingImages.length > 0 && opts.capabilities.image && !target.inCodeBlock) {
-    for (const [index, file] of result.pendingImages.entries()) {
+  } else if (result.pendingImages.length > 0) {
+    for (const pending of result.pendingImages) {
       try {
         const staged = await prepareClipboardImage(
           editor,
-          file,
+          pending.file,
           opts.assetOwnerId ?? "",
           undefined,
-          result.pendingImageAlts[index] ?? ""
+          pending.alt
         );
-        if (staged.status === "accepted") preparedImages.push(staged);
-        else rejectedImages += 1;
+        if (staged.status === "accepted") {
+          preparedImages.push({ refId: pending.refId, prepared: staged });
+          preparedByRef.set(pending.refId, staged);
+        } else rejectedImages += 1;
       } catch {
         rejectedImages += 1;
       }
     }
-  } else if (target.inCodeBlock) {
-    rejectedImages += result.pendingImages.length;
   }
 
   if (target.inCodeBlock) {
@@ -80,12 +88,29 @@ export async function insertIngestResult(
 
   try {
     if (editor.isDestroyed) return { handled: false, rejectedImages };
+    const usedPreparedRefs = new Set<string>();
+    const imageResolver: ImportImageResolver = {
+      resolve: (node): TipTapJson | null => {
+        const refId = node.blobRef?.id;
+        if (!refId) return null;
+        const prepared = preparedByRef.get(refId);
+        if (!prepared) return null;
+        usedPreparedRefs.add(refId);
+        return prepared.node as TipTapJson;
+      },
+    };
     const converted = target.inTable
-      ? convertForTableCell(result.document, opts.capabilities)
-      : importAstToRichDocument(result.document, opts.capabilities);
+      ? convertForTableCell(result.document, opts.capabilities, imageResolver)
+      : importAstToRichDocument(result.document, opts.capabilities, imageResolver);
     const content = result.document.nodes.length > 0 ? [...(converted.doc.content ?? [])] : [];
     const nodes = content.map((node) => view.state.schema.nodeFromJSON(node));
-    nodes.push(...preparedImages.map((image) => view.state.schema.nodeFromJSON(image.node)));
+    // File-only pastes are represented in the AST by ingestClipboard. Keep a
+    // defensive tail fallback for legacy callers that still send only files.
+    for (const image of preparedImages) {
+      if (!usedPreparedRefs.has(image.refId)) {
+        nodes.push(view.state.schema.nodeFromJSON(image.prepared.node));
+      }
+    }
     if (nodes.length === 0) return { handled: false, rejectedImages };
 
     // Insert a slice of content, not a nested doc or separate image/text
@@ -94,12 +119,12 @@ export async function insertIngestResult(
     const tr = closeHistory(view.state.tr).replaceSelection(slice);
     if (!tr.docChanged) return { handled: false, rejectedImages };
     view.dispatch(tr);
-    for (const image of preparedImages) image.startUpload();
+    for (const image of preparedImages) image.prepared.startUpload();
     preparedImages.length = 0;
     return { handled: true, rejectedImages };
   } catch {
     return { handled: false, rejectedImages: rejectedImages + preparedImages.length };
   } finally {
-    for (const image of preparedImages) image.discard();
+    for (const image of preparedImages) image.prepared.discard();
   }
 }

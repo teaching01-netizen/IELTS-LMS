@@ -15,8 +15,8 @@ describe("HTML image references", () => {
       2
     );
     expect(out.refs).toEqual([
-      { src: "https://cdn.test/a.png", alt: "A" },
-      { src: "blob:test", alt: "" },
+      { refId: "html-image-0", src: "https://cdn.test/a.png", alt: "A" },
+      { refId: "html-image-1", src: "blob:test", alt: "" },
     ]);
     expect(out.truncated).toBe(2);
   });
