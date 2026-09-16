@@ -82,6 +82,15 @@ echo "Starting IELTS Backend Service..."
 
 /app/migrate
 
+# SAT authoring co-editing runs inside this backend service. These values must
+# be exported before the Go API starts so both the API and Hocuspocus receive
+# the same topology. The public URL is intentionally supplied by the operator;
+# it is the browser-facing proxy URL, not the loopback control URL.
+coedit_api_port="${PORT:-${API_PORT:-4000}}"
+export AUTHORING_COEDIT_SERVICE_URL="${AUTHORING_COEDIT_SERVICE_URL:-http://127.0.0.1:1235}"
+export AUTHORING_COEDIT_GO_BASE_URL="${AUTHORING_COEDIT_GO_BASE_URL:-http://127.0.0.1:${coedit_api_port}}"
+export AUTHORING_COEDIT_PROXY_ENABLED="${AUTHORING_COEDIT_PROXY_ENABLED:-true}"
+
 # API-only memory tuning knobs.
 # Allows either generic MALLOC_* env vars or API_* overrides.
 API_MALLOC_ARENA_MAX="${API_MALLOC_ARENA_MAX:-${MALLOC_ARENA_MAX:-1}}"
@@ -97,12 +106,8 @@ MALLOC_MMAP_THRESHOLD_="${API_MALLOC_MMAP_THRESHOLD}" \
 /app/api &
 API_PID=$!
 
-# SAT authoring co-editing runs inside this backend service. The process has
-# its own singleton lock and exits on lock loss, so duplicate backend replicas
-# must not both claim the same authoring rooms.
-coedit_api_port="${PORT:-${API_PORT:-4000}}"
-export AUTHORING_COEDIT_SERVICE_URL="${AUTHORING_COEDIT_SERVICE_URL:-http://127.0.0.1:1235}"
-export AUTHORING_COEDIT_GO_BASE_URL="${AUTHORING_COEDIT_GO_BASE_URL:-http://127.0.0.1:${coedit_api_port}}"
+# The process has its own singleton lock and exits on lock loss, so duplicate
+# backend replicas must not both claim the same authoring rooms.
 /usr/local/bin/bun run /app/services/authoring-coedit/src/main.ts &
 COEDIT_PID=$!
 

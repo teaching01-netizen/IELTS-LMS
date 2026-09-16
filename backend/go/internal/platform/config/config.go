@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -557,6 +558,14 @@ type Config struct {
 	// AuthoringCoeditServiceSecret signs private Go <-> Hocuspocus calls
 	// (AUTHORING_COEDIT_SERVICE_SECRET). Minimum 32 bytes.
 	AuthoringCoeditServiceSecret string
+	// AuthoringCoeditPublicURL is the browser-facing co-edit WebSocket origin
+	// (AUTHORING_COEDIT_PUBLIC_URL). In the embedded topology it points to the
+	// Go reverse-proxy route, while AUTHORING_COEDIT_SERVICE_URL remains the
+	// loopback-only control URL.
+	AuthoringCoeditPublicURL string
+	// AuthoringCoeditProxyEnabled exposes the embedded Hocuspocus process through
+	// the Go API's /authoring-coedit WebSocket route.
+	AuthoringCoeditProxyEnabled bool
 	// AuthoringCoeditPublicWSScheme is the scheme the browser should use for
 	// the co-edit socket (ws or wss). Empty derives it from the request.
 	AuthoringCoeditPublicWSScheme string
@@ -871,6 +880,8 @@ func Load() Config {
 		AuthoringCoeditServiceURL:     getenv("AUTHORING_COEDIT_SERVICE_URL", defaultCoeditServiceURL),
 		AuthoringCoeditTokenSecret:    coeditSecret("AUTHORING_COEDIT_TOKEN_SECRET", defaultCoeditTokenSecret, environment),
 		AuthoringCoeditServiceSecret:  coeditSecret("AUTHORING_COEDIT_SERVICE_SECRET", defaultCoeditServiceSecret, environment),
+		AuthoringCoeditPublicURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("AUTHORING_COEDIT_PUBLIC_URL")), "/"),
+		AuthoringCoeditProxyEnabled:   getenvBool("AUTHORING_COEDIT_PROXY_ENABLED", false),
 		AuthoringCoeditPublicWSScheme: strings.ToLower(getenv("AUTHORING_COEDIT_PUBLIC_WS_SCHEME", "ws")),
 		RollupEnabled:                 getenvBool("ROLLUP", false),
 		PresenceMode:                  parsePresenceMode(os.Getenv("PRESENCE_MODE")),
@@ -971,6 +982,18 @@ func (c Config) ValidateForRuntime() error {
 	// Rust posture where an empty password never authenticates.
 	if c.MasterKeyEnabled && strings.TrimSpace(c.MasterKeyPassword) == "" {
 		return fmt.Errorf("MASTER_KEY_PASSWORD must be set when MASTER_KEY_ENABLED is true")
+	}
+	if c.AuthoringCoeditProxyEnabled {
+		publicURL := strings.TrimSpace(c.AuthoringCoeditPublicURL)
+		parsed, err := url.Parse(publicURL)
+		if publicURL == "" || err != nil || parsed.Host == "" {
+			return fmt.Errorf("AUTHORING_COEDIT_PUBLIC_URL must be an absolute URL when AUTHORING_COEDIT_PROXY_ENABLED is true")
+		}
+		switch strings.ToLower(parsed.Scheme) {
+		case "http", "https", "ws", "wss":
+		default:
+			return fmt.Errorf("AUTHORING_COEDIT_PUBLIC_URL must use http, https, ws, or wss")
+		}
 	}
 	// AUTH_SECRET signs attempt tokens + session-adjacent HMACs: require a
 	// non-default secret with minimum entropy in every environment (fail

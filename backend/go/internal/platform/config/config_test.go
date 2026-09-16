@@ -122,6 +122,19 @@ func TestValidateForRuntime(t *testing.T) {
 	if err := withpw.ValidateForRuntime(); err != nil {
 		t.Fatalf("master key with password rejected in dev: %v", err)
 	}
+	embedded := good
+	embedded.AuthoringCoeditProxyEnabled = true
+	if err := embedded.ValidateForRuntime(); err == nil {
+		t.Fatal("expected embedded co-edit proxy to require a public URL")
+	}
+	embedded.AuthoringCoeditPublicURL = "https://api.example.com/authoring-coedit"
+	if err := embedded.ValidateForRuntime(); err != nil {
+		t.Fatalf("valid embedded co-edit public URL rejected: %v", err)
+	}
+	embedded.AuthoringCoeditPublicURL = "ftp://api.example.com/authoring-coedit"
+	if err := embedded.ValidateForRuntime(); err == nil {
+		t.Fatal("expected embedded co-edit proxy to reject non-web URL")
+	}
 	// Weak/short secrets are rejected in every environment (no immortal
 	// dev bypass); empty and default values fail closed too.
 	for _, weak := range []string{"", "dev-secret-change-me", "short"} {

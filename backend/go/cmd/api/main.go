@@ -765,6 +765,11 @@ func BuildRouter(app *App) http.Handler {
 		r.Post("/rebase", authorize("POST /internal/authoring-coedit/rebase", coeditRebaseHandler(app)))
 		r.Post("/recover", authorize("POST /internal/authoring-coedit/recover", coeditRecoverHandler(app)))
 	})
+	if app.Config.AuthoringCoeditProxyEnabled {
+		// The browser-facing Hocuspocus socket shares the Go API's public port;
+		// the child process itself remains bound to the container loopback.
+		r.Get(coeditPublicProxyPath, coeditWebSocketProxy(app))
+	}
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Route not found."))

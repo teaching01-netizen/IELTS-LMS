@@ -15,8 +15,12 @@ The production backend image embeds the Hocuspocus process from
 `services/authoring-coedit/` and supervises it beside the Go API and worker via
 `backend/Dockerfile`. It is therefore one deployable backend service, while
 the co-edit runtime remains a separate child process with its own singleton
-room lock. Set the `AUTHORING_COEDIT_*` variables in the backend deployment;
-the Go API and embedded process must share the two dedicated secrets.
+room lock. The Go API exposes `/authoring-coedit` and reverse-proxies the
+browser WebSocket to the loopback child, so `AUTHORING_COEDIT_PUBLIC_URL` must
+be the public API URL plus `/authoring-coedit`; `AUTHORING_COEDIT_SERVICE_URL`
+stays loopback-only for private control calls. Set the `AUTHORING_COEDIT_*`
+variables in the backend deployment; the Go API and embedded process must
+share the two dedicated secrets.
 
 Run exactly one backend replica when authoring co-editing is enabled. The
 singleton lock intentionally prevents two containers from serving the same

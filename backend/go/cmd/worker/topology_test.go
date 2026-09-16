@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestDockerEntrypointKeepsActivityDrivenAPIOnly(t *testing.T) {
+func TestDockerEntrypointKeepsActivityDrivenWorkerless(t *testing.T) {
 	_, sourceFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller did not return the test path")
@@ -22,12 +22,19 @@ func TestDockerEntrypointKeepsActivityDrivenAPIOnly(t *testing.T) {
 	if activity < 0 {
 		t.Fatal("Dockerfile entrypoint has no activity_driven branch")
 	}
+	coedit := strings.Index(script, "/usr/local/bin/bun run /app/services/authoring-coedit/src/main.ts &")
+	if coedit < 0 {
+		t.Fatal("Dockerfile entrypoint must start embedded SAT co-editing")
+	}
 	worker := strings.Index(script[activity:], "/app/worker &")
 	if worker < 0 {
 		t.Fatal("Dockerfile entrypoint no longer starts the worker in continuous mode")
 	}
 	worker += activity
-	if !strings.Contains(script[activity:worker], `wait "$API_PID"`) {
-		t.Fatal("activity_driven branch must wait on the API without launching a worker")
+	if strings.Contains(script[activity:worker], "/app/worker &") {
+		t.Fatal("activity_driven branch must not launch a worker")
+	}
+	if !strings.Contains(script[activity:worker], `wait -n "$API_PID" "$COEDIT_PID"`) {
+		t.Fatal("activity_driven branch must supervise API and embedded co-editing")
 	}
 }

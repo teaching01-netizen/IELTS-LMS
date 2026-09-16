@@ -195,11 +195,16 @@ func authorWorkspaceCoeditTokenHandler(app *App) http.HandlerFunc {
 	}
 }
 
-// coeditPublicSocketURL derives the browser-facing socket URL from the private
-// service URL. An explicit AUTHORING_COEDIT_PUBLIC_WS_SCHEME wins; otherwise ws
-// for plain http and wss for https (mirroring the page scheme).
+// coeditPublicSocketURL returns the browser-facing socket URL. Embedded
+// deployments use AUTHORING_COEDIT_PUBLIC_URL, which points at the Go proxy;
+// standalone deployments retain the service URL as their public endpoint. An
+// explicit AUTHORING_COEDIT_PUBLIC_WS_SCHEME wins; otherwise ws for plain http
+// and wss for https (mirroring the page scheme).
 func coeditPublicSocketURL(app *App, r *http.Request) string {
-	base := strings.TrimRight(strings.TrimSpace(app.Config.AuthoringCoeditServiceURL), "/")
+	base := strings.TrimRight(strings.TrimSpace(app.Config.AuthoringCoeditPublicURL), "/")
+	if base == "" {
+		base = strings.TrimRight(strings.TrimSpace(app.Config.AuthoringCoeditServiceURL), "/")
+	}
 	if base == "" {
 		return ""
 	}
