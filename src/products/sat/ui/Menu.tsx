@@ -26,7 +26,16 @@ export type SatMenuItem = {
   current?: boolean;
   /** Renders a hairline separator above the item (group boundary). */
   separatorBefore?: boolean;
+  /** Leading glyph. Icons are for items whose meaning is unambiguous alone. */
+  icon?: LucideIcon;
+  /**
+   * Replaces the item face with the menu's own rendering of the effect (for
+   * example a style option shown at its real weight and size). The visible
+   * preview text is what names the item, so it must read as the label.
+   */
+  preview?: ReactNode;
 };
+
 
 type SatMenuProps = {
   /** Accessible name of the trigger; also the visible label unless `compact`. */
@@ -39,6 +48,12 @@ type SatMenuProps = {
   compact?: boolean;
   align?: 'start' | 'end';
   width?: number;
+  /**
+   * Replaces the standard trigger geometry. Callers that own a denser strip
+   * (the rich-editor toolbar) keep one menu contract but their own trigger
+   * proportions; the accessible name still comes from `label`.
+   */
+  triggerClassName?: string | undefined;
 };
 
 const MENU_ELEVATION =
@@ -55,15 +70,25 @@ function supportsNativeMenu(): boolean {
 }
 
 function ItemFace({ item }: { item: SatMenuItem }) {
+  if (item.preview !== undefined && item.preview !== null) {
+    return (
+      <>
+        <span className="min-w-0 flex-1">{item.preview}</span>
+        {item.current ? <Check size={13} className="shrink-0 text-[var(--sat-staff-accent,#0071e3)]" aria-hidden="true" /> : null}
+      </>
+    );
+  }
+  const Icon = item.icon;
   return (
     <>
+      {Icon ? <Icon size={15} className="sat-menu-item__icon" aria-hidden="true" /> : null}
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
       {item.current ? <Check size={13} className="shrink-0 text-[var(--sat-staff-accent,#0071e3)]" aria-hidden="true" /> : null}
     </>
   );
 }
 
-function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align = 'start', width }: SatMenuProps) {
+function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align = 'start', width, triggerClassName }: SatMenuProps) {
   const [open, setOpen] = useState(false);
   const popupId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -136,7 +161,7 @@ function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align =
           event.preventDefault();
           setOpen(true);
         }}
-        className={compact ? COMPACT_TRIGGER_CLASS : WORKSPACE_TRIGGER_CLASS}
+        className={triggerClassName ?? (compact ? COMPACT_TRIGGER_CLASS : WORKSPACE_TRIGGER_CLASS)}
       >
         {triggerContent ?? (
           <>
@@ -186,11 +211,11 @@ function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align =
 
 export function SatMenu(props: SatMenuProps) {
   if (!supportsNativeMenu()) return <StaticMenu {...props} />;
-  const { label, items, triggerContent, icon: Icon, compact, align = 'start', width } = props;
+  const { label, items, triggerContent, icon: Icon, compact, align = 'start', width, triggerClassName } = props;
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button type="button" aria-label={label} className={`group ${compact ? COMPACT_TRIGGER_CLASS : WORKSPACE_TRIGGER_CLASS}`}>
+        <button type="button" aria-label={label} className={`group ${triggerClassName ?? (compact ? COMPACT_TRIGGER_CLASS : WORKSPACE_TRIGGER_CLASS)}`}>
           {triggerContent ?? (
             <>
               {Icon ? <Icon size={16} aria-hidden="true" /> : null}

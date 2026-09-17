@@ -7,8 +7,9 @@ import {
   retryTransientUploadForNode,
 } from "./ingestionImagePipe";
 import { SatImageNode, isDirectImageSource as isDirectSource } from "./schema/imageNode";
+import { imageContentStyle, imageFigureStyle } from "./imageObjectActions";
 
-function SatImageNodeView({ node, editor }: NodeViewProps) {
+function SatImageNodeView({ node, editor, selected }: NodeViewProps) {
   const assetId = String(node.attrs["assetId"] ?? "");
   const fallbackSource = String(node.attrs["src"] ?? "");
   const alt = String(node.attrs["alt"] ?? "");
@@ -20,6 +21,9 @@ function SatImageNodeView({ node, editor }: NodeViewProps) {
     isDirectSource(assetId) ? assetId : isDirectSource(fallbackSource) ? fallbackSource : ""
   );
   const [failed, setFailed] = useState(false);
+
+  const figureStyle = imageFigureStyle(node.attrs as Record<string, unknown>);
+  const contentStyle = imageContentStyle(node.attrs as Record<string, unknown>);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,7 +41,16 @@ function SatImageNodeView({ node, editor }: NodeViewProps) {
   }, [assetId]);
 
   return (
-    <NodeViewWrapper as="figure" className="my-4 space-y-2" data-asset-id={assetId}>
+    <NodeViewWrapper
+      as="figure"
+      className="my-4 space-y-2"
+      data-asset-id={assetId}
+      // Selection is stated by the object itself (a restrained accent stroke)
+      // rather than by a ring around the whole editor: the smallest meaningful
+      // object gets the focus, and it fades in with the object controls.
+      data-image-selected={selected ? "true" : undefined}
+      style={figureStyle}
+    >
       {uploadFailed ? (
         <div className="space-y-3 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <span
@@ -76,6 +89,7 @@ function SatImageNodeView({ node, editor }: NodeViewProps) {
           src={source}
           alt={alt}
           onError={() => setFailed(true)}
+          style={contentStyle}
           className="mx-auto max-h-80 max-w-full rounded-xl border border-au-separator bg-au-surface object-contain"
         />
       ) : (

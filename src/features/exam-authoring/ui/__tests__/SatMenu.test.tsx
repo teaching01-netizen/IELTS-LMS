@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Image as ImageIcon } from "lucide-react";
 import { SatMenu } from "../../../../products/sat/ui/Menu";
 
 const originalMatchMedia = window.matchMedia;
@@ -48,5 +49,36 @@ describe("SatMenu constrained-environment fallback", () => {
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it("renders item icons, item previews, and a caller-owned trigger class", () => {
+    render(
+      <SatMenu
+        label="Text style"
+        align="start"
+        triggerClassName="sat-rich-editor__menu-trigger"
+        items={[
+          {
+            id: "paragraph",
+            label: "Paragraph",
+            current: true,
+            preview: <span className="preview-paragraph">Paragraph</span>,
+            onSelect: vi.fn(),
+          },
+          { id: "image", label: "Insert image", icon: ImageIcon, onSelect: vi.fn() },
+        ]}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Text style" });
+    expect(trigger).toHaveClass("sat-rich-editor__menu-trigger");
+    fireEvent.click(trigger);
+    const previewed = screen.getByRole("menuitem", { name: "Paragraph" });
+    // A preview names the item and shows the effect; the current mark stays.
+    expect(previewed.querySelector(".preview-paragraph")).not.toBeNull();
+    expect(previewed).toHaveAttribute("aria-current", "true");
+    expect(
+      screen.getByRole("menuitem", { name: "Insert image" }).querySelector(".sat-menu-item__icon"),
+    ).not.toBeNull();
   });
 });

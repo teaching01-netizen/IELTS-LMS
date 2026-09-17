@@ -119,6 +119,32 @@ describe('authoring-local foundation', () => {
     expect(css).toContain('.sat-spine .sat-rich-editor:hover .sat-rich-editor__toolbar {\n  opacity: 0.82;\n}');
     expect(css).toContain('.sat-spine .sat-rich-editor:focus-within .sat-rich-editor__toolbar {\n  opacity: 1;\n}');
   });
+  it('hands the accent to whichever surface has focus, so only one cue shows', () => {
+    // The field's own focus treatment is pinned above; these rules only step it
+    // aside while the author is driving a control surface instead of the text.
+    expect(css).toContain('.sat-spine .sat-rich-editor:has(.sat-rich-editor__toolbar:focus-within),');
+    expect(css).toContain('.sat-spine .sat-rich-editor:has(.sat-rich-editor__bubble:focus-within) {');
+    expect(css).not.toContain('.sat-spine .sat-rich-editor:focus-within,');
+  });
+  it('keeps keyboard focus visible inside the editor without a second accent ring', () => {
+    expect(css).toContain('.sat-spine .sat-rich-editor__toolbar-button:focus-visible,');
+    expect(css).toContain('.sat-spine .sat-rich-editor__menu-trigger:focus-visible,');
+    expect(css).toContain('.sat-spine .sat-rich-editor__bubble-label:focus-visible,');
+    const rule = css.match(/\.sat-spine \.sat-rich-editor__toolbar-button:focus-visible,[\s\S]*?\{([^}]*)\}/)?.[1] ?? '';
+    expect(rule).toContain('outline: none;');
+    expect(rule).toContain('box-shadow: inset 0 0 0 1px var(--color-au-separator-strong);');
+  });
+  it('sizes editor menu triggers on the control row, not as standalone menus', () => {
+    const rule = css.match(/\.sat-spine \.sat-rich-editor__toolbar \.sat-spine__menu button,\n\.sat-spine \.sat-rich-editor__bubble \.sat-spine__menu button \{([^}]*)\}/)?.[1] ?? '';
+    expect(rule).toContain('min-width: 0;');
+    expect(rule).toContain('min-height: 30px;');
+  });
+  it('lets a table strip reach the answer row edges like the shared strip', () => {
+    const strip = css.match(/\.sat-spine \.answer-choice \.sat-rich-editor__table-toolbar \{([^}]*)\}/)?.[1] ?? '';
+    expect(strip).toContain('margin-inline: -64px -144px;');
+    expect(strip).toContain('padding-inline: 64px 144px;');
+    expect(strip).not.toContain('background: transparent;');
+  });
   it('gives validation a quiet text treatment instead of a banner', () => {
     const rule = css.match(/\.sat-spine__field-error \{([^}]*)\}/)?.[1] ?? '';
     expect(rule).toContain('padding: 0;');

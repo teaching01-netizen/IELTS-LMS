@@ -91,6 +91,44 @@ if (typeof Element !== "undefined") {
   });
 }
 
+// jsdom implements neither getClientRects() nor getBoundingClientRect() on
+// Range. ProseMirror's coordsAtPos() — which the rich editor's anchored
+// editing surfaces use to sit next to a selection or a selected object — calls
+// both and throws without them. The stub reports an empty, zero-sized box:
+// tests assert the surfaces' presence and state, never their measured pixels.
+//
+// Both stay writable: tests that position a surface (see
+// highlightSelectionPort.test.tsx, EditableMathExtension.test.tsx) assign a
+// rect onto a live range instance, and a non-writable prototype property turns
+// that assignment into a TypeError under strict mode.
+if (typeof Range !== "undefined") {
+  if (typeof Range.prototype.getClientRects !== "function") {
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      writable: true,
+      value: () => [] as unknown as DOMRectList,
+    });
+  }
+  if (typeof Range.prototype.getBoundingClientRect !== "function") {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      writable: true,
+      value: () =>
+        ({
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: 0,
+          height: 0,
+          toJSON: () => ({}),
+        }) as DOMRect,
+    });
+  }
+}
+
 // jsdom has no Pointer Capture API. Production components (splitter, Radix
 // Select) call hasPointerCapture/setPointerCapture/releasePointerCapture;
 // stub them browser-faithfully (nothing ever holds capture) instead of

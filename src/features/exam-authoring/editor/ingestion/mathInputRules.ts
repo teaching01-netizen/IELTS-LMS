@@ -24,7 +24,20 @@ function tryLatex(latex: string): boolean {
   return validateLatex(trimmed).ok;
 }
 
-function inlineRule(find: RegExp, nodeName: "inlineMath" | "blockMath"): InputRule {
+export interface MathInputRuleOptions {
+  /**
+   * Called only when a rule actually converted typed text into an equation, so
+   * the caller can acknowledge the conversion without re-implementing the
+   * confidence check. Absent means no notification, exactly as before.
+   */
+  onConvert?: ((latex: string, nodeName: "inlineMath" | "blockMath") => void) | undefined;
+}
+
+function inlineRule(
+  find: RegExp,
+  nodeName: "inlineMath" | "blockMath",
+  options: MathInputRuleOptions
+): InputRule {
   return new InputRule({
     find,
     handler: ({ range, match, chain }) => {
@@ -34,15 +47,16 @@ function inlineRule(find: RegExp, nodeName: "inlineMath" | "blockMath"): InputRu
         .deleteRange(range)
         .insertContentAt(range.from, { type: nodeName, attrs: { latex } })
         .run();
+      options.onConvert?.(latex, nodeName);
       return null;
     },
   });
 }
 
-export function satMathInputRules(): InputRule[] {
+export function satMathInputRules(options: MathInputRuleOptions = {}): InputRule[] {
   return [
-    inlineRule(/\\\(([\s\S]{1,300}?)\\\)$/, "inlineMath"),
-    inlineRule(/\\\[([\s\S]{1,300}?)\\\]$/, "blockMath"),
-    inlineRule(/\$\$([\s\S]{1,300}?)\$\$$/, "blockMath"),
+    inlineRule(/\\\(([\s\S]{1,300}?)\\\)$/, "inlineMath", options),
+    inlineRule(/\\\[([\s\S]{1,300}?)\\\]$/, "blockMath", options),
+    inlineRule(/\$\$([\s\S]{1,300}?)\$\$$/, "blockMath", options),
   ];
 }

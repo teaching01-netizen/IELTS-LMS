@@ -27,7 +27,7 @@ export function FastQuestionComposer({
   onChange,
   onLocalChange,
   label,
-  placeholder = "Start typing…",
+  placeholder = "Write or paste…",
   compact = false,
   minHeightClassName = "min-h-[112px]",
   assetOwnerId,

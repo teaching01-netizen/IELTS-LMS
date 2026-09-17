@@ -16,12 +16,42 @@ export function isDirectImageSource(value: string): boolean {
   return validation.ok && (validation.kind === "https" || validation.kind === "relative");
 }
 
+// Alignment and size are authoring choices the student surface must honour, so
+// they belong to the shared node rather than to the browser's node view: the
+// co-editing service builds the same schema from this module, and the published
+// document carries whatever the author chose. `null` is the pre-existing
+// behaviour (centred, natural width), which keeps untouched content identical.
+const alignValues = new Set(["left", "center", "right"]);
+const sizeValues = new Set(["small", "medium", "large"]);
+
 export const SatImageNode = Image.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
       assetId: { default: null },
       caption: { default: null },
+      align: {
+        default: null,
+        parseHTML: (element) => {
+          const value = element.getAttribute("data-align");
+          return value && alignValues.has(value) ? value : null;
+        },
+        renderHTML: (attributes) =>
+          typeof attributes["align"] === "string" && alignValues.has(attributes["align"])
+            ? { "data-align": attributes["align"] }
+            : {},
+      },
+      size: {
+        default: null,
+        parseHTML: (element) => {
+          const value = element.getAttribute("data-size");
+          return value && sizeValues.has(value) ? value : null;
+        },
+        renderHTML: (attributes) =>
+          typeof attributes["size"] === "string" && sizeValues.has(attributes["size"])
+            ? { "data-size": attributes["size"] }
+            : {},
+      },
       // Transient upload state for clipboard image paste. The pipe inserts a
       // temp node with uploadId/uploading set, then swaps attrs with
       // addToHistory:false so the paste stays one undo step. Undeclared attrs

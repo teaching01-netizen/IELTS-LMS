@@ -44,10 +44,13 @@ describe("collaborative composer history", () => {
 
 describe("SAT rich question composer capabilities", () => {
   it("shows the standard control set with visible undo and redo", async () => {
+    // Count includes the style command, which reads as a control rather than a
+    // form field: 8 buttons, and no combobox anywhere in the chrome.
     render(<RichQuestionComposer value={plainContentFromText("Hello")} onChange={vi.fn()} label="Question" />);
     const toolbar=await screen.findByRole("toolbar", {name:"Formatting tools"});
-    expect(within(toolbar).getAllByRole("button")).toHaveLength(7);
-    expect(within(toolbar).getByRole("combobox", {name:"Text style"})).toBeInTheDocument();
+    expect(within(toolbar).getAllByRole("button")).toHaveLength(8);
+    expect(within(toolbar).getByRole("button", {name:"Text style"})).toBeInTheDocument();
+    expect(within(toolbar).queryByRole("combobox")).toBeNull();
   });
   it("retains a persisted text-block identity when the editor loads", async () => {
     render(<RichQuestionComposer value={{ version: 2, nodes: [], document: {

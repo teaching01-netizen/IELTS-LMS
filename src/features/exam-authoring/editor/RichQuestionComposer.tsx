@@ -14,13 +14,15 @@ import {
 } from "./richContent";
 import { SatImage } from "./SatImageExtension";
 import { EditableBlockMath, EditableInlineMath } from "./EditableMathExtension";
-import { uploadAssessmentAsset } from "../api/assessmentMediaApi";
+import { getAssessmentMediaAsset, uploadAssessmentAsset } from "../api/assessmentMediaApi";
 import { AuthoringDialog } from "../ui/authoringPrimitives";
 import { authoringMotion } from "../ui/authoringMotion";
 import { RichContentIdentity } from "./RichContentIdentityExtension";
 import { richTextSchemaExtensions } from "./schema/richTextSchema";
 import { ComposerToolbar } from "./ComposerToolbar";
-import type { ComposerContext } from "./composerContext";
+import { type ComposerContext, type ImageDialogMode } from "./composerContext";
+import { EditorContextualSurfaces } from "./EditorContextualSurfaces";
+import { defaultHintStore, type OneTimeHintStore } from "./oneTimeHints";
 import { isDirectImageSource } from "./schema/imageNode";
 import { SmartPastePlugin } from "./plugins/smartPastePlugin";
 import { SmartDropPlugin } from "./plugins/smartDropPlugin";
@@ -29,7 +31,13 @@ import { insertIngestResult } from "./plugins/insertIngestResult";
 import { importImageSource, ImageSourceError } from "./ingestion/application/imageImport";
 import { ingestClipboard } from "./ingestion/application/ingestClipboard";
 import { createPipelineContext } from "./ingestion/application/pipelineContext";
-import { PasteStatus } from "./PasteStatus";
+import {
+  buildActionFeedback,
+  buildPasteFeedback,
+  type EditorFeedbackInput,
+  type EditorFeedbackItem,
+  type EditorFeedbackPublisher,
+} from "./editorFeedbackCopy";
 import {
   stripTransientImages,
   validateSatImageFile,
@@ -136,6 +144,12 @@ export interface RichQuestionComposerProps {
   smartPaste?: boolean;
   onSmartPaste?: ((info: SmartPasteStatus) => void) | undefined;
   /**
+   * Where "you have already seen this" is remembered. Injected so the composer
+   * never reaches for browser storage itself and tests can use a fake; the
+   * default is a lazily created localStorage-backed store.
+   */
+  hintStore?: OneTimeHintStore | undefined;
+  /**
    * Prompt co-editing binding, supplied by the co-edit package (the only
    * package that knows about Yjs and Hocuspocus). When present the composer:
    *
@@ -181,25 +195,51 @@ export function RichQuestionComposer({
   onChange,
   onLocalChange,
   label,
-  placeholder = "Start typing…",
+  // Transient, and only as long as it needs to be: as soon as the author types
+  // or pastes, the instruction is gone. No permanent helper paragraph.
+  placeholder = "Write or paste…",
   compact = false,
   minHeightClassName = "min-h-[132px]",
   assetOwnerId,
   capabilities = SAT_RICH_COMPOSER_CAPABILITIES,
   smartPaste = true,
   onSmartPaste,
+  hintStore,
   collaboration,
 }: RichQuestionComposerProps) {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [dialogContext, setDialogContext] = useState<ComposerContext>({ kind: "text" });
   const [tableFeedback, setTableFeedback] = useState(false);
-  const [pasteStatus, setPasteStatus] = useState<SmartPasteStatus>({
-    visible: false,
-    source: null,
-    imageCount: 0,
-    mathCount: 0,
-    needsAltText: false,
-  });
+  const [feedback, setFeedback] = useState<EditorFeedbackItem | null>(null);
+  const feedbackSequence = useRef(0);
+  const editorRef = useRef<Editor | null>(null);
+  // The hint store is created once, at the composition boundary: the editor
+  // never reaches for browser storage on its own.
+  const hintStoreRef = useRef<OneTimeHintStore | null>(null);
+  if (!hintStoreRef.current) hintStoreRef.current = hintStore ?? defaultHintStore();
+  const openAltTextRef = useRef<(() => void) | null>(null);
+  const nextFeedbackId = () => `feedback-${(feedbackSequence.current += 1)}`;
+  const undoLastChange = () => {
+    setFeedback(null);
+    editorRef.current?.chain().focus().undo().run();
+  };
+  /** Raises one acknowledgement, replacing whatever was showing. */
+  const publishFeedback = (input: EditorFeedbackInput) => {
+    setFeedback(buildActionFeedback(input, nextFeedbackId(), undoLastChange));
+  };
+  // The paste plugins are frozen at construction, so their acknowledgement goes
+  // through a ref that always points at the newest render's publisher.
+  const publishFeedbackRef = useRef<EditorFeedbackPublisher>(() => {});
+  publishFeedbackRef.current = publishFeedback;
+  const publishPasteFeedbackRef = useRef<(status: SmartPasteStatus) => void>(() => {});
+  publishPasteFeedbackRef.current = (status: SmartPasteStatus) => {
+    const item = buildPasteFeedback(
+      status,
+      { onUndo: undoLastChange, onAddAltText: () => openAltTextRef.current?.() },
+      nextFeedbackId()
+    );
+    if (item) setFeedback(item);
+  };
   const [initialContent] = useState(() => documentFromStructuredContent(value));
   const ingestRef = useRef(ingestClipboard);
   const capabilitiesRef = useRef(capabilities);
@@ -282,7 +322,7 @@ export function RichQuestionComposer({
             ...(info.document ? { document: info.document } : {}),
             ...(info.pastedPlainText ? { pastedPlainText: info.pastedPlainText } : {}),
           };
-          setPasteStatus(status);
+          publishPasteFeedbackRef.current(status);
           onSmartPasteRef.current?.(status);
         },
       }),
@@ -312,11 +352,16 @@ export function RichQuestionComposer({
             canUndo: info.canUndo,
             ...(info.rejectedImageCount > 0 ? { rejectedImageCount: info.rejectedImageCount } : {}),
           };
-          setPasteStatus(status);
+          publishPasteFeedbackRef.current(status);
           onSmartPasteRef.current?.(status);
         },
       }),
-      LatexPasteRule.configure({ enabled: capabilities.equation }),
+      // Typed LaTeX (`\(x^2\)`, `$$y=mx+b$$`) converts in place; the author is
+      // told once, quietly, with the way back — that is the whole tutorial.
+      LatexPasteRule.configure({
+        enabled: capabilities.equation,
+        onConvert: () => publishFeedbackRef.current({ message: "Converted to equation", undoable: true }),
+      }),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable plugin identity; runtime opts flow via refs
     [collaborative, placeholder, collaborationExtensions]
@@ -417,20 +462,23 @@ export function RichQuestionComposer({
     return <div className={`${minHeightClassName} animate-pulse rounded-xl bg-au-fill`} />;
   }
 
+  editorRef.current = editor;
+
+  const openImageDialog = (context: Extract<ComposerContext, { kind: "image" }>, mode: ImageDialogMode) => {
+    setDialogContext({ ...context, mode });
+    setDialog("image");
+  };
+
   const openAltTextForFirstMissingImage = () => {
     const position = firstImageWithoutAlt(editor);
     if (position === null) return;
     const node = editor.state.doc.nodeAt(position);
     if (!node || node.type.name !== "image") return;
     editor.chain().focus().setNodeSelection(position).run();
-    setDialogContext({
-      kind: "image",
-      pos: position,
-      attrs: { ...(node.attrs as Record<string, unknown>) },
-    });
-    setDialog("image");
-    setPasteStatus((status) => ({ ...status, visible: false }));
+    setFeedback(null);
+    openImageDialog({ kind: "image", pos: position, attrs: { ...(node.attrs as Record<string, unknown>) } }, "alt");
   };
+  openAltTextRef.current = openAltTextForFirstMissingImage;
 
   return (
     <div
@@ -447,13 +495,29 @@ export function RichQuestionComposer({
           setDialog(next);
         }}
         onTableMutation={flashTableFeedback}
+        onFeedback={publishFeedback}
       />
       <EditorContent editor={editor} className="sat-rich-editor__content" />
-      <PasteStatus
-        status={pasteStatus}
-        onUndo={() => editor.commands.undo()}
-        onAddAltText={openAltTextForFirstMissingImage}
-        onDismiss={() => setPasteStatus((s) => ({ ...s, visible: false }))}
+      {/*
+       * The contextual surfaces of the interaction model: text formatting next
+       * to the text, object controls attached to the object. Neither joins the
+       * toolbar, which is what keeps Bold where the author learned it, and the
+       * persistent toolbar stays the fallback — core formatting never depends
+       * on a floating surface.
+       */}
+      <EditorContextualSurfaces
+        editor={editor}
+        capabilities={capabilities}
+        feedback={feedback}
+        onDismissFeedback={() => setFeedback(null)}
+        hintStore={hintStoreRef.current ?? defaultHintStore()}
+        onOpenImageDialog={openImageDialog}
+        onEditEquation={(context) => {
+          setDialogContext(context);
+          setDialog("math");
+        }}
+        onFeedback={publishFeedback}
+        resolveAsset={getAssessmentMediaAsset}
       />
       <AnimatePresence>
         {dialog === "math" ? (
@@ -477,6 +541,7 @@ export function RichQuestionComposer({
             editor={editor}
             target={dialogContext.kind === "image" ? dialogContext : undefined}
             {...(assetOwnerId ? { ownerId: assetOwnerId } : {})}
+            onFeedback={publishFeedback}
             onClose={() => setDialog(null)}
           />
         ) : null}
@@ -804,11 +869,13 @@ function ImageDialog({
   editor,
   ownerId,
   target,
+  onFeedback,
   onClose,
 }: {
   editor: Editor;
   ownerId?: string;
   target?: Extract<ComposerContext, { kind: "image" }> | undefined;
+  onFeedback?: EditorFeedbackPublisher | undefined;
   onClose: () => void;
 }) {
   const reduceMotion = useReducedMotion();
@@ -888,6 +955,14 @@ function ImageDialog({
     void handleUpload(file);
   };
 
+  // The dialog is one component with three intents: inserting a visual,
+  // replacing the one that is selected, and describing it. The title and where
+  // focus lands follow the intent, so "Replace" does not open a form about alt
+  // text, and the whole thing still shares one implementation.
+  const mode: ImageDialogMode = target?.mode ?? (target ? "alt" : "insert");
+  const dialogTitle =
+    mode === "replace" ? "Replace visual" : mode === "alt" ? "Describe this visual" : "Insert image or graph";
+
   const handleInsert = async () => {
     const source = assetId.trim();
     const alternativeText = alt.trim();
@@ -920,8 +995,12 @@ function ImageDialog({
           .setNodeSelection(target.pos)
           .updateAttributes("image", attrs)
           .run();
+        onFeedback?.({ message: "Image replaced", undoable: true });
       } else if (!target) {
+        // The placeholder already reserved the object's space; the document now
+        // holds it, and the acknowledgement says so quietly.
         editor.chain().focus().insertContent({ type: "image", attrs }).run();
+        onFeedback?.({ message: "Image added", undoable: true });
       }
       onClose();
     } catch (error) {
@@ -935,7 +1014,7 @@ function ImageDialog({
   };
 
   return (
-    <DialogFrame title="Insert image or graph" onClose={onClose}>
+    <DialogFrame title={dialogTitle} onClose={onClose}>
       {ownerId ? (
         <label
           htmlFor="sat-visual-upload"
@@ -947,6 +1026,7 @@ function ImageDialog({
             type="file"
             accept={SAT_IMAGE_POLICY.allowedMime.join(",")}
             className="sr-only"
+            data-dialog-initial-focus={mode === "replace" ? true : undefined}
             disabled={uploading}
             onChange={(event) => {
               const file = event.target.files?.[0];
@@ -1054,7 +1134,7 @@ function ImageDialog({
             <input
               id="sat-visual-asset"
               aria-label="Image URL or asset ID"
-              data-dialog-initial-focus
+              data-dialog-initial-focus={mode === "insert" ? true : undefined}
               value={assetId}
               onChange={(event) => setAssetId(event.target.value)}
               className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"
@@ -1070,7 +1150,7 @@ function ImageDialog({
         id="sat-visual-alt"
         aria-labelledby="sat-visual-alt-label"
         aria-required="true"
-        data-dialog-initial-focus={target && !alt.trim() ? true : undefined}
+        data-dialog-initial-focus={mode === "alt" && !alt.trim() ? true : undefined}
         value={alt}
         onChange={(event) => setAlt(event.target.value)}
         className="mt-2 w-full rounded-xl border border-au-separator px-3 py-2 text-sm outline-none transition focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10"

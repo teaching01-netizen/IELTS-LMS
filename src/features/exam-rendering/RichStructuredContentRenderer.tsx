@@ -123,6 +123,21 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
   const caption = stringAttribute(node, "caption");
   const width = positiveDimension(node, "width");
   const height = positiveDimension(node, "height");
+  // Authoring choices the student surface must honour. Absent values mean the
+  // pre-existing presentation (centred at the column's natural width), so
+  // questions authored before these controls existed render unchanged.
+  const align = stringAttribute(node, "align");
+  const size = stringAttribute(node, "size");
+  const figureMaxWidth = size === "small" ? "40%" : size === "medium" ? "70%" : size === "large" ? "100%" : undefined;
+  const figureStyle: CSSProperties = {
+    ...(figureMaxWidth ? { maxWidth: figureMaxWidth } : {}),
+    ...(figureMaxWidth
+      ? { marginInline: align === "left" ? "0 auto" : align === "right" ? "auto 0" : "auto" }
+      : {}),
+  };
+  const contentAlignStyle: CSSProperties = {
+    marginInline: align === "left" ? "0 auto" : align === "right" ? "auto 0" : "auto",
+  };
   const [source, setSource] = useState(() => initialImageSource(node));
   const [failed, setFailed] = useState(() => !assetId && !directSource(fallbackSource));
   // Bluebook lightbox (Phase 10): transient per-image viewer state. No timer,
@@ -162,10 +177,10 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
 
   const enlargeLabel = alt || caption || "question visual";
   return (
-    <figure className="my-4 space-y-2" data-asset-id={assetId}>
+    <figure className="my-4 space-y-2" data-asset-id={assetId} data-align={align || undefined} data-size={size || undefined} style={figureStyle}>
       <div
         className="mx-auto flex w-full max-w-full items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white"
-        style={mediaStyle}
+        style={{ ...mediaStyle, ...contentAlignStyle }}
       >
         {source && !failed ? (
           <img

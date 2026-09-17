@@ -573,6 +573,16 @@
 @keyframes spine-panel-enter { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
 .sat-spine__main, .sat-spine__queue { overscroll-behavior: contain; }
 .sat-spine__menu button { min-width: 44px; min-height: 44px; }
+
+/* ...except inside the rich editor, where menu triggers are part of a control
+ * row: they take the row's own geometry so "Insert" and "···" sit on the same
+ * line as Bold. Touch hardware still receives the 44px floor from the coarse
+ * pointer block in index.css. */
+.sat-spine .sat-rich-editor__toolbar .sat-spine__menu button,
+.sat-spine .sat-rich-editor__bubble .sat-spine__menu button {
+  min-width: 0;
+  min-height: 30px;
+}
 @media (hover: hover) and (pointer: fine) {
   .sat-spine__row-actions, .sat-spine__choice-reorder { opacity: 0; }
   [data-spine-key-row]:hover .sat-spine__choice-reorder,
@@ -1016,6 +1026,35 @@
   color: #626269;
 }
 
+/* One action, one obvious feedback signal.
+ *
+ * At rest the field carries the accent. The moment the author's focus moves
+ * into the toolbar — or into a contextual surface — the field's ambient ring
+ * steps aside and the control under the pointer becomes the only emphasised
+ * thing on screen. Two simultaneous blue outlines read as browser chrome; one
+ * reads as intent. */
+.sat-spine .sat-rich-editor:has(.sat-rich-editor__toolbar:focus-within),
+.sat-spine .sat-rich-editor:has(.sat-rich-editor__bubble:focus-within) {
+  border-color: var(--color-border-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    0 1px 2px rgba(18, 30, 48, 0.025);
+}
+
+/* Inside the editor, keyboard focus is a neutral inset edge instead of the
+ * global blue two-pixel outline: visible, unmistakable, and not a fourth
+ * accent competing with the one that means "this field is live". */
+.sat-spine .sat-rich-editor__toolbar-button:focus-visible,
+.sat-spine .sat-rich-editor__menu-trigger:focus-visible,
+.sat-spine .sat-rich-editor__bubble-label:focus-visible,
+.sat-spine .sat-rich-editor__table-action:focus-visible {
+  outline: none;
+  border-color: var(--color-au-separator-strong);
+  background: var(--color-au-fill);
+  color: #18181b;
+  box-shadow: inset 0 0 0 1px var(--color-au-separator-strong);
+}
+
 .sat-spine .sat-rich-editor__toolbar-button:hover:not(:disabled) {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(236, 240, 245, 0.95));
   border-color: rgba(0, 0, 0, 0.1);
@@ -1023,7 +1062,7 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
-.sat-spine .sat-rich-editor__style-select {
+.sat-spine .sat-rich-editor__menu-trigger {
   background: transparent;
   color: #3f3f46;
 }
@@ -1203,7 +1242,16 @@
   border-radius: 9px 9px 0 0;
 }
 
-.sat-spine .answer-choice .sat-rich-editor__style-select {
+/* The table strip is part of that same strip when it appears, so it reaches
+ * across the same two tracks; otherwise a table inside an answer choice would
+ * end its rules short of the row's edges. */
+.sat-spine .answer-choice .sat-rich-editor__table-toolbar {
+  margin-inline: -64px -144px;
+  padding-inline: 64px 144px;
+  border-radius: 0 0 9px 9px;
+}
+
+.sat-spine .answer-choice .sat-rich-editor__menu-trigger {
   height: 28px;
   min-height: 28px;
   padding-inline: 8px;
