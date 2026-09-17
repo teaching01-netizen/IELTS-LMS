@@ -215,30 +215,40 @@ describe("StaticStructuredImage figure chrome", () => {
     expect(frame).not.toHaveAttribute("data-sat-image-dragging");
   });
 
-  it("zooms where the student double-clicks, at any magnification", async () => {
-    const intents: SatImageGestureIntent[] = [];
+  it("opens fullscreen when the student double-clicks the embedded figure, without zooming", async () => {
+    let viewerOpened = false;
+    const views: SatImageEnlargeView[] = [];
     const resolveGesture = vi.fn((input: SatImageGestureInput) => {
-      intents.push(input.intent);
-      return input.intent.kind === "zoom-at-point"
-        ? { zoom: 1.25, offsetX: 0, offsetY: 0 }
-        : input.view;
+      return input.view;
     });
     const { container } = render(
       <RichStructuredContentRenderer
         content={content}
         enlarge={{
-          renderEnlarge: () => <div role="toolbar" aria-label="Figure controls" />,
+          renderEnlarge: (props: SatImageEnlargeProps) => {
+            views.push(props.view);
+            if (props.open) viewerOpened = true;
+            return (
+              <div role="toolbar" aria-label="Figure controls">
+                <span data-testid="open-state">{props.open ? "open" : "closed"}</span>
+              </div>
+            );
+          },
           resolveGesture,
         }}
       />,
     );
     const { frame, image } = layOut(container, { viewport: [200, 100], image: [200, 100] });
     fireEvent.load(image);
-    // Point is reported from the centre of the frame, so the consumer never has
-    // to know where the figure sits on the page.
+    // Double-click on the embedded frame opens fullscreen — it does NOT zoom.
     fireEvent.doubleClick(frame, { clientX: 180, clientY: 40 });
-    expect(intents[0]).toEqual({ kind: "zoom-at-point", point: { x: -20, y: -60 }, direction: 1 });
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    // The resolveGesture should NOT be called — no zoom-at-point intent.
+    expect(resolveGesture).not.toHaveBeenCalled();
+    // The fullscreen viewer should be requested to open.
+    expect(viewerOpened).toBe(true);
+    // The view's zoom must not have changed as a side effect.
+    const lastView = views.at(-1);
+    expect(lastView?.zoom).toBe(1);
   });
 
   it("keeps a keyboard path to the parts of a magnified figure the window hides", async () => {

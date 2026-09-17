@@ -87,7 +87,7 @@ describe("SatImageViewer", () => {
     expect(screen.getByTestId("view")).toHaveTextContent("1.25:0:0");
   });
 
-  it("zooms where the student double-clicks inside the pane", async () => {
+  it("zooms where the student double-clicks inside the fullscreen pane", async () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByRole("button", { name: "Full screen" }));
@@ -185,15 +185,38 @@ describe("SatImageViewer", () => {
     expect(screen.getByTestId("view")).toHaveTextContent("1:0:0");
   });
 
-  it("presents an exclusive full-viewport modal dialog that fully occludes the background", async () => {
+  it("presents an exclusive modal dialog with backdrop blur over a floating panel", async () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByRole("button", { name: "Full screen" }));
     const dialog = screen.getByRole("dialog", { name: "Image viewer" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
+    // The dialog root covers the full viewport as the backdrop absorber.
     expect(dialog).toHaveClass("fixed", "inset-0", "h-[100dvh]", "w-[100dvw]");
     expect(dialog).toHaveClass("z-[89]");
+    // Backdrop material overlay exists with blur styling.
+    const backdrop = dialog.querySelector("[data-sat-image-backdrop]");
+    expect(backdrop).toBeInTheDocument();
+    expect(backdrop).toHaveClass("backdrop-blur-[20px]");
+    // A floating panel exists inside the dialog (not edge-to-edge).
+    const panel = dialog.querySelector("[data-sat-image-panel]");
+    expect(panel).toBeInTheDocument();
+    expect(panel).toHaveClass("rounded-2xl");
+    // No old-style scrim element.
     expect(document.querySelector("[data-sat-image-scrim]")).toBeNull();
+  });
+
+  it("uses h-full w-full object-contain on the fullscreen image to fill the stage", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    const image = screen.getByTestId("sat-image-viewer").querySelector("img");
+    expect(image).toBeInTheDocument();
+    // The image element must own the full stage box (h-full w-full),
+    // NOT merely limit its size (max-h-full max-w-full).
+    expect(image).toHaveClass("h-full", "w-full", "object-contain");
+    expect(image?.className).not.toContain("max-h-full");
+    expect(image?.className).not.toContain("max-w-full");
   });
 
   it("traps keyboard Tab focus within the modal dialog", async () => {
@@ -242,5 +265,17 @@ describe("SatImageViewer", () => {
     const whileZoomed = createEvent.keyDown(viewport, { key: "ArrowLeft" });
     fireEvent(viewport, whileZoomed);
     expect(whileZoomed.defaultPrevented).toBe(true);
+  });
+
+  it("closes when clicking on the backdrop outside the panel", async () => {
+    render(<Harness />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    const dialog = screen.getByRole("dialog", { name: "Image viewer" });
+    expect(dialog).toBeInTheDocument();
+
+    // Clicking the dialog root (the backdrop) closes the viewer
+    fireEvent.pointerDown(dialog);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

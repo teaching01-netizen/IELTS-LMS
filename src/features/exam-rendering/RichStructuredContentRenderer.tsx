@@ -256,14 +256,6 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
     [resolveGesture, geometry],
   );
 
-  /** A window point, in pixels from the centre of the frame. */
-  const pointWithinFrame = (event: { clientX: number; clientY: number }, frame: HTMLElement) => {
-    const rect = frame.getBoundingClientRect();
-    return {
-      x: event.clientX - rect.left - rect.width / 2,
-      y: event.clientY - rect.top - rect.height / 2,
-    };
-  };
   return (
     <figure
       className="my-4 space-y-2"
@@ -356,17 +348,21 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
           setDragging(false);
           applyGesture({ kind: "pan-end" });
         }}
-        // Double-click is the expert's zoom: one step, around the point the
-        // student is actually looking at. It never replaces the strip's
-        // controls, which stay the only way a beginner needs.
+        // Double-click is the expert's shortcut to fullscreen: the visible
+        // Full screen button already teaches the capability, and double-click
+        // is the faster gesture for students who know it.
+        //
+        // In the embedded context, double-click = open fullscreen.
+        // In the fullscreen context, double-click = zoom toward cursor.
+        // These are deliberately different contextual meanings.
         onDoubleClick={(event) => {
-          if (!resolveGesture) return;
+          if (!enlarge?.renderEnlarge) return;
           event.preventDefault();
-          applyGesture({
-            kind: "zoom-at-point",
-            point: pointWithinFrame(event, event.currentTarget),
-            direction: 1,
-          });
+          // Open fullscreen — same path as the Full screen toolbar button.
+          // Do NOT zoom the embedded image as a side effect.
+          if (!viewerOpen) {
+            setViewerOpen(true);
+          }
         }}
         // While the figure owns the gesture, the browser's menu is not part of
         // it: a right-click mid-inspection should not interrupt the graph.

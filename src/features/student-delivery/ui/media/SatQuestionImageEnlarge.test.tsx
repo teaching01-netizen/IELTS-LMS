@@ -121,10 +121,12 @@ describe("SatQuestionImageEnlarge", () => {
     );
     await user.click(screen.getByRole("button", { name: "Enter full screen" }));
     const dialog = screen.getByRole("dialog", { name: "Image viewer" });
-    // The card grows from the centre of the figure it is showing (700×400 at
+    const panel = dialog.querySelector("[data-sat-image-panel]");
+    expect(panel).toBeInTheDocument();
+    // The panel grows from the centre of the figure it is showing (700×400 at
     // 300,200 → 500,300), so expanding reads as the same object getting larger.
-    expect(dialog).toHaveClass("sat-figure-expand");
-    expect(dialog).toHaveStyle({ transformOrigin: "500px 300px" });
+    expect(panel).toHaveClass("sat-figure-expand");
+    expect(panel).toHaveStyle({ transformOrigin: "500px 300px" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     spy.mockRestore();
   });
@@ -222,5 +224,45 @@ describe("SatQuestionImageEnlarge", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(image.className).not.toContain("invisible");
     expect(image).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("opens fullscreen on double-click without changing the embedded zoom", async () => {
+    const content: StructuredContent = {
+      version: 2,
+      nodes: [],
+      document: {
+        type: "doc",
+        content: [
+          {
+            type: "image",
+            attrs: { src: "https://example.com/graph.png", alt: "Graph of f", width: 400, height: 200 },
+          },
+        ],
+      },
+    } as unknown as StructuredContent;
+
+    const { container } = render(
+      <RichStructuredContentRenderer
+        content={content}
+        enlarge={SAT_QUESTION_IMAGE_ENLARGE}
+      />,
+    );
+    const image = container.querySelector("img");
+    if (!image) throw new Error("missing embedded image");
+    const frame = image.parentElement;
+    if (!frame) throw new Error("no frame");
+
+    // Verify starting at 100%
+    const strip = screen.getByRole("toolbar", { name: /Figure controls/ });
+    expect(within(strip).getByRole("status")).toHaveTextContent("100%");
+
+    // Double-click on the embedded frame should open fullscreen
+    fireEvent.doubleClick(frame, { clientX: 100, clientY: 50 });
+
+    // The fullscreen viewer should now be open
+    expect(screen.getByRole("dialog", { name: "Image viewer" })).toBeInTheDocument();
+
+    // The embedded zoom must NOT have changed as a side effect
+    expect(within(strip).getByRole("status")).toHaveTextContent("100%");
   });
 });
