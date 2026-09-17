@@ -1,7 +1,5 @@
 import { Highlighter } from 'lucide-react';
-import type { SatTextAnchor } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
-import { useSatAnnotationPlacement } from '../annotations/useSatAnnotationPlacement';
 
 /**
  * Education cues for Highlights & Notes.
@@ -38,27 +36,10 @@ export function SatAnnotationPassageHint() {
   );
 }
 
-/**
- * One-time confirmation beside the first highlight. The ink changing is the
- * real feedback; this exists only to name what just happened, once, for a
- * student who has never seen a highlight before.
+/*
+ * The one-time "Highlighted" chip is gone on purpose. It used to appear beside
+ * the first mark, in the same place as the tools that now stay open after a
+ * highlight — two bordered panels stacked on the same span, one of which said
+ * nothing the other did not (the pressed swatch under a "Highlight" heading IS
+ * the confirmation). Nothing replaces it: the ink landing is the feedback.
  */
-export function SatAnnotationFirstHighlightFeedback({ anchor }: { anchor: SatTextAnchor }) {
-  const { placement, containerRef } = useSatAnnotationPlacement(anchor, { dock: false });
-  return (
-    <p
-      ref={containerRef}
-      data-sat-annotation-confirmation="true"
-      role="status"
-      className="sat-ui absolute z-[79] rounded-[6px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-2 py-1 sat-type-metadata font-semibold text-[var(--sat-text)] shadow-[var(--sat-shadow-floating)]"
-      style={{
-        left: placement ? placement.left : 8,
-        top: placement ? placement.top : 8,
-        visibility: placement ? 'visible' : 'hidden',
-        animation: 'sat-annotation-enter var(--sat-motion-annotation) ease-out',
-      }}
-    >
-      {SAT_COPY.annotations.highlightedConfirmation}
-    </p>
-  );
-}

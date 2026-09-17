@@ -377,6 +377,13 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(toolbar.getByRole('button', { name: 'Highlight Blue' })).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(page.locator('[data-sat-highlight-color="blue"]')).toHaveCount(1);
+    // Acting keeps the tools open: they are the new mark's controls now, in the
+    // same place, with the ink the student just chose pressed — and the Notes
+    // pane stayed out of the middle of the exam.
+    const afterHighlight = page.getByRole('toolbar', { name: 'Edit annotation' });
+    await expect(afterHighlight).toBeVisible();
+    await expect(afterHighlight.getByRole('button', { name: 'Highlight Blue' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('complementary', { name: 'Notes' })).toHaveCount(0);
 
     // A drag that ends on an existing mark is a student selecting NEW text: the
     // toolbar must survive and the edit dock must not steal the gesture.
@@ -407,18 +414,23 @@ test.describe("SAT student accessibility and layout", () => {
     await expectNoSeriousAxeViolations(page, 'selection toolbar over a live selection');
 
     await page.getByRole('toolbar', { name: 'Selected text actions' }).getByRole('button', { name: 'Highlight Yellow' }).click();
-    await page.locator('[data-sat-highlight="true"]').first().click();
-    await expect(page.getByRole('toolbar', { name: 'Edit annotation' })).toBeVisible();
-    await expectNoSeriousAxeViolations(page, 'edit dock for an existing highlight');
+    const editDock = page.getByRole('toolbar', { name: 'Edit annotation' });
+    await expect(editDock).toBeVisible();
+    await expectNoSeriousAxeViolations(page, 'edit dock for a new highlight');
+
+    // Writing happens in the dock, so that state needs its own scan: a quoted
+    // source, a capped textarea, and the inks in one floating panel.
+    await editDock.getByRole('button', { name: 'Add note' }).click();
+    await expect(page.getByRole('textbox', { name: 'Notes' })).toBeFocused();
+    await expect(page.locator('[data-sat-inline-note="true"]')).toBeVisible();
+    await expectNoSeriousAxeViolations(page, 'edit dock while writing a note');
 
     // The notes column is a new surface and needs its own scan, both empty and
     // while a note card's field has the caret.
-    await page
-      .getByRole('toolbar', { name: 'Edit annotation' })
-      .getByRole('button', { name: 'Add note' })
-      .click();
+    await page.getByRole('button', { name: /Highlights & Notes/ }).click();
     const column = page.getByRole('complementary', { name: 'Notes' });
-    await expect(column.getByRole('textbox', { name: 'Notes' })).toBeFocused();
+    await column.getByRole('button', { name: 'Write a note about this question' }).click();
+    await expect(page.getByRole('textbox', { name: 'This question' })).toBeFocused();
     await expectNoSeriousAxeViolations(page, 'notes column while writing a note');
   });
 
@@ -482,19 +494,48 @@ test.describe("SAT student accessibility and layout", () => {
     // Empty column: one line of guidance, and no idle editor contradicting it.
     await expect(column.locator("[data-sat-notes-empty]")).toBeVisible();
     await expect(column.getByRole("textbox")).toHaveCount(0);
-    // Escape closes it and hands focus back to the entry that opened it.
+    // Escape hides it, and the pane leaves a handle in its own seat: the edge it
+    // was lost from is the edge that brings it back, so a student who never
+    // touches the top bar can still find Highlights & Notes.
     await page.keyboard.press("Escape");
     await expect(column).toHaveCount(0);
-    await expect(notes).toBeFocused();
+    const rail = page.getByRole("button", { name: "Show notes" });
+    await expect(rail).toBeVisible();
+    await expect(rail).toContainText("Notes");
+    // Focus follows the pane, so the press that hid it is one press from undone.
+    await expect(rail).toBeFocused();
+    await rail.click();
+    await expect(page.getByRole("complementary", { name: "Notes" })).toBeVisible();
+    await page.getByRole("button", { name: "Hide notes" }).click();
+    await expect(column).toHaveCount(0);
+    await expect(rail).toBeVisible();
 
     // The whole journey, in one sentence: select text, mark it, and the note you
-    // write appears beside the passage text it is about.
+    // write appears under the words it is about.
     await selectStimulusText(page, "Several");
     await page
       .getByRole("toolbar", { name: "Selected text actions" })
       .getByRole("button", { name: "Add note" })
       .click();
+    const inline = page.locator('[data-sat-inline-note="true"]');
+    await expect(inline).toContainText("\u201CSeveral\u201D");
+    await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
+
+    // The exam keeps its shape while a note is written: the tools float over the
+    // text they belong to instead of pushing a third pane between the panes — the
+    // reading tasks stay where the student left them.
+    await expect(page.locator("[data-sat-passage-scroll]")).toBeVisible();
+    await expect(page.locator("[data-sat-question-scroll]")).toBeVisible();
+
+    const field = page.getByRole("textbox", { name: "Notes" });
+    await expect(field).toBeFocused();
+    await field.fill("Compare the two blocks");
+    await expect(page.getByTestId("sat-note-saved")).toBeVisible();
+
+    // Asking for the pane shows the same note, in one list with its quote.
+    await notes.click();
     const opened = page.getByRole("complementary", { name: "Notes" });
+    await expect(opened).toContainText("Compare the two blocks");
     await expect(opened).toContainText("\u201CSeveral\u201D");
     await expect(opened.locator("[data-sat-note-ink]")).toHaveCount(1);
 
@@ -514,13 +555,12 @@ test.describe("SAT student accessibility and layout", () => {
     expect(columnBox!.width).toBeGreaterThanOrEqual(280);
     expect(columnBox!.width).toBeLessThanOrEqual(340);
 
-    const field = opened.getByRole("textbox", { name: "Notes" });
-    await expect(field).toBeFocused();
-    await field.fill("Compare the two blocks");
-    await expect(opened.getByTestId("sat-note-saved")).toBeVisible();
-
     // Closing and coming back keeps the note, and keeps it attached to its
-    // source: one list, quotes and all.
+    // source: one list, quotes and all. Escape dismisses one layer per press —
+    // the tools first, then the pane — so no student is sent two screens back.
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("toolbar", { name: "Edit annotation" })).toHaveCount(0);
+    await expect(opened).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     await notes.click();
@@ -565,7 +605,7 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(column.getByTestId("sat-note-saved")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /Highlights & Notes/ })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Show notes" })).toBeFocused();
 
     // And the text survives the trip: reopening shows it in the same list as the
     // anchored note, each under the source it came from.
@@ -619,11 +659,13 @@ test.describe("SAT student accessibility and layout", () => {
     expect(passageBox!.x + passageBox!.width).toBeLessThanOrEqual(columnBox!.x + 1);
     expect(columnBox!.width).toBeGreaterThanOrEqual(280);
 
-    // The control says what it brings back, and does it.
-    await page.getByRole("button", { name: "Close notes and show the question" }).click();
+    // The control says what it brings back, and does it — and leaves its handle in
+    // the place the question just reclaimed, so hiding notes is still reversible
+    // from where it happened.
+    await page.getByRole("button", { name: "Hide notes and show the question" }).click();
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     await expect(page.locator("[data-sat-question-scroll]")).toBeVisible();
-    await expect(page.getByRole("button", { name: /Highlights & Notes/ })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Show notes" })).toBeFocused();
   });
 
   test("regular SAT navigator is anchored above the footer without hiding the exam", async ({
@@ -1307,9 +1349,8 @@ test.describe("SAT student accessibility and layout", () => {
 
     await page.setViewportSize({ width: 320, height: 568 });
     // Display text-scale also scales the note field (same reading token): still
-    // 200% here, so the Notes column must scale too. A note is written first
-    // because the column shows guidance rather than an idle editor until there
-    // is something to write about.
+    // 200% here, so the field must scale too. It is reading content wherever it
+    // appears — in the mark's own tools or in the pane.
     await page.getByRole("button", { name: /Highlights & Notes/ }).click();
     await expect(page.getByRole("complementary", { name: "Notes" })).toBeVisible();
     await selectStimulusText(page, "Several");
@@ -1322,7 +1363,11 @@ test.describe("SAT student accessibility and layout", () => {
       Number.parseFloat(getComputedStyle(element).fontSize)
     );
     expect(noteSize).toBeGreaterThanOrEqual(29);
+    // One layer per press: the note field's tools, then the pane they were opened
+    // from.
     await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     await page.getByRole("button", { name: /open question navigator/i }).click();
     await expect(
       page.getByRole("dialog", { name: /Reading and Writing Questions/i })

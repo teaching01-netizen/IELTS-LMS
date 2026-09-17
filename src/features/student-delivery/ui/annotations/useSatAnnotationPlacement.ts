@@ -102,16 +102,27 @@ export function useSatAnnotationPlacement(
  * hidden element is silently ignored — so focusing on mount does nothing at all
  * and the toolbar's keyboard affordance quietly disappears (the anchor never
  * changes, so a mount-keyed effect never gets a second chance).
+ *
+ * `skip` is for chrome that holds a field the student just asked for: the caret
+ * belongs in that field, and a later placement commit must not pull it back onto
+ * the first button.
  */
 export function useSatAnnotationAutofocus(
   placement: AnnotationPlacement | null,
   anchorKey: string,
   containerRef: React.RefObject<HTMLElement | null>,
+  options: { skip?: boolean } = {},
 ): void {
   const focusedRef = useRef<string | null>(null);
+  const skip = options.skip === true;
   useEffect(() => {
-    if (!placement || focusedRef.current === anchorKey) return;
+    if (skip || !placement || focusedRef.current === anchorKey) return;
     focusedRef.current = anchorKey;
-    containerRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus({ preventScroll: true });
-  }, [anchorKey, containerRef, placement]);
+    // Dismissals are skipped: the way out is not a way in, and landing the caret
+    // on "close" would make the first keystroke after selecting text undo the
+    // tools instead of using them.
+    containerRef.current
+      ?.querySelector<HTMLButtonElement>('button:not([disabled]):not([data-sat-annotation-dismiss])')
+      ?.focus({ preventScroll: true });
+  }, [anchorKey, containerRef, placement, skip]);
 }

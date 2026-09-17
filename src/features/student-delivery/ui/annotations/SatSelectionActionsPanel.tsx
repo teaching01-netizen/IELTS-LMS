@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import type { SatHighlightColor, SatTextAnchor } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
-import { SatAnnotationHeading, SatHighlightSwatchButtons, SatNoteControl, SatUnderlineControl } from './SatAnnotationControls';
+import { SatAnnotationHeading, SatCloseControl, SatHighlightSwatchButtons, SatNoteControl, SatUnderlineControl } from './SatAnnotationControls';
 import { useSatAnnotationAutofocus, useSatAnnotationPlacement } from './useSatAnnotationPlacement';
 
 export interface SatSelectionActions {
@@ -28,6 +28,11 @@ export interface SatSelectionActions {
  * It is a real toolbar: arrow keys walk the actions, Enter/Space fires the
  * focused one, and Escape belongs to the exam (clearing the selection closes
  * this, which is the behaviour a system selection menu has already taught).
+ *
+ * Acting does not dismiss it: choosing an ink hands the work to the mark that
+ * just landed (its edit controls, in the same place), so a student who wants a
+ * different colour, an underline, or a note keeps their tools instead of
+ * re-selecting the sentence to get them back.
  */
 export function SatSelectionActionsPanel({
   anchor,
@@ -35,6 +40,7 @@ export function SatSelectionActionsPanel({
   actions,
   disabled,
   variant,
+  onClose,
 }: {
   anchor: SatTextAnchor;
   /** Ink the student used last; the default the swatches show as current. */
@@ -42,6 +48,8 @@ export function SatSelectionActionsPanel({
   actions: SatSelectionActions;
   disabled?: boolean | undefined;
   variant: 'floating' | 'docked';
+  /** Dismiss the tools without touching the selection or the marks. */
+  onClose: () => void;
 }) {
   const docked = variant === 'docked';
   const { placement, containerRef } = useSatAnnotationPlacement(anchor, { dock: docked });
@@ -101,7 +109,13 @@ export function SatSelectionActionsPanel({
         </p>
       ) : null}
       <div className={docked ? 'mt-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1' : ''}>
-        <SatAnnotationHeading />
+        {/* Full width on the docked sheet, so the dismissal sits at the far edge
+            where a dismissed sheet's control is looked for, not beside the
+            heading with the inks trailing after it. */}
+        <div className={'flex items-center justify-between gap-2' + (docked ? ' w-full' : '')}>
+          <SatAnnotationHeading />
+          <SatCloseControl onSelect={onClose} disabled={disabled} label={SAT_COPY.annotations.closeTools} />
+        </div>
         <div className={docked ? '' : 'mt-1.5'}>
           <SatHighlightSwatchButtons
             current={currentColor}

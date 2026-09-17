@@ -185,7 +185,7 @@ describe('SAT annotation rendering', () => {
     expect(openEditor).toHaveBeenCalledWith(annotations.annotations[0]);
   });
 
-  it('marks a note-bearing mark in the passage so it can be found without the column', () => {
+  it('leaves the passage as text: a note is announced in the tools, never drawn into the sentence', () => {
     const text = 'A tree grows.';
     const annotations = emptySatAnnotations();
     annotations.annotations = [
@@ -196,25 +196,23 @@ describe('SAT annotation rendering', () => {
     const written = container.querySelector('[data-sat-highlight-color="yellow"]')!;
     const bare = container.querySelector('[data-sat-highlight-color="blue"]')!;
 
-    // The attribute means what it says now: it used to carry the mark's id on
-    // every mark, note or not.
+    // The attribute means what it says: it used to carry the mark's id on every
+    // mark, note or not. It stays, because it is how the passage reports which
+    // highlights carry a note — that is a fact about the mark, not decoration.
     expect(written).toHaveAttribute('data-sat-annotation-note', 'true');
     expect(bare).not.toHaveAttribute('data-sat-annotation-note');
-    // And the mark itself carries the marker, which is the point: a student can
-    // see which of their highlights they wrote about.
-    const marker = written.querySelector('[data-sat-note-mark="true"]')!;
-    expect(marker).toBeInTheDocument();
-    expect(marker).toHaveAttribute('aria-hidden', 'true');
-    expect(marker.parentElement).toBe(written);
-    // The marker adds no text, so it cannot shift an anchor's offsets.
+    // But nothing is drawn into the sentence for it: the note glyph that used to
+    // ride the mark made annotated prose look marked-up, and the note is already
+    // one press away in the mark's own tools.
+    expect(container.querySelector('[data-sat-note-mark]')).toBeNull();
     expect(written).toHaveTextContent('tree');
-    expect(bare.querySelector('[data-sat-note-mark="true"]')).toBeNull();
-    // The label already told assistive tech which action it is.
+    // The label tells assistive tech (and every sighted student reading the tool)
+    // which action the mark offers, which is where that answer belongs.
     expect(written).toHaveAttribute('aria-label', expect.stringContaining('Edit note'));
     expect(bare).toHaveAttribute('aria-label', expect.stringContaining('Add note'));
   });
 
-  it('shows the note marker once per mark, on its last fragment', () => {
+  it('carries the note on the mark exactly once, however the mark wraps', () => {
     const text = 'A tree that grows in shade and drops its leaves in autumn.';
     const annotations = emptySatAnnotations();
     annotations.annotations = [{
@@ -222,8 +220,8 @@ describe('SAT annotation rendering', () => {
       note: 'Compare the two claims',
     }];
     const { container } = renderContent({ annotations, content: content(text) });
-    // One marker for the mark, not one per rendered line or text run.
-    expect(container.querySelectorAll('[data-sat-note-mark="true"]')).toHaveLength(1);
+    // A mark split across rendered lines is still ONE mark with one note.
+    expect(container.querySelectorAll('[data-sat-highlight="true"]').length).toBeGreaterThan(0);
     expect(container.querySelectorAll('[data-sat-annotation-note="true"]')).toHaveLength(1);
   });
 

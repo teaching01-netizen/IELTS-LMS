@@ -29,7 +29,6 @@ import { SatAnnotationEditDock } from './annotations/SatAnnotationEditDock';
 import { SatAnnotationViewContext } from './annotations/SatAnnotationViewContext';
 import { SatNotesSurfaceHost } from './annotations/SatNotesSurfaceHost';
 import { SatSelectionActionsPanel } from './annotations/SatSelectionActionsPanel';
-import { SatAnnotationFirstHighlightFeedback } from './education/SatAnnotationEducationCues';
 
 export interface SatExamShellProps {
   moduleIdentity?: string;
@@ -208,7 +207,6 @@ export function SatExamShell(props: SatExamShellProps) {
     updateNote,
     undoEntry,
     undoLastRemoval,
-    confirmationAnchor,
     hintVisible,
     announcement,
     questionNotes,
@@ -452,6 +450,9 @@ export function SatExamShell(props: SatExamShellProps) {
             // when marks exist: the notes list the column sees cannot answer that,
             // and a migrated freeform note is not a mark on the passage.
             hasHighlights={(props.annotations?.annotations.length ?? 0) > 0}
+            // Without the surface (Math) there is no pane to hide, so there is no
+            // handle left behind either: the layout is handed nothing to place.
+            notesAvailable={notesAvailable}
             disabled={props.blocked || !annotationsWritable}
             hintVisible={hintVisible}
             onSelectNote={(annotationId) => {
@@ -471,6 +472,9 @@ export function SatExamShell(props: SatExamShellProps) {
               if (target) surface.removeNoteText(target);
             }}
             onWriteAboutQuestion={surface.openQuestionNote}
+            // The handle the hidden column leaves behind opens it again, in its
+            // own place, so hiding a pane never strands a student in the toolbar.
+            onOpenNotes={surface.openNotes}
             onFlush={props.onFlushAnnotations}
             onClose={surface.closeNotes}
           >
@@ -490,10 +494,16 @@ export function SatExamShell(props: SatExamShellProps) {
             annotation={editingMark}
             touch={touchAnnotations}
             disabled={props.blocked || !annotationsWritable}
+            noteOpen={surface.noteFieldMarkId === editingMark.id}
             onColor={(color) => recolourMark(editingMark, color)}
             onUnderline={() => underlineMark(editingMark)}
-            onNote={() => openNoteOnMark(editingMark)}
+            // Writing happens in the dock the student is already using; the
+            // Notes column opens only when they ask for it.
+            onNote={() => surface.openNoteField(editingMark)}
+            onNoteChange={(note) => surface.writeMarkNote(editingMark, note)}
+            onRemoveNote={() => surface.removeNoteText(editingMark)}
             onRemove={() => removeMark(editingMark)}
+            onClose={surface.closeMarkEditor}
           />
         ) : selection ? (
           <SatSelectionActionsPanel
@@ -502,9 +512,9 @@ export function SatExamShell(props: SatExamShellProps) {
             actions={selectionActions}
             disabled={props.blocked || !annotationsWritable}
             variant={touchAnnotations ? 'docked' : 'floating'}
+            onClose={surface.closeSelectionTools}
           />
         ) : null}
-        {confirmationAnchor ? <SatAnnotationFirstHighlightFeedback anchor={confirmationAnchor} /> : null}
         {/* Removal is forgiving instead of confirmed: one undo, then it is
             final. Sits in the exam body (never over the footer navigation). */}
         {undoEntry ? (

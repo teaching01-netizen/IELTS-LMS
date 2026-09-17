@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { focusSatAnnotationMark, focusSatQuestionNoteRow, scrollSatAnnotationIntoView } from './satAnnotationDom';
+import {
+  focusSatAnnotationMark,
+  focusSatNotesRail,
+  focusSatQuestionNoteRow,
+  scrollSatAnnotationIntoView,
+} from './satAnnotationDom';
 
 /**
  * Clicking a note must reveal the text it belongs to — and must move nothing
@@ -88,8 +93,19 @@ describe('note close returns focus', () => {
     expect(document.activeElement).toBe(row);
   });
 
+  it('returns focus to the handle a hidden Notes column left behind', () => {
+    const rail = document.createElement('button');
+    rail.setAttribute('data-sat-notes-rail', 'true');
+    document.body.appendChild(rail);
+    expect(focusSatNotesRail()).toBe(true);
+    expect(document.activeElement).toBe(rail);
+  });
+
   it('reports when there is nothing to return to, so a caller can fall back', () => {
     expect(focusSatAnnotationMark('missing')).toBe(false);
     expect(focusSatQuestionNoteRow()).toBe(false);
+    // No handle on this tier (stacked panes, or notes unavailable): the caller
+    // falls back to the top-bar entry instead of leaving focus on <body>.
+    expect(focusSatNotesRail()).toBe(false);
   });
 });

@@ -95,3 +95,34 @@ export const SAT_NOTES_COLUMN_TRACK = 'clamp(280px, 20%, 340px)';
 
 /** The same band as a share of a two-pane layout. */
 export const SAT_NOTES_PAIR_TRACK = 'clamp(280px, 32%, 340px)';
+
+/**
+ * The track a hidden column leaves behind: a handle, not a pane.
+ *
+ * It takes the column's own place in the grid, so hiding and opening move
+exactly one edge — the passage never shifts and the question never jumps. That
+stability is what makes the two states read as one pane that collapses rather
+than two layouts the student has to re-learn.
+ */
+export const SAT_NOTES_RAIL_TRACK = '2.25rem';
+
+/**
+ * True when the hidden column should leave its handle on screen.
+ *
+ * The handle is how the pane's ability to come back is visible without decoding
+the top bar: it stands exactly where the column was, so hiding is visibly
+reversible, and a student who has never opened notes can see there is something
+there. It is skipped on phone widths, where the column takes no side of the
+layout to leave a handle on and every pixel of reading height is spoken for;
+there the labeled top-bar entry stays the way back.
+ */
+export function satNotesRailVisible(input: {
+  /** True while the column is part of the layout. */
+  open: boolean;
+  /** True below the split breakpoint (stacked panes). */
+  compact: boolean;
+  /** R&W-only: without the surface there is nothing to open. */
+  available: boolean;
+}): boolean {
+  return input.available && !input.open && !input.compact;
+}

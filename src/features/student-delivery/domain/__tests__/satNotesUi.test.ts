@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   SAT_NOTES_COLUMN_TRACK,
   SAT_NOTES_PAIR_TRACK,
+  SAT_NOTES_RAIL_TRACK,
   SAT_QUESTION_NOTE_EDITOR,
   idleSatNotesUi,
   satNotesColumnOpen,
   satNotesPlacement,
+  satNotesRailVisible,
   satNotesUiFromSurface,
   selectionSatNotesUi,
 } from '../satNotesUi';
@@ -99,5 +101,37 @@ describe('satNotesPlacement', () => {
       expect(Number(min?.replace('px', ''))).toBe(280);
       expect(Number(max?.replace('px', ''))).toBe(340);
     }
+  });
+});
+
+/**
+ * The handle a hidden column leaves behind is one decision too: it exists where
+ * the pane would have stood, and nowhere it could not. These cases pin that, so
+ * "hiding notes is reversible" stays visible instead of becoming a rule each
+ * layout re-derives from its own viewport.
+ */
+describe('satNotesRailVisible', () => {
+  it('stands where a hidden column stood, so hiding it is visibly reversible', () => {
+    expect(satNotesRailVisible({ open: false, compact: false, available: true })).toBe(true);
+  });
+
+  it('retires while the column itself is on screen', () => {
+    expect(satNotesRailVisible({ open: true, compact: false, available: true })).toBe(false);
+  });
+
+  it('never appears without the surface it belongs to', () => {
+    // Math: no notes, so no handle advertising a pane that cannot open.
+    expect(satNotesRailVisible({ open: false, compact: false, available: false })).toBe(false);
+  });
+
+  it('stays out of the stacked layout, where there is no edge to hold', () => {
+    // Phone widths: the column takes no side of the layout, and the reading
+    // height a handle would cost is the same space the passage needs.
+    expect(satNotesRailVisible({ open: false, compact: true, available: true })).toBe(false);
+  });
+
+  it('is a tab beside the pane it replaces, never a second pane', () => {
+    expect(SAT_NOTES_RAIL_TRACK).toBe('2.25rem');
+    expect(Number(SAT_NOTES_RAIL_TRACK.replace('rem', ''))).toBeLessThan(5);
   });
 });

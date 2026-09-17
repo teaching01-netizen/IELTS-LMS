@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StickyNote } from 'lucide-react';
 import type { StructuredContent } from '../../../exam-authoring/api/assessmentContracts';
 import { StructuredContentRenderer, type StaticStructuredImageEnlargeApi } from '../../../exam-rendering/api/structuredContent';
 import type { StructuredTextRenderer } from '../../../exam-rendering/api/structuredContent';
@@ -119,17 +118,15 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         const start = Math.max(segment.start, startOffset);
         const end = Math.min(segment.end, startOffset + text.length);
         if (end <= start) return [];
-        // The mark this segment belongs to, plus where that mark ends. Stored
-        // order decides which mark wins an overlap, exactly as the ink does.
+        // The mark this segment belongs to. Stored order decides which mark wins
+        // an overlap, exactly as the ink does.
         let segmentMark: SatTextAnnotation | undefined;
-        let markEnd = 0;
         if (segment.highlight || segment.underline) {
           for (const item of annotations.annotations) {
             if (item.anchor.nodeId !== scopedId) continue;
             const range = resolveSatTextAnchor(blockText, item.anchor);
             if (range !== null && range.start < end && start < range.end) {
               segmentMark = item;
-              markEnd = range.end;
               break;
             }
           }
@@ -139,8 +136,9 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         // color / note / removal live. Marks without a live editor stay plain
         // spans (read-only contexts).
         const interactive = match !== undefined && view.openEditorActive;
-        // A note is what the student wrote, not a kind of mark: the marker below
-        // and the label both read this one answer.
+        // A note is what the student wrote, not a kind of mark: the passage
+        // reports it as an attribute and the label reads the same one answer —
+        // nothing is drawn into the sentence for it.
         const hasNote = typeof match?.note === 'string' && match.note.length > 0;
         const label = match
           ? `${match.kind === 'highlight' ? SAT_COPY.annotations.highlight : SAT_COPY.annotations.underline}: ${match.anchor.exact}. ${hasNote ? SAT_COPY.annotations.editNote : SAT_COPY.annotations.addNote}`
@@ -192,19 +190,6 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
             }}
           >
             {text.slice(start - startOffset, end - startOffset)}
-            {/* Otherwise a note leaves no trace in the passage, and the only way
-                to find which mark it belongs to is to read every card. It rides
-                the mark's LAST fragment so a wrapped mark shows it once, and it
-                takes no pointer events, so selecting and tapping are unchanged. */}
-            {hasNote && end >= markEnd ? (
-              <span
-                aria-hidden="true"
-                data-sat-note-mark="true"
-                className="pointer-events-none ml-0.5 inline-block h-3 w-3 align-[-2px] text-[var(--sat-text-secondary)]"
-              >
-                <StickyNote className="h-3 w-3" />
-              </span>
-            ) : null}
           </span>
         );
       });

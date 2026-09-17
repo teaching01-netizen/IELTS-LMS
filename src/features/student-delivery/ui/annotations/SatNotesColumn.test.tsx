@@ -252,16 +252,34 @@ describe('SatNotesColumn', () => {
     expect(props.onSelectNote).toHaveBeenCalledWith(target.id);
   });
 
-  it('closes with an explicit, labeled control', () => {
+  it('hides with an explicit, written control — never a corner glyph to decode', () => {
     const { props } = renderColumn();
-    fireEvent.click(screen.getByRole('button', { name: 'Close notes' }));
+    const control = screen.getByRole('button', { name: 'Hide notes' });
+    // Written out, because a pane that comes back is not a universal glyph: the
+    // word is what tells a first-time student the press is reversible.
+    expect(control).toHaveTextContent('Hide notes');
+    expect(control.querySelector('svg')).not.toBeNull();
+    fireEvent.click(control);
     expect(props.onClose).toHaveBeenCalled();
   });
 
-  it('names what closing does where the column took the question’s place', () => {
+  it('says what hiding brings back where the column took the question’s place', () => {
     // On the two-pane tier the question is hidden behind notes, so a control
-    // called "Close notes" would under-promise; it says what comes back.
+    // called "Hide notes" would under-promise; it says what comes back.
     renderColumn({ placement: 'pair' });
-    fireEvent.click(screen.getByRole('button', { name: 'Close notes and show the question' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide notes and show the question' }));
+  });
+
+  it('points the way the pane goes, which depends on the tier it is placed in', () => {
+    const side = renderColumn();
+    // Beside the passage the pane retracts to its trailing edge: a left chevron.
+    expect(side.props.placement).toBe('column');
+    expect(screen.getByRole('button', { name: 'Hide notes' }).querySelector('.lucide-chevron-left')).not.toBeNull();
+    side.unmount();
+
+    // Stacked beneath the panes it goes down instead, so the same press reports a
+    // different direction rather than a generic "dismiss".
+    renderColumn({ placement: 'row' });
+    expect(screen.getByRole('button', { name: 'Hide notes' }).querySelector('.lucide-chevron-down')).not.toBeNull();
   });
 });

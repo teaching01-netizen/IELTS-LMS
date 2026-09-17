@@ -14,10 +14,12 @@ function withNotes(
   node: React.ReactNode,
   children: React.ReactNode,
   placement: 'none' | 'column' | 'pair' | 'row' = 'column',
+  /** The handle a hidden column leaves behind; null when there is none. */
+  rail: React.ReactNode = null,
 ) {
   return (
     <SatNotesSurfaceContext.Provider
-      value={{ open: placement !== 'none', placement, column: node, passageHint: <p>Select text</p> }}
+      value={{ open: placement !== 'none', placement, column: node, rail, passageHint: <p>Select text</p> }}
     >
       {children}
     </SatNotesSurfaceContext.Provider>
@@ -154,6 +156,30 @@ describe('notes in the reading layout', () => {
       expect(layout.querySelector('[data-sat-notes-row]')).not.toBeInTheDocument();
       expect(screen.queryByTestId('notes-content')).not.toBeInTheDocument();
       expect(tracks(layout.style.gridTemplateColumns)).toHaveLength(3);
+    } finally { unmount(); media.mockRestore(); }
+  });
+
+  it('gives the hidden column’s handle the column’s own seat', () => {
+    // Hiding notes swaps the pane for its handle rather than reflowing the exam
+    // around a gap: same member, same track, one edge moves — so opening it
+    // again comes from exactly where it went.
+    const media = mockWidths({ compact: false, wide: true });
+    const { container, unmount } = render(
+      withNotes(null, (
+        <SatQuestionWorkspace split stimulus={<p>Passage</p>} question={<p>Question</p>}
+          readingPreferences={createReading()} onSplitRatioChange={vi.fn()} />
+      ), 'none', <button type="button" data-testid="notes-rail">Notes</button>),
+    );
+    try {
+      const layout = container.querySelector<HTMLElement>('[data-sat-reading-split]')!;
+      expect(layout).toHaveAttribute('data-sat-notes-placement', 'none');
+      const rail = screen.getByTestId('notes-rail');
+      expect(rail.parentElement).toBe(layout);
+      expect(tracks(layout.style.gridTemplateColumns)).toHaveLength(5);
+      expect(layout.style.gridTemplateColumns).toContain('2.25rem');
+      // The question keeps its seat beside the handle, so what is hidden is one
+      // pane and not the layout the student had learned.
+      expect(layout.querySelector('[data-sat-question-scroll]')).toBeInTheDocument();
     } finally { unmount(); media.mockRestore(); }
   });
 

@@ -40,7 +40,15 @@ export const SAT_COPY = {
   // which. Anchored notes quote their source; the question's own note says so.
   notes: {
     title: "Notes",
-    close: "Close notes",
+    // The column is a pane, not an alert: hiding it is one press away from
+    // bringing it back, so the control says "Hide" rather than "Close" —
+    // "Close" promises an end to something that has not ended.
+    collapse: "Hide notes",
+    // The handle a hidden column leaves behind. Its written label is `title`
+    // itself — the handle IS the pane's tab, and a pane does not need a second
+    // name to be found again. The spoken name adds the action, which the tab's
+    // identity does not carry on its own.
+    railAction: "Show notes",
     questionSource: "This question",
     placeholder: "Add a quick note\u2026",
     // Quiet, transient confirmation that there is no Save button to press.
@@ -59,9 +67,9 @@ export const SAT_COPY = {
     // went — and without a second list to check.
     emptyWithHighlights: "Your highlights are marked in the passage.",
     writeAboutQuestion: "Write a note about this question",
-    // On the close control at widths where notes take the question's place, so
-    // closing says what it actually does.
-    closeAndShowQuestion: "Close notes and show the question",
+    // On the hide control at widths where notes take the question's place, so
+    // hiding says what it actually does.
+    collapseAndShowQuestion: "Hide notes and show the question",
     unavailableInMath: "Notes are not available in Math.",
   },
   flag: {
@@ -186,13 +194,14 @@ export const SAT_COPY = {
     underline: "Underline",
     selectedTextActions: "Selected text actions",
     editAnnotation: "Edit annotation",
+    // The visible way out of either popover. Esc, a click outside, and a new
+    // selection all dismiss it too, but a panel that can only be dismissed by a
+    // gesture the student has to guess is a panel they will try to avoid.
+    closeTools: "Close text tools",
     // Passive first-use hint: one quiet line at the top of the passage, shown
     // once per attempt, dismissed by the first selection (or the first answer).
     // It teaches where the gesture belongs instead of pointing at the tool.
     passageHint: "Select text to highlight or add a note",
-    // First highlight only: the mark itself is the feedback; this label just
-    // confirms the mental model once and is gone.
-    highlightedConfirmation: "Highlighted",
     removedHighlight: "Highlight removed",
     removedUnderline: "Underline removed",
     undo: "Undo",

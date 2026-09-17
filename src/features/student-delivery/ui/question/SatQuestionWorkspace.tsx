@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
-import { SAT_NOTES_COLUMN_TRACK, SAT_NOTES_PAIR_TRACK } from "../../domain/satNotesUi";
+import { SAT_NOTES_COLUMN_TRACK, SAT_NOTES_PAIR_TRACK, SAT_NOTES_RAIL_TRACK } from "../../domain/satNotesUi";
 import { satReadingStyle } from "../reading/satReadingStyle";
 import { SatReadingSplitHandle } from "./SatReadingSplitHandle";
 import { useSatMediaQuery } from '../useSatMediaQuery';
@@ -24,7 +24,9 @@ export interface SatQuestionWorkspaceProps {
  * it, because the whole point of a note is its relationship to the text it is
  * about. Which of the three arrangements applies is decided once, by
  * `satNotesPlacement` in the surface host, and read here — this component never
- * re-derives it.
+ * re-derives it. The handle left behind when the pane is hidden keeps the same
+ * seat, so hiding notes swaps the pane for its handle instead of reflowing the
+ * exam around the gap.
  */
 export function SatQuestionWorkspace({
   split,
@@ -49,7 +51,12 @@ export function SatQuestionWorkspace({
     : notes.placement === 'pair'
       ? SAT_NOTES_PAIR_TRACK
       : null;
-  const notesPane = paneTrack ? notes.column : null;
+  // The hidden pane's handle holds the column's track. Whether it exists at all
+  // is the host's answer (`satNotesRailVisible`), so this only places what it
+  // was handed — the same contract the column follows. Hiding notes therefore
+  // swaps one member for another in the same seat rather than reflowing the exam.
+  const railTrack = notes.rail ? SAT_NOTES_RAIL_TRACK : null;
+  const notesSide = paneTrack ? notes.column : notes.rail;
   const notesRow = notes.placement === 'row' ? (
     <section
       className="min-h-0 min-w-0 overflow-hidden border-t border-[var(--sat-divider)]"
@@ -70,7 +77,9 @@ export function SatQuestionWorkspace({
           ...readingStyle,
           gridTemplateColumns: paneTrack
             ? `minmax(0, 1fr) 2px ${paneTrack}`
-            : undefined,
+            : railTrack
+              ? `minmax(0, 1fr) 2px ${railTrack}`
+              : undefined,
           gridTemplateRows: notesRow ? 'repeat(2, minmax(0, 1fr))' : undefined,
         }}
       >
@@ -81,8 +90,8 @@ export function SatQuestionWorkspace({
         >
           <div className="mx-auto w-full max-w-[760px] px-5 py-6 sm:px-8 sm:py-8">{question}</div>
         </div>
-        {paneTrack ? <div aria-hidden="true" className="bg-[var(--sat-divider)]" /> : null}
-        {notesPane ?? notesRow}
+        {paneTrack || railTrack ? <div aria-hidden="true" className="bg-[var(--sat-divider)]" /> : null}
+        {notesSide ?? notesRow}
       </div>
     );
   }
@@ -108,7 +117,9 @@ export function SatQuestionWorkspace({
             ? `minmax(0, ${readingPreferences.splitRatio}fr) 2px ${SAT_NOTES_COLUMN_TRACK} 2px minmax(0, ${questionRatio}fr)`
             : notes.placement === 'pair'
               ? `minmax(0, 1fr) 2px ${SAT_NOTES_PAIR_TRACK}`
-              : `minmax(0, ${readingPreferences.splitRatio}fr) 2px minmax(0, ${questionRatio}fr)`,
+              : railTrack
+                ? `minmax(0, ${readingPreferences.splitRatio}fr) 2px ${railTrack} 2px minmax(0, ${questionRatio}fr)`
+                : `minmax(0, ${readingPreferences.splitRatio}fr) 2px minmax(0, ${questionRatio}fr)`,
         gridTemplateRows: compact
           ? `repeat(${notesRow ? 3 : 2}, minmax(0, 1fr))`
           : notesRow
@@ -138,8 +149,8 @@ export function SatQuestionWorkspace({
         onChange={onSplitRatioChange}
       /> : null}
       {!compact && !showsQuestion ? <div aria-hidden="true" className="bg-[var(--sat-divider)]" /> : null}
-      {notesPane}
-      {paneTrack && showsQuestion ? <div aria-hidden="true" className="bg-[var(--sat-divider)]" /> : null}
+      {notesSide}
+      {(paneTrack || railTrack) && showsQuestion ? <div aria-hidden="true" className="bg-[var(--sat-divider)]" /> : null}
       {showsQuestion ? (
         <section
           className="min-h-0 min-w-0 overflow-y-auto px-5 py-5 md:px-10 md:py-8"

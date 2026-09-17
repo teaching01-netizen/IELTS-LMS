@@ -1,4 +1,4 @@
-import { Highlighter, StickyNote, Trash2, Underline } from 'lucide-react';
+import { Highlighter, StickyNote, Trash2, Underline, X } from 'lucide-react';
 import type { SatHighlightColor } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
 import { satHighlightInkList } from './satAnnotationPalette';
@@ -143,6 +143,43 @@ export function SatRemoveControl({
     >
       <Trash2 className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
       <span className="whitespace-nowrap">{label}</span>
+    </button>
+  );
+}
+
+/**
+ * The way out of a popover, written and labeled like every other action.
+ *
+ * Esc, a new selection, and (on desktop) a click outside already close these
+ * tools, but none of them is visible: a student who does not want the toolbar
+ * anymore needs a control they can see rather than a gesture they must guess.
+ * It stays at full target size while reading as secondary, so it is easy to hit
+ * and hard to mistake for an annotation action.
+ */
+export function SatCloseControl({
+  onSelect,
+  disabled,
+  label,
+}: {
+  onSelect: () => void;
+  disabled?: boolean | undefined;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      data-sat-annotation-action="close"
+      // Marked as a dismissal so the shared autofocus skips it: the caret
+      // belongs on the action the student opened these tools for, and the first
+      // button in the markup is now the way out rather than a way in.
+      data-sat-annotation-dismiss="true"
+      aria-label={label}
+      disabled={disabled === true}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onSelect}
+      className={ACTION_BASE + ' text-[var(--sat-text-secondary)]'}
+    >
+      <X className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
     </button>
   );
 }

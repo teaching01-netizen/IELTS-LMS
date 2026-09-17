@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { StickyNote, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, StickyNote } from 'lucide-react';
 import type { SatTextAnnotation } from '../../domain/satResponses';
 import { SAT_COPY, satNotesCountLabel, satQuotedSource } from '../../domain/satCopy';
 import { SAT_QUESTION_NOTE_EDITOR, type SatNotesPlacement, type SatNotesUiState } from '../../domain/satNotesUi';
@@ -44,6 +44,10 @@ export interface SatNotesColumnProps {
  * One list, no second editor with its own name, no Save button (idle autosave
  * plus a commit on close), the character count appears only near the limit, and
  * removal exists only once there is something to remove.
+ *
+ * Hiding it is part of that model, not an escape hatch: the header's control
+ * names what it does, and the pane leaves a labeled handle in its own place (see
+ * SatNotesRail) so the one press can be taken back from where it was taken.
  */
 export function SatNotesColumn(props: SatNotesColumnProps) {
   const rootRef = useRef<HTMLElement | null>(null);
@@ -109,15 +113,26 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
             </span>
           ) : null}
         </div>
+        {/* One control, and it is written out rather than drawn: hiding a pane
+            that comes back is not a universal glyph, and a bare chevron in the
+            corner is exactly the thing a first-time student declines to press.
+            It also points the way the pane goes — down where notes stack beneath
+            the panes, toward the edge it retracts to everywhere else — so the
+            press reports the direction it will take. */}
         <button
           type="button"
           onClick={props.onClose}
           // On the two-pane widths the column takes the question's place, so the
-          // control says what closing brings back.
-          aria-label={props.placement === 'pair' ? SAT_COPY.notes.closeAndShowQuestion : SAT_COPY.notes.close}
-          className="sat-touch-target sat-pressable flex items-center justify-center rounded-[6px] text-[var(--sat-text-secondary)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+          // control says what hiding brings back.
+          aria-label={props.placement === 'pair' ? SAT_COPY.notes.collapseAndShowQuestion : SAT_COPY.notes.collapse}
+          className="sat-touch-target sat-pressable flex shrink-0 items-center gap-1 rounded-[6px] px-2 sat-type-metadata font-medium text-[var(--sat-text-secondary)] hover:bg-[var(--sat-surface-hover)] hover:text-[var(--sat-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
         >
-          <X className="h-4 w-4" aria-hidden="true" />
+          {props.placement === 'row' ? (
+            <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+          ) : (
+            <ChevronLeft className="h-4 w-4 shrink-0" aria-hidden="true" />
+          )}
+          <span>{SAT_COPY.notes.collapse}</span>
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SatAccessibilityDebugRoute } from '../../../../app/router/dev/SatAccessibilityDebugRoute';
 
@@ -75,9 +75,29 @@ describe('SAT shell annotation flow (selection first)', () => {
     const mark = container.querySelector('[data-sat-highlight="true"]');
     expect(mark).toHaveTextContent('Several');
     expect(mark).toHaveAttribute('data-sat-highlight-color', 'blue');
-    // Acting dismisses the tools: the mark itself is the feedback now.
+    // Acting does not dismiss the tools: they become the new mark's controls, in
+    // the same place, with the chosen ink pressed — so a second tap is a new ink
+    // rather than a hunt for the mark.
     expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
+    const dock = screen.getByRole('toolbar', { name: 'Edit annotation' });
+    expect(screen.getByRole('button', { name: 'Highlight Blue' })).toHaveAttribute('aria-pressed', 'true');
+    // The note the student may want next is one labeled press away, here — not in
+    // a pane that had to open in the middle of the exam to offer it.
+    expect(dock).toHaveTextContent('Add note');
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
     expect(screen.getByTestId('sat-annotation-announcement')).toHaveTextContent('Text highlighted blue.');
+  });
+
+  it('lets the student close the popover with a written control', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    selectStimulusText(container, 'Several');
+    const toolbar = screen.getByRole('toolbar', { name: 'Selected text actions' });
+    // Esc already did this, invisibly. The control names the action for the
+    // student who does not guess gestures.
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Close text tools' }));
+    expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
+    // Closing the tools is not editing: nothing was marked.
+    expect(container.querySelector('[data-sat-highlight="true"]')).toBeNull();
   });
 
   it('underlines a selection from the same toolbar', () => {
@@ -103,7 +123,7 @@ describe('SAT shell annotation flow (selection first)', () => {
     expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
   });
 
-  it('attaches a note to the selection and writes it in the Notes column beside the passage', async () => {
+  it('writes a note on selected text right where the text is, without opening the Notes column', async () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     selectStimulusText(container, 'Several');
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
@@ -111,11 +131,11 @@ describe('SAT shell annotation flow (selection first)', () => {
     // Choosing "Add note" leaves a visible mark behind: a note without a source
     // would be unfindable later.
     expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
-    // The card quotes the text the note is about, and the column is part of the
-    // exam layout rather than a panel floating over it.
-    const column = await screen.findByRole('complementary', { name: 'Notes' });
-    expect(column).toHaveTextContent('“Several”');
-    expect(column.closest('[data-sat-reading-split]')).not.toBeNull();
+    // The field appears inside the tools the student is already looking at, under
+    // the words it is about — the middle of the exam keeps reading the question.
+    const inline = document.querySelector('[data-sat-inline-note="true"]')!;
+    expect(inline).toHaveTextContent('“Several”');
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
     const field = screen.getByRole('textbox', { name: 'Notes' });
     expect(field).toHaveAttribute('placeholder', 'Add a quick note…');
     // The caret is already in the field: opening the note IS the invitation.
@@ -124,6 +144,13 @@ describe('SAT shell annotation flow (selection first)', () => {
     fireEvent.change(field, { target: { value: 'Remember this claim' } });
     // Autosave, then the quiet confirmation that no Save button is needed.
     await waitFor(() => expect(screen.getByTestId('sat-note-saved')).toHaveTextContent('Saved'), { timeout: 3000 });
+
+    // The pane is still the place you go to read your notes — it just does not
+    // push itself open to be written in.
+    fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
+    const column = await screen.findByRole('complementary', { name: 'Notes' });
+    expect(column).toHaveTextContent('“Several”');
+    expect(column).toHaveTextContent('Remember this claim');
   });
 
   it('recolors an existing mark in one tap and forgives removal with Undo', () => {
@@ -159,16 +186,17 @@ describe('SAT shell annotation flow (selection first)', () => {
     fireEvent.blur(field);
     await waitFor(() => expect(screen.getByTestId('sat-note-saved')).toBeInTheDocument());
 
-    // The label says what closing brings back, so it varies by tier; the control
-    // and its meaning do not.
-    fireEvent.click(screen.getByRole('button', { name: /^Close notes/ }));
-    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
+    // Closing the tools leaves the note on the mark: the words live with the
+    // mark, not with the panel that happened to be showing when they were typed.
+    fireEvent.click(screen.getByRole('button', { name: 'Close text tools' }));
+    expect(screen.queryByRole('toolbar', { name: 'Edit annotation' })).not.toBeInTheDocument();
+    expect(container.querySelector('[data-sat-highlight="true"]')).toHaveAttribute('data-sat-annotation-note', 'true');
 
     // Reopening shows the saved note under the quoted source.
     fireEvent.click(container.querySelector('[data-sat-highlight="true"]')!);
     fireEvent.click(screen.getByRole('button', { name: 'Edit note' }));
     expect(await screen.findByRole('textbox', { name: 'Notes' })).toHaveValue('Check the evidence');
-    expect(screen.getByRole('complementary', { name: 'Notes' })).toHaveTextContent('“Several”');
+    expect(document.querySelector('[data-sat-inline-note="true"]')).toHaveTextContent('“Several”');
   });
 
   it('clears the tools on Escape without touching the mark', () => {
@@ -289,10 +317,12 @@ describe('SAT shell annotation flow (selection first)', () => {
     fireEvent.blur(field);
     await waitFor(() => expect(screen.getByTestId('sat-note-saved')).toBeInTheDocument());
 
-    // The passage says which mark carries a note, without opening the column.
+    // The mark reports that it carries a note — nothing is drawn into the
+    // sentence for it, and no pane had to open to say so.
     const written = container.querySelector('[data-sat-highlight="true"]')!;
     expect(written).toHaveAttribute('data-sat-annotation-note', 'true');
-    expect(written.querySelector('[data-sat-note-mark="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-sat-note-mark]')).toBeNull();
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
 
     // Removing a note discards up to two thousand characters, so it gets the same
     // forgiveness as deleting a mark instead of being final on one press.
@@ -301,12 +331,11 @@ describe('SAT shell annotation flow (selection first)', () => {
     expect(toast).toHaveTextContent('Note removed');
     const cleared = container.querySelector('[data-sat-highlight="true"]')!;
     expect(cleared).not.toHaveAttribute('data-sat-annotation-note');
-    expect(cleared.querySelector('[data-sat-note-mark="true"]')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     const restored = container.querySelector('[data-sat-highlight="true"]')!;
     expect(restored).toHaveAttribute('data-sat-annotation-note', 'true');
-    expect(screen.getByRole('textbox', { name: 'Notes' })).toHaveValue('Cooler after the trees');
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Notes' })).toHaveValue('Cooler after the trees'));
   });
 });
 
@@ -316,7 +345,13 @@ describe('SAT annotation Bluebook surfaces (Phase 7)', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     selectStimulusText(container, 'Several');
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+    const field = await screen.findByRole('textbox', { name: 'Notes' });
+    fireEvent.change(field, { target: { value: 'Compare the two blocks' } });
 
+    // The column is asked for from the top bar. Opening it is the student's
+    // request, so it may take layout space; it must never be pushed open by a
+    // highlight, which is why nothing above opened it.
+    fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
     const column = await screen.findByRole('complementary', { name: 'Notes' });
     const layout = container.querySelector<HTMLElement>('[data-sat-reading-split]')!;
     // A member of the passage/question grid, so adding a note moves nothing and
@@ -332,6 +367,31 @@ describe('SAT annotation Bluebook surfaces (Phase 7)', () => {
     // Nothing dims the exam, and no modal takes the work hostage.
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(0);
     expect(document.querySelector('.bg-black\\/20')).toBeNull();
+  });
+
+  it('hides the column to a handle that brings it back, in the column’s own seat', async () => {
+    stubWideViewport();
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
+    expect(await screen.findByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
+    const layout = container.querySelector<HTMLElement>('[data-sat-reading-split]')!;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide notes' }));
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
+
+    // What took the pane's place says, in words, that the pane can come back —
+    // and it stands exactly where the pane was, so the reversal is found by
+    // looking at the edge it was lost from rather than by searching the toolbar.
+    const rail = screen.getByRole('button', { name: 'Show notes' });
+    expect(rail).toHaveTextContent('Notes');
+    expect(layout).toContainElement(rail);
+    // Hiding hands the caret to the control that undoes it: a keyboard student is
+    // never left on <body> wondering what changed.
+    await waitFor(() => expect(rail).toHaveFocus());
+
+    fireEvent.click(rail);
+    expect(await screen.findByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show notes' })).not.toBeInTheDocument();
   });
 
   it('keeps every annotation ink a token, never a literal in the copy-free palette', () => {

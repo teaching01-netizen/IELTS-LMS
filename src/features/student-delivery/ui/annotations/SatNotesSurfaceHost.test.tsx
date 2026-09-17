@@ -22,10 +22,11 @@ function Probe() {
       data-open={surface.open ? 'true' : 'false'}
       data-placement={surface.placement}
       data-has-column={surface.column ? 'true' : 'false'}
+      data-has-rail={surface.rail ? 'true' : 'false'}
       data-has-hint={surface.passageHint ? 'true' : 'false'}
     >
       {/* Same contract as the real layout: it renders what the host handed it. */}
-      {surface.column}
+      {surface.column ?? surface.rail}
     </div>
   );
 }
@@ -38,17 +39,19 @@ function renderHost(
     wide?: boolean;
     questionKey?: string;
     questionNote?: string;
+    notesAvailable?: boolean;
     onSaveQuestionNote?: (note: string) => void;
+    onOpenNotes?: () => void;
   } = {},
 ) {
-  const media = mockWidths({ compact: overrides.compact ?? false, wide: overrides.wide ?? true });
-  const view = render(
+  const media = mockWidths({ compact: overrides.compact ?? false, wide: overrides.wide ?? true });    const view = render(
     <SatNotesSurfaceHost
       state={state}
       questionKey={overrides.questionKey ?? 'module::0'}
       annotations={[]}
       questionNote={overrides.questionNote ?? ''}
       hasHighlights={false}
+      notesAvailable={overrides.notesAvailable ?? true}
       disabled={false}
       hintVisible={overrides.hintVisible ?? false}
       onSelectNote={vi.fn()}
@@ -56,6 +59,7 @@ function renderHost(
       onSaveQuestionNote={overrides.onSaveQuestionNote ?? vi.fn()}
       onRemoveNote={vi.fn()}
       onWriteAboutQuestion={vi.fn()}
+      onOpenNotes={overrides.onOpenNotes ?? vi.fn()}
       onClose={vi.fn()}
     >
       <Probe />
@@ -80,6 +84,43 @@ describe('SatNotesSurfaceHost', () => {
       expect(probe).toHaveAttribute('data-placement', 'none');
       expect(probe).toHaveAttribute('data-has-column', 'false');
     } finally { unmount(); media.mockRestore(); }
+  });
+
+  it('hands the layout a handle where the hidden column stood, so it is visibly reversible', () => {
+    const onOpenNotes = vi.fn();
+    const { media, unmount } = renderHost({ kind: 'idle' }, { onOpenNotes });
+    try {
+      const probe = screen.getByTestId('probe');
+      expect(probe).toHaveAttribute('data-has-column', 'false');
+      expect(probe).toHaveAttribute('data-has-rail', 'true');
+      // The handle says what it is and what pressing it does: no decoding a
+      // corner chevron to find out a pane can come back.
+      const rail = screen.getByRole('button', { name: 'Show notes' });
+      expect(rail).toHaveTextContent('Notes');
+      fireEvent.click(rail);
+      expect(onOpenNotes).toHaveBeenCalledTimes(1);
+    } finally { unmount(); media.mockRestore(); }
+  });
+
+  it('leaves no handle while the column is open, or where notes cannot open', () => {
+    const open = renderHost(notes());
+    try {
+      expect(screen.getByTestId('probe')).toHaveAttribute('data-has-rail', 'false');
+    } finally { open.unmount(); open.media.mockRestore(); }
+
+    // Math: the surface is absent, so a handle would advertise a pane that can
+    // never appear.
+    const unavailable = renderHost({ kind: 'idle' }, { notesAvailable: false });
+    try {
+      expect(screen.getByTestId('probe')).toHaveAttribute('data-has-rail', 'false');
+      expect(screen.queryByRole('button', { name: 'Show notes' })).not.toBeInTheDocument();
+    } finally { unavailable.unmount(); unavailable.media.mockRestore(); }
+
+    // Stacked tiers have no edge to hold a handle on.
+    const compact = renderHost({ kind: 'idle' }, { compact: true, wide: false });
+    try {
+      expect(screen.getByTestId('probe')).toHaveAttribute('data-has-rail', 'false');
+    } finally { compact.unmount(); compact.media.mockRestore(); }
   });
 
   it('hands the column and its placement to the layout together', () => {
@@ -132,6 +173,7 @@ describe('SatNotesSurfaceHost', () => {
           annotations={[]}
           questionNote=""
           hasHighlights={false}
+          notesAvailable
           disabled={false}
           hintVisible={false}
           onSelectNote={vi.fn()}
@@ -139,6 +181,7 @@ describe('SatNotesSurfaceHost', () => {
           onSaveQuestionNote={onSaveQuestionNote}
           onRemoveNote={vi.fn()}
           onWriteAboutQuestion={vi.fn()}
+          onOpenNotes={vi.fn()}
           onClose={vi.fn()}
         >
           <Probe />

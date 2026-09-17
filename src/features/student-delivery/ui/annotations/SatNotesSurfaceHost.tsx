@@ -1,7 +1,14 @@
 import { useMemo, type ReactNode } from 'react';
-import { satNotesColumnOpen, satNotesPlacement, type SatNotesPlacement, type SatNotesUiState } from '../../domain/satNotesUi';
+import {
+  satNotesColumnOpen,
+  satNotesPlacement,
+  satNotesRailVisible,
+  type SatNotesPlacement,
+  type SatNotesUiState,
+} from '../../domain/satNotesUi';
 import type { SatTextAnnotation } from '../../domain/satResponses';
 import { SatNotesColumn } from './SatNotesColumn';
+import { SatNotesRail } from './SatNotesRail';
 import { SatNotesSurfaceContext, type SatNotesSurface } from './SatNotesSurfaceContext';
 import { useSatMediaQuery } from '../useSatMediaQuery';
 import { SatAnnotationPassageHint } from '../education/SatAnnotationEducationCues';
@@ -19,6 +26,8 @@ export interface SatNotesSurfaceHostProps {
   questionNote: string;
   /** True when the question carries marks, so an empty column can say so. */
   hasHighlights: boolean;
+  /** R&W-only: without the surface there is no pane and no handle for it. */
+  notesAvailable: boolean;
   disabled: boolean;
   hintVisible: boolean;
   onSelectNote: (annotationId: string) => void;
@@ -27,6 +36,8 @@ export interface SatNotesSurfaceHostProps {
   /** Staged removal for a note's text, undo included, owned by the surface hook. */
   onRemoveNote: (annotationId: string) => void;
   onWriteAboutQuestion: () => void;
+  /** Opens the column from the handle a previous hide left behind. */
+  onOpenNotes: () => void;
   onFlush?: (() => void) | undefined;
   onClose: () => void;
   children: ReactNode;
@@ -40,12 +51,16 @@ export interface SatNotesSurfaceHostProps {
  * panel and the layout read the same placement value, so "where the column goes"
  * is computed once, by one rule (`satNotesPlacement`), instead of being derived
  * separately by the component that renders it and the component that places it.
+ * The handle a hidden column leaves behind is decided here for the same reason:
+ * "should the pane's ability to open be visible right now" is one question, and
+ * it has one answer (`satNotesRailVisible`).
  */
 export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
   const compact = useSatMediaQuery('(max-width: 767px)');
   const threeColumn = useSatMediaQuery('(min-width: 1024px)');
   const open = satNotesColumnOpen(props.state);
   const placement: SatNotesPlacement = satNotesPlacement({ open, compact, threeColumn });
+  const railVisible = satNotesRailVisible({ open, compact, available: props.notesAvailable });
 
   const surface = useMemo<SatNotesSurface>(
     () => ({
@@ -70,9 +85,12 @@ export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
             onClose={props.onClose}
           />
         ),
+      // The hidden column's handle, in the column's own place: hiding a pane is
+      // only honest if what takes its place says it can come back.
+      rail: railVisible ? <SatNotesRail onOpen={props.onOpenNotes} /> : null,
       passageHint: props.hintVisible ? <SatAnnotationPassageHint /> : null,
     }),
-    [placement, props.annotations, props.disabled, props.hasHighlights, props.hintVisible, props.onChangeNote, props.onClose, props.onFlush, props.onRemoveNote, props.onSaveQuestionNote, props.onSelectNote, props.onWriteAboutQuestion, props.questionKey, props.questionNote, props.state],
+    [placement, props.annotations, props.disabled, props.hasHighlights, props.hintVisible, props.onChangeNote, props.onClose, props.onFlush, props.onOpenNotes, props.onRemoveNote, props.onSaveQuestionNote, props.onSelectNote, props.onWriteAboutQuestion, props.questionKey, props.questionNote, props.state, railVisible],
   );
 
   return <SatNotesSurfaceContext.Provider value={surface}>{props.children}</SatNotesSurfaceContext.Provider>;

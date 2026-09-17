@@ -20,13 +20,22 @@ export interface SatNotesSurface {
   /** The column content, composed by the host. */
   column: ReactNode;
   /**
+   * The handle a hidden column leaves behind, composed by the host.
+   *
+   * Null whenever there is nothing to leave behind — the pane is open, notes are
+   * unavailable, or the width has no side for a handle to stand on. The layout
+   * renders it in the column's own track, so it never has to decide when a handle
+   * belongs on screen (`satNotesRailVisible` already answered).
+   */
+  rail: ReactNode;
+  /**
    * The one-time teaching line, rendered at the top of the passage so the
    * instruction sits where the gesture belongs.
    */
   passageHint: ReactNode;
 }
 
-const CLOSED: SatNotesSurface = { open: false, placement: 'none', column: null, passageHint: null };
+const CLOSED: SatNotesSurface = { open: false, placement: 'none', column: null, rail: null, passageHint: null };
 
 export const SatNotesSurfaceContext = createContext<SatNotesSurface>(CLOSED);
 

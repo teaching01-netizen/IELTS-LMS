@@ -30,6 +30,20 @@ export function focusSatQuestionNoteRow(): boolean {
 }
 
 /**
+ * Put focus on the handle a hidden Notes column leaves behind.
+ *
+ * Hiding the pane is one press away from being undone, so the caret belongs on
+ * the control that undoes it rather than in the toolbar it was opened from —
+ * otherwise a keyboard student has to go looking for what just happened. Callers
+ * fall back to the top-bar entry when no handle is on screen (phone widths, or a
+ * module where notes are unavailable).
+ */
+export function focusSatNotesRail(): boolean {
+  if (typeof document === 'undefined') return false;
+  return focusAndReport(document.querySelector<HTMLElement>('[data-sat-notes-rail="true"]'));
+}
+
+/**
  * Focus a return target and report whether it actually took the focus.
  *
  * Reporting the *outcome* rather than the attempt is what lets the caller fall

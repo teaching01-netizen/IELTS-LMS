@@ -65,8 +65,6 @@ export function normalizeSatAnnotationEducationState(value: unknown): SatAnnotat
 
 /** Delay before the passive hint appears, so it reads as an aside, not an alert. */
 export const SAT_ANNOTATION_HINT_DELAY_MS = 1200;
-/** Lifetime of the one-time "Highlighted" confirmation. */
-export const SAT_ANNOTATION_CONFIRMATION_MS = 800;
 /** How long the removal toast (with Undo) stays reachable. */
 export const SAT_ANNOTATION_UNDO_MS = 5000;
 

@@ -17,6 +17,16 @@ export const SAT_NOTE_EDITOR_FIELD_ID = 'sat-note-editor-field';
 export const QUESTION_NOTE_FIELD_ID = 'sat-question-note';
 
 /**
+ * Field id for the note written inside a mark's edit dock.
+ *
+ * Distinct from the Notes column's anchored field on purpose: the two are
+ * different places, and one day both could be on screen at once — two elements
+ * sharing an id would make the caret target ambiguous for the browser and for
+ * the focus code that aims at it.
+ */
+export const SAT_INLINE_NOTE_FIELD_ID = 'sat-inline-note-field';
+
+/**
  * The one note field: a capped textarea with idle autosave, a quiet "Saved", a
  * count that only appears near the limit, and removal that only exists once
  * there is text.

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  SAT_ANNOTATION_CONFIRMATION_MS,
   SAT_ANNOTATION_UNDO_MS,
   satAnnotationHintDelayMs,
   shouldShowSatAnnotationHint,
@@ -28,6 +27,7 @@ import { useSatAnnotationEducation } from './useSatAnnotationEducation';
 import { satHighlightInk } from '../ui/annotations/satAnnotationPalette';
 import {
   focusSatAnnotationMark,
+  focusSatNotesRail,
   focusSatQuestionNoteRow,
   scrollSatAnnotationIntoView,
 } from '../ui/annotations/satAnnotationDom';
@@ -101,12 +101,30 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
 
   /** Mark whose edit controls are open (presentation state, not exam truth). */
   const [editingMarkId, setEditingMarkId] = useState<string | null>(null);
-  const [confirmationAnchor, setConfirmationAnchor] = useState<SatTextAnchor | null>(null);
+  /**
+   * Mark whose note is being written inside those controls.
+   *
+   * Writing a note on selected text happens where the text is, so the Notes
+   * column never opens itself into the middle of the exam — it stays the place a
+   * student goes on purpose, and this state says which field is live here.
+   */
+  const [noteFieldMarkId, setNoteFieldMarkId] = useState<string | null>(null);
   const [undoEntry, setUndoEntry] = useState<SatAnnotationUndoEntry | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const [hintVisible, setHintVisible] = useState(false);
 
   const editingMark = annotations?.annotations.find((annotation) => annotation.id === editingMarkId) ?? null;
+  /**
+   * Dismiss the mark's controls, and with them any note field they were holding.
+   *
+   * One transition rather than two setState calls at every call site: a field
+   * left open for a mark whose controls went away is a note editor the student
+   * cannot see and did not ask for.
+   */
+  const dismissMarkControls = useCallback(() => {
+    setEditingMarkId(null);
+    setNoteFieldMarkId(null);
+  }, []);
   /**
    * Which note field is open, read from the one place that decides surfaces. Both
    * editors are machine surfaces, so there is no second copy of this answer here.
@@ -134,11 +152,16 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       if (!annotations || !writable) return;
       const result = applySatHighlightRange(annotations, anchor, color);
       if (result.annotations !== annotations) write(result.annotations);
-      // Teach once: the ink landing is the feedback, this names it one time.
-      const firstHighlight = !education.state.createdFirstHighlight;
+      // The student's ink choice is remembered for the next mark.
       education.markFirstHighlight(color);
-      if (firstHighlight) setConfirmationAnchor(result.annotation.anchor);
-      setEditingMarkId(null);
+      // Acting does not dismiss the tools: they become the controls of the mark
+      // that just landed, in the same place, with the chosen ink pressed — so a
+      // second tap changes the ink instead of demanding a click on the text
+      // first. The mark's own ink is the confirmation; nothing else pops up.
+      setEditingMarkId(result.annotation.id);
+      // A fresh mark's controls open on the mark itself, never on a field: the
+      // student asked for ink, not for somewhere to type.
+      setNoteFieldMarkId(null);
       setAnnouncement(satHighlightedAnnouncement(satHighlightInk(color).label.toLowerCase()));
       interaction.selectionCleared();
     },
@@ -163,8 +186,11 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       if (result.annotations !== annotations) write(result.annotations);
       education.markFirstNote();
       interaction.selectionCleared();
-      // Note panel opens focused, so the student types immediately.
-      interaction.openAnnotationNote(result.annotation.id);
+      // The field opens in the tools the student is already looking at, under
+      // the quote it is about: writing a note is part of marking the text, so it
+      // must not push the Notes column into the middle of the exam to be written.
+      setEditingMarkId(result.annotation.id);
+      setNoteFieldMarkId(result.annotation.id);
     },
     [annotations, education, interaction, writable, write],
   );
@@ -215,27 +241,76 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     window.requestAnimationFrame(() => {
       if (surface.kind === 'annotation-note-editor' && focusSatAnnotationMark(surface.annotationId)) return;
       if (surface.kind === 'question-note-editor' && focusSatQuestionNoteRow()) return;
+      // The pane leaves a handle where it was; focus goes with it, so hiding is
+      // one press from being undone rather than a change the student has to
+      // hunt for. The top bar is the fallback where no handle exists.
+      if (focusSatNotesRail()) return;
       document.getElementById(options.notesTriggerId)?.focus();
     });
   }, [interaction, options.notesTriggerId]);
 
   /** Write about the question itself, with nothing selected. */
   const openQuestionNote = useCallback(() => {
-    setEditingMarkId(null);
+    dismissMarkControls();
     interaction.openQuestionNote();
-  }, [interaction]);
+  }, [dismissMarkControls, interaction]);
 
+  /**
+   * Open the column from its own edge, for the handle it leaves behind.
+   *
+   * Not a toggle: the handle only exists while the column is hidden, so the
+   * control is a way back rather than a switch, and an open request that arrived
+   * twice could never close the pane the student just asked for.
+   */
+  const openNotes = useCallback(() => {
+    dismissMarkControls();
+    interaction.openQuestionNotes();
+  }, [dismissMarkControls, interaction]);
+
+  /**
+   * Open a mark's note in the Notes column.
+   *
+   * Reserved for the column's own cards: choosing one there is a request for the
+   * pane the student is already reading, not a reason to push it open from the
+   * passage. The mark's inline controls are closed on the way, so exactly one
+   * editor for that note is ever on screen.
+   */
   const openNoteOnMark = useCallback(
     (annotation: SatTextAnnotation) => {
-      setEditingMarkId(null);
+      dismissMarkControls();
       interaction.openAnnotationNote(annotation.id);
       // The other half of the highlight <-> note link: choosing a note shows the
       // text it is about. Deferred a frame so the passage has laid out around a
       // column that may have just opened.
       window.requestAnimationFrame(() => scrollSatAnnotationIntoView(annotation.id));
     },
-    [interaction],
+    [dismissMarkControls, interaction],
   );
+
+  /** Write a mark's note in the mark's own place (the edit dock). */
+  const writeMarkNote = useCallback(
+    (annotation: SatTextAnnotation, note: string) => {
+      if (!annotations || !writable) return;
+      const text = note.slice(0, SAT_ANNOTATION_NOTE_LIMIT);
+      write({
+        ...annotations,
+        annotations: annotations.annotations.map((item) => {
+          if (item.id !== annotation.id) return item;
+          const { note: _previous, ...rest } = item;
+          return { ...rest, ...(text ? { note: text } : {}), updatedAt: new Date().toISOString() };
+        }),
+      });
+      if (text) education.markFirstNote();
+      onFlushAnnotations?.();
+    },
+    [annotations, education, onFlushAnnotations, writable, write],
+  );
+
+  /** Show this mark's note field inside its own controls. */
+  const openNoteField = useCallback((annotation: SatTextAnnotation) => {
+    setEditingMarkId(annotation.id);
+    setNoteFieldMarkId(annotation.id);
+  }, []);
 
   const removeMark = useCallback(
     (annotation: SatTextAnnotation) => {
@@ -246,11 +321,11 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       // Forgiveness instead of a confirmation dialog: the removal is undoable for
       // a few seconds, which is what makes confident tapping safe.
       setUndoEntry({ kind: 'mark', annotation, index });
-      setEditingMarkId(null);
+      dismissMarkControls();
       if (noteEditorId === annotation.id) interaction.closeSurface();
       setAnnouncement(annotation.kind === 'highlight' ? SAT_COPY.annotations.removedHighlight : SAT_COPY.annotations.removedUnderline);
     },
-    [annotations, interaction, noteEditorId, writable, write],
+    [annotations, dismissMarkControls, interaction, noteEditorId, writable, write],
   );
 
   const undoLastRemoval = useCallback(() => {
@@ -293,9 +368,10 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     onSaveQuestionNote('');
   }, [onSaveQuestionNote, questionNote, writable]);
 
+  /** The column's own field, which is the machine's note editor surface. */
   const updateNote = useCallback(
     (note: string | undefined) => {
-      if (!annotations || !noteEditorAnnotation || !writable) return;
+      if (!noteEditorAnnotation) return;
       // Deleting from a bare mark removes the whole annotation. A note-bearing
       // mark keeps its ink and loses only the text: the eraser equivalent is
       // Remove in the edit dock.
@@ -303,19 +379,9 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
         removeMark(noteEditorAnnotation);
         return;
       }
-      const text = (note ?? '').slice(0, SAT_ANNOTATION_NOTE_LIMIT);
-      write({
-        ...annotations,
-        annotations: annotations.annotations.map((annotation) => {
-          if (annotation.id !== noteEditorAnnotation.id) return annotation;
-          const { note: _previous, ...rest } = annotation;
-          return { ...rest, ...(text ? { note: text } : {}), updatedAt: new Date().toISOString() };
-        }),
-      });
-      if (text) education.markFirstNote();
-      onFlushAnnotations?.();
+      writeMarkNote(noteEditorAnnotation, note ?? '');
     },
-    [annotations, education, noteEditorAnnotation, onFlushAnnotations, removeMark, writable, write],
+    [noteEditorAnnotation, removeMark, writeMarkNote],
   );
 
   const selectionActions = useMemo<SatSelectionActions>(
@@ -323,20 +389,22 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     [addNoteToSelection, highlightSelection, underlineSelection],
   );
 
-  /** Closing the mark editor is Escape's first job; true when it consumed one. */
+  /**
+   * The tools' own close control, and Escape's first job.
+   *
+   * Focus goes back to the mark they were about: dismissing the controls is not
+   * leaving the text, and a keyboard student must not land on <body> for it.
+   */
   const closeMarkEditor = useCallback(() => {
-    if (editingMarkId === null) return false;
-    setEditingMarkId(null);
+    if (editingMarkId === null && noteFieldMarkId === null) return false;
+    const markId = editingMarkId ?? noteFieldMarkId;
+    dismissMarkControls();
+    if (markId) window.requestAnimationFrame(() => focusSatAnnotationMark(markId));
     return true;
-  }, [editingMarkId]);
+  }, [dismissMarkControls, editingMarkId, noteFieldMarkId]);
 
-  // One-time "Highlighted" confirmation: the ink is the real feedback, this
-  // only names the mental model once, then leaves on its own.
-  useEffect(() => {
-    if (!confirmationAnchor) return;
-    const timer = window.setTimeout(() => setConfirmationAnchor(null), SAT_ANNOTATION_CONFIRMATION_MS);
-    return () => window.clearTimeout(timer);
-  }, [confirmationAnchor]);
+  /** Dismiss the selection tools without touching the selection or the marks. */
+  const closeSelectionTools = useCallback(() => interaction.selectionCleared(), [interaction]);
 
   // Removal toast lifetime (Undo stays reachable for a few seconds).
   useEffect(() => {
@@ -349,16 +417,15 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   // working on?"), and demonstrating the gesture retires the passive hint.
   useEffect(() => {
     if (!selection) return;
-    setEditingMarkId(null);
+    dismissMarkControls();
     education.markHintSeen();
-  }, [education, selection]);
+  }, [dismissMarkControls, education, selection]);
 
   // Question changes discard annotation chrome: a mark editor belongs to one
   // question and must never follow the student to the next one.
   useEffect(() => {
-    setEditingMarkId(null);
-    setConfirmationAnchor(null);
-  }, [options.questionKey]);
+    dismissMarkControls();
+  }, [dismissMarkControls, options.questionKey]);
 
   const hasAnnotations = annotations ? hasSatAnnotations(annotations) : false;
   /**
@@ -407,6 +474,10 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       openEditorActive: writable,
       openEditor: (annotation: SatTextAnnotation) => {
         setEditingMarkId(annotation.id);
+        // The mark's own field survives a second press on the same mark: the
+        // student may be clicking the text to place the caret, not to close the
+        // note they were writing.
+        setNoteFieldMarkId((current) => (current === annotation.id ? current : null));
         interaction.selectionCleared();
       },
       onSelectionCaptured: (anchor: SatTextAnchor) => interaction.selectionCaptured(anchor),
@@ -424,14 +495,20 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     currentColor: education.state.lastHighlightColor,
     editingMark,
     closeMarkEditor,
+    closeSelectionTools,
     recolourMark,
     underlineMark,
     openNoteOnMark,
+    /** The mark whose note is being written in its own controls, if any. */
+    noteFieldMarkId,
+    openNoteField,
+    writeMarkNote,
     removeMark,
     noteEditorAnnotation,
     /** The notes UI state + its close, owned here so no caller derives them. */
     notesState,
     closeNotes,
+    openNotes,
     openQuestionNote,
     updateNote,
     /** Removal, with undo, for both kinds of note text. */
@@ -439,7 +516,6 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     removeQuestionNoteText,
     undoEntry,
     undoLastRemoval,
-    confirmationAnchor,
     hintVisible,
     announcement,
     /** Anchored notes for the Notes panel, in passage order. */
