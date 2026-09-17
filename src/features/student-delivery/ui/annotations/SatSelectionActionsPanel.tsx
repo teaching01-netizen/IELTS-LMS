@@ -11,19 +11,30 @@ export interface SatSelectionActions {
 }
 
 /**
- * The controls raised by a text selection — one component, two placements.
+ * The controls raised by a text selection — one component, two presentations.
  *
- * `floating` (desktop) is a panel positioned against the selected span.
- * `docked` (touch) pins full-bleed to the bottom of the exam body and quotes
- * the selection back to the student, because Safari keeps owning selection and
- * the dock is what answers "these are my tools for THAT text".
+ * The PRESENTATION is not a device setting; it is the answer to "is there room
+ * for a toolbar beside this selection". `useSatAnnotationPlacement` decides it
+ * (see the placement engine for the rules) and this component simply honours
+ * the answer: `floating` is a panel with a caret pointing at the exact line it
+ * belongs to, `docked` is a full-bleed sheet at the bottom of the exam body
+ * that quotes the selection back to the student, and `hidden` is mounted but
+ * invisible while the anchor is off screen or the viewport is moving.
+ *
+ * `variant` is therefore a REQUEST, not a command: `floating` asks for a
+ * toolbar and accepts the dock when the space budget refuses, while `docked`
+ * pins the sheet (contract layouts and tests). The shell always asks for
+ * `floating` — a coarse pointer only widens the budget, because the native
+ * selection menu needs a zone of its own on touch.
  *
  * They are one component because they are one interaction: same actions, same
  * order, same 44px targets, same labels, only the chrome around them differs.
- * Two copies drifted would mean two places to fix every future label.
+ * Two copies drifted would mean two places to fix every future label. The dock
+ * keeps the selection quote, the floating surface keeps the caret; the actions
+ * themselves are rendered by the same shared controls, unchanged.
  *
- * Both variants are overlays: a toolbar that appeared by pushing the page would
- * move the sentence the student just selected.
+ * Both presentations are overlays: a toolbar that appeared by pushing the page
+ * would move the sentence the student just selected.
  *
  * It is a real toolbar: arrow keys walk the actions, Enter/Space fires the
  * focused one, and Escape belongs to the exam (clearing the selection closes
@@ -40,6 +51,7 @@ export function SatSelectionActionsPanel({
   actions,
   disabled,
   variant,
+  touch = false,
   onClose,
 }: {
   anchor: SatTextAnchor;
@@ -47,13 +59,26 @@ export function SatSelectionActionsPanel({
   currentColor: SatHighlightColor;
   actions: SatSelectionActions;
   disabled?: boolean | undefined;
+  /** Requested presentation; `floating` still yields to the space budget. */
   variant: 'floating' | 'docked';
+  /** Coarse pointer: reserve the native selection menu's zone and comfort. */
+  touch?: boolean | undefined;
   /** Dismiss the tools without touching the selection or the marks. */
   onClose: () => void;
 }) {
-  const docked = variant === 'docked';
-  const { placement, containerRef } = useSatAnnotationPlacement(anchor, { dock: docked });
+  const { placement, containerRef } = useSatAnnotationPlacement(anchor, {
+    dock: variant === 'docked',
+    touch,
+  });
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const mode = placement?.mode ?? null;
+  const docked = mode === 'docked';
+  const hidden = mode === null || mode === 'hidden';
+  const floating = mode === 'floating';
+  const side = placement?.side ?? 'above';
+  // The dock spans the body at the same inset the engine used, so both edges of
+  // the sheet come from one number.
+  const dockInset = placement?.left ?? 8;
 
   // The student has already selected text; landing the caret on the first
   // action means the mark is one keystroke away, and it is also what makes the
@@ -79,27 +104,43 @@ export function SatSelectionActionsPanel({
       }}
       data-sat-selection-toolbar={docked ? undefined : 'true'}
       data-sat-touch-dock={docked ? 'true' : undefined}
-      data-sat-placement-flipped={!docked && placement?.flipped ? 'true' : undefined}
+      data-sat-placement-mode={mode ?? 'none'}
+      data-sat-placement-flipped={floating && placement?.flipped ? 'true' : undefined}
       role="toolbar"
       aria-label={SAT_COPY.annotations.selectedTextActions}
       aria-orientation={docked ? undefined : 'horizontal'}
       onKeyDown={onKeyDown}
       className={
-        docked
-          ? 'sat-ui absolute z-[80] rounded-t-[10px] border-t border-[var(--sat-divider-strong)] bg-[var(--sat-surface)] px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 shadow-[var(--sat-annotation-dock-shadow)]'
-          : 'sat-ui absolute z-[80] w-[min(320px,calc(100%-16px))] rounded-[8px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] p-2 shadow-[var(--sat-shadow-floating)]'
+        'sat-ui absolute z-[80] '
+        + (docked
+          ? 'sat-annotation-surface-docked rounded-t-[10px] border-t border-[var(--sat-divider-strong)] bg-[var(--sat-surface)] px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 shadow-[var(--sat-annotation-dock-shadow)]'
+          : 'sat-annotation-surface-floating rounded-[10px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] p-2 shadow-[var(--sat-shadow-floating)]')
+        // Only a move big enough to notice settles; a nudge is applied directly,
+        // so the surface never chases a selection handle.
+        + (floating && placement?.animated ? ' sat-annotation-settle' : '')
       }
       style={{
         left: placement ? placement.left : 8,
         // A docked sheet is full-bleed: it always spans the body it is docked to.
-        right: docked ? 8 : undefined,
-        top: placement ? placement.top : docked ? undefined : 8,
-        // One quiet entrance: a system control becoming available, never a
-        // panel sliding in from off-screen.
-        animation: 'sat-annotation-enter var(--sat-motion-annotation) ease-out',
-        visibility: placement ? 'visible' : 'hidden',
+        right: docked ? dockInset : undefined,
+        top: placement ? placement.top : 8,
+        // Anchored to the selection, never constrained by it: a short selection
+        // must not produce tiny controls.
+        width: docked ? undefined : 'min(var(--sat-annotation-surface-max), calc(100% - var(--sat-annotation-edge) * 2))',
+        visibility: hidden ? 'hidden' : 'visible',
       }}
     >
+      {/* The caret is the whole spatial argument: this control belongs to THAT
+          line. Floating only — a docked sheet is already the student's answer
+          to "where did my tools go". */}
+      {floating && placement ? (
+        <span
+          aria-hidden="true"
+          data-sat-annotation-caret={side === 'above' ? 'down' : 'up'}
+          className="sat-annotation-caret"
+          style={{ left: placement.arrowX }}
+        />
+      ) : null}
       {docked ? (
         <p
           data-sat-dock-quote="true"

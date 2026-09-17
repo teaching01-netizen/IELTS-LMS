@@ -488,7 +488,14 @@ export function SatExamShell(props: SatExamShellProps) {
         </SatAnnotationViewContext.Provider>
         {/* Contextual annotation tools. Exactly one is mounted at a time:
             a mark editor when a mark is being changed, otherwise the selection
-            toolbar/dock while a selection is live. */}
+            toolbar/dock while a selection is live.
+
+            Both ask for a floating surface and let the placement engine decide:
+            it docks them only when the space budget refuses (a cramped visual
+            viewport, a selection that covers the screen, no room for the
+            controls at a usable size). A coarse pointer does not force the
+            dock — it widens the budget, because the native selection menu needs
+            a zone of its own on touch and nothing needs one under a mouse. */}
         {editingMark ? (
           <SatAnnotationEditDock
             annotation={editingMark}
@@ -508,7 +515,8 @@ export function SatExamShell(props: SatExamShellProps) {
             currentColor={currentColor}
             actions={selectionActions}
             disabled={props.blocked || !annotationsWritable}
-            variant={touchAnnotations ? 'docked' : 'floating'}
+            variant="floating"
+            touch={touchAnnotations}
             onClose={surface.closeSelectionTools}
           />
         ) : null}

@@ -1327,6 +1327,29 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   /* Annotation chrome motion (C4: exam TSX carries no duration literals). */
   --sat-motion-annotation: 140ms;
   --sat-annotation-dock-shadow: 0 -2px 8px rgb(0 0 0 / 12%);
+  /* Annotation surface placement (Highlights & Notes). BUDGETS, not guesses:
+   * `native-ui-zone` is the safety margin the native selection menu owns,
+   * `comfort` is why a surface that technically fits by 2px still docks, and
+   * `selection-ratio` hands a selection that covers the viewport to the dock,
+   * where "nearby" has stopped meaning anything. `comfort-fine` is the same
+   * idea for a mouse, which has no native menu to avoid. Every value is
+   * mirrored as a fallback in satSelectionGeometry.ts, which the runtime
+   * prefers these over (jsdom reads none of them). */
+  --sat-annotation-edge: 12px;
+  --sat-annotation-native-ui-zone: 80px;
+  --sat-annotation-gap: 12px;
+  --sat-annotation-comfort: 24px;
+  --sat-annotation-comfort-fine: 12px;
+  --sat-annotation-surface-min: 280px;
+  --sat-annotation-surface-max: 340px;
+  --sat-annotation-selection-ratio: 0.3;
+  --sat-annotation-caret: 6px;
+  --sat-annotation-caret-inset: 20px;
+  --sat-annotation-switch-margin: 24px;
+  --sat-annotation-stable-delta: 8px;
+  --sat-annotation-settle: 80ms;
+  --sat-annotation-settle-motion: 120ms;
+  --sat-annotation-settle-ease: cubic-bezier(0.4, 0, 0.2, 1);
   /* Bluebook selection preview (Phase 7, Lane 3): preview var for the
    * ::selection utility below; defaults to the paper token. No literal
    * change — value intentionally mirrors --sat-highlight-background. */
@@ -1462,6 +1485,61 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* The dock arrives from its own edge (a sheet, not a floating panel). Two
+ * animation names, not one: swapping modes therefore restarts the entrance by
+ * itself, which is the crossfade — the surface never travels across the screen
+ * from its old coordinates to its new ones. */
+@keyframes sat-annotation-dock-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sat-annotation-surface-floating {
+  animation: sat-annotation-enter var(--sat-motion-annotation) ease-out;
+}
+
+.sat-annotation-surface-docked {
+  animation: sat-annotation-dock-enter var(--sat-motion-annotation) ease-out;
+}
+
+/* A larger reposition (scroll, resize, a handle nudge that moved the anchor
+ * far) settles; small moves are applied directly and never animate. Applied
+ * only when the placement says so, so the surface does not chase the finger. */
+.sat-annotation-settle {
+  transition:
+    left var(--sat-annotation-settle-motion) var(--sat-annotation-settle-ease),
+    top var(--sat-annotation-settle-motion) var(--sat-annotation-settle-ease);
+}
+
+/* The caret: the one thing that says "this control belongs to THAT text".
+ * Border-drawn (never a gradient or an image), filled with the surface color
+ * so it reads as part of the panel, and removed entirely in dock mode. */
+.sat-annotation-caret {
+  position: absolute;
+  width: 0;
+  height: 0;
+  margin-left: calc(-1 * var(--sat-annotation-caret));
+  border-left: var(--sat-annotation-caret) solid transparent;
+  border-right: var(--sat-annotation-caret) solid transparent;
+  pointer-events: none;
+}
+
+.sat-annotation-caret[data-sat-annotation-caret='down'] {
+  top: 100%;
+  border-top: var(--sat-annotation-caret) solid var(--sat-surface);
+}
+
+.sat-annotation-caret[data-sat-annotation-caret='up'] {
+  bottom: 100%;
+  border-bottom: var(--sat-annotation-caret) solid var(--sat-surface);
 }
 
 /* Highlights & Notes: existing marks read as interactive on mouse only — the

@@ -94,6 +94,21 @@ describe('touch dock', () => {
   });
 });
 
+describe('presentation parity', () => {
+  it('keeps the same actions in the same order whether it floats or docks', () => {
+    const order = () =>
+      screen.getAllByRole('button').map((button) => button.getAttribute('data-sat-annotation-action'));
+    const { unmount } = render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions()} variant="floating" {...closeProps} />);
+    const floating = order();
+    unmount();
+    render(<SatSelectionActionsPanel anchor={anchor} currentColor="yellow" actions={actions()} variant="docked" {...closeProps} />);
+    // A docked sheet is the same tool moved, never a rearranged one: muscle
+    // memory has to survive the presentation change in the middle of an exam.
+    expect(order()).toEqual(floating);
+    expect(floating).toEqual(['close', 'highlight-yellow', 'highlight-blue', 'highlight-pink', 'underline', 'note']);
+  });
+});
+
 describe('edit dock', () => {
   const mark = createSatTextAnnotation({
     kind: 'highlight', nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree', color: 'pink', note: 'Check this',
