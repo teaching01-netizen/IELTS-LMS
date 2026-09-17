@@ -123,6 +123,7 @@ export type SatInteractionEvent =
   | { type: 'ANNOTATION_NOTE_EDITOR_OPENED'; annotationId: string; returnFocus: SatInteractionFocusTarget }
   | { type: 'QUESTION_NOTE_EDITOR_OPENED'; returnFocus: SatInteractionFocusTarget }
   | { type: 'ANNOTATION_NOTE_EDITOR_CLOSED' }
+  | { type: 'NOTE_EDITOR_SETTLED' }
   | { type: 'SURFACE_CLOSED' }
   | { type: 'CALCULATOR_OPENED' }
   | { type: 'CALCULATOR_CLOSED' }
@@ -313,6 +314,19 @@ export function satInteractionReducer(
         ...state,
         surface: { kind: 'question-note-editor', returnFocus: event.returnFocus },
         annotation: { ...state.annotation, selection: null },
+      };
+      break;
+    case 'NOTE_EDITOR_SETTLED':
+      // A press anywhere outside the pane settles the note: the field's own blur
+      // commits it, and the words stay where they were written. What ends is the
+      // *editor*, not the pane — the pane is a place in the exam, like the
+      // passage, and it is only the note the student was writing that was ever
+      // open. Ending that is what lets the next selection raise the annotation
+      // tools again instead of being read as a second competing editor.
+      if (!isSatNoteEditorSurface(state.surface)) return state;
+      next = {
+        ...state,
+        surface: { kind: 'question-notes', returnFocus: { type: 'topbar', control: 'notes' } },
       };
       break;
     case 'ANNOTATION_NOTE_EDITOR_CLOSED':

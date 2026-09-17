@@ -245,6 +245,20 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   }, [dismissMarkControls, interaction]);
 
   /**
+   * The student pressed somewhere other than the notes pane.
+   *
+   * The field they were in commits through its own blur and the pane does not
+   * move — but the note stops being *open*, which is the difference between "I
+   * am writing a note" and "there are notes over there". Without it the exam
+   * treats a pane full of live fields as an unresolved editor forever, and every
+   * later selection in the passage is refused as a second editor: the student
+   * can read their notes or highlight text, never both.
+   */
+  const settleNoteEditor = useCallback(() => {
+    interaction.settleNoteEditor();
+  }, [interaction]);
+
+  /**
    * Open the column from its own edge, for the handle it leaves behind.
    *
    * Not a toggle: the handle only exists while the column is hidden, so the
@@ -525,6 +539,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     closeNotes,
     openNotes,
     openQuestionNote,
+    settleNoteEditor,
     updateNote,
     /** Removal, with undo, for both kinds of note text. */
     removeNoteText,

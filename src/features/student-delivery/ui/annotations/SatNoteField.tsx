@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import { SAT_ANNOTATION_NOTE_LIMIT } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
@@ -27,14 +27,19 @@ const SAT_NOTE_FIELD_MAX_PX = 160;
 type SatNoteSaveState = 'idle' | 'saving' | 'saved';
 
 /**
- * The one note field: a capped textarea that autosaves, tells the truth about
- * saving only while it is happening, and keeps removal out of the way.
+ * The one note field: a capped textarea that autosaves, with the line it is about
+ * above it and everything else the student does not need kept quiet.
  *
  * Both card kinds use it, so an anchored note and a note about the question
  * cannot drift apart in how they save, grow, or empty. It is also the only
  * editor: the student's words exist in exactly one place on screen, and this is
  * it — there is no reading state that shows the same text as static content
  * beside a field that shows it again.
+ *
+ * The layout is one header line and one field. `context` is whatever the note is
+ * about (the student's own selection, or nothing at all), and the header's far end
+ * carries the transient save status and the secondary disclosure — so a card is a
+ * row of context and a place to write, with no third band of chrome under it.
  *
  * Removal is *staged* by the caller (`onRemoveRequested`) so it can land in the
  * same undo toast that already forgives a deleted mark; a field used on its own
@@ -52,6 +57,7 @@ export function SatNoteField({
   onFlush,
   canRemove,
   onRemoveRequested,
+  context,
   className,
 }: {
   fieldId: string;
@@ -68,62 +74,31 @@ export function SatNoteField({
   canRemove: boolean;
   /** Staged, undoable removal. Absent = clear in place. */
   onRemoveRequested?: (() => void) | undefined;
+  /** What this note is about, shown on the header line. Absent = a note about the question. */
+  context?: ReactNode;
   className?: string;
 }) {
-  const draft = useSatNoteDraft({ value, ownerKey, disabled, commit, onFlush });
+  // Destructured, not read off an object: a bare `status` would quietly bind to
+  // `window.status` and narrate nothing at all.
+  const {
+    draft: typed,
+    type: onType,
+    status,
+    commitNow,
+    clear,
+  } = useSatNoteDraft({ value, ownerKey, disabled, commit, onFlush });
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
-  useSatNoteAutogrow(fieldRef, draft.draft);
-  return (
-    <>
-      <textarea
-        ref={fieldRef}
-        id={fieldId}
-        value={draft.draft}
-        maxLength={SAT_ANNOTATION_NOTE_LIMIT}
-        rows={3}
-        disabled={disabled}
-        placeholder={SAT_COPY.notes.placeholder}
-        aria-label={label}
-        onChange={(event) => draft.type(event.target.value)}
-        onBlur={() => draft.commitNow()}
-        // `sat-reading-copy`, like the passage: a note is reading content, so the
-        // student's text-size choice applies to it as well.
-        //
-        // One boundary at a time: quieter than the surface at rest, and the only
-        // thing in the pane that carries a ring while it is being used. That is
-        // what keeps a column of notes from reading as a box inside a box.
-        className={
-          'sat-reading-copy min-h-[68px] w-full resize-none rounded-[6px] border border-transparent bg-[var(--sat-surface-hover)] p-2 text-[var(--sat-text)] outline-none placeholder:text-[var(--sat-text-secondary)] hover:border-[var(--sat-divider)] focus:border-[var(--sat-accent)] focus:bg-[var(--sat-surface)] focus:ring-2 focus:ring-[var(--sat-focus)]/25 disabled:cursor-not-allowed ' +
-          (className ?? '')
-        }
-      />
-      <NoteFieldFooter
-        length={draft.draft.length}
-        status={draft.status}
-        actionsLabel={actionsLabel}
-        showRemoval={canRemove && !disabled}
-        onRemove={onRemoveRequested ?? (() => draft.clear())}
-      />
-    </>
-  );
-}
-
-function NoteFieldFooter({
-  length,
-  status,
-  actionsLabel,
-  showRemoval,
-  onRemove,
-}: {
-  length: number;
-  status: SatNoteSaveState;
-  actionsLabel: string;
-  showRemoval: boolean;
-  onRemove: () => void;
-}) {
+  useSatNoteAutogrow(fieldRef, typed);
   const [actionsOpen, setActionsOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const showRemoval = canRemove && !disabled;
+  /**
+   * Removal lands in the caller's undo toast when there is one; a field used on its
+   * own empties in place. Either way the ink stays: this drops words, not marks.
+   */
+  const requestRemoval = onRemoveRequested ?? clear;
+
   // A note whose text is gone has nothing left to delete: an open disclosure must
   // not outlive the thing it was about (the owner clears the value underneath it).
   useEffect(() => {
@@ -162,12 +137,16 @@ function NoteFieldFooter({
     status === 'saving' ? SAT_COPY.notes.saving : status === 'saved' ? SAT_COPY.notes.saved : null;
 
   return (
-    <div className="mt-1">
-      {/* One row height for every card, written or not: saving feedback and the
-          one control that appears with the first character must never move the
-          note underneath the student. */}
-      <div className="flex min-h-[32px] items-center justify-between gap-2">
-        <span className="flex items-center gap-2">
+    <div className={'relative ' + (className ?? '')}>
+      {/* One row height for every card, written or not: saving feedback and the one
+          control that appears with the first character must never move the note
+          underneath the student. */}
+      <div className="flex min-h-[28px] items-start gap-2">
+        {context ?? <span aria-hidden="true" className="min-w-0 flex-1" />}
+        {/* The status, the count, and the disclosure share the far end of the
+            context line, and the disclosure hangs its menu off this span — so
+            asking for the menu never moves the paragraph underneath it. */}
+        <span className="relative flex shrink-0 items-center gap-2 pt-[3px]">
           {statusText !== null ? (
             <span
               data-sat-note-status={status}
@@ -178,68 +157,101 @@ function NoteFieldFooter({
             </span>
           ) : null}
           {/* Progressive disclosure: the count is a warning, not a decoration. */}
-          {satNoteCounterVisible(length) ? (
+          {satNoteCounterVisible(typed.length) ? (
             <span
               data-sat-note-counter="true"
               aria-live="polite"
               className={
-                satNoteCounterUrgent(length)
+                satNoteCounterUrgent(typed.length)
                   ? 'sat-type-metadata font-semibold text-[var(--sat-danger-text)]'
                   : 'sat-type-metadata text-[var(--sat-text-secondary)]'
               }
             >
-              {satNoteCounterLabel(length)}
+              {satNoteCounterLabel(typed.length)}
             </span>
           ) : null}
+          {showRemoval ? (
+            <>
+              <button
+                ref={triggerRef}
+                type="button"
+                data-sat-note-actions-trigger="true"
+                aria-label={actionsLabel}
+                aria-haspopup="menu"
+                aria-expanded={actionsOpen}
+                onClick={() => setActionsOpen((open) => !open)}
+                onKeyDown={onActionsEscape}
+                className="sat-pressable -mr-1.5 -mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--sat-text-secondary)] hover:bg-[var(--sat-surface-hover)] hover:text-[var(--sat-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+              >
+                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+              </button>
+              {actionsOpen ? (
+                <div
+                  ref={menuRef}
+                  role="menu"
+                  data-sat-note-actions="true"
+                  // The menu itself never takes the caret — its one item does — but
+                  // an interactive role that can hold focus must be able to.
+                  tabIndex={-1}
+                  aria-label={actionsLabel}
+                  // Tabbing or clicking away leaves the menu behind; the press that
+                  // opened it is the only state anyone has to remember.
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActionsOpen(false);
+                  }}
+                  onKeyDown={onActionsEscape}
+                  // Anchored, not stacked: a menu that pushes the note down the
+                  // instant it opens moves the thing the student was reading.
+                  className="absolute right-0 top-full z-10 mt-1 flex flex-col rounded-[8px] border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)] p-0.5 shadow-[var(--sat-shadow-floating)]"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setActionsOpen(false);
+                      requestRemoval();
+                    }}
+                    // Destructive ink lives in here, after the student has said what
+                    // they mean, instead of sitting red beside their writing.
+                    className="sat-pressable whitespace-nowrap rounded-[6px] px-2 py-1 text-left sat-type-metadata font-medium text-[var(--sat-danger)] hover:bg-[var(--sat-danger-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+                  >
+                    {SAT_COPY.notes.deleteNote}
+                  </button>
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </span>
-        {showRemoval ? (
-          <button
-            ref={triggerRef}
-            type="button"
-            data-sat-note-actions-trigger="true"
-            aria-label={actionsLabel}
-            aria-haspopup="menu"
-            aria-expanded={actionsOpen}
-            onClick={() => setActionsOpen((open) => !open)}
-            onKeyDown={onActionsEscape}
-            className="sat-pressable -mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[var(--sat-text-secondary)] hover:bg-[var(--sat-surface-hover)] hover:text-[var(--sat-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
-          >
-            <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-          </button>
-        ) : null}
       </div>
-      {actionsOpen ? (
-        <div
-          ref={menuRef}
-          role="menu"
-          data-sat-note-actions="true"
-          // The menu itself never takes the caret — its one item does — but an
-          // interactive role that can hold focus must be able to.
-          tabIndex={-1}
-          aria-label={actionsLabel}
-          // Tabbing or clicking away leaves the menu behind; the press that opened
-          // it is the only state anyone has to remember.
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActionsOpen(false);
-          }}
-          onKeyDown={onActionsEscape}
-          className="mt-1 flex justify-end"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setActionsOpen(false);
-              onRemove();
-            }}
-            // Destructive ink lives in here, after the student has said what they
-            // mean, instead of sitting red beside their writing the whole time.
-            className="sat-pressable rounded-[6px] px-2 py-1 sat-type-metadata font-medium text-[var(--sat-danger)] hover:bg-[var(--sat-danger-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
-          >
-            {SAT_COPY.notes.deleteNote}
-          </button>
-        </div>
-      ) : null}
+      <textarea
+        ref={fieldRef}
+        id={fieldId}
+        value={typed}
+        maxLength={SAT_ANNOTATION_NOTE_LIMIT}
+        rows={3}
+        disabled={disabled}
+        placeholder={SAT_COPY.notes.placeholder}
+        aria-label={label}
+        onChange={(event) => onType(event.target.value)}
+        onBlur={commitNow}
+        // `sat-reading-copy`, like the passage: a note is reading content, so the
+        // student's text-size choice applies to it as well.
+        //
+        // One boundary, drawn once: a hairline that goes from whisper to accent as
+        // the field becomes the thing being used. Nothing about the box fills in or
+        // moves when it is touched, so the pane never reads as a box inside a box,
+        // and the field is quiet enough that the words in it are the only thing
+        // worth looking at.
+        //
+        // No fill of its own: the pane is already the surface, and a tinted box
+        // under every note is what made a pane of two-line notes read as a stack
+        // of empty rectangles. Only the boundary changes, and only for the field
+        // the student is actually in.
+        //
+        // `scrollbar-width: thin` because past the ceiling this field scrolls,
+        // and the platform's default bar eats a line of a 280px-wide note.
+        className="sat-reading-copy mt-2 min-h-[68px] w-full resize-none rounded-[8px] border border-[var(--sat-divider-soft)] bg-transparent p-2 text-[var(--sat-text)] outline-none [scrollbar-width:thin] placeholder:text-[var(--sat-text-secondary)] hover:border-[var(--sat-divider)] focus:border-[var(--sat-accent)] focus:ring-2 focus:ring-[var(--sat-focus)]/25 disabled:cursor-not-allowed"
+      />
     </div>
   );
 }
@@ -247,15 +259,12 @@ function NoteFieldFooter({
 /**
  * Grow the field to its content, between a comfortable floor and a ceiling.
  *
- * A note pane is a list of live fields, so a fixed box either scrolls away the
- * beginning of a long note or leaves a short one looking half-empty. The ceiling
- * is deliberate: past it the field scrolls, because a single note must not be
- * able to push the rest of the list off screen.
+ * A note pane is a list of live fields, so a box of one size either scrolls away
+ * the beginning of a long note or leaves a short one looking half-empty. The
+ * ceiling is deliberate: past it the field scrolls, because a single note must not
+ * be able to push the rest of the list off screen.
  */
-function useSatNoteAutogrow(
-  ref: React.RefObject<HTMLTextAreaElement | null>,
-  value: string,
-): void {
+function useSatNoteAutogrow(ref: React.RefObject<HTMLTextAreaElement | null>, value: string): void {
   useEffect(() => {
     const field = ref.current;
     if (!field) return;
@@ -360,21 +369,18 @@ function useSatNoteDraft({
     [],
   );
 
-  const type = useCallback(
-    (next: string) => {
-      const clamped = clampSatNote(next);
-      setDraft(clamped);
-      // Typing back to what is already stored leaves nothing to wait for: the
-      // field must not claim to be saving text the owner already has.
-      setStatus(clamped === valueRef.current ? 'idle' : 'saving');
-      if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
-      autosaveTimer.current = window.setTimeout(() => {
-        autosaveTimer.current = null;
-        writeRef.current(draftRef.current);
-      }, SAT_NOTE_AUTOSAVE_MS);
-    },
-    [],
-  );
+  const type = useCallback((next: string) => {
+    const clamped = clampSatNote(next);
+    setDraft(clamped);
+    // Typing back to what is already stored leaves nothing to wait for: the field
+    // must not claim to be saving text the owner already has.
+    setStatus(clamped === valueRef.current ? 'idle' : 'saving');
+    if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = window.setTimeout(() => {
+      autosaveTimer.current = null;
+      writeRef.current(draftRef.current);
+    }, SAT_NOTE_AUTOSAVE_MS);
+  }, []);
 
   /** Commit whatever is typed right now (blur, close, navigation). */
   const commitNow = useCallback(() => {

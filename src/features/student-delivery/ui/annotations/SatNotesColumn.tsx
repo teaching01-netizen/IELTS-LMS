@@ -9,6 +9,7 @@ import {
   type SatNotesUiState,
 } from '../../domain/satNotesUi';
 import { satHighlightInk } from './satAnnotationPalette';
+import { useSatAnnotationDismiss } from './useSatAnnotationDismiss';
 import { QUESTION_NOTE_FIELD_ID, SatNoteField, satNoteEditorFieldId } from './SatNoteField';
 
 export interface SatNotesColumnProps {
@@ -37,6 +38,13 @@ export interface SatNotesColumnProps {
   onRemoveNote: (annotationId: string) => void;
   /** Write about the question itself, for a student with nothing selected. */
   onAddQuestionNote: () => void;
+  /**
+   * A press outside the pane settles the note the student was in — the pane stays
+   * exactly where it is, and the exam stops treating a list of live fields as an
+   * open editor. Without it, the next selection in the passage is refused as a
+   * second editor and the student simply cannot highlight anything else.
+   */
+  onSettleNoteEditor: () => void;
   onFlush?: (() => void) | undefined;
   onClose: () => void;
 }
@@ -97,6 +105,12 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
     const frame = window.requestAnimationFrame(() => rootRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  // Reading the passage is not leaving the notes: a press outside the pane ends
+  // the note the student was in and nothing else. The press is read in the
+  // capture phase, before it becomes the start of a new selection, so the
+  // selection that follows is understood as a selection rather than refused.
+  useSatAnnotationDismiss(rootRef, props.onSettleNoteEditor);
 
   // Writing a note is the one case where the caret belongs in the field — and the
   // only thing `editorId` still decides, now that every card carries a field: it
@@ -174,7 +188,7 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
           {showsEmptyState ? (
             <EmptyState hasHighlights={props.hasHighlights} />
           ) : (
-            <ul className="flex flex-col gap-1">
+            <ul className="flex flex-col gap-3">
               {props.annotations.map((annotation) => (
                 <li key={annotation.id}>
                   <SatNoteCard
@@ -261,53 +275,60 @@ function SatNoteCard({
   return (
     <div
       data-sat-note-card={annotation.id}
-      // Not a box: the pane is the container, so a card is rows of content with a
-      // soft hover, and the active one is marked by the accent on its leading edge
-      // rather than by another border.
+      // Not a box: the pane is the container, so a card is rows of content, and
+      // the active one is marked by the accent on its leading edge alone rather
+      // than by a fill and a border and a ring at once.
       className={
-        'rounded-[8px] border-l-2 px-2 py-2 ' +
-        (active ? 'border-l-[var(--sat-accent)] bg-[var(--sat-surface-hover)]' : 'border-l-transparent')
+        'flex gap-2 rounded-[8px] border-l-2 py-2 pl-1.5 pr-2 ' +
+        (active ? 'border-l-[var(--sat-accent)]' : 'border-l-transparent')
       }
     >
-      <div className="flex items-start gap-2">
-        {/* The ink of the mark this note hangs off: with several notes in the pane
-            it is the only cue tying one to one of several highlights. */}
-        <span
-          aria-hidden="true"
-          data-sat-note-ink={annotation.color ?? 'yellow'}
-          className="mt-[4px] h-[10px] w-[10px] shrink-0 rounded-full border border-[var(--sat-divider-strong)]"
-          style={{ backgroundColor: satHighlightInk(annotation.color).swatch }}
-        />
-        <button
-          type="button"
-          data-sat-note-excerpt="true"
-          disabled={disabled}
-          onClick={onSelect}
-          // The accent edge says "this is the mark you are on" to the eye; this
-          // says it to a screen reader, which cannot see the link at all.
-          aria-current={active ? 'true' : undefined}
-          className="sat-pressable min-w-0 flex-1 rounded-[4px] text-left sat-type-control-secondary font-semibold text-[var(--sat-text)] hover:text-[var(--sat-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed"
-        >
-          {/* Capped at three lines: a long selection must not take the pane, and
-              the whole excerpt is still there for a screen reader. */}
-          <span className="line-clamp-3">{excerpt}</span>
-        </button>
-      </div>
-      <SatNoteField
-        fieldId={satNoteEditorFieldId(annotation.id)}
-        label={satNoteFieldLabel(excerpt)}
-        actionsLabel={satNoteActionsLabel(excerpt)}
-        value={annotation.note ?? ''}
-        ownerKey={annotation.id}
-        disabled={disabled}
-        commit={(note) => onChangeNote(annotation.id, note)}
-        onFlush={onFlush}
-        // Removal matters only once there is a note; during a first note there is
-        // nothing behind the control worth offering.
-        canRemove={(annotation.note ?? '').trim().length > 0}
-        onRemoveRequested={onRemoveNote}
-        className="mt-2"
+      {/* The mark's ink in a leading gutter, so the excerpt and the note beneath
+          it start on the same line of the card: a column of text, with the one dot
+          that says which highlight it belongs to beside both of them. With several
+          notes in the pane it is the only cue tying one to one of several marks. */}
+      <span
+        aria-hidden="true"
+        data-sat-note-ink={annotation.color ?? 'yellow'}
+        className="mt-[6px] h-2 w-2 shrink-0 rounded-full border border-[var(--sat-divider-strong)]"
+        style={{ backgroundColor: satHighlightInk(annotation.color).swatch }}
       />
+      {/* The header line is the note's context, and its far end holds whatever the
+          note has to say about itself: the save status, and the one control that
+          is not about writing. Nothing sits under the field, so a card is a row of
+          context and a place to write. */}
+      <div className="min-w-0 flex-1">
+        <SatNoteField
+          fieldId={satNoteEditorFieldId(annotation.id)}
+          label={satNoteFieldLabel(excerpt)}
+          actionsLabel={satNoteActionsLabel(excerpt)}
+          value={annotation.note ?? ''}
+          ownerKey={annotation.id}
+          disabled={disabled}
+          commit={(note) => onChangeNote(annotation.id, note)}
+          onFlush={onFlush}
+          // Removal matters only once there is a note; during a first note there is
+          // nothing behind the control worth offering.
+          canRemove={(annotation.note ?? '').trim().length > 0}
+          onRemoveRequested={onRemoveNote}
+          context={
+            <button
+              type="button"
+              data-sat-note-excerpt="true"
+              disabled={disabled}
+              onClick={onSelect}
+              // The accent edge says "this is the mark you are on" to the eye; this
+              // says it to a screen reader, which cannot see the link at all.
+              aria-current={active ? 'true' : undefined}
+              className="sat-pressable min-w-0 flex-1 rounded-[4px] text-left sat-type-control-secondary font-semibold text-[var(--sat-text)] hover:text-[var(--sat-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed"
+            >
+              {/* Capped at three lines: a long selection must not take the pane,
+                  and the whole excerpt is still there for a screen reader. */}
+              <span className="line-clamp-3">{excerpt}</span>
+            </button>
+          }
+        />
+      </div>
     </div>
   );
 }
@@ -370,7 +391,7 @@ function SatQuestionNoteSlot({
 
   return (
     <div className={frame}>
-      <div data-sat-note-card={SAT_QUESTION_NOTE_EDITOR}>
+      <div data-sat-note-card={SAT_QUESTION_NOTE_EDITOR} className="px-1">
         {/* `questionSource` is this field's spoken name and nothing else: the note
             about the question reads as a note, not as a labeled form row. */}
         <SatNoteField

@@ -7,7 +7,7 @@ import type { SatQuestionAnnotations, SatQuestionResponseDraft } from "../../dom
 import type { SatSectionKey } from "../../application/satRunnerReducer";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
 import { SatQuestionBody } from "../../../exam-rendering/api/SatQuestionBody";
-import { renderSatQuestionImageEnlarge } from "../media/SatQuestionImageEnlarge";
+import { SAT_QUESTION_IMAGE_ENLARGE } from "../media/SatQuestionImageEnlarge";
 import { SatQuestionHeader } from "./SatQuestionHeader";
 import { SatQuestionWorkspace } from "./SatQuestionWorkspace";
 import { SatSingleChoiceAnswer } from "./SatSingleChoiceAnswer";
@@ -53,7 +53,10 @@ export function SatQuestionRenderer(props: SatQuestionRendererProps) {
       region={region}
       annotations={props.response.annotations}
       enabled={policy.highlight || policy.underline}
-      enlarge={props.disabled ? undefined : { renderEnlarge: renderSatQuestionImageEnlarge }}
+      // Figure inspection follows the same policy shape as annotation: a module
+      // whose policy does not advertise image zoom gets a plain, unlensed
+      // figure rather than a disabled strip.
+      enlarge={props.disabled || !policy.imageZoom ? undefined : SAT_QUESTION_IMAGE_ENLARGE}
     />
   );
 

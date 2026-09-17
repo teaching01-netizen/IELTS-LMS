@@ -493,6 +493,11 @@ export function SatExamShell(props: SatExamShellProps) {
               if (target) surface.removeNoteText(target);
             }}
             onAddQuestionNote={surface.openQuestionNote}
+            // Pressing outside the pane leaves the note they were writing and
+            // keeps the notes themselves: the pane is a place in the exam, not a
+            // mode to escape from, and a student who is done writing must be able
+            // to highlight the passage again with the notes still in front of them.
+            onSettleNoteEditor={surface.settleNoteEditor}
             // The handle the hidden column leaves behind opens it again, in its
             // own place, so hiding a pane never strands a student in the toolbar.
             onOpenNotes={surface.openNotes}

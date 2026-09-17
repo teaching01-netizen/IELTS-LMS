@@ -69,6 +69,31 @@ describe('resolveSatInteractionIntent (intent, not mutation)', () => {
     ).toEqual({ type: 'ANNOTATION_NOTE_EDITOR_CLOSED' });
   });
 
+  it('settles a note editor, and says nothing when no note is open', () => {
+    const editor = {
+      ...createSatInteractionState(),
+      surface: {
+        kind: 'question-note-editor' as const,
+        returnFocus: { type: 'topbar' as const, control: 'notes' as const },
+      },
+    };
+    // Not capability-gated: leaving a note is not a tool the exam can revoke.
+    expect(
+      resolveSatInteractionIntent(editor, mathCtx(), { type: 'NOTE_EDITOR_SETTLE_REQUESTED' }),
+    ).toEqual({ type: 'NOTE_EDITOR_SETTLED' });
+    // A press outside a pane that holds nothing being written is just a press.
+    const paneOpen = {
+      ...createSatInteractionState(),
+      surface: {
+        kind: 'question-notes' as const,
+        returnFocus: { type: 'topbar' as const, control: 'notes' as const },
+      },
+    };
+    expect(
+      resolveSatInteractionIntent(paneOpen, mathCtx(), { type: 'NOTE_EDITOR_SETTLE_REQUESTED' }),
+    ).toBeNull();
+  });
+
   it('refuses text-selection capture outside R&W capability', () => {
     // The intent layer resolves DATA, not session policy: whether the mode is
     // armed is the reducer's guard (see satInteractionReducer), because an

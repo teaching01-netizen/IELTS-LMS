@@ -105,6 +105,51 @@ describe('satInteractionReducer transition contracts', () => {
     expect(next.surface.kind).toBe('annotation-note-editor');
   });
 
+  it('settles a note editor into an open pane, so the next selection raises the tools', () => {
+    const ctx = rwCtx();
+    let state = arm(createSatInteractionState(), ctx);
+    state = satInteractionReducer(
+      state,
+      {
+        type: 'ANNOTATION_NOTE_EDITOR_OPENED',
+        annotationId: 'ann-9',
+        returnFocus: { type: 'question', questionId: 'q1' },
+      },
+      ctx,
+    );
+    // While the student is in the note, a selection is refused: one thing at a
+    // time, and the field they are typing in is the thing.
+    expect(
+      satInteractionReducer(state, { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() }, ctx)
+        .annotation.selection,
+    ).toBeNull();
+
+    // Pressing away settles the note and keeps the pane: the notes stay on screen
+    // and the exam stops being "in" the editor — which is what makes the very
+    // next selection a selection again instead of a competing editor.
+    state = satInteractionReducer(state, { type: 'NOTE_EDITOR_SETTLED' }, ctx);
+    expect(state.surface.kind).toBe('question-notes');
+    const selected = satInteractionReducer(
+      state,
+      { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() },
+      ctx,
+    );
+    expect(selected.annotation.selection).not.toBeNull();
+  });
+
+  it('leaves a pane that holds no live note exactly as it was', () => {
+    const ctx = rwCtx();
+    const paneOpen = satInteractionReducer(
+      createSatInteractionState(),
+      { type: 'QUESTION_NOTES_OPENED', returnFocus: { type: 'topbar', control: 'notes' } },
+      ctx,
+    );
+    const settled = satInteractionReducer(paneOpen, { type: 'NOTE_EDITOR_SETTLED' }, ctx);
+    // Nothing was open, so nothing settles: reading the notes is not a state to
+    // be released from.
+    expect(settled.surface).toEqual(paneOpen.surface);
+  });
+
   // The invariant this whole pass exists for. Nothing about the state of the
   // exam — a selection, a surface, a note editor — may produce a selection in
   // an unarmed exam.

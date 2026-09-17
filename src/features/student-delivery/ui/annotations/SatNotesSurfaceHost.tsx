@@ -39,6 +39,11 @@ export interface SatNotesSurfaceHostProps {
   onRemoveNote: (annotationId: string) => void;
   /** Write about the question itself, for a student with nothing selected. */
   onAddQuestionNote: () => void;
+  /**
+   * A press outside the pane settles the note the student was in. The pane stays
+   * open; only the editor closes, so the next selection can raise the tools.
+   */
+  onSettleNoteEditor: () => void;
   /** Opens the column from the handle a previous hide left behind. */
   onOpenNotes: () => void;
   onFlush?: (() => void) | undefined;
@@ -92,6 +97,7 @@ export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
             onSaveQuestionNote={props.onSaveQuestionNote}
             onRemoveNote={props.onRemoveNote}
             onAddQuestionNote={props.onAddQuestionNote}
+            onSettleNoteEditor={props.onSettleNoteEditor}
             onFlush={props.onFlush}
             onClose={props.onClose}
           />
@@ -101,7 +107,7 @@ export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
       rail: railVisible ? <SatNotesRail onOpen={props.onOpenNotes} /> : null,
       passageHint: props.hintVisible ? <SatAnnotationPassageHint /> : null,
     }),
-    [placement, props.annotations, props.disabled, props.hasHighlights, props.hintVisible, props.onAddQuestionNote, props.onChangeNote, props.onClose, props.onFlush, props.onOpenNotes, props.onRemoveNote, props.onSaveQuestionNote, props.onSelectNote, props.questionKey, props.questionNote, props.state, railVisible],
+    [placement, props.annotations, props.disabled, props.hasHighlights, props.hintVisible, props.onAddQuestionNote, props.onChangeNote, props.onClose, props.onFlush, props.onOpenNotes, props.onRemoveNote, props.onSaveQuestionNote, props.onSelectNote, props.onSettleNoteEditor, props.questionKey, props.questionNote, props.state, railVisible],
   );
 
   return <SatNotesSurfaceContext.Provider value={surface}>{props.children}</SatNotesSurfaceContext.Provider>;

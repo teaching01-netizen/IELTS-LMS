@@ -44,6 +44,7 @@ function renderHost(
     notesAvailable?: boolean;
     onSaveQuestionNote?: (note: string) => void;
     onOpenNotes?: () => void;
+    onSettleNoteEditor?: () => void;
   } = {},
 ) {
   const media = mockWidths({ compact: overrides.compact ?? false, wide: overrides.wide ?? true });    const view = render(
@@ -61,6 +62,7 @@ function renderHost(
       onSaveQuestionNote={overrides.onSaveQuestionNote ?? vi.fn()}
       onRemoveNote={vi.fn()}
       onAddQuestionNote={vi.fn()}
+      onSettleNoteEditor={overrides.onSettleNoteEditor ?? vi.fn()}
       onOpenNotes={overrides.onOpenNotes ?? vi.fn()}
       onClose={vi.fn()}
     >
@@ -217,6 +219,7 @@ describe('SatNotesSurfaceHost', () => {
           onSaveQuestionNote={onSaveQuestionNote}
           onRemoveNote={vi.fn()}
           onAddQuestionNote={vi.fn()}
+          onSettleNoteEditor={vi.fn()}
           onOpenNotes={vi.fn()}
           onClose={vi.fn()}
         >

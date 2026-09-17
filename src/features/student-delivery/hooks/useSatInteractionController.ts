@@ -33,6 +33,11 @@ export interface SatInteractionController {
   openAnnotationNote: (annotationId: string, returnFocus?: SatInteractionFocusTarget) => void;
   /** Write about the question itself, with nothing selected. */
   openQuestionNote: (returnFocus?: SatInteractionFocusTarget) => void;
+  /**
+   * A press outside the notes pane settles the note the student was in: the pane
+   * stays open, the editor stops being open.
+   */
+  settleNoteEditor: () => void;
   toggleSurface: (
     surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes' | 'more-menu',
     returnFocus?: SatInteractionFocusTarget,
@@ -234,6 +239,10 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
       dispatchIntent(focus ? { type: 'MORE_MENU_OPEN_REQUESTED', returnFocus: focus } : { type: 'MORE_MENU_OPEN_REQUESTED' }),
     [dispatchIntent],
   );
+  const settleNoteEditor = useCallback(
+    () => dispatchIntent({ type: 'NOTE_EDITOR_SETTLE_REQUESTED' }),
+    [dispatchIntent],
+  );
   const toggleSurface = useCallback(
     (
       surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes' | 'more-menu',
@@ -312,6 +321,7 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
     openMoreMenu,
     openAnnotationNote,
     openQuestionNote,
+    settleNoteEditor,
     toggleSurface,
     closeSurface,
     toggleCalculator,

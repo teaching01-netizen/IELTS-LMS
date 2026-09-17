@@ -1,5 +1,6 @@
-/* eslint-disable jsx-a11y/no-noninteractive-element-interactions -- img onError is a resource lifecycle signal. */
-import { memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+/* eslint-disable jsx-a11y/no-noninteractive-element-interactions -- img onError is a resource lifecycle signal; the figure frame is a pannable surface rather than a control. */
+/* eslint-disable jsx-a11y/no-static-element-interactions, jsx-a11y/no-noninteractive-tabindex -- the frame becomes tabbable and labelled only while zoomed, so a magnified figure keeps a keyboard path (arrow keys) to the parts the window no longer shows. */
+import { memo, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import type {
@@ -10,6 +11,15 @@ import type {
 import { getAssessmentMediaAsset } from "../exam-authoring/api/assessmentMediaApi";
 import { satImagePresentation } from "../exam-authoring/api/satImagePresentation";
 import { documentFromStructuredContent } from "../exam-authoring/api/structuredContentPublic";
+import {
+  SAT_IMAGE_ENLARGE_FIT_VIEW,
+  SAT_IMAGE_ENLARGE_NO_GEOMETRY,
+  type SatImageEnlargeGeometry,
+  type SatImageEnlargeSlot,
+  type SatImageEnlargeView,
+  type SatImageGestureIntent,
+  type SatImageResolveGesture,
+} from "./api/structuredContentEnlarge";
 
 const CONTENT_CLASS_NAME =
   "structured-content-renderer outline-none text-[inherit] leading-7 [&_p]:my-2 [&_h1]:my-3 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-3 [&_h3]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:my-4 [&_blockquote]:border-l-4 [&_blockquote]:border-slate-300 [&_blockquote]:pl-4 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-slate-200 [&_td]:p-2.5 [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:p-2.5 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-slate-50 [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-[0.92em] [&_pre]:leading-6 [&_pre]:text-slate-900 [&_a]:underline [&_a]:underline-offset-2";
@@ -113,7 +123,12 @@ function applyMarks(node: RichTextNode, value: ReactNode): ReactNode {
 }
 
 export interface StaticStructuredImageEnlargeApi {
-  renderEnlarge: import("./api/structuredContentEnlarge").SatImageEnlargeSlot | undefined;
+  renderEnlarge: SatImageEnlargeSlot | undefined;
+  /**
+   * Optional: how a gesture on the frame becomes the next view. Absent means
+   * the figure is inert, which is also what a zoom-less consumer wants.
+   */
+  resolveGesture?: SatImageResolveGesture | undefined;
 }
 
 function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?: StaticStructuredImageEnlargeApi | undefined }) {
@@ -132,9 +147,19 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
   const presentation = satImagePresentation(node.attrs ?? {});
   const [source, setSource] = useState(() => initialImageSource(node));
   const [failed, setFailed] = useState(() => !assetId && !directSource(fallbackSource));
-  // Bluebook lightbox (Phase 10): transient per-image viewer state. No timer,
-  // answer, or persistence touch — pure presentation over the same source.
+  // Bluebook figure inspection (Phase 10): transient per-image viewing state.
+  // No timer, answer, or persistence touch — pure presentation over the same
+  // source. The view and the measured geometry live here, beside the image they
+  // describe, and are handed to the consumer's slot: this module reports what it
+  // measures and applies what it is given, while the consumer decides what a
+  // zoom or a pan means.
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [view, setView] = useState<SatImageEnlargeView>(SAT_IMAGE_ENLARGE_FIT_VIEW);
+  const [geometry, setGeometry] = useState<SatImageEnlargeGeometry>(SAT_IMAGE_ENLARGE_NO_GEOMETRY);
+  const [dragging, setDragging] = useState(false);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
   const enlargeId = `sat-enlarge-${assetId || "inline"}-${width ?? 0}x${height ?? 0}`;
 
   useEffect(() => {
@@ -164,10 +189,81 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
     };
   }, [assetId, fallbackSource]);
 
+  // A new source is a new figure: no magnification survives it.
+  useEffect(() => {
+    setView(SAT_IMAGE_ENLARGE_FIT_VIEW);
+  }, [source]);
+
+  // Layout boxes, not rects: the image carries the consumer's zoom transform,
+  // and a transformed rect would report the zoomed size back as its own.
+  const measure = useCallback(() => {
+    const frame = frameRef.current;
+    const image = imageRef.current;
+    if (!frame || !image) return;
+    const next: SatImageEnlargeGeometry = {
+      viewport: { width: frame.clientWidth, height: frame.clientHeight },
+      image: { width: image.offsetWidth, height: image.offsetHeight },
+      natural: { width: image.naturalWidth, height: image.naturalHeight },
+    };
+    setGeometry((current) =>
+      current.viewport.width === next.viewport.width &&
+      current.viewport.height === next.viewport.height &&
+      current.image.width === next.image.width &&
+      current.image.height === next.image.height &&
+      current.natural.width === next.natural.width &&
+      current.natural.height === next.natural.height
+        ? current
+        : next,
+    );
+  }, []);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    const image = imageRef.current;
+    if (!frame || !image) return;
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(frame);
+    observer.observe(image);
+    return () => observer.disconnect();
+  }, [measure, source, failed]);
+
   const aspectRatio = width && height ? `${width} / ${height}` : "16 / 9";
   const mediaStyle: CSSProperties = { aspectRatio };
 
   const enlargeLabel = alt || caption || "question visual";
+  const zoomed = view.zoom > 1;
+  const resolveGesture = enlarge?.resolveGesture;
+  // Panning is the consumer's if and only if it offers a gesture rule; the frame
+  // never invents one, so a zoom-less consumer keeps a plain, undraggable image.
+  const pannable = Boolean(resolveGesture) && zoomed;
+
+  // Only writes when the gesture actually changed the view: a release, or a drag
+  // that hit the boundary, must not re-render — and must not restart the zoom
+  // transition the student is watching.
+  const applyGesture = useCallback(
+    (intent: SatImageGestureIntent) => {
+      if (!resolveGesture) return;
+      setView((current) => {
+        const next = resolveGesture({ view: current, geometry, intent });
+        return next.zoom === current.zoom &&
+          next.offsetX === current.offsetX &&
+          next.offsetY === current.offsetY
+          ? current
+          : next;
+      });
+    },
+    [resolveGesture, geometry],
+  );
+
+  /** A window point, in pixels from the centre of the frame. */
+  const pointWithinFrame = (event: { clientX: number; clientY: number }, frame: HTMLElement) => {
+    const rect = frame.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left - rect.width / 2,
+      y: event.clientY - rect.top - rect.height / 2,
+    };
+  };
   return (
     <figure
       className="my-4 space-y-2"
@@ -176,24 +272,145 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
       data-size={size || undefined}
       style={presentation.figure}
     >
+      {/* The quiet utility strip belongs ABOVE the figure and inside the same
+          object it commands: no instructional text, no floating chrome, and the
+          controls never move while the student zooms. */}
+      {source && !failed && enlarge?.renderEnlarge
+        ? enlarge.renderEnlarge({
+            label: enlargeLabel,
+            enlargeId,
+            src: source,
+            open: viewerOpen,
+            view,
+            geometry,
+            onOpen: () => setViewerOpen(true),
+            onClose: () => setViewerOpen(false),
+            onViewChange: setView,
+            returnFocusSelector: `#${CSS.escape(enlargeId)}`,
+          })
+        : null}
       <div
-        className="mx-auto flex w-full max-w-full items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white"
+        ref={frameRef}
+        className={
+          "mx-auto flex w-full max-w-full items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white" +
+          (pannable
+            ? " cursor-grab touch-none select-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 active:cursor-grabbing"
+            : "")
+        }
         style={mediaStyle}
+        // Focusable only once there is something to move: an unzoomed figure is
+        // content, not a control, and must not add a tab stop to every question.
+        role={pannable ? "group" : undefined}
+        tabIndex={pannable ? 0 : undefined}
+        aria-label={pannable ? enlargeLabel : undefined}
+        // The keyboard path to the same capability the pointer has. Without it
+        // a keyboard-only student could zoom but never reach the parts of a
+        // magnified figure the window is no longer showing.
+        onKeyDown={(event) => {
+          if (!pannable) return;
+          const PAN_STEP = 40;
+          const deltas: Record<string, { dx: number; dy: number }> = {
+            ArrowLeft: { dx: PAN_STEP, dy: 0 },
+            ArrowRight: { dx: -PAN_STEP, dy: 0 },
+            ArrowUp: { dx: 0, dy: PAN_STEP },
+            ArrowDown: { dx: 0, dy: -PAN_STEP },
+          };
+          const delta = deltas[event.key];
+          if (!delta) return;
+          event.preventDefault();
+          applyGesture({ kind: "pan", ...delta });
+        }}
+        // The drag flag silences the zoom transition for the length of the
+        // gesture: a pan must stay 1:1 with the finger, and an eased transform
+        // would put the figure behind it.
+        data-sat-image-dragging={dragging ? "true" : undefined}
+        onPointerDown={(event) => {
+          if (!pannable) return;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          dragRef.current = { x: event.clientX, y: event.clientY };
+          setDragging(true);
+        }}
+        onPointerMove={(event) => {
+          const drag = dragRef.current;
+          if (!drag) return;
+          const dx = event.clientX - drag.x;
+          const dy = event.clientY - drag.y;
+          if (dx === 0 && dy === 0) return;
+          dragRef.current = { x: event.clientX, y: event.clientY };
+          applyGesture({ kind: "pan", dx, dy });
+        }}
+        onPointerUp={(event) => {
+          if (!dragRef.current) return;
+          dragRef.current = null;
+          setDragging(false);
+          // Release settles the view, and the now-restored transition carries it
+          // back if anything needs carrying.
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+          applyGesture({ kind: "pan-end" });
+        }}
+        onPointerCancel={() => {
+          if (!dragRef.current) return;
+          dragRef.current = null;
+          setDragging(false);
+          applyGesture({ kind: "pan-end" });
+        }}
+        // Double-click is the expert's zoom: one step, around the point the
+        // student is actually looking at. It never replaces the strip's
+        // controls, which stay the only way a beginner needs.
+        onDoubleClick={(event) => {
+          if (!resolveGesture) return;
+          event.preventDefault();
+          applyGesture({
+            kind: "zoom-at-point",
+            point: pointWithinFrame(event, event.currentTarget),
+            direction: 1,
+          });
+        }}
+        // While the figure owns the gesture, the browser's menu is not part of
+        // it: a right-click mid-inspection should not interrupt the graph.
+        onContextMenu={(event) => {
+          if (zoomed) event.preventDefault();
+        }}
       >
         {source && !failed ? (
           <img
+            ref={imageRef}
             src={source}
             alt={alt}
             {...(width ? { width } : {})}
             {...(height ? { height } : {})}
             decoding="async"
             loading="lazy"
+            draggable={false}
             onError={() => setFailed(true)}
+            onLoad={measure}
             // The visual itself carries the alignment: auto margins move it
             // inside a full-width box, which is what makes "Align left" mean
             // something even when no size was chosen.
-            style={presentation.content}
-            className="h-full max-h-80 max-w-full object-contain"
+            //
+            // Inspection centres instead: the zoom maths measures from the
+            // frame's centre, and an off-centre image would crop against a
+            // window it does not share a centre with — an empty band beside a
+            // magnified figure. Author alignment governs the resting 100% state.
+            style={
+              zoomed
+                ? {
+                    transform:
+                      "translate(" + view.offsetX + "px, " + view.offsetY + "px) scale(" + view.zoom + ")",
+                    transformOrigin: "center",
+                  }
+                : presentation.content
+            }
+            // `sat-figure-zoom` eases the transform so a zoom step reads as
+            // "of course it got bigger" rather than a snap; it is attached
+            // whenever the consumer offers gestures, so resetting to 100%
+            // animates home too. Reduced motion zeroes it upstream.
+            className={
+              "h-full max-h-80 max-w-full object-contain" +
+              (resolveGesture ? " sat-figure-zoom" : "")
+            }
           />
         ) : (
           <div
@@ -206,9 +423,6 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
         )}
       </div>
       {caption ? <figcaption className="text-center text-xs text-slate-500">{caption}</figcaption> : null}
-      {source && !failed && enlarge?.renderEnlarge ? (
-        <>{enlarge.renderEnlarge({ label: enlargeLabel, enlargeId, src: source, open: viewerOpen, onOpen: () => setViewerOpen(true), onClose: () => setViewerOpen(false), returnFocusSelector: `#${CSS.escape(enlargeId)}` })}</>
-      ) : null}
     </figure>
   );
 }

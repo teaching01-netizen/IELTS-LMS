@@ -44,6 +44,7 @@ function renderColumn(overrides: Partial<React.ComponentProps<typeof SatNotesCol
     onSaveQuestionNote: vi.fn(),
     onRemoveNote: vi.fn(),
     onAddQuestionNote: vi.fn(),
+    onSettleNoteEditor: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
   };
@@ -379,6 +380,28 @@ describe('SatNotesColumn', () => {
     fireEvent.change(field, { target: { value: 'Main idea is control' } });
     await waitFor(() => expect(props.onSaveQuestionNote).toHaveBeenCalledWith('Main idea is control'));
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+  });
+
+  it('settles the note the student was in when they press back in the passage', () => {
+    const target = note();
+    const { props } = renderColumn({ annotations: [target], state: notesState(target.id) });
+    // A press outside the pane leaves the note: the field's own blur commits the
+    // words and the pane stays exactly where it is, but the note stops being
+    // *open* — which is the whole difference between writing a note and being
+    // stuck in one, and what lets the next selection raise the tools.
+    fireEvent.pointerDown(document.body);
+    expect(props.onSettleNoteEditor).toHaveBeenCalledTimes(1);
+  });
+
+  it('never settles a note on a press inside the pane', () => {
+    const target = note();
+    const { props } = renderColumn({ annotations: [target], state: notesState(target.id) });
+    // Moving between notes, or reaching for the question's own field, is not
+    // leaving: only a press that lands outside the column is the student looking
+    // at something else.
+    fireEvent.pointerDown(fieldIn(cardFor(target.id)));
+    fireEvent.pointerDown(document.querySelector('[data-sat-notes-column]')!);
+    expect(props.onSettleNoteEditor).not.toHaveBeenCalled();
   });
 
   it('selects a note so the passage can show its source', () => {

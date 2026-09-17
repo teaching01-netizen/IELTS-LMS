@@ -289,13 +289,25 @@ export const SAT_COPY = {
     veilBody: "Your timer is still running.",
     returnToTest: "Return to Test",
   },
+  // Figure inspection (Bluebook two-layer model). No "click to enlarge" any
+  // more: the strip above the figure *is* the affordance, and Full screen is the
+  // escalation of the view the student already has, not the only way in.
   imageViewer: {
     title: "Image viewer",
-    close: "Close image viewer",
+    // The strip's own spoken name, before the figure it belongs to: several
+    // figures in one question must not become indistinguishable in speech.
+    controls: "Figure controls",
+    // Names the percentage readout, which is otherwise a bare number.
+    zoomLevel: "Zoom level",
     zoomIn: "Zoom in",
     zoomOut: "Zoom out",
     resetZoom: "Reset zoom",
-    enlarge: "Click to enlarge",
+    // The drawn word stays short; the spoken name carries the verb, because an
+    // icon-plus-word control should still say what pressing it will do. The
+    // visible text is a substring of the spoken name, so the two never disagree.
+    fullScreen: "Full screen",
+    enterFullScreen: "Enter full screen",
+    exitFullScreen: "Exit full screen",
   },
   timerWarning: {
     // Wave C R-11: Title Case alert-title fragment, no period
@@ -372,6 +384,17 @@ export function satNotesToolLabel(input: { count: number; hasHighlights: boolean
  */
 export function satHighlightedAnnouncement(colorLabel: string): string {
   return "Text highlighted " + colorLabel + ".";
+}
+
+/**
+ * The strip's spoken name, e.g. `Figure controls: Graph of f`.
+ *
+ * The label names the *thing being commanded* rather than repeating the control
+ * names: a student tabbing between two figures needs to hear which graph they
+ * just zoomed, and "Zoom in" alone would be identical for both.
+ */
+export function satImageControlsLabel(label: string): string {
+  return SAT_COPY.imageViewer.controls + ": " + label;
 }
 
 export function satBackToQuestionLabel(questionNumber: number): string {

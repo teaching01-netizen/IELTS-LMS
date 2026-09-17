@@ -1301,6 +1301,9 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-press-overlay: rgba(0, 0, 0, 0.075);
   --sat-control-target: 44px;
   --sat-motion-state: 130ms;
+  /* Figure inspection: long enough to read as the graph growing, short enough
+   * that a student stepping 100% → 300% is never waiting on the animation. */
+  --sat-motion-figure: 200ms;
   --sat-type-body: 1.0625rem;
   --sat-type-control-primary: 0.9375rem;
   --sat-type-control-secondary: 0.875rem;
@@ -1713,6 +1716,52 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 .sat-pressable:not(:disabled):active {
   box-shadow: inset 0 0 0 999px var(--sat-press-overlay);
   transition-duration: 40ms;
+}
+
+/* Figure inspection (Bluebook two-layer model).
+ *
+ * The transform eases so a zoom step reads as "of course it got bigger" instead
+ * of a snap, and so Reset travels home rather than teleporting. A drag silences
+ * it (the frame carries data-sat-image-dragging while a pointer is down), because
+ * a pan has to stay 1:1 with the finger — an eased transform would lag behind it.
+ *
+ * Both the graph growing out of its own position and the scrim fading in carry
+ * the same duration, so the full-screen view feels like one object expanding.
+ * The shell's existing Reduce Motion guard zeroes animations and transitions. */
+.sat-figure-zoom {
+  transition: transform var(--sat-motion-figure) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-sat-image-dragging="true"] .sat-figure-zoom {
+  transition: none;
+}
+
+.sat-figure-expand {
+  animation: sat-figure-expand var(--sat-motion-figure) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes sat-figure-expand {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.sat-figure-scrim {
+  animation: sat-figure-scrim-in var(--sat-motion-figure) ease-out;
+}
+
+@keyframes sat-figure-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .sat-tool-pressable {

@@ -1,4 +1,5 @@
 import { satInteractionCan } from './satInteractionGuards';
+import { isSatNoteEditorSurface } from './satInteractionState';
 import type { SatTextAnchor } from './satResponses';
 import type {
   SatInteractionContext,
@@ -32,6 +33,7 @@ export type SatInteractionIntent =
   | { type: 'TEXT_SELECTION_CLEARED' }
   | { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' }
   | { type: 'ANNOTATION_EDITOR_CLOSED' }
+  | { type: 'NOTE_EDITOR_SETTLE_REQUESTED' }
   | { type: 'MODULE_SCOPE_CHANGED'; moduleKey: string; questionId: string }
   | { type: 'TOOL_POLICY_CHANGED' }
   | { type: 'TERMINAL_TRANSITION' };
@@ -198,6 +200,11 @@ export function resolveSatInteractionIntent(
       return { type: 'TEXT_SELECTION_CLEARED' };
     case 'ANNOTATION_EDITOR_CLOSED':
       return { type: 'ANNOTATION_NOTE_EDITOR_CLOSED' };
+    case 'NOTE_EDITOR_SETTLE_REQUESTED':
+      // Nothing is open: the press was just a press, and the pane keeps whatever
+      // it was showing. Only a live note editor has something to settle.
+      if (!isSatNoteEditorSurface(state.surface)) return null;
+      return { type: 'NOTE_EDITOR_SETTLED' };
     case 'MODULE_SCOPE_CHANGED':
       return {
         type: 'MODULE_SCOPE_CHANGED',

@@ -400,6 +400,31 @@ describe('SAT shell annotation flow (armed mode)', () => {
     expect(document.querySelector('[data-sat-note-excerpt]')!.textContent).toBe('Several');
   });
 
+  it('leaves the note when the student presses back in the passage, so the next selection still raises the tools', async () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
+    selectStimulusText(container, 'Several');
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+    const field = await screen.findByRole('textbox', { name: 'Note on \u201CSeveral\u201D' });
+    fireEvent.change(field, { target: { value: 'First thought' } });
+
+    // The press that starts the next selection is also the press that leaves the
+    // note. It is read before the selection it begins, so what follows is a
+    // selection rather than a second editor competing with the one already open.
+    fireEvent.pointerDown(container.querySelector('[data-sat-annotation-region="stimulus"]')!);
+    selectStimulusText(container, 'researchers');
+
+    // Still able to highlight with the notes in front of them: the pane did not
+    // close, and the note is still there to read.
+    const toolbar = await screen.findByRole('toolbar', { name: 'Selected text actions' });
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Highlight Yellow' }));
+    expect(container.querySelectorAll('[data-sat-highlight="true"]').length).toBeGreaterThan(1);
+    const column = screen.getByRole('complementary', { name: 'Notes' });
+    expect(within(column).getByRole('textbox', { name: 'Note on \u201CSeveral\u201D' })).toHaveValue(
+      'First thought',
+    );
+  });
+
   it('clears the tools on Escape without touching the mark or the mode', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     highlight(container, 'Several', 'Yellow');
