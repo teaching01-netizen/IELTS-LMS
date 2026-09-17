@@ -185,13 +185,41 @@ describe("SatImageViewer", () => {
     expect(screen.getByTestId("view")).toHaveTextContent("1:0:0");
   });
 
-  it("renders a protective scrim covering the viewport to prevent background interaction", async () => {
+  it("presents an exclusive full-viewport modal dialog that fully occludes the background", async () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByRole("button", { name: "Full screen" }));
-    const scrim = document.querySelector("[data-sat-image-scrim]");
-    expect(scrim).toBeInTheDocument();
-    expect(scrim).toHaveClass("sat-figure-scrim");
+    const dialog = screen.getByRole("dialog", { name: "Image viewer" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveClass("fixed", "inset-0", "h-[100dvh]", "w-[100dvw]");
+    expect(dialog).toHaveClass("z-[89]");
+    expect(document.querySelector("[data-sat-image-scrim]")).toBeNull();
+  });
+
+  it("traps keyboard Tab focus within the modal dialog", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    const dialog = screen.getByRole("dialog", { name: "Image viewer" });
+
+    const focusables = dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [tabindex]:not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([disabled])'
+    );
+    expect(focusables.length).toBeGreaterThan(1);
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+
+    // Focus last element and press Tab -> should wrap to first
+    last.focus();
+    expect(last).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(first).toHaveFocus();
+
+    // Focus first element and press Shift+Tab -> should wrap to last
+    first.focus();
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(last).toHaveFocus();
   });
 
   it("handles arrow key panning only when zoomed", async () => {

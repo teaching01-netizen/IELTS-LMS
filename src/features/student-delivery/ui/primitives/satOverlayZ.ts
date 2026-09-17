@@ -64,9 +64,31 @@ export const SAT_OVERLAY_Z = {
 
 export type SatOverlayLayer = keyof typeof SAT_OVERLAY_Z;
 
+export const SAT_OVERLAY_Z_CLASS = {
+  savingHint: "z-[55]",
+  saveStatusDock: "z-[65]",
+  toolSheet: "z-[70]",
+  saveAlert: "z-[75]",
+  notesBackdrop: "z-[78]",
+  directionsBackdrop: "z-[79]",
+  navigator: "z-[80]",
+  readingBackdrop: "z-[83]",
+  moreMenu: "z-[84]",
+  routeAlert: "z-[85]",
+  breakConfirm: "z-[86]",
+  helpModal: "z-[88]",
+  shortcutsModal: "z-[88]",
+  imageViewer: "z-[89]",
+  leaseNotice: "z-[90]",
+  breakVeil: "z-[94]",
+  submissionVeil: "z-[95]",
+  timerWarning: "z-[96]",
+  blockingVeil: "z-[100]",
+} as const satisfies Record<SatOverlayLayer, string>;
+
 /** Tailwind arbitrary z-index class for a contract layer. */
 export function satOverlayZClass(layer: SatOverlayLayer): string {
-  return "z-[" + SAT_OVERLAY_Z[layer] + "]";
+  return SAT_OVERLAY_Z_CLASS[layer];
 }
 
 /** True when no two modal layers claim `aria-modal` at once. */

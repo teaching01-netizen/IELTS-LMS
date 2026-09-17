@@ -31,6 +31,7 @@ describe("satOverlayZ contract", () => {
     expect(SAT_OVERLAY_Z.helpModal).toBe(SAT_OVERLAY_Z.shortcutsModal);
     expect(satOverlayZClass("moreMenu")).toBe("z-[84]");
     expect(satOverlayZClass("helpModal")).toBe("z-[88]");
+    expect(satOverlayZClass("imageViewer")).toBe("z-[89]");
     expect(satOverlayZClass("breakVeil")).toBe("z-[94]");
     expect(satOverlayZClass("timerWarning")).toBe("z-[96]");
   });

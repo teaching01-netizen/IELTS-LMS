@@ -13,24 +13,18 @@ import { useSatImageWindowGeometry, useSatImageZoom } from "../../hooks/useSatIm
 import { SatImageStrip } from "./SatImageStrip";
 
 /**
- * The high-magnification presentation of a figure (Bluebook shot 4).
+ * The high-magnification inspection workspace for a figure (Bluebook shot 4).
  *
- * This is not a separate viewer application: it is the *same* view — same zoom,
- * same focal point, same strip order — given a bigger window, with the rest of
- * the exam suppressed behind a light scrim. Because the view lives with the
+ * This is not a floating card or separate viewer application: it is the *same* view —
+ * same zoom, same focal point, same strip order — expanded into an opaque, full-viewport
+ * workspace that cleanly occludes the exam behind it. Because the view lives with the
  * image rather than in this layer, entering and leaving full screen never costs
  * the student their place in the figure.
  *
- * It should feel like the figure expanding, not like a second thing opening, so
- * the card grows from the spot the figure occupies on screen (the origin is
- * measured by the control that asked for this) and the scrim fades in rather
- * than appearing. Reduce Motion zeroes both, through the shell's existing guard.
- *
- * Deliberately non-modal (`aria-modal="false"`, no focus trap, no
- * backdrop-click-to-close): the exam behind stays reachable, a stray press can
- * never dismiss what the student is studying, and the scrim is light enough that
- * the question is still legible as "underneath this". Escape and the strip's own
- * exit control are the two ways out, both instant and both obvious.
+ * Immersive and modal (`role="dialog"`, `aria-modal="true"`, focus trap):
+ * the exam behind is completely occluded and protected from background interactions.
+ * Escape and the strip's exit control ("Exit full screen") return focus smoothly
+ * back to the opener.
  *
  * Layer imageViewer (89): above Help/Shortcuts (88), below the break veil.
  */
@@ -158,57 +152,71 @@ export function SatImageViewer(props: SatImageViewerProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- zoomAtPoint is stable; re-subscribing on every render would only churn.
   }, [props.open, controller.zoomAtPoint]);
 
+  // Focus trap for modal dialog
+  const handleDialogKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Tab") return;
+    const container = cardRef.current;
+    if (!container) return;
+
+    const focusableElements = container.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [tabindex]:not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [role="button"]:not([disabled])'
+    );
+    if (focusableElements.length === 0) return;
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (event.shiftKey) {
+      if (document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement?.focus();
+      }
+    } else {
+      if (document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement?.focus();
+      }
+    }
+  }, []);
+
   if (!props.open || typeof document === "undefined") return null;
   const zoomed = controller.zoom > 1;
 
   const viewer = (
     <div
-      className={
-        "sat-ui fixed inset-0 flex items-center justify-center p-4 sm:p-8 " +
-        satOverlayZClass("imageViewer")
-      }
+      ref={cardRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
       data-sat-contrast={contrast}
       data-testid="sat-image-viewer"
+      onKeyDown={handleDialogKeyDown}
+      style={expandOrigin ? { transformOrigin: expandOrigin } : undefined}
+      className={
+        "sat-ui fixed inset-0 flex h-[100dvh] w-[100dvw] flex-col overflow-hidden bg-[var(--sat-surface,#ffffff)] text-[var(--sat-text)] " +
+        satOverlayZClass("imageViewer") +
+        (expandOrigin ? " sat-figure-expand" : "")
+      }
     >
-      {/* Suppress, don't dramatize: the question stays recognisably underneath,
-          dimmed just enough that attention stops going to it. No blur — an exam
-          behind frosted glass is noise, not depth. Pointer events are absorbed
-          so the background exam cannot be clicked through the viewer. */}
-      <div
-        aria-hidden="true"
-        data-sat-image-scrim=""
-        className="sat-figure-scrim absolute inset-0 bg-black/40"
+      <h2 id={titleId} className="sr-only">
+        {SAT_COPY.imageViewer.title}
+      </h2>
+      <SatImageStrip
+        label={props.alt}
+        toolbarRef={toolbarRef}
+        zoom={controller.zoom}
+        canZoomIn={controller.canZoomIn}
+        canZoomOut={controller.canZoomOut}
+        dirty={controller.dirty}
+        fullScreen
+        onZoomIn={controller.zoomIn}
+        onZoomOut={controller.zoomOut}
+        onReset={controller.reset}
+        onToggleFullScreen={() => {
+          props.onClose();
+          focusBack();
+        }}
       />
-      <div
-        ref={cardRef}
-        role="dialog"
-        aria-modal="false"
-        aria-labelledby={titleId}
-        style={expandOrigin ? { transformOrigin: expandOrigin } : undefined}
-        className={
-          "relative flex max-h-[calc(100dvh-32px)] sm:max-h-[calc(100dvh-64px)] w-full max-w-[880px] flex-col overflow-hidden rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] text-[var(--sat-text)] shadow-[var(--sat-shadow-modal)]" +
-          (expandOrigin ? " sat-figure-expand" : "")
-        }
-      >
-        <h2 id={titleId} className="sr-only">
-          {SAT_COPY.imageViewer.title}
-        </h2>
-        <SatImageStrip
-          label={props.alt}
-          toolbarRef={toolbarRef}
-          zoom={controller.zoom}
-          canZoomIn={controller.canZoomIn}
-          canZoomOut={controller.canZoomOut}
-          dirty={controller.dirty}
-          fullScreen
-          onZoomIn={controller.zoomIn}
-          onZoomOut={controller.zoomOut}
-          onReset={controller.reset}
-          onToggleFullScreen={() => {
-            props.onClose();
-            focusBack();
-          }}
-        />
         <div
           ref={viewportRef}
           data-sat-image-viewport=""
@@ -345,7 +353,6 @@ export function SatImageViewer(props: SatImageViewerProps) {
             }
           />
         </div>
-      </div>
     </div>
   );
 

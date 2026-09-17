@@ -125,7 +125,7 @@ describe("SatQuestionImageEnlarge", () => {
     // 300,200 → 500,300), so expanding reads as the same object getting larger.
     expect(dialog).toHaveClass("sat-figure-expand");
     expect(dialog).toHaveStyle({ transformOrigin: "500px 300px" });
-    expect(document.querySelector(".sat-figure-scrim")).toBeInTheDocument();
+    expect(dialog).toHaveAttribute("aria-modal", "true");
     spy.mockRestore();
   });
 
