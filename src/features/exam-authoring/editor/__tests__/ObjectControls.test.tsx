@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Editor } from "@tiptap/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectControls } from "../ObjectControls";
 import { composerBaseExtensions } from "../RichQuestionComposer";
 import type { EditorFeedbackInput } from "../editorFeedbackCopy";
@@ -189,6 +189,84 @@ describe("equation controls", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete equation" }));
     expect(JSON.stringify(editor.getJSON())).not.toContain("x^2=16");
     expect(onFeedback).toHaveBeenCalledWith({ message: "Equation deleted", undoable: true });
+  });
+});
+
+/**
+ * Where the surface's popup goes.
+ *
+ * Tiptap hides a bubble menu as soon as focus leaves the element the surface was
+ * appended to (`BubbleMenuPlugin.blurHandler`), and opening a menu moves focus
+ * into it. A popup portaled to the document body therefore hides the surface
+ * that owns it — which takes the button the popup is anchored to out of the
+ * document, and the popup then lands where a zero-sized anchor puts it: the
+ * top-left of the screen. Keeping the popup in the surface's own container is
+ * what stops that, so this asserts the container the browser's guard looks at.
+ *
+ * jsdom has no `matchMedia` and SatMenu falls back to a static menu without it,
+ * so the stub keeps this on the branch a browser runs.
+ */
+describe("popup placement in a browser", () => {
+  const originalMatchMedia = window.matchMedia;
+
+  beforeEach(() => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      })),
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "matchMedia", { configurable: true, value: originalMatchMedia });
+  });
+
+  it("opens the image options inside the container the surface is appended to", async () => {
+    const { editor } = renderImageSurface();
+    await act(async () => {
+      fireEvent.pointerDown(screen.getByRole("button", { name: "Image options" }), { button: 0 });
+    });
+
+    const host = editor.view.dom.parentElement;
+    expect(host).not.toBeNull();
+    expect(host?.contains(screen.getByRole("menu", { name: "Image options" }))).toBe(true);
+  });
+
+  it("opens the equation options inside the container the surface is appended to", async () => {
+    const editor = make({
+      type: "doc",
+      content: [{ type: "blockMath", attrs: { latex: "x^2=16" } }],
+    });
+    act(() => {
+      editor.commands.setNodeSelection(nodePosition(editor, "blockMath"));
+    });
+    render(
+      <ObjectControls
+        editor={editor}
+        onReplace={vi.fn()}
+        onAltText={vi.fn()}
+        onDownload={vi.fn()}
+        onEditEquation={vi.fn()}
+        showHint={false}
+        onHintSeen={vi.fn()}
+        onFeedback={vi.fn()}
+      />
+    );
+    await act(async () => {
+      fireEvent.pointerDown(screen.getByRole("button", { name: "Equation options" }), { button: 0 });
+    });
+
+    const host = editor.view.dom.parentElement;
+    expect(host).not.toBeNull();
+    expect(host?.contains(screen.getByRole("menu", { name: "Equation options" }))).toBe(true);
   });
 });
 

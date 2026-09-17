@@ -9,6 +9,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { SatMenu, type SatMenuItem } from "@/src/products/sat/ui/Menu";
+import { bubbleAppendTarget } from "./anchoredSurfaces";
 import { EditorControl } from "./EditorControl";
 import { resolveObjectBubble, type ComposerContext } from "./composerContext";
 import type { EditorFeedbackPublisher } from "./editorFeedbackCopy";
@@ -185,7 +186,19 @@ function ImageControls({
         Alt text
       </EditorControl>
       <div className="sat-spine__menu">
-        <SatMenu label="Image options" compact icon={MoreHorizontal} align="end" width={196} items={items} />
+        <SatMenu
+          label="Image options"
+          compact
+          icon={MoreHorizontal}
+          align="end"
+          width={196}
+          items={items}
+          // The popup belongs to this surface, so it lives in the surface's own
+          // container rather than at the end of the document: the editor hides
+          // the surface when focus leaves that container, and a hidden surface
+          // takes the button this popup is anchored to with it.
+          portalContainer={bubbleAppendTarget(editor)}
+        />
       </div>
       {showHint ? (
         <span className="sat-rich-editor__bubble-hint" data-editor-hint="image-object">
@@ -245,6 +258,7 @@ function EquationControls({
           icon={MoreHorizontal}
           align="end"
           width={184}
+          portalContainer={bubbleAppendTarget(editor)}
           items={[
             {
               id: "delete",

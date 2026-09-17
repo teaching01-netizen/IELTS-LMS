@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatMenu, type SatMenuItem } from '../Menu';
 
 class ResizeObserverStub {
@@ -120,5 +120,68 @@ describe('SatMenu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
     expect(screen.getByRole('menuitem', { name: 'First' })).toBeInTheDocument();
     expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Where the popup goes.
+ *
+ * The default — `document.body` — is right for a trigger in stable chrome. A menu
+ * owned by a *floating* surface has to stay inside that surface's container: the
+ * editor hides the surface when focus leaves the element it was appended to, so a
+ * body-portaled popup hides its own surface, which takes the button the popup is
+ * anchored to out of the document — and the popup then lands where a zero-sized
+ * anchor puts it, at the top-left of the screen.
+ *
+ * jsdom has no `matchMedia`, and SatMenu deliberately falls back to a static menu
+ * without it; the stub keeps this test on the branch a browser runs.
+ */
+describe('popup placement', () => {
+  const originalMatchMedia = window.matchMedia;
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      })),
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia });
+  });
+
+  it('renders inside the container it is given', () => {
+    const container = document.createElement('div');
+    container.setAttribute('data-surface-host', '');
+    document.body.append(container);
+
+    render(
+      <SatMenu label="Image options" compact items={buildItems(vi.fn())} portalContainer={container} />,
+    );
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Image options' }), { button: 0 });
+
+    const hosted = screen.getByRole('menu', { name: 'Image options' });
+    expect(container.contains(hosted)).toBe(true);
+    // Radix wraps the popup in a positioning element, which is the container's
+    // child — not the body's.
+    expect(hosted.parentElement?.parentElement).toBe(container);
+  });
+
+  it('renders in the document body when no container is given', () => {
+    renderMenu(vi.fn());
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Session actions' }), { button: 0 });
+
+    const portalled = screen.getByRole('menu', { name: 'Session actions' });
+    expect(document.body.contains(portalled)).toBe(true);
+    expect(portalled.parentElement?.parentElement).toBe(document.body);
   });
 });

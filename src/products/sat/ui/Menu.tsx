@@ -54,6 +54,19 @@ type SatMenuProps = {
    * proportions; the accessible name still comes from `label`.
    */
   triggerClassName?: string | undefined;
+  /**
+   * Where the popup is portaled. Defaults to `document.body`, which is right for
+   * a trigger that lives in stable chrome.
+   *
+   * A menu opened from a *floating* surface must share that surface's container
+   * instead. Tiptap hides a bubble menu as soon as focus leaves the element the
+   * surface was appended to, and Radix moves focus into the popup when it opens
+   * — so a body-portaled menu hides its own surface, which removes the very
+   * button Radix anchors the popup against, and the popup lands wherever a
+   * zero-sized anchor puts it: the top-left of the screen. Sharing the container
+   * keeps the surface up, the trigger attached, and the popup under the trigger.
+   */
+  portalContainer?: HTMLElement | null;
 };
 
 const MENU_ELEVATION =
@@ -211,7 +224,7 @@ function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align =
 
 export function SatMenu(props: SatMenuProps) {
   if (!supportsNativeMenu()) return <StaticMenu {...props} />;
-  const { label, items, triggerContent, icon: Icon, compact, align = 'start', width, triggerClassName } = props;
+  const { label, items, triggerContent, icon: Icon, compact, align = 'start', width, triggerClassName, portalContainer } = props;
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
@@ -225,7 +238,7 @@ export function SatMenu(props: SatMenuProps) {
           {!compact ? <ChevronDown size={14} className="sat-menu-trigger-chevron shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)] group-data-[state=open]:rotate-180" aria-hidden="true" /> : null}
         </button>
       </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
+      <DropdownMenu.Portal container={portalContainer ?? null}>
         <DropdownMenu.Content
           align={align}
           sideOffset={6}
