@@ -89,7 +89,12 @@ export {
   type PromptFreeSaveDeps,
   type PromptFreeSaveInput,
 } from "./fieldPatch";
-export { requestCoeditToken, requestWorkspaceCoeditToken } from "./tokenApi";
+export {
+  CoeditNoEditableDraftError,
+  CoeditUnavailableError,
+  requestCoeditToken,
+  requestWorkspaceCoeditToken,
+} from "./tokenApi";
 export {
   SAT_WORKSPACE_COMMANDS,
   createSatWorkspaceCommand,

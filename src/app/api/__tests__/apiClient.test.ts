@@ -42,6 +42,39 @@ describe('apiClient', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  it('does not warn for a status the caller declared expected, and still throws it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Draft version not found.' },
+        }),
+        { status: 404, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const failure = await apiClient
+      .get('/v1/assessment-authoring/exams/exam-1/shell', { retries: 0, expectedStatuses: [404] })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('still warns for a 404 the caller did not declare expected', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = vi.fn(async () => jsonError(404, 'Not found'));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await apiClient.get('/v1/example', { retries: 0 }).catch(() => undefined);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects with ApiError carrying code, details, and request id', async () => {
     const fetchMock = vi.fn(async () => new Response(
       JSON.stringify({

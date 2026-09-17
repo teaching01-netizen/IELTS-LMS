@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatNotesColumn } from './SatNotesColumn';
 import { createSatTextAnnotation } from '../../domain/satResponses';
@@ -43,7 +43,7 @@ function renderColumn(overrides: Partial<React.ComponentProps<typeof SatNotesCol
     onChangeNote: vi.fn(),
     onSaveQuestionNote: vi.fn(),
     onRemoveNote: vi.fn(),
-    onWriteAboutQuestion: vi.fn(),
+    onAddQuestionNote: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
   };
@@ -86,7 +86,10 @@ describe('SatNotesColumn', () => {
 
   it('coaches an empty column with one line instead of an idle editor', () => {
     const { container } = renderColumn();
-    expect(container.querySelector('[data-sat-notes-empty]')).toHaveTextContent('Select text to add a note');
+    // Two lines: what this column is, then the one gesture that fills it.
+    const empty = container.querySelector('[data-sat-notes-empty]')!;
+    expect(empty).toHaveTextContent('No notes yet');
+    expect(empty).toHaveTextContent('Select text in the passage, then choose Add note.');
     // Guidance and editors never share the column: an open field beside
     // "nothing here yet" is the contradiction this replaced.
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
@@ -103,17 +106,24 @@ describe('SatNotesColumn', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 
-  it('leaves a way to write about the question even with no selection', () => {
+  it('leaves a quiet way to write about the question even with no selection', () => {
     // The capability the redesign nearly lost: with nothing selected and nothing
     // written, the column still offers the one action that is always available.
-    const { props } = renderColumn();
-    fireEvent.click(screen.getByRole('button', { name: 'Write a note about this question' }));
-    expect(props.onWriteAboutQuestion).toHaveBeenCalledTimes(1);
+    const first = renderColumn();
+    fireEvent.click(screen.getByRole('button', { name: 'Add question note' }));
+    expect(first.props.onAddQuestionNote).toHaveBeenCalledTimes(1);
+    first.unmount();
 
-    // And it stays reachable once the list has content, as a quiet row in it.
-    renderColumn({ annotations: [note()] });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Write a note about this question' })[0]!);
-    expect(props.onWriteAboutQuestion).toHaveBeenCalledTimes(2);
+    // Demoted, not removed: with notes about the passage in the list this is one
+    // text button under them, so selected-text notes stay the pattern instead of
+    // the two competing as equal primary actions.
+    const withList = renderColumn({ annotations: [note()] });
+    const button = screen.getByRole('button', { name: 'Add question note' });
+    expect(button).toHaveAttribute('data-sat-notes-add-question-note', 'true');
+    // Asked for from where the existing notes are, never instead of them.
+    expect(button.closest('ul')).toBeNull();
+    fireEvent.click(button);
+    expect(withList.props.onAddQuestionNote).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the count out of the way until the limit is in range', () => {
@@ -200,7 +210,7 @@ describe('SatNotesColumn', () => {
     const { container } = renderColumn({ hasHighlights: true });
     // The empty state still teaches the note gesture first, then answers the
     // question a highlighted-but-unwritten student actually has.
-    expect(container.querySelector('[data-sat-notes-empty]')).toHaveTextContent('Select text to add a note');
+    expect(container.querySelector('[data-sat-notes-empty]')).toHaveTextContent('Select text in the passage');
     expect(container.querySelector('[data-sat-notes-empty-highlights]')).toHaveTextContent(
       'Your highlights are marked in the passage',
     );
@@ -281,5 +291,83 @@ describe('SatNotesColumn', () => {
     // different direction rather than a generic "dismiss".
     renderColumn({ placement: 'row' });
     expect(screen.getByRole('button', { name: 'Hide notes' }).querySelector('.lucide-chevron-down')).not.toBeNull();
+  });
+
+  it('reads as content and writes as one strong editor, never as a half-open form', () => {
+    const target = note();
+    const reading = renderColumn({ annotations: [target] });
+    const card = reading.container.querySelector(`[data-sat-note-card="${target.id}"]`)!;
+    // Reading: a plain button. The pane is the container, so a card that is not
+    // being edited adds no second box and no field.
+    expect(card.tagName).toBe('BUTTON');
+    expect(card.className).not.toContain('ring-1');
+    expect(card.className).not.toContain('border-[var(--sat-accent)]');
+    expect(card).toHaveTextContent('“Several”');
+    expect(card).toHaveTextContent('Check the evidence');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    reading.unmount();
+
+    // Writing: the same quote stays on top, and the card becomes the one layered
+    // surface in the pane with the field inside it.
+    const writing = renderColumn({ annotations: [target], state: notesState(target.id) });
+    const editor = writing.container.querySelector(`[data-sat-note-card="${target.id}"]`)!;
+    expect(editor.tagName).toBe('DIV');
+    expect(editor.className).toContain('ring-1');
+    expect(editor).toHaveTextContent('“Several”');
+    expect(within(editor).getByRole('textbox', { name: 'Notes' })).toBeInTheDocument();
+  });
+
+  it('promises autosave once, then retires the promise when it comes true', async () => {
+    const target = note({ note: undefined });
+    const { props } = renderColumn({ annotations: [target], state: notesState(target.id) });
+    const hint = document.querySelector('[data-sat-note-autosave-hint]')!;
+    expect(hint).toHaveTextContent('Notes save automatically.');
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Notes' }), { target: { value: 'One thought' } });
+    await waitFor(() => expect(props.onChangeNote).toHaveBeenCalledWith('One thought'));
+    // A sentence that keeps saying the same thing is a sentence the student stops
+    // reading: the quiet "Saved" takes its place, and then that goes too.
+    await waitFor(() => expect(document.querySelector('[data-sat-note-autosave-hint]')).toBeNull());
+  });
+
+  it('opens one editor at a time, whichever card kind it belongs to', () => {
+    const target = note();
+    renderColumn({ annotations: [target], questionNote: 'The theme is control', state: notesState(target.id) });
+    expect(screen.getAllByRole('textbox')).toHaveLength(1);
+    // The other note reads as a card beside the open one rather than as a second
+    // field: "which one am I editing?" has one answer at any moment.
+    expect(document.querySelector('[data-sat-note-card="question"]')).toHaveTextContent('The theme is control');
+  });
+
+  it('marks the card whose mark is active in the passage', () => {
+    const first = note();
+    const second = note({ id: 'a2' });
+    renderColumn({ annotations: [first, second], state: notesState(null, second.id) });
+    // The other half of the highlight <-> note link: the card that belongs to the
+    // mark the student is on is the one that looks current, by an accent on its
+    // leading edge rather than by another border.
+    const active = document.querySelector('[data-sat-note-card="a2"]')!;
+    const idle = document.querySelector(`[data-sat-note-card="${first.id}"]`)!;
+    expect(active.className).toContain('border-l-[var(--sat-accent)]');
+    expect(active).toHaveAttribute('aria-current', 'true');
+    expect(idle.className).toContain('border-l-transparent');
+    expect(idle).not.toHaveAttribute('aria-current');
+  });
+
+  it('opens the question’s note from its card, like any other note', () => {
+    const { props } = renderColumn({ questionNote: 'The theme is control' });
+    fireEvent.click(document.querySelector('[data-sat-note-card="question"]')!);
+    expect(props.onAddQuestionNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('puts the count under the title instead of on the dismissal’s line', () => {
+    renderColumn({ annotations: [note(), note({ id: 'a2' })] });
+    const heading = screen.getByRole('heading', { name: 'Notes' });
+    const count = document.querySelector('[data-sat-notes-count]')!;
+    // Title primary, count secondary metadata, dismissal last: three things on
+    // one row made "1 note" look like something to press.
+    expect(count.tagName).toBe('P');
+    expect(count.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(heading.parentElement).not.toBe(screen.getByRole('button', { name: 'Hide notes' }).parentElement);
   });
 });

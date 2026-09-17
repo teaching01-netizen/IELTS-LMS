@@ -1,10 +1,28 @@
+import type { ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { examKeys } from '../../../features/exam-authoring/api/examQueries';
 import { SatRoot } from '../SatRoot';
 
 const authMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../features/auth/authSession', () => ({ useAuthSession: authMock }));
+
+/**
+ * Exam pages mount the exam-level collaboration boundary, whose room waits for
+ * the exam's draft pointer before it opens (see useSatAuthoringCollaboration).
+ * The cache carries the exam so these layout tests stay on the render thread and
+ * never reach for the room they are not asserting on.
+ */
+function withExamCache(children: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(examKeys.detail('ex-1'), {
+    id: 'ex-1',
+    currentDraftVersionId: 'version-1',
+  });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
 
 function renderRoot(role: 'admin' | 'builder' | 'proctor' | 'grader' = 'admin') {
   authMock.mockReturnValue({
@@ -84,15 +102,17 @@ describe('SatRoot', () => {
     });
     for (const entry of ['/sat/sessions/sched-1', '/sat/results/res-1', '/sat/exams/ex-1/access']) {
       const { unmount } = render(
-        <MemoryRouter initialEntries={[entry]}>
-          <Routes>
-            <Route path="/sat" element={<SatRoot />}>
-              <Route path="sessions/:scheduleId" element={<div>Session room content</div>} />
-              <Route path="results/:resultId" element={<div>Result detail content</div>} />
-              <Route path="exams/:examId/access" element={<div>Access content</div>} />
-            </Route>
-          </Routes>
-        </MemoryRouter>,
+        withExamCache(
+          <MemoryRouter initialEntries={[entry]}>
+            <Routes>
+              <Route path="/sat" element={<SatRoot />}>
+                <Route path="sessions/:scheduleId" element={<div>Session room content</div>} />
+                <Route path="results/:resultId" element={<div>Result detail content</div>} />
+                <Route path="exams/:examId/access" element={<div>Access content</div>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>,
+        ),
       );
       expect(screen.getAllByRole('button', { name: 'Sign Out' }).length).toBeGreaterThan(0);
       expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
@@ -106,13 +126,15 @@ describe('SatRoot', () => {
       logout: vi.fn(),
     });
     render(
-      <MemoryRouter initialEntries={['/sat/exams/ex-1']}>
-        <Routes>
-          <Route path="/sat" element={<SatRoot />}>
-            <Route path="exams/:examId" element={<div>Builder content</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>,
+      withExamCache(
+        <MemoryRouter initialEntries={['/sat/exams/ex-1']}>
+          <Routes>
+            <Route path="/sat" element={<SatRoot />}>
+              <Route path="exams/:examId" element={<div>Builder content</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      ),
     );
     expect(screen.getByText('Builder content')).toBeInTheDocument();
     // Desktop sidebar (workspace switcher + sign-out region) is gone on authoring pages.
@@ -136,19 +158,21 @@ describe('SatRoot shell polish', () => {
       logout: vi.fn(),
     });
     return render(
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/sat" element={<SatRoot />}>
-            <Route path="exams" element={<div>Exam list content</div>} />
-            <Route path="exams/:examId" element={<div>Authoring content</div>} />
-            <Route path="exams/:examId/release" element={<div>Release content</div>} />
-            <Route path="exams/:examId/preview" element={<div>Preview content</div>} />
-            <Route path="exams/:examId/access" element={<div>Access content</div>} />
-            <Route path="sessions/:scheduleId" element={<div>Session room content</div>} />
-            <Route path="results/:resultId" element={<div>Result detail content</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>,
+      withExamCache(
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route path="/sat" element={<SatRoot />}>
+              <Route path="exams" element={<div>Exam list content</div>} />
+              <Route path="exams/:examId" element={<div>Authoring content</div>} />
+              <Route path="exams/:examId/release" element={<div>Release content</div>} />
+              <Route path="exams/:examId/preview" element={<div>Preview content</div>} />
+              <Route path="exams/:examId/access" element={<div>Access content</div>} />
+              <Route path="sessions/:scheduleId" element={<div>Session room content</div>} />
+              <Route path="results/:resultId" element={<div>Result detail content</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      ),
     );
   }
 

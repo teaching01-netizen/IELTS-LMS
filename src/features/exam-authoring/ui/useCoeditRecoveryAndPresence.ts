@@ -120,6 +120,17 @@ export function useCoeditRecoveryAndPresence(
   } = input;
 
   const coeditSession = coedit.session;
+  /**
+   * The exam room, when there is one.
+   *
+   * A room that was never opened because the exam has no editable draft is
+   * `disabled`: its empty snapshot is not a view-only room, and reading it as one
+   * would let it veto saves the HTTP editors are perfectly entitled to make.
+   */
+  const room =
+    workspaceCollaboration && workspaceCollaboration.status !== "disabled"
+      ? workspaceCollaboration
+      : null;
   // The save clock only advances while something is pending, so an idle
   // workspace does not re-render four times a second.
   const [coeditSaveClock, setCoeditSaveClock] = useState(() => Date.now());
@@ -172,20 +183,20 @@ export function useCoeditRecoveryAndPresence(
     return () => globalThis.clearInterval(timer);
   }, [coeditPendingSince]);
 
-  const coeditDisplayStatus: CoeditSaveDisplayStatus | null = workspaceCollaboration
-    ? workspaceCollaboration.status === "error" &&
-      workspaceCollaboration.lifecyclePhase === "active" &&
-      !workspaceCollaboration.workspaceSnapshot.readOnly
+  const coeditDisplayStatus: CoeditSaveDisplayStatus | null = room
+    ? room.status === "error" &&
+      room.lifecyclePhase === "active" &&
+      !room.workspaceSnapshot.readOnly
       ? "error"
-      : workspaceCollaboration.status === "preparing"
+      : room.status === "preparing"
         ? "saving"
         : coeditDisplayStatusFor({
-            saveState: workspaceCollaboration.workspaceSnapshot.saveState,
-            connectionPhase: workspaceCollaboration.connectionPhase,
-            hasEstablishedConnection: workspaceCollaboration.workspaceSnapshot.hasEstablishedConnection,
-            lifecyclePhase: workspaceCollaboration.lifecyclePhase,
-            readOnly: workspaceCollaboration.workspaceSnapshot.readOnly,
-            pendingSince: workspaceCollaboration.pendingSince ?? null,
+            saveState: room.workspaceSnapshot.saveState,
+            connectionPhase: room.connectionPhase,
+            hasEstablishedConnection: room.workspaceSnapshot.hasEstablishedConnection,
+            lifecyclePhase: room.lifecyclePhase,
+            readOnly: room.workspaceSnapshot.readOnly,
+            pendingSince: room.pendingSince ?? null,
             now: coeditSaveClock,
           })
     : coeditUiActive
@@ -204,17 +215,17 @@ export function useCoeditRecoveryAndPresence(
             now: coeditSaveClock,
           })
       : null;
-  const collaborationReadOnly = workspaceCollaboration
-    ? workspaceCollaboration.workspaceSnapshot.readOnly || workspaceCollaboration.lifecyclePhase !== "active"
+  const collaborationReadOnly = room
+    ? room.workspaceSnapshot.readOnly || room.lifecyclePhase !== "active"
     : Boolean(coeditSession?.readOnly || publishedFrozen);
   const collaborationPublished = Boolean(
-    workspaceCollaboration?.workspaceSnapshot.published || coeditSession?.recovery.published,
+    room?.workspaceSnapshot.published || coeditSession?.recovery.published,
   );
   const collaborationLifecyclePhase =
-    workspaceCollaboration?.lifecyclePhase ?? coeditSession?.lifecyclePhase ?? null;
+    room?.lifecyclePhase ?? coeditSession?.lifecyclePhase ?? null;
   const collaborationIsReadOnly =
-    workspaceCollaboration?.workspaceSnapshot.readOnly ?? coeditSession?.readOnly ?? null;
-  const hasCollaborationSession = Boolean(workspaceCollaboration || coeditSession);
+    room?.workspaceSnapshot.readOnly ?? coeditSession?.readOnly ?? null;
+  const hasCollaborationSession = Boolean(room || coeditSession);
 
   // The author's own presence in the exam room: which question the builder is
   // looking at. Published from here so a route cannot forget to announce it.

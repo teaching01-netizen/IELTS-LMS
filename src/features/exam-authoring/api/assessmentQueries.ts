@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { shouldRetryQuery } from "../../../shared/api/queryClient";
 import { hasBackendStatusCode, isBackendNotFound } from "../infrastructure/examAuthoringBackendGateway";
+import { examKeys } from "./examQueries";
 import { assessmentAuthoringApi } from "./assessmentAuthoringApi";
 import { assessmentReleaseApi } from "./assessmentReleaseApi";
 import type {
@@ -31,6 +33,10 @@ export function useAuthoringShell(examId: string) {
     // POST /shell is reserved for the explicit draft-open in useEnsureDraftShell.
     queryFn: () => assessmentAuthoringApi.getShell(examId),
     staleTime: AUTHORING_SHELL_STALE_TIME_MS,
+    // A 404 is the answer "this exam has no editable draft yet", not a transient
+    // failure: retrying it asks the same question four more times, and each
+    // attempt is a request the network panel reports as an error.
+    retry: (failureCount, error) => !isBackendNotFound(error) && shouldRetryQuery(failureCount, error),
   });
 }
 
@@ -77,6 +83,11 @@ export function useEnsureDraftShell(examId: string) {
         assessmentKeys.shell(examId),
         shell
       );
+      // The draft pointer is part of the exam entity, and the collaboration
+      // boundary refuses to open a room until the exam says there is a draft
+      // to co-edit. Opening one from this screen must therefore refresh that
+      // entity, or the room would stay closed until the cache expired.
+      void queryClient.invalidateQueries({ queryKey: examKeys.detail(examId) });
       void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
       void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
     },

@@ -471,7 +471,7 @@ export function SatExamShell(props: SatExamShellProps) {
               const target = questionNotes.find((annotation) => annotation.id === annotationId);
               if (target) surface.removeNoteText(target);
             }}
-            onWriteAboutQuestion={surface.openQuestionNote}
+            onAddQuestionNote={surface.openQuestionNote}
             // The handle the hidden column leaves behind opens it again, in its
             // own place, so hiding a pane never strands a student in the toolbar.
             onOpenNotes={surface.openNotes}
@@ -494,14 +494,11 @@ export function SatExamShell(props: SatExamShellProps) {
             annotation={editingMark}
             touch={touchAnnotations}
             disabled={props.blocked || !annotationsWritable}
-            noteOpen={surface.noteFieldMarkId === editingMark.id}
             onColor={(color) => recolourMark(editingMark, color)}
             onUnderline={() => underlineMark(editingMark)}
-            // Writing happens in the dock the student is already using; the
-            // Notes column opens only when they ask for it.
-            onNote={() => surface.openNoteField(editingMark)}
-            onNoteChange={(note) => surface.writeMarkNote(editingMark, note)}
-            onRemoveNote={() => surface.removeNoteText(editingMark)}
+            // One editor for one note: pressing Add note hands the mark to the
+            // Notes pane and these controls step aside.
+            onNote={() => openNoteOnMark(editingMark)}
             onRemove={() => removeMark(editingMark)}
             onClose={surface.closeMarkEditor}
           />

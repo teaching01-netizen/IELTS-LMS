@@ -23,8 +23,11 @@ function SectionDeliveryEditorInner({
   onDirtyChange,
 }: SectionDeliveryEditorProps) {
   const collaboration = useSatAuthoringCollaboration();
+  // "Disabled" is the no-room posture (no editable draft), which is NOT
+  // read-only: the section's own HTTP save path owns this form then.
   const collaborationReadOnly = Boolean(
     collaboration &&
+      collaboration.status !== "disabled" &&
       (collaboration.workspaceSnapshot.readOnly || collaboration.lifecyclePhase !== "active"),
   );
   const effectiveCanEdit = canEdit && !collaborationReadOnly;

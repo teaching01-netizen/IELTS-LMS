@@ -7,6 +7,7 @@ import {
   idleSatNotesUi,
   satNotesColumnOpen,
   satNotesPlacement,
+  satNotesCount,
   satNotesRailVisible,
   satNotesUiFromSurface,
   selectionSatNotesUi,
@@ -112,22 +113,37 @@ describe('satNotesPlacement', () => {
  */
 describe('satNotesRailVisible', () => {
   it('stands where a hidden column stood, so hiding it is visibly reversible', () => {
-    expect(satNotesRailVisible({ open: false, compact: false, available: true })).toBe(true);
+    expect(satNotesRailVisible({ open: false, compact: false, available: true, hasNotes: true })).toBe(true);
   });
 
   it('retires while the column itself is on screen', () => {
-    expect(satNotesRailVisible({ open: true, compact: false, available: true })).toBe(false);
+    expect(satNotesRailVisible({ open: true, compact: false, available: true, hasNotes: true })).toBe(false);
   });
 
   it('never appears without the surface it belongs to', () => {
     // Math: no notes, so no handle advertising a pane that cannot open.
-    expect(satNotesRailVisible({ open: false, compact: false, available: false })).toBe(false);
+    expect(satNotesRailVisible({ open: false, compact: false, available: false, hasNotes: true })).toBe(false);
   });
 
   it('stays out of the stacked layout, where there is no edge to hold', () => {
     // Phone widths: the column takes no side of the layout, and the reading
     // height a handle would cost is the same space the passage needs.
-    expect(satNotesRailVisible({ open: false, compact: true, available: true })).toBe(false);
+    expect(satNotesRailVisible({ open: false, compact: true, available: true, hasNotes: true })).toBe(false);
+  });
+
+  it('waits for a note before it promises anything to come back to', () => {
+    // Nothing written yet: no pane, no handle, nothing notes-shaped in the middle
+    // of the exam — the labeled top-bar entry is the way in, and a highlight on
+    // its own never summons the section.
+    expect(satNotesRailVisible({ open: false, compact: false, available: true, hasNotes: false })).toBe(false);
+  });
+
+  it('counts written notes only, so the heading and the handle agree', () => {
+    // A card open for a first note is not a note yet. Both the summary and the
+    // handle read this one number, which is what keeps them from disagreeing.
+    expect(satNotesCount([{ note: '  ' }, { note: undefined }], '   ')).toBe(0);
+    expect(satNotesCount([{ note: 'Check the evidence' }], '')).toBe(1);
+    expect(satNotesCount([{ note: 'One' }, { note: 'Two' }], 'About the question')).toBe(3);
   });
 
   it('is a tab beside the pane it replaces, never a second pane', () => {

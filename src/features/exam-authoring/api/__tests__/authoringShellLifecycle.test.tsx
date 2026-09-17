@@ -75,7 +75,11 @@ describe("Phase 04 shell lifecycle (GET for refresh, explicit open)", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(backendGet).toHaveBeenCalledTimes(1);
-    expect(backendGet).toHaveBeenCalledWith("/v1/assessment-authoring/exams/exam-1/shell");
+    // The 404 is declared expected: an exam without an editable draft is a state
+    // this read reports, not a load failure worth a console warning.
+    expect(backendGet).toHaveBeenCalledWith("/v1/assessment-authoring/exams/exam-1/shell", {
+      expectedStatuses: [404],
+    });
     expect(backendPost).not.toHaveBeenCalled();
 
     // Window-focus-style refetch: still GET only, zero POST.

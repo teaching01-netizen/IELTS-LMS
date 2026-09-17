@@ -48,6 +48,16 @@ export interface ApiRequestConfig {
    * and any configured `x-csrf-token` default header.
    */
   csrf?: string;
+  /**
+   * Statuses this caller handles as data rather than as a failure.
+   *
+   * Some answers are states: "this exam has no editable draft yet" is a 404 the
+   * surface renders as a first-class screen, not an outage. The ApiError still
+   * reaches the caller and the attempt is still logged, but the client does not
+   * add a failure warning for a status the caller asked for — otherwise a
+   * normal state reads in the console as a broken app.
+   */
+  expectedStatuses?: number[];
 }
 
 /** Request options accepted by the legacy `apiRequest` wrapper. */
@@ -360,8 +370,13 @@ class ApiClient {
 
     // All retries failed
     const statusCode = ApiClient.getStatusCode(lastError || new Error("Request failed"));
-    // Log 401 as warning since it's expected for unauthenticated requests
-    if (statusCode === 401) {
+    // A status the caller named up front is an answer, not a failure: the
+    // classified ApiError below is still thrown, it just does not warn.
+    const expectedByCaller =
+      statusCode !== undefined && (config.expectedStatuses?.includes(statusCode) ?? false);
+    if (!expectedByCaller) {
+      // Log 401 as warning since it's expected for unauthenticated requests
+      if (statusCode === 401) {
         logWarn("Request failed with 401 Unauthorized", {
           endpoint,
           requestId,
@@ -380,6 +395,7 @@ class ApiClient {
           requestId,
           attempts: completedAttempts,
         });
+      }
     }
 
     if (lastError) {

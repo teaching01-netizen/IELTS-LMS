@@ -51,6 +51,16 @@ describe("satCopy controlled vocabulary", () => {
     // "Notes save automatically" beside a "Save and close" button was the
     // contradiction; the column autosaves and offers no such button at all.
     expect(Object.values(SAT_COPY.notes).join(" ")).not.toMatch(/\bSave\b/);
+    // The promise is still made — once, in the field, and then retired.
+    expect(SAT_COPY.notes.saveHelper).toBe("Notes save automatically.");
+    // The empty state names the column, then the gesture that fills it, instead
+    // of a call to action standing in for both.
+    expect(SAT_COPY.notes.emptyTitle).toBe("No notes yet");
+    expect(SAT_COPY.notes.empty).toContain("Add note");
+    // Demoted, not renamed: one action under the list, in the vocabulary the
+    // toolbar already taught ("Add note").
+    expect(SAT_COPY.notes.addQuestionNote).toBe("Add question note");
+    expect((SAT_COPY.notes as unknown as Record<string, unknown>).writeAboutQuestion).toBeUndefined();
   });
 
   it("splits flag state from the review destination", () => {

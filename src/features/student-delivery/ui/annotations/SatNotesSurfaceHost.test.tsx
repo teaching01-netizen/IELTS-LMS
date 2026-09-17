@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SatNotesSurfaceHost } from './SatNotesSurfaceHost';
+import { createSatTextAnnotation, type SatTextAnnotation } from '../../domain/satResponses';
 import { useSatNotesSurface } from './SatNotesSurfaceContext';
 import type { SatNotesUiState } from '../../domain/satNotesUi';
 import { SAT_QUESTION_NOTE_EDITOR } from '../../domain/satNotesUi';
@@ -39,6 +40,7 @@ function renderHost(
     wide?: boolean;
     questionKey?: string;
     questionNote?: string;
+    annotations?: SatTextAnnotation[];
     notesAvailable?: boolean;
     onSaveQuestionNote?: (note: string) => void;
     onOpenNotes?: () => void;
@@ -48,7 +50,7 @@ function renderHost(
     <SatNotesSurfaceHost
       state={state}
       questionKey={overrides.questionKey ?? 'module::0'}
-      annotations={[]}
+      annotations={overrides.annotations ?? []}
       questionNote={overrides.questionNote ?? ''}
       hasHighlights={false}
       notesAvailable={overrides.notesAvailable ?? true}
@@ -58,7 +60,7 @@ function renderHost(
       onChangeNote={vi.fn()}
       onSaveQuestionNote={overrides.onSaveQuestionNote ?? vi.fn()}
       onRemoveNote={vi.fn()}
-      onWriteAboutQuestion={vi.fn()}
+      onAddQuestionNote={vi.fn()}
       onOpenNotes={overrides.onOpenNotes ?? vi.fn()}
       onClose={vi.fn()}
     >
@@ -69,6 +71,23 @@ function renderHost(
 }
 
 const notes = (editorId: string | null = null): SatNotesUiState => ({ kind: 'notes', editorId, activeId: null });
+
+/** A mark the student wrote a note on — the only thing a handle promises. */
+function writtenNote(): SatTextAnnotation {
+  return {
+    ...createSatTextAnnotation({
+      kind: 'highlight', nodeId: 'stimulus:p', startOffset: 0, endOffset: 7, exact: 'Several', color: 'yellow',
+    }),
+    note: 'Check the evidence',
+  };
+}
+
+/** A highlight with no words behind it: marked, but nothing to come back to. */
+function bareMark(): SatTextAnnotation {
+  return createSatTextAnnotation({
+    kind: 'highlight', nodeId: 'stimulus:p', startOffset: 8, endOffset: 12, exact: 'trees', color: 'pink',
+  });
+}
 
 /**
  * The host is the one place that decides what the column is and where it goes,
@@ -88,7 +107,7 @@ describe('SatNotesSurfaceHost', () => {
 
   it('hands the layout a handle where the hidden column stood, so it is visibly reversible', () => {
     const onOpenNotes = vi.fn();
-    const { media, unmount } = renderHost({ kind: 'idle' }, { onOpenNotes });
+    const { media, unmount } = renderHost({ kind: 'idle' }, { annotations: [writtenNote()], onOpenNotes });
     try {
       const probe = screen.getByTestId('probe');
       expect(probe).toHaveAttribute('data-has-column', 'false');
@@ -100,6 +119,23 @@ describe('SatNotesSurfaceHost', () => {
       fireEvent.click(rail);
       expect(onOpenNotes).toHaveBeenCalledTimes(1);
     } finally { unmount(); media.mockRestore(); }
+  });
+
+  it('leaves nothing in the middle until there is a note to come back to', () => {
+    // Highlighted but never wrote: no pane, no handle — the exam holds no
+    // notes-shaped furniture, and the labeled top-bar entry is the way in.
+    const { media, unmount } = renderHost({ kind: 'idle' }, { annotations: [bareMark()], questionNote: '   ' });
+    try {
+      expect(screen.getByTestId('probe')).toHaveAttribute('data-has-rail', 'false');
+      expect(screen.queryByRole('button', { name: 'Show notes' })).not.toBeInTheDocument();
+    } finally { unmount(); media.mockRestore(); }
+
+    // One written note is enough: the handle stands as soon as there is something
+    // to bring back.
+    const written = renderHost({ kind: 'idle' }, { annotations: [], questionNote: 'The theme is control' });
+    try {
+      expect(screen.getByTestId('probe')).toHaveAttribute('data-has-rail', 'true');
+    } finally { written.unmount(); written.media.mockRestore(); }
   });
 
   it('leaves no handle while the column is open, or where notes cannot open', () => {
@@ -180,7 +216,7 @@ describe('SatNotesSurfaceHost', () => {
           onChangeNote={vi.fn()}
           onSaveQuestionNote={onSaveQuestionNote}
           onRemoveNote={vi.fn()}
-          onWriteAboutQuestion={vi.fn()}
+          onAddQuestionNote={vi.fn()}
           onOpenNotes={vi.fn()}
           onClose={vi.fn()}
         >

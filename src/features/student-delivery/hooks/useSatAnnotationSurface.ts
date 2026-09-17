@@ -101,29 +101,14 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
 
   /** Mark whose edit controls are open (presentation state, not exam truth). */
   const [editingMarkId, setEditingMarkId] = useState<string | null>(null);
-  /**
-   * Mark whose note is being written inside those controls.
-   *
-   * Writing a note on selected text happens where the text is, so the Notes
-   * column never opens itself into the middle of the exam — it stays the place a
-   * student goes on purpose, and this state says which field is live here.
-   */
-  const [noteFieldMarkId, setNoteFieldMarkId] = useState<string | null>(null);
   const [undoEntry, setUndoEntry] = useState<SatAnnotationUndoEntry | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const [hintVisible, setHintVisible] = useState(false);
 
   const editingMark = annotations?.annotations.find((annotation) => annotation.id === editingMarkId) ?? null;
-  /**
-   * Dismiss the mark's controls, and with them any note field they were holding.
-   *
-   * One transition rather than two setState calls at every call site: a field
-   * left open for a mark whose controls went away is a note editor the student
-   * cannot see and did not ask for.
-   */
+  /** Dismiss the mark's controls (the note editor is a surface, not chrome). */
   const dismissMarkControls = useCallback(() => {
     setEditingMarkId(null);
-    setNoteFieldMarkId(null);
   }, []);
   /**
    * Which note field is open, read from the one place that decides surfaces. Both
@@ -159,9 +144,6 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       // second tap changes the ink instead of demanding a click on the text
       // first. The mark's own ink is the confirmation; nothing else pops up.
       setEditingMarkId(result.annotation.id);
-      // A fresh mark's controls open on the mark itself, never on a field: the
-      // student asked for ink, not for somewhere to type.
-      setNoteFieldMarkId(null);
       setAnnouncement(satHighlightedAnnouncement(satHighlightInk(color).label.toLowerCase()));
       interaction.selectionCleared();
     },
@@ -186,13 +168,13 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       if (result.annotations !== annotations) write(result.annotations);
       education.markFirstNote();
       interaction.selectionCleared();
-      // The field opens in the tools the student is already looking at, under
-      // the quote it is about: writing a note is part of marking the text, so it
-      // must not push the Notes column into the middle of the exam to be written.
-      setEditingMarkId(result.annotation.id);
-      setNoteFieldMarkId(result.annotation.id);
+      // The note opens where notes live: the pane, on this note's card, with the
+      // caret already in the field. The mark's own controls close on the way, so
+      // there is never a floating editor over a pane editor for the same note.
+      dismissMarkControls();
+      interaction.openAnnotationNote(result.annotation.id);
     },
-    [annotations, education, interaction, writable, write],
+    [annotations, dismissMarkControls, education, interaction, writable, write],
   );
 
   const recolourMark = useCallback(
@@ -270,10 +252,10 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   /**
    * Open a mark's note in the Notes column.
    *
-   * Reserved for the column's own cards: choosing one there is a request for the
-   * pane the student is already reading, not a reason to push it open from the
-   * passage. The mark's inline controls are closed on the way, so exactly one
-   * editor for that note is ever on screen.
+   * The one way into writing: choosing the mark's card, pressing Add note on a
+   * mark that already has one, or adding a note to a fresh selection all land
+   * here. The mark's inline controls are closed on the way, so exactly one editor
+   * for that note is ever on screen.
    */
   const openNoteOnMark = useCallback(
     (annotation: SatTextAnnotation) => {
@@ -287,7 +269,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     [dismissMarkControls, interaction],
   );
 
-  /** Write a mark's note in the mark's own place (the edit dock). */
+  /** The single writer for an anchored note's text (the pane's field commits here). */
   const writeMarkNote = useCallback(
     (annotation: SatTextAnnotation, note: string) => {
       if (!annotations || !writable) return;
@@ -305,12 +287,6 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     },
     [annotations, education, onFlushAnnotations, writable, write],
   );
-
-  /** Show this mark's note field inside its own controls. */
-  const openNoteField = useCallback((annotation: SatTextAnnotation) => {
-    setEditingMarkId(annotation.id);
-    setNoteFieldMarkId(annotation.id);
-  }, []);
 
   const removeMark = useCallback(
     (annotation: SatTextAnnotation) => {
@@ -396,12 +372,12 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
    * leaving the text, and a keyboard student must not land on <body> for it.
    */
   const closeMarkEditor = useCallback(() => {
-    if (editingMarkId === null && noteFieldMarkId === null) return false;
-    const markId = editingMarkId ?? noteFieldMarkId;
+    if (editingMarkId === null) return false;
+    const markId = editingMarkId;
     dismissMarkControls();
-    if (markId) window.requestAnimationFrame(() => focusSatAnnotationMark(markId));
+    window.requestAnimationFrame(() => focusSatAnnotationMark(markId));
     return true;
-  }, [dismissMarkControls, editingMarkId, noteFieldMarkId]);
+  }, [dismissMarkControls, editingMarkId]);
 
   /** Dismiss the selection tools without touching the selection or the marks. */
   const closeSelectionTools = useCallback(() => interaction.selectionCleared(), [interaction]);
@@ -474,10 +450,6 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       openEditorActive: writable,
       openEditor: (annotation: SatTextAnnotation) => {
         setEditingMarkId(annotation.id);
-        // The mark's own field survives a second press on the same mark: the
-        // student may be clicking the text to place the caret, not to close the
-        // note they were writing.
-        setNoteFieldMarkId((current) => (current === annotation.id ? current : null));
         interaction.selectionCleared();
       },
       onSelectionCaptured: (anchor: SatTextAnchor) => interaction.selectionCaptured(anchor),
@@ -499,10 +471,6 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     recolourMark,
     underlineMark,
     openNoteOnMark,
-    /** The mark whose note is being written in its own controls, if any. */
-    noteFieldMarkId,
-    openNoteField,
-    writeMarkNote,
     removeMark,
     noteEditorAnnotation,
     /** The notes UI state + its close, owned here so no caller derives them. */

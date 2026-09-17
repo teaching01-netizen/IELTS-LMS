@@ -1,7 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useExamQuery } from "../../api/examQueries";
 import type { StructuredContent } from "../../contracts/assessment";
 import type { CoeditFlushResult, CoeditLifecycleIssue } from "./contracts";
-import { CoeditUnavailableError, requestWorkspaceCoeditToken } from "./tokenApi";
+import {
+  CoeditNoEditableDraftError,
+  CoeditUnavailableError,
+  requestWorkspaceCoeditToken,
+} from "./tokenApi";
 import {
   SatAuthoringWorkspaceProvider,
   type WorkspaceCoeditSnapshot,
@@ -81,20 +86,59 @@ const EMPTY_SNAPSHOT: WorkspaceCoeditSnapshot = {
 const SatAuthoringCollaborationContext = createContext<SatAuthoringCollaborationValue | null>(null);
 
 export function SatAuthoringCollaborationProvider({ examId, children }: { examId: string; children: ReactNode }) {
+  /**
+   * Does this exam have an editable draft to co-edit?
+   *
+   * The room the boundary opens is the CURRENT EDITABLE SAT DRAFT's room, so an
+   * exam without a draft pointer has no room at all — the token endpoint says so
+   * itself (404, "Only the current editable SAT draft can be co-edited"). Asking
+   * first and reading the refusal as an error turned a normal pre-draft exam into
+   * a 404 and a warning in every console on the way in, so the room is only
+   * requested once the exam read says there is something to open.
+   *
+   * `null` means "not answered yet": the exam read is the same one every SAT
+   * authoring page already performs, and the room waits for it rather than
+   * guessing. That wait is what makes this deterministic — a request fired in the
+   * same tick as the exam read would race it and lose.
+   */
+  const examQuery = useExamQuery(examId);
+  const hasEditableDraft = examQuery.isSuccess
+    ? Boolean(examQuery.data?.currentDraftVersionId)
+    : null;
   const [status, setStatus] = useState<WorkspaceCoeditingStatus>("preparing");
   const [snapshot, setSnapshot] = useState<WorkspaceCoeditSnapshot>(EMPTY_SNAPSHOT);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const providerRef = useRef<SatAuthoringWorkspaceProvider | null>(null);
+  // Only a successful exam read may deny the room: an exam read that is loading
+  // or failed is not evidence that a draft is missing, and acting on it would
+  // disable collaboration for every exam behind one transient error.
+  const noEditableDraft = hasEditableDraft === false;
 
   useEffect(() => {
     let active = true;
     let createdProvider: SatAuthoringWorkspaceProvider | null = null;
     let unsubscribe: (() => void) | null = null;
+    providerRef.current = null;
+    if (noEditableDraft) {
+      // No draft, no room: this is the quiet posture (see the provider doc), not
+      // a failure to report. Consumers read `status: "disabled"` as "no room"
+      // and keep their own HTTP save path.
+      setStatus("disabled");
+      setSnapshot(EMPTY_SNAPSHOT);
+      setError(null);
+      return undefined;
+    }
+    if (hasEditableDraft === null) {
+      // Waiting on the exam read, which is also what "preparing" already means.
+      setStatus("preparing");
+      setSnapshot(EMPTY_SNAPSHOT);
+      setError(null);
+      return undefined;
+    }
     setStatus("preparing");
     setSnapshot(EMPTY_SNAPSHOT);
     setError(null);
-    providerRef.current = null;
 
     void (async () => {
       try {
@@ -129,6 +173,14 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
         });
       } catch (cause) {
         if (!active) return;
+        if (cause instanceof CoeditNoEditableDraftError) {
+          // The exam lost (or never had) its editable draft between our read and
+          // the request. Same posture as reading it up front: no room, no error.
+          setStatus("disabled");
+          setSnapshot(EMPTY_SNAPSHOT);
+          setError(null);
+          return;
+        }
         if (cause instanceof CoeditUnavailableError) {
           setStatus("error");
           setError("Live collaboration is unavailable. The authoring service must be running.");
@@ -149,7 +201,7 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
         createdProvider?.destroy();
       }
     };
-  }, [attempt, examId]);
+  }, [attempt, examId, hasEditableDraft, noEditableDraft]);
 
   const retry = useCallback(() => {
     const current = providerRef.current;
@@ -221,7 +273,7 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
 
   const value = useMemo<SatAuthoringCollaborationValue>(() => ({
     examId,
-    enabled: true,
+    enabled: !noEditableDraft,
     status,
     error,
     workspaceSnapshot: snapshot,
@@ -242,7 +294,7 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
     setPresence,
     recovery: providerRef.current?.recovery ?? null,
     reportReplaced,
-  }), [error, examId, fieldBinding, flushAndWaitForSaved, publishCommand, reportReplaced, retry, seedRichField, seedValue, setPresence, setRichField, setValue, setValues, snapshot, status]);
+  }), [error, examId, fieldBinding, flushAndWaitForSaved, noEditableDraft, publishCommand, reportReplaced, retry, seedRichField, seedValue, setPresence, setRichField, setValue, setValues, snapshot, status]);
 
   return <SatAuthoringCollaborationContext.Provider value={value}>{children}</SatAuthoringCollaborationContext.Provider>;
 }

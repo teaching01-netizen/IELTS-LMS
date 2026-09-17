@@ -18,7 +18,12 @@ import {
 import { parseCoeditDocumentName } from "../documentIdentity";
 import { deriveSaveState } from "../saveState";
 import { encodeStateVectorBase64, toBase64 } from "../stateVector";
-import { CoeditUnavailableError, requestCoeditToken } from "../tokenApi";
+import {
+  CoeditNoEditableDraftError,
+  CoeditUnavailableError,
+  requestCoeditToken,
+  requestWorkspaceCoeditToken,
+} from "../tokenApi";
 
 const backendPost = vi.fn();
 vi.mock("../../../infrastructure/examAuthoringBackendGateway", () => ({
@@ -465,6 +470,28 @@ describe("token api", () => {
       }),
     );
     await expect(requestCoeditToken("eq-1")).rejects.toBeInstanceOf(CoeditUnavailableError);
+  });
+
+  it("names the no-editable-draft 404 as a state, not an outage", async () => {
+    const { ApiError } = await import("../../../../../shared/api-client/errors");
+    backendPost.mockRejectedValue(
+      new ApiError({
+        code: "NOT_FOUND",
+        message: "Only the current editable SAT draft can be co-edited.",
+        status: 404,
+      }),
+    );
+
+    await expect(requestWorkspaceCoeditToken("exam-1")).rejects.toBeInstanceOf(
+      CoeditNoEditableDraftError,
+    );
+    // Declared expected, so the refusal is a state the caller renders rather
+    // than a warning in the author's console.
+    expect(backendPost).toHaveBeenCalledWith(
+      "/v1/assessment-authoring/exams/exam-1/coedit-token",
+      {},
+      { expectedStatuses: [404] },
+    );
   });
 });
 

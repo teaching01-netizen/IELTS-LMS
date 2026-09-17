@@ -37,6 +37,10 @@ export function CollaborationHeaderCluster({
   }, [collaboration?.pendingSince]);
 
   if (!collaboration) return null;
+  // No room: an exam with no editable draft has nothing to co-edit, so the
+  // header must not report a room's save truth. Whatever the page saves (the
+  // HTTP editors behind it) owns its own status.
+  if (collaboration.status === "disabled") return null;
 
   const snapshot = collaboration.workspaceSnapshot;
   const status =

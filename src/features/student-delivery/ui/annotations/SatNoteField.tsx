@@ -17,24 +17,18 @@ export const SAT_NOTE_EDITOR_FIELD_ID = 'sat-note-editor-field';
 export const QUESTION_NOTE_FIELD_ID = 'sat-question-note';
 
 /**
- * Field id for the note written inside a mark's edit dock.
- *
- * Distinct from the Notes column's anchored field on purpose: the two are
- * different places, and one day both could be on screen at once — two elements
- * sharing an id would make the caret target ambiguous for the browser and for
- * the focus code that aims at it.
- */
-export const SAT_INLINE_NOTE_FIELD_ID = 'sat-inline-note-field';
-
-/**
- * The one note field: a capped textarea with idle autosave, a quiet "Saved", a
- * count that only appears near the limit, and removal that only exists once
- * there is text.
+ * The one note field: a capped textarea with idle autosave, a one-time promise
+ * that there is nothing to save, a quiet "Saved", a count that only appears
+ * near the limit, and removal that only exists once there is text.
  *
  * Both card kinds use it, so an anchored note and a note about the question
  * cannot drift apart in how they save, warn, or empty. Removal is *staged* by the
  * caller (`onRemoveRequested`) so it can land in the same undo toast that already
  * forgives a deleted mark; a field used on its own still empties in place.
+ *
+ * It is also the only field: the mark's own controls used to hold a second copy
+ * of it, which meant two editors for one note and two places that had to agree
+ * about autosave. Writing a note now always lands here, in the pane.
  */
 export function SatNoteField({
   fieldId,
@@ -76,14 +70,21 @@ export function SatNoteField({
         onBlur={() => draft.commitNow()}
         // `sat-reading-copy`, like the passage: a note is reading content, so the
         // student's text-size choice applies to it as well.
+        //
+        // No border until focus: this field is the strongest layer in the column
+        // while it is being used and no layer at all while it is not, which is
+        // what keeps a pane full of cards from reading as a box inside a box.
         className={
-          'sat-reading-copy w-full resize-y rounded-[6px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] p-2 text-[var(--sat-text)] outline-none focus:border-[var(--sat-accent)] focus:ring-2 focus:ring-[var(--sat-focus)]/25 disabled:cursor-not-allowed '
+          'sat-reading-copy w-full resize-y rounded-[6px] border border-transparent bg-[var(--sat-surface-hover)] p-2 text-[var(--sat-text)] outline-none placeholder:text-[var(--sat-text-secondary)] hover:border-[var(--sat-divider)] focus:border-[var(--sat-accent)] focus:bg-[var(--sat-surface)] focus:ring-2 focus:ring-[var(--sat-focus)]/25 disabled:cursor-not-allowed '
           + (className ?? '')
         }
       />
       <NoteFieldFooter
         length={draft.draft.length}
         saved={draft.saved}
+        // Shown until the first save in this field happens: the student reads the
+        // promise once, watches it come true, and never sees it again.
+        showAutosaveHint={!draft.hasSaved}
         disabled={disabled}
         onRemove={canRemove ? onRemoveRequested ?? (() => draft.clear()) : undefined}
       />
@@ -94,22 +95,27 @@ export function SatNoteField({
 function NoteFieldFooter({
   length,
   saved,
+  showAutosaveHint,
   disabled,
   onRemove,
 }: {
   length: number;
   saved: boolean;
+  /** True until this field has seen its first save. */
+  showAutosaveHint: boolean;
   disabled: boolean;
   onRemove?: (() => void) | undefined;
 }) {
   return (
     <div className="mt-1 flex min-h-[20px] items-center justify-between gap-2">
-      {/* Destructive only once there is something meaningful to destroy. */}
+      {/* Destructive only once there is something meaningful to destroy, and
+          quiet when it is: a student mid-sentence should never have their eye
+          caught by the way to lose the sentence. */}
       {onRemove && !disabled ? (
         <button
           type="button"
           onClick={onRemove}
-          className="sat-pressable rounded-[6px] px-1 sat-type-metadata font-medium text-[var(--sat-text-secondary)] hover:bg-[var(--sat-surface-hover)] hover:text-[var(--sat-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+          className="sat-pressable rounded-[6px] px-1 sat-type-metadata font-medium text-[var(--sat-danger)] hover:bg-[var(--sat-danger-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
         >
           {SAT_COPY.notes.remove}
         </button>
@@ -117,6 +123,13 @@ function NoteFieldFooter({
         <span />
       )}
       <span className="flex items-center gap-2">
+        {/* The promise, made once: this replaces a permanent line repeating that
+            there is nothing to press. */}
+        {showAutosaveHint ? (
+          <span data-sat-note-autosave-hint="true" className="sat-type-metadata text-[var(--sat-text-secondary)]">
+            {SAT_COPY.notes.saveHelper}
+          </span>
+        ) : null}
         {/* Transient by design: the reassurance that there is nothing to save. */}
         {saved ? (
           <span
@@ -170,6 +183,14 @@ function useSatNoteDraft({
 }) {
   const [draft, setDraft] = useState(value);
   const [saved, setSaved] = useState(false);
+  /**
+   * True once this field has saved once.
+   *
+   * Not transient like `saved`: it is the memory that lets the autosave promise
+   * be made exactly once. It belongs to the field instance, and the column keys a
+   * field by its note, so a different note is a different promise.
+   */
+  const [hasSaved, setHasSaved] = useState(false);
   const draftRef = useRef(draft);
   const valueRef = useRef(value);
   const commitRef = useRef(commit);
@@ -204,6 +225,7 @@ function useSatNoteDraft({
     commitRef.current(next);
     flushRef.current?.();
     setSaved(true);
+    setHasSaved(true);
     if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
     savedTimer.current = window.setTimeout(() => setSaved(false), SAT_NOTE_SAVED_MS);
   }, []);
@@ -253,5 +275,5 @@ function useSatNoteDraft({
     write('');
   }, [write]);
 
-  return { draft, type, saved, commitNow, clear };
+  return { draft, type, saved, hasSaved, commitNow, clear };
 }

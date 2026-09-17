@@ -111,10 +111,15 @@ export const SAT_NOTES_RAIL_TRACK = '2.25rem';
  *
  * The handle is how the pane's ability to come back is visible without decoding
 the top bar: it stands exactly where the column was, so hiding is visibly
-reversible, and a student who has never opened notes can see there is something
-there. It is skipped on phone widths, where the column takes no side of the
+reversible. It is skipped on phone widths, where the column takes no side of the
 layout to leave a handle on and every pixel of reading height is spoken for;
 there the labeled top-bar entry stays the way back.
+ *
+ * It also waits for a note to exist. A handle promises something to come back to,
+ * and a student who has highlighted but written nothing does not have one yet: a
+ * "Notes" strip standing in the middle of the exam is the app advertising a
+ * feature rather than the student's own work. The labeled top-bar entry is still
+ * the way in.
  */
 export function satNotesRailVisible(input: {
   /** True while the column is part of the layout. */
@@ -123,6 +128,26 @@ export function satNotesRailVisible(input: {
   compact: boolean;
   /** R&W-only: without the surface there is nothing to open. */
   available: boolean;
+  /** True once the question holds at least one written note (`satNotesCount`). */
+  hasNotes: boolean;
 }): boolean {
-  return input.available && !input.open && !input.compact;
+  return input.available && input.hasNotes && !input.open && !input.compact;
+}
+
+/**
+ * How many notes the question actually holds.
+ *
+ * A card open for a first note is not a note until there are words in it. The
+ * heading's summary and the decision to leave a handle behind both need that
+ * answer, so it is derived once here instead of twice downstream — which is how
+ * "3 notes" and "there is something to come back to" could otherwise disagree.
+ */
+export function satNotesCount(
+  annotations: readonly { note?: string | undefined }[],
+  questionNote: string,
+): number {
+  return (
+    annotations.filter((annotation) => (annotation.note ?? '').trim().length > 0).length +
+    (questionNote.trim().length > 0 ? 1 : 0)
+  );
 }

@@ -58,15 +58,24 @@ export const SAT_COPY = {
     // stays, only the words go, and they can come back for a few seconds.
     removed: "Note removed",
     // Shown only when there is nothing to read AND nothing being written, so it
-    // can never sit beside an open editor contradicting itself. It offers the
-    // one action available with no selection, so writing about the question is
-    // discoverable rather than a capability that quietly disappeared.
-    empty: "Select text to add a note",
+    // can never sit beside an open editor contradicting itself. Two lines in
+    // that order — what the column is, then how to fill it — because one sentence
+    // inside a dashed box read like a web form rather than an exam aid, and a
+    // student who has never noted anything needs both halves.
+    emptyTitle: "No notes yet",
+    empty: "Select text in the passage, then choose Add note.",
     // The empty state's aside when the question carries marks but no notes, so a
     // student who only highlighted is not left wondering where their highlights
     // went — and without a second list to check.
     emptyWithHighlights: "Your highlights are marked in the passage.",
-    writeAboutQuestion: "Write a note about this question",
+    // The question's own note, demoted to a quiet text button under the list.
+    // Notes on selected text are the pattern; this one exists for a student with
+    // nothing selected, and it used to compete with them as a full-width row.
+    addQuestionNote: "Add question note",
+    // Autosave reassurance, shown while a field is open and retired once the
+    // first save it announces has been seen: a promise made once and then
+    // trusted, rather than a permanent banner repeating itself.
+    saveHelper: "Notes save automatically.",
     // On the hide control at widths where notes take the question's place, so
     // hiding says what it actually does.
     collapseAndShowQuestion: "Hide notes and show the question",

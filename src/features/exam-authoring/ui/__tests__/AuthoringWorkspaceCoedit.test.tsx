@@ -203,6 +203,16 @@ vi.mock("../../api/assessmentQueries", () => ({
   useLoadSatSampleExam: (...a: unknown[]) => (harness.useLoadSample as never)(...a),
   useEnsureDraftShell: (...a: unknown[]) => (harness.useEnsureDraft as never)(...a),
 }));
+// The collaboration boundary opens the exam room only for an exam that HAS an
+// editable draft (asking an exam without one is the 404 this gate exists to
+// stop), so the exam read has to answer like a draft-bearing exam here.
+vi.mock("../../api/examQueries", () => ({
+  examKeys: { detail: (examId: string) => ["exam-authoring", "detail", examId] },
+  useExamQuery: () => ({
+    isSuccess: true,
+    data: { id: "exam-1", currentDraftVersionId: "version-1" },
+  }),
+}));
 vi.mock("../../api/assessmentAuthoringApi", () => ({ assessmentAuthoringApi: harness.api }));
 vi.mock("../../hooks/useQuestionAutosave", () => ({
   useQuestionAutosave: (...a: unknown[]) => (harness.useQuestionAutosave as never)(...a),

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createSatTextAnnotation } from '../../domain/satResponses';
 import { SatAnnotationEditDock } from './SatAnnotationEditDock';
@@ -99,7 +99,7 @@ describe('edit dock', () => {
     kind: 'highlight', nodeId: 'stimulus:p1', startOffset: 2, endOffset: 6, exact: 'tree', color: 'pink', note: 'Check this',
   });
   /** What every render of the dock needs beyond the mark itself. */
-  const base = { noteOpen: false, onNoteChange: vi.fn(), onRemoveNote: vi.fn(), onClose: vi.fn() };
+  const base = { onClose: vi.fn() };
 
   it('shows the current ink pressed, offers the note edit, and separates removal', () => {
     const onColor = vi.fn();
@@ -145,39 +145,27 @@ describe('edit dock', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Highlight Yellow' }));
   });
 
-  it('writes the note inside the dock, under the quote it belongs to', async () => {
-    const onNoteChange = vi.fn();
+  it('hands writing to the pane instead of holding an editor of its own', () => {
+    const onNote = vi.fn();
+    const onRemove = vi.fn();
     render(
       <SatAnnotationEditDock
         annotation={{ ...mark, note: undefined }}
         touch={false}
-        noteOpen
         onColor={vi.fn()}
         onUnderline={vi.fn()}
-        onNote={vi.fn()}
-        onNoteChange={onNoteChange}
-        onRemoveNote={vi.fn()}
-        onRemove={vi.fn()}
-        onClose={vi.fn()}
+        onNote={onNote}
+        onRemove={onRemove}
+        {...base}
       />,
     );
-    // The quote is what keeps a note attached to its text while it is typed.
-    expect(document.querySelector('[data-sat-inline-note="true"]')).toHaveTextContent('“tree”');
-    const field = await screen.findByRole('textbox', { name: 'Notes' });
-    // Pressing "Add note" IS the invitation to type.
-    expect(field).toHaveFocus();
-    fireEvent.change(field, { target: { value: 'Cooler under the canopy' } });
-    await waitFor(() => expect(onNoteChange).toHaveBeenCalledWith('Cooler under the canopy'));
-    // No Save button anywhere: idle autosave plus a commit on close is the
-    // contract, and this field is the same field the Notes column uses.
-    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
-  });
-
-  it('never draws the note field while it is closed', () => {
-    render(
-      <SatAnnotationEditDock annotation={mark} touch={false} onColor={vi.fn()} onUnderline={vi.fn()} onNote={vi.fn()} onRemove={vi.fn()} {...base} />,
-    );
-    expect(document.querySelector('[data-sat-inline-note="true"]')).toBeNull();
+    // One note has one editor: this dock changes the mark and asks the Notes pane
+    // to open the note, so a student never sees two textareas for the same words
+    // — and never has to guess which one is saving.
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+    expect(onNote).toHaveBeenCalledOnce();
+    // Asking for a note is not touching the mark.
+    expect(onRemove).not.toHaveBeenCalled();
   });
 });

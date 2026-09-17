@@ -19,6 +19,21 @@ export class CoeditUnavailableError extends Error {
   }
 }
 
+/**
+ * Raised when the exam has no editable draft, so there is no room to open.
+ *
+ * A distinct type because it is the opposite of an outage: the service is fine
+ * and the exam is simply not at a co-editable stage yet. Callers degrade to
+ * "no room" silently instead of telling an author that collaboration is broken —
+ * and, when they know that up front, they never ask at all.
+ */
+export class CoeditNoEditableDraftError extends Error {
+  constructor() {
+    super("This exam has no editable draft yet.");
+    this.name = "CoeditNoEditableDraftError";
+  }
+}
+
 /** Refuse a response whose document name is not the frozen opaque shape. */
 function assertUsable(response: CoeditTokenResponse): CoeditTokenResponse {
   if (!response.token) throw new Error("Co-edit token response carried no token.");
@@ -103,16 +118,24 @@ export async function requestCoeditToken(examQuestionId: string): Promise<Coedit
   }
 }
 
-/** Requests the single exam-level SAT authoring room. */
+/**
+ * Requests the single exam-level SAT authoring room.
+ *
+ * A 404 is the server naming a state, not a failure ("Only the current editable
+ * SAT draft can be co-edited."), so it is declared expected — the request still
+ * throws the typed error below, it just does not reach the console as a warning.
+ */
 export async function requestWorkspaceCoeditToken(examId: string): Promise<CoeditTokenResponse> {
   try {
     const response = await backendPost<CoeditTokenResponse>(
       `/v1/assessment-authoring/exams/${encodeURIComponent(examId)}/coedit-token`,
       {},
+      { expectedStatuses: [404] },
     );
     return assertWorkspaceUsable(response);
   } catch (error) {
     if (error instanceof ApiError) {
+      if (error.status === 404) throw new CoeditNoEditableDraftError();
       const reason = typeof error.details?.["coeditReason"] === "string"
         ? String(error.details["coeditReason"])
         : null;

@@ -67,8 +67,11 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const sharedLinkSignature =
     sharedLink && typeof sharedLink === "object" ? JSON.stringify(sharedLink) : null;
   const selfId = collaboration?.participants.find((participant) => participant.isSelf)?.id ?? null;
+  // "Disabled" is the no-room posture (no editable draft): not read-only, just
+  // a link this sheet edits through its own HTTP path.
   const readOnly = Boolean(
     collaboration &&
+      collaboration.status !== "disabled" &&
       (collaboration.workspaceSnapshot.readOnly || collaboration.lifecyclePhase !== "active"),
   );
 

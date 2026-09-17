@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from 'react';
 import {
   satNotesColumnOpen,
+  satNotesCount,
   satNotesPlacement,
   satNotesRailVisible,
   type SatNotesPlacement,
@@ -35,7 +36,8 @@ export interface SatNotesSurfaceHostProps {
   onSaveQuestionNote: (note: string) => void;
   /** Staged removal for a note's text, undo included, owned by the surface hook. */
   onRemoveNote: (annotationId: string) => void;
-  onWriteAboutQuestion: () => void;
+  /** Write about the question itself, for a student with nothing selected. */
+  onAddQuestionNote: () => void;
   /** Opens the column from the handle a previous hide left behind. */
   onOpenNotes: () => void;
   onFlush?: (() => void) | undefined;
@@ -60,7 +62,15 @@ export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
   const threeColumn = useSatMediaQuery('(min-width: 1024px)');
   const open = satNotesColumnOpen(props.state);
   const placement: SatNotesPlacement = satNotesPlacement({ open, compact, threeColumn });
-  const railVisible = satNotesRailVisible({ open, compact, available: props.notesAvailable });
+  // The handle waits for a note: until there is something to come back to, the
+  // middle of the exam holds nothing notes-shaped at all, and the labeled top-bar
+  // entry stays the only way in.
+  const railVisible = satNotesRailVisible({
+    open,
+    compact,
+    available: props.notesAvailable,
+    hasNotes: satNotesCount(props.annotations, props.questionNote) > 0,
+  });
 
   const surface = useMemo<SatNotesSurface>(
     () => ({
@@ -80,7 +90,7 @@ export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
             onChangeNote={props.onChangeNote}
             onSaveQuestionNote={props.onSaveQuestionNote}
             onRemoveNote={props.onRemoveNote}
-            onWriteAboutQuestion={props.onWriteAboutQuestion}
+            onAddQuestionNote={props.onAddQuestionNote}
             onFlush={props.onFlush}
             onClose={props.onClose}
           />
@@ -90,7 +100,7 @@ export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
       rail: railVisible ? <SatNotesRail onOpen={props.onOpenNotes} /> : null,
       passageHint: props.hintVisible ? <SatAnnotationPassageHint /> : null,
     }),
-    [placement, props.annotations, props.disabled, props.hasHighlights, props.hintVisible, props.onChangeNote, props.onClose, props.onFlush, props.onOpenNotes, props.onRemoveNote, props.onSaveQuestionNote, props.onSelectNote, props.onWriteAboutQuestion, props.questionKey, props.questionNote, props.state, railVisible],
+    [placement, props.annotations, props.disabled, props.hasHighlights, props.hintVisible, props.onAddQuestionNote, props.onChangeNote, props.onClose, props.onFlush, props.onOpenNotes, props.onRemoveNote, props.onSaveQuestionNote, props.onSelectNote, props.questionKey, props.questionNote, props.state, railVisible],
   );
 
   return <SatNotesSurfaceContext.Provider value={surface}>{props.children}</SatNotesSurfaceContext.Provider>;

@@ -43,8 +43,18 @@ function withIdempotency(operationKey: string | undefined, base?: ApiRequestConf
 }
 
 export const assessmentAuthoringApi = {
+  /**
+   * The editable shell, or a 404 that MEANS something: an exam with no editable
+   * draft answers here, and the workspace renders that as its own state (with
+   * the explicit "Open draft" action) rather than as a load failure. The caller
+   * still receives the ApiError — `expectedStatuses` only retires the console
+   * warning, so a normal pre-draft exam stops looking like a broken app.
+   */
   getShell(examId: string): Promise<AssessmentAuthoringShell> {
-    return backendGet<AssessmentAuthoringShell>(`/v1/assessment-authoring/exams/${examId}/shell`);
+    return backendGet<AssessmentAuthoringShell>(
+      `/v1/assessment-authoring/exams/${examId}/shell`,
+      { expectedStatuses: [404] },
+    );
   },
 
   openShell(examId: string): Promise<AssessmentAuthoringShell> {
