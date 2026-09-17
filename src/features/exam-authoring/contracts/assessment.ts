@@ -19,6 +19,21 @@ export interface StructuredContent {
   document?: RichTextDocument | undefined;
 }
 
+/**
+ * The values an image's `align` and `size` attributes may carry.
+ *
+ * They live in the contract rather than in the editor because they are document
+ * data: the image node validates against them, the authoring surfaces offer
+ * them, and the student renderer reads them. `null` (or an absent attribute) is
+ * the pre-existing presentation — centred at the column's natural width — so
+ * content authored before these choices existed stays valid and unchanged.
+ */
+export type SatImageAlign = "left" | "center" | "right";
+export type SatImageSize = "small" | "medium" | "large";
+
+export const SAT_IMAGE_ALIGN_VALUES: readonly SatImageAlign[] = ["left", "center", "right"];
+export const SAT_IMAGE_SIZE_VALUES: readonly SatImageSize[] = ["small", "medium", "large"];
+
 export type ContentNode =
   | { type: "paragraph"; id: string; text: string }
   | { type: "heading"; id: string; level: number; text: string }

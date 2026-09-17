@@ -15,6 +15,7 @@
     "coedit:service:dev": "bun run --cwd services/authoring-coedit dev",
     "coedit:test": "bun run --cwd services/authoring-coedit test",
     "coedit:typecheck": "bun run --cwd services/authoring-coedit typecheck",
+    "coedit:manifest": "bun backend/scripts/syncCoeditRuntimeManifest.ts",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",

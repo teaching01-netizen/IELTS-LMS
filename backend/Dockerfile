@@ -61,18 +61,27 @@ COPY --from=frontend-builder /app/dist /app/frontend/dist
 # crossws Node adapter intentionally rejects Bun.
 COPY --from=frontend-builder /app/node_modules /app/node_modules
 COPY --from=frontend-builder /app/package.json /app/package.json
-COPY --from=frontend-builder /app/services/authoring-coedit/tsconfig.json /app/services/authoring-coedit/tsconfig.json
+# The source list below is GENERATED from backend/coedit-runtime-manifest.json:
+# add a path there and run `bun run coedit:manifest`. A hand-written COPY for
+# src/ or services/ outside that block fails the architecture guard.
+# coedit-runtime-manifest:begin
+# Generated from backend/coedit-runtime-manifest.json — do not hand-edit.
+# Regenerate with `bun run coedit:manifest`;
+# src/test/architecture/coedit-runtime-manifest.test.ts fails when this block
+# and the manifest disagree, so a missing path cannot reach production.
 COPY --from=frontend-builder /app/services/authoring-coedit/src /app/services/authoring-coedit/src
-COPY --from=frontend-builder /app/src/features/exam-authoring/editor/schema /app/src/features/exam-authoring/editor/schema
+COPY --from=frontend-builder /app/services/authoring-coedit/tsconfig.json /app/services/authoring-coedit/tsconfig.json
+COPY --from=frontend-builder /app/src/features/exam-authoring/contracts /app/src/features/exam-authoring/contracts
 COPY --from=frontend-builder /app/src/features/exam-authoring/editor/ingestion/domain /app/src/features/exam-authoring/editor/ingestion/domain
 COPY --from=frontend-builder /app/src/features/exam-authoring/editor/richContent.ts /app/src/features/exam-authoring/editor/richContent.ts
 COPY --from=frontend-builder /app/src/features/exam-authoring/editor/richContentIdentity.ts /app/src/features/exam-authoring/editor/richContentIdentity.ts
-COPY --from=frontend-builder /app/src/features/exam-authoring/contracts /app/src/features/exam-authoring/contracts
+COPY --from=frontend-builder /app/src/features/exam-authoring/editor/schema /app/src/features/exam-authoring/editor/schema
+COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/documentIdentity.ts /app/src/features/exam-authoring/realtime/coedit/documentIdentity.ts
+COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/protocol.ts /app/src/features/exam-authoring/realtime/coedit/protocol.ts
+COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/storeRequest.ts /app/src/features/exam-authoring/realtime/coedit/storeRequest.ts
 COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/workspaceCommands.ts /app/src/features/exam-authoring/realtime/coedit/workspaceCommands.ts
 COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/workspaceSeed.ts /app/src/features/exam-authoring/realtime/coedit/workspaceSeed.ts
-COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/storeRequest.ts /app/src/features/exam-authoring/realtime/coedit/storeRequest.ts
-COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/protocol.ts /app/src/features/exam-authoring/realtime/coedit/protocol.ts
-COPY --from=frontend-builder /app/src/features/exam-authoring/realtime/coedit/documentIdentity.ts /app/src/features/exam-authoring/realtime/coedit/documentIdentity.ts
+# coedit-runtime-manifest:end
 COPY backend/go/migrations /app/migrations
 COPY backend/scripts/normalize-background-runtime-mode.sh /app/normalize-background-runtime-mode.sh
 

@@ -1,0 +1,17 @@
+{
+  "//": "The ONE list of repository sources the backend image ships for the co-edit runtime. backend/Dockerfile's COPY block is generated from it (`bun run coedit:manifest`) and src/test/architecture/coedit-runtime-manifest.test.ts fails when the two disagree. A directory entry ships everything beneath it.",
+  "sources": [
+    "services/authoring-coedit/src",
+    "services/authoring-coedit/tsconfig.json",
+    "src/features/exam-authoring/contracts",
+    "src/features/exam-authoring/editor/ingestion/domain",
+    "src/features/exam-authoring/editor/richContent.ts",
+    "src/features/exam-authoring/editor/richContentIdentity.ts",
+    "src/features/exam-authoring/editor/schema",
+    "src/features/exam-authoring/realtime/coedit/documentIdentity.ts",
+    "src/features/exam-authoring/realtime/coedit/protocol.ts",
+    "src/features/exam-authoring/realtime/coedit/storeRequest.ts",
+    "src/features/exam-authoring/realtime/coedit/workspaceCommands.ts",
+    "src/features/exam-authoring/realtime/coedit/workspaceSeed.ts"
+  ]
+}

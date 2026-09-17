@@ -1,4 +1,10 @@
 import type { CSSProperties } from "react";
+import {
+  SAT_IMAGE_ALIGN_VALUES,
+  SAT_IMAGE_SIZE_VALUES,
+  type SatImageAlign,
+  type SatImageSize,
+} from "../contracts/assessment";
 
 /**
  * How an image is presented, in one place.
@@ -9,10 +15,10 @@ import type { CSSProperties } from "react";
  * made "Align left" a no-op on the surface that actually matters. Everything
  * that decides where a visual sits now comes from here.
  *
- * The vocabulary is the document's, not the UI's: `align` and `size` are the
- * attributes the shared image node stores, and `null` (or anything unrecognised)
- * means "as it was before these choices existed" — centred at the column's
- * natural width — so content authored earlier renders unchanged.
+ * It is a *frontend* module by design: only the two surfaces that draw a visual
+ * import it, never the schema or anything else the co-editing service loads in
+ * Node. The vocabulary itself is the document's (see the assessment contract),
+ * because "what the document accepts" is not a rendering concern.
  *
  * The two choices are deliberately orthogonal:
  *
@@ -22,12 +28,8 @@ import type { CSSProperties } from "react";
  * which is why alignment works on its own, without a size.
  */
 
-export type SatImageAlign = "left" | "center" | "right";
-export type SatImageSize = "small" | "medium" | "large";
-
-/** The document's vocabulary, shared with the image node's attribute validation. */
-export const SAT_IMAGE_ALIGN_VALUES: readonly SatImageAlign[] = ["left", "center", "right"];
-export const SAT_IMAGE_SIZE_VALUES: readonly SatImageSize[] = ["small", "medium", "large"];
+export { SAT_IMAGE_ALIGN_VALUES, SAT_IMAGE_SIZE_VALUES };
+export type { SatImageAlign, SatImageSize };
 
 export const IMAGE_ALIGN_OPTIONS: readonly { value: SatImageAlign; label: string }[] = [
   { value: "left", label: "Align left" },

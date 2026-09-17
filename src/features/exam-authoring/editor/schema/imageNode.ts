@@ -9,7 +9,7 @@ import { validateDurableImageSource } from "../ingestion/domain/imagePolicy";
 import {
   SAT_IMAGE_ALIGN_VALUES,
   SAT_IMAGE_SIZE_VALUES,
-} from "../../api/satImagePresentation";
+} from "../../contracts/assessment";
 
 // Renderable without the media service: http(s) and app-relative paths only.
 // data:/blob: URLs are never rendered directly — pasted images must go through
@@ -26,8 +26,10 @@ export function isDirectImageSource(value: string): boolean {
 // document carries whatever the author chose. `null` is the pre-existing
 // behaviour (centred, natural width), which keeps untouched content identical.
 //
-// The accepted values come from the presentation module, so the node cannot
-// accept a value the surfaces do not know how to render.
+// The accepted values come from the document contract, so the node cannot
+// accept a value the surfaces do not know how to render — and this module stays
+// as self-contained as the co-editing service needs it to be: it is loaded in
+// Node, where a frontend-only module would simply not exist.
 const alignValues = new Set<string>(SAT_IMAGE_ALIGN_VALUES);
 const sizeValues = new Set<string>(SAT_IMAGE_SIZE_VALUES);
 
