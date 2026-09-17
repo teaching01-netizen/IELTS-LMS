@@ -18,9 +18,9 @@ export interface SatAnnotationEducationState {
    * The passive "Select text to highlight" line has retired.
    *
    * It used to mean "the line was shown once", set by a five-second timer once
-   * the cue appeared — which is how a student who read slowly, or who opened
-   * Highlights & Notes later, was never taught at all. It now means only that
-   * the lesson is over: the student demonstrated the gesture. The stored name is
+   * the cue appeared — which is how a student who read slowly, or who armed
+   * annotation later, was never taught at all. It now means only that the
+   * lesson is over: the student demonstrated the gesture. The stored name is
    * unchanged so per-attempt records written by earlier builds still read.
    */
   sawHighlightHint: boolean;
@@ -63,8 +63,15 @@ export function normalizeSatAnnotationEducationState(value: unknown): SatAnnotat
   };
 }
 
-/** Delay before the passive hint appears, so it reads as an aside, not an alert. */
-export const SAT_ANNOTATION_HINT_DELAY_MS = 1200;
+/**
+ * How long the activation cue stays before retiring itself.
+ *
+ * The cue exists to connect two events that just happened — the student pressed
+ * Highlights, and the passage is now selectable — so it arrives at once and
+ * leaves on its own. It is short on purpose: long enough to read one line,
+ * never long enough to become furniture over the passage being read.
+ */
+export const SAT_ANNOTATION_CUE_MS = 3000;
 /** How long the removal toast (with Undo) stays reachable. */
 export const SAT_ANNOTATION_UNDO_MS = 5000;
 
@@ -79,20 +86,27 @@ export function satAnnotationHintRetired(state: SatAnnotationEducationState): bo
 /**
  * The whole teaching policy in one place.
  *
- * Rules from the spec, encoded so they cannot drift: the line appears only on an
- * interactive R&W question, only while nothing else is happening, and only for a
- * student who has not annotated anything yet.
+ * The cue is the answer to "I just armed this — what now?", so it is tied to
+ * the mode and to nothing else. Rules, encoded so they cannot drift:
  *
- * It is deliberately a function of state rather than of the clock. The line stays
- * available until the student demonstrates the gesture, then never returns for
- * the attempt — a student can discover it by looking at the passage whenever they
- * are ready, instead of having five seconds to notice it on question one.
+ * - it appears only while the student has ARMED annotation (never on load: an
+ *   unarmed exam teaches nothing, because nothing is armed to teach)
+ * - only on an interactive R&W question, and only while nothing else is
+ *   happening (no live selection, no answer started)
+ * - only for a student who has not annotated anything yet
+ *
+ * Once the student marks or writes something, the lesson is over and the cue
+ * never returns, however many times they toggle the mode afterwards. Until
+ * then, each activation offers the line again — which is what makes the toggle
+ * self-teaching instead of a control whose meaning has to be remembered.
  */
 export function shouldShowSatAnnotationHint(
   state: SatAnnotationEducationState,
   context: {
     annotationsAvailable: boolean;
     blocked: boolean;
+    /** True while the student has armed annotation; the cue teaches that mode. */
+    modeEnabled: boolean;
     hasSelection: boolean;
     answered: boolean;
     /** True once this question carries a mark or a note; the lesson is over. */
@@ -101,18 +115,8 @@ export function shouldShowSatAnnotationHint(
 ): boolean {
   if (satAnnotationHintRetired(state)) return false;
   if (context.hasAnnotations) return false;
+  if (!context.modeEnabled) return false;
   if (!context.annotationsAvailable || context.blocked) return false;
   if (context.hasSelection || context.answered) return false;
   return true;
-}
-
-/**
- * How long the line waits before appearing.
- *
- * Pressing Highlights & Notes is a direct request for the tool, so the lesson
- * arrives at once; otherwise it waits, so it reads as a quiet aside rather than
- * an alert firing on load.
- */
-export function satAnnotationHintDelayMs(notesColumnOpen: boolean): number {
-  return notesColumnOpen ? 0 : SAT_ANNOTATION_HINT_DELAY_MS;
 }

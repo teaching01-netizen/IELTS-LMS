@@ -16,12 +16,18 @@ export const SAT_ANNOTATION_LIMIT = 200;
 /**
  * Renders annotatable SAT content and owns the text-selection gesture.
  *
- * Selection is now the ONLY way to annotate: there is no armed paint tool, so
- * finishing a selection reports the span upward (the shell raises the
- * contextual toolbar) instead of applying a mark. Everything that changes an
- * annotation — ink, underline, note, removal — happens in the shell where the
- * response is written, so this component stays a renderer plus a gesture
- * listener.
+ * Selecting text is how an annotation is CREATED, but only while the student has
+ * armed the mode: finishing a selection reports the span upward (the shell
+ * raises the contextual toolbar) when annotation is on, and does nothing at all
+ * when it is off. Everything that changes an annotation — ink, underline, note,
+ * removal — happens in the shell where the response is written, so this
+ * component stays a renderer plus a gesture listener.
+ *
+ * The listener stays ATTACHED while the mode is off, and that is deliberate: it
+ * also records that a text drag ended (so a drag released over an answer option
+ * is not read as a tap on it). Detaching it would trade a visible bug for an
+ * invisible one. The mode is read through a ref and the listener exits before
+ * capturing anything, so no annotation state is touched either way.
  */
 export function SatAnnotatedContent({ content, annotations, region, enabled, enlarge, onLimitReached }: {
   content: StructuredContent;
@@ -46,9 +52,12 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
 
   // Live selection reporting through a ref so the listener below never needs
   // re-binding: re-binding mid-gesture would lose the pointerup that completes
-  // the very selection being captured.
+  // the very selection being captured. The armed mode rides the same ref for the
+  // same reason — arming or disarming during a drag must not drop the release.
   const reportSelection = useRef<((anchor: SatTextAnchor) => void) | null>(null);
   reportSelection.current = view.onSelectionCaptured ?? null;
+  const modeEnabled = useRef(view.annotationModeEnabled);
+  modeEnabled.current = view.annotationModeEnabled;
 
   /**
    * Selection gesture. Capture is deliberately passive: a completed selection
@@ -68,8 +77,14 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
       const selection = window.getSelection();
       // Any finished selection retires answer-click safety, even when it cannot
       // be anchored (a drag across two blocks still ends with a click landing
-      // wherever the finger stopped).
+      // wherever the finger stopped). This runs whether or not annotation is
+      // armed: it protects the answer controls, and has nothing to do with the
+      // annotation mode.
       if (selection && !selection.isCollapsed) markSatSelectionGestureEnded();
+      // The invariant, at the gesture: with the mode off the browser's own
+      // selection behavior is all there is. Nothing is captured, nothing is
+      // serialized, nothing is reported upward.
+      if (!modeEnabled.current) return;
       const anchor = captureSatTextSelection(root.current, region, selection, {
         allowAnnotationControls: true,
       });
@@ -178,9 +193,10 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         }
         const match = segmentMark;
         // In-place affordance: clicking a mark opens its editor directly, where
-        // color / note / removal live. Marks without a live editor stay plain
-        // spans (read-only contexts).
-        const interactive = match !== undefined && view.openEditorActive;
+        // color / note / removal live. Two conditions, two different meanings:
+        // the capability (`openEditorActive`) and the armed mode. Marks without
+        // both stay plain spans — still painted with their ink, never controls.
+        const interactive = match !== undefined && view.openEditorActive && view.annotationModeEnabled;
         // A note is what the student wrote, not a kind of mark: the passage
         // reports it as an attribute and the label reads the same one answer —
         // nothing is drawn into the sentence for it.
@@ -191,16 +207,26 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         return (
           <span
             key={start}
-            // The same mark, in one place: interactive attributes are added when
-            // an editor can open, never rebuilt as a second markup branch.
+            // What the mark IS, present whenever it is painted: its identity and
+            // whether it carries a note. These are facts about the student's
+            // work, not about the tool — the margin dots measure against the id
+            // and closing a note returns focus to it, and both have to keep
+            // working with annotation unarmed. Without the id, turning the mode
+            // off would make the student's own dots disappear.
+            {...(match
+              ? {
+                  'data-sat-annotation-id': match.id,
+                  // Truthful, not decorative: present only when there is a note.
+                  ...(hasNote ? { 'data-sat-annotation-note': 'true' } : {}),
+                }
+              : {})}
+            // What the mark OFFERS, present only while annotation is armed. The
+            // same mark, in one place: never rebuilt as a second markup branch.
             {...(interactive && match
               ? {
                   role: 'button' as const,
                   tabIndex: 0,
                   'data-sat-annotation-control': 'true',
-                  'data-sat-annotation-id': match.id,
-                  // Truthful, not decorative: present only when there is a note.
-                  ...(hasNote ? { 'data-sat-annotation-note': 'true' } : {}),
                   'data-sat-annotation-active': view.activeAnnotationId === match.id ? 'true' : undefined,
                   'aria-label': label,
                   title: label,
@@ -230,7 +256,10 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
             style={{
               ...(segment.highlight ? satHighlightMarkStyle(segment.highlight) : {}),
               ...(segment.underline ? { textDecorationLine: 'underline', textDecorationColor: 'var(--sat-underline, currentColor)', textDecorationThickness: '2px', textUnderlineOffset: '3px' } : {}),
-              ...(interactive ? { boxDecorationBreak: 'clone' as const, WebkitBoxDecorationBreak: 'clone' as const } : {}),
+              // Cloned per wrapped line for the same geometry in Chromium and
+              // WebKit. Keyed on the mark being PAINTED, never on it being
+              // interactive: arming the mode must not restyle anyone's ink.
+              ...(segment.highlight || segment.underline ? { boxDecorationBreak: 'clone' as const, WebkitBoxDecorationBreak: 'clone' as const } : {}),
               ...(segment.underline && !segment.highlight ? { color: 'inherit' } : {}),
             }}
           >
@@ -240,7 +269,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- contentKey is the memo input; the raw content object is consumed by the renderer, not read here.
-  }, [annotations, region, contentKey, view.activeAnnotationId, view.openEditorActive, view.openEditor]);
+  }, [annotations, region, contentKey, view.activeAnnotationId, view.openEditorActive, view.annotationModeEnabled, view.openEditor]);
 
   return (
     <div>

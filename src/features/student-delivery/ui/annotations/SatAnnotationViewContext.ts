@@ -17,8 +17,20 @@ export interface SatAnnotationView {
   /**
    * False in read-only contexts (disabled exam, preview shells): marks render
    * as decoration instead of controls.
+   *
+   * This is the CAPABILITY (R&W, unblocked, response wired). It is deliberately
+   * not the armed mode: marks and their margin dots are the student's work and
+   * stay on screen whether or not annotation is armed.
    */
   openEditorActive: boolean;
+  /**
+   * True while the student has armed annotation.
+   *
+   * Selecting text may only produce controls in this state, and an existing mark
+   * only becomes a control in this state. It is what makes the top-bar toggle
+   * mean something in both directions.
+   */
+  annotationModeEnabled: boolean;
   /** Student tapped or activated an existing mark: open its editor. */
   openEditor: (annotation: SatTextAnnotation) => void;
   /** A completed text selection, reported upward for the toolbar. */
@@ -28,6 +40,9 @@ export interface SatAnnotationView {
 const EMPTY_VIEW: SatAnnotationView = {
   activeAnnotationId: null,
   openEditorActive: false,
+  // Default OFF: a context that never armed annotation cannot raise controls,
+  // which is the safe end of the invariant.
+  annotationModeEnabled: false,
   openEditor: () => undefined,
 };
 

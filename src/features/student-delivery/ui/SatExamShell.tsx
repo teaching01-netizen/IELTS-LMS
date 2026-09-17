@@ -23,7 +23,7 @@ import { SatContrastContext } from './reading/SatContrastContext';
 import { useSatMediaQuery } from './useSatMediaQuery';
 import { useSatAnnotationSurface } from '../hooks/useSatAnnotationSurface';
 import type { SatQuestionAnnotations } from '../domain/satResponses';
-import { SAT_QUESTION_NOTE_EDITOR } from '../domain/satNotesUi';
+import { SAT_QUESTION_NOTE_EDITOR, satNotesColumnOpen, satNotesCount } from '../domain/satNotesUi';
 import { SAT_COPY } from '../domain/satCopy';
 import { SatAnnotationEditDock } from './annotations/SatAnnotationEditDock';
 import { SatAnnotationViewContext } from './annotations/SatAnnotationViewContext';
@@ -166,14 +166,18 @@ export function SatExamShell(props: SatExamShellProps) {
   const [timerWarningVisible, setTimerWarningVisible] = useState(false);
 
   /* ------------------------------------------------------------------ *
-   * Highlights & Notes (selection-first)
+   * Highlights & Notes (armed mode)
    *
-   * One owner for the whole annotation surface: marks, chrome, undo, and the
-   * teaching cues all live in useSatAnnotationSurface. The shell renders what
-   * it returns and reports gestures; nothing here writes an annotation twice.
+   * One owner for the whole annotation surface: the armed mode, the marks, the
+   * chrome, undo, and the teaching cues all live in useSatAnnotationSurface.
+   * The shell renders what it returns and reports gestures; nothing here writes
+   * an annotation twice, and nothing here decides whether selection may produce
+   * controls — that answer comes from the interaction machine.
    * ------------------------------------------------------------------ */
   // Declared before the annotation surface: the notes column's focus contract
-  // needs the id of the control that opens it.
+  // needs the id of the control that opens it. It belongs to the Notes
+  // DISCLOSURE — the one control that opens the column — never to the mode
+  // toggle beside it, which opens nothing.
   const notesButtonId = useId();
   const navigatorButtonId = useId();
   const navigatorPanelId = useId();
@@ -194,6 +198,8 @@ export function SatExamShell(props: SatExamShellProps) {
     notesTriggerId: notesButtonId,
   });
   const {
+    annotationModeEnabled,
+    toggleAnnotationMode,
     selection,
     annotationView,
     selectionActions,
@@ -213,6 +219,23 @@ export function SatExamShell(props: SatExamShellProps) {
   } = surface;
   const annotationsWritable = surface.writable;
   const questionHasAnnotations = props.questionNote.trim().length > 0 || surface.hasAnnotations;
+  /**
+   * The Notes column's open state, read from the one Notes UI value.
+   *
+   * Deliberately NOT `activeOverlay === 'notes'`: a note's own editor is a
+   * surface too, and the column is equally open while one is showing. Reading
+   * the notes state keeps the disclosure's expanded state honest in both cases.
+   */
+  const notesColumnOpen = satNotesColumnOpen(surface.notesState);
+  const notesCount = satNotesCount(questionNotes, props.questionNote);
+  /**
+   * The disclosure's one job: show or hide the column.
+   *
+   * A genuine open/close pair rather than a toggle intent, because closing is
+   * the only path that has to hand focus back to the text the note was about —
+   * `closeNotes` owns that, and every way out of the column shares it.
+   */
+  const toggleNotesColumn = () => (notesColumnOpen ? surface.closeNotes() : surface.openNotes());
 
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
@@ -282,22 +305,17 @@ export function SatExamShell(props: SatExamShellProps) {
     calculator: () => props.onToggleCalculator(),
     reference: () => props.onToggleReference(),
     lineReader: () => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: !(props.readingPreferences.lineReaderEnabled ?? false) }),
-    // Highlights & Notes is a surface now, not an armed mode: with a selection
-    // live the shortcut drives the contextual toolbar (the colors are already
-    // one keystroke away); otherwise it opens the notes panel.
-    highlights: () => {
-      if (interaction.state.annotation.selection) {
-        document.querySelector<HTMLButtonElement>('[data-sat-selection-toolbar="true"] button:not([disabled]), [data-sat-touch-dock="true"] button:not([disabled])')?.focus();
-        return;
-      }
-      interaction.closeSurface();
-      interaction.toggleSurface('question-notes');
-    },
+    // The shortcut is the same single meaning as the control: arm or disarm
+    // annotation. It does not open notes, it does not create anything, and it
+    // is not a "focus the toolbar" gesture — those would give the key a second
+    // meaning that the button does not have.
+    highlights: () => toggleAnnotationMode(),
     eliminatorMode: () => props.onToggleEliminationMode?.(),
     markForReview: () => props.onToggleMarkForReview?.(),
     questionMenu: () => toggleOverlay("navigator"),
     directions: () => toggleOverlay("directions"),
-    notes: () => toggleOverlay("notes"),
+    // Opening the Notes column is its own action, from its own control.
+    notes: () => toggleNotesColumn(),
     timerVisibility: () => setTimerVisible((visible) => !visible),
     help: () => props.onOpenHelp?.(),
     shortcuts: () => props.onOpenShortcuts?.(),
@@ -387,7 +405,10 @@ export function SatExamShell(props: SatExamShellProps) {
         referenceAvailable={props.referenceAvailable}
         referenceOpen={props.referenceOpen}
         notesAvailable={notesAvailable}
-        notesOpen={activeOverlay === "notes"}
+        annotationModeEnabled={annotationModeEnabled}
+        onToggleAnnotationMode={toggleAnnotationMode}
+        notesOpen={notesColumnOpen}
+        notesCount={notesCount}
         notesButtonId={notesButtonId}
         hasAnnotations={questionHasAnnotations}
         readingOpen={activeOverlay === "reading"}
@@ -398,7 +419,7 @@ export function SatExamShell(props: SatExamShellProps) {
         onToggleTimer={() => setTimerVisible((visible) => !visible)}
         onToggleCalculator={toggleCalculator}
         onToggleReference={toggleReference}
-        onToggleNotes={() => toggleOverlay("notes")}
+        onToggleNotes={toggleNotesColumn}
         moreOpen={activeOverlay === "more"}
         onToggleMore={() => toggleOverlay("more")}
         onToggleReading={() => toggleOverlay("reading")}

@@ -88,9 +88,9 @@ describe("Wave A R-02 compact single-modal (option ii: tool sheet non-modal)", (
         </SatFloatingTool>
       </>,
     );
-    // Highlights & Notes is one labeled entry; what it opens is a structural
-    // column, so it adds no dialog to the stack.
-    fireEvent.click(screen.getByRole("button", { name: /^Highlights & Notes/ }));
+    // Notes opens from its own disclosure; what it opens is a structural column,
+    // so it adds no dialog to the stack.
+    fireEvent.click(screen.getByRole("button", { name: /^Notes/ }));
     expect(await screen.findByRole("complementary", { name: "Notes" })).toBeInTheDocument();
     const tool = screen.getByRole("dialog", { name: "Calculator" });
     expect(tool).toHaveAttribute("data-sat-tool-presentation", "compact-sheet");
@@ -122,9 +122,9 @@ describe("Wave A R-03 focus return per surface (option A: mounted selectors)", (
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
-  it("notes: open, Escape, focus returns to the Highlights & Notes trigger", async () => {
+  it("notes: open, Escape, focus returns to the Notes disclosure", async () => {
     render(<SatExamShell {...shellProps()} />);
-    const trigger = screen.getByRole("button", { name: /^Highlights & Notes/ });
+    const trigger = screen.getByRole("button", { name: /^Notes/ });
     expect(trigger).toHaveAttribute("data-sat-focus", "topbar-notes");
     fireEvent.click(trigger);
     expect(screen.getByRole("complementary", { name: "Notes" })).toBeInTheDocument();

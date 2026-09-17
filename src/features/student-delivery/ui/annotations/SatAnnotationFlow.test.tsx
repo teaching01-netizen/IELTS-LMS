@@ -5,9 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SatAccessibilityDebugRoute } from '../../../../app/router/dev/SatAccessibilityDebugRoute';
 
 /**
- * The student journey the whole pass exists for: select text, see obvious
- * labeled controls, tap a color, watch the sentence change. No tutorial is
- * involved anywhere in these tests — that is the point.
+ * The student journey the whole pass exists for: turn Highlights on, select text,
+ * see obvious labeled controls, tap a color, watch the sentence change. No
+ * tutorial is involved anywhere in these tests — that is the point.
+ *
+ * The mode is the spine of the journey, so it is never implied by a helper:
+ * `selectStimulusText` only makes a selection (which is exactly what an unarmed
+ * exam must ignore), and `armHighlights` is the student pressing the control.
  */
 
 /** Select the first `length` characters of the passage's first text node. */
@@ -27,7 +31,24 @@ function selectStimulusText(container: HTMLElement, value: string, length = valu
   fireEvent.pointerUp(textNode.parentElement!);
 }
 
+/** The labeled top-bar control that arms annotation. */
+function highlightsToggle(): HTMLElement {
+  return screen.getByRole('button', { name: /^Highlights & Notes/ });
+}
+
+/** The disclosure beside it: the one control that opens the Notes column. */
+function notesDisclosure(): HTMLElement {
+  return screen.getByRole('button', { name: /^Notes/ });
+}
+
+/** Arm annotation the way the student does: press the labeled control. */
+function armHighlights(): void {
+  const toggle = highlightsToggle();
+  if (toggle.getAttribute('aria-pressed') !== 'true') fireEvent.click(toggle);
+}
+
 function highlight(container: HTMLElement, value: string, color: 'Yellow' | 'Blue' | 'Pink', length?: number) {
+  armHighlights();
   selectStimulusText(container, value, length ?? value.length);
   fireEvent.click(screen.getByRole('button', { name: 'Highlight ' + color }));
 }
@@ -55,9 +76,158 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('SAT shell annotation flow (selection first)', () => {
+/*
+ * The invariant, first and on its own: OFF means OFF. Everything else in this
+ * file is what the student gets once they have asked for the tool.
+ */
+describe('SAT annotation mode (the non-negotiable rule)', () => {
+  it('starts off, and selecting text in an unarmed exam raises nothing', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'false');
+
+    selectStimulusText(container, 'Several');
+
+    // No toolbar, no inks, no underline, no Add note — none of it exists.
+    expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Highlight Yellow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Highlight Blue' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Highlight Pink' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Underline' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add note' })).not.toBeInTheDocument();
+    // The browser's own selection is left alone: this is our system declining to
+    // act, not us fighting the platform.
+    expect(window.getSelection()?.isCollapsed).toBe(false);
+    // And nothing was marked.
+    expect(container.querySelector('[data-sat-highlight="true"]')).toBeNull();
+  });
+
+  it('arms on one press of the labeled control — and does nothing else at all', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    const toggle = highlightsToggle();
+
+    fireEvent.click(toggle);
+
+    // The control now reads as on, in state as well as styling.
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'true');
+    // Arming opens NOTHING: no Notes column, no popover, no mark, no layout move.
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
+    expect(container.querySelector('[data-sat-highlight="true"]')).toBeNull();
+
+    // Now — and only now — the gesture produces the tools.
+    selectStimulusText(container, 'Several');
+    expect(screen.getByRole('toolbar', { name: 'Selected text actions' })).toBeInTheDocument();
+  });
+
+  it('stays armed after a highlight, so the next phrase needs no re-arming', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    highlight(container, 'Several', 'Yellow');
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'true');
+
+    // Second phrase, same tools, no trip back to the top bar.
+    selectStimulusText(container, 'researchers');
+    fireEvent.click(screen.getByRole('button', { name: 'Highlight Blue' }));
+    expect(container.querySelectorAll('[data-sat-highlight="true"]')).toHaveLength(2);
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('keeps the student’s marks painted but inert while off', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    highlight(container, 'Several', 'Pink');
+    const mark = container.querySelector<HTMLElement>('[data-sat-highlight="true"]')!;
+    expect(mark).toHaveAttribute('data-sat-highlight-color', 'pink');
+
+    fireEvent.click(highlightsToggle());
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'false');
+
+    // The work is still there, in its own ink: OFF stops editing, it never hides.
+    const painted = container.querySelector<HTMLElement>('[data-sat-highlight="true"]')!;
+    expect(painted).toHaveTextContent('Several');
+    expect(painted).toHaveAttribute('data-sat-highlight-color', 'pink');
+    // …and it is no longer a control: tapping it opens nothing.
+    expect(painted).not.toHaveAttribute('role');
+    expect(painted).not.toHaveAttribute('data-sat-annotation-control');
+    fireEvent.click(painted);
+    expect(screen.queryByRole('toolbar', { name: 'Edit annotation' })).not.toBeInTheDocument();
+
+    // Arming again is what makes it editable, which is what the toggle promises.
+    armHighlights();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-sat-highlight="true"]')!);
+    expect(screen.getByRole('toolbar', { name: 'Edit annotation' })).toBeInTheDocument();
+  });
+
+  it('disarms: the open tools close, and nothing else changes', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
+    selectStimulusText(container, 'Several');
+    expect(screen.getByRole('toolbar', { name: 'Selected text actions' })).toBeInTheDocument();
+
+    fireEvent.click(highlightsToggle());
+
+    // The toolbar is the annotation chrome the student just dismissed.
+    expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
+    // Nothing was deleted and nothing was hidden.
+    expect(container.querySelector('[data-sat-highlight="true"]')).toBeNull();
+    expect(screen.queryByTestId('sat-undo-toast')).not.toBeInTheDocument();
+  });
+
+  // Two independent states, asserted in both directions: neither control may
+  // secretly drive the other.
+  it('opening and hiding Notes never changes the mode', async () => {
+    stubWideViewport();
+    render(<SatAccessibilityDebugRoute />);
+    armHighlights();
+
+    fireEvent.click(notesDisclosure());
+    expect(await screen.findByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide notes' }));
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
+    // Hiding the pane is not disarming the tool.
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'true');
+
+    // …and opening Notes is not arming it either.
+    fireEvent.click(highlightsToggle());
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(notesDisclosure());
+    expect(await screen.findByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('keeps the Notes column open when the mode is turned off', async () => {
+    stubWideViewport();
+    render(<SatAccessibilityDebugRoute />);
+    armHighlights();
+    fireEvent.click(notesDisclosure());
+    const column = await screen.findByRole('complementary', { name: 'Notes' });
+
+    fireEvent.click(highlightsToggle());
+
+    // A student reviewing what they wrote is not disarmed out of their reading.
+    expect(column).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide notes' })).toBeInTheDocument();
+  });
+
+  it('hides the Notes column from its own disclosure, leaving the mode alone', async () => {
+    stubWideViewport();
+    render(<SatAccessibilityDebugRoute />);
+    armHighlights();
+    fireEvent.click(notesDisclosure());
+    expect(await screen.findByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
+
+    // The disclosure is a genuine open/close control, so an open column is one
+    // press from closed without reaching for the pane's own close button.
+    fireEvent.click(notesDisclosure());
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('SAT shell annotation flow (armed mode)', () => {
   it('raises labeled color controls on a selection and highlights on one tap', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
     expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
 
     selectStimulusText(container, 'Several');
@@ -90,6 +260,7 @@ describe('SAT shell annotation flow (selection first)', () => {
 
   it('lets the student close the popover with a written control', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
     selectStimulusText(container, 'Several');
     const toolbar = screen.getByRole('toolbar', { name: 'Selected text actions' });
     // Esc already did this, invisibly. The control names the action for the
@@ -102,6 +273,7 @@ describe('SAT shell annotation flow (selection first)', () => {
 
   it('underlines a selection from the same toolbar', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
     selectStimulusText(container, 'researchers');
     fireEvent.click(screen.getByRole('button', { name: 'Underline' }));
     expect(container.querySelector('[data-sat-underline="true"]')).toHaveTextContent('researchers');
@@ -110,6 +282,7 @@ describe('SAT shell annotation flow (selection first)', () => {
 
   it('creates a highlight from the keyboard alone (shift+arrows then the toolbar)', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
     const leaf = container.querySelector('[data-sat-annotation-region="stimulus"] [data-content-text-node] span span')!.firstChild!;
     const seed = document.createRange();
     seed.setStart(leaf, 0); seed.setEnd(leaf, 7);
@@ -125,11 +298,12 @@ describe('SAT shell annotation flow (selection first)', () => {
 
   it('opens a new note in the Notes pane, in edit mode, with the caret already in it', async () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
     selectStimulusText(container, 'Several');
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
 
-    // Choosing "Add note" leaves a visible mark behind: a note without a source
-    // would be unfindable later.
+    // The pane opens only because Add note was pressed — never because the mode
+    // was armed or text was selected.
     expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
     // One note has one editor: the mark's tools step aside for the pane's field
     // rather than sitting over it with a second textarea for the same words.
@@ -198,7 +372,7 @@ describe('SAT shell annotation flow (selection first)', () => {
     expect(document.querySelector('[data-sat-note-card]')).toHaveTextContent('“Several”');
   });
 
-  it('clears the tools on Escape without touching the mark', () => {
+  it('clears the tools on Escape without touching the mark or the mode', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     highlight(container, 'Several', 'Yellow');
     selectStimulusText(container, 'Several');
@@ -206,6 +380,8 @@ describe('SAT shell annotation flow (selection first)', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
     expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
+    // Dismissing chrome is not disarming the tool: the next selection still works.
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('lists anchored notes in the Notes column with their ink and quoted source', async () => {
@@ -228,7 +404,7 @@ describe('SAT shell annotation flow (selection first)', () => {
 
   it('coaches an empty Notes column instead of floating a detached pill', () => {
     render(<SatAccessibilityDebugRoute />);
-    fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
+    fireEvent.click(notesDisclosure());
     // What the column is, then the one gesture that fills it — no dashed box and
     // no call to action standing in for a heading.
     const empty = document.querySelector('[data-sat-notes-empty]')!;
@@ -238,55 +414,61 @@ describe('SAT shell annotation flow (selection first)', () => {
     expect(document.querySelector('[data-sat-select-text-coach]')).toBeNull();
   });
 
-  it('shows the passive first-use hint in the passage, and retires it on the gesture alone', () => {
+  it('offers the cue when the mode is armed, and takes it away on its own', () => {
     vi.useFakeTimers();
     try {
-      const { container } = render(<SatAccessibilityDebugRoute />);
-      // Nothing appears on load: the hint is an aside, not an alert.
+      render(<SatAccessibilityDebugRoute />);
+      // Nothing appears on load: an unarmed exam has no gesture to teach.
       expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
       act(() => {
-        vi.advanceTimersByTime(1500);
+        vi.advanceTimersByTime(5000);
       });
-      // It sits in the passage it is about, not pinned to the tool entry.
-      const hint = document.querySelector('[data-sat-annotation-hint]')!;
-      expect(hint).toHaveTextContent('Select text to highlight or add a note');
-      expect(hint.closest('[data-sat-passage-scroll]')).not.toBeNull();
-      // Time passing is not a lesson: the line waits for the student instead of
-      // retiring itself, which is what let slow readers miss it entirely.
+      expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
+
       act(() => {
-        vi.advanceTimersByTime(60_000);
+        fireEvent.click(highlightsToggle());
+      });
+      // It arrives at once, where the new capability applies, and it answers the
+      // question the student just created: "what did that do?"
+      const cue = document.querySelector('[data-sat-annotation-hint]')!;
+      expect(cue).toHaveTextContent('Highlighting on');
+      expect(cue).toHaveTextContent('select text to highlight or add a note');
+      expect(cue.closest('[data-sat-passage-scroll]')).not.toBeNull();
+
+      // It leaves on its own, so it can never become furniture over the passage.
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
+
+      // Disarming is not a lesson, but re-arming still is: the student has not
+      // annotated anything, so the line is offered again — once.
+      act(() => {
+        fireEvent.click(highlightsToggle());
+      });
+      expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
+      act(() => {
+        fireEvent.click(highlightsToggle());
       });
       expect(document.querySelector('[data-sat-annotation-hint]')).not.toBeNull();
-      // Demonstrating the gesture is the whole lesson: the hint never returns.
-      selectStimulusText(container, 'Several');
-      expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
-      act(() => {
-        vi.advanceTimersByTime(60_000);
-      });
-      expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('teaches at once when the student opens Highlights & Notes', () => {
-    vi.useFakeTimers();
-    try {
-      render(<SatAccessibilityDebugRoute />);
-      expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
-      // Pressing the tool is a direct request for it, so the lesson is already on
-      // screen — no delay to sit through, and no selection required first.
-      fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
-      expect(screen.getByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
-      expect(document.querySelector('[data-sat-annotation-hint]')).toHaveTextContent('Select text to highlight or add a note');
-    } finally {
-      vi.useRealTimers();
-    }
+  it('retires the cue for good once the student makes a mark', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    highlight(container, 'Several', 'Yellow');
+
+    // The mark itself is the lesson: no line is needed, and none appears.
+    fireEvent.click(highlightsToggle());
+    fireEvent.click(highlightsToggle());
+    expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
   });
 
   it('gives the question’s own note the same undo as a note on the passage', async () => {
     render(<SatAccessibilityDebugRoute />);
-    fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
+    fireEvent.click(notesDisclosure());
     fireEvent.click(screen.getByRole('button', { name: 'Add question note' }));
     const field = await screen.findByRole('textbox', { name: 'This question' });
     fireEvent.change(field, { target: { value: 'The control condition' } });
@@ -345,6 +527,7 @@ describe('SAT annotation Bluebook surfaces (Phase 7)', () => {
   it('writes notes in a structural column: no modal, no scrim, exam still usable', async () => {
     stubWideViewport();
     const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
     selectStimulusText(container, 'Several');
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
     const field = await screen.findByRole('textbox', { name: 'Notes' });
@@ -372,20 +555,20 @@ describe('SAT annotation Bluebook surfaces (Phase 7)', () => {
   it('leaves nothing in the middle until there is a note, then a handle that brings it back', async () => {
     stubWideViewport();
     const { container } = render(<SatAccessibilityDebugRoute />);
-    const trigger = screen.getByRole('button', { name: /^Highlights & Notes/ });
-    fireEvent.click(trigger);
+    const disclosure = notesDisclosure();
+    fireEvent.click(disclosure);
     expect(await screen.findByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
     const layout = container.querySelector<HTMLElement>('[data-sat-reading-split]')!;
 
     // Nothing written yet: hiding leaves nothing behind, because a handle promises
     // something to come back to and there is nothing yet. The middle of the exam
     // holds no notes-shaped furniture — and the caret still lands somewhere useful
-    // rather than on <body>, because the labeled entry that opened the pane is the
+    // rather than on <body>, because the disclosure that opened the pane is the
     // one way back that exists.
     fireEvent.click(screen.getByRole('button', { name: 'Hide notes' }));
     expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show notes' })).not.toBeInTheDocument();
-    await waitFor(() => expect(trigger).toHaveFocus());
+    await waitFor(() => expect(disclosure).toHaveFocus());
 
     // Marking text is not writing about it: a highlight on its own still leaves the
     // middle alone, which is the state a student who only highlights lives in.
@@ -411,7 +594,7 @@ describe('SAT annotation Bluebook surfaces (Phase 7)', () => {
     // The note survived the trip, and now there is something to come back to:
     // hiding the list itself leaves the handle in the pane's own seat with the
     // caret on it, so a keyboard student can undo the hide with the next press.
-    fireEvent.click(trigger);
+    fireEvent.click(disclosure);
     expect(await screen.findByRole('complementary', { name: 'Notes' })).toHaveTextContent('Compare the claim');
     fireEvent.click(screen.getByRole('button', { name: 'Hide notes' }));
     const rail = screen.getByRole('button', { name: 'Show notes' });

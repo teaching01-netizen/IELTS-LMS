@@ -262,6 +262,31 @@ async function selectStimulusText(page: Page, requested: string) {
   }, requested);
 }
 
+/**
+ * Arm annotation the way the student does: press the labeled top-bar control.
+ *
+ * This is the press that makes selection meaningful. Without it the gesture
+ * below raises nothing at all — which is asserted on its own in the annotation
+ * flow test, and is the invariant the mode exists for.
+ */
+async function armHighlights(page: Page) {
+  const toggle = page.getByRole('button', { name: /^Highlights & Notes/ });
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+}
+
+/**
+ * Arm annotation, then run the app's own selection gesture.
+ *
+ * Kept separate from `selectStimulusText` so the unarmed case stays expressible:
+ * a test that asserts "selecting text raises nothing" must be able to make a
+ * selection without secretly arming the tool first.
+ */
+async function selectTextForAnnotation(page: Page, requested: string) {
+  await armHighlights(page);
+  await selectStimulusText(page, requested);
+}
+
 test.describe("SAT student accessibility and layout", () => {
   test('combined text size, exam zoom, and contrast reflow without clipping', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -309,15 +334,23 @@ test.describe("SAT student accessibility and layout", () => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await openSatHarness(page);
 
-    // No armed paint tool in the top bar anymore: the controls belong to the
-    // selection, so a first-time student meets them exactly when they are
-    // useful.
+    // The controls belong to the SELECTION, not to a paint button in the top bar:
+    // nothing sits up there waiting to be decoded, and nothing appears until the
+    // student arms the tool and selects text.
     await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Underline', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveCount(0);
     await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toHaveCount(0);
 
+    // Off by default, and OFF MEANS OFF: the first selection of the exam raises
+    // nothing whatsoever. This is the invariant the whole mode exists for.
     await selectStimulusText(page, 'Several');
+    await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Highlight Yellow' })).toHaveCount(0);
+    await expect(page.locator('[data-sat-highlight="true"]')).toHaveCount(0);
+
+    // The same gesture, after one press on the labeled control, produces them.
+    await selectTextForAnnotation(page, 'Several');
     const selectionToolbar = page.getByRole('toolbar', { name: 'Selected text actions' });
     await expect(selectionToolbar).toBeVisible();
     // The heading is what links "selected text" to "highlight" unaided.
@@ -335,7 +368,7 @@ test.describe("SAT student accessibility and layout", () => {
     await editDock.getByRole('button', { name: 'Highlight Pink' }).click();
     await expect(page.locator('[data-sat-highlight="true"]').first()).toHaveAttribute('data-sat-highlight-color', 'pink');
 
-    await selectStimulusText(page, 'researchers');
+    await selectTextForAnnotation(page, 'researchers');
     await page.getByRole('toolbar', { name: 'Selected text actions' }).getByRole('button', { name: 'Underline' }).click();
     await expect(page.locator('[data-sat-underline="true"]')).toContainText('researchers');
 
@@ -354,12 +387,16 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(page.getByRole('button', { name: 'Underline', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Highlights & Notes/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Notes/ })).toHaveCount(0);
     await expect(page.locator('[data-sat-annotation-region="stimulus"]')).toHaveCount(0);
   });
 
   test('a selection hands the keyboard to the toolbar, and a drag on a mark is not a tap', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 768 });
     await openSatHarness(page);
+    // Armed before the drag: an unarmed exam shows no toolbar at all, and this
+    // test is about where the toolbar goes — and when it must not.
+    await armHighlights(page);
     const passage = page.locator('[data-sat-annotation-region="stimulus"] p').first();
     const box = (await passage.boundingBox())!;
 
@@ -409,7 +446,7 @@ test.describe("SAT student accessibility and layout", () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await openSatHarness(page);
 
-    await selectStimulusText(page, 'Several');
+    await selectTextForAnnotation(page, 'Several');
     await expect(page.getByRole('toolbar', { name: 'Selected text actions' })).toBeVisible();
     await expectNoSeriousAxeViolations(page, 'selection toolbar over a live selection');
 
@@ -479,10 +516,11 @@ test.describe("SAT student accessibility and layout", () => {
     await page.mouse.click(1000, 740);
     await expect(page.getByRole("dialog", { name: "Directions" })).toHaveCount(0);
 
-    // Notes are deliberately NOT a popover. One labeled entry opens a column
-    // that is part of the passage/question layout, so writing a note never dims,
-    // covers, or navigates away from the exam it is written about.
-    const notes = page.getByRole("button", { name: /Highlights & Notes/ });
+    // Notes are deliberately NOT a popover. The labeled entry arms annotation;
+    // the disclosure beside it opens a column that is part of the
+    // passage/question layout, so writing a note never dims, covers, or navigates
+    // away from the exam it is written about.
+    const notes = page.getByRole("button", { name: /^Notes/ });
     await notes.click();
     const column = page.getByRole("complementary", { name: "Notes" });
     await expect(column).toBeVisible();
@@ -506,7 +544,7 @@ test.describe("SAT student accessibility and layout", () => {
 
     // Highlighting is not writing: turning on an ink from the tools leaves the
     // middle of the exam exactly as it was.
-    await selectStimulusText(page, "researchers");
+    await selectTextForAnnotation(page, "researchers");
     await page
       .getByRole("toolbar", { name: "Selected text actions" })
       .getByRole("button", { name: "Highlight Yellow" })
@@ -522,7 +560,7 @@ test.describe("SAT student accessibility and layout", () => {
 
     // The whole journey, in one sentence: select text, choose Add note, and the
     // note opens beside the words it is about with the caret already in it.
-    await selectStimulusText(page, "Several");
+    await selectTextForAnnotation(page, "Several");
     await page
       .getByRole("toolbar", { name: "Selected text actions" })
       .getByRole("button", { name: "Add note" })
@@ -613,7 +651,7 @@ test.describe("SAT student accessibility and layout", () => {
     // Write about a marked span, then leave without pressing anything that looks
     // like Save: the student's next keystroke must land where they were, not at
     // the top of the document.
-    await selectStimulusText(page, "Several");
+    await selectTextForAnnotation(page, "Several");
     await page
       .getByRole("toolbar", { name: "Selected text actions" })
       .getByRole("button", { name: "Add note" })
@@ -625,14 +663,14 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     await expect(page.locator("[data-sat-annotation-id]").first()).toBeFocused();
     // The text was committed on the way out, without a Save button to press.
-    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await page.getByRole("button", { name: /^Notes/ }).click();
     await expect(page.getByRole("complementary", { name: "Notes" })).toContainText("Compare the two blocks");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
 
     // The same for a note about the question itself: the one action available
     // with nothing selected is reachable, and closing it is a return too.
-    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await page.getByRole("button", { name: /^Notes/ }).click();
     const column = page.getByRole("complementary", { name: "Notes" });
     const addQuestionNote = column.getByRole("button", { name: "Add question note" });
     await addQuestionNote.click();
@@ -646,7 +684,7 @@ test.describe("SAT student accessibility and layout", () => {
 
     // And the text survives the trip: reopening shows it in the same list as the
     // anchored note, each under the source it came from.
-    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await page.getByRole("button", { name: /^Notes/ }).click();
     const list = page.getByRole("complementary", { name: "Notes" });
     await expect(list).toContainText("Look for the contrast");
     await expect(list).toContainText("This question");
@@ -656,7 +694,7 @@ test.describe("SAT student accessibility and layout", () => {
   test("a note typed and abandoned by navigating the question survives", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await openSatHarness(page);
-    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await page.getByRole("button", { name: /^Notes/ }).click();
     const column = page.getByRole("complementary", { name: "Notes" });
     await column.getByRole("button", { name: "Add question note" }).click();
     const field = page.getByRole("textbox", { name: "This question" });
@@ -669,7 +707,7 @@ test.describe("SAT student accessibility and layout", () => {
     // Chrome does not follow the student to the next question.
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     await page.getByRole("button", { name: "Previous" }).click();
-    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await page.getByRole("button", { name: /^Notes/ }).click();
     await expect(page.getByRole("complementary", { name: "Notes" })).toContainText("Half a thought");
   });
 
@@ -680,7 +718,7 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(layout).toHaveAttribute("data-sat-notes-placement", "none");
     await expect(page.locator("[data-sat-question-scroll]")).toBeVisible();
 
-    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await page.getByRole("button", { name: /^Notes/ }).click();
     const column = page.getByRole("complementary", { name: "Notes" });
     await expect(layout).toHaveAttribute("data-sat-notes-placement", "pair");
     // Three panes here would leave the passage and the question unreadable, so
@@ -704,7 +742,7 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     await expect(page.locator("[data-sat-question-scroll]")).toBeVisible();
     await expect(page.getByRole("button", { name: "Show notes" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /Highlights & Notes/ })).toBeFocused();
+    await expect(page.getByRole("button", { name: /^Notes/ })).toBeFocused();
   });
 
   test("regular SAT navigator is anchored above the footer without hiding the exam", async ({
@@ -1369,10 +1407,11 @@ test.describe("SAT student accessibility and layout", () => {
         scrollWidth: document.documentElement.scrollWidth,
       }));
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.innerWidth + 1);
-      // The R&W annotation row is gone from the top bar (one labeled
-      // "Highlights & Notes" entry replaced the armed
-      // Highlight/Underline/Annotate/Eraser cluster), so the old 768px
-      // "Hide timer overlaps Highlight" crowding finding no longer applies.
+      // The R&W top bar carries two annotation controls (the labeled mode
+      // toggle and the Notes disclosure) where an armed
+      // Highlight/Underline/Annotate/Eraser cluster used to sit, so the old
+      // 768px "Hide timer overlaps Highlight" crowding finding no longer
+      // applies — and the pair below is what must stay uncrowded at 200%.
       // Overlap helper still runs at >= 1024px in this 200% loop.
       if (viewport.width >= 1024) {
         await expectButtonsDoNotOverlap(page, ".sat-exam-topbar");
@@ -1390,9 +1429,9 @@ test.describe("SAT student accessibility and layout", () => {
     // Display text-scale also scales the note field (same reading token): still
     // 200% here, so the field must scale too. It is reading content wherever it
     // appears — in the mark's own tools or in the pane.
-    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await page.getByRole("button", { name: /^Notes/ }).click();
     await expect(page.getByRole("complementary", { name: "Notes" })).toBeVisible();
-    await selectStimulusText(page, "Several");
+    await selectTextForAnnotation(page, "Several");
     await page
       .getByRole("toolbar", { name: "Selected text actions" })
       .getByRole("button", { name: "Add note" })
@@ -1732,7 +1771,7 @@ test.describe("SAT student accessibility and layout", () => {
     await expectNoSeriousAxeViolations(page, "Display settings dialog");
     await page.keyboard.press("Escape");
 
-    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await page.getByRole("button", { name: /^Notes/ }).click();
     await expectNoSeriousAxeViolations(page, "Highlights & Notes panel");
     await page.keyboard.press("Escape");
 

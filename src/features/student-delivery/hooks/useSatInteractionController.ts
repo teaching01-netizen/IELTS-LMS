@@ -40,7 +40,17 @@ export interface SatInteractionController {
   closeSurface: () => void;
   toggleCalculator: () => void;
   toggleReference: () => void;
-  /** Selection-first annotation: capture the span the toolbar will act on. */
+  /**
+   * Armed annotation: true while selecting text may raise the tools.
+   *
+   * Exposed as state (not as "is a selection live") because the whole contract
+   * is a mode: the top-bar control reflects THIS value, and OFF must be
+   * readable independently of any selection.
+   */
+  annotationModeEnabled: boolean;
+  /** Flip the armed annotation mode (the one meaning of the top-bar control). */
+  toggleAnnotationMode: () => void;
+  /** Capture the span the toolbar will act on (refused while the mode is off). */
   selectionCaptured: (anchor: SatTextAnchor) => void;
   selectionCleared: () => void;
   questionNavigated: (moduleKey: string, questionId: string) => void;
@@ -240,6 +250,10 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
   // keep compiling; they are refused no-ops by the intent layer.
   const toggleCalculator = useCallback(() => dispatchIntent({ type: 'CALCULATOR_TOGGLE_REQUESTED' }), [dispatchIntent]);
   const toggleReference = useCallback(() => dispatchIntent({ type: 'REFERENCE_TOGGLE_REQUESTED' }), [dispatchIntent]);
+  const toggleAnnotationMode = useCallback(
+    () => dispatchIntent({ type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' }),
+    [dispatchIntent],
+  );
   const selectionCaptured = useCallback(
     (anchor: SatTextAnchor) => dispatchIntent({ type: 'TEXT_SELECTION_CAPTURED', anchor }),
     [dispatchIntent],
@@ -302,6 +316,8 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
     closeSurface,
     toggleCalculator,
     toggleReference,
+    annotationModeEnabled: state.annotation.modeEnabled,
+    toggleAnnotationMode,
     selectionCaptured,
     selectionCleared,
     questionNavigated,

@@ -4,7 +4,20 @@ import { stubScreenDetails } from './support/studentUi';
 
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
+/**
+ * Arm annotation the way the student does: press the labeled top-bar control.
+ *
+ * Selection only raises the tools in an armed exam, so every flow that marks
+ * text starts here. Idempotent, because the mode stays armed across questions.
+ */
+async function armHighlights(page: Page) {
+  const toggle = page.getByRole('button', { name: /^Highlights & Notes/ });
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+}
+
 async function selectFirstStimulusText(page: Page) {
+  await armHighlights(page);
   await page.locator('[data-sat-annotation-region="stimulus"]').evaluate((root) => {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node: Node | null = walker.nextNode();
@@ -118,8 +131,9 @@ test.describe('SAT answer durability recovery', () => {
       await studentPage.getByRole('button', { name: 'Turn on cross-out mode' }).click();
       await studentPage.getByRole('button', { name: 'Eliminate option B' }).click();
 
-      // Highlights & Notes is selection-first: selecting the stimulus raises the
-      // labeled controls, and the note rides on the mark it was made from.
+      // Highlights & Notes is an armed mode: pressing the labeled control lets a
+      // selection raise the tools, and the note rides on the mark it was made
+      // from.
       await selectFirstStimulusText(studentPage);
       await studentPage
         .getByRole('toolbar', { name: 'Selected text actions' })

@@ -53,7 +53,7 @@ describe('annotation mark affordances follow the shell view context', () => {
     const response = { ...emptySatQuestionResponse('q1'), annotations: { version: 2, annotations: [noted], legacyQuestionNote: '' } };
     const openEditor = vi.fn();
     render(
-      <SatAnnotationViewContext.Provider value={{ enabled: true, selection: null, activeAnnotationId: null, openEditorActive: true, openEditor }}>
+      <SatAnnotationViewContext.Provider value={{ activeAnnotationId: null, openEditorActive: true, annotationModeEnabled: true, openEditor }}>
         <SatQuestionRenderer sectionKey="reading-writing" questionNumber={1} question={question} response={response}
           eliminationMode={false} disabled={false} readingPreferences={createSatReadingPreferences()}
           onReadingSplitRatioChange={vi.fn()} onAnswerChange={vi.fn()} onToggleReview={vi.fn()} onToggleEliminationMode={vi.fn()} onToggleEliminatedOption={vi.fn()} />

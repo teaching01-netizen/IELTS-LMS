@@ -4,11 +4,12 @@ import {
   isAnnotationAllowed,
   normalizeSatInteractionState,
   satInteractionReducer,
+  type SatInteractionContext,
+  type SatInteractionState,
 } from '../satInteractionState';
 import { resolveEscapeAction } from '../satInteractionEscape';
 import { resolveSatInteractionIntent } from '../satInteractionIntents';
 import { resolveSatExamToolPolicy } from '../satToolPolicy';
-import type { SatInteractionContext } from '../satInteractionState';
 import type { SatTextAnchor as Anchor } from '../satResponses';
 
 function mathCtx(): SatInteractionContext {
@@ -38,6 +39,11 @@ function anchor(exact: string = 'tree'): Anchor {
   return { nodeId: 'stimulus:p1', startOffset: 0, endOffset: exact.length, exact };
 }
 
+/** The one gesture that makes selection meaningful: arm the mode. */
+function arm(state: SatInteractionState, ctx: SatInteractionContext = rwCtx()): SatInteractionState {
+  return satInteractionReducer(state, { type: 'ANNOTATION_MODE_ENABLED' }, ctx);
+}
+
 describe('satInteractionReducer transition contracts', () => {
   it('makes two exclusive surfaces structurally impossible', () => {
     let state = createSatInteractionState();
@@ -59,7 +65,7 @@ describe('satInteractionReducer transition contracts', () => {
 
   // Tool events are runner-owned (activeTools) and reduce to strict no-ops
   // here: the same state reference returns, disturbing neither the annotation
-  // selection nor the exclusive surface.
+  // mode, its selection, nor the exclusive surface.
   it('treats tool events as strict no-ops beside a live selection and open surfaces', () => {
     const bothCtx = {
       ...mathCtx(),
@@ -71,6 +77,7 @@ describe('satInteractionReducer transition contracts', () => {
       { type: 'READING_SETTINGS_OPENED', returnFocus: { type: 'topbar', control: 'reading' } },
       bothCtx,
     );
+    state = arm(state, bothCtx);
     state = satInteractionReducer(state, { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() }, bothCtx);
     const before = state;
     state = satInteractionReducer(state, { type: 'CALCULATOR_OPENED' }, bothCtx);
@@ -98,9 +105,41 @@ describe('satInteractionReducer transition contracts', () => {
     expect(next.surface.kind).toBe('annotation-note-editor');
   });
 
-  it('captures a selection with no armed mode and clears it on question change', () => {
+  // The invariant this whole pass exists for. Nothing about the state of the
+  // exam — a selection, a surface, a note editor — may produce a selection in
+  // an unarmed exam.
+  it('starts unarmed, and a selection in an unarmed exam is discarded', () => {
     const ctx = rwCtx();
-    let state = createSatInteractionState();
+    expect(createSatInteractionState().annotation.modeEnabled).toBe(false);
+    const state = satInteractionReducer(
+      createSatInteractionState(),
+      { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() },
+      ctx,
+    );
+    expect(state.annotation.modeEnabled).toBe(false);
+    expect(state.annotation.selection).toBeNull();
+    // Same state reference: an ignored selection cannot churn a render either.
+    expect(state).toEqual(createSatInteractionState());
+  });
+
+  it('arms the mode without touching the surface or inventing a selection', () => {
+    let state = satInteractionReducer(
+      createSatInteractionState(),
+      { type: 'QUESTION_NOTES_OPENED', returnFocus: { type: 'topbar', control: 'notes' } },
+      rwCtx(),
+    );
+    const armed = arm(state);
+    expect(armed.annotation.modeEnabled).toBe(true);
+    expect(armed.annotation.selection).toBeNull();
+    // Arming is not opening: the column the student was reading stays open.
+    expect(armed.surface.kind).toBe('question-notes');
+    // And arming twice is not an event at all.
+    expect(arm(armed)).toBe(armed);
+  });
+
+  it('captures a selection while armed and clears it on question change, keeping the mode', () => {
+    const ctx = rwCtx();
+    let state = arm(createSatInteractionState(), ctx);
     state = satInteractionReducer(state, { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() }, ctx);
     expect(state.annotation.selection).toEqual(anchor());
     state = satInteractionReducer(
@@ -110,48 +149,85 @@ describe('satInteractionReducer transition contracts', () => {
     );
     expect(state.annotation.selection).toBeNull();
     expect(state.surface.kind).toBe('none');
+    // The armed mode is the student's standing choice for the module, so the
+    // next question is still armed and needs no re-arming.
+    expect(state.annotation.modeEnabled).toBe(true);
   });
 
-  it('resets the selection on module change, preserving nothing ephemeral', () => {
+  it('resets the selection AND the mode on module change', () => {
     const ctx = rwCtx();
-    let state = createSatInteractionState();
+    let state = arm(createSatInteractionState(), ctx);
     state = satInteractionReducer(state, { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() }, ctx);
     state = satInteractionReducer(
       state,
-      { type: 'MODULE_SCOPE_CHANGED', moduleKey: 'rw-m1', questionId: 'q1' },
-      { ...ctx, moduleKey: 'rw-m1', questionId: 'q1' },
+      { type: 'MODULE_SCOPE_CHANGED', moduleKey: 'rw-m2', questionId: 'q1' },
+      { ...ctx, moduleKey: 'rw-m2', questionId: 'q1' },
     );
+    expect(state.annotation.modeEnabled).toBe(false);
     expect(state.annotation.selection).toBeNull();
     expect(state.surface.kind).toBe('none');
-    expect(state.scope).toEqual({ moduleKey: 'rw-m1', questionId: 'q1' });
+    expect(state.scope).toEqual({ moduleKey: 'rw-m2', questionId: 'q1' });
+  });
+
+  it('closes the tools by dropping the selection when the mode is disarmed', () => {
+    const ctx = rwCtx();
+    let state = arm(createSatInteractionState(), ctx);
+    state = satInteractionReducer(state, { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() }, ctx);
+    expect(state.annotation.selection).not.toBeNull();
+    const disarmed = satInteractionReducer(state, { type: 'ANNOTATION_MODE_DISABLED' }, ctx);
+    expect(disarmed.annotation.modeEnabled).toBe(false);
+    expect(disarmed.annotation.selection).toBeNull();
+  });
+
+  // The mode's own cleanup, asserted on the surface as well: the panel the
+  // student was reading is NOT the mode's to close. Two independent states
+  // means disarming one leaves the other exactly where it was.
+  it('disarming leaves an open Notes column open', () => {
+    const ctx = rwCtx();
+    let state = satInteractionReducer(
+      createSatInteractionState(),
+      { type: 'QUESTION_NOTES_OPENED', returnFocus: { type: 'topbar', control: 'notes' } },
+      ctx,
+    );
+    state = arm(state, ctx);
+    // Arming did not close it…
+    expect(state.surface.kind).toBe('question-notes');
+    const disarmed = satInteractionReducer(state, { type: 'ANNOTATION_MODE_DISABLED' }, ctx);
+    // …and disarming does not either.
+    expect(disarmed.surface).toEqual(state.surface);
+    expect(disarmed.surface.kind).toBe('question-notes');
   });
 
   it('refuses a selection without annotation capability and normalizes one that policy revokes', () => {
     const captured = satInteractionReducer(
-      createSatInteractionState(),
+      arm(createSatInteractionState(), mathCtx()),
       { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() },
       mathCtx(),
     );
     expect(captured.annotation.selection).toBeNull();
+    expect(captured.annotation.modeEnabled).toBe(false);
     // Capability asserted directly: the reducer and the selectors agree.
     expect(isAnnotationAllowed(mathCtx().toolPolicy)).toBe(false);
     expect(isAnnotationAllowed(rwCtx().toolPolicy)).toBe(true);
 
     const rwState = satInteractionReducer(
-      createSatInteractionState(),
+      arm(createSatInteractionState()),
       { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() },
       rwCtx(),
     );
     expect(rwState.annotation.selection).not.toBeNull();
-    // Entering a section without annotation data regions drops the anchor so a
-    // Math question can never inherit a R&W toolbar.
-    expect(normalizeSatInteractionState(rwState, mathCtx()).annotation.selection).toBeNull();
+    expect(rwState.annotation.modeEnabled).toBe(true);
+    // Entering a section without annotation data regions drops the anchor and
+    // disarms the mode, so a Math question can never inherit a R&W toolbar.
+    const normalized = normalizeSatInteractionState(rwState, mathCtx()).annotation;
+    expect(normalized.selection).toBeNull();
+    expect(normalized.modeEnabled).toBe(false);
   });
 
   it('refuses a selection while the note editor owns interaction', () => {
     const ctx = rwCtx();
     let state = satInteractionReducer(
-      createSatInteractionState(),
+      arm(createSatInteractionState(), ctx),
       {
         type: 'ANNOTATION_NOTE_EDITOR_OPENED',
         annotationId: 'ann-1',
@@ -164,8 +240,8 @@ describe('satInteractionReducer transition contracts', () => {
     expect(state.surface.kind).toBe('annotation-note-editor');
   });
 
-  it('discards all interaction on terminal transition', () => {
-    let state = createSatInteractionState();
+  it('discards all interaction, including the mode, on terminal transition', () => {
+    let state = arm(createSatInteractionState());
     state = satInteractionReducer(state, { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() }, rwCtx());
     state = satInteractionReducer(state, { type: 'TERMINAL_TRANSITION' }, mathCtx());
     expect(state).toEqual({
@@ -182,16 +258,29 @@ describe('satInteractionReducer transition contracts', () => {
   });
 });
 
-describe('selection-first annotation intents', () => {
+describe('armed annotation intents', () => {
   it('resolves a captured selection in R&W and refuses it in Math', () => {
     const intent = { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() } as const;
     expect(resolveSatInteractionIntent(createSatInteractionState(), rwCtx(), intent)).toEqual(intent);
     expect(resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), intent)).toBeNull();
   });
 
+  it('maps one toggle request onto the mode the machine is actually in', () => {
+    const off = createSatInteractionState();
+    expect(resolveSatInteractionIntent(off, rwCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toEqual({
+      type: 'ANNOTATION_MODE_ENABLED',
+    });
+    const on = arm(off);
+    expect(resolveSatInteractionIntent(on, rwCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toEqual({
+      type: 'ANNOTATION_MODE_DISABLED',
+    });
+    // No capability, no mode: Math cannot arm annotation through any path.
+    expect(resolveSatInteractionIntent(off, mathCtx(), { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' })).toBeNull();
+  });
+
   it('keeps the selection across a question change contract and clears it explicitly', () => {
     const ctx = rwCtx();
-    let state = createSatInteractionState({ moduleKey: 'rw-m1', questionId: 'q1' });
+    let state = arm(createSatInteractionState({ moduleKey: 'rw-m1', questionId: 'q1' }));
     const event = resolveSatInteractionIntent(state, ctx, { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() });
     state = satInteractionReducer(state, event!, ctx);
     expect(state.annotation.selection).not.toBeNull();
@@ -199,15 +288,29 @@ describe('selection-first annotation intents', () => {
     expect(cleared).toEqual({ type: 'TEXT_SELECTION_CLEARED' });
     state = satInteractionReducer(state, cleared!, ctx);
     expect(state.annotation.selection).toBeNull();
+    // Dismissing the tools does not disarm the tool.
+    expect(state.annotation.modeEnabled).toBe(true);
   });
 
   it('exits the selection through the standard Escape arbitration', () => {
     const ctx = rwCtx();
     const selected = satInteractionReducer(
-      createSatInteractionState(),
+      arm(createSatInteractionState()),
       { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() },
       ctx,
     );
     expect(resolveEscapeAction(selected, ctx)).toEqual({ type: 'CLEAR_SELECTION' });
+  });
+
+  // Escape dismisses chrome; it does not silently disarm the mode. A student who
+  // pressed Escape to get rid of a toolbar must not find the next selection
+  // does nothing, with the top-bar toggle still claiming to be on.
+  it('leaves the mode armed when Escape clears a selection', () => {
+    const ctx = rwCtx();
+    const armed = arm(createSatInteractionState());
+    expect(resolveEscapeAction(armed, ctx)).toEqual({ type: 'NOOP' });
+    const selected = satInteractionReducer(armed, { type: 'TEXT_SELECTION_CAPTURED', anchor: anchor() }, ctx);
+    const afterEscape = satInteractionReducer(selected, { type: 'TEXT_SELECTION_CLEARED' }, ctx);
+    expect(afterEscape.annotation.modeEnabled).toBe(true);
   });
 });

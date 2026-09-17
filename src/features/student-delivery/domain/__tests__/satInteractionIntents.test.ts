@@ -70,8 +70,10 @@ describe('resolveSatInteractionIntent (intent, not mutation)', () => {
   });
 
   it('refuses text-selection capture outside R&W capability', () => {
-    // There is no armed mode to request any more: selecting text IS the
-    // intent, and the annotation capability is what gates it.
+    // The intent layer resolves DATA, not session policy: whether the mode is
+    // armed is the reducer's guard (see satInteractionReducer), because an
+    // in-flight selection must still be discarded by the state machine that
+    // owns the mode. Capability is what this layer can answer.
     const anchor = { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' } as const;
     expect(
       resolveSatInteractionIntent(createSatInteractionState(), mathCtx(), {

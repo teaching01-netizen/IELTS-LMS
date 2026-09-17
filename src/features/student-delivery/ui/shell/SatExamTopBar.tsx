@@ -1,6 +1,6 @@
 import { useId, useRef, type Ref } from "react";
 import { BookOpen, Calculator, ChevronDown, EllipsisVertical, Highlighter } from "lucide-react";
-import { SAT_COPY } from "../../domain/satCopy";
+import { SAT_COPY, satNotesToolLabel } from "../../domain/satCopy";
 import type { StructuredContent } from "../../../exam-authoring/api/assessmentContracts";
 import type { SatReadingPreferences } from "../../domain/satReadingPreferences";
 import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
@@ -20,12 +20,23 @@ export interface SatExamTopBarProps {
   calculatorOpen: boolean;
   referenceAvailable: boolean;
   referenceOpen: boolean;
-  /** R&W-only. When false the Highlights & Notes entry is hidden, not disabled. */
+  /** R&W-only. When false both Highlights & Notes controls are hidden, not disabled. */
   notesAvailable: boolean;
+  /**
+   * The armed annotation mode: selecting text may raise annotation controls.
+   *
+   * Held by the shell's interaction machine, never derived here from a
+   * selection or from the Notes column being open.
+   */
+  annotationModeEnabled: boolean;
   /** True when the current question already carries marks or a note (dot). */
   hasAnnotations?: boolean | undefined;
+  /** Notes this question holds, written beside the disclosure. */
+  notesCount: number;
+  /** True while the Notes column is part of the layout (not "a popover is up"). */
   notesOpen: boolean;
   notesButtonId: string;
+  onToggleAnnotationMode: () => void;
   moreOpen: boolean;
   readingOpen: boolean;
   readingPreferences: SatReadingPreferences;
@@ -120,23 +131,66 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
         </div>
 
         <div className="relative col-span-2 row-start-2 flex min-w-0 flex-wrap items-center justify-end gap-1 self-stretch lg:col-span-1 lg:col-start-auto lg:row-start-auto lg:flex-nowrap" role="group" aria-label="Test tools">
-          {/* ONE labeled entry for Highlights & Notes. The label is never
-              shortened to an icon-only state: a bare highlighter glyph would
-              have to be decoded, and the whole point of this pass is that a
-              first-time student never has to decode anything. The panel it
-              opens lists anchored notes and the freeform question note. */}
+          {/* Two controls, two meanings — never one control with two:
+
+              - the labeled entry ARMS annotation. Its pressed state is the
+                mode and its click does nothing else: no panel opens, no draft
+                is created, and the exam layout does not move. Arming is the
+                student saying "I am about to mark something up".
+              - the disclosure beside it opens the Notes column, which stays a
+                separate state: reviewing notes with annotation disarmed is a
+                normal thing to be, and so is arming annotation with nothing
+                open. Coupling them is what makes a toggle mean two things.
+
+              The label is never shortened to an icon-only state: a bare
+              highlighter glyph would have to be decoded, and the whole point of
+              this pass is that a first-time student never has to decode. */}
           {props.notesAvailable ? (
-            <TopToolButton
-              id={props.notesButtonId}
-              dataSatFocus="topbar-notes"
-              label={SAT_COPY.annotations.toolLabel}
-              indicatorLabel={SAT_COPY.annotations.toolLabelHasAnnotations}
-              pressed={props.notesOpen}
-              disabled={props.blocked}
-              onClick={props.onToggleNotes}
-              hasIndicator={props.hasAnnotations}
-              icon={<Highlighter className="h-5 w-5" aria-hidden="true" />}
-            />
+            <div className="flex items-stretch" role="none" data-sat-annotation-group="true">
+              <TopToolButton
+                dataSatFocus="topbar-annotations"
+                label={SAT_COPY.annotations.toolLabel}
+                pressed={props.annotationModeEnabled}
+                disabled={props.blocked}
+                onClick={props.onToggleAnnotationMode}
+                icon={<Highlighter className="h-5 w-5" aria-hidden="true" />}
+              />
+              <button
+                id={props.notesButtonId}
+                type="button"
+                data-sat-focus="topbar-notes"
+                data-sat-notes-disclosure="true"
+                onClick={props.onToggleNotes}
+                disabled={props.blocked}
+                aria-expanded={props.notesOpen}
+                aria-label={satNotesToolLabel({
+                  count: props.notesCount,
+                  hasHighlights: props.hasAnnotations === true,
+                })}
+                className="sat-touch-target sat-pressable relative flex min-w-11 items-center justify-center gap-1 px-1.5 sat-type-control-secondary font-medium text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] lg:min-w-[44px] lg:flex-col lg:gap-1"
+              >
+                <span className="flex items-center gap-1">
+                  <ChevronDown
+                    className={props.notesOpen ? "h-4 w-4 rotate-180 transition-transform" : "h-4 w-4 transition-transform"}
+                    aria-hidden="true"
+                  />
+                  {props.notesCount > 0 ? (
+                    <span
+                      data-sat-notes-count="true"
+                      className="sat-tabular rounded-full bg-[var(--sat-surface-hover)] px-1.5 text-[11px] font-semibold text-[var(--sat-text)]"
+                    >
+                      {props.notesCount}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="hidden max-w-[80px] truncate text-[13px] min-[420px]:inline">
+                  {SAT_COPY.annotations.notesTool}
+                </span>
+                {props.hasAnnotations === true ? (
+                  <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[var(--sat-accent-strong)]" aria-hidden="true" />
+                ) : null}
+              </button>
+            </div>
           ) : null}
           <div className="sat-popover-anchor relative shrink-0">
             <TopToolButton
@@ -205,7 +259,6 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
 }
 
 function TopToolButton({
-  id,
   buttonRef,
   dataSatFocus,
   dataSatToolTrigger,
@@ -213,11 +266,8 @@ function TopToolButton({
   icon,
   pressed,
   disabled,
-  hasIndicator,
-  indicatorLabel,
   onClick,
 }: {
-  id?: string;
   buttonRef?: Ref<HTMLButtonElement>;
   dataSatFocus?: string | undefined;
   dataSatToolTrigger?: "calculator" | "reference" | undefined;
@@ -225,31 +275,27 @@ function TopToolButton({
   icon: React.ReactNode;
   pressed: boolean;
   disabled: boolean;
-  hasIndicator?: boolean | undefined;
-  /** Spoken suffix while the indicator dot is present (defaults to "has note"). */
-  indicatorLabel?: string | undefined;
   onClick: () => void;
 }) {
   return (
     <button
       ref={buttonRef}
-      id={id}
       data-sat-focus={dataSatFocus}
       data-sat-tool-trigger={dataSatToolTrigger}
       type="button"
       onClick={onClick}
       disabled={disabled}
+      // A real toggle, announced as one: pressed is the armed mode, and the
+      // 2px underline below says the same thing to a student at a glance. The
+      // active state is never colour alone.
       aria-pressed={pressed}
-      aria-label={hasIndicator === true ? (indicatorLabel ?? label + ", has note") : label}
+      aria-label={label}
       className="sat-touch-target sat-pressable relative flex min-w-11 items-center justify-center gap-1.5 px-2 min-[420px]:min-w-[72px] sat-type-control-secondary font-medium text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] lg:h-[66px] lg:min-w-[68px] lg:flex-col lg:gap-1"
     >
       {icon}
       <span className="hidden max-w-[80px] truncate text-[13px] min-[420px]:inline">{label}</span>
       {pressed ? (
         <span className="absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--sat-text)]" aria-hidden="true" />
-      ) : null}
-      {hasIndicator === true ? (
-        <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[var(--sat-accent-strong)]" aria-hidden="true" />
       ) : null}
     </button>
   );

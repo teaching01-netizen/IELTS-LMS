@@ -107,21 +107,80 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
   it('SELECTING vs QUESTION_CHANGED converges: the selection never survives scope change', () => {
     const selectingThenNavigate = run(
       [
+        { type: 'ANNOTATION_MODE_ENABLED' },
         { type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor },
         { type: 'QUESTION_CHANGED', moduleKey: 'rw-m1', questionId: 'q2' },
       ],
       rwCtx(),
     );
     expect(selectingThenNavigate.annotation.selection).toBeNull();
+    // …but the mode does: it belongs to the module, not the question.
+    expect(selectingThenNavigate.annotation.modeEnabled).toBe(true);
     assertSatInteractionInvariants(selectingThenNavigate, rwCtx());
   });
 
-  it('SELECTING vs MODULE_TRANSITION converges: leaving R&W drops the anchor', () => {
-    const captured = run([{ type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor }], rwCtx());
+  it('SELECTING vs MODULE_TRANSITION converges: leaving R&W drops the anchor and the mode', () => {
+    const captured = run(
+      [
+        { type: 'ANNOTATION_MODE_ENABLED' },
+        { type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor },
+      ],
+      rwCtx(),
+    );
     expect(captured.annotation.selection).not.toBeNull();
     const normalized = normalizeSatInteractionState(captured, mathCtx());
     expect(normalized.annotation.selection).toBeNull();
+    expect(normalized.annotation.modeEnabled).toBe(false);
     assertSatInteractionInvariants(normalized, mathCtx());
+  });
+
+  // The disarm/dismiss race: whichever arrives first, the exam ends the same way
+  // — no selection, no mode, and no invariant broken on the way there.
+  it('DISARM vs ESCAPE converges on an unarmed exam with nothing selected', () => {
+    const armedAndSelected = run(
+      [
+        { type: 'ANNOTATION_MODE_ENABLED' },
+        { type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor },
+      ],
+      rwCtx(),
+    );
+    const disarmFirst = run(
+      [
+        { type: 'ANNOTATION_MODE_ENABLED' },
+        { type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor },
+        { type: 'ANNOTATION_MODE_DISABLED' },
+        { type: 'TEXT_SELECTION_CLEARED' },
+      ],
+      rwCtx(),
+    );
+    const escapeFirst = run(
+      [
+        { type: 'ANNOTATION_MODE_ENABLED' },
+        { type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor },
+        { type: 'TEXT_SELECTION_CLEARED' },
+        { type: 'ANNOTATION_MODE_DISABLED' },
+      ],
+      rwCtx(),
+    );
+    expect(armedAndSelected.annotation.selection).not.toBeNull();
+    for (const state of [disarmFirst, escapeFirst]) {
+      expect(state.annotation.modeEnabled).toBe(false);
+      expect(state.annotation.selection).toBeNull();
+      assertSatInteractionInvariants(state, rwCtx());
+    }
+  });
+
+  it('a selection reported after a disarm is discarded, never resurrected', () => {
+    const state = run(
+      [
+        { type: 'ANNOTATION_MODE_ENABLED' },
+        { type: 'ANNOTATION_MODE_DISABLED' },
+        { type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor },
+      ],
+      rwCtx(),
+    );
+    expect(state.annotation.selection).toBeNull();
+    assertSatInteractionInvariants(state, rwCtx());
   });
 
   it('torture sequence never violates an invariant', () => {
@@ -129,6 +188,9 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
       { type: 'NAVIGATOR_OPENED', returnFocus: { type: 'footer', control: 'navigator' } },
       { type: 'CALCULATOR_TOGGLED' },
       { type: 'ESCAPE_HANDLED' },
+      // Armed first: an unarmed exam discards the selection outright, which
+      // would make the rest of this sequence vacuous.
+      { type: 'ANNOTATION_MODE_ENABLED' },
       { type: 'TEXT_SELECTION_CAPTURED', anchor: selectionAnchor },
       {
         type: 'ANNOTATION_NOTE_EDITOR_OPENED',
@@ -142,8 +204,12 @@ describe('satInteraction race commutativity (adversarial interleavings)', () => 
       { type: 'ESCAPE_HANDLED' },
       { type: 'TERMINAL_TRANSITION' },
     ];
-    const end = run(torture, mathCtx());
+    // Run under R&W so every annotation event in the sequence actually applies:
+    // under Math they would all be refused, and the torture test would be
+    // asserting that nothing happened rather than that nothing broke.
+    const end = run(torture, rwCtx());
     expect(end.surface.kind).toBe('none');
     expect(end.annotation.selection).toBeNull();
+    expect(end.annotation.modeEnabled).toBe(false);
   });
 });

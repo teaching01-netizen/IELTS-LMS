@@ -15,13 +15,15 @@ import { SAT_COPY } from '../../domain/satCopy';
  */
 
 /**
- * The one quiet line a first-time student sees, rendered at the top of the
- * passage rather than pinned near the tool entry.
+ * The activation cue: the one quiet line a first-time student sees when they
+ * arm annotation, rendered at the top of the passage rather than pinned near
+ * the tool entry.
  *
  * It used to float at the top-right of the shell, which read as a tooltip about
- * the page — a label pointing at the toolbar. The instruction belongs where the
- * gesture happens: it says "select text" while sitting directly above the text
- * there is to select.
+ * the page — a label pointing at the toolbar. The answer to "what did I just
+ * turn on?" belongs where the new capability applies: directly above the text
+ * that can now be selected. It leaves on its own after a few seconds, so it can
+ * never become furniture over the passage being read.
  */
 export function SatAnnotationPassageHint() {
   return (
@@ -31,7 +33,7 @@ export function SatAnnotationPassageHint() {
       className="mb-4 flex items-center gap-1.5 sat-type-metadata font-medium text-[var(--sat-text-secondary)]"
     >
       <Highlighter className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      {SAT_COPY.annotations.passageHint}
+      {SAT_COPY.annotations.activationCue}
     </p>
   );
 }

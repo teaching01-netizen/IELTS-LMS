@@ -16,9 +16,11 @@ export type SatEscapeAction =
  * this machine (reading preferences), so the caller passes lineReaderEnabled
  * and handles DISABLE_LINE_READER itself.
  *
- * There is no armed annotation mode to disable: the annotation layer is
- * cleared by dismissing its selection, which is also what closes the
- * contextual toolbar.
+ * The armed annotation mode is deliberately NOT in this list. Escape dismisses
+ * chrome; the mode is a standing choice the student makes with an explicit
+ * control, and silently disarming it would leave the top-bar toggle lying about
+ * what the next selection will do. Dismissing the selection closes the
+ * contextual toolbar while leaving the mode armed, ready for the next phrase.
  */
 export function resolveEscapeAction(
   state: SatInteractionState,

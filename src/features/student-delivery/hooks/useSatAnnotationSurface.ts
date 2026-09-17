@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  SAT_ANNOTATION_CUE_MS,
   SAT_ANNOTATION_UNDO_MS,
-  satAnnotationHintDelayMs,
   shouldShowSatAnnotationHint,
 } from '../domain/satAnnotationEducation';
 import { SAT_COPY, satHighlightedAnnouncement } from '../domain/satCopy';
@@ -96,6 +96,13 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   const { annotations, onAnnotationsChange, onFlushAnnotations, interaction } = options;
   const { onSaveQuestionNote, questionNote } = options;
   const writable = annotations !== undefined && onAnnotationsChange !== undefined && !options.blocked;
+  /**
+   * The armed annotation mode, read from the one machine that owns it.
+   *
+   * Nothing here derives it: it is not "a selection exists" and not "the Notes
+   * column is open", and the three must never be allowed to imply each other.
+   */
+  const annotationModeEnabled = interaction.state.annotation.modeEnabled;
   const selection = writable ? interaction.state.annotation.selection : null;
   const education = useSatAnnotationEducation(options.educationKey ?? null);
 
@@ -382,6 +389,26 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   /** Dismiss the selection tools without touching the selection or the marks. */
   const closeSelectionTools = useCallback(() => interaction.selectionCleared(), [interaction]);
 
+  /**
+   * Arm or disarm annotation — the single meaning of the top-bar control.
+   *
+   * Disarming closes the mark's edit controls on the way out, because those ARE
+   * the annotation chrome the student is dismissing, and the machine's own
+   * disarm drops the transient selection (which is what closes the contextual
+   * toolbar). That is the whole cleanup, on purpose:
+   *
+   * - marks are NOT deleted,
+   * - the Notes column is NOT hidden, and
+   * - rendered highlights are NOT removed.
+   *
+   * OFF means "stop creating and editing annotations", never "hide the student's
+   * work" — and never "close the panel they were reading".
+   */
+  const toggleAnnotationMode = useCallback(() => {
+    if (annotationModeEnabled) dismissMarkControls();
+    interaction.toggleAnnotationMode();
+  }, [annotationModeEnabled, dismissMarkControls, interaction]);
+
   // Removal toast lifetime (Undo stays reachable for a few seconds).
   useEffect(() => {
     if (!undoEntry) return;
@@ -390,7 +417,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   }, [undoEntry]);
 
   // A fresh selection closes the edit dock (they are two answers to "what am I
-  // working on?"), and demonstrating the gesture retires the passive hint.
+  // working on?"), and demonstrating the gesture retires the activation cue.
   useEffect(() => {
     if (!selection) return;
     dismissMarkControls();
@@ -413,26 +440,28 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   const hintAllowed = shouldShowSatAnnotationHint(education.state, {
     annotationsAvailable: options.annotationsAvailable,
     blocked: options.blocked,
+    modeEnabled: annotationModeEnabled,
     hasSelection: selection !== null,
     answered: options.answered,
     hasAnnotations: lessonOver,
   });
-  // Opening Highlights & Notes is a request for the tool, so the line is there
-  // immediately; otherwise it waits, so it reads as an aside rather than an alert
-  // firing on load.
-  const hintDelayMs = satAnnotationHintDelayMs(interaction.state.surface.kind === 'question-notes');
+  // The activation cue: one lifetime per arming.
+  //
+  // Arming the mode starts it, and it ends on its own after a few seconds — or
+  // at once if the student selects something, answers, or disarms the mode.
+  // Keyed on the policy value rather than on a clock, so a disarm/re-arm is a
+  // genuine new activation and the line comes back for a student who still has
+  // not annotated anything. Nothing shows on load: an unarmed exam has no
+  // gesture to teach, and the labeled control is what teaches it.
   useEffect(() => {
     if (!hintAllowed) {
       setHintVisible(false);
       return;
     }
-    if (hintDelayMs === 0) {
-      setHintVisible(true);
-      return;
-    }
-    const show = window.setTimeout(() => setHintVisible(true), hintDelayMs);
-    return () => window.clearTimeout(show);
-  }, [hintAllowed, hintDelayMs]);
+    setHintVisible(true);
+    const hide = window.setTimeout(() => setHintVisible(false), SAT_ANNOTATION_CUE_MS);
+    return () => window.clearTimeout(hide);
+  }, [hintAllowed]);
   // The line retires on demonstrated understanding, never on a timer: the old
   // five-second countdown spent the lesson on students who had not read it yet.
   useEffect(() => {
@@ -448,18 +477,28 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     () => ({
       activeAnnotationId: noteEditorId ?? editingMarkId,
       openEditorActive: writable,
+      annotationModeEnabled,
       openEditor: (annotation: SatTextAnnotation) => {
+        // OFF means OFF for existing marks too: with the mode disarmed a mark is
+        // rendered content, and tapping it opens nothing. Arming the mode is how
+        // the student asks to edit, which is what makes the toggle's meaning
+        // consistent in both directions.
+        if (!annotationModeEnabled) return;
         setEditingMarkId(annotation.id);
         interaction.selectionCleared();
       },
       onSelectionCaptured: (anchor: SatTextAnchor) => interaction.selectionCaptured(anchor),
     }),
-    [editingMarkId, interaction, noteEditorId, writable],
+    [annotationModeEnabled, editingMarkId, interaction, noteEditorId, writable],
   );
 
   return {
     /** True when a mark can be painted (R&W, not blocked, response wired). */
     writable,
+    /** True while the student has armed annotation (the top-bar toggle's state). */
+    annotationModeEnabled,
+    /** Arm or disarm annotation; disarming closes the mark's controls only. */
+    toggleAnnotationMode,
     selection,
     selectionActions,
     annotationView,

@@ -30,6 +30,7 @@ export type SatInteractionIntent =
   | { type: 'QUESTION_NAVIGATION_REQUESTED'; moduleKey: string; questionId: string }
   | { type: 'TEXT_SELECTION_CAPTURED'; anchor: SatTextAnchor }
   | { type: 'TEXT_SELECTION_CLEARED' }
+  | { type: 'ANNOTATION_MODE_TOGGLE_REQUESTED' }
   | { type: 'ANNOTATION_EDITOR_CLOSED' }
   | { type: 'MODULE_SCOPE_CHANGED'; moduleKey: string; questionId: string }
   | { type: 'TOOL_POLICY_CHANGED' }
@@ -59,8 +60,11 @@ function defaultReturnFocus(
  * Conflict matrix (executable policy):
  * - navigator/directions/reading/notes replace each other (exclusive surface)
  * - annotation editor rejects competing surfaces until resolved
- * - text selection is captured with no armed mode; the annotation capability
- *   plus the interaction gate are the only preconditions
+ * - the annotation mode arms/disarms independently of every surface; it is the
+ *   student's standing choice for the module, not a property of a panel
+ * - text selection is captured ONLY while the mode is armed (the reducer owns
+ *   the guard); the annotation capability plus the interaction gate are the
+ *   other two preconditions
  * - calculator/reference are runner-owned independent layers; intents refuse them here and opening a tool never closes the exclusive surface (shell coexistence contract).
  * - question navigation clears transient selection, closes editor+panels+navigator
  * - scope change resets harder (annotation off, tools closed)
@@ -182,6 +186,14 @@ export function resolveSatInteractionIntent(
     case 'TEXT_SELECTION_CAPTURED':
       if (!satInteractionCan.annotate(state, ctx)) return null;
       return { type: 'TEXT_SELECTION_CAPTURED', anchor: intent.anchor };
+    case 'ANNOTATION_MODE_TOGGLE_REQUESTED':
+      // One request, one meaning: flip the mode. The reducer re-checks the gate
+      // and the capability, so an unarmed exam can never be armed by a stale
+      // in-flight intent either.
+      if (!satInteractionCan.annotate(state, ctx)) return null;
+      return state.annotation.modeEnabled
+        ? { type: 'ANNOTATION_MODE_DISABLED' }
+        : { type: 'ANNOTATION_MODE_ENABLED' };
     case 'TEXT_SELECTION_CLEARED':
       return { type: 'TEXT_SELECTION_CLEARED' };
     case 'ANNOTATION_EDITOR_CLOSED':

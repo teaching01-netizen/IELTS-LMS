@@ -160,30 +160,60 @@ describe("SatExamShell", () => {
     expect(shell).toHaveAttribute("data-sat-keyboard-open", "true");
   });
 
-  it("exposes ONE labeled Highlights & Notes entry that opens the notes column and closes on Escape", () => {
+  // Two controls, two meanings. The labeled entry arms annotation and must not
+  // open anything; the disclosure opens the Notes column and must not arm.
+  it("toggles the annotation mode from the labeled entry, and opens nothing for it", () => {
+    render(<SatExamShell {...props({ notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
+    const entry = () => screen.getByRole('button', { name: /^Highlights & Notes/ });
+    expect(entry()).toHaveTextContent('Highlights & Notes');
+    expect(entry()).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(entry());
+
+    // Armed — visibly and in state…
+    expect(entry()).toHaveAttribute('aria-pressed', 'true');
+    // …and nothing else happened. Arming is not opening: no column, no popover,
+    // no draft, no layout move.
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
+
+    fireEvent.click(entry());
+    expect(entry()).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
+  });
+
+  it("opens the Notes column from its own disclosure, and closes on Escape", () => {
     const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
-    const entry = screen.getByRole('button', { name: /^Highlights & Notes/ });
-    expect(entry).toHaveTextContent('Highlights & Notes');
-    fireEvent.click(entry);
-    expect(entry).toHaveAttribute('aria-pressed', 'true');
+    const disclosure = () => screen.getByRole('button', { name: /^Notes/ });
+    expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(disclosure());
+
+    expect(disclosure()).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: 'Escape' });
+    // Opening notes is not arming annotation.
     expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
     // Navigation closes the column (notes never survive a question change) but
-    // the entry itself is permanent chrome.
-    fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
+    // both controls stay permanent chrome.
+    fireEvent.click(disclosure());
     rerender(<SatExamShell {...props({ notesAvailable: true, questionIndex: 1 })}><NotesWorkspace /></SatExamShell>);
-    expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toHaveAttribute('aria-pressed', 'false');
+    expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toBeInTheDocument();
   });
-  it("announces annotations on the tool entry instead of adding a second icon", () => {
+  it("announces existing work on the Notes disclosure, never on the mode toggle", () => {
     const annotations = emptySatAnnotations();
     annotations.annotations = [createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 0, endOffset: 4, exact: 'tree' })];
     const { rerender } = render(<SatExamShell {...props({ notesAvailable: true, annotations, onAnnotationsChange: vi.fn() })} />);
-    // The dot appends a spoken suffix; the visible label never changes shape.
-    expect(screen.getByRole('button', { name: 'Highlights & Notes, has annotations' })).toBeInTheDocument();
-    rerender(<SatExamShell {...props({ notesAvailable: true, annotations: emptySatAnnotations(), onAnnotationsChange: vi.fn() })} />);
+    // The dot marks the entry that SHOWS the work, and the spoken name says why.
+    expect(screen.getByRole('button', { name: 'Notes, has highlights' })).toBeInTheDocument();
+    // The mode toggle keeps one stable name: its state is pressed/not, never
+    // content — a control that renames itself as work accumulates has to be
+    // re-found every time.
     expect(screen.getByRole('button', { name: 'Highlights & Notes' })).toBeInTheDocument();
+    rerender(<SatExamShell {...props({ notesAvailable: true, annotations: emptySatAnnotations(), onAnnotationsChange: vi.fn() })} />);
+    expect(screen.getByRole('button', { name: 'Notes' })).toBeInTheDocument();
   });
   it("pins Display and More to the top bar, and keeps Notes out of the overlay layer entirely", () => {
     render(<SatExamShell {...props({ notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
@@ -194,7 +224,7 @@ describe("SatExamShell", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     // Notes are a structural column between passage and question, so they are
     // neither a fixed top-bar panel nor a dialog: nothing floats over the exam.
-    fireEvent.click(screen.getByRole("button", { name: /^Highlights & Notes/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Notes/ }));
     const notes = screen.getByRole('complementary', { name: 'Notes' });
     expect(notes).not.toHaveAttribute("data-sat-popover-panel");
     expect(notes.className).not.toMatch(/fixed|absolute/);
@@ -205,18 +235,23 @@ describe("SatExamShell", () => {
     expect(menu).toHaveAttribute("data-sat-popover-panel", "anchored");
     expect(menu.className).toMatch(/fixed/);
   });
-  it("shows the annotation entry in Reading and Writing and hides it in Math", () => {
+  it("shows both annotation controls in Reading and Writing and hides them in Math", () => {
     const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
     expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
+    expect(screen.getByRole('button', { name: /^Notes/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Notes/ }));
     expect(screen.getByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     rerender(<SatExamShell {...props({ notesAvailable: false })}><NotesWorkspace /></SatExamShell>);
+    // Hidden, not disabled: with no annotation surface there is nothing behind
+    // either control, and a disabled control would promise one.
     expect(screen.queryByRole('button', { name: /^Highlights & Notes/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Notes/ })).not.toBeInTheDocument();
   });
-  it("disables the annotation entry while the exam is blocked", () => {
+  it("disables both annotation controls while the exam is blocked", () => {
     render(<SatExamShell {...props({ notesAvailable: true, blocked: true })} />);
     expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Notes/ })).toBeDisabled();
   });
   it("shows SAT timer/tools with a quiet persistent save token (Phase 6f)", () => {
     render(<SatExamShell {...props()} />);
@@ -250,11 +285,13 @@ describe("SatExamShell", () => {
     expect(screen.queryByRole("button", { name: "Calculator" })).not.toBeInTheDocument();
   });
 
-  it("keeps the annotation entry out of Math and present in Reading and Writing", () => {
+  it("keeps the annotation controls out of Math and present in Reading and Writing", () => {
     const { rerender } = render(<SatExamShell {...props({ notesAvailable: false })} />);
     expect(screen.queryByRole("button", { name: /^Highlights & Notes/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Notes/ })).not.toBeInTheDocument();
     rerender(<SatExamShell {...props({ notesAvailable: true })} />);
     expect(screen.getByRole("button", { name: /^Highlights & Notes/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Notes/ })).toBeInTheDocument();
   });
 
   it("opens the bottom-anchored navigator and routes a selected question", () => {

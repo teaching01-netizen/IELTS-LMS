@@ -51,7 +51,10 @@ describe('resolveEscapeAction (exactly one semantic action per press)', () => {
   it('clears the live annotation selection before the line reader', () => {
     const selected = {
       ...createSatInteractionState(),
-      annotation: { selection: { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' } },
+      annotation: {
+        modeEnabled: true,
+        selection: { nodeId: 'stimulus:p1', startOffset: 0, endOffset: 4, exact: 'tree' },
+      },
     };
     expect(resolveEscapeAction(selected, ctx()).type).toBe('CLEAR_SELECTION');
     expect(resolveEscapeAction(selected, ctx(), { lineReaderEnabled: true }).type).toBe('CLEAR_SELECTION');
@@ -61,5 +64,13 @@ describe('resolveEscapeAction (exactly one semantic action per press)', () => {
 
   it('is a NOOP when nothing is open, selected, or reading-aided', () => {
     expect(resolveEscapeAction(createSatInteractionState(), ctx()).type).toBe('NOOP');
+    // An ARMED mode with nothing selected is still nothing to dismiss: Escape
+    // dismisses chrome, and the mode is not chrome. It has its own control.
+    expect(
+      resolveEscapeAction(
+        { ...createSatInteractionState(), annotation: { modeEnabled: true, selection: null } },
+        ctx(),
+      ).type,
+    ).toBe('NOOP');
   });
 });

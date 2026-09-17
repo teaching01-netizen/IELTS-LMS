@@ -60,11 +60,26 @@ async function openHarness(page: Page): Promise<void> {
 const PHRASE = 'canopy density';
 
 /**
+ * Arm annotation the way the student does: press the labeled top-bar control.
+ *
+ * This is the first half of every flow in this file. Selection only raises the
+ * surface in an armed exam, so without this the placement engine would have
+ * nothing to place — which is the point of the mode, not a quirk of the harness.
+ */
+async function armHighlights(page: Page): Promise<void> {
+  const toggle = page.getByRole('button', { name: /^Highlights & Notes/ });
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+}
+
+/**
  * The app's own selection gesture: a real range plus the pointerup that
  * completes it. Identical to the accessibility suite's helper on purpose — the
- * flow under test is the one a student performs, not a shortcut into it.
+ * flow under test is the one a student performs, not a shortcut into it — with
+ * the one press that arms the tool in front of it.
  */
 async function selectStimulusText(page: Page, requested: string): Promise<void> {
+  await armHighlights(page);
   await page.locator('[data-sat-annotation-region="stimulus"]').evaluate((root, value) => {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node: Node | null = walker.nextNode();
@@ -244,6 +259,9 @@ test.describe('annotation surface placement', () => {
   test('surfaces promptly, but not the instant the gesture ends', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 768 });
     await openHarness(page);
+    // Armed outside the measured window on purpose: the timing contract is about
+    // the gesture, not about the press that made it possible.
+    await armHighlights(page);
 
     const elapsed = await page.locator('[data-sat-annotation-region="stimulus"]').evaluate(async (root, value) => {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);

@@ -7,10 +7,17 @@ import { SatAnnotationViewContext, type SatAnnotationView } from './SatAnnotatio
 
 const content = (text = 'A tree grows.') => ({ version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text }] });
 
+/**
+ * An armed, writable passage — the state most of these cases are about.
+ *
+ * The armed mode is spelled out rather than defaulted into, so the two cases
+ * that turn it off read as the deliberate exception they are.
+ */
 function view(overrides: Partial<SatAnnotationView> = {}): SatAnnotationView {
   return {
     activeAnnotationId: null,
     openEditorActive: true,
+    annotationModeEnabled: true,
     openEditor: vi.fn(),
     ...overrides,
   };
@@ -113,6 +120,56 @@ describe('SAT annotation rendering', () => {
     // Pointer landing outside the component (the toolbar case) is a command.
     selectText(container, 2, 6);
     expect(onSelectionCaptured).toHaveBeenCalledTimes(1);
+  });
+
+  // The non-negotiable rule, at the gesture: an unarmed exam captures nothing.
+  // The browser's own selection still happens — that is not ours to prevent —
+  // but nothing is serialized, reported, or shown.
+  it('reports nothing while annotation is unarmed, however much text is selected', () => {
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ annotationModeEnabled: false, onSelectionCaptured }));
+    selectText(container, 2, 6);
+    expect(onSelectionCaptured).not.toHaveBeenCalled();
+    // The native selection is left exactly as the browser made it: unarming
+    // stops our annotation system, it does not fight the platform.
+    expect(window.getSelection()?.isCollapsed).toBe(false);
+
+    // Arming the same passage restores capture with no other change, which is
+    // what makes the mode the only thing that mattered.
+    const armed = renderContent({}, view({ annotationModeEnabled: true, onSelectionCaptured }));
+    selectText(armed.container, 2, 6);
+    expect(onSelectionCaptured).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps painted marks as plain text while unarmed, with their ink intact', () => {
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree', color: 'blue' })];
+    const openEditor = vi.fn();
+    const { container } = renderContent({ annotations }, view({ annotationModeEnabled: false, openEditor }));
+    const mark = container.querySelector<HTMLElement>('[data-sat-highlight="true"]')!;
+
+    // Still the student's work: OFF means stop creating and editing, never hide.
+    expect(container.querySelector('[data-sat-highlight-color="blue"]')).toHaveTextContent('tree');
+    // …and never a control. Tapping it opens nothing, and no assistive tech
+    // announces an action that is not available.
+    expect(mark).not.toHaveAttribute('role');
+    expect(mark).not.toHaveAttribute('tabindex');
+    expect(mark).not.toHaveAttribute('data-sat-annotation-control');
+    expect(mark).not.toHaveAttribute('aria-label');
+    fireEvent.click(mark);
+    expect(openEditor).not.toHaveBeenCalled();
+  });
+
+  // The margin dots are part of what the student wrote, not part of the tool:
+  // arming decides whether marks are editable, never whether they are visible.
+  it('keeps the note dots while unarmed', () => {
+    restoreMarkGeometry = stubMarkLines({ a1: 40 });
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [
+      createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', id: 'a1', startOffset: 2, endOffset: 6, exact: 'tree', note: 'Cooler here' }),
+    ];
+    const { container } = renderContent({ annotations }, view({ annotationModeEnabled: false }));
+    expect(container.querySelector('[data-sat-note-marker="a1"]')).not.toBeNull();
   });
 
   it('never reports a selection while annotations are disabled for this section', () => {

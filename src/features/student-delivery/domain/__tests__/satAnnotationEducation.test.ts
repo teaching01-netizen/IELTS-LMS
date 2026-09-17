@@ -1,19 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import * as education from '../satAnnotationEducation';
 import {
-  SAT_ANNOTATION_HINT_DELAY_MS,
+  SAT_ANNOTATION_CUE_MS,
   createDefaultSatAnnotationEducationState,
   normalizeSatAnnotationEducationState,
-  satAnnotationHintDelayMs,
   satAnnotationHintRetired,
   shouldShowSatAnnotationHint,
 } from '../satAnnotationEducation';
 
-/** The ordinary case: an interactive R&W question with nothing happening yet. */
+/** The ordinary case: an armed R&W question with nothing happening yet. */
 function context(overrides: Partial<Parameters<typeof shouldShowSatAnnotationHint>[1]> = {}) {
   return {
     annotationsAvailable: true,
     blocked: false,
+    modeEnabled: true,
     hasSelection: false,
     answered: false,
     hasAnnotations: false,
@@ -61,16 +60,19 @@ describe('satAnnotationEducation', () => {
     expect(shouldShowSatAnnotationHint(fresh, context({ answered: true }))).toBe(false);
   });
 
-  // The pass this replaced put the cue on a five-second clock: it retired itself
-  // whether or not anyone had read it, so a slow reader (or anyone who opened
-  // Highlights & Notes later) was never taught at all.
-  it('keeps teaching until the student demonstrates the gesture, never until a clock runs out', () => {
+  // The cue answers "what did I just turn on?", so it is tied to the mode and to
+  // nothing else. An unarmed exam teaches nothing — there is no gesture to
+  // teach, and the labeled control is what teaches it.
+  it('never appears while annotation is unarmed, however fresh the student is', () => {
     const fresh = createDefaultSatAnnotationEducationState();
-    expect(shouldShowSatAnnotationHint(fresh, context())).toBe(true);
-    expect(satAnnotationHintRetired(fresh)).toBe(false);
-    // No elapsed time is an input to this decision, and no show-once duration
-    // exists to consume the hint on its own.
-    expect('SAT_ANNOTATION_HINT_DURATION_MS' in education).toBe(false);
+    expect(shouldShowSatAnnotationHint(fresh, context({ modeEnabled: false }))).toBe(false);
+    // Nor for a student who has never annotated and is on question one: the cue
+    // is the consequence of arming, not an alert that fires on load.
+    expect(shouldShowSatAnnotationHint(fresh, context({ modeEnabled: false, answered: false }))).toBe(false);
+  });
+
+  it('is a bounded cue, not a permanent line: its lifetime is a constant', () => {
+    expect(SAT_ANNOTATION_CUE_MS).toBe(3000);
   });
 
   it('retires the cue once the student has marked or written something', () => {
@@ -82,23 +84,27 @@ describe('satAnnotationEducation', () => {
     expect(satAnnotationHintRetired({ ...fresh, createdFirstNote: true })).toBe(true);
     expect(satAnnotationHintRetired({ ...fresh, sawHighlightHint: true })).toBe(true);
     expect(shouldShowSatAnnotationHint({ ...fresh, createdFirstNote: true }, context())).toBe(false);
+    expect(shouldShowSatAnnotationHint({ ...fresh, createdFirstHighlight: true }, context())).toBe(false);
   });
 
-  it('arrives at once when the student asks for the tool, and quietly otherwise', () => {
-    // Pressing Highlights & Notes is a direct request: the lesson should already
-    // be on screen. On an untouched exam it waits, so it reads as an aside instead
-    // of an alert firing on load.
-    expect(satAnnotationHintDelayMs(true)).toBe(0);
-    expect(satAnnotationHintDelayMs(false)).toBe(SAT_ANNOTATION_HINT_DELAY_MS);
+  it('keeps teaching across repeated activations until the student annotates', () => {
+    const fresh = createDefaultSatAnnotationEducationState();
+    // Arm, disarm, arm: the cue is offered every time, because the student still
+    // has not annotated anything. Once they do, it never returns.
+    expect(shouldShowSatAnnotationHint(fresh, context({ modeEnabled: true }))).toBe(true);
+    expect(shouldShowSatAnnotationHint(fresh, context({ modeEnabled: false }))).toBe(false);
+    expect(shouldShowSatAnnotationHint(fresh, context({ modeEnabled: true }))).toBe(true);
+    const learned = { ...fresh, createdFirstHighlight: true, lastHighlightColor: 'yellow' as const };
+    expect(shouldShowSatAnnotationHint(learned, context({ modeEnabled: true }))).toBe(false);
+    expect(shouldShowSatAnnotationHint(learned, context({ modeEnabled: false }))).toBe(false);
   });
 
-  it.each([
-    ['shown once already', { sawHighlightHint: true }, true],
-    ['annotations unavailable (Math)', { sawHighlightHint: false }, false],
-  ])('hides the passive hint when %s', (_label, overrides, annotationsAvailable) => {
-    expect(shouldShowSatAnnotationHint(
-      { ...createDefaultSatAnnotationEducationState(), ...overrides },
-      context({ annotationsAvailable }),
-    )).toBe(false);
+  it('hides the cue on questions without the annotation surface', () => {
+    expect(
+      shouldShowSatAnnotationHint(
+        createDefaultSatAnnotationEducationState(),
+        context({ annotationsAvailable: false, modeEnabled: true }),
+      ),
+    ).toBe(false);
   });
 });

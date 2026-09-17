@@ -194,10 +194,17 @@ export const SAT_COPY = {
   // to read, so "Add note" always appears next to the note glyph.
   annotations: {
     limitReached: "Note limit reached (200) for this question \u2014 remove one to add another.",
-    // One labeled top-bar entry. Never dynamically shortened: an icon-only
-    // entry would have to be decoded, and decoding is what this pass removes.
+    // The top-bar entry that ARMS annotation. Never dynamically shortened: an
+    // icon-only entry would have to be decoded, and decoding is what this pass
+    // removes. Its pressed state is the mode, so the label never changes with
+    // it — the control is still the same control, and renaming it on toggle
+    // would make a student re-find it every time.
     toolLabel: "Highlights & Notes",
-    toolLabelHasAnnotations: "Highlights & Notes, has annotations",
+    // The disclosure beside it, which is the only thing that opens the Notes
+    // column. Named for the destination, never for the mode: the two controls
+    // must never be mistakable for each other, in speech or on screen.
+    notesTool: "Notes",
+    notesToolHasHighlights: "Notes, has highlights",
     // Action affordance names shared by the toolbar, dock, and edit dock.
     highlight: "Highlight",
     underline: "Underline",
@@ -207,10 +214,11 @@ export const SAT_COPY = {
     // selection all dismiss it too, but a panel that can only be dismissed by a
     // gesture the student has to guess is a panel they will try to avoid.
     closeTools: "Close text tools",
-    // Passive first-use hint: one quiet line at the top of the passage, shown
-    // once per attempt, dismissed by the first selection (or the first answer).
-    // It teaches where the gesture belongs instead of pointing at the tool.
-    passageHint: "Select text to highlight or add a note",
+    // The activation cue: one quiet line at the top of the passage, shown when
+    // the student arms annotation, until they annotate something. It answers
+    // "what did I just turn on?" where the answer applies — over the text that
+    // is now selectable — instead of pointing back at the control.
+    activationCue: "Highlighting on \u2014 select text to highlight or add a note",
     removedHighlight: "Highlight removed",
     removedUnderline: "Underline removed",
     undo: "Undo",
@@ -313,6 +321,20 @@ export function satQuotedSource(quote: string): string {
  */
 export function satNotesCountLabel(count: number): string {
   return count === 1 ? "1 note" : count + " notes";
+}
+
+/**
+ * The Notes disclosure's name, spoken and written.
+ *
+ * Always begins with "Notes" so the control that opens the column is one
+ * predictable thing in speech, whatever it currently holds; the suffix reports
+ * content ("2 notes") or, when there is ink but no writing, that there is
+ * something of the student's to look at ("has highlights").
+ */
+export function satNotesToolLabel(input: { count: number; hasHighlights: boolean }): string {
+  if (input.count > 0) return SAT_COPY.annotations.notesTool + ", " + satNotesCountLabel(input.count);
+  if (input.hasHighlights) return SAT_COPY.annotations.notesToolHasHighlights;
+  return SAT_COPY.annotations.notesTool;
 }
 
 /**
