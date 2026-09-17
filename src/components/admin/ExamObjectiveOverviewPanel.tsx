@@ -11,8 +11,11 @@ import type {
   ObjectiveOverrideUpsertRequest,
 } from '../../types/grading';
 import { examRepository } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
-import { gradingRepository, gradingService } from '../../features/grading/infrastructure/gradingGateway';
-import { gradingErrorMessage } from '../../services/gradingService';
+import {
+  gradingErrorMessage,
+  gradingRepository,
+  gradingService,
+} from '../../features/grading/infrastructure/gradingGateway';
 import { sanitizeAcceptedAnswers } from '../../utils/acceptedAnswers';
 import type {
   ExamObjectiveOverviewBundle,

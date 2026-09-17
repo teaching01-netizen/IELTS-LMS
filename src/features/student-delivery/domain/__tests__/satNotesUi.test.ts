@@ -1,0 +1,103 @@
+import { describe, expect, it } from 'vitest';
+import {
+  SAT_NOTES_COLUMN_TRACK,
+  SAT_NOTES_PAIR_TRACK,
+  SAT_QUESTION_NOTE_EDITOR,
+  idleSatNotesUi,
+  satNotesColumnOpen,
+  satNotesPlacement,
+  satNotesUiFromSurface,
+  selectionSatNotesUi,
+} from '../satNotesUi';
+import type { SatExclusiveSurface } from '../satInteractionState';
+
+const returnFocus = { kind: 'top-bar', id: 'sat-notes-button' } as never;
+
+/**
+ * One state owns "is the column open, which card is active, which field is
+ * open". These cases pin the translation from the interaction machine so no
+ * component has to answer that question a second time — the duplication that
+ * let the Add-note close path drop focus.
+ */
+describe('satNotesUiFromSurface', () => {
+  it('opens the column on a marked span, with that card active and its field open', () => {
+    const state = satNotesUiFromSurface(
+      { kind: 'annotation-note-editor', annotationId: 'mark-1', returnFocus },
+      null,
+      false,
+    );
+    expect(state).toEqual({ kind: 'notes', editorId: 'mark-1', activeId: 'mark-1' });
+    expect(satNotesColumnOpen(state)).toBe(true);
+  });
+
+  it('treats writing about the question as an editor state, not a flag', () => {
+    const state = satNotesUiFromSurface({ kind: 'question-note-editor', returnFocus }, null, false);
+    expect(state).toEqual({
+      kind: 'notes',
+      editorId: SAT_QUESTION_NOTE_EDITOR,
+      activeId: null,
+    });
+  });
+
+  it('opens the column with no field when the student asked for notes', () => {
+    // The top-bar entry is a request for the column, not for a field: nothing
+    // should be focused for typing that the student did not ask to type in.
+    const state = satNotesUiFromSurface({ kind: 'question-notes', returnFocus }, 'mark-2', false);
+    expect(state).toEqual({ kind: 'notes', editorId: null, activeId: 'mark-2' });
+  });
+
+  it('rings the mark being edited without opening anything', () => {
+    // The edit dock's own presentation state only ever highlights a card; it can
+    // never make the column appear.
+    expect(satNotesUiFromSurface({ kind: 'none' }, 'mark-3', false)).toEqual({ kind: 'idle' });
+    expect(satNotesColumnOpen(satNotesUiFromSurface({ kind: 'none' }, 'mark-3', false))).toBe(false);
+  });
+
+  it('reports a live selection, so the toolbar owns the surface instead', () => {
+    expect(satNotesUiFromSurface({ kind: 'none' }, null, true)).toEqual(selectionSatNotesUi());
+    expect(satNotesUiFromSurface({ kind: 'none' }, null, false)).toEqual(idleSatNotesUi());
+  });
+
+  it.each<SatExclusiveSurface['kind']>(['navigator', 'directions', 'reading-settings', 'more-menu'])(
+    'keeps the column closed while %s is open',
+    (kind) => {
+      expect(satNotesUiFromSurface({ kind, returnFocus } as SatExclusiveSurface, 'mark-3', false)).toEqual({
+        kind: 'idle',
+      });
+    },
+  );
+});
+
+/**
+ * One rule for where the column goes, so the component that renders it and the
+ * component that places it can never disagree.
+ */
+describe('satNotesPlacement', () => {
+  it('is closed when the column is closed, whatever the width', () => {
+    expect(satNotesPlacement({ open: false, compact: false, threeColumn: true })).toBe('none');
+    expect(satNotesPlacement({ open: false, compact: true, threeColumn: false })).toBe('none');
+  });
+
+  it('takes a column of its own when three panes fit', () => {
+    expect(satNotesPlacement({ open: true, compact: false, threeColumn: true })).toBe('column');
+  });
+
+  it('takes the question’s place rather than squeezing three panes', () => {
+    expect(satNotesPlacement({ open: true, compact: false, threeColumn: false })).toBe('pair');
+  });
+
+  it('stacks on phone widths, where even two panes do not fit', () => {
+    expect(satNotesPlacement({ open: true, compact: true, threeColumn: false })).toBe('row');
+    // Compact wins over a stale wide query: one pane at a time cannot hold a
+    // column beside it.
+    expect(satNotesPlacement({ open: true, compact: true, threeColumn: true })).toBe('row');
+  });
+
+  it('keeps the track inside the 280–340px band a note column needs', () => {
+    for (const track of [SAT_NOTES_COLUMN_TRACK, SAT_NOTES_PAIR_TRACK]) {
+      const [min, , max] = track.replace(/^clamp\(|\)$/g, '').split(', ');
+      expect(Number(min?.replace('px', ''))).toBe(280);
+      expect(Number(max?.replace('px', ''))).toBe(340);
+    }
+  });
+});

@@ -2,7 +2,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSatReadingPreferences } from "../../domain/satReadingPreferences";
 import { SatExamShell, type SatExamShellProps } from "../SatExamShell";
+import { useSatNotesSurface } from "../annotations/SatNotesSurfaceContext";
 import { SatFloatingTool } from "../tools/SatFloatingTool";
+
+/**
+ * The route's workspace is what renders the Notes column out of the shell's
+ * context; this stands in for it so the shell can be exercised on its own.
+ */
+function NotesWorkspace() {
+  const notes = useSatNotesSurface();
+  return <>{notes.open ? notes.column : null}</>;
+}
 
 function shellProps(overrides: Partial<SatExamShellProps> = {}): SatExamShellProps {
   return {
@@ -26,7 +36,12 @@ function shellProps(overrides: Partial<SatExamShellProps> = {}): SatExamShellPro
     saveState: "idle",
     questionNote: "",
     readingPreferences: createSatReadingPreferences(),
-    children: <div>Question body</div>,
+    children: (
+      <>
+        <div>Question body</div>
+        <NotesWorkspace />
+      </>
+    ),
     onSelectQuestion: vi.fn(),
     onToggleCalculator: vi.fn(),
     onToggleReference: vi.fn(),
@@ -73,10 +88,10 @@ describe("Wave A R-02 compact single-modal (option ii: tool sheet non-modal)", (
         </SatFloatingTool>
       </>,
     );
-    // Highlights & Notes is one labeled entry; its panel is the question-note
-    // dialog (/Question note/ matches the dialog's accessible name).
+    // Highlights & Notes is one labeled entry; what it opens is a structural
+    // column, so it adds no dialog to the stack.
     fireEvent.click(screen.getByRole("button", { name: /^Highlights & Notes/ }));
-    expect(await screen.findByRole("dialog", { name: /Question note/ })).toBeInTheDocument();
+    expect(await screen.findByRole("complementary", { name: "Notes" })).toBeInTheDocument();
     const tool = screen.getByRole("dialog", { name: "Calculator" });
     expect(tool).toHaveAttribute("data-sat-tool-presentation", "compact-sheet");
     expect(tool).not.toHaveAttribute("aria-modal");
@@ -112,9 +127,9 @@ describe("Wave A R-03 focus return per surface (option A: mounted selectors)", (
     const trigger = screen.getByRole("button", { name: /^Highlights & Notes/ });
     expect(trigger).toHaveAttribute("data-sat-focus", "topbar-notes");
     fireEvent.click(trigger);
-    expect(screen.getByRole("dialog", { name: /Question note/ })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Notes" })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: /Question note/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Notes" })).not.toBeInTheDocument();
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Search, Clock, Users, AlertCircle, ArrowRight, Calendar, Download, ChevronLeft, ChevronRight, RotateCw, X } from 'lucide-react';
 import type { GradingSession, SessionQueuePagination } from '../../types/grading';
-import { gradingService } from '../../features/grading/infrastructure/gradingGateway';
-import { gradingErrorMessage } from '../../services/gradingService';
+import {
+  gradingErrorMessage,
+  gradingService,
+} from '../../features/grading/infrastructure/gradingGateway';
 import { TableLoadingSkeleton } from '@components/ui';
 import { seedDevelopmentFixtures } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import { downloadCsv } from '../../utils/csvExport';

@@ -33,21 +33,29 @@ export const SAT_COPY = {
     decreaseZoom: "Decrease screen zoom",
     increaseZoom: "Increase screen zoom",
   },
-  questionNote: {
-    title: "Question note",
-    fieldLabel: "Note for this question",
-    placeholder: "Add a note you can revisit in this module.",
-    saveAndClose: "Save and close",
-    close: "Close question note",
-    autoSaveHint: "Notes save automatically for this module.",
-    hasNote: "Has note",
+  // One concept, one destination: the student's notes for this question. Notes
+  // anchored to selected passage text and the freeform note about the question
+  // itself live in the same column and the same list, because a student does not
+  // experience two note systems — the earlier split only made them ask which was
+  // which. Anchored notes quote their source; the question's own note says so.
+  notes: {
+    title: "Notes",
+    close: "Close notes",
+    questionSource: "This question",
+    placeholder: "Add a quick note\u2026",
+    // Quiet, transient confirmation that there is no Save button to press.
+    saved: "Saved",
+    remove: "Remove note",
+    // Shown only when there is nothing to read AND nothing being written, so it
+    // can never sit beside an open editor contradicting itself. It offers the
+    // one action available with no selection, so writing about the question is
+    // discoverable rather than a capability that quietly disappeared.
+    empty: "Select text to add a note",
+    writeAboutQuestion: "Write a note about this question",
+    // On the close control at widths where notes take the question's place, so
+    // closing says what it actually does.
+    closeAndShowQuestion: "Close notes and show the question",
     unavailableInMath: "Notes are not available in Math.",
-  },
-  noteOnSelection: {
-    title: "Note on selected text",
-    yourNote: "Your note",
-    delete: "Delete this note",
-    done: "Done",
   },
   flag: {
     flag: "Flag for later",
@@ -171,24 +179,18 @@ export const SAT_COPY = {
     underline: "Underline",
     selectedTextActions: "Selected text actions",
     editAnnotation: "Edit annotation",
-    // Passive first-use hint: one quiet line under the tool entry, shown once
-    // per attempt, dismissed by the first selection (or the first answer).
-    firstUseHint: "Select text to highlight",
+    // Passive first-use hint: one quiet line at the top of the passage, shown
+    // once per attempt, dismissed by the first selection (or the first answer).
+    // It teaches where the gesture belongs instead of pointing at the tool.
+    passageHint: "Select text to highlight or add a note",
     // First highlight only: the mark itself is the feedback; this label just
     // confirms the mental model once and is gone.
     highlightedConfirmation: "Highlighted",
     removedHighlight: "Highlight removed",
     removedUnderline: "Underline removed",
     undo: "Undo",
-    emptyNotesTitle: "No notes yet",
-    emptyNotesBody: "Select text in the passage, then choose Add note.",
-    selectTextCoach: "Select any text",
     addNote: "Add note",
     editNote: "Edit note",
-    // The note field's own teaching: a short human prompt, and the quiet
-    // confirmation that saving happened without a Save button.
-    notePlaceholder: "Add a quick note\u2026",
-    noteSaved: "Saved",
     removeHighlight: "Remove highlight",
     removeUnderline: "Remove underline",
     // Polite announcements (never rendered visually).
@@ -267,8 +269,15 @@ export const SAT_COPY = {
 
 export type SatCopy = typeof SAT_COPY;
 
-export function satSelectedTextLabel(quote: string): string {
-  return "Selected text: " + quote;
+/**
+ * A note's source, quoted the way the Notes column shows it.
+ *
+ * The old label read "Selected text: …", which is system language for something
+ * the student did themselves a moment ago. A quoted snippet needs no preface:
+ * the quotes say "this is the text you marked".
+ */
+export function satQuotedSource(quote: string): string {
+  return "\u201C" + quote + "\u201D";
 }
 
 /**

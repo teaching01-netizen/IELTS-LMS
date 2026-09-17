@@ -45,7 +45,6 @@ describe("bluebook overlays (Phases 8-9 source contract)", () => {
     for (const file of [
       "shell/SatDirectionsPopover.tsx",
       "shell/SatReadingPopover.tsx",
-      "question/SatNotesPanel.tsx",
     ]) {
       const source = read(file);
       expect(source).not.toContain("var(--sat-scrim)");
@@ -55,11 +54,20 @@ describe("bluebook overlays (Phases 8-9 source contract)", () => {
     expect(shell).not.toContain("var(--sat-scrim)");
   });
 
+  it("writes notes in a structural column: no scrim, no backdrop, no floating panel", () => {
+    const column = read("annotations/SatNotesColumn.tsx");
+    // Notes occupy layout space between the passage and the question, so the
+    // column must never dim the exam or float over it.
+    expect(column).not.toContain("var(--sat-scrim)");
+    expect(column).not.toContain("bg-black");
+    expect(column).not.toContain("fixed");
+    expect(column).not.toContain("var(--sat-shadow-floating)");
+  });
+
   it("popover panels use radius 6-8, subtle border, floating shadow", () => {
     for (const file of [
       "shell/SatDirectionsPopover.tsx",
       "shell/SatReadingPopover.tsx",
-      "question/SatNotesPanel.tsx",
     ]) {
       const source = read(file);
       expect(source).toContain("var(--sat-shadow-floating)");

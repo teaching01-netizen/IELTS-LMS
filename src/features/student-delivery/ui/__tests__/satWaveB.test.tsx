@@ -196,7 +196,7 @@ describe("Wave B R-10/R-17 token swap is size-preserving", () => {
     "feedback/SatSaveStatus.tsx",
     "shell/SatTimerWarning.tsx",
     "shell/SatReadingPopover.tsx",
-    "question/SatNotesPanel.tsx",
+    "annotations/SatNotesColumn.tsx",
     "transitions/SatDirectionsScreen.tsx",
     "shell/SatQuestionNavigator.tsx",
   ];

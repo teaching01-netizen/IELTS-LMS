@@ -88,22 +88,143 @@ Design and quality work in the same pass:
 
 ---
 
+## Iteration 2: notes as a structural column (the layout explains the model)
+
+The first delivery taught the feature through labels and behaviour, but the notes
+still lived in overlays: a `fixed right-4 z-70` panel for the question note and a
+`Dialog` note card with a `bg-black/20` scrim for the selected-text note. A
+review of the running app named the consequence — the student had to travel the
+whole viewport to connect a note to its source, the exam dimmed as if they had
+left it, and two note concepts ("Question note", "Note on selected text") asked
+them to work out which was which. This iteration makes the layout itself explain
+the model:
+
+```
+select something -> mark it -> the note appears beside what I marked
+```
+
+- **`SatNotesColumn`** replaces both overlays. It is one list: anchored notes
+  quoting their source with the ink dot of their mark, plus the question's own
+  note as the same card with a different source line. No scrim, no dialog, no
+  Save button (idle autosave, commit on blur/close, transient "Saved"), no
+  always-visible `0/2000` (the count appears at 1,600 and turns into a warning at
+  1,900 — `domain/satNoteEntry.ts`), and removal only exists once there is a note
+  to remove.
+- **`SatNotesSurfaceContext`** carries the shell-composed column into
+  `SatQuestionWorkspace`, which owns the grid: `Passage | Notes | Question` at
+  ≥1024px (`320px` fixed for notes, the rest split by the student's ratio), and a
+  full-width row under the question below that — a row, never an overlay.
+- **Teaching moved into the passage.** The floating "Select any text" pill and
+  the top-right first-use hint are gone; one quiet line with a highlighter glyph
+  renders at the top of the passage text it is talking about.
+- **Both directions of the highlight ↔ note link** now work: choosing a note
+  scrolls the passage pane (only that pane, centred, reduced-motion aware) to its
+  mark, and tapping a mark scrolls its card into view and rings it.
+- **Removed:** `ui/question/SatNotesPanel.tsx`, `ui/annotations/SatAnnotationNoteEditor.tsx`,
+  `SatAnnotationEmptyNotesCoach`, `SatAnnotationSelectTextCoach`,
+  `SatAnnotationFirstUseHint`, the `--sat-note-header` token, and the copy keys
+  for the two-concept model. `satAnnotatedNotes` gained an `editingId` so a mark
+  chosen for its first note appears as a card immediately.
+
+Two deliberate trade-offs, both recorded rather than hidden:
+
+- A completely empty column shows guidance only: the freeform note about the
+  question is reachable once the column has any content, because a note with no
+  source is outside the model this layout teaches.
+- Below 1024px the column stacks under the question. Three panes at 768–1023px
+  would leave the passage and question ~224px each, and readable text beats a
+  strict three-column rule.
+
+---
+
+## Iteration 3: one state, three placements, and a close that returns the caret
+
+The audit of iteration 2 found three things worth fixing, all of them structural.
+
+**One state.** "Is the column open, which card is active, which field is open" was
+answered in three places — the interaction machine's surface kind, the shell's own
+derivation, and the annotation being edited. `domain/satNotesUi.ts` now holds the
+one union:
+
+```ts
+{ kind: 'idle' } | { kind: 'selection' } | { kind: 'notes'; editorId; activeId }
+```
+
+`satNotesUiFromSurface` is the single translation from the machine, and the
+sentinel `SAT_QUESTION_NOTE_EDITOR` is why writing about the question is a *state*
+rather than a flag: the machine gained a `question-note-editor` surface, so Escape,
+close, and focus return need no special case. `SatNotesSurfaceHost` owns the
+chrome and the placement decision; the workspace only renders the placement it is
+handed, and no component re-derives it.
+
+**Three placements, one rule.** `satNotesPlacement({ open, compact, threeColumn })`
+returns `none | column | pair | row`:
+
+- `column` (≥1024px) — `Passage | Notes | Question`, the column at
+  `clamp(280px, 20%, 340px)`;
+- `pair` (768–1023px) — **`Passage | Notes` while notes are open**, exactly what the
+  review asked for at narrower widths: three panes here would leave both reading
+  panes ~224px, so the note takes the question's place and the close control says so
+  ("Close notes and show the question") and brings it back;
+- `row` (phone) — notes stack full width beneath both panes.
+
+**Closing is a return.** Every close path (the button, Escape, a question change)
+runs through the hook's `closeNotes`, which hands focus back to the mark the note
+was about, else the row for the question's own note, else the trigger — and reports
+whether the target actually took focus, so an unfocusable element falls back
+instead of leaving the caret on `<body>`.
+
+Two smaller corrections came out of the same pass: the column is keyed by question
+again (`questionKey` on the host), which is what makes a half-typed draft commit to
+its own question and never onto the next one; and the question's own note is a row
+in the same list — a card once written, a quiet dashed "Write a note about this
+question" until then — so the capability the empty state had quietly removed is
+reachable in every state without a permanently open textarea.
+
+The note field, its idle autosave, its progressive counter, and its conditional
+Remove were extracted to `SatNoteField.tsx`, used by both cards, so the two can no
+longer drift apart.
+
+---
+
 ## Verification
 
 | Command | Result |
 |---|---|
-| `bunx vitest run src/features/student-delivery` | **96 files / 635 tests passed** |
-| `bunx vitest run` | 4567 passed, 8 failed — all 8 in other workstreams' files (`src/components/admin/*`, `src/features/exam-authoring/editor/ingestion/*`) and the two architecture baselines that flag exactly those files; none import anything changed here |
+| `bunx vitest run src/features/student-delivery` | **100 files / 685 tests passed** (iteration 3: + `satNotesUi`, `SatNotesSurfaceHost`, the two focus-return helpers, the three placement tiers, the draft-across-questions case) |
+| `bunx vitest run` | **627 files / 4625 tests passed, 0 failed** — the whole repository, including the admin and exam-ingestion failures that were red before this pass (the missing `gradingErrorMessage` in five test mocks plus a `document` shadowing a DOM global); three unhandled `presence`-polling log lines remain and are unrelated console noise |
 | `bun run typecheck` (`tsc --noEmit`) | clean apart from one pre-existing error in `services/authoring-coedit/src/persistence.ts` (untouched by this work) |
 | `cd backend/go && go test ./internal/attempts/...` | **ok** |
-| `bunx playwright test --config playwright.sat-a11y.config.ts --project chromium` | **33 passed, 2 skipped, 4 failed** — the four are the calculator/Reference/Desmos tests (network-bound Desmos embed plus the already-recorded Reference-header hit-area finding); no annotation surface is involved and none of those sources were touched |
+| `bunx playwright test --config playwright.sat-a11y.config.ts` (full profile, iteration 3) | **104 passed, 12 failed** — 3× Desmos embed (network-bound), 3× Reference-header hit-area (recorded finding), 3× floating-calculator geometry, 3× landscape-iPad calculator touch targets (sub-pixel iframe settle); every remaining failure is a calculator/Reference/Desmos test and none touches an annotation surface |
+| `… -g "closing a note returns the caret"` (iteration 3) | **3 passed** — the regression the audit found: closing a note returns focus to the marked span, and Escape after writing about the question returns it to the entry that opens the column; the anchored text was committed on the way out |
+| `… -g "abandoned by navigating"` (iteration 3) | **3 passed** — a half-typed note survives Next → Previous (chrome does not follow the student, the draft does) |
+| `… -g "at tablet widths notes take the question's place"` (iteration 3) | **3 passed** — `pair` tier: the column sits beside the passage, the question's box is gone, and the labeled close control brings it back with focus |
 | Guard probe (temporary, deleted after the run) | selection gesture + activation on the option's text in the same task → **refused, and nothing committed** (state survived a forced re-render); activation after the window, a real click, and keyboard `Space` → **all accepted** |
+| `… -g "notes open as a column beside the exam"` (iteration 2) | **3 passed** (chromium, touch-chromium, webkit) — opening the entry yields a column, no dialog and no backdrop, passage and question both still visible, Escape returns focus to the trigger, and the column's box sits **between** the passage and the question (320px wide) — the layout claim, asserted as geometry in three engines |
+| `… -g "notes column report no"` (iteration 2) | **3 passed** — new axe scan of the notes column with the caret in a note field |
+| `… -g "Reading text at 200 percent"` (iteration 2) | **1 passed** — caught a real bug: the note field had lost `sat-reading-copy`, so the student's text size did not apply to their own notes until this run |
 | `eslint src/features/student-delivery` | 0 errors; the 7 remaining warnings are pre-existing in files this work did not author |
-| `… -g "selected text raises labeled highlight controls\|axe: the selection toolbar"` | **2 passed** — the rewritten selection-first journey and the new axe scan of the toolbar + edit dock, in a real browser over the dev harness |
+| `… -g "selected text raises labeled highlight controls\|axe: the selection toolbar"` | **2 passed** — the rewritten selection-first journey and the axe scan of the toolbar + edit dock, in a real browser over the dev harness |
+| `bunx eslint src/features/student-delivery` (iteration 2) | 0 errors |
 
 ## Open items
+
+- **Iteration 3:** the column's width is a band (`clamp(280px, 20%, 340px)`), not a
+  handle. A draggable notes width (or a ratio token) would let a student trade
+  reading width for note width on a wide screen; today only the passage/question
+  ratio is adjustable.
+- **Iteration 3:** on the `pair` tier the question is genuinely off screen while a
+  note is written. The close control says so and restores it, but a student who
+  needs to re-read the question mid-note has to close the column to do it. A
+  collapse-to-strip affordance (or a peek) is the obvious next experiment.
 
 - `e2e/sat-answer-recovery.spec.ts` (rewritten for the selection-first flow) still needs a live backend + MySQL stack; it is the only changed spec that could not be executed here.
 - iPad hardware pass for §5/§34: the guard is now proven with synthetic-but-realistic input in Chromium (`GUARD_BLOCKS_MISTAP`, `GUARD_NOT_COMMITTED`), but a real finger on glass is still the acceptance test the brief asked for.
 - Keyboard-only initiation of a selection is still impossible: plain passage text is not focusable, so `Shift+Arrow` produces nothing and `Ctrl+A` spans multiple blocks (correctly rejected). The keyboard path is now complete *from* a selection — the toolbar takes the caret, arrow keys walk it, Enter applies — and marks themselves are reachable and activatable by keyboard. Whether to add a keyboard-only way to create a selection is a product decision the brief did not make.
-- The four pre-existing calculator/Reference/Desmos failures in `sat-student-accessibility.spec.ts` belong to the floating-tool workstream, not this one.
+- The nine remaining failures in the full `sat-a11y` profile belong to the
+  calculator/Reference/Desmos workstream (network-bound embed, sub-pixel iframe
+  settling, the recorded Reference hit-area finding); none touches an annotation
+  surface, and the notes/citations geometry assertions run green in three engines.
+- A real finger on iPad glass is still the acceptance test nobody has run: the
+  column's touch behaviour, the dock-to-column transition after "Add note", and
+  the answer-gesture guard are all only proven with synthetic input here.

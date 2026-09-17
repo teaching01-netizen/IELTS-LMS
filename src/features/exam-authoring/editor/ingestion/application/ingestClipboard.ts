@@ -18,6 +18,10 @@ import {
   type HtmlImageRef,
 } from "../adapters/htmlImageRefs";
 import { fetchHtmlImagesAsFiles } from "../adapters/fetchHtmlImagesAsFiles";
+import {
+  reconcileClipboardImageRepresentations,
+  type ClipboardImageReconciliationDeps,
+} from "./reconcileClipboardImages";
 import type { TextHtmlImageRef } from "../adapters/textHtml";
 import { DIAGNOSTIC_MESSAGES } from "../domain/diagnostics";
 import { SAT_IMAGE_POLICY } from "../domain/imagePolicy";
@@ -58,6 +62,12 @@ export interface PendingImage {
   file: File;
   alt: string;
 }
+
+const REPRESENTATION_RECONCILED_TRANSFORMATION = "image.representation-reconciled";
+const REPRESENTATION_RECONCILED_VISUAL_TRANSFORMATION = "image.representation-reconciled-visual";
+
+/** Injectable boundaries of the clipboard pipeline (browser primitives by default). */
+export type IngestClipboardDeps = ClipboardImageReconciliationDeps;
 
 const EMPTY_DOC: ImportDocument = {
   version: 1,
@@ -359,7 +369,10 @@ async function htmlImages(
 }
 
 function result(
-  document: ImportDocument,
+  // Deliberately NOT named `document`: this is an imported ImportDocument, and
+  // shadowing the DOM global with it reads as a browser dependency to the
+  // architecture guard (and to a human reader).
+  importedDocument: ImportDocument,
   source: IngestSource,
   pendingImages: PendingImage[],
   rejectedImages: number,
@@ -367,19 +380,20 @@ function result(
   transformations: string[]
 ): IngestClipboardResult {
   return {
-    document,
+    document: importedDocument,
     source,
     pendingImages,
     rejectedImages,
     warnings,
     transformations,
-    stats: statsOf(document),
+    stats: statsOf(importedDocument),
   };
 }
 
 export async function ingestClipboard(
   req: IngestClipboardRequest,
-  ctx: PipelineContext
+  ctx: PipelineContext,
+  deps: IngestClipboardDeps = {}
 ): Promise<IngestClipboardResult> {
   const flags = req.flags ?? {};
   const empty: IngestClipboardResult = {
@@ -397,7 +411,9 @@ export async function ingestClipboard(
       ? []
       : req.files.filter((file) => file.type.toLowerCase().startsWith("image/"));
   const directSelection = selectDirectImages(imageFiles);
-  const fileImages: PendingImage[] = directSelection.files.map((file, index) => ({
+  // Reassigned by reconciliation: a direct file adopts the alt text of the HTML
+  // representation that turned out to be the same bytes.
+  let fileImages: PendingImage[] = directSelection.files.map((file, index) => ({
     refId: "clipboard-image-" + String(index),
     file,
     alt: "",
@@ -425,6 +441,40 @@ export async function ingestClipboard(
       Math.max(0, SAT_IMAGE_POLICY.maxImagesPerPaste - fileImages.length),
       Math.max(0, SAT_IMAGE_POLICY.maxPasteBytes - directSelection.bytes)
     );
+    // Both representations of the SAME clipboard image arrive here: the direct
+    // file and the HTML <img> that was just fetched. Fold them into one staged
+    // image before the pending lists merge, or the paste inserts the visual
+    // twice and uploads it twice.
+    const reconciled = await reconcileClipboardImageRepresentations(
+      {
+        files: fileImages,
+        refs: htmlImageResult.refs,
+        htmlImages: htmlImageResult.pendingImages,
+        imageRefs: htmlImageResult.imageRefs,
+      },
+      deps
+    );
+    fileImages = reconciled.files;
+    htmlImageResult = {
+      ...htmlImageResult,
+      pendingImages: reconciled.htmlImages,
+      imageRefs: reconciled.imageRefs,
+      transformations: [
+        ...htmlImageResult.transformations,
+        ...(reconciled.reconciled > 0
+          ? [REPRESENTATION_RECONCILED_TRANSFORMATION + ":" + String(reconciled.reconciled)]
+          : []),
+        // A fold justified only by the visual fingerprint, never by bytes —
+        // the one reconciliation an operator may want to audit later.
+        ...(reconciled.reconciledByVisualFingerprint > 0
+          ? [
+              REPRESENTATION_RECONCILED_VISUAL_TRANSFORMATION +
+                ":" +
+                String(reconciled.reconciledByVisualFingerprint),
+            ]
+          : []),
+      ],
+    };
     pendingImages = [...fileImages, ...htmlImageResult.pendingImages];
     baseWarnings = [...directSelection.warnings, ...htmlImageResult.warnings];
     baseTransformations = [

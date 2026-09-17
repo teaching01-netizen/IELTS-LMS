@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPipelineContext } from "../application/pipelineContext";
 import { ingestClipboard } from "../application/ingestClipboard";
 import { SAT_IMAGE_POLICY } from "../domain/imagePolicy";
@@ -14,6 +14,45 @@ function imageFile(index: number, size = 1): File {
 
 function sixValidImageFiles(): File[] {
   return Array.from({ length: 6 }, (_, index) => imageFile(index));
+}
+
+const PNG_SIGNATURE = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_SIGNATURE_DATA_URL =
+  "data:image/png;base64," + btoa(String.fromCharCode(...PNG_SIGNATURE));
+
+function clipboardPng(bytes: Uint8Array = PNG_SIGNATURE): File {
+  return new File([bytes], "copy.png", { type: "image/png" });
+}
+
+function imageNodesIn(document: { nodes: Array<{ kind: string }> }): Array<Record<string, unknown>> {
+  const collected: Array<Record<string, unknown>> = [];
+  const visit = (nodes: Array<Record<string, unknown>>): void => {
+    for (const node of nodes) {
+      if (node["kind"] === "image") collected.push(node);
+      if (node["kind"] === "paragraph" || node["kind"] === "heading") {
+        visit((node["children"] as Array<Record<string, unknown>>) ?? []);
+      }
+      if (node["kind"] === "bulletList" || node["kind"] === "orderedList") {
+        for (const item of (node["items"] as Array<Record<string, unknown>>) ?? []) {
+          visit((item["nodes"] as Array<Record<string, unknown>>) ?? []);
+        }
+      }
+    }
+  };
+  visit(document.nodes as unknown as Array<Record<string, unknown>>);
+  return collected;
+}
+
+function stubPngFetch(bytes: Uint8Array = PNG_SIGNATURE): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "image/png" }),
+      blob: async () => new Blob([bytes], { type: "image/png" }),
+    }))
+  );
 }
 
 function filesTotalling(total: number): File[] {
@@ -274,6 +313,128 @@ describe("ingestClipboard orchestration", () => {
       blobRef: { id: "clipboard-image-0", mimeType: "image/png", sizeBytes: file.size },
     });
   });
+  it("folds a data: HTML image that repeats a direct clipboard file into one node", async () => {
+    const file = clipboardPng();
+    const res = await ingestClipboard(
+      {
+        files: [file],
+        html: '<p>See <img src="' + PNG_SIGNATURE_DATA_URL + '" alt="Copied visual"></p>',
+        text: "https://example.test/copy.png",
+        ownerId: "q1",
+        target,
+      },
+      ctx
+    );
+
+    const images = imageNodesIn(res.document);
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({
+      alt: "Copied visual",
+      blobRef: { id: "clipboard-image-0", mimeType: "image/png", sizeBytes: file.size },
+    });
+    expect(res.pendingImages.map((item) => item.refId)).toEqual(["clipboard-image-0"]);
+    // The direct file owns the bytes: no second fetch/decode, one upload.
+    expect(res.pendingImages[0]?.file).toBe(file);
+    expect(res.pendingImages[0]?.alt).toBe("Copied visual");
+    expect(res.stats.imageCount).toBe(1);
+    expect(res.rejectedImages).toBe(0);
+    expect(res.warnings).toEqual([]);
+    expect(res.transformations).toContain("image.representation-reconciled:1");
+  });
+
+  it("folds an https HTML image that repeats a direct clipboard file into one node", async () => {
+    const file = clipboardPng();
+    stubPngFetch();
+    try {
+      const res = await ingestClipboard(
+        {
+          files: [file],
+          html: '<p>See <img src="https://cdn.test/copy.png" alt="Copied visual"></p>',
+          text: "https://cdn.test/copy.png",
+          ownerId: "q1",
+          target,
+        },
+        ctx
+      );
+
+      expect(imageNodesIn(res.document)).toHaveLength(1);
+      expect(res.pendingImages.map((item) => item.refId)).toEqual(["clipboard-image-0"]);
+      expect(res.pendingImages[0]?.file).toBe(file);
+      expect(res.pendingImages[0]?.alt).toBe("Copied visual");
+      expect(res.rejectedImages).toBe(0);
+      expect(res.transformations).toContain("image.representation-reconciled:1");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("folds a re-encoded HTML representation through the visual fingerprint", async () => {
+    const file = clipboardPng();
+    // Different bytes on purpose: the fetched JPEG-flavored representation.
+    const otherBytes = Uint8Array.from([...PNG_SIGNATURE, 0x2a]);
+    stubPngFetch(otherBytes);
+    const fingerprint = async (candidate: File) => ({
+      width: 800,
+      height: 600,
+      luminance: Array.from({ length: 16 * 16 }, (_, index) =>
+        (index % 9) * 12 + (index % 5) * 7 + (candidate.type === "image/png" ? 0 : 3)
+      ),
+    });
+    try {
+      const res = await ingestClipboard(
+        {
+          files: [file],
+          html: '<p>See <img src="https://cdn.test/re-encoded.png" alt="Copied visual"></p>',
+          text: "See https://cdn.test/re-encoded.png",
+          ownerId: "q1",
+          target,
+        },
+        ctx,
+        { fingerprint }
+      );
+
+      expect(imageNodesIn(res.document)).toHaveLength(1);
+      expect(res.pendingImages.map((item) => item.refId)).toEqual(["clipboard-image-0"]);
+      expect(res.pendingImages[0]?.alt).toBe("Copied visual");
+      expect(res.stats.imageCount).toBe(1);
+      expect(res.rejectedImages).toBe(0);
+      expect(res.transformations).toContain("image.representation-reconciled:1");
+      // The fold rested on the heuristic level, not on the bytes.
+      expect(res.transformations).toContain("image.representation-reconciled-visual:1");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps two images when the HTML representation is not byte-identical", async () => {
+    const file = clipboardPng();
+    const otherBytes = Uint8Array.from([...PNG_SIGNATURE, 0x2a]);
+    stubPngFetch(otherBytes);
+    try {
+      const res = await ingestClipboard(
+        {
+          files: [file],
+          html: '<p>See <img src="https://cdn.test/re-encoded.png" alt="Copied visual"></p>',
+          text: null,
+          ownerId: "q1",
+          target,
+        },
+        ctx
+      );
+
+      expect(imageNodesIn(res.document)).toHaveLength(2);
+      expect(res.pendingImages.map((item) => item.refId)).toEqual([
+        "clipboard-image-0",
+        "html-image-0",
+      ]);
+      // No canvas in this environment, so only byte identity decided — and it
+      // did not fold a pair whose bytes differ.
+      expect(res.transformations).not.toContain("image.representation-reconciled:1");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("joins display math split across HTML block elements", async () => {
     const html =
       "<p>Before the estimate.</p><p>\\[</p>" +

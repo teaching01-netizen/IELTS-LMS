@@ -1327,7 +1327,6 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   /* Annotation chrome motion (C4: exam TSX carries no duration literals). */
   --sat-motion-annotation: 140ms;
   --sat-annotation-dock-shadow: 0 -2px 8px rgb(0 0 0 / 12%);
-  --sat-note-header: #FFF9D9;
   /* Bluebook selection preview (Phase 7, Lane 3): preview var for the
    * ::selection utility below; defaults to the paper token. No literal
    * change — value intentionally mirrors --sat-highlight-background. */

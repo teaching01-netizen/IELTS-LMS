@@ -22,9 +22,15 @@ import {
   type SatTextAnchor,
   type SatTextAnnotation,
 } from '../domain/satResponses';
+import { satNotesUiFromSurface, SAT_QUESTION_NOTE_EDITOR, type SatNotesUiState } from '../domain/satNotesUi';
 import type { SatInteractionController } from './useSatInteractionController';
 import { useSatAnnotationEducation } from './useSatAnnotationEducation';
 import { satHighlightInk } from '../ui/annotations/satAnnotationPalette';
+import {
+  focusSatAnnotationMark,
+  focusSatQuestionNoteRow,
+  scrollSatAnnotationIntoView,
+} from '../ui/annotations/satAnnotationDom';
 import type { SatSelectionActions } from '../ui/annotations/SatSelectionActionsPanel';
 import type { SatAnnotationView } from '../ui/annotations/SatAnnotationViewContext';
 
@@ -42,6 +48,8 @@ export interface SatAnnotationSurfaceOptions {
   interaction: SatInteractionController;
   /** Chrome belongs to one question; changing it discards the chrome. */
   questionKey: string;
+  /** Id of the control that opens the column, for focus return. */
+  notesTriggerId: string;
 }
 
 /**
@@ -74,10 +82,20 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   const [hintVisible, setHintVisible] = useState(false);
 
   const editingMark = annotations?.annotations.find((annotation) => annotation.id === editingMarkId) ?? null;
-  const noteEditorId = interaction.state.surface.kind === 'annotation-note-editor' ? interaction.state.surface.annotationId : null;
-  const noteEditorAnnotation = noteEditorId
-    ? annotations?.annotations.find((annotation) => annotation.id === noteEditorId) ?? null
-    : null;
+  /**
+   * Which note field is open, read from the one place that decides surfaces. Both
+   * editors are machine surfaces, so there is no second copy of this answer here.
+   */
+  const noteEditorId =
+    interaction.state.surface.kind === 'annotation-note-editor'
+      ? interaction.state.surface.annotationId
+      : interaction.state.surface.kind === 'question-note-editor'
+        ? SAT_QUESTION_NOTE_EDITOR
+        : null;
+  const noteEditorAnnotation =
+    noteEditorId && noteEditorId !== SAT_QUESTION_NOTE_EDITOR
+      ? annotations?.annotations.find((annotation) => annotation.id === noteEditorId) ?? null
+      : null;
 
   const write = useCallback(
     (next: SatQuestionAnnotations) => {
@@ -150,10 +168,46 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     [annotations, writable, write],
   );
 
+  /**
+   * The notes UI, from the machine. One state for "is the column open, which card
+   * is active, which field is open", so nothing downstream has to derive it again.
+   */
+  const notesState = useMemo<SatNotesUiState>(
+    () => satNotesUiFromSurface(interaction.state.surface, editingMarkId, selection !== null),
+    [editingMarkId, interaction.state.surface, selection],
+  );
+
+  /**
+   * Closing notes returns focus where the student was: the mark they wrote about,
+   * the row for the question's own note, or the control that opened the column.
+   * Without this the caret lands on <body> and a keyboard student loses their
+   * place entirely — and because every close path (the button, Escape, the
+   * question changing) goes through here, none of them can forget it.
+   */
+  const closeNotes = useCallback(() => {
+    const surface = interaction.state.surface;
+    interaction.closeSurface();
+    window.requestAnimationFrame(() => {
+      if (surface.kind === 'annotation-note-editor' && focusSatAnnotationMark(surface.annotationId)) return;
+      if (surface.kind === 'question-note-editor' && focusSatQuestionNoteRow()) return;
+      document.getElementById(options.notesTriggerId)?.focus();
+    });
+  }, [interaction, options.notesTriggerId]);
+
+  /** Write about the question itself, with nothing selected. */
+  const openQuestionNote = useCallback(() => {
+    setEditingMarkId(null);
+    interaction.openQuestionNote();
+  }, [interaction]);
+
   const openNoteOnMark = useCallback(
     (annotation: SatTextAnnotation) => {
       setEditingMarkId(null);
       interaction.openAnnotationNote(annotation.id);
+      // The other half of the highlight <-> note link: choosing a note shows the
+      // text it is about. Deferred a frame so the passage has laid out around a
+      // column that may have just opened.
+      window.requestAnimationFrame(() => scrollSatAnnotationIntoView(annotation.id));
     },
     [interaction],
   );
@@ -271,7 +325,10 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     return () => window.clearTimeout(hide);
   }, [education, hintVisible]);
 
-  const questionNotes = useMemo(() => (annotations ? satAnnotatedNotes(annotations) : []), [annotations]);
+  const questionNotes = useMemo(
+    () => (annotations ? satAnnotatedNotes(annotations, noteEditorId) : []),
+    [annotations, noteEditorId],
+  );
   const hasAnnotations = annotations ? hasSatAnnotations(annotations) : false;
 
   const annotationView = useMemo<SatAnnotationView>(
@@ -302,6 +359,10 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     openNoteOnMark,
     removeMark,
     noteEditorAnnotation,
+    /** The notes UI state + its close, owned here so no caller derives them. */
+    notesState,
+    closeNotes,
+    openQuestionNote,
     updateNote,
     undoEntry,
     undoRemoval,

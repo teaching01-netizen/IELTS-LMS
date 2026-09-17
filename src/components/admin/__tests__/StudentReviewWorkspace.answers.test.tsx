@@ -22,8 +22,13 @@ vi.mock('../../../services/examRepository', () => {
   };
 });
 
-vi.mock('../../../services/gradingService', () => {
+vi.mock('../../../services/gradingService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../services/gradingService')>();
+
   return {
+    // The pure formatter is not worth faking: keeping the real one means the
+    // alert copy exercised here cannot drift from the shipped helper.
+    gradingErrorMessage: actual.gradingErrorMessage,
     gradingService: {
       startReview: vi.fn(),
       saveReviewDraft: vi.fn(),

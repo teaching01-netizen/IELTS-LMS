@@ -1,4 +1,4 @@
-import { Highlighter, StickyNote } from 'lucide-react';
+import { Highlighter } from 'lucide-react';
 import type { SatTextAnchor } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
 import { useSatAnnotationPlacement } from '../annotations/useSatAnnotationPlacement';
@@ -8,8 +8,8 @@ import { useSatAnnotationPlacement } from '../annotations/useSatAnnotationPlacem
  *
  * These are presentation only. Nothing in the annotation pipeline reads them,
  * nothing about them gates an annotation action, and deleting this file (plus
- * the two call sites that render it) would leave the feature fully working —
- * which is the point: teaching is removable without surgery on the product.
+ * the call sites that render it) would leave the feature fully working — which
+ * is the point: teaching is removable without surgery on the product.
  *
  * They also deliberately avoid tutorial grammar: no "Step 1", no welcome
  * dialog, no progress. Each cue appears at the moment it is useful and retires
@@ -17,18 +17,23 @@ import { useSatAnnotationPlacement } from '../annotations/useSatAnnotationPlacem
  */
 
 /**
- * The one quiet line under the tool entry on a student's first exam
- * interaction. Non-modal, non-blocking, no close button, no scrim — it says
- * the one thing a student could not guess, then leaves.
+ * The one quiet line a first-time student sees, rendered at the top of the
+ * passage rather than pinned near the tool entry.
+ *
+ * It used to float at the top-right of the shell, which read as a tooltip about
+ * the page — a label pointing at the toolbar. The instruction belongs where the
+ * gesture happens: it says "select text" while sitting directly above the text
+ * there is to select.
  */
-export function SatAnnotationFirstUseHint() {
+export function SatAnnotationPassageHint() {
   return (
     <p
       data-sat-annotation-hint="true"
       role="note"
-      className="sat-ui fixed right-[calc(1rem+var(--student-safe-right))] top-[calc(var(--student-safe-top)+96px)] z-[65] max-w-[240px] rounded-[8px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-3 py-2 sat-type-metadata font-medium text-[var(--sat-text)] shadow-[var(--sat-shadow-floating)] lg:top-[calc(var(--student-safe-top)+100px)]"
+      className="mb-4 flex items-center gap-1.5 sat-type-metadata font-medium text-[var(--sat-text-secondary)]"
     >
-      {SAT_COPY.annotations.firstUseHint}
+      <Highlighter className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      {SAT_COPY.annotations.passageHint}
     </p>
   );
 }
@@ -54,42 +59,6 @@ export function SatAnnotationFirstHighlightFeedback({ anchor }: { anchor: SatTex
       }}
     >
       {SAT_COPY.annotations.highlightedConfirmation}
-    </p>
-  );
-}
-
-/**
- * Notes panel empty state. This is the one place the spec allows a two-line
- * instruction, because the student explicitly opened the feature asking "where
- * are my notes?" — answering that question is the point.
- */
-export function SatAnnotationEmptyNotesCoach() {
-  return (
-    <div data-sat-notes-empty="true" className="flex flex-col items-center gap-2 px-4 py-6 text-center">
-      <StickyNote className="h-7 w-7 text-[var(--sat-text-secondary)]" aria-hidden="true" />
-      <p className="sat-type-control-primary font-semibold text-[var(--sat-text)]">
-        {SAT_COPY.annotations.emptyNotesTitle}
-      </p>
-      <p className="max-w-[240px] sat-type-control-secondary text-[var(--sat-text-secondary)]">
-        {SAT_COPY.annotations.emptyNotesBody}
-      </p>
-    </div>
-  );
-}
-
-/**
- * Transient label that points at the passage while the student browses an empty
- * Notes panel. It disappears the moment they select text, so it can never
- * become furniture.
- */
-export function SatAnnotationSelectTextCoach() {
-  return (
-    <p
-      data-sat-select-text-coach="true"
-      className="sat-ui pointer-events-none absolute left-1/2 top-2 z-[70] flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-3 py-1 sat-type-metadata font-medium text-[var(--sat-text-secondary)] shadow-[var(--sat-shadow-floating)]"
-    >
-      <Highlighter className="h-3.5 w-3.5" aria-hidden="true" />
-      {SAT_COPY.annotations.selectTextCoach}
     </p>
   );
 }

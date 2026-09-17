@@ -16,7 +16,18 @@ authoritative enforcement boundary.
 - The source cap is 10 MiB per image, the decoded dimension cap is 8,192 px per
   side, and the decoded pixel cap is 25 megapixels. A paste may contain at
   most five images and 50 MiB in aggregate; remote HTML image fetches are
-  bounded by the same per-image cap and a timeout.
+  bounded by the same per-image cap and a timeout. One copied image is often
+  offered twice (an image file and an HTML `<img>` for the same picture); those
+  two representations are reconciled into one staged image that keeps the HTML
+  position and alt text with the file's bytes, so a single paste inserts and
+  uploads a single image. Byte-identical representations reconcile first. When
+  the browser re-encodes the clipboard file (PNG built from the page's JPEG, for
+  example), the two representations are compared by a 16x16 luminance
+  fingerprint — equal decoded dimensions plus tight difference-hash and
+  luminance bounds — and a match folds them too; the fold is recorded as the
+  `image.representation-reconciled-visual` transformation so a heuristic fold
+  stays auditable. Two representations that are neither byte-identical nor
+  fingerprint-identical stay two images.
 - Accepted source bytes are uploaded unchanged. The client does not silently
   resize, recompress, or transcode an image before upload. The managed asset
   records the original byte size and SHA-256 checksum, and completion succeeds

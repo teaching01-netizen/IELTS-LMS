@@ -3,6 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { createSatReadingPreferences } from "../domain/satReadingPreferences";
 import { createSatTextAnnotation, emptySatAnnotations } from "../domain/satResponses";
 import { SatExamShell, type SatExamShellProps } from "./SatExamShell";
+import { useSatNotesSurface } from "./annotations/SatNotesSurfaceContext";
+
+/**
+ * Mirrors the real composition: the route's question workspace is what renders
+ * the Notes column out of the shell's context. A shell rendered with no
+ * workspace has nowhere to put the column — which is exactly the production
+ * contract, since the column is grid furniture between passage and question.
+ */
+function NotesWorkspace() {
+  const notes = useSatNotesSurface();
+  return <>{notes.open ? notes.column : null}</>;
+}
 
 function props(overrides: Partial<SatExamShellProps> = {}): SatExamShellProps {
   return {
@@ -148,19 +160,20 @@ describe("SatExamShell", () => {
     expect(shell).toHaveAttribute("data-sat-keyboard-open", "true");
   });
 
-  it("exposes ONE labeled Highlights & Notes entry that opens the notes panel and closes on Escape", () => {
-    const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })} />);
+  it("exposes ONE labeled Highlights & Notes entry that opens the notes column and closes on Escape", () => {
+    const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
     const entry = screen.getByRole('button', { name: /^Highlights & Notes/ });
     expect(entry).toHaveTextContent('Highlights & Notes');
     fireEvent.click(entry);
     expect(entry).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('dialog', { name: /Question note/ })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toHaveAttribute('aria-pressed', 'false');
-    // Navigation closes the panel (panels never survive a question change) but
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
+    // Navigation closes the column (notes never survive a question change) but
     // the entry itself is permanent chrome.
     fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
-    rerender(<SatExamShell {...props({ notesAvailable: true, questionIndex: 1 })} />);
+    rerender(<SatExamShell {...props({ notesAvailable: true, questionIndex: 1 })}><NotesWorkspace /></SatExamShell>);
     expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toHaveAttribute('aria-pressed', 'false');
   });
   it("announces annotations on the tool entry instead of adding a second icon", () => {
@@ -172,17 +185,20 @@ describe("SatExamShell", () => {
     rerender(<SatExamShell {...props({ notesAvailable: true, annotations: emptySatAnnotations(), onAnnotationsChange: vi.fn() })} />);
     expect(screen.getByRole('button', { name: 'Highlights & Notes' })).toBeInTheDocument();
   });
-  it("pins Display, Highlights & Notes, and More panels to the top bar (never the shell bottom)", () => {
-    render(<SatExamShell {...props({ notesAvailable: true })} />);
+  it("pins Display and More to the top bar, and keeps Notes out of the overlay layer entirely", () => {
+    render(<SatExamShell {...props({ notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
     fireEvent.click(screen.getByRole("button", { name: "Display" }));
     const display = screen.getByRole("dialog", { name: "Display" });
     expect(display).toHaveAttribute("data-sat-popover-panel", "anchored");
     expect(display.className).toMatch(/fixed/);
     fireEvent.keyDown(document, { key: "Escape" });
+    // Notes are a structural column between passage and question, so they are
+    // neither a fixed top-bar panel nor a dialog: nothing floats over the exam.
     fireEvent.click(screen.getByRole("button", { name: /^Highlights & Notes/ }));
-    const note = screen.getByRole("dialog", { name: /Question note/ });
-    expect(note).toHaveAttribute("data-sat-popover-panel", "anchored");
-    expect(note.className).toMatch(/fixed/);
+    const notes = screen.getByRole('complementary', { name: 'Notes' });
+    expect(notes).not.toHaveAttribute("data-sat-popover-panel");
+    expect(notes.className).not.toMatch(/fixed|absolute/);
+    expect(screen.queryByRole("dialog", { name: /Notes/ })).not.toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "More tools" }));
     const menu = screen.getByRole("menu", { name: "More tools" });
@@ -190,12 +206,12 @@ describe("SatExamShell", () => {
     expect(menu.className).toMatch(/fixed/);
   });
   it("shows the annotation entry in Reading and Writing and hides it in Math", () => {
-    const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })} />);
+    const { rerender } = render(<SatExamShell {...props({ notesAvailable: true })}><NotesWorkspace /></SatExamShell>);
     expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
-    expect(screen.getByRole('dialog', { name: /Question note/ })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
-    rerender(<SatExamShell {...props({ notesAvailable: false })} />);
+    rerender(<SatExamShell {...props({ notesAvailable: false })}><NotesWorkspace /></SatExamShell>);
     expect(screen.queryByRole('button', { name: /^Highlights & Notes/ })).not.toBeInTheDocument();
   });
   it("disables the annotation entry while the exam is blocked", () => {

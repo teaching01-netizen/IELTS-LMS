@@ -7,13 +7,21 @@ import { seedDevelopmentFixtures } from '../../../features/exam-authoring/infras
 import { downloadCsv } from '../../../utils/csvExport';
 import type { GradingSession } from '../../../types/grading';
 
-vi.mock('../../../features/grading/infrastructure/gradingGateway', () => ({
-  gradingService: {
-    getSessionQueuePage: vi.fn(),
-    getSessionQueueSummary: vi.fn(),
-    getSessionQueue: vi.fn(),
-  },
-}));
+vi.mock('../../../features/grading/infrastructure/gradingGateway', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../features/grading/infrastructure/gradingGateway')>();
+
+  return {
+    // The pure formatter is not worth faking: keeping the real one means the
+    // alert copy exercised here cannot drift from the shipped helper.
+    gradingErrorMessage: actual.gradingErrorMessage,
+    gradingService: {
+      getSessionQueuePage: vi.fn(),
+      getSessionQueueSummary: vi.fn(),
+      getSessionQueue: vi.fn(),
+    },
+  };
+});
 
 vi.mock('../../../features/exam-authoring/infrastructure/examAuthoringGateway', () => ({
   seedDevelopmentFixtures: vi.fn().mockResolvedValue(undefined),

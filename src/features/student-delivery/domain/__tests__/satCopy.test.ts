@@ -4,7 +4,7 @@ import {
   satBackToQuestionLabel,
   satContinueToDirectionsLabel,
   satLastQuestionLabel,
-  satSelectedTextLabel,
+  satQuotedSource,
   satSubmitConfirmSummary,
   satSubmitConfirmTitle,
   satTimerRevealedAnnouncement,
@@ -39,11 +39,18 @@ describe("satCopy controlled vocabulary", () => {
     expect(SAT_COPY.displaySettings.reset).toBe("Reset display settings");
   });
 
-  it("splits the two note concepts with unambiguous names", () => {
-    expect(SAT_COPY.questionNote.title).toBe("Question note");
-    expect(SAT_COPY.noteOnSelection.title).toBe("Note on selected text");
-    expect(SAT_COPY.questionNote.title).not.toBe(SAT_COPY.noteOnSelection.title);
-    expect(SAT_COPY.questionNote.unavailableInMath).toContain("Math");
+  it("keeps ONE note concept, with no Save button to contradict autosave", () => {
+    expect(SAT_COPY.notes.title).toBe("Notes");
+    expect(SAT_COPY.notes.unavailableInMath).toContain("Math");
+    // The old split into "Question note" and "Note on selected text" is gone:
+    // two names for one student activity only ever raised the question of which
+    // one to use.
+    const table = SAT_COPY as unknown as Record<string, unknown>;
+    expect(table.questionNote).toBeUndefined();
+    expect(table.noteOnSelection).toBeUndefined();
+    // "Notes save automatically" beside a "Save and close" button was the
+    // contradiction; the column autosaves and offers no such button at all.
+    expect(Object.values(SAT_COPY.notes).join(" ")).not.toMatch(/\bSave\b/);
   });
 
   it("splits flag state from the review destination", () => {
@@ -59,7 +66,7 @@ describe("satCopy controlled vocabulary", () => {
   });
 
   it("interpolates dynamic labels without empty segments", () => {
-    expect(satSelectedTextLabel("Trees change heat.")).toBe("Selected text: Trees change heat.");
+    expect(satQuotedSource("Trees change heat.")).toBe("\u201CTrees change heat.\u201D");
     expect(satBackToQuestionLabel(7)).toBe("Back to question 7");
     expect(satSubmitConfirmTitle("Module 2")).toBe("Submit Module 2 answers?");
     expect(satSubmitConfirmSummary(3, 2)).toBe("3 unanswered \u00B7 2 flagged");

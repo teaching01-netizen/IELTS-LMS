@@ -47,7 +47,19 @@ export type SatExclusiveSurface =
   | { kind: 'reading-settings'; returnFocus: SatInteractionFocusTarget }
   | { kind: 'question-notes'; returnFocus: SatInteractionFocusTarget }
   | { kind: 'more-menu'; returnFocus: SatInteractionFocusTarget }
-  | { kind: 'annotation-note-editor'; annotationId: string; returnFocus: SatInteractionFocusTarget };
+  | { kind: 'annotation-note-editor'; annotationId: string; returnFocus: SatInteractionFocusTarget }
+  // Writing about the question itself, with nothing selected. It is a surface
+  // like the annotation editor — not a flag on the notes panel — so "which note
+  // field is open" has exactly one owner, and Escape needs no special case.
+  | { kind: 'question-note-editor'; returnFocus: SatInteractionFocusTarget };
+
+/**
+ * True for both note editors. They are unresolved student work: nothing else may
+ * open over them, and Escape closes them before anything else.
+ */
+export function isSatNoteEditorSurface(surface: SatExclusiveSurface): boolean {
+  return surface.kind === 'annotation-note-editor' || surface.kind === 'question-note-editor';
+}
 
 /** Authoritative exam truth, passed IN — never stored as interaction state. */
 export interface SatInteractionContext {
@@ -91,6 +103,7 @@ export type SatInteractionEvent =
   | { type: 'QUESTION_NOTES_OPENED'; returnFocus: SatInteractionFocusTarget }
   | { type: 'MORE_MENU_OPENED'; returnFocus: SatInteractionFocusTarget }
   | { type: 'ANNOTATION_NOTE_EDITOR_OPENED'; annotationId: string; returnFocus: SatInteractionFocusTarget }
+  | { type: 'QUESTION_NOTE_EDITOR_OPENED'; returnFocus: SatInteractionFocusTarget }
   | { type: 'ANNOTATION_NOTE_EDITOR_CLOSED' }
   | { type: 'SURFACE_CLOSED' }
   | { type: 'CALCULATOR_OPENED' }
@@ -192,8 +205,8 @@ export function satInteractionReducer(
   switch (event.type) {
     case 'NAVIGATOR_OPENED':
       if (opensRefused) return state;
-      // The annotation note editor must resolve before navigation affordances.
-      if (state.surface.kind === 'annotation-note-editor') return state;
+      // A note editor must resolve before navigation affordances.
+      if (isSatNoteEditorSurface(state.surface)) return state;
       next = {
         ...state,
         surface: { kind: 'navigator', returnFocus: event.returnFocus },
@@ -202,7 +215,7 @@ export function satInteractionReducer(
       break;
     case 'DIRECTIONS_OPENED':
       if (opensRefused) return state;
-      if (state.surface.kind === 'annotation-note-editor') return state;
+      if (isSatNoteEditorSurface(state.surface)) return state;
       next = {
         ...state,
         surface: { kind: 'directions', returnFocus: event.returnFocus },
@@ -211,7 +224,7 @@ export function satInteractionReducer(
       break;
     case 'READING_SETTINGS_OPENED':
       if (opensRefused) return state;
-      if (state.surface.kind === 'annotation-note-editor') return state;
+      if (isSatNoteEditorSurface(state.surface)) return state;
       next = {
         ...state,
         surface: { kind: 'reading-settings', returnFocus: event.returnFocus },
@@ -220,7 +233,7 @@ export function satInteractionReducer(
       break;
     case 'QUESTION_NOTES_OPENED':
       if (opensRefused) return state;
-      if (state.surface.kind === 'annotation-note-editor') return state;
+      if (isSatNoteEditorSurface(state.surface)) return state;
       next = {
         ...state,
         surface: { kind: 'question-notes', returnFocus: event.returnFocus },
@@ -229,11 +242,11 @@ export function satInteractionReducer(
       break;
     case 'MORE_MENU_OPENED':
       // More is a read mostly utility center: it may open while blocked
-      // (Help/Shortcuts stay reachable read-only) but never over the
-      // annotation editor. Row-level guards (Line Reader / Break) handle
-      // their own disabled state.
+      // (Help/Shortcuts stay reachable read-only) but never over a note
+      // editor. Row-level guards (Line Reader / Break) handle their own
+      // disabled state.
       if (ctx.terminated) return state;
-      if (state.surface.kind === 'annotation-note-editor') return state;
+      if (isSatNoteEditorSurface(state.surface)) return state;
       next = {
         ...state,
         surface: { kind: 'more-menu', returnFocus: event.returnFocus },
@@ -249,6 +262,14 @@ export function satInteractionReducer(
           annotationId: event.annotationId,
           returnFocus: event.returnFocus,
         },
+        annotation: { selection: null },
+      };
+      break;
+    case 'QUESTION_NOTE_EDITOR_OPENED':
+      if (opensRefused) return state;
+      next = {
+        ...state,
+        surface: { kind: 'question-note-editor', returnFocus: event.returnFocus },
         annotation: { selection: null },
       };
       break;
@@ -277,7 +298,7 @@ export function satInteractionReducer(
       // editor holding the surface (the editor owns interaction until closed).
       if (opensRefused) return state;
       if (!isAnnotationAllowed(ctx.toolPolicy)) return state;
-      if (state.surface.kind === 'annotation-note-editor') return state;
+      if (isSatNoteEditorSurface(state.surface)) return state;
       if (event.anchor.nodeId === '' || !(event.anchor.endOffset > event.anchor.startOffset)) return state;
       next = { ...state, annotation: { selection: event.anchor } };
       break;
@@ -320,7 +341,7 @@ export function assertSatInteractionInvariants(
   if (ctx.phase !== 'module' && state.surface.kind !== 'none') {
     failures.push('Question interaction surface outside module');
   }
-  if (state.annotation.selection !== null && state.surface.kind === 'annotation-note-editor') {
+  if (state.annotation.selection !== null && isSatNoteEditorSurface(state.surface)) {
     failures.push('Annotation selection behind the note editor');
   }
   if (failures.length > 0) {

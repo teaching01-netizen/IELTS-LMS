@@ -32,8 +32,27 @@ function highlight(container: HTMLElement, value: string, color: 'Yellow' | 'Blu
   fireEvent.click(screen.getByRole('button', { name: 'Highlight ' + color }));
 }
 
+/**
+ * jsdom has no viewport, so every width query answers false and the notes
+ * column would always land on its narrowest tier. This stands in for a desktop
+ * exam window, which is the tier the three-pane promise belongs to.
+ */
+function stubWideViewport(): void {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query.includes('min-width: 1024px'),
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }) as unknown as MediaQueryList);
+}
+
 afterEach(() => {
   window.localStorage.clear();
+  vi.unstubAllGlobals();
 });
 
 describe('SAT shell annotation flow (selection first)', () => {
@@ -84,7 +103,7 @@ describe('SAT shell annotation flow (selection first)', () => {
     expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
   });
 
-  it('attaches a note to the selection, opening the card focused with a human placeholder', async () => {
+  it('attaches a note to the selection and writes it in the Notes column beside the passage', async () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     selectStimulusText(container, 'Several');
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
@@ -92,9 +111,15 @@ describe('SAT shell annotation flow (selection first)', () => {
     // Choosing "Add note" leaves a visible mark behind: a note without a source
     // would be unfindable later.
     expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
-    const field = await screen.findByRole('textbox', { name: 'Your note' });
+    // The card quotes the text the note is about, and the column is part of the
+    // exam layout rather than a panel floating over it.
+    const column = await screen.findByRole('complementary', { name: 'Notes' });
+    expect(column).toHaveTextContent('“Several”');
+    expect(column.closest('[data-sat-reading-split]')).not.toBeNull();
+    const field = screen.getByRole('textbox', { name: 'Notes' });
     expect(field).toHaveAttribute('placeholder', 'Add a quick note…');
-    expect(document.activeElement).toBe(field);
+    // The caret is already in the field: opening the note IS the invitation.
+    await waitFor(() => expect(document.activeElement).toBe(field));
 
     fireEvent.change(field, { target: { value: 'Remember this claim' } });
     // Autosave, then the quiet confirmation that no Save button is needed.
@@ -123,20 +148,27 @@ describe('SAT shell annotation flow (selection first)', () => {
     expect(screen.queryByTestId('sat-undo-toast')).not.toBeInTheDocument();
   });
 
-  it('edits the note of an existing mark and keeps the quoted source linked by ink', async () => {
+  it('reopens an existing mark’s note with its saved text and quoted source', async () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     highlight(container, 'Several', 'Blue');
     fireEvent.click(container.querySelector('[data-sat-highlight="true"]')!);
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
-    const field = await screen.findByRole('textbox', { name: 'Your note' });
+    const field = await screen.findByRole('textbox', { name: 'Notes' });
     fireEvent.change(field, { target: { value: 'Check the evidence' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    // Leaving the field is a commit: there is no Save button to press.
+    fireEvent.blur(field);
+    await waitFor(() => expect(screen.getByTestId('sat-note-saved')).toBeInTheDocument());
+
+    // The label says what closing brings back, so it varies by tier; the control
+    // and its meaning do not.
+    fireEvent.click(screen.getByRole('button', { name: /^Close notes/ }));
+    expect(screen.queryByRole('complementary', { name: 'Notes' })).not.toBeInTheDocument();
 
     // Reopening shows the saved note under the quoted source.
     fireEvent.click(container.querySelector('[data-sat-highlight="true"]')!);
     fireEvent.click(screen.getByRole('button', { name: 'Edit note' }));
-    expect(await screen.findByRole('textbox', { name: 'Your note' })).toHaveValue('Check the evidence');
-    expect(screen.getByRole('dialog', { name: 'Note on selected text' })).toHaveTextContent('Selected text: Several');
+    expect(await screen.findByRole('textbox', { name: 'Notes' })).toHaveValue('Check the evidence');
+    expect(screen.getByRole('complementary', { name: 'Notes' })).toHaveTextContent('“Several”');
   });
 
   it('clears the tools on Escape without touching the mark', () => {
@@ -149,32 +181,36 @@ describe('SAT shell annotation flow (selection first)', () => {
     expect(container.querySelector('[data-sat-highlight="true"]')).toHaveTextContent('Several');
   });
 
-  it('lists anchored notes in the Notes panel with their ink and quoted source', async () => {
+  it('lists anchored notes in the Notes column with their ink and quoted source', async () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     highlight(container, 'Several', 'Pink');
     fireEvent.click(container.querySelector('[data-sat-highlight="true"]')!);
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
-    const field = await screen.findByRole('textbox', { name: 'Your note' });
+    const field = await screen.findByRole('textbox', { name: 'Notes' });
     fireEvent.change(field, { target: { value: 'Compare the claim' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    fireEvent.blur(field);
 
     // The top-bar entry keeps its label; the annotation dot appends a spoken
     // suffix, so match the label prefix rather than the whole name.
     fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
-    const list = document.querySelector('[data-sat-notes-list="true"]')!;
-    expect(list).toHaveTextContent('Several');
-    expect(list).toHaveTextContent('Compare the claim');
-    expect(document.querySelector('[data-sat-notes-empty]')).toBeNull();
+    const column = await screen.findByRole('complementary', { name: 'Notes' });
+    expect(column).toHaveTextContent('“Several”');
+    expect(column).toHaveTextContent('Compare the claim');
+    // The card carries the ink of the mark it hangs off, which is the visual
+    // link between a note and its source.
+    expect(column.querySelector('[data-sat-note-ink]')).toHaveAttribute('data-sat-note-ink', 'pink');
+    expect(column.querySelector('[data-sat-notes-empty]')).toBeNull();
   });
 
-  it('coaches an empty Notes panel instead of showing an empty list', () => {
+  it('coaches an empty Notes column instead of floating a detached pill', () => {
     render(<SatAccessibilityDebugRoute />);
     fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
-    expect(document.querySelector('[data-sat-notes-empty]')).toHaveTextContent('No notes yet');
-    expect(document.querySelector('[data-sat-select-text-coach]')).toHaveTextContent('Select any text');
+    expect(document.querySelector('[data-sat-notes-empty]')).toHaveTextContent('Select text to add a note');
+    // The "Select any text" balloon is gone: teaching lives in the passage.
+    expect(document.querySelector('[data-sat-select-text-coach]')).toBeNull();
   });
 
-  it('shows the passive first-use hint once per attempt, then retires it on selection', () => {
+  it('shows the passive first-use hint in the passage once per attempt, then retires it on selection', () => {
     vi.useFakeTimers();
     try {
       const { container } = render(<SatAccessibilityDebugRoute />);
@@ -183,7 +219,10 @@ describe('SAT shell annotation flow (selection first)', () => {
       act(() => {
         vi.advanceTimersByTime(1500);
       });
-      expect(document.querySelector('[data-sat-annotation-hint]')).toHaveTextContent('Select text to highlight');
+      // It sits in the passage it is about, not pinned to the tool entry.
+      const hint = document.querySelector('[data-sat-annotation-hint]')!;
+      expect(hint).toHaveTextContent('Select text to highlight or add a note');
+      expect(hint.closest('[data-sat-passage-scroll]')).not.toBeNull();
       // Demonstrating the gesture is the whole lesson: the hint never returns.
       selectStimulusText(container, 'Several');
       expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
@@ -198,18 +237,27 @@ describe('SAT shell annotation flow (selection first)', () => {
 });
 
 describe('SAT annotation Bluebook surfaces (Phase 7)', () => {
-  it('renders the note card at 260px with 8px radius, answer-grade border, pale-yellow header, and no large shadow', async () => {
+  it('writes notes in a structural column: no modal, no scrim, exam still usable', async () => {
+    stubWideViewport();
     const { container } = render(<SatAccessibilityDebugRoute />);
     selectStimulusText(container, 'Several');
     fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Note on selected text' });
-    // Document-like note card: fixed narrow width, small radius, answer-grade
-    // border, pale-yellow header band, small/no shadow (never shadow-xl/2xl).
-    expect(dialog.className).toContain('w-[260px]');
-    expect(dialog.className).toContain('var(--sat-answer-border)');
-    expect(dialog.className).not.toMatch(/shadow-xl|shadow-2xl/);
-    const header = dialog.querySelector('[data-sat-note-header]')!;
-    expect(header.className).toContain('var(--sat-note-header)');
+
+    const column = await screen.findByRole('complementary', { name: 'Notes' });
+    const layout = container.querySelector<HTMLElement>('[data-sat-reading-split]')!;
+    // A member of the passage/question grid, so adding a note moves nothing and
+    // the source it quotes stays on screen next to it — and the question stays
+    // available while the student writes, because notes support the task rather
+    // than interrupting it.
+    expect(layout).toHaveAttribute('data-sat-notes-placement', 'column');
+    expect(column.closest('[data-sat-reading-split]')).not.toBeNull();
+    expect(container.querySelector('[data-sat-question-scroll]')).not.toBeNull();
+    // Exactly one column, and it is a direct member of that grid.
+    expect(document.querySelectorAll('[data-sat-notes-column]')).toHaveLength(1);
+    expect(column.parentElement).toBe(layout);
+    // Nothing dims the exam, and no modal takes the work hostage.
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(0);
+    expect(document.querySelector('.bg-black\\/20')).toBeNull();
   });
 
   it('keeps every annotation ink a token, never a literal in the copy-free palette', () => {

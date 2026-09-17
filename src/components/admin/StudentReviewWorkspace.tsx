@@ -10,8 +10,11 @@ import {
   RubricAssessment, ReleaseStatus, GradingChecklist,
   WritingAnnotation, DrawingAnnotation, CommentBankItem, WritingAnswers
 } from '../../types/grading';
-import { gradingService, gradingRepository } from '../../features/grading/infrastructure/gradingGateway';
-import { gradingErrorMessage } from '../../services/gradingService';
+import {
+  gradingErrorMessage,
+  gradingRepository,
+  gradingService,
+} from '../../features/grading/infrastructure/gradingGateway';
 import { examRepository, hydrateExamState } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
 import type { ExamState, WritingTaskContent } from '../../types';
 import { WritingAnnotationCanvas } from './WritingAnnotationCanvas';

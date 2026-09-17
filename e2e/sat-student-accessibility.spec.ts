@@ -398,8 +398,8 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(mark).toHaveAttribute('data-sat-annotation-active', 'true');
   });
 
-  test('axe: the selection toolbar and the edit dock report no critical or serious violations', async ({ page }) => {
-    await page.setViewportSize({ width: 1024, height: 768 });
+  test('axe: the selection toolbar, the edit dock, and the notes column report no critical or serious violations', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
     await openSatHarness(page);
 
     await selectStimulusText(page, 'Several');
@@ -410,6 +410,16 @@ test.describe("SAT student accessibility and layout", () => {
     await page.locator('[data-sat-highlight="true"]').first().click();
     await expect(page.getByRole('toolbar', { name: 'Edit annotation' })).toBeVisible();
     await expectNoSeriousAxeViolations(page, 'edit dock for an existing highlight');
+
+    // The notes column is a new surface and needs its own scan, both empty and
+    // while a note card's field has the caret.
+    await page
+      .getByRole('toolbar', { name: 'Edit annotation' })
+      .getByRole('button', { name: 'Add note' })
+      .click();
+    const column = page.getByRole('complementary', { name: 'Notes' });
+    await expect(column.getByRole('textbox', { name: 'Notes' })).toBeFocused();
+    await expectNoSeriousAxeViolations(page, 'notes column while writing a note');
   });
 
   test('desktop reading keeps the split divider without layout mode controls', async ({ page }) => {
@@ -446,8 +456,8 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(page.locator('input[type="radio"]').nth(1)).toBeChecked();
   });
 
-  test("directions and notes use accessible popup semantics and return focus", async ({ page }) => {
-    await page.setViewportSize({ width: 1024, height: 768 });
+  test("directions stay anchored popovers, and notes open as a column beside the exam", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
     await openSatHarness(page);
 
     const directions = page.getByRole("button", { name: "Directions" }).first();
@@ -457,32 +467,163 @@ test.describe("SAT student accessibility and layout", () => {
     await page.mouse.click(1000, 740);
     await expect(page.getByRole("dialog", { name: "Directions" })).toHaveCount(0);
 
-    // Two note concepts, one entry: the top bar's "Highlights & Notes" panel
-    // lists notes anchored to selected text and keeps the freeform question
-    // note below them. This asserts the panel path: focus-in, autosave draft,
-    // Escape focus-back, reopen value.
+    // Notes are deliberately NOT a popover. One labeled entry opens a column
+    // that is part of the passage/question layout, so writing a note never dims,
+    // covers, or navigates away from the exam it is written about.
     const notes = page.getByRole("button", { name: /Highlights & Notes/ });
     await notes.click();
-    const notesDialog = page.getByRole("dialog", { name: /Question note/ });
-    await expect(notesDialog).toBeVisible();
-    // Question-note field carries the panel copy-table label ("Note for this
-    // question"); "Your note" belongs to the anchored note-on-selection
-    // editor. Focus-in lands on the textarea — hardened with an explicit
-    // focus() because two focus effects race (panel + shell close-button).
-    const noteField = page.getByRole("textbox", { name: "Note for this question" });
-    await expect(noteField).toBeVisible();
-    await noteField.focus();
-    await expect(noteField).toBeFocused();
-    await noteField.fill("Recheck this question");
+    const column = page.getByRole("complementary", { name: "Notes" });
+    await expect(column).toBeVisible();
+    await expect(page.getByRole("dialog", { name: /Notes|Question note/ })).toHaveCount(0);
+    await expect(page.locator(".sat-dialog-backdrop")).toHaveCount(0);
+    // The passage and the question are both still on screen beside it.
+    await expect(page.locator("[data-sat-passage-scroll]")).toBeVisible();
+    await expect(page.locator("[data-sat-question-scroll]")).toBeVisible();
+    // Empty column: one line of guidance, and no idle editor contradicting it.
+    await expect(column.locator("[data-sat-notes-empty]")).toBeVisible();
+    await expect(column.getByRole("textbox")).toHaveCount(0);
+    // Escape closes it and hands focus back to the entry that opened it.
     await page.keyboard.press("Escape");
-    await expect(notesDialog).toHaveCount(0);
+    await expect(column).toHaveCount(0);
     await expect(notes).toBeFocused();
 
+    // The whole journey, in one sentence: select text, mark it, and the note you
+    // write appears beside the passage text it is about.
+    await selectStimulusText(page, "Several");
+    await page
+      .getByRole("toolbar", { name: "Selected text actions" })
+      .getByRole("button", { name: "Add note" })
+      .click();
+    const opened = page.getByRole("complementary", { name: "Notes" });
+    await expect(opened).toContainText("\u201CSeveral\u201D");
+    await expect(opened.locator("[data-sat-note-ink]")).toHaveCount(1);
+
+    // The layout IS the explanation: passage on the left, its note beside it in
+    // the middle, question still on the right — nothing overlapping, nothing
+    // dimmed, no eye travel to the far corner of the viewport.
+    const [passageBox, columnBox, questionBox] = await Promise.all([
+      page.locator("[data-sat-passage-scroll]").boundingBox(),
+      opened.boundingBox(),
+      page.locator("[data-sat-question-scroll]").boundingBox(),
+    ]);
+    expect(passageBox).not.toBeNull();
+    expect(columnBox).not.toBeNull();
+    expect(questionBox).not.toBeNull();
+    expect(passageBox!.x + passageBox!.width).toBeLessThanOrEqual(columnBox!.x + 1);
+    expect(columnBox!.x + columnBox!.width).toBeLessThanOrEqual(questionBox!.x + 1);
+    expect(columnBox!.width).toBeGreaterThanOrEqual(280);
+    expect(columnBox!.width).toBeLessThanOrEqual(340);
+
+    const field = opened.getByRole("textbox", { name: "Notes" });
+    await expect(field).toBeFocused();
+    await field.fill("Compare the two blocks");
+    await expect(opened.getByTestId("sat-note-saved")).toBeVisible();
+
+    // Closing and coming back keeps the note, and keeps it attached to its
+    // source: one list, quotes and all.
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     await notes.click();
-    await expect(noteField).toHaveValue("Recheck this question");
-    // Header close ("Close question note") and footer action ("Save and
-    // close") are distinct controls with distinct names — no ambiguity.
-    await notesDialog.getByRole("button", { name: "Save and close", exact: true }).click();
+    const reopened = page.getByRole("complementary", { name: "Notes" });
+    await expect(reopened).toContainText("Compare the two blocks");
+    await expect(reopened).toContainText("\u201CSeveral\u201D");
+  });
+
+  test("closing a note returns the caret to the text it was written about", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openSatHarness(page);
+
+    // Write about a marked span, then leave without pressing anything that looks
+    // like Save: the student's next keystroke must land where they were, not at
+    // the top of the document.
+    await selectStimulusText(page, "Several");
+    await page
+      .getByRole("toolbar", { name: "Selected text actions" })
+      .getByRole("button", { name: "Add note" })
+      .click();
+    const noteField = page.getByRole("textbox", { name: "Notes" });
+    await expect(noteField).toBeFocused();
+    await noteField.fill("Compare the two blocks");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
+    await expect(page.locator("[data-sat-annotation-id]").first()).toBeFocused();
+    // The text was committed on the way out, without a Save button to press.
+    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await expect(page.getByRole("complementary", { name: "Notes" })).toContainText("Compare the two blocks");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
+
+    // The same for a note about the question itself: the one action available
+    // with nothing selected is reachable, and closing it is a return too.
+    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    const column = page.getByRole("complementary", { name: "Notes" });
+    const writeAboutQuestion = column.getByRole("button", { name: "Write a note about this question" });
+    await writeAboutQuestion.click();
+    const questionField = page.getByRole("textbox", { name: "This question" });
+    await expect(questionField).toBeFocused();
+    await questionField.fill("Look for the contrast");
+    await expect(column.getByTestId("sat-note-saved")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Highlights & Notes/ })).toBeFocused();
+
+    // And the text survives the trip: reopening shows it in the same list as the
+    // anchored note, each under the source it came from.
+    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    const list = page.getByRole("complementary", { name: "Notes" });
+    await expect(list).toContainText("Look for the contrast");
+    await expect(list).toContainText("This question");
+    await expect(list).toContainText("\u201CSeveral\u201D");
+  });
+
+  test("a note typed and abandoned by navigating the question survives", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openSatHarness(page);
+    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    const column = page.getByRole("complementary", { name: "Notes" });
+    await column.getByRole("button", { name: "Write a note about this question" }).click();
+    const field = page.getByRole("textbox", { name: "This question" });
+    await field.fill("Half a thought");
+
+    // No Save, no unsaved-changes dialog: moving to the next question commits the
+    // draft immediately and starts clean, so nothing can be typed onto the wrong
+    // question and nothing typed is lost.
+    await page.getByRole("button", { name: "Next" }).click();
+    // Chrome does not follow the student to the next question.
+    await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Previous" }).click();
+    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    await expect(page.getByRole("complementary", { name: "Notes" })).toContainText("Half a thought");
+  });
+
+  test("at tablet widths notes take the question's place and give it back", async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 800 });
+    await openSatHarness(page);
+    const layout = page.locator("[data-sat-reading-split]");
+    await expect(layout).toHaveAttribute("data-sat-notes-placement", "none");
+    await expect(page.locator("[data-sat-question-scroll]")).toBeVisible();
+
+    await page.getByRole("button", { name: /Highlights & Notes/ }).click();
+    const column = page.getByRole("complementary", { name: "Notes" });
+    await expect(layout).toHaveAttribute("data-sat-notes-placement", "pair");
+    // Three panes here would leave the passage and the question unreadable, so
+    // the note takes the question's place — beside the passage it quotes, never
+    // floating over it, and never somewhere else entirely.
+    await expect(page.locator("[data-sat-question-scroll]")).toHaveCount(0);
+    const [passageBox, columnBox] = await Promise.all([
+      page.locator("[data-sat-passage-scroll]").boundingBox(),
+      column.boundingBox(),
+    ]);
+    expect(passageBox).not.toBeNull();
+    expect(columnBox).not.toBeNull();
+    expect(passageBox!.x + passageBox!.width).toBeLessThanOrEqual(columnBox!.x + 1);
+    expect(columnBox!.width).toBeGreaterThanOrEqual(280);
+
+    // The control says what it brings back, and does it.
+    await page.getByRole("button", { name: "Close notes and show the question" }).click();
+    await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
+    await expect(page.locator("[data-sat-question-scroll]")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Highlights & Notes/ })).toBeFocused();
   });
 
   test("regular SAT navigator is anchored above the footer without hiding the exam", async ({
@@ -1165,15 +1306,23 @@ test.describe("SAT student accessibility and layout", () => {
     }
 
     await page.setViewportSize({ width: 320, height: 568 });
-    // Display text-scale also scales the question-note textarea (same
-    // reading token): still 200% here, so the note surface must scale too.
+    // Display text-scale also scales the note field (same reading token): still
+    // 200% here, so the Notes column must scale too. A note is written first
+    // because the column shows guidance rather than an idle editor until there
+    // is something to write about.
     await page.getByRole("button", { name: /Highlights & Notes/ }).click();
-    const noteField = page.getByRole("textbox", { name: "Note for this question" });
+    await expect(page.getByRole("complementary", { name: "Notes" })).toBeVisible();
+    await selectStimulusText(page, "Several");
+    await page
+      .getByRole("toolbar", { name: "Selected text actions" })
+      .getByRole("button", { name: "Add note" })
+      .click();
+    const noteField = page.getByRole("textbox", { name: "Notes" });
     const noteSize = await noteField.evaluate((element) =>
       Number.parseFloat(getComputedStyle(element).fontSize)
     );
     expect(noteSize).toBeGreaterThanOrEqual(29);
-    await page.getByRole("button", { name: "Save and close", exact: true }).click();
+    await page.keyboard.press("Escape");
     await page.getByRole("button", { name: /open question navigator/i }).click();
     await expect(
       page.getByRole("dialog", { name: /Reading and Writing Questions/i })

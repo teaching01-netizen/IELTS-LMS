@@ -320,10 +320,22 @@ export function hasSatAnnotations(annotations: SatQuestionAnnotations): boolean 
   return annotations.annotations.length > 0 || annotations.legacyQuestionNote.trim().length > 0;
 }
 
-/** Annotations that carry a note, in stored order (the Notes panel list). */
-export function satAnnotatedNotes(annotations: SatQuestionAnnotations): SatTextAnnotation[] {
+/**
+ * Annotations that carry a note, in stored order (the Notes column list).
+ *
+ * `editingId` keeps the mark the student just chose to write on in the list
+ * before a single character exists: "Add note" paints the mark and opens its
+ * card, so the card has to be there to type into. Without it the column would
+ * answer a request to write with an empty state.
+ */
+export function satAnnotatedNotes(
+  annotations: SatQuestionAnnotations,
+  editingId?: string | null,
+): SatTextAnnotation[] {
   return annotations.annotations.filter(
-    (annotation) => typeof annotation.note === 'string' && annotation.note.length > 0,
+    (annotation) =>
+      (typeof annotation.note === 'string' && annotation.note.length > 0) ||
+      (editingId != null && annotation.id === editingId),
   );
 }
 

@@ -3,8 +3,10 @@ import { useCoalescedReload } from '../../hooks/useCoalescedReload';
 import { AlertTriangle, CheckCircle2, ChevronRight, ListChecks, LoaderCircle, MousePointerClick, SlidersHorizontal } from 'lucide-react';
 import type { ExamState, ModuleType } from '../../types';
 import { examRepository, getStudentQuestionsForModule } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
-import { gradingService } from '../../features/grading/infrastructure/gradingGateway';
-import { gradingErrorMessage } from '../../services/gradingService';
+import {
+  gradingErrorMessage,
+  gradingService,
+} from '../../features/grading/infrastructure/gradingGateway';
 import type {
   GradingScheduleObjectiveOverrideRow,
   ObjectiveOverrideDeleteRequest,

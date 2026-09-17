@@ -1,5 +1,5 @@
 import { resolveInteractionGate } from './satInteractionGuards';
-import type { SatInteractionContext, SatInteractionState } from './satInteractionState';
+import { isSatNoteEditorSurface, type SatInteractionContext, type SatInteractionState } from './satInteractionState';
 
 export type SatEscapeAction =
   | { type: 'IGNORE' }
@@ -26,7 +26,9 @@ export function resolveEscapeAction(
   options: { lineReaderEnabled?: boolean | undefined } = {},
 ): SatEscapeAction {
   if (resolveInteractionGate(ctx) !== 'interactive') return { type: 'IGNORE' };
-  if (state.surface.kind === 'annotation-note-editor') return { type: 'CLOSE_ANNOTATION_EDITOR' };
+  // Both note editors (a marked span, the question itself) close on the first
+  // press: they are the innermost thing the student opened.
+  if (isSatNoteEditorSurface(state.surface)) return { type: 'CLOSE_ANNOTATION_EDITOR' };
   if (state.surface.kind !== 'none') return { type: 'CLOSE_SURFACE' };
   if (state.annotation.selection !== null) return { type: 'CLEAR_SELECTION' };
   if (options.lineReaderEnabled) return { type: 'DISABLE_LINE_READER' };

@@ -1,8 +1,8 @@
 import { gradingRepository } from '../../../services/gradingRepository';
-import { gradingService } from '../../../services/gradingService';
+import { gradingErrorMessage, gradingService } from '../../../services/gradingService';
 import type { ReviewDraft, SessionDetailFilters, WritingAnnotation } from '../../../types/grading';
 
-export { gradingRepository, gradingService };
+export { gradingErrorMessage, gradingRepository, gradingService };
 export { backendGet, backendPost, isBackendNotFound } from '@services/backendBridge';
 
 export const gradingGateway = {

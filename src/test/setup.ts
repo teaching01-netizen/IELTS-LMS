@@ -71,6 +71,19 @@ if (typeof window !== "undefined" && (window as unknown as Record<string, unknow
   (window as unknown as Record<string, unknown>)["PointerEvent"] = PointerEventPolyfill;
 }
 
+// jsdom ships canvas elements without a rendering backend: getContext("2d")
+// raises a "Not implemented" console error before returning null. Production
+// code feature-detects the canvas and degrades when it is absent (clipboard
+// image fingerprinting is skipped, byte identity still applies), so tests get
+// the same honest null without the console noise.
+if (typeof HTMLCanvasElement !== "undefined") {
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    writable: true,
+    value: () => null,
+  });
+}
+
 if (typeof Element !== "undefined") {
   Object.defineProperty(Element.prototype, "scrollIntoView", {
     configurable: true,

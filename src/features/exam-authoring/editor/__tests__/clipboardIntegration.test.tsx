@@ -35,12 +35,21 @@ const createUrl = vi.fn(() => "blob:clipboard-test");
 const revokeUrl = vi.fn();
 const editors: Editor[] = [];
 
+const PNG_SIGNATURE = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_DATA_URL = "data:image/png;base64," + btoa(String.fromCharCode(...PNG_SIGNATURE));
+const IMAGE_URL = "https://cdn.test/pic.png";
+// The HTML representation's bytes, mutable so a test can prove that a
+// re-encoded (non-identical) representation is NOT treated as a duplicate.
+const fetchedBytes = { value: PNG_SIGNATURE };
+const fetchImages = vi.fn(async () => ({
+  ok: true,
+  status: 200,
+  headers: new Headers({ "content-type": "image/png" }),
+  blob: async () => new Blob([fetchedBytes.value], { type: "image/png" }),
+}));
+
 function imageFile(): File {
-  return new File(
-    [Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
-    "clipboard.png",
-    { type: "image/png" }
-  );
+  return new File([PNG_SIGNATURE], "clipboard.png", { type: "image/png" });
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -92,6 +101,9 @@ function paste(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  fetchedBytes.value = PNG_SIGNATURE;
+  // The HTML representation of a copied image is fetched from its source URL.
+  vi.stubGlobal("fetch", fetchImages);
   vi.stubGlobal(
     "createImageBitmap",
     vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() }))
@@ -233,6 +245,56 @@ describe("SAT production composer clipboard integration", () => {
     });
     expect(editor.getJSON().content?.some((node) => node.type === "image")).toBe(false);
     expect(editor.getText()).toBe("");
+  });
+
+  it.each(["https", "data"] as const)(
+    "stages ONE image when the paste repeats the same bytes as a file and a %s HTML img",
+    async (flavor) => {
+      const { textbox, editor, changed, notice } = await mountComposer();
+      await act(async () => {
+        paste(textbox, {
+          files: [imageFile()],
+          html: `<p>See <img src="${flavor === "https" ? IMAGE_URL : PNG_DATA_URL}" alt="Copied visual"></p>`,
+          text: "See " + IMAGE_URL,
+        });
+        await waitFor(() => expect(uploadAssessmentAsset).toHaveBeenCalledTimes(1));
+      });
+      await waitFor(() =>
+        expect(textbox.querySelector("img")).toHaveAttribute("alt", "Copied visual")
+      );
+      const images = editor.getJSON().content?.filter((node) => node.type === "image") ?? [];
+      expect(images).toHaveLength(1);
+      expect(uploadAssessmentAsset).toHaveBeenCalledTimes(1);
+      expect(notice).toHaveBeenCalledWith(
+        expect.objectContaining({ imageCount: 1, canUndo: true })
+      );
+      expect(notice.mock.lastCall?.[0].rejectedImageCount ?? 0).toBe(0);
+      // One image, one clipboard event, one undo entry.
+      act(() => {
+        editor.commands.undo();
+      });
+      expect(editor.getJSON().content?.some((node) => node.type === "image")).toBe(false);
+      expect(JSON.stringify(changed.mock.calls)).not.toContain("blob:");
+    }
+  );
+
+  // jsdom has no canvas, so no visual fingerprint is available here: this pins
+  // the degradation contract — with bytes that differ and no fingerprint, the
+  // paste keeps both images instead of guessing they are the same.
+  it("keeps two images when the HTML representation is not byte-identical", async () => {
+    const { textbox, editor } = await mountComposer();
+    fetchedBytes.value = Uint8Array.from([...PNG_SIGNATURE, 0x2a]);
+    await act(async () => {
+      paste(textbox, {
+        files: [imageFile()],
+        html: `<p>See <img src="${IMAGE_URL}" alt="Re-encoded visual"></p>`,
+        text: "See " + IMAGE_URL,
+      });
+      await waitFor(() => expect(uploadAssessmentAsset).toHaveBeenCalledTimes(2));
+    });
+    const images = editor.getJSON().content?.filter((node) => node.type === "image") ?? [];
+    expect(images).toHaveLength(2);
+    expect(images.map((node) => node.attrs?.["alt"]).sort()).toEqual(["", "Re-encoded visual"]);
   });
 
   it("does not upload images when the field disables images", async () => {

@@ -7,7 +7,6 @@ import { emptySatExamToolPolicy } from "../domain/satToolPolicy";
 import type { SatInteractionContext } from "../domain/satInteractionState";
 import { useSatInteractionController } from "../hooks/useSatInteractionController";
 import { SatSaveStatus } from "./feedback/SatSaveStatus";
-import { SatNotesPanel } from "./question/SatNotesPanel";
 import { SatExamFooter } from "./shell/SatExamFooter";
 import { SatExamTopBar } from "./shell/SatExamTopBar";
 import { SatQuestionNavigator } from "./shell/SatQuestionNavigator";
@@ -26,15 +25,10 @@ import { useSatAnnotationSurface } from '../hooks/useSatAnnotationSurface';
 import type { SatQuestionAnnotations } from '../domain/satResponses';
 import { SAT_COPY } from '../domain/satCopy';
 import { SatAnnotationEditDock } from './annotations/SatAnnotationEditDock';
-import { SatAnnotationNoteEditor } from './annotations/SatAnnotationNoteEditor';
 import { SatAnnotationViewContext } from './annotations/SatAnnotationViewContext';
+import { SatNotesSurfaceHost } from './annotations/SatNotesSurfaceHost';
 import { SatSelectionActionsPanel } from './annotations/SatSelectionActionsPanel';
-import {
-  SatAnnotationEmptyNotesCoach,
-  SatAnnotationFirstHighlightFeedback,
-  SatAnnotationFirstUseHint,
-  SatAnnotationSelectTextCoach,
-} from './education/SatAnnotationEducationCues';
+import { SatAnnotationFirstHighlightFeedback } from './education/SatAnnotationEducationCues';
 
 export interface SatExamShellProps {
   moduleIdentity?: string;
@@ -124,6 +118,10 @@ export function SatExamShell(props: SatExamShellProps) {
   // Tool flags mirror the runner/policy props: notesAvailable IS policy.notes
   // (R&W-only), calculator/reference mirror the module tool policy.
   const notesAvailable = props.notesAvailable ?? true;
+  // One identity for "which question this is": the interaction machine, the
+  // annotation surface, and the Notes column keyed by it all read the same
+  // string, so a draft can never be committed against the wrong question.
+  const questionKey = `${props.moduleIdentity ?? ''}::${props.questionIndex}`;
   const interactionCtx = useMemo<SatInteractionContext>(() => ({
     phase: 'module',
     paused: props.blocked,
@@ -148,8 +146,8 @@ export function SatExamShell(props: SatExamShellProps) {
     },
     sectionKey: notesAvailable ? 'reading-writing' : 'math',
     moduleKey: props.moduleIdentity ?? '',
-    questionId: `${props.moduleIdentity ?? ''}::${props.questionIndex}`,
-  }), [props.blocked, props.calculatorAvailable, props.referenceAvailable, notesAvailable, props.moduleIdentity, props.questionIndex]);
+    questionId: questionKey,
+  }), [questionKey, props.blocked, props.calculatorAvailable, props.moduleIdentity, props.referenceAvailable, notesAvailable]);
   const interaction = useSatInteractionController(interactionCtx);
   const touchAnnotations = useSatMediaQuery('(pointer: coarse)');
   const activeOverlay: "directions" | "navigator" | "notes" | "reading" | "more" | null =
@@ -158,8 +156,8 @@ export function SatExamShell(props: SatExamShellProps) {
     : interaction.state.surface.kind === 'navigator' ? 'navigator'
     : interaction.state.surface.kind === 'more-menu' ? 'more'
     : interaction.state.surface.kind === 'directions' ? 'directions'
-    // The annotation note editor is a dialog, not a shell overlay: it must not
-    // alias to a TopBar popover.
+    // Both note editors live in the inline Notes column, which is part of the
+    // layout rather than a top-bar popover, so nothing aliases here for them.
     : null;
   const routeModalOpen = props.helpOpen === true || props.shortcutsOpen === true;
   const floatingToolOpen = props.calculatorOpen || props.referenceOpen;
@@ -174,6 +172,11 @@ export function SatExamShell(props: SatExamShellProps) {
    * teaching cues all live in useSatAnnotationSurface. The shell renders what
    * it returns and reports gestures; nothing here writes an annotation twice.
    * ------------------------------------------------------------------ */
+  // Declared before the annotation surface: the notes column's focus contract
+  // needs the id of the control that opens it.
+  const notesButtonId = useId();
+  const navigatorButtonId = useId();
+  const navigatorPanelId = useId();
   const surface = useSatAnnotationSurface({
     annotations: props.annotations,
     onAnnotationsChange: props.onAnnotationsChange,
@@ -183,7 +186,8 @@ export function SatExamShell(props: SatExamShellProps) {
     educationKey: props.educationKey,
     answered: props.answered === true,
     interaction,
-    questionKey: `${props.moduleIdentity ?? ''}::${props.questionIndex}`,
+    questionKey,
+    notesTriggerId: notesButtonId,
   });
   const {
     selection,
@@ -196,7 +200,6 @@ export function SatExamShell(props: SatExamShellProps) {
     underlineMark,
     openNoteOnMark,
     removeMark,
-    noteEditorAnnotation,
     updateNote,
     undoEntry,
     undoRemoval,
@@ -224,6 +227,13 @@ export function SatExamShell(props: SatExamShellProps) {
       // Annotation chrome answers before exam surfaces: the edit dock is the
       // innermost thing the student opened.
       if (closeMarkEditor()) return;
+      // The Notes column is inline now, so nothing else can hand focus back to
+      // the control that opened it; Escape goes through the same close path as
+      // the column's own close button.
+      if (surface.notesState.kind === 'notes') {
+        surface.closeNotes();
+        return;
+      }
       interaction.handleEscape({
         lineReaderEnabled: props.readingPreferences.lineReaderEnabled ?? false,
         onDisableLineReader: () => props.onReadingPreferencesChange({ ...props.readingPreferences, lineReaderEnabled: false }),
@@ -261,9 +271,6 @@ export function SatExamShell(props: SatExamShellProps) {
     }
     previousRemainingRef.current = remaining ?? null;
   }, [props.remainingSeconds]);
-  const notesButtonId = useId();
-  const navigatorButtonId = useId();
-  const navigatorPanelId = useId();
 
   // Bluebook keyboard shortcuts (Phase 3): one binding converges clicks and
   // keys on the same actions. Listener lives only while the module surface
@@ -333,9 +340,15 @@ export function SatExamShell(props: SatExamShellProps) {
     props.examHeight !== null && Number.isFinite(props.examHeight)
       ? ({ ["--student-exam-height" as string]: `${props.examHeight}px` } as CSSProperties)
       : undefined;
-  // Empty-notes coach: shown inside an open, empty Notes panel. It exists to
-  // answer "where are my notes?" for a student who just opened the feature.
-  const showNotesCoach = activeOverlay === 'notes' && questionNotes.length === 0 && props.questionNote.trim().length === 0;
+  /* ------------------------------------------------------------------ *
+   * The Notes column
+   *
+   * Notes are a structural pane beside the passage, never an overlay: the
+   * student does not leave the exam to write something down, and the note stays
+   * next to the text it is about. SatNotesSurfaceHost owns the chrome and
+   * SatNotesSurfaceContext hands it to the layout that has room for it, so the
+   * shell only wires props — it no longer derives whether the column is open.
+   * ------------------------------------------------------------------ */
 
   return (
     <SatContrastContext.Provider value={props.readingPreferences.contrastMode ?? 'default'}>
@@ -389,10 +402,6 @@ export function SatExamShell(props: SatExamShellProps) {
         onCloseReading={closeOverlay}
         onReadingPreferencesChange={props.onReadingPreferencesChange}
       />
-      {/* Passive first-use hint (Highlights & Notes): one quiet line, once per
-          attempt, below the tool entry. No scrim, no blocking, no close
-          button — it leaves on its own or the moment the student selects. */}
-      {hintVisible ? <SatAnnotationFirstUseHint /> : null}
       {/* Bluebook More utility center (Phase 1): fixed-position dropdown
           pinned under the top-right More trigger (fixed right/top offsets
           mirror the trigger cell, so the panel can never drop to the shell
@@ -423,16 +432,37 @@ export function SatExamShell(props: SatExamShellProps) {
         data-sat-annotation-bounds="true"
       >
         <SatAnnotationViewContext.Provider value={annotationView}>
-          <div
-            className="h-full min-w-0"
-            data-sat-content-zoom={props.readingPreferences.examZoom ?? 1}
-            style={{ zoom: props.readingPreferences.examZoom ?? 1, width: '100%', height: '100%' }}>
-            {props.children}
-          </div>
+          {/* The Notes column rides inside the zoom wrapper on purpose: it is
+              exam content now, so screen zoom must treat it like the passage
+              beside it (a fixed overlay could never do that). */}
+          <SatNotesSurfaceHost
+            state={surface.notesState}
+            // Keyed by question: switching questions commits the draft through
+            // that question's own writer before the column starts clean, so a
+            // note can never be typed onto the next question.
+            questionKey={questionKey}
+            annotations={questionNotes}
+            questionNote={props.questionNote}
+            disabled={props.blocked || !annotationsWritable}
+            hintVisible={hintVisible}
+            onSelectNote={(annotationId) => {
+              const target = questionNotes.find((annotation) => annotation.id === annotationId);
+              if (target) openNoteOnMark(target);
+            }}
+            onChangeNote={updateNote}
+            onSaveQuestionNote={props.onSaveNote}
+            onWriteAboutQuestion={surface.openQuestionNote}
+            onFlush={props.onFlushAnnotations}
+            onClose={surface.closeNotes}
+          >
+            <div
+              className="h-full min-w-0"
+              data-sat-content-zoom={props.readingPreferences.examZoom ?? 1}
+              style={{ zoom: props.readingPreferences.examZoom ?? 1, width: '100%', height: '100%' }}>
+              {props.children}
+            </div>
+          </SatNotesSurfaceHost>
         </SatAnnotationViewContext.Provider>
-        {/* Empty Notes panel coach points at the passage instead of changing
-            it: a label, never a restyle of the student's reading surface. */}
-        {showNotesCoach && surface.hasAnnotations === false ? <SatAnnotationSelectTextCoach /> : null}
         {/* Contextual annotation tools. Exactly one is mounted at a time:
             a mark editor when a mark is being changed, otherwise the selection
             toolbar/dock while a selection is live. */}
@@ -514,31 +544,9 @@ export function SatExamShell(props: SatExamShellProps) {
         onReviewModule={props.onReviewModule}
         onClose={closeOverlay}
       />
-      <SatNotesPanel
-        open={activeOverlay === "notes" && notesAvailable}
-        note={props.questionNote}
-        disabled={props.blocked}
-        readingPreferences={props.readingPreferences}
-        returnFocusId={notesButtonId}
-        annotations={questionNotes}
-        onOpenAnnotation={(annotationId) => interaction.openAnnotationNote(annotationId)}
-        emptyState={<SatAnnotationEmptyNotesCoach />}
-        onSave={props.onSaveNote}
-        onClose={closeOverlay}
-      />
-      {/* Note card for the selected text. Opened by the selection toolbar, the
-          dock, or a mark tap; the caret lands in the field so typing starts
-          immediately and "Saved" confirms itself without a Save button. */}
-      {noteEditorAnnotation ? (
-        <SatAnnotationNoteEditor
-          annotation={noteEditorAnnotation}
-          onChange={updateNote}
-          onClose={closeOverlay}
-          onDelete={() => removeMark(noteEditorAnnotation)}
-          onFlush={props.onFlushAnnotations}
-          returnFocusSelector={'[data-sat-focus="topbar-notes"]'}
-        />
-      ) : null}
+      {/* The Notes column is not mounted here: it is rendered by the question
+          workspace from SatNotesSurfaceContext, so it occupies layout space
+          between the passage and the question instead of floating over them. */}
       {/* Bluebook Help + Shortcuts (Phases 2-3): route-owned open state;
           the shell only presents. Timer continues and answers stay untouched
           by design — these modals never touch exam state. */}

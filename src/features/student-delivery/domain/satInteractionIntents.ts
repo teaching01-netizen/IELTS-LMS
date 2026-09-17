@@ -21,6 +21,7 @@ export type SatInteractionIntent =
   | { type: 'QUESTION_NOTES_OPEN_REQUESTED'; returnFocus?: SatInteractionFocusTarget }
   | { type: 'MORE_MENU_OPEN_REQUESTED'; returnFocus?: SatInteractionFocusTarget }
   | { type: 'ANNOTATION_NOTE_REQUESTED'; annotationId: string; returnFocus?: SatInteractionFocusTarget }
+  | { type: 'QUESTION_NOTE_REQUESTED'; returnFocus?: SatInteractionFocusTarget }
   | { type: 'CALCULATOR_TOGGLE_REQUESTED' }
   | { type: 'REFERENCE_TOGGLE_REQUESTED' }
   | { type: 'SURFACE_CLOSE_REQUESTED' }
@@ -111,6 +112,15 @@ export function resolveSatInteractionIntent(
         type: 'ANNOTATION_NOTE_EDITOR_OPENED',
         annotationId: intent.annotationId,
         returnFocus: intent.returnFocus ?? { type: 'question', questionId: ctx.questionId },
+      };
+    }
+    case 'QUESTION_NOTE_REQUESTED': {
+      // Writing about the question needs the notes capability, not a selection:
+      // a student with nothing marked can still write something down.
+      if (!satInteractionCan.annotate(state, ctx)) return null;
+      return {
+        type: 'QUESTION_NOTE_EDITOR_OPENED',
+        returnFocus: intent.returnFocus ?? { type: 'topbar', control: 'notes' },
       };
     }
     // Tool buttons dispatch runner commands directly (activeTools is the

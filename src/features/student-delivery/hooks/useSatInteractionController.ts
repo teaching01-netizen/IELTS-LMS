@@ -31,6 +31,8 @@ export interface SatInteractionController {
   openQuestionNotes: (returnFocus?: SatInteractionFocusTarget) => void;
   openMoreMenu: (returnFocus?: SatInteractionFocusTarget) => void;
   openAnnotationNote: (annotationId: string, returnFocus?: SatInteractionFocusTarget) => void;
+  /** Write about the question itself, with nothing selected. */
+  openQuestionNote: (returnFocus?: SatInteractionFocusTarget) => void;
   toggleSurface: (
     surface: 'navigator' | 'directions' | 'reading-settings' | 'question-notes' | 'more-menu',
     returnFocus?: SatInteractionFocusTarget,
@@ -210,6 +212,13 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
       ),
     [dispatchIntent],
   );
+  const openQuestionNote = useCallback(
+    (focus?: SatInteractionFocusTarget) =>
+      dispatchIntent(
+        focus ? { type: 'QUESTION_NOTE_REQUESTED', returnFocus: focus } : { type: 'QUESTION_NOTE_REQUESTED' },
+      ),
+    [dispatchIntent],
+  );
   const openMoreMenu = useCallback(
     (focus?: SatInteractionFocusTarget) =>
       dispatchIntent(focus ? { type: 'MORE_MENU_OPEN_REQUESTED', returnFocus: focus } : { type: 'MORE_MENU_OPEN_REQUESTED' }),
@@ -288,6 +297,7 @@ export function useSatInteractionController(ctx: SatInteractionContext): SatInte
     openQuestionNotes,
     openMoreMenu,
     openAnnotationNote,
+    openQuestionNote,
     toggleSurface,
     closeSurface,
     toggleCalculator,
