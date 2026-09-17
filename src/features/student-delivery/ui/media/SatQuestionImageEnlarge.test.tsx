@@ -7,7 +7,13 @@ import {
   type SatImageEnlargeGeometry,
   type SatImageEnlargeView,
 } from "../../../exam-rendering/api/structuredContentEnlarge";
-import { SatQuestionImageEnlarge } from "./SatQuestionImageEnlarge";
+import { RichStructuredContentRenderer } from "../../../exam-rendering/RichStructuredContentRenderer";
+import type { StructuredContent } from "../../../exam-rendering/api/assessmentContracts";
+import { SAT_QUESTION_IMAGE_ENLARGE, SatQuestionImageEnlarge } from "./SatQuestionImageEnlarge";
+
+vi.mock("../../../exam-authoring/api/assessmentMediaApi", () => ({
+  getAssessmentMediaAsset: vi.fn(),
+}));
 
 /** A square figure whose frame and image box are already laid out at 200×200. */
 const GEOMETRY: SatImageEnlargeGeometry = {
@@ -147,5 +153,74 @@ describe("SatQuestionImageEnlarge", () => {
     fireEvent.keyDown(document.body, { key: "0" });
     fireEvent.keyDown(document.body, { key: "-" });
     expect(screen.getByTestId("view").textContent).toBe(before);
+  });
+
+  it("preserves zoom modified in fullscreen when returning to the embedded view", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(within(embeddedStrip()).getByRole("status")).toHaveTextContent("125%");
+
+    await user.click(screen.getByRole("button", { name: "Enter full screen" }));
+    const dialog = screen.getByRole("dialog", { name: "Image viewer" });
+    expect(within(dialog).getByRole("status")).toHaveTextContent("125%");
+
+    await user.click(within(dialog).getByRole("button", { name: "Zoom in" }));
+    expect(within(dialog).getByRole("status")).toHaveTextContent("150%");
+
+    await user.click(within(dialog).getByRole("button", { name: "Exit full screen" }));
+    expect(screen.queryByRole("dialog", { name: "Image viewer" })).not.toBeInTheDocument();
+    expect(within(embeddedStrip()).getByRole("status")).toHaveTextContent("150%");
+    expect(screen.getByTestId("view")).toHaveTextContent("1.5:0:0");
+  });
+
+  it("renders only one visible question image while fullscreen is open", async () => {
+    const user = userEvent.setup();
+    const content: StructuredContent = {
+      version: 2,
+      nodes: [],
+      document: {
+        type: "doc",
+        content: [
+          {
+            type: "image",
+            attrs: { src: "https://example.com/graph.png", alt: "Graph of f" },
+          },
+        ],
+      },
+    } as unknown as StructuredContent;
+
+    const { container } = render(
+      <RichStructuredContentRenderer
+        content={content}
+        enlarge={SAT_QUESTION_IMAGE_ENLARGE}
+      />,
+    );
+    const image = container.querySelector("img");
+    if (!image) throw new Error("missing embedded image");
+
+    // Before fullscreen: embedded image is visible, no viewer dialog
+    expect(image.className).not.toContain("invisible");
+    expect(image).not.toHaveAttribute("aria-hidden");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Enter fullscreen
+    await user.click(screen.getByRole("button", { name: "Enter full screen" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Image viewer" });
+    const fullscreenImage = dialog.querySelector("img");
+    expect(fullscreenImage).toBeInTheDocument();
+    expect(fullscreenImage?.className).not.toContain("invisible");
+
+    // Embedded image remains mounted but visually suspended
+    expect(container.querySelector("img")).toBe(image);
+    expect(image.className).toContain("invisible");
+    expect(image).toHaveAttribute("aria-hidden", "true");
+
+    // Exit fullscreen
+    await user.click(within(dialog).getByRole("button", { name: "Exit full screen" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(image.className).not.toContain("invisible");
+    expect(image).not.toHaveAttribute("aria-hidden");
   });
 });

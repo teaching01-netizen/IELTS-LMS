@@ -1,7 +1,10 @@
 /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex -- the pane is a 2D pannable surface, not a control: it is focusable only to give the pointer's pan a keyboard equivalent (arrow keys), it is labelled with the figure it shows, and every change of scale stays on the named controls in the strip above. */
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { acquireBodyScrollLock, releaseBodyScrollLock } from "../../../../components/ui/bodyScrollLock";
 import { SAT_COPY } from "../../domain/satCopy";
 import { satOverlayZClass } from "../primitives/satOverlayZ";
+import { SatContrastContext } from "../reading/SatContrastContext";
 import type {
   SatImageEnlargeGeometry,
   SatImageEnlargeView,
@@ -48,6 +51,7 @@ export interface SatImageViewerProps {
 const PINCH_MIN_SEPARATION = 24;
 
 export function SatImageViewer(props: SatImageViewerProps) {
+  const contrast = useContext(SatContrastContext);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
@@ -99,6 +103,14 @@ export function SatImageViewer(props: SatImageViewerProps) {
     );
   }, [props.open, props.origin]);
 
+  useEffect(() => {
+    if (!props.open) return;
+    acquireBodyScrollLock();
+    return () => {
+      releaseBodyScrollLock();
+    };
+  }, [props.open]);
+
   // Focus-back: explicit selector wins; otherwise the opener captured at open
   // time (the strip's Full screen control).
   useEffect(() => {
@@ -146,21 +158,27 @@ export function SatImageViewer(props: SatImageViewerProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- zoomAtPoint is stable; re-subscribing on every render would only churn.
   }, [props.open, controller.zoomAtPoint]);
 
-  if (!props.open) return null;
+  if (!props.open || typeof document === "undefined") return null;
   const zoomed = controller.zoom > 1;
 
-  return (
+  const viewer = (
     <div
       className={
         "sat-ui fixed inset-0 flex items-center justify-center p-4 sm:p-8 " +
         satOverlayZClass("imageViewer")
       }
+      data-sat-contrast={contrast}
       data-testid="sat-image-viewer"
     >
       {/* Suppress, don't dramatize: the question stays recognisably underneath,
           dimmed just enough that attention stops going to it. No blur — an exam
-          behind frosted glass is noise, not depth. */}
-      <div aria-hidden="true" className="sat-figure-scrim absolute inset-0 bg-black/40" />
+          behind frosted glass is noise, not depth. Pointer events are absorbed
+          so the background exam cannot be clicked through the viewer. */}
+      <div
+        aria-hidden="true"
+        data-sat-image-scrim=""
+        className="sat-figure-scrim absolute inset-0 bg-black/40"
+      />
       <div
         ref={cardRef}
         role="dialog"
@@ -168,7 +186,7 @@ export function SatImageViewer(props: SatImageViewerProps) {
         aria-labelledby={titleId}
         style={expandOrigin ? { transformOrigin: expandOrigin } : undefined}
         className={
-          "relative flex max-h-full w-full max-w-[880px] flex-col overflow-hidden rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] text-[var(--sat-text)] shadow-[var(--sat-shadow-modal)]" +
+          "relative flex max-h-[calc(100dvh-32px)] sm:max-h-[calc(100dvh-64px)] w-full max-w-[880px] flex-col overflow-hidden rounded-[10px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] text-[var(--sat-text)] shadow-[var(--sat-shadow-modal)]" +
           (expandOrigin ? " sat-figure-expand" : "")
         }
       >
@@ -199,8 +217,10 @@ export function SatImageViewer(props: SatImageViewerProps) {
           tabIndex={0}
           aria-label={props.alt}
           className={
-            "flex max-h-[70dvh] min-h-0 flex-1 items-center justify-center overflow-hidden bg-[var(--sat-surface-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] " +
-            (zoomed ? "touch-none cursor-grab active:cursor-grabbing" : "")
+            "flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[var(--sat-surface-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] " +
+            (zoomed
+              ? "touch-none " + (dragging ? "cursor-grabbing" : "cursor-grab")
+              : "cursor-default")
           }
           // The keyboard path to the same capability the pointer has: arrows
           // move the figure, and the strip remains the way to change scale.
@@ -328,4 +348,6 @@ export function SatImageViewer(props: SatImageViewerProps) {
       </div>
     </div>
   );
+
+  return createPortal(viewer, document.body);
 }

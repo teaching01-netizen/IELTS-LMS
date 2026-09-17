@@ -386,6 +386,7 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
             draggable={false}
             onError={() => setFailed(true)}
             onLoad={measure}
+            aria-hidden={viewerOpen ? true : undefined}
             // The visual itself carries the alignment: auto margins move it
             // inside a full-width box, which is what makes "Align left" mean
             // something even when no size was chosen.
@@ -409,7 +410,8 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
             // animates home too. Reduced motion zeroes it upstream.
             className={
               "h-full max-h-80 max-w-full object-contain" +
-              (resolveGesture ? " sat-figure-zoom" : "")
+              (resolveGesture ? " sat-figure-zoom" : "") +
+              (viewerOpen ? " invisible" : "")
             }
           />
         ) : (

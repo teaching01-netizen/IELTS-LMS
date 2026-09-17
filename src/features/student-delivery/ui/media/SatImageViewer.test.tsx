@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import {
@@ -7,6 +7,7 @@ import {
   type SatImageEnlargeGeometry,
   type SatImageEnlargeView,
 } from "../../../exam-rendering/api/structuredContentEnlarge";
+import { SatContrastContext } from "../reading/SatContrastContext";
 import { SatImageViewer } from "./SatImageViewer";
 
 const GEOMETRY: SatImageEnlargeGeometry = {
@@ -125,5 +126,93 @@ describe("SatImageViewer", () => {
     document.body.focus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("portals outside the question stacking context to document.body", async () => {
+    const user = userEvent.setup();
+    render(
+      <div
+        data-testid="question-stacking-context"
+        style={{
+          transform: "translateZ(0)",
+          overflow: "hidden",
+          position: "relative",
+        }}
+      >
+        <Harness />
+      </div>,
+    );
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    const viewer = screen.getByTestId("sat-image-viewer");
+    const question = screen.getByTestId("question-stacking-context");
+
+    expect(question).not.toContainElement(viewer);
+    expect(viewer.parentElement).toBe(document.body);
+  });
+
+  it("propagates contrast context across the portal", async () => {
+    const user = userEvent.setup();
+    render(
+      <SatContrastContext.Provider value="high-contrast">
+        <Harness />
+      </SatContrastContext.Provider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    const viewer = screen.getByTestId("sat-image-viewer");
+    expect(viewer).toHaveAttribute("data-sat-contrast", "high-contrast");
+  });
+
+  it("acquires body scroll lock while open and releases on close", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    expect(document.body.style.overflow).toBe("");
+
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    expect(document.body.style.overflow).toBe("hidden");
+
+    await user.keyboard("{Escape}");
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("resets both zoom and pan offset when Reset zoom is clicked", async () => {
+    const user = userEvent.setup();
+    render(<Harness initialView={{ zoom: 1.5, offsetX: 20, offsetY: -15 }} />);
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    expect(screen.getByTestId("view")).toHaveTextContent("1.5:20:-15");
+
+    const dialog = screen.getByRole("dialog", { name: "Image viewer" });
+    await user.click(within(dialog).getByRole("button", { name: "Reset zoom" }));
+    expect(screen.getByTestId("view")).toHaveTextContent("1:0:0");
+  });
+
+  it("renders a protective scrim covering the viewport to prevent background interaction", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    const scrim = document.querySelector("[data-sat-image-scrim]");
+    expect(scrim).toBeInTheDocument();
+    expect(scrim).toHaveClass("sat-figure-scrim");
+  });
+
+  it("handles arrow key panning only when zoomed", async () => {
+    const user = userEvent.setup();
+    render(<Harness initialView={{ zoom: 1, offsetX: 0, offsetY: 0 }} />);
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    const viewport = document.querySelector("[data-sat-image-viewport]");
+    if (!viewport) throw new Error("no viewport");
+
+    // At 100%: arrow keys do not pan or preventDefault
+    const at100 = createEvent.keyDown(viewport, { key: "ArrowLeft" });
+    fireEvent(viewport, at100);
+    expect(at100.defaultPrevented).toBe(false);
+
+    // Zoom in via strip
+    const dialog = screen.getByRole("dialog", { name: "Image viewer" });
+    await user.click(within(dialog).getByRole("button", { name: "Zoom in" }));
+
+    // While zoomed: arrow keys prevent default and handle pan
+    const whileZoomed = createEvent.keyDown(viewport, { key: "ArrowLeft" });
+    fireEvent(viewport, whileZoomed);
+    expect(whileZoomed.defaultPrevented).toBe(true);
   });
 });

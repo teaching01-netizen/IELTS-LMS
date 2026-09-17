@@ -314,9 +314,9 @@ export class CoeditPersistence {
         if (applied !== binary) {
           metadata = {
             ...metadata,
-            stateEpoch: durability.stateEpoch ?? metadata.stateEpoch,
-            commitSequence: durability.commitSequence ?? metadata.commitSequence,
-            workspaceRevision: durability.workspaceRevision ?? metadata.workspaceRevision,
+            ...(durability.stateEpoch ? { stateEpoch: durability.stateEpoch } : {}),
+            ...(durability.commitSequence ? { commitSequence: durability.commitSequence } : {}),
+            ...(durability.workspaceRevision !== undefined ? { workspaceRevision: durability.workspaceRevision } : {}),
           };
         }
       } finally {

@@ -317,4 +317,39 @@ describe("StaticStructuredImage figure chrome", () => {
     fireEvent(frame, whileZoomed);
     expect(whileZoomed.defaultPrevented).toBe(true);
   });
+
+  it("suspends the embedded image visually while fullscreen is open and restores it when closed", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <RichStructuredContentRenderer
+        content={content}
+        enlarge={{
+          renderEnlarge: (props: SatImageEnlargeProps) => (
+            <div role="toolbar">
+              <button type="button" onClick={props.open ? props.onClose : props.onOpen}>
+                {props.open ? "close" : "open"}
+              </button>
+            </div>
+          ),
+        }}
+      />,
+    );
+    const image = container.querySelector("img");
+    if (!image) throw new Error("no image");
+
+    expect(image.className).not.toContain("invisible");
+    expect(image).not.toHaveAttribute("aria-hidden");
+
+    await user.click(screen.getByRole("button", { name: "open" }));
+
+    expect(container.querySelector("img")).toBe(image);
+    expect(image.className).toContain("invisible");
+    expect(image).toHaveAttribute("aria-hidden", "true");
+
+    await user.click(screen.getByRole("button", { name: "close" }));
+
+    expect(container.querySelector("img")).toBe(image);
+    expect(image.className).not.toContain("invisible");
+    expect(image).not.toHaveAttribute("aria-hidden");
+  });
 });
