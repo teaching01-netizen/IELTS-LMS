@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createSatTextAnnotation } from '../../domain/satResponses';
 import {
   focusSatAnnotationMark,
   focusSatNotesRail,
   focusSatQuestionNoteRow,
+  measureSatNoteMarkers,
   scrollSatAnnotationIntoView,
 } from './satAnnotationDom';
 
@@ -57,6 +59,70 @@ describe('scrollSatAnnotationIntoView', () => {
 
   it('reports when there is nothing to scroll to', () => {
     expect(scrollSatAnnotationIntoView('missing')).toBe(false);
+  });
+});
+
+/**
+ * The margin dots are measured from the marks themselves, because where a phrase
+ * sits on screen is a fact only the renderer has. These cases pin the two ways
+ * this can go wrong: a dot beside a mark nobody wrote about, and a dot parked at
+ * the top of the passage because layout had not happened yet.
+ */
+describe('measureSatNoteMarkers', () => {
+  function box(top: number, height: number): DOMRect {
+    return { top, height, left: 0, right: 0, bottom: top + height, width: 600, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+  }
+
+  function buildRoot(marks: Record<string, number>, rootTop = 0): HTMLElement {
+    const root = document.createElement('div');
+    root.getBoundingClientRect = () => box(rootTop, 800);
+    for (const [id, top] of Object.entries(marks)) {
+      const mark = document.createElement('span');
+      mark.setAttribute('data-sat-annotation-id', id);
+      mark.getBoundingClientRect = () => box(top, 20);
+      root.appendChild(mark);
+    }
+    document.body.appendChild(root);
+    return root;
+  }
+
+  const at = { kind: 'highlight' as const, nodeId: 'stimulus:p', startOffset: 0, endOffset: 4, exact: 'tree' };
+  const noted = (id: string, note = 'Check this') => createSatTextAnnotation({ ...at, id, note });
+  const bare = (id: string) => createSatTextAnnotation({ ...at, id });
+
+  it('dots the phrase that has a note and leaves the bare highlight alone', () => {
+    const root = buildRoot({ a1: 40, a2: 90 }, 12);
+    // Level with the mark's line, in the content box's own coordinates, and in
+    // the mark's ink.
+    expect(measureSatNoteMarkers(root, [noted('a1'), bare('a2')])).toEqual([
+      { id: 'a1', top: 38, color: 'yellow' },
+    ]);
+  });
+
+  it('treats a whitespace-only note as nothing written', () => {
+    const root = buildRoot({ a1: 40 });
+    expect(measureSatNoteMarkers(root, [noted('a1', '   ')])).toEqual([]);
+  });
+
+  it('collapses two notes on one line to a single dot', () => {
+    const root = buildRoot({ a1: 40, a2: 42 });
+    expect(measureSatNoteMarkers(root, [noted('a1'), noted('a2')])).toHaveLength(1);
+  });
+
+  it('has nothing to dot when the mark has not laid out', () => {
+    // jsdom (and a question that has not painted yet) reports zero-height boxes: a
+    // dot at the passage's top-left corner would be worse than no dot.
+    const root = document.createElement('div');
+    const mark = document.createElement('span');
+    mark.setAttribute('data-sat-annotation-id', 'a1');
+    root.appendChild(mark);
+    document.body.appendChild(root);
+    expect(measureSatNoteMarkers(root, [noted('a1')])).toEqual([]);
+  });
+
+  it('skips a note whose mark is not on screen at all', () => {
+    const root = buildRoot({ a1: 40 });
+    expect(measureSatNoteMarkers(root, [noted('gone')])).toEqual([]);
   });
 });
 

@@ -1,5 +1,5 @@
 import { fireEvent, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSatTextAnnotation, emptySatAnnotations } from '../../domain/satResponses';
 import { clearSatGestureOrigin, clearSatSelectionGesture, markSatPointerDown } from './satSelectionDragGuard';
 import { SatAnnotatedContent } from './SatAnnotatedContent';
@@ -22,6 +22,33 @@ beforeEach(() => {
   clearSatGestureOrigin();
   clearSatSelectionGesture();
 });
+
+let restoreMarkGeometry: (() => void) | null = null;
+afterEach(() => {
+  restoreMarkGeometry?.();
+  restoreMarkGeometry = null;
+});
+
+/**
+ * Give the rendered marks a line to sit on.
+ *
+ * jsdom has no layout, so every box would report zero and the dots would (rightly)
+ * not render at all; this is the same stubbing the DOM helpers are tested with, so
+ * the maths runs against the geometry the browser would report.
+ */
+function stubMarkLines(tops: Record<string, number>) {
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    const id = this.getAttribute('data-sat-annotation-id');
+    const top = id === null ? undefined : tops[id];
+    return top === undefined
+      ? ({ top: 0, left: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0 } as DOMRect)
+      : ({ top, left: 0, width: 600, height: 20, right: 600, bottom: top + 20, x: 0, y: top } as DOMRect);
+  };
+  return () => {
+    HTMLElement.prototype.getBoundingClientRect = original;
+  };
+}
 
 function renderContent(props: Partial<React.ComponentProps<typeof SatAnnotatedContent>> = {}, annotationView = view()) {
   return render(
@@ -223,6 +250,103 @@ describe('SAT annotation rendering', () => {
     // A mark split across rendered lines is still ONE mark with one note.
     expect(container.querySelectorAll('[data-sat-highlight="true"]').length).toBeGreaterThan(0);
     expect(container.querySelectorAll('[data-sat-annotation-note="true"]')).toHaveLength(1);
+  });
+
+  /*
+   * The margin dots. The pane says what the student wrote; these say where, which
+   * used to mean opening the pane and reading quotes. Two properties matter and
+   * are what these cases pin: a dot appears only for a phrase someone actually
+   * wrote about, and it appears OUTSIDE the sentence.
+   */
+  describe('note markers in the margin', () => {
+    const at = { kind: 'highlight' as const, nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' };
+
+    /** One noted phrase and one bare highlight beside it. */
+    function passage(note: string | undefined) {
+      const annotations = emptySatAnnotations();
+      annotations.annotations = [
+        createSatTextAnnotation({ ...at, id: 'a1', color: 'blue', ...(note ? { note } : {}) }),
+        createSatTextAnnotation({ ...at, id: 'a2', color: 'pink', startOffset: 7, endOffset: 12, exact: 'grows' }),
+      ];
+      return annotations;
+    }
+
+    it('dots the phrase the note was written about, in that highlight’s ink, outside the sentence', () => {
+      restoreMarkGeometry = stubMarkLines({ a1: 40, a2: 90 });
+      const { container } = renderContent({ annotations: passage('Cooler here') });
+
+      const layer = container.querySelector('[data-sat-note-markers="true"]')!;
+      expect(layer).toHaveAttribute('aria-hidden', 'true');
+      const dot = layer.querySelector('[data-sat-note-marker="a1"]')!;
+      // The same ink as the highlight, which is the same dot its card shows in
+      // the pane: one object, seen at both ends.
+      expect(dot).toHaveAttribute('data-sat-note-marker-color', 'blue');
+      expect(dot.getAttribute('style')).toContain('var(--sat-swatch-blue');
+      // Level with the mark's line, in the content box's coordinates.
+      expect(dot.getAttribute('style')).toContain('top: 50px');
+
+      // A highlight nobody wrote about stays a plain highlight.
+      expect(layer.querySelector('[data-sat-note-marker="a2"]')).toBeNull();
+
+      // And nothing is drawn into the sentence: the dot lives in the margin
+      // layer, never inside the mark's own box.
+      const mark = container.querySelector('[data-sat-highlight-color="blue"]')!;
+      expect(mark.querySelector('[data-sat-note-marker]')).toBeNull();
+      expect(mark).toHaveTextContent('tree');
+      expect(layer.closest('[data-sat-annotation-region]')?.contains(layer)).toBe(true);
+    });
+
+    it('is decoration only: no target, no name, nothing to announce twice', () => {
+      restoreMarkGeometry = stubMarkLines({ a1: 40 });
+      const { container } = renderContent({ annotations: passage('Cooler here') });
+      const dot = container.querySelector('[data-sat-note-marker="a1"]')!;
+      expect(dot.tagName).toBe('SPAN');
+      // The mark's own label already says "Edit note"; a second control in the
+      // margin would be a second answer to the same question.
+      expect(dot).not.toHaveAttribute('role');
+      expect(dot).not.toHaveAttribute('tabindex');
+      expect(dot).not.toHaveAttribute('aria-label');
+      expect(container.querySelector('[data-sat-note-markers] button')).toBeNull();
+      expect(container.querySelector('[data-sat-note-markers]')!.className).toContain('pointer-events-none');
+      // Never focusable, so the tab order through the passage is unchanged.
+      expect(dot.querySelectorAll('a, button, input, textarea, [tabindex]')).toHaveLength(0);
+    });
+
+    it('gives the mark its dot the moment the note is written', () => {
+      restoreMarkGeometry = stubMarkLines({ a1: 40 });
+      const { container, rerender } = render(
+        <SatAnnotationViewContext.Provider value={view()}>
+          <SatAnnotatedContent content={content()} annotations={passage(undefined)} region="stimulus" enabled />
+        </SatAnnotationViewContext.Provider>,
+      );
+      // Highlighted but not written about: the passage shows no trace, which is
+      // the whole rule the pane follows too.
+      expect(container.querySelector('[data-sat-note-markers]')).toBeNull();
+
+      rerender(
+        <SatAnnotationViewContext.Provider value={view()}>
+          <SatAnnotatedContent content={content()} annotations={passage('Cooler here')} region="stimulus" enabled />
+        </SatAnnotationViewContext.Provider>,
+      );
+      expect(container.querySelector('[data-sat-note-marker="a1"]')).not.toBeNull();
+    });
+
+    it('collapses two notes on one line to a single dot', () => {
+      restoreMarkGeometry = stubMarkLines({ a1: 40, a2: 42 });
+      const annotations = emptySatAnnotations();
+      annotations.annotations = [
+        createSatTextAnnotation({ ...at, id: 'a1', note: 'First' }),
+        createSatTextAnnotation({ ...at, id: 'a2', startOffset: 7, endOffset: 12, exact: 'grows', note: 'Second' }),
+      ];
+      const { container } = renderContent({ annotations });
+      expect(container.querySelectorAll('[data-sat-note-marker]')).toHaveLength(1);
+    });
+
+    it('stays out of a read-only passage, where notes cannot be written at all', () => {
+      restoreMarkGeometry = stubMarkLines({ a1: 40 });
+      const { container } = renderContent({ annotations: passage('Cooler here') }, view({ openEditorActive: false }));
+      expect(container.querySelector('[data-sat-note-markers]')).toBeNull();
+    });
   });
 
   it('renders marks as plain decoration in a read-only context', () => {

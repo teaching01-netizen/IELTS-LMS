@@ -1,3 +1,11 @@
+import type { SatTextAnnotation } from '../../domain/satResponses';
+import {
+  clusterSatNoteMarkers,
+  type SatNoteMarker,
+  type SatNoteMarkerInput,
+} from '../../domain/satNoteMarkers';
+import { satAnnotationHasNote } from '../../domain/satNotesUi';
+
 /**
  * The two DOM things a note needs from a mark: show it, and hand focus back to
  * it. Both live here so "a note is attached to that span" has one implementation
@@ -87,6 +95,55 @@ export function scrollSatAnnotationIntoView(annotationId: string): boolean {
   if (prefersReducedMotion()) container.scrollTop = top;
   else container.scrollTo({ top, behavior: 'smooth' });
   return true;
+}
+
+/**
+ * Measure the margin dots: where each noted mark's first line sits.
+ *
+ * This is the one place that turns a mark into a position, so the passage never
+ * has to guess where its own dots go. Geometry comes from the mark itself, and a
+ * mark that has not laid out yet (a headless renderer, or a question that has not
+ * painted) contributes nothing — a dot parked at the top-left corner would be
+ * worse than a dot that arrives a frame later.
+ *
+ * Only marks with a note are measured, against the same definition the pane's
+ * count uses (`satAnnotationHasNote`), so the dots, the count, and the handle a
+ * hidden pane leaves behind can never disagree about what they are showing.
+ */
+export function measureSatNoteMarkers(
+  root: HTMLElement,
+  annotations: readonly SatTextAnnotation[],
+): SatNoteMarker[] {
+  const rootRect = root.getBoundingClientRect();
+  const markers: SatNoteMarkerInput[] = [];
+  for (const annotation of annotations) {
+    if (!satAnnotationHasNote(annotation)) continue;
+    const mark = root.querySelector<HTMLElement>(markSelector(annotation.id));
+    if (!mark) continue;
+    const line = firstLineRect(mark);
+    if (!line || line.height <= 0) continue;
+    markers.push({
+      id: annotation.id,
+      // The centre of the line the dot sits beside, not the middle of a wrapped
+      // mark: a three-line highlight still points at the line it starts on.
+      top: line.top - rootRect.top + line.height / 2,
+      ...(annotation.color ? { color: annotation.color } : {}),
+    });
+  }
+  return clusterSatNoteMarkers(markers);
+}
+
+/**
+ * The mark's first rendered line.
+ *
+ * A mark is one inline span that wraps, so it reports one client rect per line it
+ * covers and the first one is the line to point at. The fallback is for
+ * renderers that expose only the union box.
+ */
+function firstLineRect(mark: HTMLElement): { top: number; height: number } | null {
+  const rects = mark.getClientRects();
+  const first = rects.length > 0 ? rects[0] : mark.getBoundingClientRect();
+  return first ? { top: first.top, height: first.height } : null;
 }
 
 function escapeAttributeValue(value: string): string {

@@ -135,10 +135,22 @@ export function satNotesRailVisible(input: {
 }
 
 /**
+ * What counts as a note.
+ *
+ * A mark whose card is merely open for a first note is not a note until there are
+ * words in it — whitespace is not writing either. Three surfaces need exactly
+ * this answer (the heading's count, the decision to leave a handle behind, and
+ * the margin dot beside a marked phrase), and they must not be able to disagree
+ * about what they are counting, so the definition lives here once.
+ */
+export function satAnnotationHasNote(annotation: { note?: string | undefined }): boolean {
+  return (annotation.note ?? '').trim().length > 0;
+}
+
+/**
  * How many notes the question actually holds.
  *
- * A card open for a first note is not a note until there are words in it. The
- * heading's summary and the decision to leave a handle behind both need that
+ * The heading's summary and the decision to leave a handle behind both need that
  * answer, so it is derived once here instead of twice downstream — which is how
  * "3 notes" and "there is something to come back to" could otherwise disagree.
  */
@@ -147,7 +159,7 @@ export function satNotesCount(
   questionNote: string,
 ): number {
   return (
-    annotations.filter((annotation) => (annotation.note ?? '').trim().length > 0).length +
+    annotations.filter(satAnnotationHasNote).length +
     (questionNote.trim().length > 0 ? 1 : 0)
   );
 }

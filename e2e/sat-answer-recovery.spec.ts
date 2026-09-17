@@ -127,13 +127,24 @@ test.describe('SAT answer durability recovery', () => {
         .click();
       await expect(studentPage.locator('[data-sat-highlight="true"]')).toHaveCount(1);
 
+      // Writing happens in the Notes pane now: choosing Add note marks the words
+      // (the same span, so this stays one highlight), opens the pane on that
+      // note's card, and puts the caret in its field. There is no Save and no
+      // Done — the draft is committed on the way out.
       await selectFirstStimulusText(studentPage);
       await studentPage
         .getByRole('toolbar', { name: 'Selected text actions' })
         .getByRole('button', { name: 'Add note' })
         .click();
-      await studentPage.locator('#sat-note-on-selection').fill('Keep this evidence.');
-      await studentPage.getByRole('button', { name: 'Done' }).click();
+      const noteField = studentPage.getByRole('textbox', { name: 'Notes' });
+      await expect(noteField).toBeFocused();
+      await noteField.fill('Keep this evidence.');
+      await expect(studentPage.getByTestId('sat-note-saved')).toBeVisible();
+      await expect(studentPage.locator('[data-sat-highlight="true"]')).toHaveCount(1);
+      // The passage itself now says where that note lives.
+      await expect(studentPage.locator('[data-sat-note-marker]')).toHaveCount(1);
+      await studentPage.keyboard.press('Escape');
+      await expect(studentPage.getByRole('complementary', { name: 'Notes' })).toHaveCount(0);
       await waitForSatSaved(studentPage);
 
       let delayedRecovery = false;
@@ -155,15 +166,21 @@ test.describe('SAT answer durability recovery', () => {
         'true',
       );
       await expect(studentPage.locator('[data-sat-highlight="true"]')).toHaveCount(1);
+      // Recovered too: the margin dot is derived from the note, so a dot here is
+      // the note having survived, not a stale attribute.
+      await expect(studentPage.locator('[data-sat-note-marker]')).toHaveCount(1);
 
-      // The recovered note is the note attached to the recovered mark.
+      // The recovered note is the note attached to the recovered mark, and it
+      // reads back in the one place a note is written.
       await studentPage.locator('[data-sat-highlight="true"]').first().click();
       await studentPage
         .getByRole('toolbar', { name: 'Edit annotation' })
         .getByRole('button', { name: 'Edit note' })
         .click();
-      await expect(studentPage.locator('#sat-note-on-selection')).toHaveValue('Keep this evidence.');
-      await studentPage.getByRole('button', { name: 'Done' }).click();
+      await expect(studentPage.getByRole('complementary', { name: 'Notes' })).toBeVisible();
+      await expect(studentPage.getByRole('textbox', { name: 'Notes' })).toHaveValue('Keep this evidence.');
+      await studentPage.keyboard.press('Escape');
+      await expect(studentPage.getByRole('complementary', { name: 'Notes' })).toHaveCount(0);
       await radios.nth(2).check();
       await waitForSatSaved(studentPage);
 

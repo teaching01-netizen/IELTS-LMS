@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { StructuredContent } from '../../../exam-authoring/api/assessmentContracts';
 import { StructuredContentRenderer, type StaticStructuredImageEnlargeApi } from '../../../exam-rendering/api/structuredContent';
 import type { StructuredTextRenderer } from '../../../exam-rendering/api/structuredContent';
 import { applySatAnnotationsToText, resolveSatTextAnchor, type SatTextAnchor, type SatQuestionAnnotations, type SatTextAnnotation, type SatTextSegment } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
-import { satHighlightMarkStyle } from './satAnnotationPalette';
+import { satHighlightInk, satHighlightMarkStyle } from './satAnnotationPalette';
+import { measureSatNoteMarkers } from './satAnnotationDom';
+import { satNoteMarkersEqual, type SatNoteMarker } from '../../domain/satNoteMarkers';
 import { useSatAnnotationView } from './SatAnnotationViewContext';
 import { captureSatTextSelection, isSatSelectionInsideAnnotationUi } from './satTextSelection';
 import { isSatDragRelease, markSatPointerDown, markSatSelectionGestureEnded } from './satSelectionDragGuard';
@@ -102,6 +104,49 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
   }, [annotations, enabled, flashLimitNotice, region]);
 
   const contentKey = JSON.stringify(content);
+
+  /**
+   * Margin dots: which marked phrases carry a note (`clusterSatNoteMarkers`).
+   *
+   * Measured after layout rather than derived from the model, because where a
+   * phrase sits on screen is a fact only the browser has. They are re-measured
+   * only when something can move a mark — marks changing, the Notes pane opening
+   * or closing (which re-wraps the passage), text size, zoom, a resize — and never
+   * on scroll, since the dots sit inside the prose and travel with it.
+   */
+  const [noteMarkers, setNoteMarkers] = useState<readonly SatNoteMarker[]>([]);
+  const markersEnabled = view.openEditorActive;
+  const measureNoteMarkers = useCallback(() => {
+    const element = root.current;
+    if (!element || !markersEnabled) {
+      setNoteMarkers((previous) => (previous.length === 0 ? previous : []));
+      return;
+    }
+    const next = measureSatNoteMarkers(element, annotations.annotations);
+    // Same dots, same render: a drag-resize must not re-render a question under
+    // the student's cursor.
+    setNoteMarkers((previous) => (satNoteMarkersEqual(previous, next) ? previous : next));
+  }, [annotations, markersEnabled]);
+
+  // A layout effect for the same reason the toolbar's placement is one: the dots
+  // belong to the same commit as the prose they point at, so a question the
+  // student just turned to never shows its notes a frame late.
+  useLayoutEffect(() => {
+    measureNoteMarkers();
+  }, [measureNoteMarkers]);
+
+  useEffect(() => {
+    const element = root.current;
+    if (!element || !markersEnabled) return;
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measureNoteMarkers);
+    observer?.observe(element);
+    window.addEventListener('resize', measureNoteMarkers);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measureNoteMarkers);
+    };
+  }, [markersEnabled, measureNoteMarkers]);
+
   const renderText = useMemo<StructuredTextRenderer>(() => {
     const blocks = new Map<string, SatTextSegment[]>();
     return ({ nodeId, blockText, text, startOffset }) => {
@@ -203,9 +248,36 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         ref={root}
         data-sat-annotation-region={enabled ? region : undefined}
         data-sat-highlight-preview={enabled ? 'true' : undefined}
-        className="rounded-[8px]"
+        className="relative rounded-[8px]"
       >
         <StructuredContentRenderer content={content} renderText={enabled ? renderText : undefined} enlarge={enlarge} />
+        {/* The margin dots: one per line that carries a note, level with the
+            phrase's first line, in that highlight's own ink — the same dot the
+            note's card shows in the pane, so the two ends read as one object.
+
+            Decoration, and nothing else: hidden from assistive tech (the mark's
+            own label already says "Edit note"), never a target (the marked words
+            stay the way in), and skipped on phone widths, where there is no
+            gutter to spare and the pane is how notes are reached. Nothing is
+            drawn into the sentence — the passage stays prose. */}
+        {noteMarkers.length > 0 ? (
+          <div
+            aria-hidden="true"
+            data-sat-note-markers="true"
+            className="pointer-events-none absolute inset-0 hidden md:block"
+          >
+            {noteMarkers.map((marker) => (
+              <span
+                key={marker.id}
+                data-sat-note-marker={marker.id}
+                data-sat-note-marker-color={marker.color ?? 'yellow'}
+                // The gutter, not the text: one dot's width clear of the prose.
+                className="absolute -left-3.5 h-[7px] w-[7px] -translate-y-1/2 rounded-full border border-[var(--sat-divider-strong)]"
+                style={{ top: marker.top, backgroundColor: satHighlightInk(marker.color).swatch }}
+              />
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {limitNotice ? (

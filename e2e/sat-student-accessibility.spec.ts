@@ -538,6 +538,32 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(opened).toContainText("Compare the two blocks");
     await expect(opened.locator("[data-sat-note-ink]")).toHaveCount(1);
 
+    // The passage answers "which highlights did I write about?" without opening
+    // anything: one dot in the margin, level with the noted phrase, in that
+    // phrase's own ink. The other highlight, which nobody wrote about, has none —
+    // which is the whole point of the dot.
+    await expect(page.locator('[data-sat-highlight="true"]')).toHaveCount(2);
+    const dots = page.locator("[data-sat-note-marker]");
+    await expect(dots).toHaveCount(1);
+    await expect(dots).toHaveAttribute("data-sat-note-marker-color", "yellow");
+
+    // Strictly outside the sentence: the dot is not inside the mark's own box,
+    // and it sits in the gutter beside the line it belongs to.
+    const notedMark = page.locator('[data-sat-highlight="true"]').first();
+    await expect(notedMark.locator("[data-sat-note-marker]")).toHaveCount(0);
+    const [markBox, dotBox] = await Promise.all([notedMark.boundingBox(), dots.boundingBox()]);
+    expect(markBox).not.toBeNull();
+    expect(dotBox).not.toBeNull();
+    expect(dotBox!.x + dotBox!.width).toBeLessThanOrEqual(markBox!.x + 1);
+    expect(dotBox!.y).toBeGreaterThanOrEqual(markBox!.y - 2);
+    expect(dotBox!.y + dotBox!.height).toBeLessThanOrEqual(markBox!.y + markBox!.height + 2);
+
+    // Decoration only: nothing to tab to, nothing announced twice — the mark's
+    // own label already says "Edit note" — so the scans stay clean with it there.
+    await expect(page.locator("[data-sat-note-markers]")).toHaveAttribute("aria-hidden", "true");
+    await expect(page.locator("[data-sat-note-markers] button")).toHaveCount(0);
+    await expectNoSeriousAxeViolations(page, "notes column with a note marker in the passage");
+
     // The exam keeps its shape while a note is written: the passage and the
     // question stay where the student left them, with the note between them.
     await expect(page.locator("[data-sat-passage-scroll]")).toBeVisible();
@@ -573,6 +599,11 @@ test.describe("SAT student accessibility and layout", () => {
     const reopened = page.getByRole("complementary", { name: "Notes" });
     await expect(reopened).toContainText("Compare the two blocks");
     await expect(reopened).toContainText("\u201CSeveral\u201D");
+
+    // Phone widths have no gutter to spare and a pane of their own to reach notes
+    // through, so the passage drops its dots rather than crowding the words.
+    await page.setViewportSize({ width: 390, height: 780 });
+    await expect(page.locator("[data-sat-note-marker]").first()).toBeHidden();
   });
 
   test("closing a note returns the caret to the text it was written about", async ({ page }) => {

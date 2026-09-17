@@ -7,6 +7,7 @@ import {
   idleSatNotesUi,
   satNotesColumnOpen,
   satNotesPlacement,
+  satAnnotationHasNote,
   satNotesCount,
   satNotesRailVisible,
   satNotesUiFromSurface,
@@ -144,6 +145,15 @@ describe('satNotesRailVisible', () => {
     expect(satNotesCount([{ note: '  ' }, { note: undefined }], '   ')).toBe(0);
     expect(satNotesCount([{ note: 'Check the evidence' }], '')).toBe(1);
     expect(satNotesCount([{ note: 'One' }, { note: 'Two' }], 'About the question')).toBe(3);
+  });
+
+  it('answers "has a note" once, for everything that has to agree about it', () => {
+    // The heading's count, the handle, and the margin dots all ask this same
+    // question; a second definition is how the passage ends up dotting a mark the
+    // pane does not count.
+    expect(satAnnotationHasNote({ note: 'Check the evidence' })).toBe(true);
+    expect(satAnnotationHasNote({ note: '   ' })).toBe(false);
+    expect(satAnnotationHasNote({})).toBe(false);
   });
 
   it('is a tab beside the pane it replaces, never a second pane', () => {
