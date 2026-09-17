@@ -151,12 +151,24 @@ describe('note close returns focus', () => {
     expect(focusSatAnnotationMark('a1')).toBe(false);
   });
 
-  it('returns focus to the question’s own note row', () => {
-    const row = document.createElement('button');
-    row.setAttribute('data-sat-note-card', 'question');
-    document.body.appendChild(row);
+  it('returns focus to the question’s own note field', () => {
+    // The question's note is an always-editable field, so the field — not a
+    // wrapper that only opens it — is where the caret belongs on the way out.
+    const field = document.createElement('textarea');
+    field.id = 'sat-question-note';
+    document.body.appendChild(field);
     expect(focusSatQuestionNoteRow()).toBe(true);
-    expect(document.activeElement).toBe(row);
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('falls back to the button that opens the question’s note when nothing is written', () => {
+    // With no text the slot is its own button, which is both where the student
+    // was and the press that starts the note again.
+    const button = document.createElement('button');
+    button.setAttribute('data-sat-notes-add-question-note', 'true');
+    document.body.appendChild(button);
+    expect(focusSatQuestionNoteRow()).toBe(true);
+    expect(document.activeElement).toBe(button);
   });
 
   it('returns focus to the handle a hidden Notes column left behind', () => {

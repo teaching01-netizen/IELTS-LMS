@@ -49,11 +49,20 @@ export const SAT_COPY = {
     // name to be found again. The spoken name adds the action, which the tab's
     // identity does not carry on its own.
     railAction: "Show notes",
+    // The question's own note has no highlighted source to quote, so this is the
+    // only note that needs a name at all — and it is spoken rather than drawn:
+    // the pane's shape already says which note hangs off a passage phrase.
     questionSource: "This question",
-    placeholder: "Add a quick note\u2026",
-    // Quiet, transient confirmation that there is no Save button to press.
+    placeholder: "Write a note\u2026",
+    // The two halves of autosave feedback, and only ever one of them at a time:
+    // "Saving" while a draft is still waiting on the idle pause, "Saved" for a
+    // moment once it lands. At rest the field says nothing, which is the point.
+    saving: "Saving" + "\u2026",
     saved: "Saved",
-    remove: "Remove note",
+    // A note's secondary actions, behind one neutral control: the destructive
+    // verb is disclosed, never parked beside the student's writing.
+    noteActions: "Note actions",
+    deleteNote: "Delete note",
     // Shown in the same undo toast that already forgives a removed mark: the ink
     // stays, only the words go, and they can come back for a few seconds.
     removed: "Note removed",
@@ -72,10 +81,6 @@ export const SAT_COPY = {
     // Notes on selected text are the pattern; this one exists for a student with
     // nothing selected, and it used to compete with them as a full-width row.
     addQuestionNote: "Add question note",
-    // Autosave reassurance, shown while a field is open and retired once the
-    // first save it announces has been seen: a promise made once and then
-    // trusted, rather than a permanent banner repeating itself.
-    saveHelper: "Notes save automatically.",
     // On the hide control at widths where notes take the question's place, so
     // hiding says what it actually does.
     collapseAndShowQuestion: "Hide notes and show the question",
@@ -304,14 +309,36 @@ export const SAT_COPY = {
 export type SatCopy = typeof SAT_COPY;
 
 /**
- * A note's source, quoted the way the Notes column shows it.
+ * A highlighted excerpt, normalized and capped, for the places that have to name
+ * it in speech.
  *
- * The old label read "Selected text: …", which is system language for something
- * the student did themselves a moment ago. A quoted snippet needs no preface:
- * the quotes say "this is the text you marked".
+ * The Notes column shows the excerpt itself, in semibold type, with no quotes and
+ * no label — but a screen reader cannot hear typography, and several notes in one
+ * pane need to be told apart. The quotes that would be noise on screen are what
+ * mark the boundary of the excerpt when it is spoken, and the cap keeps a whole
+ * paragraph from becoming a control's name.
  */
-export function satQuotedSource(quote: string): string {
-  return "\u201C" + quote + "\u201D";
+function satExcerptLabel(excerpt: string, max = 60): string {
+  const normalized = excerpt.replace(/\s+/g, " ").trim();
+  const capped =
+    normalized.length > max ? normalized.slice(0, max).trimEnd() + "\u2026" : normalized;
+  return "\u201C" + capped + "\u201D";
+}
+
+/**
+ * The spoken name of a note's own field, e.g. `Note on \u201CSeveral\u201D`.
+ *
+ * Every card in the pane carries a live field now, so "Notes" can no longer name
+ * them all: a student tabbing through the column has to hear which note each
+ * field belongs to, and which excerpt it is about.
+ */
+export function satNoteFieldLabel(excerpt: string): string {
+  return "Note on " + satExcerptLabel(excerpt);
+}
+
+/** The spoken name of a note's secondary actions, scoped to its own excerpt. */
+export function satNoteActionsLabel(excerpt: string): string {
+  return SAT_COPY.notes.noteActions + " for " + satExcerptLabel(excerpt);
 }
 
 /**

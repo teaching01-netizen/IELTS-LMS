@@ -5,6 +5,7 @@ import {
   type SatNoteMarkerInput,
 } from '../../domain/satNoteMarkers';
 import { satAnnotationHasNote } from '../../domain/satNotesUi';
+import { QUESTION_NOTE_FIELD_ID } from './SatNoteField';
 
 /**
  * The two DOM things a note needs from a mark: show it, and hand focus back to
@@ -25,16 +26,21 @@ export function focusSatAnnotationMark(annotationId: string): boolean {
 }
 
 /**
- * Put focus back on the row for the question's own note.
+ * Put focus back on the question's own note.
  *
- * Writing about the question opens a second kind of note editor; closing it must
+ * Writing about the question opens a note editor like any other; closing it must
  * return the student to what they were doing just as closing a marked note does,
  * rather than dumping focus at the top of the document or on a control they were
- * not using.
+ * not using. The field is the destination while there is text in it; with nothing
+ * written the slot is its own "Add question note" button, which is where the
+ * student was and is the press that starts over.
  */
 export function focusSatQuestionNoteRow(): boolean {
   if (typeof document === 'undefined') return false;
-  return focusAndReport(document.querySelector<HTMLElement>('[data-sat-note-card="question"]'));
+  return (
+    focusAndReport(document.getElementById(QUESTION_NOTE_FIELD_ID)) ||
+    focusAndReport(document.querySelector<HTMLElement>('[data-sat-notes-add-question-note="true"]'))
+  );
 }
 
 /**

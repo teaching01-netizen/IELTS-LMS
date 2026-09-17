@@ -4,7 +4,8 @@ import {
   satBackToQuestionLabel,
   satContinueToDirectionsLabel,
   satLastQuestionLabel,
-  satQuotedSource,
+  satNoteActionsLabel,
+  satNoteFieldLabel,
   satSubmitConfirmSummary,
   satSubmitConfirmTitle,
   satTimerRevealedAnnouncement,
@@ -49,10 +50,20 @@ describe("satCopy controlled vocabulary", () => {
     expect(table.questionNote).toBeUndefined();
     expect(table.noteOnSelection).toBeUndefined();
     // "Notes save automatically" beside a "Save and close" button was the
-    // contradiction; the column autosaves and offers no such button at all.
+    // contradiction; the column autosaves and offers no such button at all — and
+    // it no longer makes the promise either. Saving is narrated only while it is
+    // happening ("Saving" / "Saved"), never explained in advance.
     expect(Object.values(SAT_COPY.notes).join(" ")).not.toMatch(/\bSave\b/);
-    // The promise is still made — once, in the field, and then retired.
-    expect(SAT_COPY.notes.saveHelper).toBe("Notes save automatically.");
+    expect((SAT_COPY.notes as unknown as Record<string, unknown>).saveHelper).toBeUndefined();
+    expect(SAT_COPY.notes.saving).toBe("Saving\u2026");
+    expect(SAT_COPY.notes.saved).toBe("Saved");
+    // The field invites writing rather than administration.
+    expect(SAT_COPY.notes.placeholder).toBe("Write a note\u2026");
+    // Removal is disclosed, not parked beside the writing: a neutral control and
+    // the verb behind it.
+    expect(SAT_COPY.notes.noteActions).toBe("Note actions");
+    expect(SAT_COPY.notes.deleteNote).toBe("Delete note");
+    expect((SAT_COPY.notes as unknown as Record<string, unknown>).remove).toBeUndefined();
     // The empty state names the column, then the gesture that fills it, instead
     // of a call to action standing in for both.
     expect(SAT_COPY.notes.emptyTitle).toBe("No notes yet");
@@ -76,7 +87,13 @@ describe("satCopy controlled vocabulary", () => {
   });
 
   it("interpolates dynamic labels without empty segments", () => {
-    expect(satQuotedSource("Trees change heat.")).toBe("\u201CTrees change heat.\u201D");
+    expect(satNoteFieldLabel("Several")).toBe("Note on \u201CSeveral\u201D");
+    expect(satNoteActionsLabel("Several")).toBe("Note actions for \u201CSeveral\u201D");
+    // Normalized and capped: a whole paragraph must not become a control's name.
+    expect(satNoteFieldLabel("  trees\n change   heat ")).toBe("Note on \u201Ctrees change heat\u201D");
+    const long = satNoteFieldLabel("x".repeat(80));
+    expect(long.length).toBeLessThan(80);
+    expect(long.endsWith("\u2026\u201D")).toBe(true);
     expect(satBackToQuestionLabel(7)).toBe("Back to question 7");
     expect(satSubmitConfirmTitle("Module 2")).toBe("Submit Module 2 answers?");
     expect(satSubmitConfirmSummary(3, 2)).toBe("3 unanswered \u00B7 2 flagged");

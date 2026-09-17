@@ -150,10 +150,12 @@ test.describe('SAT answer durability recovery', () => {
         .getByRole('toolbar', { name: 'Selected text actions' })
         .getByRole('button', { name: 'Add note' })
         .click();
-      const noteField = studentPage.getByRole('textbox', { name: 'Notes' });
+      // The field is named for the words it is about, so the test does not have to
+      // guess which note it is typing into.
+      const noteField = studentPage.getByRole('textbox', { name: /^Note on / });
       await expect(noteField).toBeFocused();
       await noteField.fill('Keep this evidence.');
-      await expect(studentPage.getByTestId('sat-note-saved')).toBeVisible();
+      await expect(studentPage.locator('[data-sat-note-status="saved"]')).toBeVisible();
       await expect(studentPage.locator('[data-sat-highlight="true"]')).toHaveCount(1);
       // The passage itself now says where that note lives.
       await expect(studentPage.locator('[data-sat-note-marker]')).toHaveCount(1);
@@ -192,7 +194,7 @@ test.describe('SAT answer durability recovery', () => {
         .getByRole('button', { name: 'Edit note' })
         .click();
       await expect(studentPage.getByRole('complementary', { name: 'Notes' })).toBeVisible();
-      await expect(studentPage.getByRole('textbox', { name: 'Notes' })).toHaveValue('Keep this evidence.');
+      await expect(studentPage.getByRole('textbox', { name: /^Note on / })).toHaveValue('Keep this evidence.');
       await studentPage.keyboard.press('Escape');
       await expect(studentPage.getByRole('complementary', { name: 'Notes' })).toHaveCount(0);
       await radios.nth(2).check();

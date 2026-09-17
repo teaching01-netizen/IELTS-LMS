@@ -351,20 +351,28 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     onSaveQuestionNote('');
   }, [onSaveQuestionNote, questionNote, writable]);
 
-  /** The column's own field, which is the machine's note editor surface. */
+  /**
+   * The column's fields commit here, keyed by the note each one belongs to.
+   *
+   * The key is the id the field was rendered for, not "whichever editor the
+   * machine last opened": every card in the pane holds a live field now, so a
+   * word typed into any of them has to land on its own note.
+   */
   const updateNote = useCallback(
-    (note: string | undefined) => {
-      if (!noteEditorAnnotation) return;
+    (annotationId: string, note: string | undefined) => {
+      if (!annotations || !writable) return;
+      const target = annotations.annotations.find((item) => item.id === annotationId) ?? null;
+      if (!target) return;
       // Deleting from a bare mark removes the whole annotation. A note-bearing
       // mark keeps its ink and loses only the text: the eraser equivalent is
       // Remove in the mark's edit controls.
-      if (note === undefined && !noteEditorAnnotation.note) {
-        removeMark(noteEditorAnnotation);
+      if (note === undefined && !target.note) {
+        removeMark(target);
         return;
       }
-      writeMarkNote(noteEditorAnnotation, note ?? '');
+      writeMarkNote(target, note ?? '');
     },
-    [noteEditorAnnotation, removeMark, writeMarkNote],
+    [annotations, removeMark, writable, writeMarkNote],
   );
 
   const selectionActions = useMemo<SatSelectionActions>(

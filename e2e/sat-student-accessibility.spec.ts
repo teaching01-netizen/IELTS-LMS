@@ -456,18 +456,19 @@ test.describe("SAT student accessibility and layout", () => {
     await expectNoSeriousAxeViolations(page, 'edit dock for a new highlight');
 
     // Writing opens the pane on this note's card, and that state needs its own
-    // scan: a quoted source, a capped field, and the autosave promise under it.
+    // scan: the selected words as the student selected them, and the one field
+    // their note lives in — nothing else repeating either of them.
     await editDock.getByRole('button', { name: 'Add note' }).click();
     const column = page.getByRole('complementary', { name: 'Notes' });
-    await expect(page.getByRole('textbox', { name: 'Notes' })).toBeFocused();
-    await expect(column).toContainText('Notes save automatically.');
+    await expect(page.getByRole('textbox', { name: 'Note on \u201CSeveral\u201D' })).toBeFocused();
+    await expect(column.locator('[data-sat-note-excerpt]')).toHaveText('Several');
     await expectNoSeriousAxeViolations(page, 'notes column while writing a note');
 
-    // The question's own note is one quiet button under the list, and the surface
-    // it opens is a different one: no field sharing the pane with another field.
+    // The question's own note is one quiet button under the list; with it open the
+    // pane holds one field per note, and no field is a preview of another.
     await column.getByRole('button', { name: 'Add question note' }).click();
     await expect(page.getByRole('textbox', { name: 'This question' })).toBeFocused();
-    await expect(column.getByRole('textbox')).toHaveCount(1);
+    await expect(column.getByRole('textbox')).toHaveCount(2);
     await expectNoSeriousAxeViolations(page, 'notes column while writing about the question');
   });
 
@@ -566,14 +567,14 @@ test.describe("SAT student accessibility and layout", () => {
       .getByRole("button", { name: "Add note" })
       .click();
     const opened = page.getByRole("complementary", { name: "Notes" });
-    await expect(opened).toContainText("\u201CSeveral\u201D");
+    await expect(opened.locator('[data-sat-note-excerpt]')).toHaveText("Several");
     // One note has one editor: the mark's floating tools step aside for the field.
     await expect(page.getByRole("toolbar", { name: "Edit annotation" })).toHaveCount(0);
-    const field = page.getByRole("textbox", { name: "Notes" });
+    const field = page.getByRole("textbox", { name: "Note on \u201CSeveral\u201D" });
     await expect(field).toBeFocused();
     await field.fill("Compare the two blocks");
-    await expect(page.getByTestId("sat-note-saved")).toBeVisible();
-    await expect(opened).toContainText("Compare the two blocks");
+    await expect(opened.locator('[data-sat-note-status="saved"]')).toBeVisible();
+    await expect(field).toHaveValue("Compare the two blocks");
     await expect(opened.locator("[data-sat-note-ink]")).toHaveCount(1);
 
     // The passage answers "which highlights did I write about?" without opening
@@ -624,8 +625,9 @@ test.describe("SAT student accessibility and layout", () => {
     expect(columnBox!.width).toBeLessThanOrEqual(340);
 
     // Closing and coming back keeps the note, and keeps it attached to its
-    // source: one list, quotes and all. Escape closes the editor the student is
-    // in — one press, one layer — and the words are already committed.
+    // source: one list, the words they selected and the field they wrote in.
+    // Escape closes the pane the student is in — one press, one layer — and the
+    // words are already committed.
     await page.keyboard.press("Escape");
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     // Now there IS something to come back to, so the pane's place holds a handle
@@ -635,8 +637,10 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(rail).toContainText("Notes");
     await rail.click();
     const reopened = page.getByRole("complementary", { name: "Notes" });
-    await expect(reopened).toContainText("Compare the two blocks");
-    await expect(reopened).toContainText("\u201CSeveral\u201D");
+    await expect(
+      reopened.getByRole("textbox", { name: "Note on \u201CSeveral\u201D" }),
+    ).toHaveValue("Compare the two blocks");
+    await expect(reopened.locator("[data-sat-note-excerpt]")).toHaveText("Several");
 
     // Phone widths have no gutter to spare and a pane of their own to reach notes
     // through, so the passage drops its dots rather than crowding the words.
@@ -656,15 +660,18 @@ test.describe("SAT student accessibility and layout", () => {
       .getByRole("toolbar", { name: "Selected text actions" })
       .getByRole("button", { name: "Add note" })
       .click();
-    const noteField = page.getByRole("textbox", { name: "Notes" });
+    const noteField = page.getByRole("textbox", { name: "Note on \u201CSeveral\u201D" });
     await expect(noteField).toBeFocused();
     await noteField.fill("Compare the two blocks");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     await expect(page.locator("[data-sat-annotation-id]").first()).toBeFocused();
-    // The text was committed on the way out, without a Save button to press.
+    // The text was committed on the way out, without a Save button to press — and
+    // reading it back is the same field the student typed it in.
     await page.getByRole("button", { name: /^Notes/ }).click();
-    await expect(page.getByRole("complementary", { name: "Notes" })).toContainText("Compare the two blocks");
+    await expect(
+      page.getByRole("complementary", { name: "Notes" }).getByRole("textbox", { name: "Note on \u201CSeveral\u201D" }),
+    ).toHaveValue("Compare the two blocks");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
 
@@ -677,7 +684,7 @@ test.describe("SAT student accessibility and layout", () => {
     const questionField = page.getByRole("textbox", { name: "This question" });
     await expect(questionField).toBeFocused();
     await questionField.fill("Look for the contrast");
-    await expect(column.getByTestId("sat-note-saved")).toBeVisible();
+    await expect(column.locator('[data-sat-note-status="saved"]')).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Show notes" })).toBeFocused();
@@ -686,9 +693,11 @@ test.describe("SAT student accessibility and layout", () => {
     // anchored note, each under the source it came from.
     await page.getByRole("button", { name: /^Notes/ }).click();
     const list = page.getByRole("complementary", { name: "Notes" });
-    await expect(list).toContainText("Look for the contrast");
-    await expect(list).toContainText("This question");
-    await expect(list).toContainText("\u201CSeveral\u201D");
+    await expect(list.getByRole("textbox", { name: "This question" })).toHaveValue("Look for the contrast");
+    // Each note under the source it came from: the anchored one shows its words,
+    // the question's own shows none, because it has no source to quote.
+    await expect(list.locator('[data-sat-note-excerpt]')).toHaveText("Several");
+    await expect(list).not.toContainText("This question");
   });
 
   test("a note typed and abandoned by navigating the question survives", async ({ page }) => {
@@ -708,7 +717,9 @@ test.describe("SAT student accessibility and layout", () => {
     await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
     await page.getByRole("button", { name: "Previous" }).click();
     await page.getByRole("button", { name: /^Notes/ }).click();
-    await expect(page.getByRole("complementary", { name: "Notes" })).toContainText("Half a thought");
+    await expect(
+      page.getByRole("complementary", { name: "Notes" }).getByRole("textbox", { name: "This question" }),
+    ).toHaveValue("Half a thought");
   });
 
   test("at tablet widths notes take the question's place and give it back", async ({ page }) => {
@@ -1436,7 +1447,7 @@ test.describe("SAT student accessibility and layout", () => {
       .getByRole("toolbar", { name: "Selected text actions" })
       .getByRole("button", { name: "Add note" })
       .click();
-    const noteField = page.getByRole("textbox", { name: "Notes" });
+    const noteField = page.getByRole("textbox", { name: "Note on \u201CSeveral\u201D" });
     const noteSize = await noteField.evaluate((element) =>
       Number.parseFloat(getComputedStyle(element).fontSize)
     );

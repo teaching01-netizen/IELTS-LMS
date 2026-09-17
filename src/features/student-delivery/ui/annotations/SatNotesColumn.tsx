@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { ChevronDown, ChevronLeft, Plus, StickyNote } from 'lucide-react';
 import type { SatTextAnnotation } from '../../domain/satResponses';
-import { SAT_COPY, satNotesCountLabel, satQuotedSource } from '../../domain/satCopy';
+import { SAT_COPY, satNoteActionsLabel, satNoteFieldLabel, satNotesCountLabel } from '../../domain/satCopy';
 import {
   SAT_QUESTION_NOTE_EDITOR,
   satNotesCount,
@@ -9,10 +9,10 @@ import {
   type SatNotesUiState,
 } from '../../domain/satNotesUi';
 import { satHighlightInk } from './satAnnotationPalette';
-import { QUESTION_NOTE_FIELD_ID, SAT_NOTE_EDITOR_FIELD_ID, SatNoteField } from './SatNoteField';
+import { QUESTION_NOTE_FIELD_ID, SatNoteField, satNoteEditorFieldId } from './SatNoteField';
 
 export interface SatNotesColumnProps {
-  /** The one notes state: which card is active, which field is open. */
+  /** The one notes state: which card is active, which field takes the caret. */
   state: Extract<SatNotesUiState, { kind: 'notes' }>;
   placement: SatNotesPlacement;
   annotations: readonly SatTextAnnotation[];
@@ -22,8 +22,12 @@ export interface SatNotesColumnProps {
   hasHighlights: boolean;
   disabled: boolean;
   onSelectNote: (annotationId: string) => void;
-  /** Commit an anchored note's text (an empty string keeps the ink). */
-  onChangeNote: (note: string) => void;
+  /**
+   * Commit an anchored note's text (an empty string keeps the ink), keyed by the
+   * note the field belongs to — every card carries a live field, so the column
+   * says which note it is writing rather than relying on a single open editor.
+   */
+  onChangeNote: (annotationId: string, note: string) => void;
   onSaveQuestionNote: (note: string) => void;
   /**
    * Remove a note's text, keyed by annotation id (`SAT_QUESTION_NOTE_EDITOR` for
@@ -47,20 +51,25 @@ export interface SatNotesColumnProps {
  *     select something -> mark it -> the note appears beside what I marked
  *
  * One list, no Save button (idle autosave plus a commit on close), the character
- * count appears only near the limit, and removal exists only once there is
- * something to remove.
+ * count appearing only near the limit, and removal behind a neutral disclosure.
  *
- * Every card has exactly two states and only one card is ever in the second one:
+ * Every card is the same card at all times, and it holds exactly two things:
  *
- *     reading   the quote and the note, as content — no border, no field
- *     editing   the same quote above the one strong surface in the pane
+ *     active after          the student's own selection, semibold, unquoted
+ *     [ Write a note… ]     the note itself, and always editable
  *
- * That single pair is what stops the column reading as a form: a student can see
- * at a glance which note they are changing, and everything else is text.
+ * There is no reading state to leave and no editing state to enter: a note IS the
+ * field, never a preview of one. Cards used to render the note twice — once as
+ * static text and again inside the textarea that appeared when the card was
+ * opened — which made a student decide which copy was theirs before they could
+ * write anything. One value has one representation; the excerpt above it is
+ * context, and context does not become a control.
  *
  * Selected-text notes are the pattern; the question's own note is one quiet
  * button at the bottom, because two competing primaries made students ask which
- * kind of note they were writing.
+ * kind of note they were writing. That note has no highlighted source, so it
+ * shows none — a label invented to make the two cards look alike would only be a
+ * third thing to read.
  *
  * Hiding the pane is part of that model, not an escape hatch: the header's
  * control names what it does, and the pane leaves a labeled handle in its own
@@ -72,12 +81,10 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
   // A sentinel editor id means "this field is the question's own note" — the same
   // state either way, so writing about the question needs no flag of its own.
   const questionEditorOpen = props.state.editorId === SAT_QUESTION_NOTE_EDITOR;
-  const editingAnnotation =
-    props.annotations.find((annotation) => annotation.id === props.state.editorId) ?? null;
-  const writingSomething = editingAnnotation !== null || questionEditorOpen;
-  // Guidance or editors, never both: the contradictory pairing this replaced was
-  // "No notes yet" sitting above an open textarea.
-  const showsEmptyState = !writingSomething && props.annotations.length === 0 && props.questionNote.trim().length === 0;
+  // Guidance or cards, never both: the contradictory pairing this replaced was
+  // "No notes yet" sitting above a live field.
+  const showsEmptyState =
+    props.annotations.length === 0 && props.questionNote.trim().length === 0 && !questionEditorOpen;
   // Cards the student actually wrote, which is what "3 notes" should count. The
   // same rule decides whether a hidden pane leaves a handle behind, so it lives
   // in one place (`satNotesCount`) rather than being re-derived per surface.
@@ -91,13 +98,17 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  // Writing a note is the one case where the caret belongs in the field.
+  // Writing a note is the one case where the caret belongs in the field — and the
+  // only thing `editorId` still decides, now that every card carries a field: it
+  // is a destination for the caret, not a permission to edit.
   useEffect(() => {
     if (props.state.editorId === null) return;
+    const fieldId =
+      props.state.editorId === SAT_QUESTION_NOTE_EDITOR
+        ? QUESTION_NOTE_FIELD_ID
+        : satNoteEditorFieldId(props.state.editorId);
     const frame = window.requestAnimationFrame(() => {
-      document.getElementById(
-        props.state.editorId === SAT_QUESTION_NOTE_EDITOR ? QUESTION_NOTE_FIELD_ID : SAT_NOTE_EDITOR_FIELD_ID,
-      )?.focus();
+      document.getElementById(fieldId)?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
   }, [props.state.editorId]);
@@ -168,7 +179,6 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
                 <li key={annotation.id}>
                   <SatNoteCard
                     annotation={annotation}
-                    editing={annotation.id === props.state.editorId}
                     active={annotation.id === props.state.activeId}
                     disabled={props.disabled}
                     onSelect={() => props.onSelectNote(annotation.id)}
@@ -222,17 +232,16 @@ function EmptyState({ hasHighlights }: { hasHighlights: boolean }) {
 }
 
 /**
- * One card. Two states, one shape: reading (a button quoting its source) and
- * writing (the same quote with a field under it). The quote never disappears
- * while the student types, which is what keeps the note attached to its text.
+ * One card: the student's selection, then the one field their note lives in.
  *
- * Reading is not a box: the pane is the container, so a card that is not being
- * edited is just rows of text with a soft hover, and the active one is marked
- * with the accent on its leading edge rather than with another border.
+ * The excerpt is context, so it is context typography — semibold, unquoted, not
+ * italic, unlabeled, capped at a few lines. It stays pressable because a note's
+ * whole purpose is the text it is about, and pressing the words is the most
+ * direct way to be shown them again in the passage; it is never the thing being
+ * written.
  */
 function SatNoteCard({
   annotation,
-  editing,
   active,
   disabled,
   onSelect,
@@ -241,54 +250,63 @@ function SatNoteCard({
   onFlush,
 }: {
   annotation: SatTextAnnotation;
-  editing: boolean;
   active: boolean;
   disabled: boolean;
   onSelect: () => void;
-  onChangeNote: (note: string) => void;
+  onChangeNote: (annotationId: string, note: string) => void;
   onRemoveNote: () => void;
   onFlush?: (() => void) | undefined;
 }) {
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        data-sat-note-card={annotation.id}
-        disabled={disabled}
-        onClick={onSelect}
-        // The accent edge says "this is the mark you are on" to the eye; this
-        // says it to a screen reader, which cannot see the link at all.
-        aria-current={active ? 'true' : undefined}
-        className={
-          'sat-pressable flex w-full items-start gap-2 rounded-[8px] border-l-2 py-2 pl-2 pr-2 text-left hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed '
-          + (active ? 'border-l-[var(--sat-accent)] bg-[var(--sat-surface-hover)]' : 'border-l-transparent')
-        }
-      >
-        <NoteSource annotation={annotation} />
-      </button>
-    );
-  }
-
+  const excerpt = annotation.anchor.exact;
   return (
     <div
       data-sat-note-card={annotation.id}
-      // The only layered surface in the pane, and only while it is being used.
-      className="rounded-[8px] border border-[var(--sat-accent)] bg-[var(--sat-surface)] p-2 ring-1 ring-[var(--sat-focus)]/30"
+      // Not a box: the pane is the container, so a card is rows of content with a
+      // soft hover, and the active one is marked by the accent on its leading edge
+      // rather than by another border.
+      className={
+        'rounded-[8px] border-l-2 px-2 py-2 ' +
+        (active ? 'border-l-[var(--sat-accent)] bg-[var(--sat-surface-hover)]' : 'border-l-transparent')
+      }
     >
-      <NoteSource annotation={annotation} />
+      <div className="flex items-start gap-2">
+        {/* The ink of the mark this note hangs off: with several notes in the pane
+            it is the only cue tying one to one of several highlights. */}
+        <span
+          aria-hidden="true"
+          data-sat-note-ink={annotation.color ?? 'yellow'}
+          className="mt-[4px] h-[10px] w-[10px] shrink-0 rounded-full border border-[var(--sat-divider-strong)]"
+          style={{ backgroundColor: satHighlightInk(annotation.color).swatch }}
+        />
+        <button
+          type="button"
+          data-sat-note-excerpt="true"
+          disabled={disabled}
+          onClick={onSelect}
+          // The accent edge says "this is the mark you are on" to the eye; this
+          // says it to a screen reader, which cannot see the link at all.
+          aria-current={active ? 'true' : undefined}
+          className="sat-pressable min-w-0 flex-1 rounded-[4px] text-left sat-type-control-secondary font-semibold text-[var(--sat-text)] hover:text-[var(--sat-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed"
+        >
+          {/* Capped at three lines: a long selection must not take the pane, and
+              the whole excerpt is still there for a screen reader. */}
+          <span className="line-clamp-3">{excerpt}</span>
+        </button>
+      </div>
       <SatNoteField
-        fieldId={SAT_NOTE_EDITOR_FIELD_ID}
-        label={SAT_COPY.notes.title}
+        fieldId={satNoteEditorFieldId(annotation.id)}
+        label={satNoteFieldLabel(excerpt)}
+        actionsLabel={satNoteActionsLabel(excerpt)}
         value={annotation.note ?? ''}
         ownerKey={annotation.id}
         disabled={disabled}
-        commit={onChangeNote}
+        commit={(note) => onChangeNote(annotation.id, note)}
         onFlush={onFlush}
         // Removal matters only once there is a note; during a first note there is
         // nothing behind the control worth offering.
         canRemove={(annotation.note ?? '').trim().length > 0}
         onRemoveRequested={onRemoveNote}
-        className="mt-1"
+        className="mt-2"
       />
     </div>
   );
@@ -302,6 +320,10 @@ function SatNoteCard({
  * Now the printed phrasing stays the primary pattern and this is one quiet
  * button — the same field and the same autosave when it is open, so nothing about
  * how a note behaves depends on what it is attached to.
+ *
+ * It has no source to quote, so it shows none: the excerpt above an anchored note
+ * is what distinguishes the two kinds, and a written label invented to make the
+ * shapes match would only be one more thing to read.
  */
 function SatQuestionNoteSlot({
   value,
@@ -326,50 +348,21 @@ function SatQuestionNoteSlot({
   const hasNote = value.trim().length > 0;
   const frame = 'shrink-0 px-3 py-2' + (divided ? ' border-t border-[var(--sat-divider)]' : '');
 
-  if (editing) {
+  if (!editing && !hasNote) {
     return (
       <div className={frame}>
-        <div
-          data-sat-note-card={SAT_QUESTION_NOTE_EDITOR}
-          className="rounded-[8px] border border-[var(--sat-accent)] bg-[var(--sat-surface)] p-2 ring-1 ring-[var(--sat-focus)]/30"
-        >
-          <p className="sat-type-metadata italic text-[var(--sat-text-secondary)]">{SAT_COPY.notes.questionSource}</p>
-          <SatNoteField
-            fieldId={QUESTION_NOTE_FIELD_ID}
-            label={SAT_COPY.notes.questionSource}
-            value={value}
-            ownerKey={SAT_QUESTION_NOTE_EDITOR}
-            disabled={disabled}
-            commit={onSave}
-            onFlush={onFlush}
-            canRemove={hasNote}
-            onRemoveRequested={onRemoveNote}
-            className="mt-1"
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (hasNote) {
-    return (
-      <div className={frame}>
+        {/* A text button, not a card: with nothing selected this is a way in, and
+            an outlined block the size of a note would read as the primary action of
+            a screen whose primary action is selecting text in the passage. */}
         <button
           type="button"
-          data-sat-note-card={SAT_QUESTION_NOTE_EDITOR}
+          data-sat-notes-add-question-note="true"
           disabled={disabled}
           onClick={onAdd}
-          // The name is the card's own content: both lines come from the copy
-          // table, so nothing on screen is paraphrased for a screen reader.
-          aria-label={`${SAT_COPY.notes.questionSource}: ${value}`}
-          className="sat-pressable flex w-full items-start gap-2 rounded-[8px] border-l-2 border-l-transparent py-2 pl-2 pr-2 text-left hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed"
+          className="sat-pressable inline-flex items-center gap-1 rounded-[6px] px-1.5 py-1 sat-type-metadata font-medium text-[var(--sat-accent-strong)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed disabled:text-[var(--sat-disabled-text)]"
         >
-          <span className="min-w-0 flex-1">
-            <span className="block sat-type-metadata italic text-[var(--sat-text-secondary)]">
-              {SAT_COPY.notes.questionSource}
-            </span>
-            <span className="mt-0.5 block line-clamp-3 sat-type-control-secondary text-[var(--sat-text)]">{value}</span>
-          </span>
+          <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {SAT_COPY.notes.addQuestionNote}
         </button>
       </div>
     );
@@ -377,43 +370,22 @@ function SatQuestionNoteSlot({
 
   return (
     <div className={frame}>
-      {/* A text button, not a card: with nothing selected this is a way in, and
-          an outlined block the size of a note would read as the primary action of
-          a screen whose primary action is selecting text in the passage. */}
-      <button
-        type="button"
-        data-sat-notes-add-question-note="true"
-        disabled={disabled}
-        onClick={onAdd}
-        className="sat-pressable inline-flex items-center gap-1 rounded-[6px] px-1.5 py-1 sat-type-metadata font-medium text-[var(--sat-accent-strong)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed disabled:text-[var(--sat-disabled-text)]"
-      >
-        <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        {SAT_COPY.notes.addQuestionNote}
-      </button>
+      <div data-sat-note-card={SAT_QUESTION_NOTE_EDITOR}>
+        {/* `questionSource` is this field's spoken name and nothing else: the note
+            about the question reads as a note, not as a labeled form row. */}
+        <SatNoteField
+          fieldId={QUESTION_NOTE_FIELD_ID}
+          label={SAT_COPY.notes.questionSource}
+          actionsLabel={SAT_COPY.notes.noteActions}
+          value={value}
+          ownerKey={SAT_QUESTION_NOTE_EDITOR}
+          disabled={disabled}
+          commit={onSave}
+          onFlush={onFlush}
+          canRemove={hasNote}
+          onRemoveRequested={onRemoveNote}
+        />
+      </div>
     </div>
-  );
-}
-
-/** Ink dot plus the quoted passage, shared by both card states. */
-function NoteSource({ annotation }: { annotation: SatTextAnnotation }) {
-  return (
-    <>
-      <span
-        aria-hidden="true"
-        data-sat-note-ink={annotation.color ?? 'yellow'}
-        className="mt-1 h-[14px] w-[14px] shrink-0 rounded-full border border-[var(--sat-divider-strong)]"
-        style={{ backgroundColor: satHighlightInk(annotation.color).swatch }}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block sat-type-metadata italic text-[var(--sat-text-secondary)]">
-          {satQuotedSource(annotation.anchor.exact)}
-        </span>
-        {annotation.note ? (
-          <span className="mt-0.5 block line-clamp-3 sat-type-control-secondary text-[var(--sat-text)]">
-            {annotation.note}
-          </span>
-        ) : null}
-      </span>
-    </>
   );
 }

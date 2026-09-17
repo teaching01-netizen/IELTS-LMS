@@ -32,7 +32,8 @@ export interface SatNotesSurfaceHostProps {
   disabled: boolean;
   hintVisible: boolean;
   onSelectNote: (annotationId: string) => void;
-  onChangeNote: (note: string) => void;
+  /** Commit one note's text, keyed by the card it was typed in. */
+  onChangeNote: (annotationId: string, note: string) => void;
   onSaveQuestionNote: (note: string) => void;
   /** Staged removal for a note's text, undo included, owned by the surface hook. */
   onRemoveNote: (annotationId: string) => void;
