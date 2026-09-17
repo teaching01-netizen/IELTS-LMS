@@ -37,7 +37,10 @@ export function SatHighlightSwatchButtons({
 }) {
   const active = value ?? current;
   return (
-    <div className="flex flex-wrap items-center gap-1" role="group" aria-label={SAT_COPY.annotations.highlight}>
+    // The gap between inks is the surface's own row rhythm, not a smaller
+    // private one: three 44px targets a finger-width apart are unhittable, and
+    // on a narrow surface the row is allowed to wrap rather than crowd.
+    <div className="flex flex-wrap items-center gap-[var(--sat-annotation-row-gap)]" role="group" aria-label={SAT_COPY.annotations.highlight}>
       {satHighlightInkList.map((ink) => {
         const pressed = active === ink.color;
         return (

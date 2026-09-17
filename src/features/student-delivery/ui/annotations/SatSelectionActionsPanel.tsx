@@ -1,8 +1,8 @@
-import { useRef } from 'react';
 import type { SatHighlightColor, SatTextAnchor } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
 import { SatAnnotationHeading, SatCloseControl, SatHighlightSwatchButtons, SatNoteControl, SatUnderlineControl } from './SatAnnotationControls';
-import { useSatAnnotationAutofocus, useSatAnnotationPlacement } from './useSatAnnotationPlacement';
+import { SatAnnotationCaret, SAT_ANNOTATION_ROW, SAT_ANNOTATION_ROW_DIVIDED } from './SatAnnotationSurfaceFrame';
+import { useSatAnnotationSurface } from './useSatAnnotationSurface';
 
 export interface SatSelectionActions {
   highlight: (anchor: SatTextAnchor, color: SatHighlightColor) => void;
@@ -16,10 +16,11 @@ export interface SatSelectionActions {
  * The PRESENTATION is not a device setting; it is the answer to "is there room
  * for a toolbar beside this selection". `useSatAnnotationPlacement` decides it
  * (see the placement engine for the rules) and this component simply honours
- * the answer: `floating` is a panel with a caret pointing at the exact line it
- * belongs to, `docked` is a full-bleed sheet at the bottom of the exam body
- * that quotes the selection back to the student, and `hidden` is mounted but
- * invisible while the anchor is off screen or the viewport is moving.
+ * the answer, rendered through `satAnnotationSurfaceChrome`: `floating` is a
+ * panel with a caret pointing at the exact line it belongs to, `docked` is a
+ * full-bleed sheet at the bottom of the visible region that quotes the selection
+ * back to the student, and `hidden` is mounted but invisible while the anchor is
+ * off screen or the geometry is still settling.
  *
  * `variant` is therefore a REQUEST, not a command: `floating` asks for a
  * toolbar and accepts the dock when the space budget refuses, while `docked`
@@ -66,28 +67,17 @@ export function SatSelectionActionsPanel({
   /** Dismiss the tools without touching the selection or the marks. */
   onClose: () => void;
 }) {
-  const { placement, containerRef } = useSatAnnotationPlacement(anchor, {
-    dock: variant === 'docked',
-    touch,
-  });
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const mode = placement?.mode ?? null;
-  const docked = mode === 'docked';
-  const hidden = mode === null || mode === 'hidden';
-  const floating = mode === 'floating';
-  const side = placement?.side ?? 'above';
-  // The dock spans the body at the same inset the engine used, so both edges of
-  // the sheet come from one number.
-  const dockInset = placement?.left ?? 8;
-
   // The student has already selected text; landing the caret on the first
   // action means the mark is one keystroke away, and it is also what makes the
   // arrow-key walk below reachable at all.
-  useSatAnnotationAutofocus(placement, `${anchor.nodeId}:${anchor.startOffset}:${anchor.endOffset}`, rootRef);
-
+  const { placement, chrome, containerRef } = useSatAnnotationSurface(anchor, {
+    autoFocusKey: `${anchor.nodeId}:${anchor.startOffset}:${anchor.endOffset}`,
+    dock: variant === 'docked',
+    touch,
+  });
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (!['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
-    const buttons = [...(rootRef.current?.querySelectorAll<HTMLButtonElement>('button:not([disabled])') ?? [])];
+    const buttons = [...(containerRef.current?.querySelectorAll<HTMLButtonElement>('button:not([disabled])') ?? [])];
     if (buttons.length === 0) return;
     const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (index === -1) return;
@@ -98,50 +88,21 @@ export function SatSelectionActionsPanel({
 
   return (
     <div
-      ref={(node) => {
-        containerRef.current = node;
-        rootRef.current = node;
-      }}
-      data-sat-selection-toolbar={docked ? undefined : 'true'}
-      data-sat-touch-dock={docked ? 'true' : undefined}
-      data-sat-placement-mode={mode ?? 'none'}
-      data-sat-placement-flipped={floating && placement?.flipped ? 'true' : undefined}
+      ref={containerRef}
+      // The interaction hooks describe a surface a student can act on, so a
+      // hidden one claims none of them: the Highlights shortcut focuses the
+      // first control it finds, and it must not find one nobody can see.
+      data-sat-selection-toolbar={chrome.docked || chrome.hidden ? undefined : 'true'}
+      data-sat-touch-dock={chrome.docked && !chrome.hidden ? 'true' : undefined}
       role="toolbar"
       aria-label={SAT_COPY.annotations.selectedTextActions}
-      aria-orientation={docked ? undefined : 'horizontal'}
+      aria-orientation={chrome.docked ? undefined : 'horizontal'}
       onKeyDown={onKeyDown}
-      className={
-        'sat-ui absolute z-[80] '
-        + (docked
-          ? 'sat-annotation-surface-docked rounded-t-[10px] border-t border-[var(--sat-divider-strong)] bg-[var(--sat-surface)] px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 shadow-[var(--sat-annotation-dock-shadow)]'
-          : 'sat-annotation-surface-floating rounded-[10px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] p-2 shadow-[var(--sat-shadow-floating)]')
-        // Only a move big enough to notice settles; a nudge is applied directly,
-        // so the surface never chases a selection handle.
-        + (floating && placement?.animated ? ' sat-annotation-settle' : '')
-      }
-      style={{
-        left: placement ? placement.left : 8,
-        // A docked sheet is full-bleed: it always spans the body it is docked to.
-        right: docked ? dockInset : undefined,
-        top: placement ? placement.top : 8,
-        // Anchored to the selection, never constrained by it: a short selection
-        // must not produce tiny controls.
-        width: docked ? undefined : 'min(var(--sat-annotation-surface-max), calc(100% - var(--sat-annotation-edge) * 2))',
-        visibility: hidden ? 'hidden' : 'visible',
-      }}
+      className={chrome.className}
+      style={chrome.style}
     >
-      {/* The caret is the whole spatial argument: this control belongs to THAT
-          line. Floating only — a docked sheet is already the student's answer
-          to "where did my tools go". */}
-      {floating && placement ? (
-        <span
-          aria-hidden="true"
-          data-sat-annotation-caret={side === 'above' ? 'down' : 'up'}
-          className="sat-annotation-caret"
-          style={{ left: placement.arrowX }}
-        />
-      ) : null}
-      {docked ? (
+      <SatAnnotationCaret placement={placement} />
+      {chrome.docked ? (
         <p
           data-sat-dock-quote="true"
           className="line-clamp-2 max-h-[44px] overflow-hidden sat-type-metadata italic text-[var(--sat-text-secondary)]"
@@ -149,15 +110,15 @@ export function SatSelectionActionsPanel({
           {anchor.exact}
         </p>
       ) : null}
-      <div className={docked ? 'mt-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1' : ''}>
+      <div className={chrome.docked ? SAT_ANNOTATION_ROW + ' flex flex-wrap items-center justify-between gap-x-2 gap-y-1' : ''}>
         {/* Full width on the docked sheet, so the dismissal sits at the far edge
             where a dismissed sheet's control is looked for, not beside the
             heading with the inks trailing after it. */}
-        <div className={'flex items-center justify-between gap-2' + (docked ? ' w-full' : '')}>
+        <div className={'flex items-center justify-between gap-2' + (chrome.docked ? ' w-full' : '')}>
           <SatAnnotationHeading />
           <SatCloseControl onSelect={onClose} disabled={disabled} label={SAT_COPY.annotations.closeTools} />
         </div>
-        <div className={docked ? '' : 'mt-1.5'}>
+        <div className={chrome.docked ? '' : SAT_ANNOTATION_ROW}>
           <SatHighlightSwatchButtons
             current={currentColor}
             disabled={disabled === true}
@@ -167,9 +128,9 @@ export function SatSelectionActionsPanel({
       </div>
       <div
         className={
-          docked
-            ? 'mt-1 flex flex-wrap items-center gap-1'
-            : 'mt-1.5 flex flex-wrap items-center gap-1 border-t border-[var(--sat-divider)] pt-1.5'
+          chrome.docked
+            ? SAT_ANNOTATION_ROW + ' flex flex-wrap items-center gap-2'
+            : SAT_ANNOTATION_ROW_DIVIDED
         }
       >
         <SatUnderlineControl disabled={disabled === true} onSelect={() => actions.underline(anchor)} />

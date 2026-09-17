@@ -1328,16 +1328,28 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-motion-annotation: 140ms;
   --sat-annotation-dock-shadow: 0 -2px 8px rgb(0 0 0 / 12%);
   /* Annotation surface placement (Highlights & Notes). BUDGETS, not guesses:
-   * `native-ui-zone` is the safety margin the native selection menu owns,
-   * `comfort` is why a surface that technically fits by 2px still docks, and
-   * `selection-ratio` hands a selection that covers the viewport to the dock,
-   * where "nearby" has stopped meaning anything. `comfort-fine` is the same
-   * idea for a mouse, which has no native menu to avoid. Every value is
-   * mirrored as a fallback in satSelectionGeometry.ts, which the runtime
-   * prefers these over (jsdom reads none of them). */
+   * `native-ui-zone` is the height the native selection menu needs, which is
+   * what decides WHICH LANE it will take on a coarse pointer (above, unless it
+   * does not fit there) — and that lane is never ours, because the browser
+   * paints its menu over our surface. `comfort` is why a surface that
+   * technically fits by 2px still docks, and `selection-ratio` hands a selection
+   * that covers the viewport to the dock, where "nearby" has stopped meaning
+   * anything. `comfort-fine` is the same idea for a mouse, which has no native
+   * menu and therefore no lane to give up. Every value is mirrored as a fallback
+   * in satSelectionGeometry.ts, which the runtime prefers these over (jsdom
+   * reads none of them). */
   --sat-annotation-edge: 12px;
   --sat-annotation-native-ui-zone: 80px;
   --sat-annotation-gap: 12px;
+  /* Surface density. Horizontal padding sits inside the spec's 12–16px band and
+   * vertical inside 10–14px, so a control never crowds the edge and two rows
+   * never read as one. `row-gap` is the rhythm both rows share. */
+  --sat-annotation-surface-padding-x: 14px;
+  --sat-annotation-surface-padding-y: 12px;
+  --sat-annotation-row-gap: 8px;
+  /* One hairline, named so the caret's layer can sit exactly on the border box
+   * instead of the padding box (a 1px lie about where the surface starts). */
+  --sat-annotation-surface-border: 1px;
   --sat-annotation-comfort: 24px;
   --sat-annotation-comfort-fine: 12px;
   --sat-annotation-surface-min: 280px;
@@ -1521,7 +1533,18 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 /* The caret: the one thing that says "this control belongs to THAT text".
  * Border-drawn (never a gradient or an image), filled with the surface color
- * so it reads as part of the panel, and removed entirely in dock mode. */
+ * so it reads as part of the panel, and removed entirely in dock mode.
+ *
+ * It lives in a layer that extends one border-width past the surface on every
+ * side, because an absolutely positioned child is measured from the padding box
+ * while the placement engine (correctly) works in border-box coordinates. The
+ * layer closes that 1px without teaching either side about the other. */
+.sat-annotation-caret-layer {
+  position: absolute;
+  inset: calc(-1 * var(--sat-annotation-surface-border));
+  pointer-events: none;
+}
+
 .sat-annotation-caret {
   position: absolute;
   width: 0;

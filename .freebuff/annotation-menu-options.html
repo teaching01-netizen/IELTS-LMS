@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Annotation toolbar vs the native selection menu — three options</title>
+<style>
+  :root {
+    --paper: #f4f2ef;
+    --surface: #ffffff;
+    --text: #1d1d1f;
+    --text-2: #5f6368;
+    --divider: #dcdcdc;
+    --divider-strong: #b8b8b8;
+    --selection: #b7d4fb;
+    --swatch-yellow: #f2de8c;
+    --swatch-blue: #9cc3f2;
+    --swatch-pink: #f0afc8;
+    --native-bg: rgba(252, 252, 253, 0.985);
+    --ink: #23262b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 28px 64px;
+    background: #ebe9e6;
+    color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.01em; }
+  h2.section { margin: 40px 0 10px; font-size: 16px; }
+  .lede { margin: 0 0 26px; max-width: 96ch; color: #41454b; }
+  code { font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: #e0ddd9; padding: 1px 4px; border-radius: 4px; }
+  .row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .option { width: 424px; }
+  .option h2 { margin: 0 0 2px; font-size: 16px; }
+  .option h2 span { color: #7a7f86; font-weight: 400; font-size: 13px; }
+  .option .verdict { margin: 0 0 12px; font-size: 13px; color: #5f6368; min-height: 38px; }
+
+  /* ---- the device: one fixed scene, identical in all three frames ---- */
+  .phone {
+    position: relative;
+    width: 424px; height: 660px;
+    background: var(--paper);
+    border: 10px solid #16181c;
+    border-radius: 30px;
+    overflow: hidden;
+    box-shadow: 0 12px 30px rgb(0 0 0 / 22%);
+  }
+  .phone > * { position: absolute; }
+  /* scene geometry, in frame coordinates */
+  .p1 { top: 16px; left: 18px; right: 18px; font-size: 12.5px; line-height: 1.5; color: #3c4043; margin: 0; }
+  .p2 { top: 132px; left: 18px; right: 18px; font-size: 12.5px; line-height: 1.5; color: #3c4043; margin: 0; }
+  table.exam { top: 226px; left: 18px; right: 18px; border-collapse: collapse; font-size: 12.5px; background: var(--surface); }
+  table.exam th, table.exam td { border: 1px solid var(--divider-strong); padding: 7px 8px; text-align: left; height: 33px; }
+  table.exam th { font-weight: 600; }
+  .sel { background: var(--selection); border-radius: 2px; padding: 1px 0; }
+  .q { top: 470px; left: 18px; right: 18px; font-size: 12.5px; line-height: 1.55; color: #3c4043; margin: 0; }
+  .devlabel { position: absolute; top: -22px; left: 4px; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: #8b8f94; }
+
+  /* ---- native iOS menu: 176px tall, bottom edge 12px above the selected row ---- */
+  .native {
+    top: 157px; left: 50%; transform: translateX(-50%);
+    width: 208px; height: 176px;
+    background: var(--native-bg);
+    border-radius: 13px;
+    box-shadow: 0 8px 26px rgb(0 0 0 / 24%), 0 0 0 0.5px rgb(0 0 0 / 8%);
+    padding: 4px 0;
+    z-index: 5;
+  }
+  .native .tag {
+    position: absolute; top: -19px; left: 0; font-size: 10px; letter-spacing: .05em;
+    text-transform: uppercase; color: #6b7178; white-space: nowrap;
+  }
+  .native .item { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; font-size: 13.5px; color: #131519; }
+  .native .item + .item { border-top: 0.5px solid rgb(0 0 0 / 10%); }
+  .native .chev { color: #9a9ea4; font-size: 12px; }
+
+  /* ---- our surface ---- */
+  .surface {
+    left: 40px; width: 344px;
+    background: var(--surface);
+    border: 1px solid var(--divider);
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: 0 4px 12px rgb(0 0 0 / 22%);
+    z-index: 4;
+  }
+  .heading {
+    display: flex; align-items: center; gap: 6px; margin: 0 0 8px;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2);
+  }
+  .heading i { width: 11px; height: 11px; border-radius: 3px; background: var(--swatch-yellow); border: 1px solid #cbb96a; }
+  .rowflex { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .secondary { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--divider); display: flex; gap: 8px; flex-wrap: wrap; }
+  .act {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 8px;
+    border: 0; border-radius: 6px; background: transparent; color: var(--text);
+    font: 500 13px/1 inherit; font-family: inherit;
+  }
+  .swatch { width: 18px; height: 18px; border-radius: 999px; border: 1px solid var(--divider-strong); flex: 0 0 auto; }
+  .caret { position: absolute; margin-left: -6px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; }
+  .caret.down { top: 100%; border-top: 6px solid var(--surface); }
+  .caret.up { bottom: 100%; border-bottom: 6px solid var(--surface); }
+  .quote { font-style: italic; color: var(--text-2); font-size: 11.5px; margin: 0 0 8px; }
+
+  .dock {
+    left: 0; right: 0; bottom: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--divider-strong);
+    border-radius: 10px 10px 0 0;
+    padding: 12px 14px 18px;
+    box-shadow: 0 -2px 8px rgb(0 0 0 / 12%);
+    z-index: 6;
+  }
+  .callout {
+    font-size: 11px; color: #8b8f94; text-align: center; line-height: 1.45; z-index: 6;
+  }
+  .callout b { color: #6b7178; }
+
+  .note {
+    margin: 14px 0 0; padding: 12px 14px; background: #fff; border-radius: 10px;
+    border: 1px solid #d9d6d2; font-size: 13px;
+  }
+  .note b { display: block; margin-bottom: 4px; }
+  .note ul { margin: 6px 0 0; padding-left: 18px; }
+  .note li { margin-bottom: 3px; }
+  .good { color: #10621f; }
+  .bad { color: #9a2020; }
+
+  .matrix { margin-top: 8px; border-collapse: collapse; font-size: 13px; background: #fff; }
+  .matrix th, .matrix td { border: 1px solid #dcd9d5; padding: 8px 12px; text-align: left; vertical-align: top; }
+  .matrix th { background: #f3f1ee; font-weight: 600; }
+  .legend { margin-top: 14px; font-size: 12.5px; color: #5f6368; max-width: 96ch; }
+</style>
+</head>
+<body>
+  <h1>The toolbar and iOS's own menu — three ways to stop sharing a lane</h1>
+  <p class="lede">
+    iOS paints its selection menu on top of everything and takes the lane <b>above</b> the selection whenever
+    there is room. Our floating surface prefers that same lane on touch, which is what the screenshot shows:
+    <code>Copy / Find Selection / Look Up / Translate</code> drawn over our swatches. Nothing can move the
+    native menu — it is browser chrome, not a node in our DOM — so placement policy is the only lever.
+    Same passage, same selected cell, same menu, same 424×660 frame in all three options below.
+  </p>
+
+  <div class="row">
+    <!-- ───────────────── A ───────────────── -->
+    <div class="option">
+      <h2>A. Take the opposite lane <span>· recommended</span></h2>
+      <p class="verdict">On touch the toolbar prefers <b>below</b> the selection. iOS wants above, so we stop wanting it.</p>
+      <div class="phone">
+        <span class="devlabel">phone</span>
+        <p class="p1">Soil temperature and moisture were logged at six sites over the growing season so that the team could compare emergence across treatments. Germination was counted every morning.</p>
+        <p class="p2">Germination percentages recorded for the trial were as follows:</p>
+        <table class="exam">
+          <tr><th>Treatment — trial 3</th><th>Mean germination (%)</th></tr>
+          <tr><td><span class="sel">No soak</span></td><td>—</td></tr>
+          <tr><td>6-hour soak</td><td>62</td></tr>
+        </table>
+        <div class="native">
+          <span class="tag">iOS native menu — free to take the top lane</span>
+          <div class="item"><span>Copy</span></div>
+          <div class="item"><span>Find Selection</span></div>
+          <div class="item"><span>Look Up</span></div>
+          <div class="item"><span>Translate</span><span class="chev">›</span></div>
+        </div>
+        <div class="surface" style="top: 372px">
+          <span class="caret up" style="left: 88px"></span>
+          <p class="heading"><i></i>Highlight</p>
+          <div class="rowflex">
+            <button class="act"><span class="swatch" style="background: var(--swatch-yellow)"></span>Yellow</button>
+            <button class="act"><span class="swatch" style="background: var(--swatch-blue)"></span>Blue</button>
+            <button class="act"><span class="swatch" style="background: var(--swatch-pink)"></span>Pink</button>
+          </div>
+          <div class="secondary">
+            <button class="act">U&nbsp; Underline</button>
+            <button class="act">🗒&nbsp; Add note</button>
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        <b><span class="good">Floats, and cannot overlap the menu.</span></b>
+        <ul>
+          <li>The caret still points at the selected cell; the tools stay next to the words.</li>
+          <li>One rule, not two: below on touch, whichever lane iOS happens to take.</li>
+          <li>When below has no comfortable room → the sheet, at the bottom of the visible region.</li>
+          <li>Mouse: unchanged — above, exactly as now.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ───────────────── B ───────────────── -->
+    <div class="option">
+      <h2>B. Keep the side, add distance</h2>
+      <p class="verdict">Keep preferring <b>above</b>, but reserve the menu's real height (~200px) and clear it.</p>
+      <div class="phone">
+        <span class="devlabel">phone</span>
+        <p class="p1">Soil temperature and moisture were logged at six sites over the growing season so that the team could compare emergence across treatments. Germination was counted every morning.</p>
+        <p class="p2">Germination percentages recorded for the trial were as follows:</p>
+        <table class="exam">
+          <tr><th>Treatment — trial 3</th><th>Mean germination (%)</th></tr>
+          <tr><td><span class="sel">No soak</span></td><td>—</td></tr>
+          <tr><td>6-hour soak</td><td>62</td></tr>
+        </table>
+        <div class="native">
+          <span class="tag">iOS native menu</span>
+          <div class="item"><span>Copy</span></div>
+          <div class="item"><span>Find Selection</span></div>
+          <div class="item"><span>Look Up</span></div>
+          <div class="item"><span>Translate</span><span class="chev">›</span></div>
+        </div>
+        <div class="surface" style="top: 16px">
+          <span class="caret down" style="left: 88px"></span>
+          <p class="heading"><i></i>Highlight</p>
+          <div class="rowflex">
+            <button class="act"><span class="swatch" style="background: var(--swatch-yellow)"></span>Yellow</button>
+            <button class="act"><span class="swatch" style="background: var(--swatch-blue)"></span>Blue</button>
+            <button class="act"><span class="swatch" style="background: var(--swatch-pink)"></span>Pink</button>
+          </div>
+          <div class="secondary">
+            <button class="act">U&nbsp; Underline</button>
+            <button class="act">🗒&nbsp; Add note</button>
+          </div>
+        </div>
+        <div class="callout" style="top: 128px; left: 120px; right: 120px">
+          <b>↑ 130px of nothing</b><br />the caret points at a cell on the other side of the menu
+        </div>
+        <p class="q" style="top: 470px">Which choice most accurately uses the table to support the claim?<br /><b>A</b> Every seed in the 6-hour treatment germinated.</p>
+      </div>
+      <div class="note">
+        <b><span class="bad">A toolbar stranded at the top of the screen.</span></b>
+        <ul>
+          <li>It clears the menu, but the tools now read as unrelated to the words that raised them.</li>
+          <li>Any selection lower on the page runs out of room above and docks — so on a phone B behaves
+              like C most of the time.</li>
+          <li>It still collides when the selection is high enough that iOS flips its own menu below:
+              that is the one case where "above" is not the menu's lane.</li>
+          <li>If the surface is ever taller (large accessibility text wraps the swatches onto three rows),
+              the reserve no longer fits at all.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ───────────────── C ───────────────── -->
+    <div class="option">
+      <h2>C. Always dock on touch</h2>
+      <p class="verdict">Never float on a coarse pointer: the sheet always sits at the bottom of the visible region.</p>
+      <div class="phone">
+        <span class="devlabel">phone</span>
+        <p class="p1">Soil temperature and moisture were logged at six sites over the growing season so that the team could compare emergence across treatments. Germination was counted every morning.</p>
+        <p class="p2">Germination percentages recorded for the trial were as follows:</p>
+        <table class="exam">
+          <tr><th>Treatment — trial 3</th><th>Mean germination (%)</th></tr>
+          <tr><td><span class="sel">No soak</span></td><td>—</td></tr>
+          <tr><td>6-hour soak</td><td>62</td></tr>
+        </table>
+        <div class="native">
+          <span class="tag">iOS native menu</span>
+          <div class="item"><span>Copy</span></div>
+          <div class="item"><span>Find Selection</span></div>
+          <div class="item"><span>Look Up</span></div>
+          <div class="item"><span>Translate</span><span class="chev">›</span></div>
+        </div>
+        <p class="q">Which choice most accurately uses the table to support the claim?<br />
+          <b>A</b> Every seed in the 6-hour treatment germinated.<br />
+          <b>B</b> The 2-hour treatment had a lower mean than the 6-hour treatment.<br />
+          <b>C</b> The 6-hour treatment had the highest mean germination percentage.</p>
+        <div class="dock">
+          <p class="quote">“No soak”</p>
+          <p class="heading"><i></i>Highlight</p>
+          <div class="rowflex">
+            <button class="act"><span class="swatch" style="background: var(--swatch-yellow)"></span>Yellow</button>
+            <button class="act"><span class="swatch" style="background: var(--swatch-blue)"></span>Blue</button>
+            <button class="act"><span class="swatch" style="background: var(--swatch-pink)"></span>Pink</button>
+          </div>
+          <div class="secondary">
+            <button class="act">U&nbsp; Underline</button>
+            <button class="act">🗒&nbsp; Add note</button>
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        <b><span class="good">Zero collisions, always.</span></b>
+        <ul>
+          <li>The menu keeps its lane; ours is a different part of the screen.</li>
+          <li>Cost: the sheet covers the question the student is reading, and the tools are never next to the
+              words — they have to look away from what they selected.</li>
+          <li>It makes the sheet the touch <i>default</i>, which reverses the rule we agreed: float when there is
+              comfortable room, dock only when there is not.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section">The decision, case by case</h2>
+  <table class="matrix">
+    <tr>
+      <th>Situation</th>
+      <th>A · opposite lane</th>
+      <th>B · more distance</th>
+      <th>C · always dock</th>
+    </tr>
+    <tr>
+      <td>Selected cell mid-passage on a phone, menu above</td>
+      <td>Floats below ✓ (the frame above)</td>
+      <td>Floats above, ~130px away</td>
+      <td>Docked</td>
+    </tr>
+    <tr>
+      <td>Selection high on a phone — iOS has no room above and flips its menu below</td>
+      <td>Docks (we will not fight for the lane it took)</td>
+      <td>Collides — we were above, so did the menu</td>
+      <td>Docked</td>
+    </tr>
+    <tr>
+      <td>iPad landscape, room on both sides</td>
+      <td>Floats below ✓</td>
+      <td>Floats above, far</td>
+      <td>Docked</td>
+    </tr>
+    <tr>
+      <td>Software keyboard up, visible region short</td>
+      <td>Docks</td>
+      <td>Docks</td>
+      <td>Docked</td>
+    </tr>
+    <tr>
+      <td>Desktop / mouse (no native menu exists)</td>
+      <td>Floats above — unchanged</td>
+      <td>Floats above, far</td>
+      <td>Floats above (if we exempt the fine pointer)</td>
+    </tr>
+  </table>
+  <p class="legend">
+    A is the only one that keeps the tools beside the words <i>and</i> leaves the menu's lane free in the common
+    case; it pays for that by docking somewhat more often on phones, where the bottom half of a paragraph is
+    often the only room that is genuinely conflict-free. Either way the numbers — the reserved lane, the menu's
+    height, the comfort buffer — stay tokens in <code>src/index.css</code>, so this can be tuned on hardware
+    without touching the engine.
+  </p>
+</body>
+</html>

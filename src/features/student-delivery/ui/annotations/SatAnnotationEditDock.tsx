@@ -1,4 +1,3 @@
-import { useRef } from 'react';
 import type { SatHighlightColor, SatTextAnnotation } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
 import {
@@ -9,7 +8,8 @@ import {
   SatRemoveControl,
   SatUnderlineControl,
 } from './SatAnnotationControls';
-import { useSatAnnotationAutofocus, useSatAnnotationPlacement } from './useSatAnnotationPlacement';
+import { SatAnnotationCaret, SAT_ANNOTATION_ROW, SAT_ANNOTATION_ROW_DIVIDED } from './SatAnnotationSurfaceFrame';
+import { useSatAnnotationSurface } from './useSatAnnotationSurface';
 
 /**
  * Edit controls for an annotation that already exists.
@@ -23,8 +23,8 @@ import { useSatAnnotationAutofocus, useSatAnnotationPlacement } from './useSatAn
  * undoable instead, which is both kinder and faster.
  *
  * It is the same surface as the selection tools, in edit mode: the same
- * placement engine, the same caret, the same float-when-there-is-room and
- * dock-when-there-is-not rule. A mark's controls therefore appear where the
+ * placement engine, the same shared chrome, the same float-when-there-is-room
+ * and dock-when-there-is-not rule. A mark's controls therefore appear where the
  * student left them (and where the taps that made them were), on a mouse and on
  * glass alike — `touch` widens the budget so the native selection menu's zone
  * is respected; it does not decide the presentation.
@@ -58,73 +58,46 @@ export function SatAnnotationEditDock({
   /** Dismiss the dock; the mark and its note stay. */
   onClose: () => void;
 }) {
-  const { placement, containerRef } = useSatAnnotationPlacement(annotation.anchor, { touch });
   // Opening a mark's editor moves the caret into it: a tap and Enter/Space on
   // the mark must both leave the student able to change the mark without
   // hunting for the controls.
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  useSatAnnotationAutofocus(placement, annotation.id, rootRef);
+  const { placement, chrome, containerRef } = useSatAnnotationSurface(annotation.anchor, {
+    autoFocusKey: annotation.id,
+    touch,
+  });
   const isHighlight = annotation.kind === 'highlight';
   const hasNote = typeof annotation.note === 'string' && annotation.note.length > 0;
   const removeLabel = isHighlight ? SAT_COPY.annotations.removeHighlight : SAT_COPY.annotations.removeUnderline;
-  const mode = placement?.mode ?? null;
-  const docked = mode === 'docked';
-  const hidden = mode === null || mode === 'hidden';
-  const floating = mode === 'floating';
-  const side = placement?.side ?? 'above';
-  const dockInset = placement?.left ?? 8;
 
   return (
     <div
-      ref={(node) => {
-        containerRef.current = node;
-        rootRef.current = node;
-      }}
-      data-sat-annotation-edit-dock="true"
+      ref={containerRef}
+      // Present for a student who can act on it, and only then — see the
+      // selection surface for why a hidden surface claims no interaction hooks.
+      data-sat-annotation-edit-dock={chrome.hidden ? undefined : 'true'}
       data-sat-annotation-id={annotation.id}
-      data-sat-placement-mode={mode ?? 'none'}
-      data-sat-placement-flipped={floating && placement?.flipped ? 'true' : undefined}
       role="toolbar"
       aria-label={SAT_COPY.annotations.editAnnotation}
-      className={
-        'sat-ui absolute z-[80] '
-        + (docked
-          ? 'sat-annotation-surface-docked rounded-t-[10px] border-t border-[var(--sat-divider-strong)] bg-[var(--sat-surface)] px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 shadow-[var(--sat-annotation-dock-shadow)]'
-          : 'sat-annotation-surface-floating rounded-[10px] border border-[var(--sat-answer-border)] bg-[var(--sat-surface)] p-2 shadow-[var(--sat-shadow-floating)]')
-        + (floating && placement?.animated ? ' sat-annotation-settle' : '')
-      }
-      style={{
-        left: placement ? placement.left : 8,
-        right: docked ? dockInset : undefined,
-        top: placement ? placement.top : 8,
-        width: docked ? undefined : 'min(var(--sat-annotation-surface-max), calc(100% - var(--sat-annotation-edge) * 2))',
-        visibility: hidden ? 'hidden' : 'visible',
-      }}
+      className={chrome.className}
+      style={chrome.style}
     >
-      {floating && placement ? (
-        <span
-          aria-hidden="true"
-          data-sat-annotation-caret={side === 'above' ? 'down' : 'up'}
-          className="sat-annotation-caret"
-          style={{ left: placement.arrowX }}
-        />
-      ) : null}
+      <SatAnnotationCaret placement={placement} />
       <div className="flex items-center justify-between gap-2">
         <SatAnnotationHeading />
         <SatCloseControl onSelect={onClose} disabled={disabled} label={SAT_COPY.annotations.closeTools} />
       </div>
-      <div className="mt-1.5">
+      <div className={SAT_ANNOTATION_ROW}>
         <SatHighlightSwatchButtons
           value={isHighlight ? annotation.color : null}
           disabled={disabled === true}
           onSelect={onColor}
         />
       </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t border-[var(--sat-divider)] pt-1.5">
+      <div className={SAT_ANNOTATION_ROW_DIVIDED}>
         <SatUnderlineControl pressed={!isHighlight} disabled={disabled === true} onSelect={onUnderline} />
         <SatNoteControl hasNote={hasNote} disabled={disabled === true} onSelect={onNote} />
       </div>
-      <div className="mt-1.5 border-t border-[var(--sat-divider)] pt-1.5">
+      <div className={SAT_ANNOTATION_ROW + ' border-t border-[var(--sat-divider)] pt-[var(--sat-annotation-row-gap)]'}>
         <SatRemoveControl disabled={disabled === true} label={removeLabel} onSelect={onRemove} />
       </div>
     </div>

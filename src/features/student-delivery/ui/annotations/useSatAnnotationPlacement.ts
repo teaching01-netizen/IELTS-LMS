@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SatTextAnchor } from '../../domain/satResponses';
+import { readSatAnnotationBudgets, readSatAnnotationSeconds } from './satAnnotationBudgets';
+import { measureSatAnnotation, SAT_ANNOTATION_DOCK_FALLBACK_SIZE } from './satAnnotationPlacementRuntime';
 import {
   hiddenSatAnnotationPlacement,
   placeSatAnnotationDock,
   placeSatAnnotationSurface,
-  satAnnotationAnchorGeometryFor,
-  SAT_ANNOTATION_BUDGET_DEFAULTS,
   type AnnotationPlacement,
-  type SatAnnotationBudgets,
-  type SatRectLike,
 } from './satSelectionGeometry';
 
-/** Fallback sizes used before the element has been measured (and in jsdom). */
-const DOCK_SIZE: SatRectLike = { left: 0, top: 0, width: 320, height: 168 };
+/** Mirror of `--sat-annotation-settle`, used when the token is unreadable. */
+const SETTLE_FALLBACK_SECONDS = 0.08;
+
+/**
+ * How many settle windows of CONTINUOUS movement may pass before the surface
+ * shows itself anyway. A student mid-drag is not owed a toolbar, but a student
+ * reading while a pane animates under them is not owed an empty screen either.
+ */
+const SETTLE_WAIT_LIMIT = 4;
 
 /**
  * Where a surface goes when the DOM cannot be measured (jsdom, a headless
@@ -22,80 +27,28 @@ const DOCK_SIZE: SatRectLike = { left: 0, top: 0, width: 320, height: 168 };
  */
 const UNMEASURABLE_INSET = 8;
 
-/** Mirror of `--sat-annotation-settle`, used when the token is unreadable. */
-const SETTLE_FALLBACK_SECONDS = 0.08;
-
-function readCssNumber(style: CSSStyleDeclaration | null, variable: string, fallback: number): number {
-  if (!style) return fallback;
-  const parsed = Number.parseFloat(style.getPropertyValue(variable));
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return parsed;
+/** Everything that has to be remembered across measurements. One owner. */
+interface SatAnnotationPlacementSession {
+  /** The last decision, fed back to the engine for hysteresis. */
+  previous: AnnotationPlacement | null;
+  /** The selection this session belongs to; a different one starts over. */
+  anchor: SatTextAnchor | null;
+  /** Has this selection's surface been shown? Until it has, it waits to settle. */
+  revealed: boolean;
+  /**
+   * When the measured geometry last changed, or -1 for "nothing measured yet".
+   * -1 rather than 0 on purpose: a clock that starts at zero would otherwise be
+   * indistinguishable from "settled", and the surface would skip its wait.
+   */
+  changedAt: number;
+  /** When the current wait began, so movement cannot hide the surface forever. -1 while not waiting. */
+  waitingSince: number;
+  /** Fingerprint of the last measurement. */
+  key: string;
 }
 
-function rootStyle(): CSSStyleDeclaration | null {
-  try {
-    if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return null;
-    return getComputedStyle(document.documentElement);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The placement budget for this environment: the token sheet first, the
- * compiled-in defaults only as a fallback. Reading one `CSSStyleDeclaration`
- * and pulling every value from it keeps this to a single style resolution per
- * placement, never one per number.
- */
-export function readSatAnnotationBudgets(): SatAnnotationBudgets {
-  const style = rootStyle();
-  const defaults = SAT_ANNOTATION_BUDGET_DEFAULTS;
-  return {
-    edge: readCssNumber(style, '--sat-annotation-edge', defaults.edge),
-    nativeUiZone: readCssNumber(style, '--sat-annotation-native-ui-zone', defaults.nativeUiZone),
-    gap: readCssNumber(style, '--sat-annotation-gap', defaults.gap),
-    comfort: readCssNumber(style, '--sat-annotation-comfort', defaults.comfort),
-    comfortFine: readCssNumber(style, '--sat-annotation-comfort-fine', defaults.comfortFine),
-    surfaceMin: readCssNumber(style, '--sat-annotation-surface-min', defaults.surfaceMin),
-    selectionRatio: readCssNumber(style, '--sat-annotation-selection-ratio', defaults.selectionRatio),
-    caretInset: readCssNumber(style, '--sat-annotation-caret-inset', defaults.caretInset),
-    switchMargin: readCssNumber(style, '--sat-annotation-switch-margin', defaults.switchMargin),
-    stableDelta: readCssNumber(style, '--sat-annotation-stable-delta', defaults.stableDelta),
-  };
-}
-
-function readCssSeconds(variable: string, fallback: number): number {
-  const raw = rootStyle()?.getPropertyValue(variable) ?? '';
-  const parsed = Number.parseFloat(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return parsed / 1000;
-}
-
-/**
- * The region the surface must stay inside: the VISUAL viewport, not the layout
- * viewport. Pinch zoom, a software keyboard, and Safari's own chrome all shrink
- * what the student can actually see, and a toolbar placed against the layout
- * viewport can end up under the keyboard or off the zoomed-in view entirely.
- */
-function visualViewportRect(): SatRectLike {
-  if (typeof window === 'undefined') return { left: 0, top: 0, width: 1024, height: 768 };
-  const viewport = window.visualViewport;
-  if (!viewport) return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
-  return { left: viewport.offsetLeft, top: viewport.offsetTop, width: viewport.width, height: viewport.height };
-}
-
-/**
- * The surface's positioning container, measured. Falls back to the visual
- * viewport when the body has not laid out, so the budget is still evaluated
- * against something real.
- */
-function boundsRectFor(container: HTMLElement | null): SatRectLike {
-  const element = container?.closest<HTMLElement>('[data-sat-annotation-bounds]') ?? null;
-  const rect = element?.getBoundingClientRect();
-  if (rect && rect.width > 0 && rect.height > 0) {
-    return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
-  }
-  return visualViewportRect();
+function newSession(): SatAnnotationPlacementSession {
+  return { previous: null, anchor: null, revealed: false, changedAt: -1, waitingSince: -1, key: '' };
 }
 
 export interface SatAnnotationPlacementOptions {
@@ -118,17 +71,22 @@ export interface SatAnnotationPlacementOptions {
  * keep it there while the student scrolls, resizes, drags a selection handle,
  * rotates the device, or the on-screen keyboard moves the visual viewport.
  *
- * Three behaviours this hook is responsible for, and nowhere else:
+ * This hook owns TIMING and nothing else — the measurement lives in
+ * `satAnnotationPlacementRuntime`, the decision in `placeSatAnnotationSurface`.
+ * Three behaviours are its whole job:
  *
- * - COALESCING. Scroll, resize and visual-viewport events arrive in bursts;
- *   each one schedules at most one animation frame, so a drag or a Safari
- *   auto-scroll never issues a state write per event.
+ * - COALESCING. Scroll, resize and visual-viewport events arrive in bursts; each
+ *   one schedules at most one animation frame, so a drag or a Safari auto-scroll
+ *   never issues a state write per event.
+ * - SETTLING (§10). A selection's surface does not appear the instant geometry
+ *   exists: it waits for the geometry to hold still for `--sat-annotation-settle`
+ *   before fading in, and keeps waiting while it moves — because a toolbar that
+ *   appears under a handle the student is still dragging is a toolbar they did
+ *   not ask for yet. The wait is capped, and every path that can end it is
+ *   independent: the timer, any later scroll/resize, and the cap itself.
  * - HYSTERESIS. The last decision is fed back into the engine, so a side is
- *   chosen once and kept until it genuinely stops fitting. A new selection (a
- *   new `anchor` identity) forgets it, because that is a new decision.
- * - SETTLING. An orientation change hides the surface, waits out
- *   `--sat-annotation-settle`, then places it again from scratch — the surface
- *   never travels from its old coordinates to its new ones.
+ *   chosen once and kept until it genuinely stops fitting. A new selection (a new
+ *   `anchor` identity) forgets it, because that is a new decision.
  *
  * Degrades instead of disappearing: when the anchor cannot be measured it falls
  * back to the container's top-left inset so the controls stay reachable — the
@@ -144,88 +102,107 @@ export function useSatAnnotationPlacement(
 } {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [placement, setPlacement] = useState<AnnotationPlacement | null>(null);
-  const previousRef = useRef<AnnotationPlacement | null>(null);
-  const anchorRef = useRef<SatTextAnchor | null>(anchor);
+  const session = useRef<SatAnnotationPlacementSession>(newSession());
   const frameRef = useRef<number | null>(null);
   const settleRef = useRef<number | null>(null);
-  /** True while the viewport is known to be lying (mid-rotation). */
-  const heldRef = useRef(false);
-  const dock = options.dock === true;
+  const forcedDock = options.dock === true;
   const touch = options.touch === true;
 
-  const measure = useCallback(() => {
-    if (heldRef.current) {
-      // The viewport is moving and its reported geometry is transitional.
-      // Placing from it would park the surface somewhere the student is about
-      // to stop looking at. Stay hidden until the hold lifts.
-      setPlacement(hiddenSatAnnotationPlacement());
-      return;
-    }
-    const container = containerRef.current;
-    const measured =
-      container && container.offsetWidth > 0 && container.offsetHeight > 0
-        ? { width: container.offsetWidth, height: container.offsetHeight }
-        : null;
-    const bounds = boundsRectFor(container);
+  /** Take a decision as final: it is what the student sees from now on. */
+  const reveal = useCallback((next: AnnotationPlacement) => {
+    session.current.revealed = true;
+    session.current.waitingSince = -1;
+    session.current.previous = next;
+    setPlacement(next);
+  }, []);
 
-    if (dock) {
-      const next = placeSatAnnotationDock(
-        bounds,
-        measured ?? { width: DOCK_SIZE.width, height: DOCK_SIZE.height },
-        readSatAnnotationBudgets().edge,
-      );
-      previousRef.current = next;
-      setPlacement(next);
+  const settleCapMs = useCallback(
+    () => readSatAnnotationSeconds('--sat-annotation-settle', SETTLE_FALLBACK_SECONDS) * 1000,
+    [],
+  );
+
+  /** Re-measure once the given delay has passed. */
+  const armRemeasure = useCallback((delayMs: number) => {
+    if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') return;
+    if (settleRef.current !== null) window.clearTimeout(settleRef.current);
+    settleRef.current = window.setTimeout(() => {
+      settleRef.current = null;
+      measureRef.current();
+    }, Math.max(0, delayMs));
+  }, []);
+
+  const measure = useCallback(() => {
+    const measurement = measureSatAnnotation(containerRef.current, anchor);
+    const budgets = readSatAnnotationBudgets();
+
+    if (forcedDock) {
+      reveal(placeSatAnnotationDock(
+        measurement.bounds,
+        measurement.viewport,
+        measurement.size ?? SAT_ANNOTATION_DOCK_FALLBACK_SIZE,
+        budgets.edge,
+      ));
       return;
     }
 
     if (!anchor) {
-      previousRef.current = null;
+      session.current.previous = null;
       setPlacement(null);
       return;
     }
 
-    const geometry = satAnnotationAnchorGeometryFor(anchor);
-    if (!geometry || !measured) {
+    if (!measurement.size || !measurement.anchor) {
       // Unmeasurable: stay visible in the preferred mode rather than vanish or
       // guess a position from nothing. Deliberately NOT recorded as the previous
       // placement — it is not a decision, and it must not steer hysteresis.
-      setPlacement({ mode: 'floating', left: UNMEASURABLE_INSET, top: UNMEASURABLE_INSET, side: null, arrowX: 0, flipped: false, animated: false });
+      setPlacement({ mode: 'floating', left: UNMEASURABLE_INSET, top: UNMEASURABLE_INSET, width: 0, maxHeight: 0, side: null, arrowX: 0, animated: false });
       return;
     }
 
-    const next = placeSatAnnotationSurface({
-      anchor: geometry,
-      bounds,
-      viewport: visualViewportRect(),
-      size: measured,
-      previous: previousRef.current,
-      touch,
-      budgets: readSatAnnotationBudgets(),
-    });
-    previousRef.current = next;
-    setPlacement(next);
-  }, [anchor, dock, touch]);
+    const now = Date.now();
+    if (measurement.key !== session.current.key) {
+      session.current.key = measurement.key;
+      session.current.changedAt = now;
+    }
 
-  // The settle timer outlives any single subscription: a rotation hold must not
-  // be cancelled by a re-render, and when it lifts it has to place the selection
-  // that is live NOW. So it calls through the latest measurement rather than a
-  // closure captured when it was armed.
+    if (!session.current.revealed) {
+      const settleMs = settleCapMs();
+      const settled = session.current.changedAt < 0 || now - session.current.changedAt >= settleMs;
+      if (!settled) {
+        if (session.current.waitingSince < 0) session.current.waitingSince = now;
+        if (now - session.current.waitingSince < settleMs * SETTLE_WAIT_LIMIT) {
+          setPlacement(hiddenSatAnnotationPlacement());
+          armRemeasure(session.current.changedAt + settleMs - now);
+          return;
+        }
+      }
+    }
+
+    reveal(placeSatAnnotationSurface({
+      anchor: measurement.anchor,
+      bounds: measurement.bounds,
+      viewport: measurement.viewport,
+      size: measurement.size,
+      previous: session.current.previous,
+      touch,
+      budgets,
+    }));
+  }, [anchor, armRemeasure, forcedDock, reveal, settleCapMs, touch]);
+
+  // The settle timer outlives any single subscription: a rotation wait must not
+  // be cancelled by a re-render, and when it ends it has to place the selection
+  // that is live NOW. So it calls through the latest measurement.
   const measureRef = useRef(measure);
   measureRef.current = measure;
 
-  // Layout effect, not an animation frame: the surface is placed in the same
-  // commit that mounts it, so it is never briefly unplaced (and never briefly
-  // invisible to a student who just selected text).
+  // Layout effect, not an animation frame: the surface is decided in the same
+  // commit that mounts it, so it is never briefly unplaced.
   useLayoutEffect(() => {
-    if (anchorRef.current !== anchor) {
-      anchorRef.current = anchor;
-      // A different selection gets a different decision; the last one's side is
-      // history, not a preference.
-      previousRef.current = null;
+    if (session.current.anchor !== anchor) {
+      session.current = { ...newSession(), anchor, changedAt: Date.now() };
     }
     if (!anchor) {
-      previousRef.current = null;
+      session.current.previous = null;
       setPlacement(null);
       return;
     }
@@ -248,21 +225,15 @@ export function useSatAnnotationPlacement(
     };
     const onOrientationChange = () => {
       // Rotation swaps both axes and the browser reports the new ones for a few
-      // frames. Hide immediately and HOLD, because those frames arrive as
-      // `visualViewport` resizes: without the hold, the first of them would
-      // place the surface from geometry that is about to stop being true, and
-      // the student would watch it flick from side to side while the device
-      // turns. When the hold lifts, the placement is fresh and unanimated.
-      heldRef.current = true;
-      previousRef.current = null;
+      // frames. Start a fresh wait rather than placing from transitional
+      // geometry: the surface must not flick side to side while the device
+      // turns, and it must not travel from its old coordinates to its new ones.
+      session.current.revealed = false;
+      session.current.previous = null;
+      session.current.changedAt = Date.now();
+      session.current.waitingSince = Date.now();
       setPlacement(hiddenSatAnnotationPlacement());
-      if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') return;
-      if (settleRef.current !== null) window.clearTimeout(settleRef.current);
-      settleRef.current = window.setTimeout(() => {
-        settleRef.current = null;
-        heldRef.current = false;
-        measureRef.current();
-      }, readCssSeconds('--sat-annotation-settle', SETTLE_FALLBACK_SECONDS) * 1000);
+      armRemeasure(settleCapMs());
     };
 
     const viewport = window.visualViewport;
@@ -282,10 +253,10 @@ export function useSatAnnotationPlacement(
       }
       frameRef.current = null;
     };
-  }, [anchor, measure]);
+  }, [anchor, armRemeasure, measure, settleCapMs]);
 
-  // Unmount is the one place a pending settle is abandoned instead of served:
-  // nothing is left to place, and a hold has no owner to release it.
+  // Unmount is the one place a pending wait is abandoned instead of served:
+  // nothing is left to place.
   useEffect(() => () => {
     if (frameRef.current !== null && typeof window.cancelAnimationFrame === 'function') {
       window.cancelAnimationFrame(frameRef.current);
@@ -293,44 +264,7 @@ export function useSatAnnotationPlacement(
     if (settleRef.current !== null) window.clearTimeout(settleRef.current);
     frameRef.current = null;
     settleRef.current = null;
-    heldRef.current = false;
   }, []);
 
   return { placement, containerRef, measure };
-}
-
-/**
- * Focus the first actionable control of annotation chrome, exactly once per
- * anchor, and only after placement has landed.
- *
- * Order matters and is the whole reason this is shared: the chrome mounts with
- * `visibility: hidden` for one commit while it is measured, and `focus()` on a
- * hidden element is silently ignored — so focusing on mount does nothing at all
- * and the toolbar's keyboard affordance quietly disappears (the anchor never
- * changes, so a mount-keyed effect never gets a second chance). A placement that
- * is deliberately hidden (the anchor scrolled away, the viewport is rotating)
- * waits for the same reason.
- *
- * `skip` is for chrome that holds a field the student just asked for: the caret
- * belongs in that field, and a later placement commit must not pull it back onto
- * the first button.
- */
-export function useSatAnnotationAutofocus(
-  placement: AnnotationPlacement | null,
-  anchorKey: string,
-  containerRef: React.RefObject<HTMLElement | null>,
-  options: { skip?: boolean } = {},
-): void {
-  const focusedRef = useRef<string | null>(null);
-  const skip = options.skip === true;
-  useEffect(() => {
-    if (skip || !placement || placement.mode === 'hidden' || focusedRef.current === anchorKey) return;
-    focusedRef.current = anchorKey;
-    // Dismissals are skipped: the way out is not a way in, and landing the caret
-    // on "close" would make the first keystroke after selecting text undo the
-    // tools instead of using them.
-    containerRef.current
-      ?.querySelector<HTMLButtonElement>('button:not([disabled]):not([data-sat-annotation-dismiss])')
-      ?.focus({ preventScroll: true });
-  }, [anchorKey, containerRef, placement, skip]);
 }
