@@ -91,7 +91,7 @@ export function EditorContextualSurfaces({
         getReferencedVirtualElement={() => objectAnchorFor(editor)}
         options={{ placement: "top", offset: 12 }}
         appendTo={() => bubbleAppendTarget(editor) ?? document.body}
-        className="sat-rich-editor__bubble sat-rich-editor__bubble--object"
+        className="sat-rich-editor__bubble"
       >
         <ObjectControls
           editor={editor}

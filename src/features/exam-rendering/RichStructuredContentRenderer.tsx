@@ -8,7 +8,7 @@ import type {
   StructuredContent,
 } from "./api/assessmentContracts";
 import { getAssessmentMediaAsset } from "../exam-authoring/api/assessmentMediaApi";
-import type { SatImageEnlargeProps } from "./api/structuredContentEnlarge";
+import { satImagePresentation } from "../exam-authoring/api/satImagePresentation";
 import { documentFromStructuredContent } from "../exam-authoring/api/structuredContentPublic";
 
 const CONTENT_CLASS_NAME =
@@ -123,21 +123,13 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
   const caption = stringAttribute(node, "caption");
   const width = positiveDimension(node, "width");
   const height = positiveDimension(node, "height");
-  // Authoring choices the student surface must honour. Absent values mean the
-  // pre-existing presentation (centred at the column's natural width), so
-  // questions authored before these controls existed render unchanged.
+  // Authoring choices the student surface must honour, from the same rule the
+  // authoring editor renders. Absent values mean the pre-existing presentation
+  // (centred at the column's natural width), so questions authored before these
+  // controls existed render unchanged — the styles come back empty.
   const align = stringAttribute(node, "align");
   const size = stringAttribute(node, "size");
-  const figureMaxWidth = size === "small" ? "40%" : size === "medium" ? "70%" : size === "large" ? "100%" : undefined;
-  const figureStyle: CSSProperties = {
-    ...(figureMaxWidth ? { maxWidth: figureMaxWidth } : {}),
-    ...(figureMaxWidth
-      ? { marginInline: align === "left" ? "0 auto" : align === "right" ? "auto 0" : "auto" }
-      : {}),
-  };
-  const contentAlignStyle: CSSProperties = {
-    marginInline: align === "left" ? "0 auto" : align === "right" ? "auto 0" : "auto",
-  };
+  const presentation = satImagePresentation(node.attrs ?? {});
   const [source, setSource] = useState(() => initialImageSource(node));
   const [failed, setFailed] = useState(() => !assetId && !directSource(fallbackSource));
   // Bluebook lightbox (Phase 10): transient per-image viewer state. No timer,
@@ -177,10 +169,16 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
 
   const enlargeLabel = alt || caption || "question visual";
   return (
-    <figure className="my-4 space-y-2" data-asset-id={assetId} data-align={align || undefined} data-size={size || undefined} style={figureStyle}>
+    <figure
+      className="my-4 space-y-2"
+      data-asset-id={assetId}
+      data-align={align || undefined}
+      data-size={size || undefined}
+      style={presentation.figure}
+    >
       <div
         className="mx-auto flex w-full max-w-full items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white"
-        style={{ ...mediaStyle, ...contentAlignStyle }}
+        style={mediaStyle}
       >
         {source && !failed ? (
           <img
@@ -191,6 +189,10 @@ function StaticStructuredImage({ node, enlarge }: { node: RichTextNode; enlarge?
             decoding="async"
             loading="lazy"
             onError={() => setFailed(true)}
+            // The visual itself carries the alignment: auto margins move it
+            // inside a full-width box, which is what makes "Align left" mean
+            // something even when no size was chosen.
+            style={presentation.content}
             className="h-full max-h-80 max-w-full object-contain"
           />
         ) : (

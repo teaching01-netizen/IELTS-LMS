@@ -7,7 +7,7 @@ import {
   retryTransientUploadForNode,
 } from "./ingestionImagePipe";
 import { SatImageNode, isDirectImageSource as isDirectSource } from "./schema/imageNode";
-import { imageContentStyle, imageFigureStyle } from "./imageObjectActions";
+import { satImagePresentation } from "../api/satImagePresentation";
 
 function SatImageNodeView({ node, editor, selected }: NodeViewProps) {
   const assetId = String(node.attrs["assetId"] ?? "");
@@ -22,8 +22,8 @@ function SatImageNodeView({ node, editor, selected }: NodeViewProps) {
   );
   const [failed, setFailed] = useState(false);
 
-  const figureStyle = imageFigureStyle(node.attrs as Record<string, unknown>);
-  const contentStyle = imageContentStyle(node.attrs as Record<string, unknown>);
+  // Same rule the student surface renders from — see satImagePresentation.
+  const presentation = satImagePresentation(node.attrs as Record<string, unknown>);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +49,7 @@ function SatImageNodeView({ node, editor, selected }: NodeViewProps) {
       // rather than by a ring around the whole editor: the smallest meaningful
       // object gets the focus, and it fades in with the object controls.
       data-image-selected={selected ? "true" : undefined}
-      style={figureStyle}
+      style={presentation.figure}
     >
       {uploadFailed ? (
         <div className="space-y-3 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
@@ -89,7 +89,7 @@ function SatImageNodeView({ node, editor, selected }: NodeViewProps) {
           src={source}
           alt={alt}
           onError={() => setFailed(true)}
-          style={contentStyle}
+          style={presentation.content}
           className="mx-auto max-h-80 max-w-full rounded-xl border border-au-separator bg-au-surface object-contain"
         />
       ) : (

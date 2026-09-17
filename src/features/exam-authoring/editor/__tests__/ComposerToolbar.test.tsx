@@ -1,3 +1,4 @@
+import {readFileSync} from 'node:fs';
 import {act,fireEvent,render,screen} from '@testing-library/react';
 import { Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -126,6 +127,38 @@ describe('stable composer toolbar',()=>{
   const undo=screen.getByRole('button',{name:'Undo (⌘Z)'});
   expect(undo).toBeDisabled();
   expect(undo.querySelector('svg')).not.toBeNull();
+ });
+ it('places the recovery group with the selector its CSS actually targets',()=>{
+  // The row's geometry is decided in CSS, so the selector and the markup have to
+  // name the same thing: a class the toolbar no longer renders silently drops
+  // undo/redo back into the middle of the row.
+  const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Stem'}]}]});
+  renderToolbar(editor);
+  const selector='.sat-rich-editor__toolbar-group[data-toolbar-group="history"]';
+  expect(document.querySelectorAll(selector)).toHaveLength(1);
+  expect(readFileSync('src/index.css','utf8')).toContain(selector+' {');
+  const history=document.querySelector(selector) as HTMLElement;
+  expect(mainRowGroups().at(-1)).toBe('history');
+  expect(history.querySelectorAll('button')).toHaveLength(2);
+ });
+ it('renders every toolbar control through the shared control contract',()=>{
+  const editor=make({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Stem'}]}]});
+  renderToolbar(editor);
+  const row=document.querySelector('.sat-rich-editor__toolbar-row') as HTMLElement;
+  const commands=Array.from(row.querySelectorAll<HTMLButtonElement>('.sat-rich-editor__toolbar-button'));
+  // The commands of the default row: Bold, Italic, Math, Undo, Redo. Every one
+  // of them is the shared control, and the menus are the only other kind of
+  // button in the row — a third recipe is how surfaces drift apart.
+  expect(commands.map((button)=>button.getAttribute('aria-label'))).toEqual([
+   'Bold (⌘B)','Italic (⌘I)','Insert equation','Undo (⌘Z)','Redo (⇧⌘Z)',
+  ]);
+  for(const button of commands){
+   expect(button.tagName).toBe('BUTTON');
+   expect(button.getAttribute('type')).toBe('button');
+  }
+  for(const button of Array.from(row.querySelectorAll('button'))){
+   expect(button.getAttribute('aria-label')).toBeTruthy();
+  }
  });
 });
 

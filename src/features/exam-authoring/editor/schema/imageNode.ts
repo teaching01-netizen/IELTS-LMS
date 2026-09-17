@@ -6,6 +6,10 @@
 // ../SatImageExtension.tsx, which extends this same node.
 import Image from "@tiptap/extension-image";
 import { validateDurableImageSource } from "../ingestion/domain/imagePolicy";
+import {
+  SAT_IMAGE_ALIGN_VALUES,
+  SAT_IMAGE_SIZE_VALUES,
+} from "../../api/satImagePresentation";
 
 // Renderable without the media service: http(s) and app-relative paths only.
 // data:/blob: URLs are never rendered directly — pasted images must go through
@@ -21,8 +25,11 @@ export function isDirectImageSource(value: string): boolean {
 // co-editing service builds the same schema from this module, and the published
 // document carries whatever the author chose. `null` is the pre-existing
 // behaviour (centred, natural width), which keeps untouched content identical.
-const alignValues = new Set(["left", "center", "right"]);
-const sizeValues = new Set(["small", "medium", "large"]);
+//
+// The accepted values come from the presentation module, so the node cannot
+// accept a value the surfaces do not know how to render.
+const alignValues = new Set<string>(SAT_IMAGE_ALIGN_VALUES);
+const sizeValues = new Set<string>(SAT_IMAGE_SIZE_VALUES);
 
 export const SatImageNode = Image.extend({
   addAttributes() {

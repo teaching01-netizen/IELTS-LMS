@@ -13,7 +13,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { SatMenu, type SatMenuItem } from '@/src/products/sat/ui/Menu';
-import { EditorTooltip } from './EditorTooltip';
+import { EditorControl } from './EditorControl';
 import type { RichComposerCapabilities } from './RichQuestionComposer';
 import { resolveComposerContext, selectionKindOf, type ComposerContext } from './composerContext';
 import type { EditorFeedbackPublisher } from './editorFeedbackCopy';
@@ -38,6 +38,9 @@ export interface ComposerToolbarProps {
  *
  * Controls a context cannot act on dim (disabled) instead of disappearing, so
  * the row never re-learns itself.
+ *
+ * Every control is an `EditorControl`, the same one the contextual surfaces use:
+ * there is one button recipe in the editor, not one per surface.
  */
 export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTableMutation, onFeedback }: ComposerToolbarProps) {
   const state = useEditorState({
@@ -62,23 +65,10 @@ export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTable
     }),
   });
   const context = state.context;
+  // A node selection (image, equation) cannot carry text marks, so those
+  // controls dim rather than vanish.
   const nodeSelection = state.selection === 'node';
   const styleLabel = state.style === 'heading2' ? 'Heading' : state.style === 'heading3' ? 'Subheading' : 'Paragraph';
-  const control = (label: string, action: () => void, content: React.ReactNode = label, active?: boolean, disabled?: boolean, tip?: { label: string; shortcut?: string | undefined }) => (
-    <EditorTooltip {...(tip ? { label: tip.label, shortcut: tip.shortcut } : { label })}>
-      <button
-        type="button"
-        className="sat-rich-editor__toolbar-button"
-        aria-label={label}
-        aria-pressed={active}
-        disabled={disabled}
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={action}
-      >
-        {content}
-      </button>
-    </EditorTooltip>
-  );
   // Groups are clustered (style / format / math / insert / more / history) so
   // the row reads as grouped actions rather than one long string of icons.
   const group = (name: string, content: React.ReactNode) => (
@@ -123,18 +113,25 @@ export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTable
       ? group(
           'history',
           <>
-            {control('Undo (⌘Z)', () => { editor.chain().focus().undo().run(); }, <Undo2 size={15} />, undefined, !state.undo, { label: 'Undo', shortcut: '⌘Z' })}
-            {control('Redo (⇧⌘Z)', () => { editor.chain().focus().redo().run(); }, <Redo2 size={15} />, undefined, !state.redo, { label: 'Redo', shortcut: '⇧⌘Z' })}
+            <EditorControl label="Undo (⌘Z)" tooltipLabel="Undo" shortcut="⌘Z" disabled={!state.undo} onSelect={() => { editor.chain().focus().undo().run(); }}>
+              <Undo2 size={15} />
+            </EditorControl>
+            <EditorControl label="Redo (⇧⌘Z)" tooltipLabel="Redo" shortcut="⇧⌘Z" disabled={!state.redo} onSelect={() => { editor.chain().focus().redo().run(); }}>
+              <Redo2 size={15} />
+            </EditorControl>
           </>
         )
       : null;
-  // Marks ride in every context at the same spot; a node selection (image,
-  // equation) cannot carry them, so those controls dim instead of vanishing.
+  // Marks ride in every context at the same spot.
   const formatGroup = group(
     'format',
     <>
-      {control('Bold (⌘B)', () => { editor.chain().focus().toggleBold().run(); }, <Bold size={15} />, state.bold, nodeSelection, { label: 'Bold', shortcut: '⌘B' })}
-      {control('Italic (⌘I)', () => { editor.chain().focus().toggleItalic().run(); }, <Italic size={15} />, state.italic, nodeSelection, { label: 'Italic', shortcut: '⌘I' })}
+      <EditorControl label="Bold (⌘B)" tooltipLabel="Bold" shortcut="⌘B" active={state.bold} disabled={nodeSelection} onSelect={() => { editor.chain().focus().toggleBold().run(); }}>
+        <Bold size={15} />
+      </EditorControl>
+      <EditorControl label="Italic (⌘I)" tooltipLabel="Italic" shortcut="⌘I" active={state.italic} disabled={nodeSelection} onSelect={() => { editor.chain().focus().toggleItalic().run(); }}>
+        <Italic size={15} />
+      </EditorControl>
     </>
   );
   const moreItems: SatMenuItem[] = [];
@@ -173,7 +170,7 @@ export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTable
             align="start"
             width={176}
             triggerClassName="sat-rich-editor__menu-trigger"
-            triggerContent={<span className="sat-rich-editor__style-value">{styleLabel}</span>}
+            triggerContent={<span>{styleLabel}</span>}
             items={[
               { id: 'paragraph', label: 'Paragraph', current: state.style === 'paragraph', preview: <span className="sat-rich-editor__style-option sat-rich-editor__style-option--paragraph">Paragraph</span>, onSelect: () => { editor.chain().focus().setParagraph().run(); } },
               { id: 'heading2', label: 'Heading', current: state.style === 'heading2', preview: <span className="sat-rich-editor__style-option sat-rich-editor__style-option--heading">Heading</span>, onSelect: () => { editor.chain().focus().setHeading({ level: 2 }).run(); } },
@@ -186,7 +183,12 @@ export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTable
   const mathGroup = c.equation
     ? group(
         'math',
-        control('Insert equation', () => onOpenDialog('math'), <span className="sat-rich-editor__toolbar-action"><Sigma size={15} />Math</span>, undefined, false, { label: 'Insert equation' })
+        <EditorControl label="Insert equation" onSelect={() => onOpenDialog('math')}>
+          <span className="sat-rich-editor__toolbar-action">
+            <Sigma size={15} />
+            Math
+          </span>
+        </EditorControl>
       )
     : null;
   const insert: SatMenuItem[] = [];
@@ -220,12 +222,12 @@ export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTable
         <div className="sat-rich-editor__table-toolbar" role="group" aria-label="Table tools">
           <div className="sat-rich-editor__table-toolbar-row">
             <span className="sat-rich-editor__table-label">Table</span>
-            <button type="button" className="sat-rich-editor__table-action" onMouseDown={(event) => event.preventDefault()} onClick={() => table(() => { editor.chain().focus().addRowAfter().run(); })}>
+            <EditorControl className="sat-rich-editor__table-action" label="Add row" onSelect={() => table(() => { editor.chain().focus().addRowAfter().run(); })}>
               Add row
-            </button>
-            <button type="button" className="sat-rich-editor__table-action" onMouseDown={(event) => event.preventDefault()} onClick={() => table(() => { editor.chain().focus().addColumnAfter().run(); })}>
+            </EditorControl>
+            <EditorControl className="sat-rich-editor__table-action" label="Add column" onSelect={() => table(() => { editor.chain().focus().addColumnAfter().run(); })}>
               Add column
-            </button>
+            </EditorControl>
             <span className="sat-rich-editor__table-divider" aria-hidden="true" />
             <SatMenu
               label="Table actions"

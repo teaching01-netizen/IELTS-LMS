@@ -21,7 +21,9 @@ export function ReadinessControl({issues,onIssueSelect}:{issues:AssessmentValida
  const blockers=issues.filter(i=>i.blocking).length;
  const label=blockers?blockers+' '+(blockers===1?'issue':'issues'):issues.length?'Review suggestions':'Question ready';
  const ready=!blockers&&!issues.length;
- const tone=blockers?'danger':issues.length?'warning':ready?'neutral':'neutral';
+ // Ready is the quiet default; only a *change* into it earns the accent, which
+ // the flash below adds.
+ const tone=blockers?'danger':issues.length?'warning':'neutral';
  const [flashReady,setFlashReady]=useState(false);
  const previousReady=useRef<boolean|undefined>(undefined);
 

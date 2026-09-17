@@ -1,42 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  IMAGE_ALIGN_OPTIONS,
-  IMAGE_SIZE_FRACTIONS,
-  IMAGE_SIZE_OPTIONS,
-  downloadImageOriginal,
-  imageAlignFromAttrs,
-  imageContentStyle,
-  imageFigureStyle,
-  imageSizeFromAttrs,
-} from "../imageObjectActions";
+import { downloadImageOriginal } from "../imageObjectActions";
 
 afterEach(() => vi.restoreAllMocks());
-
-describe("image alignment and size as document data", () => {
-  it("accepts only the values the surfaces offer", () => {
-    expect(imageAlignFromAttrs({ align: "left" })).toBe("left");
-    expect(imageAlignFromAttrs({ align: "middle" })).toBeNull();
-    expect(imageAlignFromAttrs({})).toBeNull();
-    expect(imageSizeFromAttrs({ size: "medium" })).toBe("medium");
-    expect(imageSizeFromAttrs({ size: "huge" })).toBeNull();
-    expect(IMAGE_ALIGN_OPTIONS.map((option) => option.label)).toEqual(["Align left", "Align center", "Align right"]);
-    expect(IMAGE_SIZE_OPTIONS.map((option) => option.label)).toEqual(["Small", "Medium", "Large"]);
-  });
-
-  it("leaves untouched visuals exactly as they were", () => {
-    expect(imageFigureStyle({})).toEqual({});
-    expect(imageFigureStyle({ align: "left" })).toEqual({});
-    expect(imageContentStyle({})).toEqual({ marginInline: "auto" });
-    expect(imageContentStyle({ align: "center" })).toEqual({ marginInline: "auto" });
-  });
-
-  it("expresses size as a fraction of the reading column so it survives every pane", () => {
-    expect(imageFigureStyle({ size: "small" })).toEqual({ maxWidth: IMAGE_SIZE_FRACTIONS.small, marginInline: "auto" });
-    expect(imageFigureStyle({ size: "large", align: "right" })).toEqual({ maxWidth: "100%", marginInline: "auto 0" });
-    expect(imageContentStyle({ align: "right" })).toEqual({ marginInline: "auto 0" });
-    expect(imageContentStyle({ align: "left" })).toEqual({ marginInline: "0 auto" });
-  });
-});
 
 describe("download original", () => {
   it("uses a direct source without asking the media service", async () => {

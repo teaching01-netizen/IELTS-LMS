@@ -3364,38 +3364,24 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 /* The contextual label ("Table", "Equation", "Image") names the set like a
  * toolbar section header: quiet, never competing with the content line. */
-.sat-rich-editor__context-label {
-  margin-right: var(--spacing-1);
-  padding-inline: var(--spacing-1);
-  color: var(--color-gray-500);
-  font-size: var(--text-au-11);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-
 /* Groups are separated by space, not by lines: style / format / math / insert /
  * more must read as distinct sets rather than one long string of controls. */
 .sat-rich-editor__toolbar-group + .sat-rich-editor__toolbar-group {
   margin-left: var(--spacing-2);
 }
 
-.sat-rich-editor__toolbar-group--history {
+/* Recovery is parked at the far end of the row, past a hairline: always in the
+ * same place, never in the way of the actions that change the content. */
+.sat-rich-editor__toolbar-group[data-toolbar-group="history"] {
   margin-left: auto;
   padding-left: var(--spacing-1);
   border-left: 1px solid var(--color-au-separator);
 }
 
-.sat-rich-editor__toolbar-divider,
 .sat-rich-editor__table-divider {
   flex: 0 0 auto;
   width: 1px;
   background: var(--color-au-separator);
-}
-
-.sat-rich-editor__toolbar-divider {
-  height: var(--spacing-5);
-  margin-inline: 2px;
 }
 
 .sat-rich-editor__toolbar-button {
@@ -3596,15 +3582,6 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   color: var(--color-gray-900);
 }
 
-.sat-rich-editor__table-action--danger {
-  color: var(--color-au-danger-text);
-}
-
-.sat-rich-editor__table-action--danger:hover {
-  background: var(--color-au-danger-tint);
-  color: var(--color-au-danger-text);
-}
-
 .sat-rich-editor__content {
   padding: 18px 18px 20px;
 }
@@ -3768,14 +3745,6 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     0 1px 2px rgba(18, 30, 48, 0.06),
     0 10px 30px rgba(20, 40, 70, 0.12);
   animation: sat-surface-in var(--authoring-motion-state) var(--authoring-ease);
-}
-
-.sat-rich-editor__bubble-divider {
-  flex: 0 0 auto;
-  width: 1px;
-  height: var(--spacing-5);
-  margin-inline: 2px;
-  background: var(--color-au-separator);
 }
 
 /* Controls with words are used where the icon would be ambiguous. */
@@ -3979,7 +3948,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 }
 
 @media (max-width: 640px) {
-  .sat-rich-editor__toolbar-group--history {
+  .sat-rich-editor__toolbar-group[data-toolbar-group="history"] {
     margin-left: 0;
     border-left: 0;
     padding-left: 0;

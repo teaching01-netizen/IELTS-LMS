@@ -19,7 +19,7 @@ import {
   imageSizeFromAttrs,
   type SatImageAlign,
   type SatImageSize,
-} from "./imageObjectActions";
+} from "../api/satImagePresentation";
 import { convertEquationAt, deleteObjectAt } from "./objectOps";
 
 type ImageContext = Extract<ComposerContext, { kind: "image" }>;

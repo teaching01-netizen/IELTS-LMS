@@ -84,11 +84,20 @@ if (typeof HTMLCanvasElement !== "undefined") {
   });
 }
 
+// jsdom has no layout and ships no scrolling methods on Element. Production
+// code scrolls containers (bringing a selected visual or a note into view) and
+// does so from rAF callbacks, where a missing method surfaces as an unhandled
+// error *after* the test that triggered it has already passed. Stub both:
+// nothing here can move anything, and tests assert outcomes, not scroll state.
 if (typeof Element !== "undefined") {
-  Object.defineProperty(Element.prototype, "scrollIntoView", {
-    configurable: true,
-    value: () => {},
-  });
+  for (const method of ["scrollIntoView", "scrollTo", "scrollBy"] as const) {
+    if (typeof (Element.prototype as unknown as Record<string, unknown>)[method] === "function") continue;
+    Object.defineProperty(Element.prototype, method, {
+      configurable: true,
+      writable: true,
+      value: () => {},
+    });
+  }
 }
 
 // jsdom implements neither getClientRects() nor getBoundingClientRect() on

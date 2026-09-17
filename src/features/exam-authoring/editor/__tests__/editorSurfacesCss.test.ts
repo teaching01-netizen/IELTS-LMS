@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -8,6 +8,14 @@ import { describe, expect, it } from "vitest";
  * chrome.
  */
 const css = readFileSync("src/index.css", "utf8");
+
+/** The authoring feature's own sources, tests excluded: only product markup renders classes. */
+function authoringSources(): string[] {
+  const root = "src/features/exam-authoring";
+  return readdirSync(root, { recursive: true, encoding: "utf8" })
+    .map((entry) => `${root}/${entry}`)
+    .filter((file) => /\.tsx?$/.test(file) && !file.includes("__tests__"));
+}
 
 describe("rich editor surface contract", () => {
   it("positions contextual surfaces against the editor, not the window", () => {
@@ -83,6 +91,30 @@ describe("rich editor surface contract", () => {
     ]) {
       expect(coarse).toContain(selector);
     }
+  });
+  it("keeps every editor selector and every editor class pointing at each other", () => {
+    // A selector whose class the markup no longer renders silently drops its
+    // styling — that is how the row once lost the placement of undo/redo, and
+    // how a menu trigger loses its geometry. A class with no rules is
+    // scaffolding. Neither should be able to land unnoticed.
+    const classPattern = /sat-rich-editor__[a-z-]+/g;
+    const emitted = new Set<string>();
+    for (const file of authoringSources()) {
+      for (const match of readFileSync(file, "utf8").match(classPattern) ?? []) emitted.add(match);
+    }
+    const styled = new Set<string>();
+    for (const file of ["src/index.css", "src/features/exam-authoring/ui/spine/spine.css"]) {
+      for (const match of readFileSync(file, "utf8").match(classPattern) ?? []) styled.add(match);
+    }
+
+    // The sweep has to have found something to compare, or it passes vacuously.
+    expect(emitted.size).toBeGreaterThan(20);
+    expect(styled.size).toBeGreaterThan(20);
+
+    const orphanedSelectors = [...styled].filter((name) => !emitted.has(name)).sort();
+    const unstyledClasses = [...emitted].filter((name) => !styled.has(name)).sort();
+    expect(orphanedSelectors).toEqual([]);
+    expect(unstyledClasses).toEqual([]);
   });
   it("collapses the new motion under reduced-motion", () => {
     const reduced = css.slice(css.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
