@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SAT_ANNOTATION_BUDGET_DEFAULTS } from './satAnnotationBudgets';
 import {
-  placeSatAnnotationDock,
   placeSatAnnotationSurface,
   type AnnotationPlacement,
 } from './satSelectionGeometry';
@@ -12,6 +11,8 @@ const viewport = { left: 0, top: 0, width: 800, height: 600 };
 /** A measured floating surface: the size the engine has to place. */
 const size = { width: 288, height: 108 };
 const EDGE = SAT_ANNOTATION_BUDGET_DEFAULTS.edge;
+const GAP = SAT_ANNOTATION_BUDGET_DEFAULTS.gap;
+const NATIVE_ZONE = SAT_ANNOTATION_BUDGET_DEFAULTS.nativeUiZone;
 
 /**
  * An anchor box with its per-line rects. Only the engine's inputs matter here —
@@ -66,7 +67,7 @@ function place(
 /** A placement of the given shape, as the engine would have returned it. */
 function placement(input: Partial<AnnotationPlacement> & Pick<AnnotationPlacement, 'mode'>): AnnotationPlacement {
   return {
-    left: 256, top: 180, width: size.width, maxHeight: 400, side: null, arrowX: 144, animated: false,
+    left: 256, top: 180, width: size.width, maxHeight: 400, side: null, arrowX: 144, animated: false, clamped: false,
     ...input,
   };
 }
@@ -76,11 +77,15 @@ describe('satSelectionGeometry: where the surface goes', () => {
     const above = place(geometry({ top: 300, bottom: 320 }));
     expect(above.mode).toBe('floating');
     expect(above.side).toBe('above');
-    expect(above.top).toBe(300 - size.height - SAT_ANNOTATION_BUDGET_DEFAULTS.gap);
+    expect(above.top).toBe(300 - size.height - GAP);
+    // Sitting exactly where it belongs: nothing had to be pinned, so the caret
+    // still means something.
+    expect(above.clamped).toBe(false);
 
     const below = place(geometry({ top: 10, bottom: 30 }));
     expect(below.side).toBe('below');
-    expect(below.top).toBe(30 + SAT_ANNOTATION_BUDGET_DEFAULTS.gap);
+    expect(below.top).toBe(30 + GAP);
+    expect(below.clamped).toBe(false);
   });
 
   it('refuses to squeeze the surface into a gap it only technically fits', () => {
@@ -110,35 +115,69 @@ describe('satSelectionGeometry: where the surface goes', () => {
     expect(place(roomyAbove).side).toBe('above');
   });
 
-  it('docks on touch when the menu has taken the only lane with room', () => {
-    // A selection near the top of the visible region: iOS cannot fit its menu
-    // above and flips it below, which is the lane we would have used. Above has
-    // 48px and a comfortable toolbar needs 144, so the sheet is the honest
-    // answer rather than a toolbar under the menu.
+  it('floats past the menu own zone when the menu has taken the only lane with room', () => {
+    // A selection near the top: iOS cannot fit its menu above and flips it
+    // below, which is the lane we would have used. Above holds 48px against the
+    // 144 a toolbar wants — so the toolbar goes into the menu's lane, but clear
+    // of the zone the menu itself will cover. Sitting past the menu is usable;
+    // sitting under it is not.
     const short = { left: 0, top: 0, width: 800, height: 400 };
     const high = geometry({ top: 60, bottom: 80 });
-    expect(place(high, { touch: true, viewport: short, bounds: short }).mode).toBe('docked');
+    const withFinger = place(high, { touch: true, viewport: short, bounds: short });
+    expect(withFinger.mode).toBe('floating');
+    expect(withFinger.side).toBe('below');
+    expect(withFinger.top).toBe(80 + NATIVE_ZONE + GAP);
+    expect(withFinger.top).toBeGreaterThanOrEqual(80 + NATIVE_ZONE);
+    // Placed deliberately, not pinned: the caret still points at the selection.
+    expect(withFinger.clamped).toBe(false);
 
-    // A mouse on the same geometry still floats — below, when above has no room,
-    // which is the flip it has always done.
+    // A mouse on the same geometry reserves no lane, so the toolbar takes the
+    // ordinary distance under the words instead of the menu's.
     const withMouse = place(high, { viewport: short, bounds: short });
     expect(withMouse.mode).toBe('floating');
     expect(withMouse.side).toBe('below');
+    expect(withMouse.top).toBe(80 + GAP);
   });
 
-  it('docks a selection that covers the viewport, where "nearby" has no meaning', () => {
+  it('floats a selection that covers the viewport, and pins itself only when there is nothing left', () => {
     const whatTheStudentSelected = place(geometry({ top: 100, bottom: 340 }));
-    expect(whatTheStudentSelected.mode).toBe('docked');
-    // A selection inside the threshold still floats.
-    expect(place(geometry({ top: 100, bottom: 260 })).mode).toBe('floating');
+    expect(whatTheStudentSelected.mode).toBe('floating');
+    expect(whatTheStudentSelected.side).toBe('below');
+    expect(whatTheStudentSelected.top).toBe(340 + GAP);
+
+    // A selection filling the whole visible region leaves no gap to sit in. The
+    // toolbar is pinned inside that region anyway, rather than becoming a
+    // different kind of surface or disappearing.
+    const wholeScreen = { left: 0, top: 0, width: 800, height: 400 };
+    const pinned = place(geometry({ top: EDGE, bottom: wholeScreen.height - EDGE }), {
+      viewport: wholeScreen,
+      bounds: wholeScreen,
+    });
+    expect(pinned.mode).toBe('floating');
+    expect(pinned.clamped).toBe(true);
+    expect(pinned.top + size.height).toBeLessThanOrEqual(wholeScreen.height - EDGE);
   });
 
-  it('docks when the controls would have no usable room to sit in', () => {
+  it('floats into a cramped visible region instead of shrinking out of reach', () => {
+    // A narrow visible slice: the surface takes the width it can get, inside it.
     const narrow = { left: 0, top: 0, width: 300, height: 600 };
-    expect(place(geometry({ top: 300, bottom: 320 }), { viewport: narrow, bounds: narrow }).mode).toBe('docked');
+    const inNarrow = place(geometry({ top: 300, bottom: 320 }), { viewport: narrow, bounds: narrow });
+    expect(inNarrow.mode).toBe('floating');
+    expect(inNarrow.width).toBe(narrow.width - EDGE * 2);
+    expect(inNarrow.left).toBeGreaterThanOrEqual(EDGE);
+    expect(inNarrow.left + inNarrow.width).toBeLessThanOrEqual(narrow.width - EDGE);
 
-    const squashed = { left: 0, top: 0, width: 800, height: 140 };
-    expect(place(geometry({ top: 60, bottom: 80 }), { viewport: squashed, bounds: squashed }).mode).toBe('docked');
+    // A visible region shorter than the surface itself — a phone with the
+    // software keyboard up. The toolbar is pinned to the top of what the student
+    // can see and its rows are bounded, so the actions scroll instead of hiding
+    // under the keyboard.
+    const squashed = { left: 0, top: 0, width: 800, height: 110 };
+    const inSquashed = place(geometry({ top: 40, bottom: 60 }), { viewport: squashed, bounds: squashed });
+    expect(inSquashed.mode).toBe('floating');
+    expect(inSquashed.clamped).toBe(true);
+    expect(inSquashed.top).toBe(EDGE);
+    expect(inSquashed.maxHeight).toBeLessThan(size.height);
+    expect(inSquashed.maxHeight).toBe(squashed.height - EDGE * 2);
   });
 
   it('keeps the side it chose while that side still fits', () => {
@@ -150,37 +189,50 @@ describe('satSelectionGeometry: where the surface goes', () => {
     expect(kept.side).toBe('above');
   });
 
-  it('switches sides only for a side that offers real room, and docks otherwise', () => {
+  it('switches sides only for a side that offers real room', () => {
     const previous = placement({ mode: 'floating', side: 'above' });
     const short = { left: 0, top: 0, width: 800, height: 400 };
     // Above has stopped fitting; below offers 200px, comfortably more than the
     // 132 required plus the switch margin — so the surface moves below.
     const switched = place(geometry({ top: 130, bottom: 188 }), { previous, viewport: short, bounds: short });
     expect(switched.side).toBe('below');
-
-    // Below offers 148px: enough to fit, not enough to justify a jump. The dock
-    // is the honest answer rather than a surface that looks like it lost its place.
-    const docked = place(geometry({ top: 130, bottom: 240 }), { previous, viewport: short, bounds: short });
-    expect(docked.mode).toBe('docked');
+    expect(switched.top).toBe(188 + GAP);
   });
 
-  it('leaves the dock only for room that is worth the move', () => {
-    const docked = placement({ mode: 'docked', side: null, arrowX: 0, top: 420 });
-    // The menu owns the lane above, so the lane below is ours — and it holds
-    // 157px against the 144 a toolbar needs. Enough to place, not enough to
-    // justify leaving the sheet (that costs the switch margin too), so the sheet
-    // stays rather than looking like it could not make up its mind.
-    const band = { left: 0, top: 0, width: 800, height: 430 };
-    const inBand = place(geometry({ top: 237, bottom: 261 }), { previous: docked, touch: true, bounds: band, viewport: band });
-    expect(inBand.mode).toBe('docked');
+  it('holds its ground through a tight measurement instead of chasing the roomier side', () => {
+    const previous = placement({ mode: 'floating', side: 'above' });
+    const short = { left: 0, top: 0, width: 800, height: 400 };
+    // Above holds 125px and below 140px: neither is comfortable (132 under a
+    // mouse), and neither justifies the move (156). Re-deciding on every
+    // measurement would rock the toolbar side to side while the student reads,
+    // so the side it is on wins as long as it can hold the surface at all.
+    const kept = place(geometry({ top: 137, bottom: 248 }), { previous, viewport: short, bounds: short });
+    expect(kept.side).toBe('above');
+    expect(kept.top).toBe(137 - size.height - GAP);
+    expect(kept.clamped).toBe(false);
+  });
 
-    // Real room in the free lane and the move is worth making: the sheet becomes
-    // a toolbar again rather than staying one for the selection's whole life.
-    const roomy = { left: 0, top: 0, width: 800, height: 560 };
-    const withRoom = place(geometry({ top: 300, bottom: 320 }), { previous: docked, touch: true, bounds: roomy, viewport: roomy });
-    expect(withRoom.mode).toBe('floating');
-    expect(withRoom.side).toBe('below');
-    expect(withRoom.animated).toBe(false);
+  it('never answers with anything but the two modes it has', () => {
+    // The toolbar is the only presentation. Whatever the geometry does to it —
+    // a full-screen selection, no room at all, a viewport the size of a stamp —
+    // the answer is a floating surface (pinned if it must be) or nothing at all
+    // while the source is off screen.
+    const cases: Array<[SatAnchorGeometry, typeof bounds]> = [
+      [geometry({ top: 300, bottom: 320 }), bounds],
+      [geometry({ top: EDGE, bottom: viewport.height - EDGE }), viewport],
+      [geometry({ top: 60, bottom: 80 }), { left: 0, top: 0, width: 300, height: 110 }],
+      [geometry({ top: -60, bottom: -20 }), bounds],
+      [geometry({ top: 100, bottom: 140 }), { left: 0, top: 0, width: 120, height: 120 }],
+    ];
+    for (const [anchor, box] of cases) {
+      const result = place(anchor, { bounds: box, viewport: box });
+      expect(['floating', 'hidden']).toContain(result.mode);
+      if (result.mode === 'floating') {
+        expect(result.left + result.width).toBeLessThanOrEqual(Math.max(box.width - EDGE, EDGE));
+        expect(result.top).toBeGreaterThanOrEqual(EDGE);
+        expect(result.maxHeight).toBeGreaterThan(0);
+      }
+    }
   });
 
   it('hides while its source is off screen', () => {
@@ -194,6 +246,9 @@ describe('satSelectionGeometry: where the surface goes', () => {
     expect(left.width).toBe(size.width);
     // The caret has moved inside the rounded corner rather than staying centred.
     expect(left.arrowX).toBe(SAT_ANNOTATION_BUDGET_DEFAULTS.caretInset);
+    // The edge it was clamped against is a horizontal one: the surface is still
+    // against its line, so the caret is still drawn.
+    expect(left.clamped).toBe(false);
 
     const right = place(geometry({ top: 300, bottom: 320, left: 760, right: 800 }));
     expect(right.left + right.width).toBeLessThanOrEqual(bounds.width - EDGE);
@@ -219,7 +274,7 @@ describe('satSelectionGeometry: where the surface goes', () => {
     );
     expect(above.side).toBe('above');
     expect(above.arrowX).toBe(260);
-    expect(above.top).toBe(300 - size.height - SAT_ANNOTATION_BUDGET_DEFAULTS.gap);
+    expect(above.top).toBe(300 - size.height - GAP);
 
     const below = place(
       geometry({
@@ -233,7 +288,7 @@ describe('satSelectionGeometry: where the surface goes', () => {
     );
     expect(below.side).toBe('below');
     expect(below.arrowX).toBe(260);
-    expect(below.top).toBe(120 + SAT_ANNOTATION_BUDGET_DEFAULTS.gap);
+    expect(below.top).toBe(120 + GAP);
   });
 
   it('settles a substantial move and applies a nudge directly', () => {
@@ -267,39 +322,5 @@ describe('satSelectionGeometry: where the surface goes', () => {
     const next = place(geometry({ top: 300, bottom: 320 }), { previous: moving });
     expect(next.left).toBe(256);
     expect(next.animated).toBe(false);
-  });
-});
-
-describe('satSelectionGeometry: the dock', () => {
-  it('docks to the bottom of the exam body', () => {
-    const placementResult = placeSatAnnotationDock(bounds, viewport, { width: 784, height: 168 }, EDGE);
-    expect(placementResult.mode).toBe('docked');
-    expect(placementResult.left).toBe(EDGE);
-    expect(placementResult.top).toBe(bounds.height - 168 - EDGE);
-    expect(placementResult.width).toBe(bounds.width - EDGE * 2);
-    expect(placementResult.side).toBeNull();
-  });
-
-  it('docks to what the student can SEE, not to the container', () => {
-    // A software keyboard shrinks the visible region while the exam shell keeps
-    // its own height (the shell freezes it on purpose). Docking against the
-    // container would pin the sheet under the keyboard — present, unreachable.
-    const tallContainer = { left: 0, top: 0, width: 800, height: 700 };
-    const keyboardShrunk = { left: 0, top: 0, width: 800, height: 400 };
-    const docked = placeSatAnnotationDock(tallContainer, keyboardShrunk, { width: 320, height: 168 }, EDGE);
-    expect(docked.top + 168).toBeLessThanOrEqual(keyboardShrunk.height - EDGE);
-
-    // Sheet taller than the visible slice: the bound is the room beneath its own
-    // top edge, so its contents scroll instead of spilling off the screen.
-    const cramped = placeSatAnnotationDock(tallContainer, { left: 0, top: 0, width: 800, height: 120 }, { width: 320, height: 168 }, EDGE);
-    expect(cramped.top).toBe(EDGE);
-    expect(cramped.maxHeight).toBe(120 - EDGE * 2);
-
-    // The same reasoning horizontally: a zoomed-in visible region is the sheet's
-    // extent, so its controls can never sit off the visible slice.
-    const zoomedIn = { left: 200, top: 0, width: 300, height: 400 };
-    const zoomed = placeSatAnnotationDock(bounds, zoomedIn, { width: 320, height: 168 }, EDGE);
-    expect(zoomed.left).toBe(200 + EDGE);
-    expect(zoomed.left + zoomed.width).toBeLessThanOrEqual(zoomedIn.left + zoomedIn.width - EDGE);
   });
 });

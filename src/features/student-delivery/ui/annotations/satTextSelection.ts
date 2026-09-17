@@ -10,14 +10,20 @@ export interface SatTextSelectionOptions {
 }
 
 /**
- * True when a pointer target belongs to annotation chrome (contextual toolbar,
- * touch dock, edit dock, note card) rather than to the passage. The content's
- * document-level gesture listener uses this to ignore its own controls.
+ * True when a pointer target belongs to annotation chrome (the selection
+ * toolbar, a mark's edit controls, a note card) rather than to the passage. The
+ * content's document-level gesture listener uses this to ignore its own
+ * controls.
+ *
+ * The chrome earns its own markers rather than being recognized by structure:
+ * a surface that is mounted but hidden deliberately omits them (see the
+ * selection panel), and a bare `[role="toolbar"]` would have claimed the
+ * interaction hooks of a surface nobody can see.
  */
 export function isSatSelectionInsideAnnotationUi(target: Node): boolean {
   const element = target.nodeType === Node.ELEMENT_NODE ? (target as Element) : target.parentElement;
   return element?.closest(
-    '[data-sat-selection-toolbar="true"], [data-sat-touch-dock="true"], [data-sat-annotation-edit-dock="true"], [data-sat-note-card="true"]',
+    '[data-sat-selection-toolbar="true"], [data-sat-annotation-edit-controls="true"], [data-sat-note-card="true"]',
   ) != null;
 }
 

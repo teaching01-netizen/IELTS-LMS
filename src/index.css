@@ -1326,18 +1326,18 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-annotation-active-ring: rgba(0, 0, 0, 0.45);
   /* Annotation chrome motion (C4: exam TSX carries no duration literals). */
   --sat-motion-annotation: 140ms;
-  --sat-annotation-dock-shadow: 0 -2px 8px rgb(0 0 0 / 12%);
   /* Annotation surface placement (Highlights & Notes). BUDGETS, not guesses:
    * `native-ui-zone` is the height the native selection menu needs, which is
    * what decides WHICH LANE it will take on a coarse pointer (above, unless it
    * does not fit there) — and that lane is never ours, because the browser
    * paints its menu over our surface. `comfort` is why a surface that
-   * technically fits by 2px still docks, and `selection-ratio` hands a selection
-   * that covers the viewport to the dock, where "nearby" has stopped meaning
-   * anything. `comfort-fine` is the same idea for a mouse, which has no native
-   * menu and therefore no lane to give up. Every value is mirrored as a fallback
-   * in satSelectionGeometry.ts, which the runtime prefers these over (jsdom
-   * reads none of them). */
+   * technically fits by 2px asks for the roomier side instead, and
+   * `comfort-fine` is the same idea for a mouse, which has no native menu and
+   * therefore no lane to give up. There is no "does not fit at all" token on
+   * purpose: the surface floats either way, and a placement with no comfortable
+   * room is clamped inside the visible region rather than presented differently.
+   * Every value is mirrored as a fallback in satSelectionGeometry.ts, which the
+   * runtime prefers these over (jsdom reads none of them). */
   --sat-annotation-edge: 12px;
   --sat-annotation-native-ui-zone: 80px;
   --sat-annotation-gap: 12px;
@@ -1352,9 +1352,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-annotation-surface-border: 1px;
   --sat-annotation-comfort: 24px;
   --sat-annotation-comfort-fine: 12px;
-  --sat-annotation-surface-min: 280px;
   --sat-annotation-surface-max: 340px;
-  --sat-annotation-selection-ratio: 0.3;
   --sat-annotation-caret: 6px;
   --sat-annotation-caret-inset: 20px;
   --sat-annotation-switch-margin: 24px;
@@ -1486,7 +1484,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   text-rendering: optimizeLegibility;
 }
 
-/* Annotation toolbar / dock entrance (Highlights & Notes): a system control
+/* Annotation toolbar entrance (Highlights & Notes): a system control
  * becoming available, not a panel sliding in. 140ms, 4px rise, opacity. */
 @keyframes sat-annotation-enter {
   from {
@@ -1499,27 +1497,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   }
 }
 
-/* The dock arrives from its own edge (a sheet, not a floating panel). Two
- * animation names, not one: swapping modes therefore restarts the entrance by
- * itself, which is the crossfade — the surface never travels across the screen
- * from its old coordinates to its new ones. */
-@keyframes sat-annotation-dock-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 .sat-annotation-surface-floating {
   animation: sat-annotation-enter var(--sat-motion-annotation) ease-out;
-}
-
-.sat-annotation-surface-docked {
-  animation: sat-annotation-dock-enter var(--sat-motion-annotation) ease-out;
 }
 
 /* A larger reposition (scroll, resize, a handle nudge that moved the anchor
@@ -1533,7 +1512,8 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 
 /* The caret: the one thing that says "this control belongs to THAT text".
  * Border-drawn (never a gradient or an image), filled with the surface color
- * so it reads as part of the panel, and removed entirely in dock mode.
+ * so it reads as part of the panel, and dropped entirely when the placement had
+ * to clamp the surface away from its line (nothing honest left to point at).
  *
  * It lives in a layer that extends one border-width past the surface on every
  * side, because an absolutely positioned child is measured from the padding box

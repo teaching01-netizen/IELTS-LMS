@@ -81,7 +81,7 @@ export type SatAnnotationUndoEntry =
  * chrome.
  *
  * It exists because the shell is a layout component. Rendering a contextual
- * toolbar, a dock, an edit dock, and a note card does not mean the shell should
+ * toolbar, a mark's edit controls, and a note card does not mean the shell should
  * also own nine mutation callbacks, five pieces of chrome state, the undo
  * entry, the announcements, and the teaching cues — that made a 450-line shell
  * into a 780-line one, and put "what annotation chrome is showing" in two
@@ -357,7 +357,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       if (!noteEditorAnnotation) return;
       // Deleting from a bare mark removes the whole annotation. A note-bearing
       // mark keeps its ink and loses only the text: the eraser equivalent is
-      // Remove in the edit dock.
+      // Remove in the mark's edit controls.
       if (note === undefined && !noteEditorAnnotation.note) {
         removeMark(noteEditorAnnotation);
         return;
@@ -416,8 +416,8 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     return () => window.clearTimeout(timer);
   }, [undoEntry]);
 
-  // A fresh selection closes the edit dock (they are two answers to "what am I
-  // working on?"), and demonstrating the gesture retires the activation cue.
+  // A fresh selection closes a mark's edit controls (they are two answers to
+  // "what am I working on?"), and demonstrating the gesture retires the cue.
   useEffect(() => {
     if (!selection) return;
     dismissMarkControls();

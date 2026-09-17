@@ -271,6 +271,28 @@ describe('SAT shell annotation flow (armed mode)', () => {
     expect(container.querySelector('[data-sat-highlight="true"]')).toBeNull();
   });
 
+  it('lets the student close the popover by pressing the passage instead', () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    armHighlights();
+    selectStimulusText(container, 'Several');
+    expect(screen.getByRole('toolbar', { name: 'Selected text actions' })).toBeInTheDocument();
+
+    // A press anywhere outside the tools is the student leaving — the same
+    // meaning every system selection menu has already taught them. Dispatched on
+    // the passage on purpose: that press is also the beginning of the NEXT
+    // selection, and leaving must still win over re-arming the tools.
+    const passage = container.querySelector('[data-sat-annotation-region="stimulus"]')!;
+    act(() => {
+      passage.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true }));
+    });
+
+    expect(screen.queryByRole('toolbar', { name: 'Selected text actions' })).not.toBeInTheDocument();
+    // Leaving the tools is neither editing nor disarming: the marks and the mode
+    // are exactly where the student left them.
+    expect(container.querySelector('[data-sat-highlight="true"]')).toBeNull();
+    expect(highlightsToggle()).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('underlines a selection from the same toolbar', () => {
     const { container } = render(<SatAccessibilityDebugRoute />);
     armHighlights();

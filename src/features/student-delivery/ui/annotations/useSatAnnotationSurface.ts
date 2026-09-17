@@ -1,40 +1,46 @@
 import type { SatTextAnchor } from '../../domain/satResponses';
 import { satAnnotationSurfaceChrome, type SatAnnotationSurfaceChrome } from './SatAnnotationSurfaceFrame';
 import { useSatAnnotationAutofocus } from './useSatAnnotationAutofocus';
+import { useSatAnnotationDismiss } from './useSatAnnotationDismiss';
 import { useSatAnnotationPlacement } from './useSatAnnotationPlacement';
 import type { AnnotationPlacement } from './satSelectionGeometry';
 
 /**
  * Everything a surface needs to exist, in one call: where it goes, the chrome
- * that renders that answer, and the node both of them measure and focus inside.
+ * that renders that answer, the node both of them measure and focus inside, and
+ * the rule for when a press outside it counts as leaving.
  *
  * The two surfaces — selection tools and a mark's edit tools — differ only in
  * the actions they hold and in what the caret's landing is keyed to. Everything
  * else was written twice before this existed, including the two refs bound to
  * one DOM node, which is the kind of duplication that drifts silently: the
  * measurement scope and the focus scope are the same element, so they get one
- * ref rather than two names for it.
+ * ref rather than two names for it. Dismissal is the same bargain: the popover's
+ * own node is what says where "outside" begins, so it comes from the same ref,
+ * and neither surface can be the one that forgot to wire it.
  */
 export function useSatAnnotationSurface(
   anchor: SatTextAnchor | null,
   options: {
     /** Identity of the thing the caret lands in; a new value re-focuses once. */
     autoFocusKey: string;
-    /** Force the dock. Only for layouts docked by contract; geometry decides otherwise. */
-    dock?: boolean | undefined;
-    /** Coarse pointer: widen the budget for the native selection menu's zone. */
+    /** Coarse pointer: reserve the native selection menu's lane and widen the budget. */
     touch?: boolean | undefined;
+    /**
+     * Close the surface because the student pressed outside it. Required on
+     * purpose: a popover with no way out except Escape is a modal, and neither
+     * of these is one.
+     */
+    onDismiss: () => void;
   },
 ): {
   placement: AnnotationPlacement | null;
   chrome: SatAnnotationSurfaceChrome;
-  /** The surface's own node: measured for placement, scoped for the caret. */
+  /** The surface's own node: measured for placement, scoped for the caret and for dismissal. */
   containerRef: React.RefObject<HTMLDivElement | null>;
 } {
-  const { placement, containerRef } = useSatAnnotationPlacement(anchor, {
-    dock: options.dock,
-    touch: options.touch,
-  });
+  const { placement, containerRef } = useSatAnnotationPlacement(anchor, { touch: options.touch });
   useSatAnnotationAutofocus(placement, options.autoFocusKey, containerRef);
+  useSatAnnotationDismiss(containerRef, options.onDismiss);
   return { placement, chrome: satAnnotationSurfaceChrome(placement), containerRef };
 }

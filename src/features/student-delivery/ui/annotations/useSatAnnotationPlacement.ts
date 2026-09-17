@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SatTextAnchor } from '../../domain/satResponses';
 import { readSatAnnotationBudgets, readSatAnnotationSeconds } from './satAnnotationBudgets';
-import { measureSatAnnotation, SAT_ANNOTATION_DOCK_FALLBACK_SIZE } from './satAnnotationPlacementRuntime';
+import { measureSatAnnotation } from './satAnnotationPlacementRuntime';
 import {
   hiddenSatAnnotationPlacement,
-  placeSatAnnotationDock,
   placeSatAnnotationSurface,
   type AnnotationPlacement,
 } from './satSelectionGeometry';
@@ -53,15 +52,9 @@ function newSession(): SatAnnotationPlacementSession {
 
 export interface SatAnnotationPlacementOptions {
   /**
-   * Force the dock. Only for layouts that are docked by contract (tests,
-   * embedded chrome); the exam shell asks for `floating` and lets the space
-   * budget decide, which is the whole point of the engine.
-   */
-  dock?: boolean | undefined;
-  /**
-   * Coarse pointer. It never chooses the presentation — it widens the budget,
-   * because the native selection menu needs a zone of its own on touch and
-   * nothing needs one under a mouse.
+   * Coarse pointer. It never chooses the presentation — there is only one — it
+   * reserves the lane the native selection menu will claim and asks for a
+   * roomier budget, because a finger needs more than a cursor does.
    */
   touch?: boolean | undefined;
 }
@@ -105,7 +98,6 @@ export function useSatAnnotationPlacement(
   const session = useRef<SatAnnotationPlacementSession>(newSession());
   const frameRef = useRef<number | null>(null);
   const settleRef = useRef<number | null>(null);
-  const forcedDock = options.dock === true;
   const touch = options.touch === true;
 
   /** Take a decision as final: it is what the student sees from now on. */
@@ -135,16 +127,6 @@ export function useSatAnnotationPlacement(
     const measurement = measureSatAnnotation(containerRef.current, anchor);
     const budgets = readSatAnnotationBudgets();
 
-    if (forcedDock) {
-      reveal(placeSatAnnotationDock(
-        measurement.bounds,
-        measurement.viewport,
-        measurement.size ?? SAT_ANNOTATION_DOCK_FALLBACK_SIZE,
-        budgets.edge,
-      ));
-      return;
-    }
-
     if (!anchor) {
       session.current.previous = null;
       setPlacement(null);
@@ -155,7 +137,7 @@ export function useSatAnnotationPlacement(
       // Unmeasurable: stay visible in the preferred mode rather than vanish or
       // guess a position from nothing. Deliberately NOT recorded as the previous
       // placement — it is not a decision, and it must not steer hysteresis.
-      setPlacement({ mode: 'floating', left: UNMEASURABLE_INSET, top: UNMEASURABLE_INSET, width: 0, maxHeight: 0, side: null, arrowX: 0, animated: false });
+      setPlacement({ mode: 'floating', left: UNMEASURABLE_INSET, top: UNMEASURABLE_INSET, width: 0, maxHeight: 0, side: null, arrowX: 0, animated: false, clamped: false });
       return;
     }
 
@@ -187,7 +169,7 @@ export function useSatAnnotationPlacement(
       touch,
       budgets,
     }));
-  }, [anchor, armRemeasure, forcedDock, reveal, settleCapMs, touch]);
+  }, [anchor, armRemeasure, reveal, settleCapMs, touch]);
 
   // The settle timer outlives any single subscription: a rotation wait must not
   // be cancelled by a re-render, and when it ends it has to place the selection

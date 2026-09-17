@@ -4,11 +4,11 @@ import { expect, test, type Page } from '@playwright/test';
  * Annotation surface placement: the invariants, in a real browser.
  *
  * The unit suites prove the rules (float only with comfortable room, keep the
- * side you chose, dock when the visible region cannot hold a toolbar) against
- * geometry the test supplies. They cannot prove the thing a student actually
- * experiences, because jsdom has no layout: whether the surface lands where the
- * student can reach it, whether the caret points at the words, and whether a
- * toolbar appears at all on the device they are holding.
+ * side you chose, pin inside the visible region when there is no room beside the
+ * words) against geometry the test supplies. They cannot prove the thing a
+ * student actually experiences, because jsdom has no layout: whether the surface
+ * lands where the student can reach it, whether the caret points at the words,
+ * and whether a toolbar appears at all on the device they are holding.
  *
  * So this file asserts geometry, per device profile, from the live DOM:
  *
@@ -18,8 +18,8 @@ import { expect, test, type Page } from '@playwright/test';
  *   3. its caret points at the line it belongs to — the first selected line when
  *      it floats above, the last when it floats below;
  *   4. it keeps a usable width;
- *   5. a viewport that cannot hold a toolbar docks instead, and the dock is
- *      inside the visible region too;
+ *   5. a viewport that cannot hold a toolbar still gets a toolbar, pinned inside
+ *      the visible region — there is no second presentation to retreat to;
  *   6. it appears promptly, but not the instant the gesture ends;
  *   7. the LANE follows the pointer type: the native selection menu owns the
  *      space above the selection on glass, so the toolbar takes the side below
@@ -28,11 +28,12 @@ import { expect, test, type Page } from '@playwright/test';
  * Phrase choices are deliberate. A selection near the top of a passage has no
  * conflict-free lane on glass (iOS flips its menu down into the only room, and
  * the lane above it is too short for a toolbar), so the cases that assert a
- * floating toolbar select mid-passage text, while the dock case deliberately
- * uses a viewport too short for any lane to hold the controls.
+ * caret-bearing toolbar select mid-passage text, while the cramped case
+ * deliberately uses a viewport too short for any lane to hold the controls.
  */
 
-const SURFACE_SELECTOR = '[data-sat-selection-toolbar="true"], [data-sat-touch-dock="true"]';
+/** The one annotation surface there is. */
+const SURFACE_SELECTOR = '[data-sat-selection-toolbar="true"]';
 
 /** The profiles a student actually sits an exam on. */
 const PROFILES = [
@@ -107,7 +108,6 @@ interface Box {
 }
 
 interface PlacementGeometry {
-  mode: 'floating' | 'docked';
   surface: Box;
   /** The surface's positioning container — what "room above" is measured from. */
   bounds: Box | null;
@@ -134,7 +134,6 @@ async function readPlacement(page: Page): Promise<PlacementGeometry> {
     const viewport = window.visualViewport;
     const container = document.querySelector('[data-sat-annotation-bounds]');
     return {
-      mode: surface.getAttribute('data-sat-touch-dock') === 'true' ? 'docked' : 'floating',
       surface: box(surface.getBoundingClientRect()),
       bounds: container ? box(container.getBoundingClientRect()) : null,
       caret: caret ? { center: (() => { const rect = caret.getBoundingClientRect(); return rect.left + rect.width / 2; })() } : null,
@@ -175,12 +174,8 @@ test.describe('annotation surface placement', () => {
       await openHarness(page);
       await selectStimulusText(page, PHRASE);
       await expect(page.locator(SURFACE_SELECTOR)).toBeVisible();
-      // A toolbar in a viewport with room for one — on glass as well as with a
-      // mouse. The dock is the fallback, not the touch default.
-      await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
 
       const geometry = await readPlacement(page);
-      expect(geometry.mode).toBe('floating');
       expectContained(geometry);
       expectDoesNotCoverSelection(geometry);
 
@@ -234,26 +229,30 @@ test.describe('annotation surface placement', () => {
     });
   }
 
-  test('docks inside the visible region when the viewport cannot hold a toolbar', async ({ page, isMobile }) => {
+  test('keeps the toolbar inside a viewport too short for it', async ({ page, isMobile }) => {
     // Phone: a short viewport is what a software keyboard leaves behind. Desktop:
     // a window too short for a toolbar is the same problem with a mouse. The
-    // selection sits at the top of the passage, where no lane can hold the
-    // controls — not the menu's, and not the one it leaves free either.
+    // selection sits at the top of the passage, where no lane holds the controls
+    // — not the one the native menu leaves, and not its own either.
     await page.setViewportSize(isMobile ? { width: 390, height: 330 } : { width: 1280, height: 300 });
     await openHarness(page);
     await selectStimulusText(page, 'Several');
 
-    const dock = page.locator('[data-sat-touch-dock="true"]');
-    await expect(dock).toBeVisible();
+    // Still a toolbar — there is no sheet to retreat to — and still inside what
+    // the student can see: the actions scroll inside it rather than hanging off
+    // the bottom edge, under the keyboard.
+    const toolbar = page.locator(SURFACE_SELECTOR);
+    await expect(toolbar).toBeVisible();
 
     const geometry = await readPlacement(page);
-    expect(geometry.mode).toBe('docked');
     expectContained(geometry);
-    // A sheet has no "that line" to point at.
-    expect(geometry.caret).toBeNull();
-    // Full-bleed within the region it is docked to, and anchored to its bottom.
-    expect(geometry.surface.width).toBeGreaterThan(SURFACE_MIN_WIDTH);
     expect(geometry.surface.bottom).toBeGreaterThan(geometry.surface.top);
+    expect(
+      await page.evaluate(() => {
+        const body = document.querySelector('[data-sat-annotation-surface-body="true"]');
+        return body ? getComputedStyle(body).overflowY : null;
+      }),
+    ).toBe('auto');
   });
 
   test('surfaces promptly, but not the instant the gesture ends', async ({ page }) => {
@@ -279,7 +278,7 @@ test.describe('annotation surface placement', () => {
       const started = performance.now();
       textNode.parentElement?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
       while (performance.now() - started < 3_000) {
-        const surface = document.querySelector('[data-sat-selection-toolbar="true"], [data-sat-touch-dock="true"]');
+        const surface = document.querySelector('[data-sat-selection-toolbar="true"]');
         if (surface && getComputedStyle(surface).visibility === 'visible') return performance.now() - started;
         await new Promise((resolve) => requestAnimationFrame(resolve));
       }
@@ -324,19 +323,18 @@ test.describe('annotation surface placement', () => {
     await page.setViewportSize({ width: 1180, height: 820 });
     await expect(page.locator(SURFACE_SELECTOR)).toBeVisible();
     const geometry = await readPlacement(page);
-    expect(geometry.mode).toBe('floating');
     expectContained(geometry);
     expectDoesNotCoverSelection(geometry);
     expect(geometry.caret, 'the surface comes back with its caret, not as a bare box').not.toBeNull();
   });
 
-  test('a software keyboard shrinking what is visible keeps the sheet reachable', async ({ page }) => {
+  test('a software keyboard shrinking what is visible keeps the toolbar reachable', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openHarness(page);
     // A selection small enough to float on its own, so the keyboard's arrival is
     // the only thing that can move it.
     await selectStimulusText(page, PHRASE);
-    await expect(page.locator('[data-sat-selection-toolbar="true"]')).toBeVisible();
+    await expect(page.locator(SURFACE_SELECTOR)).toBeVisible();
 
     // A note field takes focus and the keyboard rises: the LAYOUT viewport keeps
     // its height while the visible region loses most of it. A surface placed
@@ -369,16 +367,14 @@ test.describe('annotation surface placement', () => {
       'the harness runs in a browser with a visual viewport',
     ).toBe(true);
 
-    // The same selection that floated a moment ago is now a sheet: the visible
-    // region cannot hold a toolbar any more.
-    await expect(page.locator('[data-sat-touch-dock="true"]')).toBeVisible();
+    // The same selection that floated a moment ago now has nowhere to sit beside
+    // the words: the toolbar is pinned inside what is left of the viewport.
+    await expect(page.locator(SURFACE_SELECTOR)).toBeVisible();
     const geometry = await readPlacement(page);
-    expect(geometry.mode).toBe('docked');
     expectContained(geometry);
     // Above the keyboard's edge, not merely inside the page — the difference
     // between a control the student can reach and one hidden under glass.
     expect(geometry.surface.bottom).toBeLessThanOrEqual(301);
-    expect(geometry.caret).toBeNull();
 
     // And when the keyboard leaves even less than that, the selection itself is
     // off the visible region: a contextual surface with no visible source hides

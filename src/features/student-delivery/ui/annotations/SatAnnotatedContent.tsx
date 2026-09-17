@@ -235,7 +235,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
                     // A drag that ends on a mark is the student selecting NEW text
                     // (the selection is already reported); only a real tap opens the
                     // editor, otherwise the toolbar would vanish under their finger
-                    // and the edit dock would open instead.
+                    // and that mark's edit controls would open instead.
                     if (isSatDragRelease(event.clientX, event.clientY)) return;
                     view.openEditor(match);
                   },

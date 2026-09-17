@@ -6,11 +6,11 @@ import { useSatAnnotationPlacement } from '../useSatAnnotationPlacement';
 
 /**
  * The runtime half of annotation placement: the pure engine is tested on its
- * own, and this is what proves the WIRING — that a coarse pointer widens the
- * budget instead of dictating the presentation, that the surface waits for the
- * geometry to settle before it appears, that the dock follows the visible region
- * rather than the container, and that a surface the DOM cannot measure stays
- * reachable instead of vanishing.
+ * own, and this is what proves the WIRING — that a coarse pointer reserves the
+ * native menu's lane instead of dictating the presentation, that the surface
+ * waits for the geometry to settle before it appears, that the VISIBLE region is
+ * the bound rather than the container, and that a surface the DOM cannot measure
+ * stays reachable instead of vanishing.
  *
  * jsdom measures nothing (no layout, no Range rects), so every measurement the
  * runtime depends on is supplied explicitly. The stubs are the environment, not
@@ -104,6 +104,7 @@ function Harness({ selection, touch }: { selection: SatTextAnchor | null; touch:
         data-top={placement?.top ?? -1}
         data-left={placement?.left ?? -1}
         data-width={placement?.width ?? -1}
+        data-max-height={placement?.maxHeight ?? -1}
       />
       <button type="button" data-testid="remeasure" onClick={measure}>
         remeasure
@@ -141,7 +142,7 @@ describe('useSatAnnotationPlacement', () => {
     expect(surface().dataset['mode']).toBe('floating');
   });
 
-  it('floats in the lane the native menu leaves free, and docks when it leaves none', async () => {
+  it('floats in the lane the native menu leaves free', async () => {
     stubSurfaceSize();
     stubAnchorBox(200, 220);
 
@@ -156,32 +157,35 @@ describe('useSatAnnotationPlacement', () => {
 
     stubVisualViewport(800);
     render(<Harness selection={anchor} touch />);
-    // More room, same lane: the dock was never a property of the device.
+    // More room, same lane: which lane is free was never a property of the device.
     await settled('floating');
     expect(surface().dataset['side']).toBe('below');
   });
 
-  it('docks on touch when the menu has taken the lane with all the room', async () => {
+  it('floats past the menu when the menu has taken the lane with all the room', async () => {
     stubSurfaceSize();
     stubVisualViewport(400);
     // High in the visible region: iOS cannot fit its menu above and flips it
-    // below — the lane we would have used — and above has nothing to offer, so
-    // the sheet is the answer instead of a toolbar under the menu.
+    // below — the lane we would have used — and above has nothing to offer.
+    // The toolbar goes into the menu's lane anyway, but clear of the zone the
+    // menu itself paints over, so a phone still gets a toolbar it can press.
     stubAnchorBox(60, 80);
     render(<Harness selection={anchor} touch />);
-    await settled('docked');
+    await settled('floating');
+    expect(surface().dataset['side']).toBe('below');
+    expect(Number(surface().dataset['top'])).toBe(80 + 80 + 12);
   });
 
-  it('comes out of the dock for real room and re-decides for a new selection', async () => {
+  it('follows the room that appears and re-decides for a new selection', async () => {
     stubSurfaceSize();
     stubVisualViewport(400);
     stubAnchorBox(60, 80);
     const { rerender } = render(<Harness selection={anchor} touch />);
-    await settled('docked');
+    await settled('floating');
+    expect(surface().dataset['side']).toBe('below');
 
-    // Room appears (the keyboard closed, the passage scrolled) and it is worth
-    // the move: the sheet becomes a toolbar again rather than staying one for
-    // the whole selection.
+    // Room appears (the keyboard closed, the passage scrolled): the surface is
+    // placed against the words again, in the lane the menu now leaves free.
     stubVisualViewport(800);
     stubAnchorBox(300, 320);
     remeasure();
@@ -211,24 +215,26 @@ describe('useSatAnnotationPlacement', () => {
     expect(surface().dataset['side']).toBe('below');
   });
 
-  it('follows the visible region, not the container, when it docks', async () => {
+  it('bounds the surface with the visible region, not the container', async () => {
     stubSurfaceSize(320, 168);
-    stubVisualViewport(400);
-    // The shell freezes its own height while the software keyboard is open, so
-    // the container stays tall while only 400px remain visible.
+    // A phone with the software keyboard up: the shell freezes its own height,
+    // so the container stays tall while only 110px remain visible.
+    stubVisualViewport(110);
     vi.spyOn(
       document.querySelector<HTMLElement>('[data-sat-annotation-bounds="true"]')!,
       'getBoundingClientRect',
     ).mockReturnValue({ top: 0, left: 0, width: 800, height: 700 } as DOMRect);
-    // A selection that covers half the visible region: no "nearby" to float in.
-    stubAnchorBox(60, 260);
-    render(<Harness selection={anchor} touch />);
+    stubAnchorBox(40, 60);
+    render(<Harness selection={anchor} touch={false} />);
 
-    await settled('docked');
-    const top = Number(surface().dataset['top']);
-    // Pinned above the visible bottom edge (400 - 12), not the container's (700).
-    expect(top + 168).toBeLessThanOrEqual(400 - 12);
-    expect(top).toBeLessThan(400);
+    await settled('floating');
+    // Pinned to the top of what the student can see, with its rows bounded by the
+    // visible bottom edge (110 - 12) rather than the container's (700): the
+    // actions scroll instead of hiding under the keyboard, and the surface never
+    // grows past the region it was placed in.
+    expect(Number(surface().dataset['top'])).toBe(12);
+    expect(Number(surface().dataset['maxHeight'])).toBe(110 - 12 * 2);
+    expect(Number(surface().dataset['maxHeight'])).toBeLessThan(168);
   });
 
   it('holds the surface hidden while the device is turning', async () => {
@@ -282,7 +288,6 @@ describe('SatSelectionActionsPanel', () => {
         anchor={anchor}
         currentColor="yellow"
         actions={actions}
-        variant="floating"
         touch={touch}
         onClose={() => {}}
       />,
@@ -290,22 +295,19 @@ describe('SatSelectionActionsPanel', () => {
     );
   }
 
-  it('honours a geometry-driven dock even though it was asked to float', async () => {
+  it('keeps the toolbar and drops the caret when the placement has to pin it', async () => {
     stubSurfaceSize();
-    stubVisualViewport(400);
-    // High in the visible region: the native menu cannot fit above and flips
-    // below, leaving us the lane with no room in it. The requested presentation
-    // was `floating`; the space budget said otherwise.
-    stubAnchorBox(60, 80);
-    renderPanel(true);
+    // A visible region shorter than the surface itself: there is nowhere to sit
+    // beside the words, so the toolbar is pinned inside the region.
+    stubVisualViewport(110);
+    stubAnchorBox(40, 60);
+    renderPanel(false);
 
-    // The dock is what the student gets — with the selection quoted back, so the
-    // sheet is visibly attached to that text, and without a caret, because a
-    // sheet has no "that line" to point at.
-    await waitFor(() => expect(document.querySelector('[data-sat-touch-dock="true"]')).not.toBeNull());
-    expect(document.querySelector('[data-sat-selection-toolbar="true"]')).toBeNull();
-    expect(document.querySelector('[data-sat-dock-quote="true"]')).not.toBeNull();
+    // Still the toolbar — one presentation, and it scrolls its own rows — but
+    // with no caret, because it is not against that line any more.
+    await waitFor(() => expect(document.querySelector('[data-sat-selection-toolbar="true"]')).not.toBeNull());
     expect(document.querySelector('[data-sat-annotation-caret]')).toBeNull();
+    expect(document.querySelector('[data-sat-annotation-surface-body]')).not.toBeNull();
   });
 
   it('points a touch surface at the lane the native menu leaves free', async () => {
@@ -335,7 +337,6 @@ describe('SatSelectionActionsPanel', () => {
     // it is positioned inside the layer that sits on the surface's border box.
     expect(caret.getAttribute('data-sat-annotation-caret')).toBe('down');
     expect(caret.closest('.sat-annotation-caret-layer')).not.toBeNull();
-    expect(document.querySelector('[data-sat-dock-quote="true"]')).toBeNull();
   });
 
   it('claims no interaction hooks while it is waiting to settle', () => {
@@ -350,6 +351,5 @@ describe('SatSelectionActionsPanel', () => {
     const toolbar = document.querySelector('[role="toolbar"]')!;
     expect(toolbar).not.toBeNull();
     expect(toolbar.getAttribute('data-sat-selection-toolbar')).toBeNull();
-    expect(toolbar.getAttribute('data-sat-touch-dock')).toBeNull();
   });
 });

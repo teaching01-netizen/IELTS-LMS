@@ -1,5 +1,6 @@
 /**
- * The numbers that decide float vs dock, and where they come from.
+ * The numbers that decide where the floating annotation surface sits, and where
+ * they come from.
  *
  * They live here, with the reader that loads them, because they are ONE piece of
  * vocabulary: the placement engine takes them as input, CSS declares them, and
@@ -30,16 +31,9 @@ export interface SatAnnotationBudgets {
   comfort: number;
   /** The same idea for a mouse, where just-fits is merely tight. */
   comfortFine: number;
-  /**
-   * Narrower than this and the controls would have to shrink or cram onto
-   * several rows; the dock is the honest answer instead.
-   */
-  surfaceMin: number;
-  /** A selection taller than this fraction of the viewport has no "nearby". */
-  selectionRatio: number;
   /** Keeps the caret away from the surface's rounded corners. */
   caretInset: number;
-  /** Extra room a side must offer to justify moving to it (or out of the dock). */
+  /** Extra room a side must offer to justify moving to it. */
   switchMargin: number;
   /** A move larger than this settles; anything smaller is applied directly. */
   stableDelta: number;
@@ -51,8 +45,6 @@ export const SAT_ANNOTATION_BUDGET_DEFAULTS: SatAnnotationBudgets = {
   gap: 12,
   comfort: 24,
   comfortFine: 12,
-  surfaceMin: 280,
-  selectionRatio: 0.3,
   caretInset: 20,
   switchMargin: 24,
   stableDelta: 8,
@@ -65,8 +57,6 @@ const BUDGET_TOKENS: ReadonlyArray<readonly [keyof SatAnnotationBudgets, string]
   ['gap', '--sat-annotation-gap'],
   ['comfort', '--sat-annotation-comfort'],
   ['comfortFine', '--sat-annotation-comfort-fine'],
-  ['surfaceMin', '--sat-annotation-surface-min'],
-  ['selectionRatio', '--sat-annotation-selection-ratio'],
   ['caretInset', '--sat-annotation-caret-inset'],
   ['switchMargin', '--sat-annotation-switch-margin'],
   ['stableDelta', '--sat-annotation-stable-delta'],
@@ -109,8 +99,7 @@ export function readSatAnnotationSeconds(variable: string, fallbackSeconds: numb
  * Resolve a budget for this input. A coarse pointer is the only difference
  * between the two worlds: it introduces the native selection menu, whose lane is
  * reserved for the browser (see `placeSatAnnotationSurface`), and it asks for a
- * comfort buffer rather than a mouse's tighter one — which is exactly when
- * docking becomes the kinder answer.
+ * comfort buffer rather than a mouse's tighter one.
  */
 export function resolveSatAnnotationBudgets(
   touch: boolean,

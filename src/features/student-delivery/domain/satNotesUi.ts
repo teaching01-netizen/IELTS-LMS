@@ -39,9 +39,9 @@ export function satNotesColumnOpen(state: SatNotesUiState): boolean {
 /**
  * The single translation from the interaction machine to the notes UI.
  *
- * `editingMarkId` is the one input the machine cannot own: it is the edit dock's
- * own presentation state ("this mark's colour/underline controls are showing"),
- * and it only ever *rings* a card, never opens a column.
+ * `editingMarkId` is the one input the machine cannot own: it is the mark's own
+ * edit controls' presentation state ("this mark's colour/underline controls are
+ * showing"), and it only ever *rings* a card, never opens a column.
  */
 export function satNotesUiFromSurface(
   surface: SatExclusiveSurface,

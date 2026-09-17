@@ -25,7 +25,7 @@ import { useSatAnnotationSurface } from '../hooks/useSatAnnotationSurface';
 import type { SatQuestionAnnotations } from '../domain/satResponses';
 import { SAT_QUESTION_NOTE_EDITOR, satNotesColumnOpen, satNotesCount } from '../domain/satNotesUi';
 import { SAT_COPY } from '../domain/satCopy';
-import { SatAnnotationEditDock } from './annotations/SatAnnotationEditDock';
+import { SatAnnotationEditControls } from './annotations/SatAnnotationEditControls';
 import { SatAnnotationViewContext } from './annotations/SatAnnotationViewContext';
 import { SatNotesSurfaceHost } from './annotations/SatNotesSurfaceHost';
 import { SatSelectionActionsPanel } from './annotations/SatSelectionActionsPanel';
@@ -58,8 +58,8 @@ export interface SatExamShellProps {
   children: ReactNode;
   /**
    * Highlights & Notes: the shell owns annotation mutation so the contextual
-   * toolbar, the dock, and the note card can all write the same response. The
-   * content renderer only paints marks and reports gestures.
+   * toolbar and the note card can both write the same response. The content
+   * renderer only paints marks and reports gestures.
    */
   annotations?: SatQuestionAnnotations | undefined;
   onAnnotationsChange?: ((annotations: SatQuestionAnnotations) => void) | undefined;
@@ -250,8 +250,8 @@ export function SatExamShell(props: SatExamShellProps) {
       // performs the dismiss; this branch suppresses the surface-close so
       // exactly one state change happens per press).
       if (timerWarningVisible && !props.blocked) return;
-      // Annotation chrome answers before exam surfaces: the edit dock is the
-      // innermost thing the student opened.
+      // Annotation chrome answers before exam surfaces: a mark's edit controls
+      // are the innermost thing the student opened.
       if (closeMarkEditor()) return;
       // The Notes column is inline now, so nothing else can hand focus back to
       // the control that opened it; Escape goes through the same close path as
@@ -508,17 +508,20 @@ export function SatExamShell(props: SatExamShellProps) {
           </SatNotesSurfaceHost>
         </SatAnnotationViewContext.Provider>
         {/* Contextual annotation tools. Exactly one is mounted at a time:
-            a mark editor when a mark is being changed, otherwise the selection
-            toolbar/dock while a selection is live.
+            a mark's edit controls when a mark is being changed, otherwise the
+            selection toolbar while a selection is live.
 
-            Both ask for a floating surface and let the placement engine decide:
-            it docks them only when the space budget refuses (a cramped visual
-            viewport, a selection that covers the screen, no room for the
-            controls at a usable size). A coarse pointer does not force the
-            dock — it widens the budget, because the native selection menu needs
-            a zone of its own on touch and nothing needs one under a mouse. */}
+            Both are the same surface, and there is only one way for it to
+            look: a floating toolbar against the selection, with a caret
+            pointing at the line it belongs to. There is no docked sheet to fall
+            back to — when the room is not there the surface is pinned inside
+            what the student can see, drops its caret rather than pointing at a
+            line it is no longer beside, and scrolls its own rows. A coarse
+            pointer only widens the budget, because the native selection menu
+            needs a lane of its own on touch and nothing needs one under a
+            mouse. */}
         {editingMark ? (
-          <SatAnnotationEditDock
+          <SatAnnotationEditControls
             annotation={editingMark}
             touch={touchAnnotations}
             disabled={props.blocked || !annotationsWritable}
@@ -536,7 +539,6 @@ export function SatExamShell(props: SatExamShellProps) {
             currentColor={currentColor}
             actions={selectionActions}
             disabled={props.blocked || !annotationsWritable}
-            variant="floating"
             touch={touchAnnotations}
             onClose={surface.closeSelectionTools}
           />

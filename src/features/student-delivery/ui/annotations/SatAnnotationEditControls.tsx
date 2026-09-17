@@ -8,7 +8,7 @@ import {
   SatRemoveControl,
   SatUnderlineControl,
 } from './SatAnnotationControls';
-import { SatAnnotationCaret, SAT_ANNOTATION_ROW, SAT_ANNOTATION_ROW_DIVIDED } from './SatAnnotationSurfaceFrame';
+import { SatAnnotationCaret, SatAnnotationSurfaceBody, SAT_ANNOTATION_ROW, SAT_ANNOTATION_ROW_DIVIDED } from './SatAnnotationSurfaceFrame';
 import { useSatAnnotationSurface } from './useSatAnnotationSurface';
 
 /**
@@ -23,20 +23,20 @@ import { useSatAnnotationSurface } from './useSatAnnotationSurface';
  * undoable instead, which is both kinder and faster.
  *
  * It is the same surface as the selection tools, in edit mode: the same
- * placement engine, the same shared chrome, the same float-when-there-is-room
- * and dock-when-there-is-not rule. A mark's controls therefore appear where the
- * student left them (and where the taps that made them were), on a mouse and on
- * glass alike — `touch` widens the budget so the native selection menu's zone
- * is respected; it does not decide the presentation.
+ * placement engine, the same shared chrome, the same one presentation and the
+ * same clamp-when-there-is-no-room rule. A mark's controls therefore appear
+ * where the student left them (and where the taps that made them were), on a
+ * mouse and on glass alike — `touch` reserves the native selection menu's lane
+ * and widens the budget; it does not decide anything about how this looks.
  *
- * Since this dock is also what a mark's controls become the instant a highlight
- * lands (see useSatAnnotationSurface), it is the whole post-highlight surface:
+ * Since these controls are also what a mark becomes the instant a highlight
+ * lands (see useSatAnnotationSurface), this is the whole post-highlight surface:
  * the colors recolor the ink that just landed instead of demanding a click on
  * the text first, and Add note opens the note in the Notes pane — one editor for
  * one note, rather than a second textarea that had to agree with the first about
  * autosave, limits, and removal.
  */
-export function SatAnnotationEditDock({
+export function SatAnnotationEditControls({
   annotation,
   touch,
   disabled,
@@ -47,7 +47,7 @@ export function SatAnnotationEditDock({
   onClose,
 }: {
   annotation: SatTextAnnotation;
-  /** Coarse pointer: reserve the native selection menu's zone and comfort. */
+  /** Coarse pointer: reserve the native selection menu's lane and widen the budget. */
   touch: boolean;
   disabled?: boolean | undefined;
   onColor: (color: SatHighlightColor) => void;
@@ -55,7 +55,7 @@ export function SatAnnotationEditDock({
   /** Open this mark's note in the Notes pane, which is where notes are written. */
   onNote: () => void;
   onRemove: () => void;
-  /** Dismiss the dock; the mark and its note stay. */
+  /** Dismiss the controls; the mark and its note stay. */
   onClose: () => void;
 }) {
   // Opening a mark's editor moves the caret into it: a tap and Enter/Space on
@@ -64,6 +64,7 @@ export function SatAnnotationEditDock({
   const { placement, chrome, containerRef } = useSatAnnotationSurface(annotation.anchor, {
     autoFocusKey: annotation.id,
     touch,
+    onDismiss: onClose,
   });
   const isHighlight = annotation.kind === 'highlight';
   const hasNote = typeof annotation.note === 'string' && annotation.note.length > 0;
@@ -74,7 +75,7 @@ export function SatAnnotationEditDock({
       ref={containerRef}
       // Present for a student who can act on it, and only then — see the
       // selection surface for why a hidden surface claims no interaction hooks.
-      data-sat-annotation-edit-dock={chrome.hidden ? undefined : 'true'}
+      data-sat-annotation-edit-controls={chrome.hidden ? undefined : 'true'}
       data-sat-annotation-id={annotation.id}
       role="toolbar"
       aria-label={SAT_COPY.annotations.editAnnotation}
@@ -82,24 +83,29 @@ export function SatAnnotationEditDock({
       style={chrome.style}
     >
       <SatAnnotationCaret placement={placement} />
-      <div className="flex items-center justify-between gap-2">
+      <SatAnnotationSurfaceBody maxHeight={chrome.bodyMaxHeight}>
         <SatAnnotationHeading />
-        <SatCloseControl onSelect={onClose} disabled={disabled} label={SAT_COPY.annotations.closeTools} />
-      </div>
-      <div className={SAT_ANNOTATION_ROW}>
-        <SatHighlightSwatchButtons
-          value={isHighlight ? annotation.color : null}
-          disabled={disabled === true}
-          onSelect={onColor}
-        />
-      </div>
-      <div className={SAT_ANNOTATION_ROW_DIVIDED}>
-        <SatUnderlineControl pressed={!isHighlight} disabled={disabled === true} onSelect={onUnderline} />
-        <SatNoteControl hasNote={hasNote} disabled={disabled === true} onSelect={onNote} />
-      </div>
-      <div className={SAT_ANNOTATION_ROW + ' border-t border-[var(--sat-divider)] pt-[var(--sat-annotation-row-gap)]'}>
-        <SatRemoveControl disabled={disabled === true} label={removeLabel} onSelect={onRemove} />
-      </div>
+        <div className={SAT_ANNOTATION_ROW}>
+          <SatHighlightSwatchButtons
+            value={isHighlight ? annotation.color : null}
+            disabled={disabled === true}
+            onSelect={onColor}
+          />
+        </div>
+        <div className={SAT_ANNOTATION_ROW_DIVIDED}>
+          <SatUnderlineControl pressed={!isHighlight} disabled={disabled === true} onSelect={onUnderline} />
+          <SatNoteControl hasNote={hasNote} disabled={disabled === true} onSelect={onNote} />
+        </div>
+        {/* Removal keeps its own row below the divider, so it can never be hit
+            while reaching for an ink. The dismissal shares that row at its far
+            end: one press leaves, and it is a row away from every action that
+            changes the mark, which is the whole reason the destructive control
+            was separated in the first place. */}
+        <div className={SAT_ANNOTATION_ROW_DIVIDED + ' justify-between'}>
+          <SatRemoveControl disabled={disabled === true} label={removeLabel} onSelect={onRemove} />
+          <SatCloseControl onSelect={onClose} disabled={disabled} label={SAT_COPY.annotations.closeTools} />
+        </div>
+      </SatAnnotationSurfaceBody>
     </div>
   );
 }

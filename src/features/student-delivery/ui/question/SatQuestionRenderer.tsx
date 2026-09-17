@@ -32,8 +32,8 @@ export interface SatQuestionRendererProps {
  * Question presentation.
  *
  * Annotation MUTATION deliberately does not live here any more: the shell owns
- * it, because the contextual toolbar, the touch dock, the edit dock, and the
- * note card are all shell-level surfaces that must write the same response.
+ * it, because the contextual toolbar and the note card are both shell-level
+ * surfaces that must write the same response.
  * This component paints marks (through SatAnnotatedContent, which reads the
  * shell's view context) and reports answer changes.
  */

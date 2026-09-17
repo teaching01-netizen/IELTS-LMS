@@ -27,9 +27,6 @@ export interface SatAnnotationMeasurement {
   key: string;
 }
 
-/** Used before the surface has been measured (and wherever the DOM cannot). */
-export const SAT_ANNOTATION_DOCK_FALLBACK_SIZE = { width: 320, height: 168 };
-
 /**
  * The visual viewport, not the layout viewport. Pinch zoom, a software keyboard,
  * and Safari's own chrome all shrink what the student can actually see, and a

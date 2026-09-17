@@ -10,10 +10,22 @@ import type { SatAnchorGeometry, SatRectLike } from './satSelectionAnchor';
  * One pure function of measured numbers and a budget, and it touches no DOM: the
  * anchor is resolved in `satSelectionAnchor`, the environment in
  * `satAnnotationPlacementRuntime`, and timing in `useSatAnnotationPlacement`. So
- * every rule the student feels — "float only if there is comfortably enough
- * room", "choose a side once and stay there", "dock when the selection is the
- * whole screen" — is testable without a browser, and the React component never
- * has to know what a visual viewport is.
+ * every rule the student feels — "sit against the selection", "choose a side
+ * once and stay there", "stay inside what you can see, even if that means
+ * leaving the line" — is testable without a browser, and the React component
+ * never has to know what a visual viewport is.
+ *
+ * There is exactly ONE presentation, and it is not a setting: `floating` is a
+ * toolbar with a caret pointing at the line it belongs to. A second
+ * presentation used to exist — a full-bleed sheet docked to the bottom of the
+ * visible region — and it is gone on purpose. Two presentations meant two sets
+ * of chrome, two entrance animations, and a surface that changed shape under the
+ * student for reasons that had nothing to do with what they had just asked for.
+ * What the dock used to answer (a selection that covers the screen, a viewport
+ * too short for the controls) is answered by the same toolbar, clamped inside
+ * the visible region: `clamped` says when that clamp moved it away from its
+ * line, so the caret can be dropped rather than lie about where the surface is,
+ * and the surface's own body scrolls inside the placement's `maxHeight`.
  *
  * Where the surface goes is expressed in the coordinate space of its container,
  * which is why only the CONTAINER-RECT (bounds) and the VISIBLE-RECT (visual
@@ -25,16 +37,16 @@ import type { SatAnchorGeometry, SatRectLike } from './satSelectionAnchor';
  * toolbar. Callers re-measure on scroll/resize instead.
  */
 
-export type SatAnnotationMode = 'floating' | 'docked' | 'hidden';
+export type SatAnnotationMode = 'floating' | 'hidden';
 
 export type SatAnnotationSide = 'above' | 'below';
 
 export interface AnnotationPlacement {
   /**
-   * `floating` sits against the selection, `docked` is the sheet at the bottom
-   * of the visible region the geometry asked for, and `hidden` keeps the surface
-   * mounted (and its focus intact) while its anchor is off screen or the
-   * viewport is still moving.
+   * `floating` sits against the selection; `hidden` keeps the surface mounted
+   * (and its focus intact) while its anchor is off screen or the viewport is
+   * still moving. There is no third mode: an overlay that changed shape when the
+   * room ran out was a second presentation for a student to learn.
    */
   mode: SatAnnotationMode;
   /** Position relative to `bounds` (the surface's positioning container). */
@@ -44,8 +56,7 @@ export interface AnnotationPlacement {
   width: number;
   /**
    * Tallest the surface may be without leaving the visible region, measured from
-   * its own top. A sheet whose contents need more than the viewport has scrolls
-   * inside this bound instead of hanging off the edge of the screen.
+   * its own top. The rows scroll inside this bound when they need more room.
    */
   maxHeight: number;
   side: SatAnnotationSide | null;
@@ -53,6 +64,13 @@ export interface AnnotationPlacement {
   arrowX: number;
   /** A move big enough to settle, rather than a nudge to apply directly. */
   animated: boolean;
+  /**
+   * The surface had to be pinned inside the visible region instead of sitting
+   * the usual gap away from its line, so it is no longer against the text it
+   * belongs to. The caret is drawn from this: a caret that points at a line the
+   * panel is nowhere near is worse than no caret at all.
+   */
+  clamped: boolean;
 }
 
 export interface SatAnnotationPlacementInput {
@@ -70,9 +88,12 @@ export interface SatAnnotationPlacementInput {
   budgets?: Partial<SatAnnotationBudgets> | undefined;
 }
 
+/** A clamp under this many px is a rounding difference, not a lost line. */
+const CLAMP_EPSILON = 0.5;
+
 /** The surface is mounted but out of the way; nothing about it can be acted on. */
 export function hiddenSatAnnotationPlacement(): AnnotationPlacement {
-  return { mode: 'hidden', left: 0, top: 0, width: 0, maxHeight: 0, side: null, arrowX: 0, animated: false };
+  return { mode: 'hidden', left: 0, top: 0, width: 0, maxHeight: 0, side: null, arrowX: 0, animated: false, clamped: false };
 }
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -102,68 +123,32 @@ function intersectsViewport(anchor: SatAnchorGeometry, viewport: SatRectLike): b
 }
 
 /**
- * The dock: a sheet pinned to the bottom of what the student can SEE.
- *
- * The vertical edge is the visible region's bottom, not the container's. They
- * differ exactly when the container is taller than the viewport — which is what
- * a software keyboard does to an exam shell that deliberately freezes its own
- * height — and a sheet placed against the container would then be pinned under
- * the keyboard, present but unreachable. Same reasoning for the width: a zoomed
- * or narrowed visible region is the sheet's extent.
- *
- * Both the engine's dock answer and the runtime's forced dock come through here,
- * so there is one definition of where the dock is.
- */
-export function placeSatAnnotationDock(
-  bounds: SatRectLike,
-  viewport: SatRectLike,
-  size: { width: number; height: number },
-  edge: number,
-): AnnotationPlacement {
-  const region = visibleRegion(bounds, viewport, edge);
-  const top = Math.max(region.top, region.bottom - size.height);
-  return {
-    mode: 'docked',
-    left: region.left,
-    top,
-    width: Math.max(0, region.right - region.left),
-    maxHeight: Math.max(0, region.bottom - top),
-    side: null,
-    arrowX: 0,
-    animated: false,
-  };
-}
-
-/**
  * Where the contextual surface goes, from geometry alone.
  *
  * The order of the decisions IS the design, and it is the order a student would
  * make them in:
  *
  * 1. the source is gone → nothing to show;
- * 2. the selection IS the screen → there is no "nearby", so dock;
- * 3. the controls would not fit at a usable size → dock;
- * 4. on a coarse pointer, the lane the native selection menu will claim is not
+ * 2. on a coarse pointer, the lane the native selection menu will claim is not
  *    a candidate: the browser paints that menu OVER our surface, so sharing it
  *    means being covered by it. We take the lane the menu leaves;
- * 5. side, kept from the previous placement unless it genuinely stopped
- *    fitting, and moved only to a side that offers real room;
- * 6. otherwise the dock, which is a presentation mode and not a failure.
+ * 3. keep the side already in use while it still offers real room;
+ * 4. otherwise move only to a side that justifies the move;
+ * 5. and if no side satisfies the budget, float anyway (see `fallbackSide`):
+ *    "no comfortable room" is not a reason to take the controls away from the
+ *    student who just selected text, and it is not a reason to invent a second
+ *    presentation either. The clamp keeps it reachable and `clamped` keeps the
+ *    caret honest.
  *
- * Every move — side to side, and dock back to floating — costs the same
- * `switchMargin` of extra room, so the surface can never oscillate between two
- * arrangements that are both merely adequate.
+ * Every move — side to side — costs `switchMargin` of extra room, so the surface
+ * can never oscillate between two arrangements that are both merely adequate.
  */
 export function placeSatAnnotationSurface(input: SatAnnotationPlacementInput): AnnotationPlacement {
   const budgets = resolveSatAnnotationBudgets(input.touch, input.budgets);
   const { anchor, bounds, size, viewport } = input;
   const region = visibleRegion(bounds, viewport, budgets.edge);
-  const dock = () => placeSatAnnotationDock(bounds, viewport, size, budgets.edge);
 
   if (!intersectsViewport(anchor, viewport)) return hiddenSatAnnotationPlacement();
-  if (anchor.height / Math.max(1, viewport.height) > budgets.selectionRatio) return dock();
-  if (region.right - region.left < budgets.surfaceMin) return dock();
-  if (region.bottom - region.top < size.height + budgets.gap) return dock();
 
   // Room is measured from the safe region's edge, so the comfort buffer is part
   // of the question "does it fit", not a later fixup.
@@ -173,9 +158,8 @@ export function placeSatAnnotationSurface(input: SatAnnotationPlacementInput): A
 
   // Which lane will the native selection menu claim? iOS paints it above the
   // selection and only flips below when it cannot fit there — and it is drawn
-  // over everything we render, so on touch that lane is not ours to take: we
-  // float in the one it leaves, or we dock. A mouse has no menu, so nothing is
-  // reserved and desktop keeps the preference it has always had.
+  // over everything we render, so on touch that lane is not ours to take. A
+  // mouse has no menu, so nothing is reserved.
   const nativeLane: SatAnnotationSide | null = input.touch
     ? (roomAbove >= budgets.nativeUiZone ? 'above' : 'below')
     : null;
@@ -184,21 +168,43 @@ export function placeSatAnnotationSurface(input: SatAnnotationPlacementInput): A
   const fits = (candidate: SatAnnotationSide, extra: number) =>
     candidate !== nativeLane && room(candidate) >= requirement + extra;
 
-  // Keep the side we are already on while it still fits; otherwise take a side
-  // that justifies the move. Coming out of the dock costs the same margin as
-  // changing sides, so the surface cannot oscillate inside a band where both
-  // arrangements are merely adequate — and it is never locked into the dock for
-  // the rest of the selection's life either.
-  const changeCost = previousSide === null ? (input.previous?.mode === 'docked' ? budgets.switchMargin : 0) : budgets.switchMargin;
+  const changeCost = previousSide === null ? 0 : budgets.switchMargin;
   let side: SatAnnotationSide | null = previousSide !== null && fits(previousSide, 0) ? previousSide : null;
   if (!side && fits('above', changeCost)) side = 'above';
   if (!side && fits('below', changeCost)) side = 'below';
-  if (!side) return dock();
+
+  /**
+   * Nothing fits comfortably. Room is a preference here, not a permission: the
+   * surface floats either way, and this only decides what it floats AGAINST.
+   *
+   * 1. the side it is already on, if that side can hold it at all — a toolbar
+   *    that kept its place through a tight measurement is worth more than a
+   *    slightly roomier position that moves on every scroll tick;
+   * 2. the lane nobody else is using (on touch, the one the native menu leaves);
+   * 3. the lane the native menu will claim, but beyond the menu's own zone:
+   *    sitting past the menu is usable, sitting under it is not. With a mouse no
+   *    lane is reserved, so this step and the next one are touch-only;
+   * 4. otherwise the lane that is ours, at the usual distance, which the clamp
+   *    below then pins inside the visible region (`clamped` true).
+   */
+  let offset = budgets.gap;
+  if (!side) {
+    const free: SatAnnotationSide = nativeLane === 'above' ? 'below' : 'above';
+    const keepsRoom = (candidate: SatAnnotationSide) => room(candidate) >= size.height + budgets.gap;
+    const clearOfTheMenu = budgets.nativeUiZone + budgets.gap;
+    if (previousSide !== null && keepsRoom(previousSide)) side = previousSide;
+    else if (nativeLane === null) side = roomBelow >= roomAbove ? 'below' : 'above';
+    else if (keepsRoom(free)) side = free;
+    else if (room(nativeLane) >= size.height + clearOfTheMenu) {
+      side = nativeLane;
+      offset = clearOfTheMenu;
+    } else side = free;
+  }
 
   // The line the surface sits against is the one its caret should point at: the
   // first selected line above the text, the last one below it.
   const line = side === 'above' ? anchor.firstLine : anchor.lastLine;
-  const width = Math.min(size.width, region.right - region.left);
+  const width = Math.min(size.width, Math.max(0, region.right - region.left));
   const anchorCenterX = (line.left + line.right) / 2 - bounds.left;
   const left = clampNumber(anchorCenterX - width / 2, region.left, region.right - width);
   const arrowX = clampNumber(
@@ -207,11 +213,8 @@ export function placeSatAnnotationSurface(input: SatAnnotationPlacementInput): A
     Math.max(budgets.caretInset, width - budgets.caretInset),
   );
   const edgeY = (side === 'above' ? anchor.firstLine.top : anchor.lastLine.bottom) - bounds.top;
-  const top = clampNumber(
-    side === 'above' ? edgeY - size.height - budgets.gap : edgeY + budgets.gap,
-    region.top,
-    region.bottom - size.height,
-  );
+  const preferredTop = side === 'above' ? edgeY - size.height - offset : edgeY + offset;
+  const top = clampNumber(preferredTop, region.top, region.bottom - size.height);
 
   const previous = input.previous;
   const sameSide = previous?.mode === 'floating' && previous.side === side;
@@ -230,5 +233,6 @@ export function placeSatAnnotationSurface(input: SatAnnotationPlacementInput): A
     // reapplying it directly, or the transition would make it trail the finger
     // for the whole gesture.
     animated: Boolean(moved) && !previous?.animated,
+    clamped: Math.abs(top - preferredTop) > CLAMP_EPSILON,
   };
 }

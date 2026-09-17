@@ -4,8 +4,8 @@ import { SAT_COPY } from '../../domain/satCopy';
 import { satHighlightInkList } from './satAnnotationPalette';
 
 /**
- * The annotation action controls, shared by the desktop toolbar, the touch
- * dock, and the edit dock.
+ * The annotation action controls, shared by the selection toolbar and a mark's
+ * edit controls (which are the same surface in two states).
  *
  * House rules encoded here (they are the whole reason these are one component
  * instead of three copies):

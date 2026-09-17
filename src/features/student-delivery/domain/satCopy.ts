@@ -205,7 +205,8 @@ export const SAT_COPY = {
     // must never be mistakable for each other, in speech or on screen.
     notesTool: "Notes",
     notesToolHasHighlights: "Notes, has highlights",
-    // Action affordance names shared by the toolbar, dock, and edit dock.
+    // Action affordance names shared by the selection toolbar and a mark's own
+    // edit controls — the same surface in two states.
     highlight: "Highlight",
     underline: "Underline",
     selectedTextActions: "Selected text actions",
