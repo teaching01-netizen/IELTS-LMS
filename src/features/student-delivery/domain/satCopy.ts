@@ -46,11 +46,18 @@ export const SAT_COPY = {
     // Quiet, transient confirmation that there is no Save button to press.
     saved: "Saved",
     remove: "Remove note",
+    // Shown in the same undo toast that already forgives a removed mark: the ink
+    // stays, only the words go, and they can come back for a few seconds.
+    removed: "Note removed",
     // Shown only when there is nothing to read AND nothing being written, so it
     // can never sit beside an open editor contradicting itself. It offers the
     // one action available with no selection, so writing about the question is
     // discoverable rather than a capability that quietly disappeared.
     empty: "Select text to add a note",
+    // The empty state's aside when the question carries marks but no notes, so a
+    // student who only highlighted is not left wondering where their highlights
+    // went — and without a second list to check.
+    emptyWithHighlights: "Your highlights are marked in the passage.",
     writeAboutQuestion: "Write a note about this question",
     // On the close control at widths where notes take the question's place, so
     // closing says what it actually does.
@@ -278,6 +285,16 @@ export type SatCopy = typeof SAT_COPY;
  */
 export function satQuotedSource(quote: string): string {
   return "\u201C" + quote + "\u201D";
+}
+
+/**
+ * The count beside the Notes heading, e.g. "3 notes".
+ *
+ * Rendered only when there is at least one note, so the heading stays a plain
+ * word in the common case and becomes a summary once there is a list to scan.
+ */
+export function satNotesCountLabel(count: number): string {
+  return count === 1 ? "1 note" : count + " notes";
 }
 
 /**

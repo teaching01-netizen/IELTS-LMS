@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatNotesColumn } from './SatNotesColumn';
 import { createSatTextAnnotation } from '../../domain/satResponses';
@@ -37,10 +37,12 @@ function renderColumn(overrides: Partial<React.ComponentProps<typeof SatNotesCol
     placement: 'column' as const,
     annotations: [] as SatTextAnnotation[],
     questionNote: '',
+    hasHighlights: false,
     disabled: false,
     onSelectNote: vi.fn(),
     onChangeNote: vi.fn(),
     onSaveQuestionNote: vi.fn(),
+    onRemoveNote: vi.fn(),
     onWriteAboutQuestion: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
@@ -136,11 +138,77 @@ describe('SatNotesColumn', () => {
     expect(screen.getByRole('button', { name: 'Remove note' })).toBeInTheDocument();
   });
 
-  it('empties the note without destroying the mark behind it', () => {
+  it('hands removal to the owner so it can be undone, and never deletes on its own', () => {
+    // The column renders what it is given: "undoable" is a decision the owner
+    // makes, and a column that cleared the note itself could not offer it.
     const target = note();
     const { props } = renderColumn({ annotations: [target], state: notesState(target.id) });
     fireEvent.click(screen.getByRole('button', { name: 'Remove note' }));
-    expect(props.onChangeNote).toHaveBeenCalledWith('');
+    expect(props.onRemoveNote).toHaveBeenCalledWith(target.id);
+    expect(props.onChangeNote).not.toHaveBeenCalled();
+  });
+
+  it('never lets a queued autosave resurrect a note the owner removed', () => {
+    vi.useFakeTimers();
+    try {
+      const target = note({ note: 'First draft' });
+      const { props, rerender } = renderColumn({ annotations: [target], state: notesState(target.id) });
+      // Typing, then removing before the idle pause elapses: the queued write must
+      // die with the value the owner cleared, or the removed note comes back —
+      // and Undo, pressed at the right moment, would bring it back twice.
+      fireEvent.change(screen.getByRole('textbox', { name: 'Notes' }), {
+        target: { value: 'First draft, extended' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Remove note' }));
+      expect(props.onRemoveNote).toHaveBeenCalledWith(target.id);
+
+      rerender(<SatNotesColumn {...props} annotations={[note({ id: target.id, note: undefined })]} />);
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+      expect(props.onChangeNote).not.toHaveBeenCalledWith('First draft, extended');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('routes the question’s own removal through the same owner', () => {
+    const { props } = renderColumn({
+      questionNote: 'Remember the theme',
+      state: notesState(SAT_QUESTION_NOTE_EDITOR),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove note' }));
+    expect(props.onRemoveNote).toHaveBeenCalledWith(SAT_QUESTION_NOTE_EDITOR);
+  });
+
+  it('summarizes the list in the heading only once there is one', () => {
+    const { container, unmount } = renderColumn();
+    expect(container.querySelector('[data-sat-notes-count]')).toBeNull();
+    unmount();
+
+    // A card open for a first note is not a note yet: the count reads what exists.
+    const drafting = note({ note: undefined });
+    const second = renderColumn({ annotations: [drafting, note({ id: 'a2' })], state: notesState(drafting.id) });
+    expect(screen.getByText('1 note')).toBeInTheDocument();
+    second.unmount();
+
+    renderColumn({ annotations: [note(), note({ id: 'a2' })], questionNote: 'Theme' });
+    expect(screen.getByText('3 notes')).toBeInTheDocument();
+  });
+
+  it('tells a student who only highlighted where those marks went', () => {
+    const { container } = renderColumn({ hasHighlights: true });
+    // The empty state still teaches the note gesture first, then answers the
+    // question a highlighted-but-unwritten student actually has.
+    expect(container.querySelector('[data-sat-notes-empty]')).toHaveTextContent('Select text to add a note');
+    expect(container.querySelector('[data-sat-notes-empty-highlights]')).toHaveTextContent(
+      'Your highlights are marked in the passage',
+    );
+  });
+
+  it('says nothing about highlights when the passage has none', () => {
+    const { container } = renderColumn();
+    expect(container.querySelector('[data-sat-notes-empty-highlights]')).toBeNull();
   });
 
   it('autosaves an idle draft and says so without a Save button', async () => {

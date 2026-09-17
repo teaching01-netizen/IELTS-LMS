@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { StickyNote, X } from 'lucide-react';
 import type { SatTextAnnotation } from '../../domain/satResponses';
-import { SAT_COPY, satQuotedSource } from '../../domain/satCopy';
+import { SAT_COPY, satNotesCountLabel, satQuotedSource } from '../../domain/satCopy';
 import { SAT_QUESTION_NOTE_EDITOR, type SatNotesPlacement, type SatNotesUiState } from '../../domain/satNotesUi';
 import { satHighlightInk } from './satAnnotationPalette';
 import { QUESTION_NOTE_FIELD_ID, SAT_NOTE_EDITOR_FIELD_ID, SatNoteField } from './SatNoteField';
@@ -13,11 +13,19 @@ export interface SatNotesColumnProps {
   annotations: readonly SatTextAnnotation[];
   /** The freeform note about the question, which has always persisted per question. */
   questionNote: string;
+  /** True when the question carries marks that are not notes (empty-state aside). */
+  hasHighlights: boolean;
   disabled: boolean;
   onSelectNote: (annotationId: string) => void;
   /** Commit an anchored note's text (an empty string keeps the ink). */
   onChangeNote: (note: string) => void;
   onSaveQuestionNote: (note: string) => void;
+  /**
+   * Remove a note's text, keyed by annotation id (`SAT_QUESTION_NOTE_EDITOR` for
+   * the question's own note). Staged for undo by the owner, so the column never
+   * decides how forgiving a removal is.
+   */
+  onRemoveNote: (annotationId: string) => void;
   /** Open the question's own note field, for a student with nothing selected. */
   onWriteAboutQuestion: () => void;
   onFlush?: (() => void) | undefined;
@@ -48,6 +56,11 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
   // Guidance or editors, never both: the contradictory pairing this replaced was
   // "No notes yet" sitting above an open textarea.
   const showsEmptyState = !writingSomething && props.annotations.length === 0 && props.questionNote.trim().length === 0;
+  // Cards the student actually wrote, which is what "3 notes" should count — a
+  // card open for a first note is not a note until there are words in it.
+  const noteCount =
+    props.annotations.filter((annotation) => (annotation.note ?? '').trim().length > 0).length +
+    (props.questionNote.trim().length > 0 ? 1 : 0);
 
   // Opening the column is a promise of somewhere to be: focus lands on the
   // column itself (not a field nobody asked to type in) so Escape, Tab, and the
@@ -86,7 +99,16 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
       className="flex h-full min-h-0 min-w-0 flex-col border-l border-[var(--sat-divider)] bg-[var(--sat-surface)] outline-none"
     >
       <header className="flex min-h-[44px] shrink-0 items-center justify-between gap-2 border-b border-[var(--sat-divider)] px-3">
-        <h2 className="sat-type-control-primary font-semibold text-[var(--sat-text)]">{SAT_COPY.notes.title}</h2>
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <h2 className="sat-type-control-primary font-semibold text-[var(--sat-text)]">{SAT_COPY.notes.title}</h2>
+          {/* The heading stays one word in the common case and becomes a summary
+              once there is a list worth scanning. */}
+          {noteCount > 0 ? (
+            <span data-sat-notes-count="true" className="sat-type-metadata text-[var(--sat-text-secondary)]">
+              {satNotesCountLabel(noteCount)}
+            </span>
+          ) : null}
+        </div>
         <button
           type="button"
           onClick={props.onClose}
@@ -103,6 +125,13 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
           <div data-sat-notes-empty="true" className="flex flex-col items-center gap-2 px-4 py-6 text-center">
             <StickyNote className="h-6 w-6 text-[var(--sat-text-secondary)]" aria-hidden="true" />
             <p className="sat-type-control-secondary text-[var(--sat-text-secondary)]">{SAT_COPY.notes.empty}</p>
+            {/* A student who highlighted but never wrote gets told where those
+                marks are, instead of being left to wonder whether they were lost. */}
+            {props.hasHighlights ? (
+              <p data-sat-notes-empty-highlights="true" className="sat-type-metadata text-[var(--sat-text-secondary)]">
+                {SAT_COPY.notes.emptyWithHighlights}
+              </p>
+            ) : null}
             {/* Guidance that still leaves a way forward: a student with nothing
                 selected can write about the question instead of being told to
                 go and select something. */}
@@ -126,6 +155,7 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
                   disabled={props.disabled}
                   onSelect={() => props.onSelectNote(annotation.id)}
                   onChangeNote={props.onChangeNote}
+                  onRemoveNote={() => props.onRemoveNote(annotation.id)}
                   onFlush={props.onFlush}
                 />
               </li>
@@ -137,6 +167,7 @@ export function SatNotesColumn(props: SatNotesColumnProps) {
                 disabled={props.disabled}
                 onWrite={props.onWriteAboutQuestion}
                 onSave={props.onSaveQuestionNote}
+                onRemoveNote={() => props.onRemoveNote(SAT_QUESTION_NOTE_EDITOR)}
                 onFlush={props.onFlush}
               />
             </li>
@@ -159,6 +190,7 @@ function SatNoteCard({
   disabled,
   onSelect,
   onChangeNote,
+  onRemoveNote,
   onFlush,
 }: {
   annotation: SatTextAnnotation;
@@ -167,6 +199,7 @@ function SatNoteCard({
   disabled: boolean;
   onSelect: () => void;
   onChangeNote: (note: string) => void;
+  onRemoveNote: () => void;
   onFlush?: (() => void) | undefined;
 }) {
   if (!editing) {
@@ -205,6 +238,7 @@ function SatNoteCard({
         // Removal matters only once there is a note; during a first note there is
         // nothing behind the control worth offering.
         canRemove={(annotation.note ?? '').trim().length > 0}
+        onRemoveRequested={onRemoveNote}
         className="mt-2"
       />
     </div>
@@ -225,6 +259,7 @@ function SatQuestionNoteRow({
   disabled,
   onWrite,
   onSave,
+  onRemoveNote,
   onFlush,
 }: {
   value: string;
@@ -232,6 +267,8 @@ function SatQuestionNoteRow({
   disabled: boolean;
   onWrite: () => void;
   onSave: (note: string) => void;
+  /** Staged for undo by the owner, like an anchored note's removal. */
+  onRemoveNote: () => void;
   onFlush?: (() => void) | undefined;
 }) {
   const hasNote = value.trim().length > 0;
@@ -282,6 +319,7 @@ function SatQuestionNoteRow({
         commit={onSave}
         onFlush={onFlush}
         canRemove={hasNote}
+        onRemoveRequested={onRemoveNote}
         className="mt-1"
       />
     </div>

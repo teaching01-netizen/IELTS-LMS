@@ -22,7 +22,9 @@ export const QUESTION_NOTE_FIELD_ID = 'sat-question-note';
  * there is text.
  *
  * Both card kinds use it, so an anchored note and a note about the question
- * cannot drift apart in how they save, warn, or empty.
+ * cannot drift apart in how they save, warn, or empty. Removal is *staged* by the
+ * caller (`onRemoveRequested`) so it can land in the same undo toast that already
+ * forgives a deleted mark; a field used on its own still empties in place.
  */
 export function SatNoteField({
   fieldId,
@@ -33,6 +35,7 @@ export function SatNoteField({
   commit,
   onFlush,
   canRemove,
+  onRemoveRequested,
   className,
 }: {
   fieldId: string;
@@ -44,6 +47,8 @@ export function SatNoteField({
   onFlush?: (() => void) | undefined;
   /** True once there is text worth removing (removal empties the note, not the mark). */
   canRemove: boolean;
+  /** Staged, undoable removal. Absent = clear in place. */
+  onRemoveRequested?: (() => void) | undefined;
   className?: string;
 }) {
   const draft = useSatNoteDraft({ value, ownerKey, disabled, commit, onFlush });
@@ -70,7 +75,7 @@ export function SatNoteField({
         length={draft.draft.length}
         saved={draft.saved}
         disabled={disabled}
-        onRemove={canRemove ? () => draft.clear() : undefined}
+        onRemove={canRemove ? onRemoveRequested ?? (() => draft.clear()) : undefined}
       />
     </>
   );
@@ -171,7 +176,16 @@ function useSatNoteDraft({
 
   // A different note (or the same one re-read after a question change) is a
   // different draft; keeping the old text would write one note onto another.
+  //
+  // A pending autosave is dropped with it: the owner can change this value
+  // underneath the field (Remove note stages an undo and clears it), and a draft
+  // still queued from before that point would resurrect the note the student just
+  // deleted — twice over, since Undo would then restore it again.
   useEffect(() => {
+    if (autosaveTimer.current !== null) {
+      window.clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
+    }
     setDraft(value);
   }, [ownerKey, value]);
 

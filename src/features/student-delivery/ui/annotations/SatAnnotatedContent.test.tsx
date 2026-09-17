@@ -185,6 +185,48 @@ describe('SAT annotation rendering', () => {
     expect(openEditor).toHaveBeenCalledWith(annotations.annotations[0]);
   });
 
+  it('marks a note-bearing mark in the passage so it can be found without the column', () => {
+    const text = 'A tree grows.';
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [
+      { ...createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree', color: 'yellow' }), note: 'Cooler here' },
+      createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 7, endOffset: 12, exact: 'grows', color: 'blue' }),
+    ];
+    const { container } = renderContent({ annotations });
+    const written = container.querySelector('[data-sat-highlight-color="yellow"]')!;
+    const bare = container.querySelector('[data-sat-highlight-color="blue"]')!;
+
+    // The attribute means what it says now: it used to carry the mark's id on
+    // every mark, note or not.
+    expect(written).toHaveAttribute('data-sat-annotation-note', 'true');
+    expect(bare).not.toHaveAttribute('data-sat-annotation-note');
+    // And the mark itself carries the marker, which is the point: a student can
+    // see which of their highlights they wrote about.
+    const marker = written.querySelector('[data-sat-note-mark="true"]')!;
+    expect(marker).toBeInTheDocument();
+    expect(marker).toHaveAttribute('aria-hidden', 'true');
+    expect(marker.parentElement).toBe(written);
+    // The marker adds no text, so it cannot shift an anchor's offsets.
+    expect(written).toHaveTextContent('tree');
+    expect(bare.querySelector('[data-sat-note-mark="true"]')).toBeNull();
+    // The label already told assistive tech which action it is.
+    expect(written).toHaveAttribute('aria-label', expect.stringContaining('Edit note'));
+    expect(bare).toHaveAttribute('aria-label', expect.stringContaining('Add note'));
+  });
+
+  it('shows the note marker once per mark, on its last fragment', () => {
+    const text = 'A tree that grows in shade and drops its leaves in autumn.';
+    const annotations = emptySatAnnotations();
+    annotations.annotations = [{
+      ...createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 12, exact: 'tree that ' }),
+      note: 'Compare the two claims',
+    }];
+    const { container } = renderContent({ annotations, content: content(text) });
+    // One marker for the mark, not one per rendered line or text run.
+    expect(container.querySelectorAll('[data-sat-note-mark="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-sat-annotation-note="true"]')).toHaveLength(1);
+  });
+
   it('renders marks as plain decoration in a read-only context', () => {
     const annotations = emptySatAnnotations();
     annotations.annotations = [createSatTextAnnotation({ kind: 'highlight', nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' })];

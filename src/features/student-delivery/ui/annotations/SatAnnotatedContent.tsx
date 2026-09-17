@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { StickyNote } from 'lucide-react';
 import type { StructuredContent } from '../../../exam-authoring/api/assessmentContracts';
 import { StructuredContentRenderer, type StaticStructuredImageEnlargeApi } from '../../../exam-rendering/api/structuredContent';
 import type { StructuredTextRenderer } from '../../../exam-rendering/api/structuredContent';
-import { applySatAnnotationsToText, resolveSatTextAnchor, type SatTextAnchor, type SatQuestionAnnotations, type SatTextSegment } from '../../domain/satResponses';
+import { applySatAnnotationsToText, resolveSatTextAnchor, type SatTextAnchor, type SatQuestionAnnotations, type SatTextAnnotation, type SatTextSegment } from '../../domain/satResponses';
 import { SAT_COPY } from '../../domain/satCopy';
 import { satHighlightMarkStyle } from './satAnnotationPalette';
 import { useSatAnnotationView } from './SatAnnotationViewContext';
@@ -118,33 +119,45 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         const start = Math.max(segment.start, startOffset);
         const end = Math.min(segment.end, startOffset + text.length);
         if (end <= start) return [];
+        // The mark this segment belongs to, plus where that mark ends. Stored
+        // order decides which mark wins an overlap, exactly as the ink does.
+        let segmentMark: SatTextAnnotation | undefined;
+        let markEnd = 0;
+        if (segment.highlight || segment.underline) {
+          for (const item of annotations.annotations) {
+            if (item.anchor.nodeId !== scopedId) continue;
+            const range = resolveSatTextAnchor(blockText, item.anchor);
+            if (range !== null && range.start < end && start < range.end) {
+              segmentMark = item;
+              markEnd = range.end;
+              break;
+            }
+          }
+        }
+        const match = segmentMark;
         // In-place affordance: clicking a mark opens its editor directly, where
         // color / note / removal live. Marks without a live editor stay plain
         // spans (read-only contexts).
-        const match = segment.highlight || segment.underline
-          ? annotations.annotations.find((item) => {
-              if (item.anchor.nodeId !== scopedId) return false;
-              const range = resolveSatTextAnchor(blockText, item.anchor);
-              return range !== null && range.start < end && start < range.end;
-            })
-          : undefined;
         const interactive = match !== undefined && view.openEditorActive;
-        const isNoteEdit = typeof match?.note === 'string' && match.note.length > 0;
+        // A note is what the student wrote, not a kind of mark: the marker below
+        // and the label both read this one answer.
+        const hasNote = typeof match?.note === 'string' && match.note.length > 0;
         const label = match
-          ? `${match.kind === 'highlight' ? SAT_COPY.annotations.highlight : SAT_COPY.annotations.underline}: ${match.anchor.exact}. ${isNoteEdit ? SAT_COPY.annotations.editNote : SAT_COPY.annotations.addNote}`
+          ? `${match.kind === 'highlight' ? SAT_COPY.annotations.highlight : SAT_COPY.annotations.underline}: ${match.anchor.exact}. ${hasNote ? SAT_COPY.annotations.editNote : SAT_COPY.annotations.addNote}`
           : undefined;
         return (
           <span
             key={start}
             // The same mark, in one place: interactive attributes are added when
             // an editor can open, never rebuilt as a second markup branch.
-            {...(interactive
+            {...(interactive && match
               ? {
                   role: 'button' as const,
                   tabIndex: 0,
                   'data-sat-annotation-control': 'true',
                   'data-sat-annotation-id': match.id,
-                  'data-sat-annotation-note': match.id,
+                  // Truthful, not decorative: present only when there is a note.
+                  ...(hasNote ? { 'data-sat-annotation-note': 'true' } : {}),
                   'data-sat-annotation-active': view.activeAnnotationId === match.id ? 'true' : undefined,
                   'aria-label': label,
                   title: label,
@@ -179,6 +192,19 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
             }}
           >
             {text.slice(start - startOffset, end - startOffset)}
+            {/* Otherwise a note leaves no trace in the passage, and the only way
+                to find which mark it belongs to is to read every card. It rides
+                the mark's LAST fragment so a wrapped mark shows it once, and it
+                takes no pointer events, so selecting and tapping are unchanged. */}
+            {hasNote && end >= markEnd ? (
+              <span
+                aria-hidden="true"
+                data-sat-note-mark="true"
+                className="pointer-events-none ml-0.5 inline-block h-3 w-3 align-[-2px] text-[var(--sat-text-secondary)]"
+              >
+                <StickyNote className="h-3 w-3" />
+              </span>
+            ) : null}
           </span>
         );
       });

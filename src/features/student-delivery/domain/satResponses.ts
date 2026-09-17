@@ -452,6 +452,37 @@ export function reinsertSatAnnotation(
   return { ...annotations, annotations: next };
 }
 
+/**
+ * Undo support for note text: put the student's words back on the mark they
+ * belong to, leaving the ink exactly as it was.
+ *
+ * Removing a note is the one deletion in this feature that can discard a long
+ * piece of writing, so it is staged for undo like a deleted mark. Restoring is
+ * a domain edit (find, reattach, clamp), not a UI concern, which is why it lives
+ * here beside `reinsertSatAnnotation`.
+ */
+export function restoreSatAnnotationNote(
+  annotations: SatQuestionAnnotations,
+  annotationId: string,
+  text: string,
+  now: string = new Date().toISOString(),
+): SatQuestionAnnotations {
+  const target = annotations.annotations.find((annotation) => annotation.id === annotationId);
+  if (!target) return annotations;
+  const note = clampText(text, SAT_ANNOTATION_NOTE_LIMIT);
+  return {
+    ...annotations,
+    annotations: annotations.annotations.map((annotation) => {
+      if (annotation.id !== annotationId) return annotation;
+      if (!note) {
+        const { note: _previous, ...rest } = annotation;
+        return { ...rest, updatedAt: now };
+      }
+      return { ...annotation, note, updatedAt: now };
+    }),
+  };
+}
+
 export function emptySatQuestionResponse(questionId: string): SatQuestionResponseDraft {
   return {
     questionId,

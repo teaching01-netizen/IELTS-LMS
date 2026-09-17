@@ -9,8 +9,10 @@ import {
   normalizeSatAnnotations,
   reinsertSatAnnotation,
   removeSatAnnotationById,
+  restoreSatAnnotationNote,
   satAnnotatedNotes,
   setSatAnnotationColor,
+  SAT_ANNOTATION_NOTE_LIMIT,
   type SatQuestionAnnotations,
 } from './satResponses';
 
@@ -148,6 +150,35 @@ describe('satResponses v2 annotations', () => {
     const restored = reinsertSatAnnotation(removed, seeded[0]!, 0);
     expect(restored.annotations.map((a) => a.id)).toEqual(seeded.map((a) => a.id));
     expect(reinsertSatAnnotation(restored, seeded[0]!, 0)).toBe(restored);
+  });
+
+  // Removing a note used to be one irreversible press, and a note can hold two
+  // thousand characters: the same forgiveness a deleted mark gets now covers it.
+  it('restores removed note text onto the mark it belonged to', () => {
+    const marked = attachSatNoteToAnchor(emptySatAnnotationsV2(), {
+      nodeId: 'p', startOffset: 0, endOffset: 4, exact: 'tree',
+    });
+    const written: SatQuestionAnnotations = {
+      ...marked.annotations,
+      annotations: marked.annotations.annotations.map((annotation) => ({ ...annotation, note: 'Cooler here' })),
+    };
+    const cleared = restoreSatAnnotationNote(written, marked.annotation.id, '');
+    // The words go; the ink stays, so the source is never lost with the note.
+    expect(cleared.annotations[0]!.note).toBeUndefined();
+    expect(cleared.annotations[0]!.color).toBe(marked.annotation.color);
+
+    const restored = restoreSatAnnotationNote(cleared, marked.annotation.id, 'Cooler here');
+    expect(restored.annotations[0]!.note).toBe('Cooler here');
+    // Nothing to restore is a no-op, not a new empty annotation.
+    expect(restoreSatAnnotationNote(restored, 'missing-id', 'text')).toBe(restored);
+  });
+
+  it('never restores more text than a note may hold', () => {
+    const marked = attachSatNoteToAnchor(emptySatAnnotationsV2(), {
+      nodeId: 'p', startOffset: 0, endOffset: 4, exact: 'tree',
+    });
+    const restored = restoreSatAnnotationNote(marked.annotations, marked.annotation.id, 'x'.repeat(5_000));
+    expect(restored.annotations[0]!.note).toHaveLength(SAT_ANNOTATION_NOTE_LIMIT);
   });
 
   it('paints overlapping highlights with the later annotation’s ink', () => {

@@ -17,11 +17,15 @@ export interface SatNotesSurfaceHostProps {
   questionKey: string;
   annotations: readonly SatTextAnnotation[];
   questionNote: string;
+  /** True when the question carries marks, so an empty column can say so. */
+  hasHighlights: boolean;
   disabled: boolean;
   hintVisible: boolean;
   onSelectNote: (annotationId: string) => void;
   onChangeNote: (note: string) => void;
   onSaveQuestionNote: (note: string) => void;
+  /** Staged removal for a note's text, undo included, owned by the surface hook. */
+  onRemoveNote: (annotationId: string) => void;
   onWriteAboutQuestion: () => void;
   onFlush?: (() => void) | undefined;
   onClose: () => void;
@@ -55,10 +59,12 @@ export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
             placement={placement}
             annotations={props.annotations}
             questionNote={props.questionNote}
+            hasHighlights={props.hasHighlights}
             disabled={props.disabled}
             onSelectNote={props.onSelectNote}
             onChangeNote={props.onChangeNote}
             onSaveQuestionNote={props.onSaveQuestionNote}
+            onRemoveNote={props.onRemoveNote}
             onWriteAboutQuestion={props.onWriteAboutQuestion}
             onFlush={props.onFlush}
             onClose={props.onClose}
@@ -66,7 +72,7 @@ export function SatNotesSurfaceHost(props: SatNotesSurfaceHostProps) {
         ),
       passageHint: props.hintVisible ? <SatAnnotationPassageHint /> : null,
     }),
-    [placement, props.annotations, props.disabled, props.hintVisible, props.onChangeNote, props.onClose, props.onFlush, props.onSaveQuestionNote, props.onSelectNote, props.onWriteAboutQuestion, props.questionKey, props.questionNote, props.state],
+    [placement, props.annotations, props.disabled, props.hasHighlights, props.hintVisible, props.onChangeNote, props.onClose, props.onFlush, props.onRemoveNote, props.onSaveQuestionNote, props.onSelectNote, props.onWriteAboutQuestion, props.questionKey, props.questionNote, props.state],
   );
 
   return <SatNotesSurfaceContext.Provider value={surface}>{props.children}</SatNotesSurfaceContext.Provider>;

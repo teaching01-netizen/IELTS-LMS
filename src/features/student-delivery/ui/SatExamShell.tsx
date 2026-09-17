@@ -23,6 +23,7 @@ import { SatContrastContext } from './reading/SatContrastContext';
 import { useSatMediaQuery } from './useSatMediaQuery';
 import { useSatAnnotationSurface } from '../hooks/useSatAnnotationSurface';
 import type { SatQuestionAnnotations } from '../domain/satResponses';
+import { SAT_QUESTION_NOTE_EDITOR } from '../domain/satNotesUi';
 import { SAT_COPY } from '../domain/satCopy';
 import { SatAnnotationEditDock } from './annotations/SatAnnotationEditDock';
 import { SatAnnotationViewContext } from './annotations/SatAnnotationViewContext';
@@ -185,6 +186,10 @@ export function SatExamShell(props: SatExamShellProps) {
     annotationsAvailable: notesAvailable,
     educationKey: props.educationKey,
     answered: props.answered === true,
+    // The surface owns what these two imply (retiring the teaching line, and
+    // undoing a removal); the runner still owns persistence.
+    questionNote: props.questionNote,
+    onSaveQuestionNote: props.onSaveNote,
     interaction,
     questionKey,
     notesTriggerId: notesButtonId,
@@ -202,7 +207,7 @@ export function SatExamShell(props: SatExamShellProps) {
     removeMark,
     updateNote,
     undoEntry,
-    undoRemoval,
+    undoLastRemoval,
     confirmationAnchor,
     hintVisible,
     announcement,
@@ -443,6 +448,10 @@ export function SatExamShell(props: SatExamShellProps) {
             questionKey={questionKey}
             annotations={questionNotes}
             questionNote={props.questionNote}
+            // The empty state can only say "your highlights are in the passage"
+            // when marks exist: the notes list the column sees cannot answer that,
+            // and a migrated freeform note is not a mark on the passage.
+            hasHighlights={(props.annotations?.annotations.length ?? 0) > 0}
             disabled={props.blocked || !annotationsWritable}
             hintVisible={hintVisible}
             onSelectNote={(annotationId) => {
@@ -451,6 +460,16 @@ export function SatExamShell(props: SatExamShellProps) {
             }}
             onChangeNote={updateNote}
             onSaveQuestionNote={props.onSaveNote}
+            // One removal path for both card kinds: a note's words come out,
+            // its ink stays, and the removal stays undoable for a few seconds.
+            onRemoveNote={(annotationId) => {
+              if (annotationId === SAT_QUESTION_NOTE_EDITOR) {
+                surface.removeQuestionNoteText();
+                return;
+              }
+              const target = questionNotes.find((annotation) => annotation.id === annotationId);
+              if (target) surface.removeNoteText(target);
+            }}
             onWriteAboutQuestion={surface.openQuestionNote}
             onFlush={props.onFlushAnnotations}
             onClose={surface.closeNotes}
@@ -496,11 +515,15 @@ export function SatExamShell(props: SatExamShellProps) {
             className="sat-ui absolute bottom-3 left-1/2 z-[80] flex -translate-x-1/2 items-center gap-3 rounded-[8px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-3 py-2 shadow-[var(--sat-shadow-floating)]"
           >
             <span className="sat-type-control-secondary font-medium text-[var(--sat-text)]">
-              {undoEntry.annotation.kind === 'highlight' ? SAT_COPY.annotations.removedHighlight : SAT_COPY.annotations.removedUnderline}
+              {undoEntry.kind === 'mark'
+                ? undoEntry.annotation.kind === 'highlight'
+                  ? SAT_COPY.annotations.removedHighlight
+                  : SAT_COPY.annotations.removedUnderline
+                : SAT_COPY.notes.removed}
             </span>
             <button
               type="button"
-              onClick={undoRemoval}
+              onClick={undoLastRemoval}
               className="sat-touch-target sat-pressable rounded-[6px] px-2 sat-type-control-secondary font-semibold text-[var(--sat-accent-strong)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
             >
               {SAT_COPY.annotations.undo}

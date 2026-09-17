@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   SAT_ANNOTATION_CONFIRMATION_MS,
-  SAT_ANNOTATION_HINT_DELAY_MS,
-  SAT_ANNOTATION_HINT_DURATION_MS,
   SAT_ANNOTATION_UNDO_MS,
+  satAnnotationHintDelayMs,
   shouldShowSatAnnotationHint,
 } from '../domain/satAnnotationEducation';
 import { SAT_COPY, satHighlightedAnnouncement } from '../domain/satCopy';
@@ -14,6 +13,7 @@ import {
   hasSatAnnotations,
   reinsertSatAnnotation,
   removeSatAnnotationById,
+  restoreSatAnnotationNote,
   satAnnotatedNotes,
   setSatAnnotationColor,
   SAT_ANNOTATION_NOTE_LIMIT,
@@ -45,12 +45,36 @@ export interface SatAnnotationSurfaceOptions {
   educationKey?: string | null | undefined;
   /** True once this question has an answer (retires the passive hint). */
   answered: boolean;
+  /**
+   * The question's own note.
+   *
+   * The surface owns this value's consequences, not its storage: it is what
+   * retires the teaching line for a student who wrote instead of selecting, and
+   * what a removed note is restored from. The runner still owns persistence.
+   */
+  questionNote: string;
+  /** Writes the question's own note, including the empty string on removal. */
+  onSaveQuestionNote: (note: string) => void;
   interaction: SatInteractionController;
   /** Chrome belongs to one question; changing it discards the chrome. */
   questionKey: string;
   /** Id of the control that opens the column, for focus return. */
   notesTriggerId: string;
 }
+
+/**
+ * The one undo entry: whatever was just removed, with enough to put it back.
+ *
+ * Marks and note text share a slot because they make the same promise — removal
+ * is forgiving for a few seconds before it is final. Note text is the case that
+ * needed it most: a note can hold two thousand characters, and it used to be
+ * discarded the instant the student pressed Remove.
+ */
+export type SatAnnotationUndoEntry =
+  | { kind: 'mark'; annotation: SatTextAnnotation; index: number }
+  | { kind: 'note'; annotationId: string; text: string }
+  /** The question's own note lives outside the marks, so it restores its own way. */
+  | { kind: 'question-note'; text: string };
 
 /**
  * The Highlights & Notes surface: one owner for annotation state, mutation, and
@@ -70,6 +94,7 @@ export interface SatAnnotationSurfaceOptions {
  */
 export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   const { annotations, onAnnotationsChange, onFlushAnnotations, interaction } = options;
+  const { onSaveQuestionNote, questionNote } = options;
   const writable = annotations !== undefined && onAnnotationsChange !== undefined && !options.blocked;
   const selection = writable ? interaction.state.annotation.selection : null;
   const education = useSatAnnotationEducation(options.educationKey ?? null);
@@ -77,7 +102,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
   /** Mark whose edit controls are open (presentation state, not exam truth). */
   const [editingMarkId, setEditingMarkId] = useState<string | null>(null);
   const [confirmationAnchor, setConfirmationAnchor] = useState<SatTextAnchor | null>(null);
-  const [undoEntry, setUndoEntry] = useState<{ annotation: SatTextAnnotation; index: number } | null>(null);
+  const [undoEntry, setUndoEntry] = useState<SatAnnotationUndoEntry | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const [hintVisible, setHintVisible] = useState(false);
 
@@ -220,7 +245,7 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
       write(removeSatAnnotationById(annotations, annotation.id));
       // Forgiveness instead of a confirmation dialog: the removal is undoable for
       // a few seconds, which is what makes confident tapping safe.
-      setUndoEntry({ annotation, index });
+      setUndoEntry({ kind: 'mark', annotation, index });
       setEditingMarkId(null);
       if (noteEditorId === annotation.id) interaction.closeSurface();
       setAnnouncement(annotation.kind === 'highlight' ? SAT_COPY.annotations.removedHighlight : SAT_COPY.annotations.removedUnderline);
@@ -228,11 +253,45 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     [annotations, interaction, noteEditorId, writable, write],
   );
 
-  const undoRemoval = useCallback(() => {
-    if (!annotations || !undoEntry) return;
-    write(reinsertSatAnnotation(annotations, undoEntry.annotation, undoEntry.index));
+  const undoLastRemoval = useCallback(() => {
+    if (!undoEntry) return;
+    if (undoEntry.kind === 'question-note') {
+      // Restoring writes the text back through the runner's own writer, so the
+      // question note and its undo share one persistence path.
+      onSaveQuestionNote(undoEntry.text);
+    } else if (annotations) {
+      write(
+        undoEntry.kind === 'mark'
+          ? reinsertSatAnnotation(annotations, undoEntry.annotation, undoEntry.index)
+          : restoreSatAnnotationNote(annotations, undoEntry.annotationId, undoEntry.text),
+      );
+    }
     setUndoEntry(null);
-  }, [annotations, undoEntry, write]);
+  }, [annotations, onSaveQuestionNote, undoEntry, write]);
+
+  /**
+   * Remove a note's words, keep its ink, and leave the removal undoable.
+   *
+   * The mark is the student's; the text is theirs to drop — but dropping two
+   * thousand characters should never be one irreversible press.
+   */
+  const removeNoteText = useCallback(
+    (annotation: SatTextAnnotation) => {
+      const text = annotation.note ?? '';
+      if (!annotations || !writable || text.trim().length === 0) return;
+      setUndoEntry({ kind: 'note', annotationId: annotation.id, text });
+      write(restoreSatAnnotationNote(annotations, annotation.id, ''));
+      onFlushAnnotations?.();
+    },
+    [annotations, onFlushAnnotations, writable, write],
+  );
+
+  /** The same forgiveness for the question's own note. */
+  const removeQuestionNoteText = useCallback(() => {
+    if (!writable || questionNote.trim().length === 0) return;
+    setUndoEntry({ kind: 'question-note', text: questionNote });
+    onSaveQuestionNote('');
+  }, [onSaveQuestionNote, questionNote, writable]);
 
   const updateNote = useCallback(
     (note: string | undefined) => {
@@ -301,35 +360,46 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     setConfirmationAnchor(null);
   }, [options.questionKey]);
 
-  const hintVisibleFor = shouldShowSatAnnotationHint(education.state, {
+  const hasAnnotations = annotations ? hasSatAnnotations(annotations) : false;
+  /**
+   * The teaching line is for a student who has not annotated anything yet, so
+   * writing about the question counts as much as marking the passage: either one
+   * proves they found the tool.
+   */
+  const lessonOver = hasAnnotations || questionNote.trim().length > 0;
+  const hintAllowed = shouldShowSatAnnotationHint(education.state, {
     annotationsAvailable: options.annotationsAvailable,
     blocked: options.blocked,
     hasSelection: selection !== null,
     answered: options.answered,
+    hasAnnotations: lessonOver,
   });
+  // Opening Highlights & Notes is a request for the tool, so the line is there
+  // immediately; otherwise it waits, so it reads as an aside rather than an alert
+  // firing on load.
+  const hintDelayMs = satAnnotationHintDelayMs(interaction.state.surface.kind === 'question-notes');
   useEffect(() => {
-    if (!hintVisibleFor) {
+    if (!hintAllowed) {
       setHintVisible(false);
       return;
     }
-    // Delayed so it reads as a quiet aside rather than an alert firing on load.
-    const show = window.setTimeout(() => setHintVisible(true), SAT_ANNOTATION_HINT_DELAY_MS);
+    if (hintDelayMs === 0) {
+      setHintVisible(true);
+      return;
+    }
+    const show = window.setTimeout(() => setHintVisible(true), hintDelayMs);
     return () => window.clearTimeout(show);
-  }, [hintVisibleFor]);
+  }, [hintAllowed, hintDelayMs]);
+  // The line retires on demonstrated understanding, never on a timer: the old
+  // five-second countdown spent the lesson on students who had not read it yet.
   useEffect(() => {
-    if (!hintVisible) return;
-    const hide = window.setTimeout(() => {
-      setHintVisible(false);
-      education.markHintSeen();
-    }, SAT_ANNOTATION_HINT_DURATION_MS);
-    return () => window.clearTimeout(hide);
-  }, [education, hintVisible]);
+    if (lessonOver) education.markHintSeen();
+  }, [education, lessonOver]);
 
   const questionNotes = useMemo(
     () => (annotations ? satAnnotatedNotes(annotations, noteEditorId) : []),
     [annotations, noteEditorId],
   );
-  const hasAnnotations = annotations ? hasSatAnnotations(annotations) : false;
 
   const annotationView = useMemo<SatAnnotationView>(
     () => ({
@@ -364,8 +434,11 @@ export function useSatAnnotationSurface(options: SatAnnotationSurfaceOptions) {
     closeNotes,
     openQuestionNote,
     updateNote,
+    /** Removal, with undo, for both kinds of note text. */
+    removeNoteText,
+    removeQuestionNoteText,
     undoEntry,
-    undoRemoval,
+    undoLastRemoval,
     confirmationAnchor,
     hintVisible,
     announcement,

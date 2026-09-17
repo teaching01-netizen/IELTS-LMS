@@ -48,11 +48,13 @@ function renderHost(
       questionKey={overrides.questionKey ?? 'module::0'}
       annotations={[]}
       questionNote={overrides.questionNote ?? ''}
+      hasHighlights={false}
       disabled={false}
       hintVisible={overrides.hintVisible ?? false}
       onSelectNote={vi.fn()}
       onChangeNote={vi.fn()}
       onSaveQuestionNote={overrides.onSaveQuestionNote ?? vi.fn()}
+      onRemoveNote={vi.fn()}
       onWriteAboutQuestion={vi.fn()}
       onClose={vi.fn()}
     >
@@ -129,11 +131,13 @@ describe('SatNotesSurfaceHost', () => {
           questionKey="module::1"
           annotations={[]}
           questionNote=""
+          hasHighlights={false}
           disabled={false}
           hintVisible={false}
           onSelectNote={vi.fn()}
           onChangeNote={vi.fn()}
           onSaveQuestionNote={onSaveQuestionNote}
+          onRemoveNote={vi.fn()}
           onWriteAboutQuestion={vi.fn()}
           onClose={vi.fn()}
         >

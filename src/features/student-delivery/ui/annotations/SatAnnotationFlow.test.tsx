@@ -210,7 +210,7 @@ describe('SAT shell annotation flow (selection first)', () => {
     expect(document.querySelector('[data-sat-select-text-coach]')).toBeNull();
   });
 
-  it('shows the passive first-use hint in the passage once per attempt, then retires it on selection', () => {
+  it('shows the passive first-use hint in the passage, and retires it on the gesture alone', () => {
     vi.useFakeTimers();
     try {
       const { container } = render(<SatAccessibilityDebugRoute />);
@@ -223,6 +223,12 @@ describe('SAT shell annotation flow (selection first)', () => {
       const hint = document.querySelector('[data-sat-annotation-hint]')!;
       expect(hint).toHaveTextContent('Select text to highlight or add a note');
       expect(hint.closest('[data-sat-passage-scroll]')).not.toBeNull();
+      // Time passing is not a lesson: the line waits for the student instead of
+      // retiring itself, which is what let slow readers miss it entirely.
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(document.querySelector('[data-sat-annotation-hint]')).not.toBeNull();
       // Demonstrating the gesture is the whole lesson: the hint never returns.
       selectStimulusText(container, 'Several');
       expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
@@ -233,6 +239,74 @@ describe('SAT shell annotation flow (selection first)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('teaches at once when the student opens Highlights & Notes', () => {
+    vi.useFakeTimers();
+    try {
+      render(<SatAccessibilityDebugRoute />);
+      expect(document.querySelector('[data-sat-annotation-hint]')).toBeNull();
+      // Pressing the tool is a direct request for it, so the lesson is already on
+      // screen — no delay to sit through, and no selection required first.
+      fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
+      expect(screen.getByRole('complementary', { name: 'Notes' })).toBeInTheDocument();
+      expect(document.querySelector('[data-sat-annotation-hint]')).toHaveTextContent('Select text to highlight or add a note');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives the question’s own note the same undo as a note on the passage', async () => {
+    render(<SatAccessibilityDebugRoute />);
+    fireEvent.click(screen.getByRole('button', { name: /^Highlights & Notes/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Write a note about this question' }));
+    const field = await screen.findByRole('textbox', { name: 'This question' });
+    fireEvent.change(field, { target: { value: 'The control condition' } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(screen.getByTestId('sat-note-saved')).toBeInTheDocument());
+
+    // One removal path covers both card kinds, so the question's note is not the
+    // one place where writing still disappears on a single press.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove note' }));
+    expect(await screen.findByTestId('sat-undo-toast')).toHaveTextContent('Note removed');
+    expect(screen.getByRole('textbox', { name: 'This question' })).toHaveValue('');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(screen.getByRole('textbox', { name: 'This question' })).toHaveValue('The control condition');
+    expect(screen.queryByTestId('sat-undo-toast')).not.toBeInTheDocument();
+  });
+
+  it('removes a note’s words but not its mark, and puts them back with Undo', async () => {
+    const { container } = render(<SatAccessibilityDebugRoute />);
+    highlight(container, 'Several', 'Blue');
+    const bare = container.querySelector('[data-sat-highlight="true"]')!;
+    expect(bare).not.toHaveAttribute('data-sat-annotation-note');
+
+    fireEvent.click(bare);
+    fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
+    const field = await screen.findByRole('textbox', { name: 'Notes' });
+    fireEvent.change(field, { target: { value: 'Cooler after the trees' } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(screen.getByTestId('sat-note-saved')).toBeInTheDocument());
+
+    // The passage says which mark carries a note, without opening the column.
+    const written = container.querySelector('[data-sat-highlight="true"]')!;
+    expect(written).toHaveAttribute('data-sat-annotation-note', 'true');
+    expect(written.querySelector('[data-sat-note-mark="true"]')).not.toBeNull();
+
+    // Removing a note discards up to two thousand characters, so it gets the same
+    // forgiveness as deleting a mark instead of being final on one press.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove note' }));
+    const toast = await screen.findByTestId('sat-undo-toast');
+    expect(toast).toHaveTextContent('Note removed');
+    const cleared = container.querySelector('[data-sat-highlight="true"]')!;
+    expect(cleared).not.toHaveAttribute('data-sat-annotation-note');
+    expect(cleared.querySelector('[data-sat-note-mark="true"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    const restored = container.querySelector('[data-sat-highlight="true"]')!;
+    expect(restored).toHaveAttribute('data-sat-annotation-note', 'true');
+    expect(screen.getByRole('textbox', { name: 'Notes' })).toHaveValue('Cooler after the trees');
   });
 });
 

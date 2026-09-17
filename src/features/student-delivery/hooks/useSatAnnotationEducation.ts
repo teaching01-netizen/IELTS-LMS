@@ -8,7 +8,12 @@ import type { SatHighlightColor } from '../domain/satResponses';
 
 export interface SatAnnotationEducation {
   state: SatAnnotationEducationState;
-  /** The passive hint was shown; it is spent for this attempt. */
+  /**
+   * The passive hint is spent for this attempt.
+   *
+   * Written when the student demonstrates the gesture (or annotates anything),
+   * never when a timer elapses — see `shouldShowSatAnnotationHint`.
+   */
   markHintSeen: () => void;
   /** A highlight landed: remember the ink and retire the confirmation. */
   markFirstHighlight: (color: SatHighlightColor) => void;
