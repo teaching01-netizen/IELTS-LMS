@@ -207,6 +207,46 @@ describe("SAT cohort module clock", () => {
     vi.useRealTimers();
   });
 
+  // SAT-003: the student-facing allotment is min(personal, section), but the
+  // backend applies the personal deadline only for the legacy timing model
+  // (`usesPersonalDeadline()`). In cohort-section mode the shared section
+  // clock is the sole expiry authority — the personal clock hitting zero must
+  // never auto-submit the module while the section is still live.
+  it("never expires a cohort-section module on the personal clock (SAT-003)", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(cohortBootstrap());
+    // Keep any (wrong) submission pending so the test observes only the call.
+    gatewayMocks.submitModule.mockImplementation(() => new Promise(() => {}));
+    const hook = renderHook(() =>
+      useSatExamController({
+        scheduleId: "schedule",
+        attemptId: "attempt-a",
+        candidateId: "candidate",
+        liveSocketConnected: true,
+      }),
+    );
+    await act(async () => {
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    expect(hook.result.current.state.phase).toBe("module");
+    expect(hook.result.current.remainingSeconds).toBe(60);
+
+    // +61s: personal allotment reads 0 while 59s remain on the section clock.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+    });
+    expect(hook.result.current.remainingSeconds).toBe(0);
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
+    expect(hook.result.current.state.phase).toBe("module");
+
+    // +121s: the authoritative section clock reaches 0 — now expiry may fire.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(gatewayMocks.submitModule).toHaveBeenCalledTimes(1);
+    hook.unmount();
+    vi.useRealTimers();
+  });
+
   it("counts the authored break down to the next section's start", async () => {
     gatewayMocks.bootstrap.mockResolvedValue(breakBootstrap());
     const hook = renderHook(() =>

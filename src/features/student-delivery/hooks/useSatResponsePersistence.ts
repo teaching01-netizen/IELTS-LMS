@@ -66,6 +66,12 @@ export interface SatResponsePersistence {
    * `error:${string}`. Awaiting callers treat "reconciled" as success.
    */
   reconcileBlocked?: (questionId: string) => Promise<ReconcileBlockedResult>;
+  /**
+   * SAT-004 boundary barrier: refuses while any visible answer is unsettled
+   * (blocked, quarantined, queued, or awaiting a version). Module submission
+   * and terminal submit share it; never infer safety from queue length.
+   */
+  assertBoundarySettled?: () => Promise<void>;
   failure: string | null;
   failureKind: SatResponseFailureKind | null;
   tombstoneCount: number;
@@ -380,50 +386,64 @@ export function useSatResponsePersistence({
     return;
   }, [waitForV2Acceptances]);
 
+  // SAT-004: one boundary barrier for module submission AND the terminal
+  // submit. The engine owns the invariant (blocked / quarantined / queued /
+  // unacknowledged visible intent); this wrapper maps its refusals to the
+  // shared exam-stress-safe gate copy and publishes failure state for the
+  // route banner. Queue length alone is never safety: a blocked draft can be
+  // visible while the outbox is empty.
+  const assertBoundarySettled = useCallback(async (): Promise<void> => {
+    await waitForV2Acceptances();
+    const ready = v2ReadyRef.current;
+    if (ready) await ready;
+    const engine = v2EngineRef.current;
+    if (!engine) throw new Error('V2 response durability engine is not ready.');
+    try {
+      engine.assertBoundarySettled();
+    } catch (error) {
+      let blockedCount = 0;
+      let quarantined = 0;
+      try {
+        blockedCount = engine.getBlockedCount();
+      } catch {
+        blockedCount = 0;
+      }
+      try {
+        quarantined = engine.getQuarantined().length;
+      } catch {
+        quarantined = 0;
+      }
+      if (blockedCount > 0 || quarantined > 0) {
+        try {
+          setBlockedDrafts(engine.getBlockedQuestionIds());
+        } catch {
+          // Keep the last published ids; next publish refreshes them.
+        }
+        setTombstoneCount(quarantined);
+        // Shared exam-stress-safe gate copy (same function IELTS uses).
+        const message = blockedSubmitGateMessage(blockedCount, quarantined);
+        setFailure(message);
+        setFailureKind('retryable');
+        throw new Error(message);
+      }
+      throw error;
+    }
+  }, [waitForV2Acceptances]);
+
   const submit = useCallback(async (): Promise<SubmitAttemptV2Response> => {
     await waitForV2Acceptances();
     const ready = v2ReadyRef.current;
     if (ready) await ready;
     const engine = v2EngineRef.current;
     if (!engine) throw new Error('V2 response durability engine is not ready.');
-    // Submit gate (WP4/WP5): blocked/quarantined drafts must be resolved or
-    // explicitly discarded before submit completes. engine.submit() also
-    // enforces this provider-independently; surface the exam-stress-safe
-    // warning here and refuse silent exclusion of drafts. Do NOT silently
-    // exclude drafts: throwing blocks the submitModule/finalize path, which
-    // surfaces failure/failureKind in the route banner + review page.
-    // NOTE: the engine now provides reconcileBlocked(questionId),
-    // discardBlocked(questionId), and getTombstonedQuestionIds().
-    // reconcileBlocked below calls engine.reconcileBlocked directly;
-    // remaining work is future recovery-panel UI wiring only. The gate
-    // stays: this failure message plus the engine-side guard.
-    let blockedCount = 0;
-    let quarantined = 0;
-    try {
-      blockedCount = engine.getBlockedCount();
-    } catch {
-      blockedCount = 0;
-    }
-    try {
-      quarantined = engine.getQuarantined().length;
-    } catch {
-      quarantined = 0;
-    }
-    if (blockedCount > 0 || quarantined > 0) {
-      try {
-        setBlockedDrafts(engine.getBlockedQuestionIds());
-      } catch {
-        // Keep the last published ids; next publish refreshes them.
-      }
-      setTombstoneCount(quarantined);
-      // Shared exam-stress-safe gate copy (same function IELTS uses). The
-      // engine's own "Blocked drafts need attention before submit. ..."
-      // guard stays as the provider-independent backstop below.
-      const message = blockedSubmitGateMessage(blockedCount, quarantined);
-      setFailure(message);
-      setFailureKind('retryable');
-      throw new Error(message);
-    }
+    // Submit gate (WP4/WP5) + SAT-004 boundary barrier: the same engine
+    // invariant the module boundary uses. Blocked/quarantined drafts and any
+    // unsettled visible intent must be resolved or explicitly discarded
+    // before submit; never silently exclude drafts. Throwing blocks the
+    // submitModule/finalize path, which surfaces failure/failureKind in the
+    // route banner + review page. engine.submit() keeps its own guard as the
+    // provider-independent backstop below.
+    await assertBoundarySettled();
     try {
       return await engine.submit(attemptId, engine.getAttemptRevision());
     } catch (error) {
@@ -460,7 +480,7 @@ export function useSatResponsePersistence({
       }
       throw error;
     }
-  }, [attemptId, waitForV2Acceptances]);
+  }, [assertBoundarySettled, attemptId, waitForV2Acceptances]);
 
   // Best-effort reconcile of one blocked question. Returns a reason union
   // ('reconciled' | 'not-blocked' | 'refusal' | `error:${string}`) so
@@ -595,6 +615,7 @@ export function useSatResponsePersistence({
     blockedQuestionIds: blockedDrafts,
     blockedCount: blockedDrafts.length,
     reconcileBlocked,
+    assertBoundarySettled,
     failure,
     failureKind,
     tombstoneCount,

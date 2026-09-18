@@ -467,6 +467,28 @@ export class DurableResponseEngine {
   }
 
   /**
+   * SAT-004: the single boundary barrier for module submission AND the
+   * terminal submit. Throws when a visible answer would otherwise cross the
+   * boundary unaccounted for. Providers call this after flush; the engine
+   * refusal is classified by the caller (blocked/quarantine copy vs pending
+   * retryable failure). A terminal receipt owns the remainder once it lands.
+   */
+  public assertBoundarySettled(): void {
+    if (this.terminalState) return;
+    if (this.getBlockedCount() > 0) {
+      throw new Error("Blocked drafts need attention before submit. Reconcile or discard them first.");
+    }
+    if (this.quarantined.length > 0) {
+      throw new Error("Some saved answers were quarantined and need attention before submit.");
+    }
+    if (this.getPendingCount() > 0 || this.hasUnacknowledgedIntent()) {
+      throw new Error(
+        this.getLastError() ?? "One or more responses have not been durably saved."
+      );
+    }
+  }
+
+  /**
    * Bug 5: a visible draft the server has not acknowledged. A provisional
    * intent awaiting its version is deliberately NOT in the outbox or in-flight
    * maps, so queue size alone cannot answer "is anything still outstanding?".

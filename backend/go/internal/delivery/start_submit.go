@@ -80,7 +80,10 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 		if err != nil {
 			return err
 		}
-		gate, err := s.moduleTimingGateTx(ctx, t, scheduleID, module.moduleID, now)
+		// SAT-006: the gate reads the authoritative DB time after the runtime
+		// and section rows are locked; that instant — not the pre-tx wall
+		// clock — judges both the cohort deadline and the personal window.
+		gate, gateNow, err := s.moduleTimingGateTx(ctx, t, scheduleID, module.moduleID)
 		if err != nil {
 			return err
 		}
@@ -95,12 +98,12 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 		if module.state != "not_started" {
 			return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module cannot be started in its current state.")
 		}
-		if gate.usesPersonalDeadline() && module.availableAt != nil && now.Before(*module.availableAt) {
+		if gate.usesPersonalDeadline() && module.availableAt != nil && gateNow.Before(*module.availableAt) {
 			return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module is not available until the scheduled break ends.")
 		}
 		res, err := t.ExecContext(ctx,
 			"UPDATE assessment_module_attempts SET state = 'active', available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'",
-			now, now, module.id)
+			gateNow, gateNow, module.id)
 		if err != nil {
 			return err
 		}
@@ -182,12 +185,14 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 		if active.state != "active" && active.state != "review" {
 			return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module is not active.")
 		}
-		gate, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID, now)
+		// SAT-006: deadline authority is the in-tx DB instant the gate returns,
+		// read after the runtime/module locks were acquired.
+		gate, gateNow, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID)
 		if err != nil {
 			return err
 		}
 		if gate.usesPersonalDeadline() {
-			if err := ensureSaveModuleAdmitted(active, now); err != nil {
+			if err := ensureSaveModuleAdmitted(active, gateNow); err != nil {
 				return err
 			}
 		}
@@ -401,9 +406,10 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 		DeviceFingerprintHash: control.deviceFingerprintHash,
 		Sections:              sections,
 		Attempt: AttemptSnapshot{
-			ID:             attemptID,
-			ModuleAttempts: moduleAttempts,
-			Responses:      responses,
+			ID:                   attemptID,
+			ModuleAttempts:       moduleAttempts,
+			Responses:            responses,
+			ProvisionalSubmitted: control.deliveryStatus == "submitted" && control.submittedAt == nil,
 		},
 		Result: result,
 	}, nil

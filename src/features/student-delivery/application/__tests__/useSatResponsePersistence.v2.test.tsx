@@ -268,6 +268,23 @@ describe('SAT V2 response persistence integration', () => {
     expect((submitError as Error).message).toMatch(/needs attention before submit/i);
     expect(hook.result.current.failureKind).toBe('retryable');
 
+    // SAT-004: the module boundary shares the same barrier. It must refuse
+    // before any module submission is attempted — queue length alone cannot
+    // see a blocked visible draft. The refusal carries the same gate copy.
+    let boundaryError: unknown = null;
+    await act(async () => {
+      try {
+        await hook.result.current.assertBoundarySettled!();
+      } catch (error) {
+        boundaryError = error;
+      }
+    });
+    expect(boundaryError).toBeInstanceOf(Error);
+    expect((boundaryError as Error).message).toMatch(/needs attention before submit/i);
+    // The blocked draft is still visible and named after the refusal.
+    expect(hook.result.current.visibleDrafts.q1?.answer).toBe('kept-answer');
+    expect(hook.result.current.blockedDrafts).toContain('q1');
+
     // Reconcile: reason union (never a bare boolean), and the draft stays
     // visible throughout. Reconcile re-issues under the new epoch (the
     // mocked snapshot above has no server-newer write), so expect

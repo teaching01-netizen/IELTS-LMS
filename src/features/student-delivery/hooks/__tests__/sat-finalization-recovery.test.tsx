@@ -141,6 +141,89 @@ describe("SAT finalization recovery", () => {
     vi.useRealTimers();
   });
 
+  // SAT-002: the final module expires while the student is still on the
+  // question screen (never opened Review). The timeout must move the runner
+  // through `submitting`, and a failed finalization must stay retryable — the
+  // pre-fix behavior left phase `module` with no valid retry path.
+  it("finalizes after a question-screen timeout and retries a failed finalization", async () => {
+    const p = activePayload();
+    gatewayMocks.bootstrap.mockResolvedValue(p);
+    const hook = renderHook(() => useSatExamController(opts));
+    await settle();
+    expect(hook.result.current.state.phase).toBe("module");
+
+    const done = structuredClone(p);
+    done.attempt.moduleAttempts[0].state = "submitted";
+    done.attempt.moduleAttempts[0].completionReason = "time_expired";
+    gatewayMocks.submitModule.mockResolvedValue(done);
+    gatewayMocks.submitAssessment
+      .mockRejectedValueOnce(new Error("completion backend down"))
+      .mockResolvedValueOnce({
+        id: "result-1",
+        submissionId: "attempt-a",
+        providerKey: "sat",
+        totalScore: 800,
+        scorePayload: {},
+        scoreKind: "practice",
+        sections: [],
+      });
+    gatewayMocks.bootstrap.mockRejectedValue(new Error("Network unavailable"));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(70_000);
+    });
+    await settle();
+    expect(gatewayMocks.submitModule).toHaveBeenCalledWith("schedule", "attempt-a", {
+      moduleId: "module",
+    });
+    expect(hook.result.current.state.phase).toBe("submitting");
+    expect(hook.result.current.error).toBe("completion backend down");
+
+    await act(async () => {
+      await hook.result.current.commands.retryFinalization();
+    });
+    expect(hook.result.current.state.phase).toBe("complete");
+    const ids = gatewayMocks.submitAssessment.mock.calls.map(
+      (call) => (call[2] as { submissionId?: string }).submissionId,
+    );
+    expect(ids).toEqual(["attempt-a", "attempt-a"]);
+    hook.unmount();
+    vi.useRealTimers();
+  });
+
+  // SAT-001: a committed V2 provisional claim with no scoring result must go
+  // straight to completion. Response resubmission is impossible by design
+  // (the durability engine treats the attempt as terminal), so flush/submit
+  // are skipped and the idempotent completion call owns the continuation.
+  it("skips response resubmission when the provisional claim already exists", async () => {
+    const p = activePayload();
+    p.attempt.moduleAttempts[0].state = "submitted";
+    p.attempt.moduleAttempts[0].completionReason = "submitted";
+    p.attempt.provisionalSubmitted = true;
+    gatewayMocks.bootstrap.mockResolvedValue(p);
+    gatewayMocks.submitAssessment.mockResolvedValue({
+      id: "result-1",
+      submissionId: "attempt-a",
+      providerKey: "sat",
+      totalScore: 800,
+      scorePayload: {},
+      scoreKind: "practice",
+      sections: [],
+    });
+    const hook = renderHook(() => useSatExamController(opts));
+    await settle();
+    // All modules terminal + provisional claim + no result: the recovery
+    // effect drives completion without touching the response queue.
+    expect(gatewayMocks.submitAssessment).toHaveBeenCalledWith("schedule", "attempt-a", {
+      submissionId: "attempt-a",
+    });
+    expect(persistenceMock.flush).not.toHaveBeenCalled();
+    expect(persistenceMock.submit).not.toHaveBeenCalled();
+    expect(hook.result.current.state.phase).toBe("complete");
+    hook.unmount();
+    vi.useRealTimers();
+  });
+
   it("retryFinalization replays the stable submission id exactly once", async () => {
     const p = activePayload();
     gatewayMocks.bootstrap.mockResolvedValue(p);

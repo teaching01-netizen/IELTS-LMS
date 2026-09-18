@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../../../shared/api-client/errors";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import { useSatExamController } from "../useSatExamController";
 
@@ -394,8 +395,16 @@ describe("useSatExamController auto-entry", () => {
     const expired = new Date(Date.parse(SERVER_NOW) - 5_000).toISOString();
     gatewayMocks.bootstrap.mockResolvedValueOnce(waitingBreakBootstrap(9, expired));
     gatewayMocks.bootstrap.mockResolvedValue(postBreakBootstrap(10));
+    // SAT-007: the transition race is classified from the structured backend
+    // code/reason the delivery layer emits (ASSESSMENT_CONFLICT with
+    // details.reason), never from the bare 409 status.
     gatewayMocks.startModule.mockRejectedValueOnce(
-      Object.assign(new Error("Section is not active."), { statusCode: 409 }),
+      new ApiError({
+        code: "ASSESSMENT_CONFLICT",
+        message: "Section is not active.",
+        status: 409,
+        details: { reason: "SECTION_NOT_ACTIVE" },
+      }),
     );
     gatewayMocks.startModule.mockResolvedValue(
       openedModule(postBreakBootstrap(10), MODULE_MATH, 11),

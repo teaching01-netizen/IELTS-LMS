@@ -240,4 +240,21 @@ describe('satRunnerReducer', () => {
     expect(next).toMatchObject({ phase: 'module', moduleKey: 'rw-m1', activeTool: null });
     expect(complete).toMatchObject({ phase: 'complete', resultId: 'result-1' });
   });
+
+  // SAT-002: begin-finalization is legal from the question screen, not only
+  // from Review. A timeout on the last module must reach `submitting` or the
+  // runner strands in `module` with no retry path when finalization fails.
+  it('accepts submit from the module phase (timeout on the last module)', () => {
+    const module = startedMath();
+    expect(module.phase).toBe('module');
+    const submitting = satRunnerReducer(module, { type: 'submit' });
+    expect(submitting).toMatchObject({
+      phase: 'submitting',
+      scheduleId: 'schedule-1',
+      candidateId: 'candidate-1',
+      assessmentId: 'assessment-1',
+    });
+    const complete = satRunnerReducer(submitting, { type: 'completed', resultId: 'result-1' });
+    expect(complete).toMatchObject({ phase: 'complete', resultId: 'result-1' });
+  });
 });

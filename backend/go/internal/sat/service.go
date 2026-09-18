@@ -43,6 +43,13 @@ const (
 	SectionMath           = "math"
 )
 
+// maxSubmissionIDLen is the scoring-boundary submission-id limit:
+// student_submissions.id and assessment_results.submission_id are VARCHAR(36),
+// and CompleteAssessment rejects anything longer. The V2 receipt path validates
+// against attempts.MaxSubmissionIDLen (64), so a receipt id can legally exceed
+// this and must not be carried across the scoring boundary unreduced.
+const maxSubmissionIDLen = 36
+
 // PolicyConfig carries the scoring policy row for one exam version.
 type PolicyConfig struct {
 	Raw json.RawMessage
@@ -226,7 +233,7 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 	if strings.TrimSpace(req.AttemptID) == "" || strings.TrimSpace(req.ScheduleID) == "" {
 		return nil, apperrors.New(apperrors.CodeBadRequest, "Attempt and schedule ids are required.")
 	}
-	if strings.TrimSpace(req.SubmissionID) == "" || len(req.SubmissionID) > 36 {
+	if strings.TrimSpace(req.SubmissionID) == "" || len(req.SubmissionID) > maxSubmissionIDLen {
 		return nil, apperrors.New(apperrors.CodeBadRequest, "submissionId must contain between one and 36 characters.")
 	}
 	// Outcome is captured inside the closure and emitted once after the
@@ -289,9 +296,12 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 
 // ReconcileProvisional is the SAT watchdog: provider SAT AND delivery
 // submitted AND phase post-exam AND submitted_at NULL AND final_submission
-// NULL AND no V2 receipt AND all modules terminal => lock, re-check, score,
-// complete, terminalize. It never fabricates a score: attempts with no
-// modules, a missing scoring policy, or a raced terminal state are skipped.
+// NULL AND no assessment result AND all modules terminal => lock, re-check,
+// score, complete, terminalize. A V2 provisional receipt is an idempotency
+// anchor, not an exclusion: the receipt's submission id is reused so the
+// scoring path stays replay-safe when the student's completion request never
+// arrived (SAT-001). It never fabricates a score: attempts with no modules,
+// a missing scoring policy, or a raced terminal state are skipped.
 func (s *Service) ReconcileProvisional(ctx context.Context) (int64, error) {
 	return s.ReconcileProvisionalBatch(ctx, 250)
 }
@@ -301,22 +311,25 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 	if batchSize < 1 {
 		batchSize = 250
 	}
-	type candidate struct{ attemptID, scheduleID string }
+	type candidate struct{ attemptID, scheduleID, receiptSubmissionID string }
 	var cands []candidate
 	// Candidate scan runs outside a transaction (read-only sweep); every
-	// candidate is re-locked and re-checked inside its own transaction.
+	// candidate is re-locked and re-checked inside its own transaction. The
+	// attempt_submissions_v2 attempt_id is the PK, so the LEFT JOIN yields at
+	// most one receipt row per attempt.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT a.id, a.schedule_id
+		SELECT a.id, a.schedule_id, COALESCE(r.submission_id, '')
 		FROM student_attempts a
 		JOIN exam_entities e ON e.id = a.exam_id
+		LEFT JOIN attempt_submissions_v2 r ON r.attempt_id = a.id
 		WHERE e.provider_key = 'sat'
 		  AND a.delivery_status = 'submitted'
 		  AND a.phase = 'post-exam'
 		  AND a.submitted_at IS NULL
 		  AND a.final_submission IS NULL
 		  AND COALESCE(a.proctor_status, 'active') <> 'terminated'
-		  AND NOT EXISTS (SELECT 1 FROM attempt_submissions_v2 r WHERE r.attempt_id = a.id)
 		  AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id)
+		  AND NOT EXISTS (SELECT 1 FROM assessment_results ar WHERE ar.attempt_id = a.id AND ar.provider_key = 'sat')
 		  AND EXISTS (SELECT 1 FROM assessment_module_attempts ma WHERE ma.attempt_id = a.id)
 		  AND NOT EXISTS (
 			SELECT 1 FROM assessment_module_attempts ma
@@ -329,7 +342,7 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 	}
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.attemptID, &c.scheduleID); err != nil {
+		if err := rows.Scan(&c.attemptID, &c.scheduleID, &c.receiptSubmissionID); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -342,7 +355,7 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 
 	var repaired int64
 	for _, c := range cands {
-		done, err := s.repairOne(ctx, c.attemptID, c.scheduleID)
+		done, err := s.repairOne(ctx, c.attemptID, c.scheduleID, c.receiptSubmissionID)
 		if err != nil {
 			// A raced terminal state or a concurrently completed attempt is
 			// benign; anything else aborts loudly via the returned error
@@ -363,7 +376,7 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 	return repaired, nil
 }
 
-func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (bool, error) {
+func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID, receiptSubmissionID string) (bool, error) {
 	var done bool
 	var outcome string
 	err := s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
@@ -396,6 +409,38 @@ func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (
 		} else if existingID != "" {
 			return nil // Raced with the student completion path; it owns the seal.
 		}
+		// SAT-001: a V2 provisional receipt proves the terminal claim committed
+		// without the scoring continuation. Reuse its submission id as the
+		// scoring identity so a watchdog retry replays idempotently instead of
+		// minting a fresh identity each pass.
+		receiptID, err := lockedProvisionalReceiptTx(ctx, t, attempt.ID)
+		if err != nil {
+			return err
+		}
+		if receiptID == "" {
+			receiptID = receiptSubmissionID
+		}
+		if len(receiptID) > maxSubmissionIDLen {
+			// The V2 receipt accepts submission ids up to 64 chars
+			// (attempts.MaxSubmissionIDLen) while the scoring boundary
+			// persists them into VARCHAR(36) columns and CompleteAssessment
+			// rejects anything longer. Reusing such an id would fail the very
+			// first INSERT on every pass — the orphaned attempt this repair
+			// exists to resolve would never repair. Fall back to the delivery
+			// reconcile anchor (submission_id = attempt_id).
+			receiptID = attempt.ID
+		}
+		// An existing result means another owner already finished the
+		// continuation; never score a second time.
+		var existingResultID sql.NullString
+		if err := t.QueryRowContext(ctx,
+			"SELECT id FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE",
+			attempt.ID).Scan(&existingResultID); err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if existingResultID.Valid {
+			return nil
+		}
 		// Never fake a score: without terminal modules or a scoring policy
 		// there is nothing to persist, so leave the attempt provisional.
 		mods, err := loadModules(ctx, t, attempt.ID)
@@ -413,9 +458,12 @@ func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (
 		if _, err := loadPolicy(ctx, t, attempt.PublishedVerID); err != nil {
 			return nil
 		}
-		submissionID := uuid.NewString()
-		if len(submissionID) > 36 {
-			submissionID = submissionID[:36]
+		submissionID := receiptID
+		if submissionID == "" {
+			submissionID = uuid.NewString()
+			if len(submissionID) > 36 {
+				submissionID = submissionID[:36]
+			}
 		}
 		_, err = s.scoreAndPersist(ctx, t, attempt, submissionID, "system", "", uuid.NewString(), now)
 		if err != nil {
@@ -695,6 +743,21 @@ func rejectIfTerminated(ctx context.Context, t tx.Tx, a attemptCore) error {
 		return &apperrors.Error{Code: apperrors.CodeAttemptProctorBlocked, Message: "Your SAT attempt has been terminated by the proctor.", HTTPStatus: 403}
 	}
 	return nil
+}
+
+// lockedProvisionalReceiptTx loads the attempt's V2 provisional receipt
+// submission id under the attempt lock. Empty when no receipt exists.
+func lockedProvisionalReceiptTx(ctx context.Context, t tx.Tx, attemptID string) (string, error) {
+	var id sql.NullString
+	err := t.QueryRowContext(ctx,
+		"SELECT submission_id FROM attempt_submissions_v2 WHERE attempt_id = ? FOR UPDATE", attemptID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return id.String, nil
 }
 
 func lockedSubmissionID(ctx context.Context, t tx.Tx, attemptID string) (string, error) {

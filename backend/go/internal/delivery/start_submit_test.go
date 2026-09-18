@@ -82,6 +82,10 @@ func deliveryLegacyGate(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnError(sql.ErrNoRows)
+	// SAT-006: the legacy gate reads the authoritative in-tx DB time after
+	// the module lock (no runtime row to lock).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 }
 
 func deliveryMaxRevision(mock sqlmock.Sqlmock, rev int64) {

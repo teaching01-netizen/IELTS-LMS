@@ -1113,4 +1113,46 @@ describe("DurableResponseEngine", () => {
     expect(statuses).not.toContain("synced");
     engine.destroy();
   });
+
+  it("SAT-004: assertBoundarySettled refuses unsettled visible work and settles on ack", async () => {
+    transport.sendBatch = vi.fn().mockImplementation(() => new Promise(() => {}));
+    const engine = new DurableResponseEngine({
+      scheduleId: "sched-1",
+      attemptId: "att-boundary",
+      leaseEpoch: 1,
+      controlEpoch: 1,
+      transport,
+    });
+
+    // Fresh engine: nothing visible, nothing outstanding.
+    expect(() => engine.assertBoundarySettled()).not.toThrow();
+
+    const payload: ResponsePayload = {
+      answer: "A",
+      markedForReview: false,
+      eliminatedOptions: [],
+      annotations: [],
+    };
+    await engine.acceptResponse("q-1", payload);
+    void engine.flush();
+    await vi.waitFor(() => expect(transport.sendBatch).toHaveBeenCalledTimes(1));
+
+    // A visible draft the server has not acknowledged is a boundary blocker
+    // even though the queue is legitimately non-empty.
+    expect(() => engine.assertBoundarySettled()).toThrow(/durably saved/i);
+
+    // The server acknowledgement settles the boundary.
+    const pending = engine.getStates().get("q-1")?.pending;
+    engine["handleAcknowledgement"]({
+      writeId: pending?.writeId ?? "missing-write-id",
+      questionId: "q-1",
+      clientVersion: 1,
+      outcome: "applied",
+      serverRevision: 10,
+      canonicalResponse: payload,
+      contentHash: "sha256:1",
+    });
+    expect(() => engine.assertBoundarySettled()).not.toThrow();
+    engine.destroy();
+  });
 });

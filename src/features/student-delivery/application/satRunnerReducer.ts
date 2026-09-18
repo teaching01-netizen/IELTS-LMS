@@ -245,7 +245,11 @@ export function satRunnerReducer(state: SatRunnerState, action: SatRunnerAction)
         assessmentId: state.assessmentId,
       };
     case 'submit':
-      if (state.phase !== 'review') return state;
+      // SAT-002: begin-finalization is legal from the question screen as well
+      // as Review. A timeout on the last module must move the runner to
+      // `submitting` whether or not the student ever opened Review; gating on
+      // Review stranded the state machine on a failed finalization.
+      if (state.phase !== 'review' && state.phase !== 'module') return state;
       return {
         phase: 'submitting',
         scheduleId: state.scheduleId,
