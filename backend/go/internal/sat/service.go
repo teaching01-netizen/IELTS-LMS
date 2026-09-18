@@ -556,7 +556,27 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 		})
 	}
 
+	// Audit finding 5 (second half): totalScore tolerates a nil section, so a
+	// partial topology — a math-only terminal set, or a section whose adaptive
+	// route was never recorded — would otherwise persist a plausible-looking SAT
+	// total. A score may only be minted from exactly one Reading & Writing route
+	// plus exactly one Math route; anything else fails closed instead of
+	// becoming a legitimate-looking result.
+	for _, required := range []string{SectionReadingWriting, SectionMath} {
+		a, ok := aggs[required]
+		if !ok {
+			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has no submitted %s modules.", required), HTTPStatus: 400}
+		}
+		if a.route == nil {
+			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has no completed adaptive route for %s.", required), HTTPStatus: 400}
+		}
+	}
+	if len(aggs) != 2 {
+		return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: "The SAT attempt has modules outside the Reading & Writing and Math sections.", HTTPStatus: 400}
+	}
+
 	var sections []SectionResult
+
 	for sectionKey, a := range aggs {
 		maxRaw := a.target
 		if maxRaw < 1 {
@@ -600,6 +620,13 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 		"totalScore": total, "sections": sections,
 	}
 
+	// Audit finding 4: derive the real active exam time before the insert so the
+	// result metadata represents reality instead of a hardcoded zero.
+	timeSpentSeconds, err := loadTimeSpentSeconds(ctx, t, attempt.ID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Global submission ownership: a submission id belongs to exactly one attempt.
 	var owner string
 	err = t.QueryRowContext(ctx, "SELECT attempt_id FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&owner)
@@ -614,9 +641,9 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 				(id, attempt_id, schedule_id, exam_id, published_version_id, provider_key,
 				 student_id, student_name, student_email, cohort_name,
 				 submitted_at, time_spent_seconds, grading_status, section_statuses)
-			VALUES (?, ?, ?, ?, ?, 'sat', ?, ?, ?, ?, ?, 0, 'submitted', ?)`,
+			VALUES (?, ?, ?, ?, ?, 'sat', ?, ?, ?, ?, ?, ?, 'submitted', ?)`,
 			submissionID, attempt.ID, attempt.ScheduleID, attempt.ExamID, attempt.PublishedVerID,
-			candidate, name, email, cohort, now, string(sectionStatuses)); err != nil {
+			candidate, name, email, cohort, now, timeSpentSeconds, string(sectionStatuses)); err != nil {
 			// The missing-row SELECT locks nothing, so a concurrent INSERT
 			// of the same id (or the UNIQUE attempt_id twin) surfaces as
 			// a duplicate key: converge same-attempt twins to the winner's
@@ -796,6 +823,29 @@ func loadModules(ctx context.Context, t tx.Tx, attemptID string) ([]moduleRow, e
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// loadTimeSpentSeconds derives the attempt's active exam time from the
+// authoritative module timing: each module that actually ran contributes its
+// wall time from start to submit (still-paused modules stop at paused_at),
+// minus the pause time the runtime accumulated for it. Clamped at zero per
+// module so a clock anomaly can never subtract from another module's time.
+//
+// Audit finding 4: this value used to be a hardcoded 0, so every completed SAT
+// silently claimed the student spent no time at all.
+func loadTimeSpentSeconds(ctx context.Context, t tx.Tx, attemptID string) (int64, error) {
+	var seconds sql.NullInt64
+	err := t.QueryRowContext(ctx, `
+		SELECT SUM(GREATEST(TIMESTAMPDIFF(SECOND, started_at, COALESCE(submitted_at, paused_at, UTC_TIMESTAMP(6))) - accumulated_paused_seconds, 0))
+		FROM assessment_module_attempts
+		WHERE attempt_id = ? AND started_at IS NOT NULL`, attemptID).Scan(&seconds)
+	if err != nil {
+		return 0, err
+	}
+	if !seconds.Valid || seconds.Int64 < 0 {
+		return 0, nil
+	}
+	return seconds.Int64, nil
 }
 
 func loadPolicy(ctx context.Context, t tx.Tx, versionID string) (PolicyConfig, error) {

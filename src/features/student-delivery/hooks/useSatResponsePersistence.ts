@@ -18,7 +18,11 @@ import type {
   AssessmentDeliveryBootstrap,
   AssessmentResponseSnapshot,
 } from '../contracts/assessmentDelivery';
-import { normalizeSatAnnotations, type SatQuestionResponseDraft } from '../domain/satResponses';
+import {
+  normalizeSatAnnotations,
+  normalizeSatResponseDraft,
+  type SatQuestionResponseDraft,
+} from '../domain/satResponses';
 import type { SatDeliveryGateway } from '../application/ports/SatDeliveryGateway';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 import {
@@ -90,11 +94,16 @@ function failureMessage(error: unknown): string {
 }
 
 export function satDraftToDurablePayload(draft: SatQuestionResponseDraft): ResponsePayload {
+  // Audit finding 3: the durability boundary is the last place the invariant
+  // can be enforced before a contradictory draft reaches storage. Normalizing
+  // here means an already-persisted `answer ∈ eliminatedOptions` record cannot
+  // be re-sent, whatever produced the draft object.
+  const normalized = normalizeSatResponseDraft(draft);
   return {
-    answer: draft.answer || null,
-    markedForReview: draft.markedForReview,
-    eliminatedOptions: [...draft.eliminatedOptionIds],
-    annotations: [{ id: 'sat-annotations', kind: 'sat_annotations', ...draft.annotations }],
+    answer: normalized.answer || null,
+    markedForReview: normalized.markedForReview,
+    eliminatedOptions: [...normalized.eliminatedOptionIds],
+    annotations: [{ id: 'sat-annotations', kind: 'sat_annotations', ...normalized.annotations }],
   };
 }
 
@@ -107,13 +116,15 @@ export function durablePayloadToSatDraft(
   );
   const annotationRecord =
     annotation && typeof annotation === 'object' ? (annotation as Record<string, unknown>) : {};
-  return {
+  // Heal on read: a server snapshot or outbox entry written before the fix may
+  // still carry the impossible pair, and reloading it must not resurrect it.
+  return normalizeSatResponseDraft({
     questionId,
     answer: typeof payload.answer === 'string' ? payload.answer : '',
     markedForReview: payload.markedForReview,
     eliminatedOptionIds: [...payload.eliminatedOptions],
     annotations: normalizeSatAnnotations(annotationRecord),
-  };
+  });
 }
 
 export function useSatResponsePersistence({

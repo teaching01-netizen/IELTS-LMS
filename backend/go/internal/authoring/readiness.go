@@ -789,12 +789,55 @@ func (s *Service) validateSATExam(ctx context.Context, shell Shell, rep Validati
 		}
 	}
 
+	// Audit finding 5: the loop above validates every section it is HANDED, but
+	// nothing proved the set was complete. Malformed imported or legacy data
+	// missing a section (or carrying two of the same key) satisfied every
+	// per-section check and published anyway; this fails it closed instead.
+	rep.Errors = append(rep.Errors, validateSATSectionCompleteness(shell.Sections)...)
+
 	var endingRevision int
 	if err := s.db.QueryRowContext(ctx, "SELECT revision FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE", shell.VersionID, shell.ExamID).Scan(&endingRevision); err == nil && endingRevision != shell.VersionRevision {
 		return ValidationReport{}, conflictError("The SAT draft changed while publish checks were running. Run the checks again.")
 	}
 	rep.Valid = len(rep.Errors) == 0
 	return rep, nil
+}
+
+// validateSATSectionCompleteness is the set-level counterpart to the per-section
+// loop: it proves the SAT topology is exactly one Reading & Writing section plus
+// exactly one Math section, with no duplicate section key. Kept pure so the
+// invariant is unit-tested without a database.
+func validateSATSectionCompleteness(sections []Section) []ValidationIssue {
+	counts := make(map[string]int, len(sections))
+	for _, section := range sections {
+		counts[section.SectionKey]++
+	}
+	var issues []ValidationIssue
+	for _, required := range []struct{ key, label string }{
+		{SectionReadingWriting, "Reading & Writing"},
+		{SectionMath, "Math"},
+	} {
+		switch count := counts[required.key]; count {
+		case 1:
+		case 0:
+			issues = append(issues, ValidationIssue{Code: "sat.structure.incomplete", Path: required.key, Message: fmt.Sprintf("SAT exams require exactly one %s section; none was found.", required.label), Blocking: true})
+		default:
+			issues = append(issues, ValidationIssue{Code: "sat.structure.incomplete", Path: required.key, Message: fmt.Sprintf("SAT exams allow exactly one %s section; %d were found.", required.label, count), Blocking: true})
+		}
+	}
+	// Any other key is a duplicate/foreign section. The per-section loop already
+	// reports unknown keys as sat.structure.invalid, so this only adds the
+	// repeated-key case it cannot see.
+	for key, count := range counts {
+		if count < 2 {
+			continue
+		}
+		if key == SectionReadingWriting || key == SectionMath {
+			continue
+		}
+		issues = append(issues, ValidationIssue{Code: "sat.structure.incomplete", Path: key, Message: fmt.Sprintf("SAT exams allow one section per blueprint key; %q appears %d times.", key, count), Blocking: true})
+	}
+	return issues
 }
 
 func validateChoiceAnswer(answer map[string]any, issues *[]ValidationIssue) {

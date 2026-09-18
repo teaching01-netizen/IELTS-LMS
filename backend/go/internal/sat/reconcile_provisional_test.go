@@ -46,13 +46,14 @@ func TestSATWatchdogRepairsProvisionalReceiptAttempt(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(
 		sqlmock.NewRows([]string{"candidate_id", "candidate_name", "candidate_email", "student_key"}).
 			AddRow("cand-1", "Cand Name", "cand@example.com", ""))
 	// The INSERT must bind the RECEIPT's submission id, not a fresh UUID.
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO student_submissions")).
-		WithArgs("sub-receipt", "att-1", "sched-1", "exam-sat", "pv-sat", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("sub-receipt", "att-1", "sched-1", "exam-sat", "pv-sat", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_results")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "sub-receipt", sqlmock.AnyArg(), sqlmock.AnyArg()).
@@ -105,6 +106,7 @@ func TestSATWatchdogFallsBackFromOversizedReceiptSubmissionID(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(
 		sqlmock.NewRows([]string{"candidate_id", "candidate_name", "candidate_email", "student_key"}).
@@ -112,7 +114,7 @@ func TestSATWatchdogFallsBackFromOversizedReceiptSubmissionID(t *testing.T) {
 	// Both scoring rows must bind the attempt id — the only identity the
 	// VARCHAR(36) boundary can persist.
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO student_submissions")).
-		WithArgs("att-1", "att-1", "sched-1", "exam-sat", "pv-sat", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("att-1", "att-1", "sched-1", "exam-sat", "pv-sat", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_results")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "att-1", sqlmock.AnyArg(), sqlmock.AnyArg()).
@@ -199,12 +201,13 @@ func TestReconcileProvisionalBatchIncludesReceiptCandidates(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	satTimeSpent(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE id")).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(
 		sqlmock.NewRows([]string{"candidate_id", "candidate_name", "candidate_email", "student_key"}).
 			AddRow("cand-1", "Cand Name", "cand@example.com", ""))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO student_submissions")).
-		WithArgs("sub-receipt", "att-1", "sched-1", "exam-sat", "pv-sat", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("sub-receipt", "att-1", "sched-1", "exam-sat", "pv-sat", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_results")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "sub-receipt", sqlmock.AnyArg(), sqlmock.AnyArg()).
@@ -227,8 +230,21 @@ func TestReconcileProvisionalBatchIncludesReceiptCandidates(t *testing.T) {
 	}
 }
 
+// satTimeSpent answers the audit-finding-4 derivation query (active exam time
+// from authoritative module timing). 45 minutes of module time here.
+func satTimeSpent(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE attempt_id = ? AND started_at IS NOT NULL")).
+		WillReturnRows(sqlmock.NewRows([]string{"seconds"}).AddRow(int64(2700)))
+}
+
+// satTerminalModules is the REAL terminal shape: per section, the base module
+// plus the adaptive branch the router opened. The audit-finding-5 topology gate
+// requires a recorded route per section, so the old fictitious "routing" role
+// (which no delivery path writes) is no longer a valid fixture.
 func satTerminalModules() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).
-		AddRow("reading-writing", "rw-m1", "routing", "submitted", int64(20), int64(27), int64(27)).
-		AddRow("math", "math-m1", "routing", "submitted", int64(20), int64(27), int64(27))
+		AddRow("reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).
+		AddRow("reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).
+		AddRow("math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).
+		AddRow("math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27))
 }

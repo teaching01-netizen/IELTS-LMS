@@ -286,7 +286,11 @@ func submitRequestShape(cmd SubmitCommand) any {
 	return map[string]any{"submissionId": cmd.SubmissionID, "attemptId": cmd.AttemptID, "leaseEpoch": cmd.LeaseEpoch, "finalCommands": finals, "expectedAttemptRevision": exp}
 }
 
-// ComputeDigestInTx reads the projection hashes for the final digest.
+// ComputeDigestInTx reads the projection hashes for the final digest. An
+// attempt with no stored responses is NOT an error: the empty set hashes as
+// canonical JSON "[]", which keeps a fully unanswered attempt terminalizable
+// (see FinalDigest). Rejecting it here would strand every retry, since a retry
+// cannot invent a response.
 func ComputeDigestInTx(ctx context.Context, q tx.Tx, attemptID string) (string, error) {
 	rows, err := q.QueryContext(ctx, `SELECT question_id, response_hash FROM attempt_responses_v2 WHERE attempt_id=?`, attemptID)
 	if err != nil {
@@ -303,9 +307,6 @@ func ComputeDigestInTx(ctx context.Context, q tx.Tx, attemptID string) (string, 
 	}
 	if err := rows.Err(); err != nil {
 		return "", err
-	}
-	if len(m) == 0 {
-		return "", &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "No responses to submit.", HTTPStatus: 400}
 	}
 	return FinalDigest(m)
 }

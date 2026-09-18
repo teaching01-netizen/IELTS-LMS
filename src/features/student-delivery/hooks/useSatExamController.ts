@@ -12,7 +12,14 @@ import type {
   AssessmentTimingSnapshot,
 } from "../contracts/assessmentDelivery";
 import type { StudentAttempt } from "../../../types/studentAttempt";
-import { normalizeSatAnnotations, responseForQuestion, type SatQuestionAnnotations } from "../domain/satResponses";
+import {
+  applySatResponseDraftChange,
+  normalizeSatAnnotations,
+  responseForQuestion,
+  type SatQuestionAnnotations,
+  type SatQuestionResponseDraft,
+  type SatResponseDraftChange,
+} from "../domain/satResponses";
 import {
   breakRemainingSeconds,
   mergeAuthoritativeTiming,
@@ -54,6 +61,7 @@ import {
 import { satPollDelayMs } from "../application/satPollCadence";
 import {
   isSectionClosingRejection,
+  isStaleConflictRejection,
   isWriterSupersededRejection,
 } from "../application/satSubmitConflicts";
 import type { SatToolId } from "../domain/satTools";
@@ -799,7 +807,16 @@ export function useSatExamController({
         // section this module belongs to (SECTION_NOT_ACTIVE / RUNTIME_NOT_LIVE
         // at a transition). The attempt stays retryable, so say nothing and let
         // the next one land — a transition race is never a student error.
-        if (!isSectionClosingRejection(startError)) {
+        //
+        // SAT-007: entry must also tell writer supersession apart. A stale
+        // control epoch or a durable-state disagreement is not a transition
+        // either — the entry loop retries it — while losing the writer slot
+        // needs the ownership instruction, not a silent retry forever.
+        if (isWriterSupersededRejection(startError)) {
+          setError(
+            "This attempt is now active in another window. Your saved answers are safe — continue there, or use Take over to resume here."
+          );
+        } else if (!isSectionClosingRejection(startError) && !isStaleConflictRejection(startError)) {
           setError(
             startError instanceof Error ? startError.message : "The SAT module could not be started."
           );
@@ -953,6 +970,21 @@ export function useSatExamController({
       const submittedModuleAttemptId = data ? findAttemptForModule(data, moduleId)?.id : undefined;
       setIsSubmitting(true);
       setError(null);
+      // SAT-007 slice 2: a control-epoch or durability conflict means our local
+      // view is stale, not that the request is illegal. Refresh the authoritative
+      // epoch/revision and send exactly ONE more attempt before treating it as a
+      // real failure. Section closures and writer supersession are deliberately
+      // excluded: the module is genuinely gone, or another window owns the
+      // attempt and retrying here cannot help.
+      const submitModuleRequest = async () => {
+        try {
+          return await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
+        } catch (conflict) {
+          if (!isStaleConflictRejection(conflict)) throw conflict;
+          await refresh(false);
+          return await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
+        }
+      };
       try {
         await persistence.flush();
         if (!isCurrent()) return;
@@ -963,7 +995,7 @@ export function useSatExamController({
         // submit uses.
         await persistence.assertBoundarySettled?.();
         if (!isCurrent()) return;
-        const next = await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
+        const next = await submitModuleRequest();
         if (!isCurrent()) return;
         if (next.scheduleId !== scheduleId || next.attempt.id !== attemptId) return;
         // SAT-005: the submitModule hint commits data AND dispatches the
@@ -1055,6 +1087,15 @@ export function useSatExamController({
         if (isSectionClosingRejection(submitError)) {
           setError(
             "The exam is finalizing this module — your answers are safe. Keep this screen open."
+          );
+          return;
+        }
+        // The retry already refetched once. Say what is actually true — the
+        // module is NOT closed and the last answers were not lost — instead of
+        // the backend's raw code, which reads like an exam error to a student.
+        if (isStaleConflictRejection(submitError)) {
+          setError(
+            "This device and the server disagreed about the latest revision, so the module was not submitted. Your answers are saved — submit the module again."
           );
           return;
         }
@@ -1290,57 +1331,72 @@ export function useSatExamController({
     [state]
   );
 
+  // Audit finding 3: every response mutation runs through the domain mutator,
+  // and the reducer receives EXACTLY the object that is handed to persistence.
+  // Deriving the persisted draft separately let `answer` stay inside
+  // `eliminatedOptionIds` on the wire while the screen showed it restored.
+  const commitResponseChange = useCallback(
+    (
+      questionId: string,
+      change: SatResponseDraftChange,
+      interactionType: "typing" | "discrete"
+    ): SatQuestionResponseDraft | null => {
+      const current = currentResponse(questionId);
+      if (!current) return null;
+      const next = applySatResponseDraftChange(current, change);
+      dispatch({ type: "replaceResponse", response: next });
+      persistence.save(next, saveContext(interactionType));
+      return next;
+    },
+    [currentResponse, persistence, saveContext]
+  );
+
   const setAnswer = useCallback(
     (questionId: string, answer: string) => {
-      const current = currentResponse(questionId);
-      if (!current) return;
-      const next = { ...current, answer };
       const question = stateModule?.questions.find(
         (candidate) => candidate.examQuestionId === questionId
       );
       const interactionType =
         question?.questionType === "student_produced_response" ? "typing" : "discrete";
-      dispatch({ type: "setAnswer", questionId, value: answer });
-      persistence.save(next, saveContext(interactionType));
+      commitResponseChange(questionId, { kind: "setAnswer", answer }, interactionType);
     },
-    [currentResponse, persistence, saveContext, stateModule]
+    [commitResponseChange, stateModule]
   );
 
   const toggleReview = useCallback(
     (questionId: string) => {
       const current = currentResponse(questionId);
       if (!current) return;
-      const next = { ...current, markedForReview: !current.markedForReview };
-      dispatch({ type: "setReviewFlag", questionId, flagged: next.markedForReview });
-      persistence.save(next, saveContext("discrete"));
+      commitResponseChange(
+        questionId,
+        { kind: "setReviewFlag", markedForReview: !current.markedForReview },
+        "discrete"
+      );
     },
-    [currentResponse, persistence, saveContext]
+    [commitResponseChange, currentResponse]
   );
 
   const toggleEliminatedOption = useCallback(
     (questionId: string, optionId: string) => {
-      const current = currentResponse(questionId);
-      if (!current) return;
-      const eliminatedOptionIds = current.eliminatedOptionIds.includes(optionId)
-        ? current.eliminatedOptionIds.filter((candidate) => candidate !== optionId)
-        : [...current.eliminatedOptionIds, optionId];
-      const next = { ...current, eliminatedOptionIds };
-      dispatch({ type: "toggleEliminatedOption", questionId, optionId });
-      persistence.save(next, saveContext("discrete"));
+      commitResponseChange(questionId, { kind: "toggleEliminatedOption", optionId }, "discrete");
     },
-    [currentResponse, persistence, saveContext]
+    [commitResponseChange]
   );
 
   const setAnnotationNote = useCallback(
     (questionId: string, note: string) => {
       const current = currentResponse(questionId);
       if (!current) return;
-      const annotations = { ...current.annotations, legacyQuestionNote: note.slice(0, 2_000) };
-      const next = { ...current, annotations };
-      dispatch({ type: "setAnnotations", questionId, annotations });
-      persistence.save(next, saveContext("typing"));
+      commitResponseChange(
+        questionId,
+        {
+          kind: "setAnnotations",
+          annotations: { ...current.annotations, legacyQuestionNote: note.slice(0, 2_000) },
+        },
+        "typing"
+      );
     },
-    [currentResponse, persistence, saveContext]
+    [commitResponseChange, currentResponse]
   );
 
   const setAnnotations = useCallback((questionId: string, annotations: SatQuestionAnnotations) => {

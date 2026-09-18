@@ -57,6 +57,34 @@ const SECTION_CLOSING_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The control plane moved (a pause/resume or runtime bump crossed this
+ * command), so our control epoch is stale rather than the request being
+ * illegal. Recovery is to refetch the runtime and send one more attempt — a
+ * command that crossed a pause boundary is not a closed section.
+ */
+const CONTROL_EPOCH_CODES: ReadonlySet<string> = new Set(["CONTROL_EPOCH_STALE"]);
+
+/**
+ * Durable-state disagreements: the server holds a different version, revision,
+ * or write id than this client believes. These are recoverable by reconciling
+ * against the authoritative projection and retrying — they are not clock or
+ * ownership transitions.
+ */
+const DURABILITY_RECONCILE_CODES: ReadonlySet<string> = new Set([
+  "VERSION_COLLISION",
+  "RESPONSE_REVISION_MISMATCH",
+  "WRITE_ID_CONFLICT",
+  "RUNTIME_REVISION_STALE",
+]);
+
+function codeOrReasonIn(error: unknown, codes: ReadonlySet<string>): boolean {
+  const code = backendErrorCode(error);
+  if (code !== null && codes.has(code)) return true;
+  const reason = backendErrorReason(error);
+  return reason !== null && codes.has(reason);
+}
+
+/**
  * A conflict from the module gate means the server's view of the authoritative
  * clock has moved past ours (deadline expired, runtime not live, section/stage
  * not active, module already finalized by the reconciler). The module is closed
@@ -79,4 +107,34 @@ export function isWriterSupersededRejection(error: unknown): boolean {
   const code = backendErrorCode(error);
   if (code === "ACTIVE_SESSION_SUPERSEDED" || code === "LEASE_FENCED") return true;
   return backendErrorReason(error) === "ACTIVE_SESSION_SUPERSEDED";
+}
+
+/**
+ * A pause/resume (or runtime bump) crossed this command in flight. The correct
+ * recovery is to refetch the runtime/control epoch and send one more attempt,
+ * never to tell the student the section is finalizing and wait for a
+ * transition that this failure does not imply.
+ */
+export function isControlEpochStaleRejection(error: unknown): boolean {
+  return codeOrReasonIn(error, CONTROL_EPOCH_CODES);
+}
+
+/**
+ * The server's durable projection disagrees with this client's revision or
+ * write id. Recovery is a durability reconciliation against the authoritative
+ * snapshot followed by a retry, not a transition wait and not a terminal
+ * failure.
+ */
+export function isDurabilityReconcileRejection(error: unknown): boolean {
+  return codeOrReasonIn(error, DURABILITY_RECONCILE_CODES);
+}
+
+/**
+ * Conflicts where our local view is stale-but-recoverable: refetch the
+ * authoritative epoch/revision, then send exactly one more attempt before
+ * reporting anything. Deliberately excludes section closures (the module is
+ * genuinely gone) and writer supersession (another window owns the attempt).
+ */
+export function isStaleConflictRejection(error: unknown): boolean {
+  return isControlEpochStaleRejection(error) || isDurabilityReconcileRejection(error);
 }

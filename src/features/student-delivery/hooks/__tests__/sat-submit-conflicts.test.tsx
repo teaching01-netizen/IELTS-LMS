@@ -238,15 +238,27 @@ describe("SAT module submit conflicts", () => {
       rejected: ["another window"],
     },
     {
-      label: "unclassified 409",
+      label: "durable-state disagreement",
       rejection: new ApiError({
         code: "ASSESSMENT_CONFLICT",
         message: "Response revision mismatch.",
         status: 409,
         details: { reason: "RESPONSE_REVISION_MISMATCH" },
       }),
-      expected: "Response revision mismatch.",
+      // Recoverable, and definitely not a closed section: the copy must not
+      // claim the module is finalizing, nor send the student to another window.
+      expected: "submit the module again",
       rejected: ["finalizing this module", "another window"],
+    },
+    {
+      label: "unclassified 409",
+      rejection: new ApiError({
+        code: "SUBMISSION_ID_MISUSE",
+        message: "Submission identity already used.",
+        status: 409,
+      }),
+      expected: "Submission identity already used.",
+      rejected: ["finalizing this module", "another window", "submit the module again"],
     },
   ])("SAT-007: $label selects its own recovery copy", async ({ rejection, expected, rejected }) => {
     const hook = await armedHook();
