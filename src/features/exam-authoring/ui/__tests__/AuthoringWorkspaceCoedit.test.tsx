@@ -191,6 +191,7 @@ vi.mock("../../api/assessmentQueries", () => ({
     readiness: (examId: string, v: string, r: number) => ["assessment", examId, "readiness", v, r],
     question: (id: string) => ["assessment-question", id],
   },
+  setReadyShell: vi.fn(),
   useAuthoringShell: (...a: unknown[]) => (harness.useAuthoringShell as never)(...a),
   useExamQuestion: (...a: unknown[]) => (harness.useExamQuestion as never)(...a),
   useCreateAssessmentQuestion: (...a: unknown[]) => (harness.useCreate as never)(...a),
@@ -381,7 +382,13 @@ function setupDefaults(): void {
     },
   };
   harness.details = details;
-  harness.shellResult = { data: shell, isLoading: false, error: null, refetch: vi.fn() };
+  // The shell cache holds a lifecycle envelope: READY carries the shell.
+  harness.shellResult = {
+    data: { state: "READY", shell },
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  };
 
   const hookMocks = [
     harness.useAuthoringShell,

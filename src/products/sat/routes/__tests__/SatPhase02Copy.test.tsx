@@ -24,7 +24,7 @@ vi.mock('../../../../features/exam-authoring/api/examQueries', () => ({
   useExamListQuery: useExamListQueryMock,
   invalidateExamList: invalidateExamListMock,
 }));
-vi.mock('../../../../features/exam-authoring/application/examAuthoringFacade', () => ({
+vi.mock('../../../../features/exam-authoring/api/examAuthoringFacade', () => ({
   examAuthoringFacade: { lifecycle: { createProviderExam: createProviderExamMock } },
 }));
 

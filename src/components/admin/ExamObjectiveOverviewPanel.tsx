@@ -10,7 +10,7 @@ import type {
   ObjectiveIntegrityOverview,
   ObjectiveOverrideUpsertRequest,
 } from '../../types/grading';
-import { examRepository } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { examRepository } from '../../features/exam-authoring/api/examAuthoringGateway';
 import {
   gradingErrorMessage,
   gradingRepository,

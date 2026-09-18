@@ -117,7 +117,7 @@ func TestAlertRulesLabelValuesAreEmitted(t *testing.T) {
 			// Two-sided: the series must be present AND must not be
 			// followed by a label matcher (which would silently
 			// narrow it to one class).
-				idx := strings.Index(segment, pin.series)
+			idx := strings.Index(segment, pin.series)
 			if idx < 0 {
 				t.Errorf("alert %q must reference %s", pin.alert, pin.series)
 				continue

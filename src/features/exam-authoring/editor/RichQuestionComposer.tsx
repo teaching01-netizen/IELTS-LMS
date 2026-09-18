@@ -16,7 +16,7 @@ import { SatImage } from "./SatImageExtension";
 import { EditableBlockMath, EditableInlineMath } from "./EditableMathExtension";
 import { getAssessmentMediaAsset, uploadAssessmentAsset } from "../api/assessmentMediaApi";
 import { AuthoringDialog } from "../ui/authoringPrimitives";
-import { authoringMotion } from "../ui/authoringMotion";
+import { authoringMotion } from "@/src/shared/motion";
 import { RichContentIdentity } from "./RichContentIdentityExtension";
 import { richTextSchemaExtensions } from "./schema/richTextSchema";
 import { ComposerToolbar } from "./ComposerToolbar";

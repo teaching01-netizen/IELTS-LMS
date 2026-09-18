@@ -264,7 +264,7 @@ func redactAnswerValue(raw any) (any, error) {
 				}
 			}
 			redacted = append(redacted, keep)
-			}
+		}
 		out["options"] = redacted
 	case "student_produced_response":
 		for _, canonical := range []string{"normalizeFraction", "normalizeDecimal", "numericTolerance"} {

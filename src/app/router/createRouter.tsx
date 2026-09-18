@@ -138,6 +138,12 @@ const DevSatAccessibilityRoute = lazy(() =>
   }))
 );
 
+const DevSatAuthoringRoute = lazy(() =>
+  import("./dev/SatAuthoringDebugRoute").then((module) => ({
+    default: module.SatAuthoringDebugRoute,
+  }))
+);
+
 function RouteLoadingFallback() {
   return <AppLoadingSkeleton />;
 }
@@ -539,6 +545,15 @@ const devRoutes = import.meta.env.DEV
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>
             <DevSatAccessibilityRoute />
+          </Suspense>
+        ),
+      },
+      {
+        path: "/__dev/sat-authoring",
+        errorElement: <RouteErrorBoundary />,
+        element: (
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <DevSatAuthoringRoute />
           </Suspense>
         ),
       },

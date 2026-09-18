@@ -206,6 +206,27 @@ export interface AssessmentAuthoringShell {
   sections: AssessmentSectionShell[];
 }
 
+/**
+ * Lifecycle state of the authoring shell read, as the backend reports it.
+ *
+ * NO_DRAFT is a normal lifecycle answer with HTTP 200, not an error: an exam
+ * that exists and has no editable draft yet. The read never creates one, so a
+ * refresh can only ever answer READY or NO_DRAFT for a given exam.
+ */
+export type AssessmentAuthoringShellState = "READY" | "NO_DRAFT";
+
+/**
+ * Wire shape of `GET /v1/assessment-authoring/exams/:examId/shell`.
+ *
+ * `shell` is null exactly when `state` is NO_DRAFT. A READY response always
+ * carries a shell; a 404 on this route means the exam row does not exist
+ * (`EXAM_NOT_FOUND`), which is a different thing entirely.
+ */
+export interface AssessmentAuthoringShellResult {
+  state: AssessmentAuthoringShellState;
+  shell: AssessmentAuthoringShell | null;
+}
+
 export interface AssessmentQuestionDetail {
   examQuestionId: string;
   moduleId: string;

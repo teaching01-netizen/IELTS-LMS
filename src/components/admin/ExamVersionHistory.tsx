@@ -7,7 +7,7 @@ import type { ExamVersionHistoryProps } from '../../features/exam-authoring/cont
 import { normalizeWritingTaskContents } from '../../utils/writingTaskUtils';
 import { ConfirmModal } from '../ConfirmModal';
 import { useVersionHistory } from './hooks/useVersionHistory';
-import { examRepository, hydrateExamState } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { examRepository, hydrateExamState } from '../../features/exam-authoring/api/examAuthoringGateway';
 import type { ExamVersion } from '../../types/domain';
 
 export function ExamVersionHistory({

@@ -52,6 +52,21 @@ const (
 	CodeStudentWSRetired Code = "STUDENT_WS_RETIRED"
 )
 
+// Authoring lifecycle codes. These are separate from the block above because
+// they exist to keep two states apart that NOT_FOUND used to conflate.
+const (
+	// CodeExamNotFound distinguishes "no such exam row" from the generic
+	// NOT_FOUND. The authoring shell read answers 200 NO_DRAFT for an exam
+	// that exists without an editable draft, so a 404 on that route means
+	// exactly one thing: the exam does not exist.
+	CodeExamNotFound Code = "EXAM_NOT_FOUND"
+	// CodeDraftIntegrity marks a dangling current_draft_version_id: the exam
+	// row points at a version that is absent, owned by another exam, or not a
+	// draft. That is corrupted state, not an empty draft, and must never be
+	// reported as the legitimate NO_DRAFT lifecycle state.
+	CodeDraftIntegrity Code = "DRAFT_INTEGRITY_VIOLATION"
+)
+
 // Error is a typed application error with a stable code.
 type Error struct {
 	Code       Code
@@ -81,7 +96,7 @@ func statusFor(c Code) int {
 		return http.StatusUnauthorized
 	case CodeForbidden, CodeCSRF, CodeLeaseFenced, CodeAttemptProctorBlocked:
 		return http.StatusForbidden
-	case CodeNotFound:
+	case CodeNotFound, CodeExamNotFound:
 		return http.StatusNotFound
 	case CodeMethodNotAllowed:
 		return http.StatusMethodNotAllowed
@@ -103,6 +118,8 @@ func statusFor(c Code) int {
 		return http.StatusBadRequest
 	case CodeValidation, CodeUnsupportedProvider, CodeInvalidAssessment:
 		return http.StatusUnprocessableEntity
+	case CodeInternal, CodeDraftIntegrity:
+		return http.StatusInternalServerError
 	default:
 		return http.StatusInternalServerError
 	}

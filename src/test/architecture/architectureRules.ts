@@ -53,6 +53,67 @@ export function collectLayerDependencyViolations(
   return sortViolations(violations);
 }
 
+/** The feature this boundary was audited for (plan Phase 10). */
+const ASSESSMENT_AUTHORING_FEATURE = 'src/features/exam-authoring';
+
+/**
+ * A feature's INTERNAL directories.
+ *
+ * `api/` and `routes/` are deliberately absent: they are the feature's public
+ * entry points and are the only paths anyone outside the feature may import.
+ *
+ * `ui/` is absent too, and that is a deliberate scope limit rather than an
+ * endorsement: composing another feature's screen is a real (and repo-wide)
+ * question, but naming it in this rule today would flag call sites whose only
+ * fix is inventing a public entry point for a component — a product decision,
+ * not a dependency cleanup. The three layers below are the ones the plan names
+ * ("never UI → infrastructure"), and they can be repointed mechanically.
+ */
+const ASSESSMENT_AUTHORING_INTERNAL_LAYERS = [
+  `${ASSESSMENT_AUTHORING_FEATURE}/application`,
+  `${ASSESSMENT_AUTHORING_FEATURE}/domain`,
+  `${ASSESSMENT_AUTHORING_FEATURE}/infrastructure`,
+];
+
+/**
+ * UI → infrastructure, enforced (plan Phase 10).
+ *
+ * The layer and feature rules together let a legacy consumer reach PAST a
+ * feature's public `api/` into its `infrastructure/`, `application/`, or `ui/`:
+ * the layer rule does not describe feature internals, and the feature rule only
+ * compares two files that are BOTH inside `src/features/`. So twenty-odd legacy
+ * consumers imported the assessment-authoring infrastructure gateway directly,
+ * which is exactly the edge the plan forbids ("never UI → infrastructure") and
+ * exactly the edge that no guard could see.
+ *
+ * Scoped to the audited feature on purpose: other features' legacy consumers
+ * are still mid-migration, and widening this rule today would mean writing a
+ * baseline — which the architecture policy forbids. Add a feature here only
+ * after its consumers have been repointed.
+ */
+export function collectFeatureInternalBoundaryViolations(
+  sourceFiles: readonly string[],
+): readonly ArchitectureViolation[] {
+  const violations = addImportViolations(
+    'feature-internal-boundary',
+    sourceFiles,
+    (file, sourceImport) => {
+      const target = sourceImport.target;
+      if (!target) {
+        return null;
+      }
+      // A feature may always import its own internals.
+      if (isPathUnder(file, ASSESSMENT_AUTHORING_FEATURE)) {
+        return null;
+      }
+      return ASSESSMENT_AUTHORING_INTERNAL_LAYERS.some((layer) => isPathUnder(target, layer))
+        ? target
+        : null;
+    },
+  );
+  return sortViolations(violations);
+}
+
 export function collectFeatureIsolationViolations(
   sourceFiles: readonly string[],
 ): readonly ArchitectureViolation[] {

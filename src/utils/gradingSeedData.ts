@@ -6,7 +6,7 @@
  */
 
 import { gradingRepository, gradingService } from '../features/grading/infrastructure/gradingGateway';
-import { examRepository } from '../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { examRepository } from '../features/exam-authoring/api/examAuthoringGateway';
 import { ExamSchedule } from '../types/domain';
 import { logger } from './logger';
 

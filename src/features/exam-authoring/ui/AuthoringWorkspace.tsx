@@ -1,22 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import type {
   AssessmentAuthoringShell,
-  AssessmentQuestionDetail,
   AssessmentValidationIssue,
-  BatchQuestionDraft,
-  BulkQuestionAction,
   QuestionRevision,
-  SatWorkbookCommitResult,
-  SatWorkbookUndoState,
 } from "../contracts/assessment";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
 import {
-  assessmentKeys,
-  toEnsureDraftShellErrorInfo,
   useAssessmentValidation,
-  useAuthoringShell,
   useBatchCreateAssessmentQuestions,
   useBulkAssessmentQuestions,
   useCreateAssessmentQuestion,
@@ -26,45 +18,29 @@ import {
   useLoadSatSampleExam,
   useReorderAssessmentQuestions,
 } from "../api/assessmentQueries";
-import { isBackendNotFound } from "../infrastructure/examAuthoringBackendGateway";
-import { useQuestionAutosave } from "../hooks/useQuestionAutosave";
+import { authoringEffects } from "../api/authoringQueryEffects";
+import { useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
+import { AuthoringLifecycleSurface } from "./AuthoringLifecycleSurface";
 import { combineSaveStatus } from "./spine/coeditSaveTruth";
 import {
   authorForActor,
-  classifyQuestionFields,
   occupantsOf,
-  resolveAuthoringRealtimeFlags,
-  resolveEffectiveCapabilities,
-  useAuthoringPresence,
   useAuthoringRealtime,
   useQuestionDivergence,
-  type AuthoringCapabilities,
   type AuthoringPresence,
   type DivergenceEvent,
 } from "../realtime";
-import { SAVE_CONFLICT_COPY } from "../realtime/connectionCopy";
 import { RemoteUpdateNotice } from "./collaboration/RemoteUpdateNotice";
 import { ConflictResolver } from "./collaboration/ConflictResolver";
 import { CollaboratorStack } from "./collaboration/CollaboratorStack";
 import { CollaborationLiveRegion } from "./collaboration/CollaborationLiveRegion";
 import { CoeditRecoverySurface } from "./collaboration/CoeditRecoverySurface";
 import { DeviceDraftRecoverySurface } from "./collaboration/DeviceDraftRecoverySurface";
-import {
-  mergeCollaborationParticipants,
-  selfParticipant,
-} from "./collaboration/collaborationParticipants";
 import { QuestionPresenceBadge } from "./collaboration/QuestionPresenceBadge";
-import {
-  DELETION_COPY,
-  PRESENCE_COPY,
-  PUBLISH_COPY,
-  STRUCTURAL_COPY,
-  questionLabel,
-} from "./collaboration/collaborationCopy";
+import { PRESENCE_COPY } from "./collaboration/collaborationCopy";
 import { validateSatQuestion } from "../providers/sat/satProvider";
 import { QuestionImportSheet } from "../import/QuestionImportSheet";
 import { SatWorkbookImportSheet } from "../import/SatWorkbookImportSheet";
-import type { SpineQueueFilter } from "./spine/queueModel";
 import { SampleExamLoadDialog } from "./SampleExamLoadDialog";
 import { WorkbookImportUndoBanner } from "./WorkbookImportUndoBanner";
 import { useOptionalAuthSession } from "../../auth/api/authSession";
@@ -75,76 +51,50 @@ import {
   EmptyEditor,
   IssuesPane,
   QuestionLoadError,
-  summaryFromRevision,
 } from "./authoringWorkspaceSurfaces";
-import { useAuthoringSaveRouting } from "./useAuthoringSaveRouting";
-import { useModuleQuestionSelection } from "./moduleQuestionMemory";
+import { useAuthoringPersistence } from "./useAuthoringPersistence";
+import { useAuthoringWorkbook } from "./useAuthoringWorkbook";
+import { useAuthoringQuestionCommands } from "./useAuthoringQuestionCommands";
+import { useAuthoringNavigationGuard } from "./useAuthoringNavigationGuard";
+import { useAuthoringDraftLifecycle } from "./useAuthoringDraftLifecycle";
+import { useAuthoringKeyboard, type WorkspaceMode } from "./useAuthoringKeyboard";
+import { useAuthoringSelection } from "./useAuthoringSelection";
 import { useCoeditRecoveryAndPresence } from "./useCoeditRecoveryAndPresence";
-import {
-  COEDIT_MUTATION_FLUSH_TIMEOUT_MS,
-  COEDIT_ROUTE_FLUSH_TIMEOUT_MS,
-  coeditRoomBlockMessage,
-  coeditRoomShouldWarnBeforeUnload,
-} from "./collaboration/coeditNavigationGate";
-import { examKeys } from "../api/examQueries";
+import { coeditRoomShouldWarnBeforeUnload } from "./collaboration/coeditNavigationGate";
 import { useWorkspaceProjectionWrites } from "./useWorkspaceProjectionWrites";
-import {
-  isQuestionWorkspaceScalar,
-  normalizeQuestionRevision,
-  questionWorkspaceScalar,
-} from "./authoringWorkspaceModel";
-import {
-  SatAuthoringErrorSurface,
-  SatAuthoringLoadingSurface,
-} from "./SatAuthoringStateSurfaces";
+import { serverQuestionDocument, useAuthoringDraft } from "./useAuthoringDraft";
+import { useAuthoringEdits } from "./useAuthoringEdits";
 import { SpineLayout } from "./spine/SpineLayout";
 import { SpineHeader } from "./spine/SpineHeader";
 import { SpinePreviewSheet } from "./spine/SpinePreviewSheet";
 import { SpineQueueSheet } from "./spine/SpineQueueSheet";
 import { QuestionQueueRail } from "./spine/QuestionQueueRail";
 import { ExamOverviewPane } from "./spine/ExamOverviewPane";
-import { buildExamOverview, selectionAfterDelete } from "./spine/overviewModel";
+import { buildExamOverview } from "./spine/overviewModel";
 import { QuestionJumpPalette } from "./spine/QuestionJumpPalette";
 import { ShortcutHelpDialog } from "./spine/ShortcutHelpDialog";
 import { SpineQuestionView } from "./spine/SpineQuestionView";
+import { useSatAuthoringCollaboration, type SatWorkspaceCommandName } from "../realtime/coedit";
+import { useAuthoringCoeditSession } from "./useAuthoringCoeditSession";
+import { useAuthoringCollaborationBridge } from "./useAuthoringCollaborationBridge";
+import { useAuthoringCollaborationPresence } from "./useAuthoringCollaborationPresence";
 import {
-  isPromptOnlyChange,
-  colorForActor,
-  resolveCoeditEnabled,
-  usePromptCoediting,
-  useSatAuthoringCollaboration,
-  type CoeditClientCapability,
-  type SatWorkspaceCommandName,
-} from "../realtime/coedit";
-import type { RichComposerCollaboration } from "../editor/RichQuestionComposer";
+  useAuthoringConflictRecovery,
+  useAuthoringDeviceDraftRecovery,
+} from "./useAuthoringConflictRecovery";
 import { resolveAuthoringField } from "./spine/readinessFamilies";
 import { Inspector } from "./spine/Inspector";
 import { useRailWidth } from "./spine/RailResizer";
-import { useOverlayStack } from "./spine/useOverlayStack";
-import { useOverlayToggle } from "./spine/useOverlayToggle";
+import { useAuthoringOverlays } from "./useAuthoringOverlays";
 import { SaveCluster } from "./spine/SaveCluster";
 import { flashAuthoringField } from "./spine/TargetFlash";
 import { motion, useReducedMotion } from "motion/react";
 import { spineMotion } from "@/src/shared/motion";
 
-/**
- * Placeholder binding used while a room is being opened: it renders the
- * composer's non-editable loading surface and claims nothing (no extensions,
- * not ready, not writable). The legacy editable editor must never mount for a
- * prompt that is about to move into a room.
- */
-const PENDING_PROMPT_COLLABORATION: RichComposerCollaboration = Object.freeze({
-  extensions: [],
-  ready: false,
-  readOnly: true,
-});
-
 export interface AuthoringWorkspaceProps {
   examId: string;
   examTitle: string;
 }
-
-type WorkspaceMode = "build" | "overview" | "issues";
 
 export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProps) {
   const queryClient = useQueryClient();
@@ -165,8 +115,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   // grader/proctor/student (+ signed-out null) are preview/read-only here.
   const sessionRole = authSession?.session?.user.role ?? null;
   const canOpenDraft = sessionRole === "admin" || sessionRole === "builder";
-  const [searchParams, setSearchParams] = useSearchParams();
-  const shellQuery = useAuthoringShell(examId);
+  const shellLifecycle = useAuthoringShellLifecycle(examId);
   const ensureDraft = useEnsureDraftShell(examId);
   const createQuestion = useCreateAssessmentQuestion(examId);
   const batchCreate = useBatchCreateAssessmentQuestions(examId);
@@ -175,20 +124,25 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const bulkQuestions = useBulkAssessmentQuestions(examId);
   const validation = useAssessmentValidation(examId);
   const loadSampleExam = useLoadSatSampleExam(examId);
-  const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
-  const [selectedExamQuestionId, setSelectedExamQuestionId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<QuestionRevision | null>(null);
-  const draftRef = useRef<QuestionRevision | null>(null);
+  // The open question's draft is one owner with one mutation surface (see
+  // `useAuthoringDraft`): nothing else installs a revision or clears the
+  // document, and the rule for when the server may replace local work lives
+  // there beside the guards it reads.
+  const {
+    draft,
+    setDraft,
+    clearDocument,
+    adoptServerDocumentIfPermitted,
+    draftRevisionRef,
+    draftRef,
+    draftProtectedRef,
+    recoveredQuestionDraftKeyRef,
+  } = useAuthoringDraft();
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("build");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [filter, setFilter] = useState<SpineQueueFilter>("all");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [navigationError, setNavigationError] = useState<string | null>(null);
-  // Phase 05 race-recovery guards, declared here because `saveDraft` (defined
-  // below) must consult them. A published draft or a remotely deleted question
-  // freezes the mutation path WITHOUT touching the author's typed content.
-  const mutationFrozenRef = useRef(false);
-  const deletedRemotelyRef = useRef(false);
+  // Persistence state (the freeze guards, the pause flag, the refetch guard, the
+  // draft mirror, and the refusal/notice channel) is owned by
+  // `useAuthoringPersistence` and destructured below; the seams outside
+  // persistence read it from there.
   // The presence roster is the ONLY source of collaborator names (the event
   // envelope carries a bare actor id). Kept in a ref so the realtime seams —
   // registered before presence is mounted — read it at call time without
@@ -199,76 +153,98 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   // realtime seams — also declared earlier than the hook — route through it.
   // The effect that keeps it current lives with the hook.
   const divergenceDispatchRef = useRef<(event: DivergenceEvent) => void>(() => undefined);
-  // Phase 05 invariant: a known-newer remote revision stops NETWORK autosave
-  // while the durable local write continues. A ref (not state) because the
-  // divergence that sets it is derived from the autosave this feeds.
-  const networkSavePausedRef = useRef(false);
-  // True while the open question holds unsaved local work, so a refetch may not
-  // adopt the server document over it. Written by an effect that is declared
-  // BEFORE the refetch path that reads it, so within one commit the reader sees
-  // this render's value rather than the previous one's.
-  const draftProtectedRef = useRef(false);
-  // Prompt co-editing (2026-09-13 design). `saveDraft` and `handleChange` are
-  // declared BEFORE the co-edit hook, so both read through refs that the
-  // effects below keep current: which writer owns the open question's fields
-  // (resolved once, in the effect, by resolveFieldWriter), and the last
-  // server-acknowledged revision the prompt-free field diff is measured
-  // against.
-  const promptFreeBaselineRef = useRef<QuestionRevision | null>(null);
+  // The Review sheet's opener, for focus restore on close. Declared here because
+  // the sheet is rendered here and takes it as a prop; it is WRITTEN by the
+  // conflict owner, which owns the rule that opens the sheet at all.
   const conflictOpenerRef = useRef<HTMLElement | null>(null);
-  const overlayStack = useOverlayStack();
-  const [previewOpen, setPreviewOpen] = useOverlayToggle(overlayStack,"preview","sheet");
-  const [importOpen, setImportOpen] = useOverlayToggle(overlayStack,"import","sheet");
-  const [workbookImportOpen, setWorkbookImportOpen] = useOverlayToggle(overlayStack,"workbook","sheet");
-  const [workbookBaseline, setWorkbookBaseline] = useState<AssessmentAuthoringShell | null>(null);
-  const [workbookUndo, setWorkbookUndo] = useState<SatWorkbookUndoState | null>(null);
-  const [workbookUndoBusy, setWorkbookUndoBusy] = useState(false);
-  const [sampleDialogOpen, setSampleDialogOpen] = useOverlayToggle(overlayStack,"sample","dialog");
-  const [jumpPaletteOpen, setJumpPaletteOpen] = useOverlayToggle(overlayStack,"palette","dialog");
-  const [shortcutHelpOpen, setShortcutHelpOpen] = useOverlayToggle(overlayStack,"shortcuts","dialog");
-  const [questionListOpen, setQuestionListOpen] = useOverlayToggle(overlayStack,"navigator","sheet");
+  // Every overlay the workspace can open is owned by one hook, which also owns
+  // the overlay-stack ordering rule and the inspector's modal/sheet behavior.
+  // The workspace keeps the NAMES it already used, so this reads as composition
+  // rather than as new wiring.
+  const {
+    overlayStack,
+    previewOpen,
+    setPreviewOpen,
+    importOpen,
+    setImportOpen,
+    workbookImportOpen,
+    setWorkbookImportOpen,
+    sampleDialogOpen,
+    setSampleDialogOpen,
+    jumpPaletteOpen,
+    setJumpPaletteOpen,
+    shortcutHelpOpen,
+    setShortcutHelpOpen,
+    questionListOpen,
+    setQuestionListOpen,
+    inspectorOpen,
+    inspectorModal,
+    openInspector,
+    closeInspector,
+    deleteTarget,
+    setDeleteTarget,
+  } = useAuthoringOverlays();
   const rail = useRailWidth();
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
   const [focusField, setFocusField] = useState<string | null>(null);
-  const [inspectorOpen,setInspectorOpen]=useState(false);
-  const [inspectorModal,setInspectorModal]=useState(false);
-  const inspectorOpener=useRef<HTMLElement|null>(null);
-  const {requestOpen:requestOverlay,close:closeOverlay}=overlayStack;
-  const openInspector=useCallback(()=>{
-    if(inspectorModal&&!requestOverlay('inspector','sheet'))return;
-    inspectorOpener.current=document.activeElement instanceof HTMLElement?document.activeElement:null;
-    setInspectorOpen(true);
-  },[inspectorModal,requestOverlay]);
-  const closeInspector=useCallback(()=>{setInspectorOpen(false);closeOverlay('inspector');restoreAuthoringFocus(inspectorOpener.current);},[closeOverlay]);
+  // Which FIELD an inspector shortcut belongs to is a workspace concern (the
+  // deep-link path names fields, not overlays), so the rule stays here and asks
+  // the overlays hook to open the inspector.
   const requestField=useCallback((path:string|null)=>{const field=resolveAuthoringField(path);if(['domain','skill','difficulty','tags','accessibility'].includes(field))openInspector();setFocusField(field);},[openInspector]);
-  useEffect(()=>{
-    if(typeof window.matchMedia!=='function')return;const media=window.matchMedia('(max-width: 1279px)');
-    const update=()=>setInspectorModal(media.matches);update();media.addEventListener?.('change',update);return()=>media.removeEventListener?.('change',update);
-  },[]);
-  useEffect(()=>{if(!inspectorOpen)return;if(inspectorModal){if(!requestOverlay('inspector','sheet'))setInspectorOpen(false);}else closeOverlay('inspector');},[inspectorModal,inspectorOpen,requestOverlay,closeOverlay]);
-  const [deleteTarget, updateDeleteTarget] = useState<string|null>(null);
-  const setDeleteTarget=useCallback((id:string|null)=>{if(id){if(requestOverlay('delete','dialog'))updateDeleteTarget(id);}else{updateDeleteTarget(null);closeOverlay('delete');}},[requestOverlay,closeOverlay]);
-  const [rowMutationBusy, setRowMutationBusy] = useState(false);
-  const rowMutationFlight = useRef(false);
-  const selectionAnchorRef = useRef<string | null>(null);
   const questionSheetFocusRef = useRef<HTMLElement | null>(null);
   const inspectorSheetFocusRef = useRef<HTMLElement | null>(null);
-  const recoveredQuestionDraftKeyRef = useRef<string | null>(null);
-  const [deviceDraftRecovery, setDeviceDraftRecovery] = useState<{
-    questionId: string;
-    draft: QuestionRevision;
-  } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const questionQuery = useExamQuestion(selectedExamQuestionId);
   const reduceMotion = useReducedMotion();
-  const shell = shellQuery.data;
+  // The lifecycle hook owns transport mapping (READY / NO_DRAFT /
+  // EXAM_NOT_FOUND / FORBIDDEN / error). Everything below this line is either
+  // a real shell or the lifecycle surface; no status code is inspected here.
+  const shellState = shellLifecycle.state;
+  const shell = shellState.kind === "ready" ? shellState.shell : undefined;
+  // Which module and question the author is on (plus the queue's filter and row
+  // multi-selection) is one owner. It also owns the two rules that used to be
+  // effects here: the deep-link adoption and the "selection must still exist in
+  // this shell" fallback. The workspace passes the draft reset back in, because
+  // the draft is not selection state.
+  const {
+    selectedModuleId,
+    setSelectedModuleId,
+    selectedExamQuestionId,
+    setSelectedExamQuestionId,
+    selectedSection,
+    selectedModule,
+    selectedModuleIndex,
+    allQuestions,
+    entryQuestionFor,
+    selectedIds,
+    setSelectedIds,
+    selectionAnchorRef,
+    searchQuery,
+    setSearchQuery,
+    filter,
+    setFilter,
+    clearRowSelection,
+  } = useAuthoringSelection({
+    shell,
+    onQuestionAdopted: () => clearDocument(),
+    onDeepLinkField: requestField,
+  });
+  const questionQuery = useExamQuestion(selectedExamQuestionId);
   const questionDraftKey = selectedExamQuestionId
     ? buildStaffDraftKey(staffActorId, "assessment-question", examId, selectedExamQuestionId)
     : null;
   const workspaceQuestionPath = selectedExamQuestionId
     ? `question/${selectedExamQuestionId}`
     : null;
+  // The recovered-device-draft holder is created BEFORE persistence, because
+  // persistence may not adopt a recovered draft without asking it first: the
+  // question "do you want to hold this?" has to be answerable while the
+  // persistence owner is being built, and the answer is what gives an explicit
+  // import somewhere to live.
+  const deviceRecovery = useAuthoringDeviceDraftRecovery({
+    roomOwnsEditor: workspaceCollaboration !== null,
+    selectedExamQuestionId,
+  });
 
   const shellVersionId = shell?.versionId ?? null;
   const shellVersionRevision = shell?.versionRevision ?? null;
@@ -286,59 +262,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     return () => media.removeEventListener?.("change", update);
   }, [setQuestionListOpen]);
 
-  useEffect(() => {
-    if (!shellVersionId) return;
-    let cancelled = false;
-    void assessmentAuthoringApi
-      .getSatWorkbookUndoState(examId)
-      .then((state) => {
-        if (!cancelled) setWorkbookUndo(state?.available ? state : null);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkbookUndo(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [examId, shellVersionId, shellVersionRevision]);
-
-  const selectedSection = useMemo(
-    () =>
-      shell?.sections.find((section) =>
-        section.modules.some((module) => module.id === selectedModuleId)
-      ) ?? null,
-    [selectedModuleId, shell]
-  );
-  const selectedModule = useMemo(
-    () => selectedSection?.modules.find((module) => module.id === selectedModuleId) ?? null,
-    [selectedModuleId, selectedSection]
-  );
-  const allQuestions = useMemo(
-    () =>
-      shell?.sections.flatMap((section) =>
-        section.modules.flatMap((module) =>
-          module.questions.map((question) => ({ ...question, moduleId: module.id }))
-        )
-      ) ?? [],
-    [shell]
-  );
-  const selectedModuleIndex =
-    selectedModule?.questions.findIndex(
-      (question) => question.examQuestionId === selectedExamQuestionId
-    ) ?? -1;
-  // The selected question is kept inside the selected module, and each module
-  // remembers the question it was left on. Without this a section or module
-  // switch could leave the previous module's question selected under the new
-  // module's header, which is how a Math question appeared inside a Reading &
-  // Writing module.
-  const { entryQuestionFor } = useModuleQuestionSelection({
-    module: selectedModule,
-    selectedExamQuestionId,
-    onAdoptQuestion: (examQuestionId) => {
-      setDraft(null);
-      setSelectedExamQuestionId(examQuestionId);
-    },
-  });
   const selectedQuestionIssues = draft
     ? validateSatQuestion(draft.metadata.sectionKey, draft)
     : [];
@@ -347,42 +270,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     (sum, question) => sum + (question.readiness.status === "error" ? 1 : 0),
     0
   );
-
-  useEffect(() => {
-    if (!shell) return;
-    const deepQuestionId = searchParams.get("question");
-    const deepField = searchParams.get("field");
-    if (deepQuestionId) {
-      const target = shell.sections
-        .flatMap((section) =>
-          section.modules.map((module) => ({
-            module,
-            question: module.questions.find((item) => item.examQuestionId === deepQuestionId),
-          }))
-        )
-        .find((candidate) => candidate.question);
-      if (target?.question) {
-        setSelectedModuleId(target.module.id);
-        setSelectedExamQuestionId(target.question.examQuestionId);
-        requestField(deepField);
-        const next = new URLSearchParams(searchParams);
-        next.delete("question");
-        next.delete("field");
-        setSearchParams(next, { replace: true });
-        return;
-      }
-    }
-    const selectedStillExists =
-      selectedModuleId &&
-      shell.sections.some((section) =>
-        section.modules.some((module) => module.id === selectedModuleId)
-      );
-    if (!selectedStillExists) {
-      const firstModule = shell.sections[0]?.modules[0] ?? null;
-      setSelectedModuleId(firstModule?.id ?? null);
-      setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
-    }
-  }, [searchParams, selectedModuleId, setSearchParams, shell, requestField]);
 
   useEffect(() => {
     if (!draft || !focusField) return;
@@ -402,211 +289,128 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     for (const index of [selectedModuleIndex - 1, selectedModuleIndex + 1]) {
       const question = selectedModule.questions[index];
       if (!question) continue;
-      void queryClient.prefetchQuery({
-        queryKey: assessmentKeys.question(question.examQuestionId),
-        queryFn: () => assessmentAuthoringApi.getQuestion(question.examQuestionId),
-        staleTime: 60_000,
-      });
+      void authoringEffects.questionPrefetched(queryClient, question.examQuestionId, () =>
+        assessmentAuthoringApi.getQuestion(question.examQuestionId)
+      );
     }
   }, [queryClient, selectedModule, selectedModuleIndex]);
 
   // Prompt co-editing (2026-09-13 design). The workspace is the composition
   // owner: it mounts exactly one provider for the selected question and
   // threads the binding into the spine as a PROP. Nothing below this level
-  // imports Yjs or Hocuspocus.
-  //
-  // `server` is optimistic on purpose: we cannot know the server posture until
-  // we ask, and a server that cannot offer co-editing answers with a typed
-  // unavailable error that the hook degrades into "disabled" without showing
-  // the author anything. Every OTHER gate is checked before we ask at all.
-  const coeditCapability = useMemo<CoeditClientCapability>(
-    () => ({
-      server: true,
-      // Prompt co-editing is a product default now; no Vite flag is required
-      // to expose the collaborative header/editor.
-      frontendEnabled: true,
-      // A selected question in the shell IS in the current editable draft
-      // (the shell only ever exposes the draft); a published/replaced draft
-      // de-selects it and the server refuses the token anyway.
-      // The route-level exam workspace owns the selected question whenever the
-      // SAT workspace provider is mounted. Keeping this false prevents a
-      // second question-scoped Hocuspocus room from opening beside it.
-      activeEditableDraft: Boolean(selectedExamQuestionId) && workspaceCollaboration === null,
-      writeCapableRole: sessionRole === "admin" || sessionRole === "builder",
-    }),
-    [
+  // imports Yjs or Hocuspocus. WHICH gates pass and which writer owns a field
+  // is the collaboration bridge's business (see
+  // `useAuthoringCollaborationBridge`), not the render body's.
+  const { coedit, coeditEnabled, coeditRoomOpen, coeditUiActive, workspaceUiActive } =
+    useAuthoringCoeditSession({
       selectedExamQuestionId,
-      sessionRole,
+      writeCapableRole: canOpenDraft,
       workspaceCollaboration,
-    ]
-  );
-  const coeditEnabled = resolveCoeditEnabled(coeditCapability);
-  const coedit = usePromptCoediting({
-    examQuestionId: selectedExamQuestionId,
-    capability: coeditCapability,
-  });
-  // A room really exists only once its provider does.
-  const workspaceUiActive = workspaceCollaboration !== null;
-  const coeditRoomOpen = workspaceUiActive
-    ? Boolean(workspaceCollaboration.workspaceSnapshot.ready)
-    : coeditEnabled && coedit.session !== null;
-  // This flag owns the co-edit-only chrome, including the short preparation
-  // window before the provider has produced a session.
-  const coeditUiActive = workspaceUiActive || (coeditEnabled && coedit.status !== "disabled");
-  // The exam-level room is the single realtime transport for SAT authoring.
-  // Starting the legacy event socket beside it creates a second connection
-  // that is intentionally refused by the default server posture and adds
-  // noisy console failures. Non-workspace authoring keeps the old path.
+    });
   const coeditSession = coedit.session;
 
+  // A saved revision installs into both projections (the queue row's summary
+  // and the question detail). The projection policy — including how a summary
+  // is re-derived from a revision — belongs to the effects owner; the workspace
+  // only reports the fact.
   const updateSummaryCache = useCallback(
     (examQuestionId: string, saved: QuestionRevision) => {
-      queryClient.setQueryData<AssessmentAuthoringShell>(assessmentKeys.shell(examId), (current) =>
-        current
-          ? {
-              ...current,
-              sections: current.sections.map((section) => ({
-                ...section,
-                modules: section.modules.map((module) => ({
-                  ...module,
-                  questions: module.questions.map((summary) =>
-                    summary.examQuestionId === examQuestionId
-                      ? summaryFromRevision(summary, saved)
-                      : summary
-                  ),
-                })),
-              })),
-            }
-          : current
-      );
-      queryClient.setQueryData<AssessmentQuestionDetail>(
-        assessmentKeys.question(examQuestionId),
-        (current) => (current ? { ...current, question: saved } : current)
-      );
+      authoringEffects.questionSaved(queryClient, examId, examQuestionId, saved);
     },
     [examId, queryClient]
   );
 
-  // Single ownership + one save path (resolveFieldWriter): the routing policy
-  // and the write it permits are resolved together, in one place, from the two
-  // room facts — not re-decided at each call site.
-  const { fieldWriter, saveDraft } = useAuthoringSaveRouting({
+  // One owner for draft persistence: which writer owns the open question's
+  // fields, the write pipeline, the save truth, and durability before a move.
+  // Every persistence ref lives there now, so the declaration order of this
+  // component no longer decides when a save path can read them.
+  const persistence = useAuthoringPersistence({
     examId,
     queryClient,
+    draft,
+    setDraft,
     selectedExamQuestionId,
     questionDraftKey,
     workspaceRoomActive: workspaceUiActive,
     promptRoomActive: coeditEnabled && coedit.session !== null,
-    promptFreeBaselineRef,
+    workspaceCollaboration,
+    divergenceDispatchRef,
+    applySavedRevision: updateSummaryCache,
+    holdRecoveredDraft: deviceRecovery.hold,
+    recoveredQuestionDraftKeyRef,
+  });
+  const {
+    mode: persistenceMode,
+    navigationError,
+    setNavigationError,
     mutationFrozenRef,
     deletedRemotelyRef,
-    divergenceDispatchRef,
-    recoveredQuestionDraftKeyRef,
-    setDraft,
-    updateSummaryCache,
-  });
+    networkSavePausedRef,
+    promptFreeBaselineRef,
+    flushBeforeNavigation,
+    flushBeforeRouteChange,
+  } = persistence;
 
-  const autosave = useQuestionAutosave({
-    save: saveDraft,
-    durableKey: questionDraftKey,
-    autoSaveRecovered: false,
-    networkPausedRef: networkSavePausedRef,
-    onRecover: (recovered) => {
-      if (!questionDraftKey) return;
-      recoveredQuestionDraftKeyRef.current = questionDraftKey;
-      if (workspaceCollaboration && selectedExamQuestionId) {
-        // The collaborative editor reads from the exam room, so putting the
-        // legacy recovered value in `draft` alone would make it look restored
-        // in the surrounding React state while the visible editor continued
-        // to show the room's content. Hold it for an explicit, safe import.
-        setDeviceDraftRecovery({ questionId: selectedExamQuestionId, draft: recovered });
-        setNavigationError(null);
-        return;
-      }
-      setDraft(recovered);
-      // A device-local draft came back after a reload. That is its own state,
-      // not a remote conflict: nobody else's save is implied, and with the
-      // refetch guard in place this can no longer be the accidental
-      // consequence of a newer version silently replacing the editor.
-      setNavigationError(
-        `${SAVE_CONFLICT_COPY.recovered} ${SAVE_CONFLICT_COPY.recoveredHint}`
-      );
+  // A shell that replaced the exam's questions WHOLESALE (SAT workbook import,
+  // its undo, the sample exam) leaves the open draft and every row-scoped piece
+  // of local selection pointing at questions that no longer exist. One named
+  // transaction, used by all three, instead of three near-identical blocks.
+  const applyReplacedShell = useCallback(
+    (nextShell: AssessmentAuthoringShell) => {
+      const firstModule = nextShell.sections[0]?.modules[0] ?? null;
+      setWorkspaceMode("build");
+      clearRowSelection();
+      clearDocument();
+      setSelectedModuleId(firstModule?.id ?? null);
+      setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
     },
+    [clearRowSelection, setSelectedExamQuestionId, setSelectedModuleId]
+  );
+
+  // The workbook import transaction (stage → commit → undo availability) owns
+  // its own state; the selection reset it triggers is the workspace's, injected
+  // above so no wholesale replacement invents its own version of it.
+  const {
+    baseline: workbookBaseline,
+    undo: workbookUndo,
+    undoBusy: workbookUndoBusy,
+    openImport: openWorkbookImport,
+    closeImport: closeWorkbookImport,
+    handleCommitted: handleWorkbookCommitted,
+    withdrawUndo: withdrawWorkbookUndo,
+    undoImport: handleWorkbookUndo,
+  } = useAuthoringWorkbook({
+    examId,
+    queryClient,
+    shellVersionId,
+    shellVersionRevision,
+    saveStatus: persistence.status,
+    flushBeforeNavigation,
+    onQuestionsReplaced: applyReplacedShell,
+    announce: announceWorkspaceCommand,
+    setNavigationError,
+    setImportOpen: setWorkbookImportOpen,
   });
 
-  // Phase 04/05: the ONLY authoring realtime mount. It is deliberately placed
-  // here (after autosave so the dirty closure binds; before the early returns
-  // so the hook is unconditional) and NEVER inside an editor or rail.
-  //
-  // Composition rule (Phase 05): three small hooks, one owner. There is no
-  // `useCollaborationEverything`; each hook owns exactly one concern and the
-  // workspace threads their outputs into the spine as PROPS.
-  const realtimeFlags = useMemo(
-    () => resolveAuthoringRealtimeFlags(import.meta.env as Record<string, unknown>),
-    []
-  );
-  const [serverCapabilities, setServerCapabilities] = useState<AuthoringCapabilities>({
-    delivery: true,
-    presence: false,
-    conflictCompare: false,
-  });
-  // Server OFF always wins; the local kill switch can only narrow further.
-  const effectiveCapabilities = useMemo(
-    () => resolveEffectiveCapabilities(serverCapabilities, realtimeFlags),
-    [serverCapabilities, realtimeFlags]
-  );
-  // The exam-level room is the single realtime transport for SAT authoring.
-  // Starting the legacy event socket beside it creates a second connection
-  // that is intentionally refused by the default server posture and adds
-  // noisy console failures. Non-workspace authoring keeps the old path.
-  const realtimeDeliveryEnabled = !workspaceUiActive && effectiveCapabilities.delivery;
-  const isQuestionDirtyForRealtime = useCallback(
-    (examQuestionId: string) =>
-      examQuestionId === selectedExamQuestionId && autosave.hasPendingChanges,
-    [selectedExamQuestionId, autosave.hasPendingChanges]
-  );
-  // While the token round-trip and initial sync are in flight the prompt must
-  // NOT be an editable legacy editor: the room is about to own it, and text
-  // typed into an editor that is destroyed a moment later never reaches the
-  // Y.Doc (the room seeds from the stored projection). A placeholder binding
-  // keeps the composer on its non-editable loading surface until the real one
-  // arrives; it carries no save truth and claims no ownership.
-  const workspacePromptBinding = useMemo(() => {
-    if (!workspaceCollaboration || !selectedExamQuestionId) return null;
-    const binding = workspaceCollaboration.fieldBinding(
-      `question/${selectedExamQuestionId}/prompt`,
-    );
-    return binding ?? (
-      workspaceCollaboration.status === "preparing" || workspaceCollaboration.status === "error"
-        ? PENDING_PROMPT_COLLABORATION
-        : null
-    );
-  }, [
-    selectedExamQuestionId,
+  // Which capabilities are live, whether the open question is dirty for the
+  // transport, and WHICH writer owns a field are the collaboration bridge's
+  // business; the workspace only threads them into the mount and the panels.
+  const {
+    setServerCapabilities,
+    effectiveCapabilities,
+    realtimeDeliveryEnabled,
+    isQuestionDirtyForRealtime,
+    promptCollaboration,
+    workspaceFieldCollaboration,
+  } = useAuthoringCollaborationBridge({
+    workspaceUiActive,
+    coeditEnabled,
+    coedit,
     workspaceCollaboration,
-  ]);
-  const coeditBinding = workspaceUiActive
-    ? null
-    : coedit.collaboration ??
-      (coeditEnabled && (coedit.status === "preparing" || coedit.status === "error")
-        ? PENDING_PROMPT_COLLABORATION
-        : null);
-  // Effective binding for the composer: only when co-editing actually took
-  // over. A server-disabled posture renders the legacy editor; a connection
-  // error stays on the read-only recovery surface so it cannot create a second
-  // prompt writer beside an active room.
-  const promptCollaboration = workspaceUiActive
-    ? workspacePromptBinding ?? undefined
-    : coeditEnabled && coedit.status !== "disabled"
-      ? coeditBinding ?? undefined
-      : undefined;
-  const workspaceFieldCollaboration = useCallback(
-    (fieldPath: string) => {
-      if (!workspaceCollaboration || !workspaceQuestionPath) return null;
-      return workspaceCollaboration.fieldBinding(`${workspaceQuestionPath}/${fieldPath}`);
-    },
-    [workspaceCollaboration, workspaceQuestionPath],
-  );
+    selectedExamQuestionId,
+    workspaceQuestionPath,
+    hasPendingChanges: persistence.hasPendingChanges,
+  });
 
   // The save truth of the prompt comes from the co-edit acknowledgement, not
   // from the legacy autosave counter, which knows nothing about the CRDT. Both
@@ -615,9 +419,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
 
   // Phase 05 divergence: driven by the Phase 04 reconciler seams, so the
   // decision of WHAT happened stays in one place and this only records state.
-  const [publishedFrozen, setPublishedFrozen] = useState(false);
-  const [conflictOpen, setConflictOpen] = useState(false);
-  const [noticeDismissed, setNoticeDismissed] = useState(false);
+  // The collaboration FREEZE is not here: it is one state owned by
+  // `useCoeditRecoveryAndPresence`, which reads the same signals.
 
   const {
     handleRealtimeLifecycle,
@@ -626,10 +429,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     coeditRecoverySurface,
     coeditDisplayStatus,
     collaborationReadOnly,
-    collaborationPublished,
-    collaborationLifecyclePhase,
-    collaborationIsReadOnly,
-    hasCollaborationSession,
+    publishedFrozen,
   } = useCoeditRecoveryAndPresence({
     examId,
     queryClient,
@@ -639,31 +439,61 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     coeditRoomOpen,
     coeditUiActive,
     selectedExamQuestionId,
-    autosaveStatus: autosave.status,
-    publishedFrozen,
-    setPublishedFrozen,
+    autosaveStatus: persistence.status,
   });
 
-  useEffect(() => {
-    if (collaborationPublished) {
-      // A publish close can arrive through the dedicated co-edit room without
-      // the legacy exam event socket. Feed it into the existing workspace
-      // freeze so supporting fields and navigation keep the established
-      // published/read-only behavior too.
-      setPublishedFrozen(true);
-      return;
-    }
-    if (!hasCollaborationSession) return;
-    if (collaborationLifecyclePhase !== "active" || collaborationIsReadOnly) return;
-    // A failed/cancelled publish broadcasts `active`; the collaborative room
-    // is the authority for restoring editability after that staged transition.
-    setPublishedFrozen(false);
-  }, [
-    collaborationIsReadOnly,
-    collaborationLifecyclePhase,
-    collaborationPublished,
-    hasCollaborationSession,
-  ]);
+  // The question command surface: create, import, duplicate, delete, reorder,
+  // bulk-change, set-pretest and save-and-advance. The mutations stay here
+  // because this component is the composition root; the commands hook receives
+  // them, so a test can drive the surface with fakes and no network.
+  const {
+    rowMutationBusy,
+    rowMutationFlightRef,
+    createQuestion: handleCreateQuestion,
+    batchImport: handleBatchImport,
+    duplicateQuestion: handleDuplicate,
+    deleteQuestion: handleDelete,
+    saveAndNext: handleSaveAndNext,
+    reorder: handleReorder,
+    bulkAction: handleBulkAction,
+    setPretest: handlePretestChange,
+    openIssues,
+  } = useAuthoringQuestionCommands({
+    identity: { examId, queryClient },
+    selection: {
+      selectedModuleId,
+      selectedModule,
+      shellSections: shell?.sections ?? [],
+      selectedExamQuestionId,
+      setSelectedModuleId,
+      setSelectedExamQuestionId,
+      setSelectedIds,
+      clearSelectionAnchor: () => {
+        selectionAnchorRef.current = null;
+      },
+    },
+    draft: { draft, keepMetadataForNext, setDraft },
+    collaboration: { workspaceCollaboration, coeditDisplayStatus },
+    durability: {
+      flushBeforeNavigation,
+      commitAndAdvance: persistence.commitAndAdvance,
+    },
+    reporting: {
+      updateSummaryCache,
+      announce: announceWorkspaceCommand,
+      setNavigationError,
+      setWorkspaceMode,
+      setImportOpen,
+    },
+    mutations: {
+      createQuestion: (moduleId) => createQuestion.mutateAsync(moduleId),
+      batchCreate: (request) => batchCreate.mutateAsync(request),
+      duplicateQuestion: (request) => duplicateQuestion.mutateAsync(request),
+      reorderQuestions: (request) => reorderQuestions.mutateAsync(request),
+      bulkQuestions: (request) => bulkQuestions.mutateAsync(request),
+      validateExam: () => validation.mutateAsync(),
+    },
+  });
 
   // The realtime client is created before these hooks exist, so the seams it
   // calls are routed through refs that the effects below keep current (the
@@ -673,11 +503,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const presenceFrameRef = useRef<(raw: unknown) => void>(() => undefined);
   const autosavePendingRef = useRef(false);
   useEffect(() => {
-    autosavePendingRef.current = autosave.hasPendingChanges;
-  }, [autosave.hasPendingChanges]);
-  useEffect(() => {
-    mutationFrozenRef.current = publishedFrozen;
-  }, [publishedFrozen]);
+    autosavePendingRef.current = persistence.hasPendingChanges;
+  }, [persistence.hasPendingChanges]);
 
   const authoringRealtime = useAuthoringRealtime({
     examId,
@@ -712,10 +539,16 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     },
   });
 
-  const baseQuestion = useMemo(
-    () => (questionQuery.data?.question ? normalizeQuestionRevision(questionQuery.data.question) : null),
-    [questionQuery.data?.question],
+  // The server's copy of the open question. ONE projection, read by both rules
+  // that need it: the seed the editors, the room and the three-way compare are
+  // authored against, and the document a refetch may install. The projection
+  // itself is the draft owner's (`serverQuestionDocument`), so the two can no
+  // longer disagree about what the server holds.
+  const serverDocument = useMemo(
+    () => serverQuestionDocument(questionQuery.data),
+    [questionQuery.data]
   );
+  const baseQuestion = serverDocument.revision;
   // Reading and writing the open question against the exam room: seeding,
   // remote projection onto the draft, and the local write path. The hook owns
   // the "who wrote this value" bookkeeping so no call site re-invents it.
@@ -739,393 +572,141 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     useQuestionDivergence(selectedExamQuestionId, {
       base: baseQuestion,
       draft,
-      hasPendingChanges: autosave.hasPendingChanges,
+      hasPendingChanges: persistence.hasPendingChanges,
     });
   const diverged = divergence?.status === "diverged";
-  useEffect(() => {
-    // The single place divergence gates network writes. Everything else (the
-    // 409 fence, the mutation freeze) stays as it was.
-    networkSavePausedRef.current = diverged;
-  }, [diverged]);
-  useEffect(() => {
-    // The sanctioned dirty rule (content vs the authored-against base, or an
-    // unsaved-but-identical pending write) — never DOM state, focus, or
-    // keystrokes. Gated on a draft existing: a pending flag that arrived BEFORE
-    // the editor had anything in it (a recovered device draft) must not block
-    // the seed, or the question would never open at all.
-    draftProtectedRef.current =
-      draft !== null && (autosave.hasPendingChanges || isQuestionDiverged);
-  }, [draft, autosave.hasPendingChanges, isQuestionDiverged]);
-
-  // The refetch path. Declared AFTER the dirty flag it consults, so a refetch
-  // that lands in the same commit as the first keystroke still sees the work it
-  // must not discard. A refetch may adopt the server document only when there
-  // is no unsaved local work: otherwise the very fetch that reveals a newer
-  // revision would replace the draft the notice beside it promises to keep, and
-  // the device copy would be the only survivor — which is what turns "review
-  // the newer version" into "recovered unsaved changes from this device" a
-  // reload later. The clean case keeps its refetch-replace: that IS the
-  // intended freshness path (Phase 04).
-  useEffect(() => {
-    if (
-      questionQuery.data?.question &&
-      questionQuery.data.examQuestionId === selectedExamQuestionId &&
-      recoveredQuestionDraftKeyRef.current !== questionDraftKey &&
-      !draftProtectedRef.current
-    ) {
-      setDraft(normalizeQuestionRevision(questionQuery.data.question));
-    }
-  }, [questionDraftKey, questionQuery.data, selectedExamQuestionId]);
-
-  const openReview = useCallback(() => {
-    // Captured for focus restore on close. Opening the sheet programmatically
-    // must not move focus: the surface is non-modal and the author keeps
-    // typing where they were.
-    conflictOpenerRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setConflictOpen(true);
-  }, []);
-
-  // Phase 05 parity: a FENCED write is the same product condition as a
-  // socket-delivered newer revision — the author is dirty and a newer revision
-  // exists — but it arrives with no socket at all (delivery off, degraded, or a
-  // POST already in flight when the collaborator's save committed). Route it
-  // into the same divergence state and the same Review surface instead of
-  // stranding the author on a manual "reload and reapply your changes"
-  // instruction. The fetch below is what turns the fence into a fact: HTTP, not
-  // the event stream, is authoritative.
-  const conflictRoutedRef = useRef<string | null>(null);
-  // Read at resolution time, never as a dependency: the draft arriving is what
-  // triggers this fetch, so depending on it would tear the effect down and
-  // cancel the very request it just issued.
-  const draftRevisionRef = useRef<number | null>(null);
-  useEffect(() => {
-    draftRevisionRef.current = draft?.revision ?? null;
-  }, [draft]);
-  useEffect(() => {
-    if (autosave.status !== "conflict") {
-      conflictRoutedRef.current = null;
-      return undefined;
-    }
-    if (!selectedExamQuestionId || conflictRoutedRef.current === selectedExamQuestionId) {
-      return undefined;
-    }
-    conflictRoutedRef.current = selectedExamQuestionId;
-    let cancelled = false;
-    void assessmentAuthoringApi
-      .getQuestion(selectedExamQuestionId)
-      .then((detail) => {
-        if (cancelled) return;
-        const remoteRevision = detail.question.revision;
-        // 409 also covers draft_replaced / draft_not_editable. Only a genuinely
-        // newer revision is a divergence; anything else keeps its own
-        // explanation rather than being dressed up as a newer version.
-        const attemptedRevision = draftRevisionRef.current;
-        if (attemptedRevision !== null && remoteRevision <= attemptedRevision) return;
-        dispatchDivergence({
-          type: "REMOTE_REVISION",
-          examQuestionId: selectedExamQuestionId,
-          remoteRevision,
-          hasPendingChanges: autosavePendingRef.current,
-        });
-        openReview();
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [autosave.status, dispatchDivergence, openReview, selectedExamQuestionId]);
-
-  const presence = useAuthoringPresence({
-    draftVersionId: shell?.versionId ?? null,
-    selectedExamQuestionId,
-    isDirty: isQuestionDiverged,
-    enabled: effectiveCapabilities.presence,
-    connectionState: authoringRealtime.connectionState,
-    sendFrame: authoringRealtime.sendFrame,
-    selfConnectionId: authoringRealtime.selfConnectionId,
+  // ONE state for the open draft, derived from the conditions it used to be
+  // recombined from. Published, deleted, diverged and dirty were four
+  // independent booleans, each mirrored into a ref by its own effect, and every
+  // reader re-decided the precedence — so the combinations the plan names as
+  // impossible (`deleted remotely + editable + network saving + published`) were
+  // representable, and the only reason they never surfaced was that each reader
+  // happened to check its own flag first. The owner owns the precedence AND the
+  // one projection of it into the refs the imperative seams read; this states
+  // the conditions and the refs it projects into.
+  const draftLifecycle = useAuthoringDraftLifecycle({
+    conditions: {
+      draft,
+      saveStatus: persistence.status,
+      hasPendingChanges: persistence.hasPendingChanges,
+      divergedFromBase: isQuestionDiverged,
+      publishedReadOnly: publishedFrozen,
+      deletedRemotely: Boolean(divergence?.deletedRemotely),
+    },
+    seams: {
+      mutationFrozenRef,
+      deletedRemotelyRef,
+      draftProtectedRef,
+      networkSavePausedRef,
+    },
   });
-  const collaborationParticipants = useMemo(
-    () => workspaceCollaboration
-      ? workspaceCollaboration.participants
-      : mergeCollaborationParticipants({
-        self: coeditUiActive
-          ? selfParticipant(
-              coeditSession?.self ?? {
-                actorId: staffActorId ?? "self",
-                displayName:
-                  authSession?.session?.user.displayName?.trim() ||
-                  authSession?.session?.user.email ||
-                  "You",
-                color: colorForActor(staffActorId ?? "self"),
-              },
-              staffActorId,
-              selectedExamQuestionId,
-              coeditSession?.readOnly || publishedFrozen ? "viewing" : "editing",
-            )
-          : null,
-        room: coeditSession?.collaborators ?? [],
-        workspace: effectiveCapabilities.presence ? presence.occupants : [],
-        selectedQuestionId: selectedExamQuestionId,
-      }),
-    [
-      authSession?.session?.user.displayName,
-      authSession?.session?.user.email,
-      coeditSession?.collaborators,
-      coeditSession?.readOnly,
-      coeditSession?.self,
-      coeditUiActive,
-      effectiveCapabilities.presence,
-      publishedFrozen,
-      presence.occupants,
+
+  // The refetch path: the trigger for the draft owner's adoption rule, declared
+  // AFTER the dirty flag it consults, so a refetch that lands in the same commit
+  // as the first keystroke still sees the work it must not discard. A refetch
+  // may adopt the server document only when there is no unsaved local work:
+  // otherwise the very fetch that reveals a newer revision would replace the
+  // draft the notice beside it promises to keep, and the device copy would be
+  // the only survivor — which is what turns "review the newer version" into
+  // "recovered unsaved changes from this device" a reload later. The clean case
+  // keeps its refetch-replace: that IS the intended freshness path (Phase 04).
+  useEffect(() => {
+    adoptServerDocumentIfPermitted({
+      server: serverDocument,
       selectedExamQuestionId,
-      staffActorId,
+      draftKey: questionDraftKey,
+    });
+  }, [adoptServerDocumentIfPermitted, questionDraftKey, selectedExamQuestionId, serverDocument]);
+
+  // Who else is here (roster merge, labels, the late-bound frame handler) is
+  // the collaboration presence owner's business; the workspace keeps only the
+  // seam that the realtime mount was built against.
+  const { presence, collaborationParticipants, labelForQuestion, selectedQuestionLabel, editorHere } =
+    useAuthoringCollaborationPresence({
+      shell,
+      selectedExamQuestionId,
+      isQuestionDirty: isQuestionDiverged,
+      enabled: effectiveCapabilities.presence,
+      connectionState: authoringRealtime.connectionState,
+      sendFrame: authoringRealtime.sendFrame,
+      selfConnectionId: authoringRealtime.selfConnectionId,
       workspaceCollaboration,
-    ],
-  );
+      coeditUiActive,
+      coeditSession,
+      publishedFrozen,
+      self: {
+        actorId: staffActorId,
+        displayName:
+          authSession?.session?.user.displayName?.trim() ||
+          authSession?.session?.user.email ||
+          "You",
+      },
+      presenceFrameRef,
+      presenceRosterRef,
+    });
   useEffect(() => {
     divergenceDispatchRef.current = dispatchDivergence;
   }, [dispatchDivergence]);
-  useEffect(() => {
-    presenceFrameRef.current = presence.handlePresenceFrame;
-  }, [presence.handlePresenceFrame]);
 
-  // A fresh divergence is a fresh notice: never leave the banner dismissed
-  // from a previous conflict.
-  useEffect(() => {
-    setNoticeDismissed(false);
-  }, [selectedExamQuestionId, divergence?.remoteRevision]);
-
-  const labelForQuestion = useCallback(
-    (examQuestionId: string): string | null => {
-      for (const section of shell?.sections ?? []) {
-        for (const module of section.modules) {
-          const index = module.questions.findIndex(
-            (q) => q.examQuestionId === examQuestionId
-          );
-          if (index >= 0) return questionLabel(index);
-        }
-      }
-      return null;
+  // The conflict and recovery surface — the lazy remote read, the three-way
+  // compare and its baseline seam, the three notices, the seven recovery
+  // actions, the Review sheet's open/dismissed state, and the rule that turns a
+  // fenced write into a Review opening — is one owner. The workspace states the
+  // facts it is given and renders the surfaces; it decides none of it.
+  const {
+    baseDocument,
+    remoteDocument,
+    classifications,
+    remoteAuthorName,
+    activeRaceNotice,
+    showLegacyDivergenceSurface,
+    handleUseLatest,
+    copyMyWork,
+    handleRetrySave,
+    copyCoeditPrompt,
+    discardCoeditLocalCopy,
+    copyDeviceDraft,
+    keepDeviceDraft,
+    discardDeviceDraft,
+    openCurrentDraft,
+    reviewCoeditChanges,
+    conflictOpen,
+    setConflictOpen,
+    noticeDismissed,
+    setNoticeDismissed,
+    openReview,
+  } = useAuthoringConflictRecovery({
+    examId,
+    queryClient,
+    selectedExamQuestionId,
+    selectedModuleTitle: selectedModule?.title ?? null,
+    divergence,
+    diverged,
+    baseQuestion,
+    dispatchDivergence,
+    draft,
+    setDraft,
+    promptFreeBaselineRef,
+    questionQuery,
+    acknowledgeServerRevision: persistence.acknowledgeServerRevision,
+    retrySave: persistence.retry,
+    conflictCompareEnabled: effectiveCapabilities.conflictCompare,
+    publishedFrozen,
+    coeditRoomOpen,
+    coeditUiActive,
+    coeditDisplayStatus,
+    coedit,
+    coeditRecovery,
+    workspaceCollaboration,
+    deviceRecovery,
+    setNotice: setNavigationError,
+    fence: {
+      saveStatus: persistence.status,
+      draftRevisionRef,
+      pendingChangesRef: autosavePendingRef,
+      openerRef: conflictOpenerRef,
     },
-    [shell]
-  );
-
-  const remoteAuthorName = divergence?.remoteAuthor?.displayName ?? null;
-  useEffect(() => {
-    presenceRosterRef.current = presence.occupants;
-  }, [presence.occupants]);
-  useEffect(() => {
-    deletedRemotelyRef.current = Boolean(divergence?.deletedRemotely);
-  }, [divergence?.deletedRemotely]);
-  const selectedQuestionLabel = selectedExamQuestionId
-    ? labelForQuestion(selectedExamQuestionId)
-    : null;
-  const editorHere = presence.editorsHere[0] ?? null;
-
-  // The remote document is fetched LAZILY, only when Review opens, and never
-  // from an event payload: an event carries ids + revisions, not content.
-  const [remoteDocument, setRemoteDocument] = useState<QuestionRevision | null>(null);
-  useEffect(() => {
-    if (!conflictOpen || !selectedExamQuestionId) {
-      setRemoteDocument(null);
-      return undefined;
-    }
-    let cancelled = false;
-    void assessmentAuthoringApi
-      .getQuestion(selectedExamQuestionId)
-      .then((detail) => {
-        if (cancelled) return;
-        setRemoteDocument(detail.question);
-        dispatchDivergence({
-          type: "REMOTE_DOCUMENT",
-          examQuestionId: selectedExamQuestionId,
-          remote: detail.question,
-        });
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [conflictOpen, selectedExamQuestionId, dispatchDivergence]);
-
-  // `base` is the document the author STARTED FROM — taken from the divergence
-  // entry that recorded it, not from the live query. Using the query would
-  // silently use the newest server revision as the base as soon as anything
-  // refetched, turning the three-way compare into a two-way diff in which a
-  // same-field conflict can never be reported as one. `local` is always the
-  // workspace draft: the editable document has exactly one owner.
-  const baseDocument = divergence?.baseDocument ?? baseQuestion;
-  useEffect(() => {
-    // The prompt-free field diff and the prompt-only gate both measure against
-    // the last server-acknowledged revision. `baseDocument` is exactly that: the
-    // divergence store advances it on every acknowledgement, and a fresh
-    // question load seeds it.
-    promptFreeBaselineRef.current = baseDocument;
-  }, [baseDocument]);
-  const classifications = useMemo(() => {
-    if (!effectiveCapabilities.conflictCompare) return [];
-    if (!baseDocument || !draft || !remoteDocument) return [];
-    return classifyQuestionFields({ base: baseDocument, local: draft, remote: remoteDocument });
-  }, [effectiveCapabilities.conflictCompare, baseDocument, draft, remoteDocument]);
-
-  const handleUseLatest = useCallback(
-    async (remote: QuestionRevision) => {
-      if (!selectedExamQuestionId) return;
-      // Refetch at CLICK time so a save that landed while the sheet was open is
-      // not silently discarded in favour of the snapshot we opened with.
-      const refreshed = await questionQuery.refetch().catch(() => null);
-      const latest = refreshed?.data?.question ?? remote;
-      // Install only AFTER the authoritative revision is in hand: the local
-      // draft is never dropped before the replacement is rendered.
-      setDraft(normalizeQuestionRevision(latest));
-      dispatchDivergence({
-        type: "RESOLVE_USE_LATEST",
-        examQuestionId: selectedExamQuestionId,
-        remote: latest,
-      });
-      // Nothing is left to send, so the fenced/diverged save state must clear
-      // with it — otherwise the save area keeps offering a Retry for a payload
-      // the client already knows is stale, on a conflict that no longer exists.
-      autosave.acknowledgeServerRevision();
-      setConflictOpen(false);
-      setNoticeDismissed(false);
-    },
-    [selectedExamQuestionId, questionQuery, dispatchDivergence, autosave]
-  );
-
-  const activeRaceNotice = divergence?.deletedRemotely
-    ? DELETION_COPY.body(remoteAuthorName ?? "Another author")
-    : publishedFrozen
-      ? PUBLISH_COPY.body
-      : divergence?.movedRemotely
-        ? STRUCTURAL_COPY.movedTo(selectedModule?.title ?? "another module")
-        : divergence?.bulkChangedRemotely
-            ? STRUCTURAL_COPY.orderUpdated
-            : null;
-  const structuralDivergence = Boolean(
-    divergence?.deletedRemotely || divergence?.movedRemotely || divergence?.bulkChangedRemotely,
-  );
-  const showLegacyDivergenceSurface =
-    Boolean(diverged) && (!coeditRoomOpen || structuralDivergence);
-
-  const copyMyWork = useCallback(async () => {
-    if (!draft) return;
-    const text = JSON.stringify(draft, null, 2);
-    try {
-      await navigator.clipboard?.writeText(text);
-      setNavigationError("Your current question draft was copied to the clipboard.");
-    } catch {
-      setNavigationError("Copy failed — select the text in Review and copy it manually.");
-    }
-  }, [draft]);
-
-  // One retry action for both writers: the failing half is the one that needs
-  // re-driving, and a retry that silently addressed the other half would look
-  // like it did nothing.
-  const handleRetrySave = useCallback(() => {
-    if (workspaceCollaboration && coeditDisplayStatus === "error") {
-      workspaceCollaboration.retry();
-      return;
-    }
-    if (coeditUiActive && (coeditDisplayStatus === "error" || coedit.error !== null)) {
-      coedit.retry();
-      return;
-    }
-    if (draft) autosave.retry(draft);
-  }, [autosave, coedit, coeditDisplayStatus, coeditUiActive, draft, workspaceCollaboration]);
-
-  // Recovery affordance for a room that cannot continue: the local prompt is
-  // exportable before a replacement draft is opened, and it is never silently
-  // thrown away ("Offline and recovery behavior", docs/sat-authoring-coedit.md).
-  const copyCoeditPrompt = useCallback(async () => {
-    // A preserved pre-compaction copy is the local work at risk when one exists:
-    // it is exported by its own byte-exact payload rather than the prompt-shaped
-    // projection, which belongs to the live room.
-    const staleCaches = coeditRecovery?.exportStaleCache() ?? null;
-    const exported = staleCaches ?? coeditRecovery?.exportPrompt() ?? null;
-    if (exported === null) {
-      setNavigationError("There is no local prompt copy to export yet.");
-      return;
-    }
-    try {
-      await navigator.clipboard?.writeText(JSON.stringify(exported, null, 2));
-      setNavigationError("The local prompt was copied to the clipboard.");
-    } catch {
-      setNavigationError("Copy failed — copy the prompt from the editor before leaving.");
-    }
-  }, [coeditRecovery]);
-
-  // Discarding a preserved copy is the author's decision, taken from the
-  // recovery surface's confirm step; nothing else in the workspace removes
-  // local work.
-  const discardCoeditLocalCopy = useCallback(() => {
-    void coeditRecovery?.discardStaleCache().catch(() => undefined);
-  }, [coeditRecovery]);
-
-  const copyDeviceDraft = useCallback(async () => {
-    const recovered = deviceDraftRecovery?.draft;
-    if (!recovered) return;
-    try {
-      await navigator.clipboard?.writeText(JSON.stringify(recovered, null, 2));
-      setNavigationError("The recovered question was copied to the clipboard.");
-    } catch {
-      setNavigationError("Copy failed — keep the recovered changes here before leaving.");
-    }
-  }, [deviceDraftRecovery]);
-
-  const keepDeviceDraft = useCallback(() => {
-    const recovered = deviceDraftRecovery;
-    if (!recovered || !workspaceCollaboration || recovered.questionId !== selectedExamQuestionId) return;
-    const snapshot = workspaceCollaboration.workspaceSnapshot;
-    if (!snapshot.ready || snapshot.readOnly || workspaceCollaboration.lifecyclePhase !== "active") {
-      setNavigationError("The shared draft is not editable right now. Your recovered changes are still available.");
-      return;
-    }
-    const path = `question/${recovered.questionId}`;
-    const currentScalar = snapshot.values[`${path}/scalar`];
-    const isPretest = isQuestionWorkspaceScalar(currentScalar)
-      ? currentScalar.isPretest
-      : questionQuery.data?.isPretest;
-    workspaceCollaboration.setValue(`${path}/scalar`, questionWorkspaceScalar(recovered.draft, isPretest));
-    workspaceCollaboration.setRichField(`${path}/prompt`, recovered.draft.prompt);
-    workspaceCollaboration.setRichField(`${path}/stimulus`, recovered.draft.stimulus);
-    workspaceCollaboration.setRichField(`${path}/rationale`, recovered.draft.rationale);
-    if (recovered.draft.answer.kind === "single_choice") {
-      for (const option of recovered.draft.answer.options) {
-        workspaceCollaboration.setRichField(`${path}/choice/${option.id}`, option.content);
-      }
-    }
-    setDraft(recovered.draft);
-    autosave.acknowledgeServerRevision();
-    setDeviceDraftRecovery(null);
-    setNavigationError("Your recovered changes were added to the shared draft.");
-  }, [autosave, deviceDraftRecovery, questionQuery.data?.isPretest, selectedExamQuestionId, workspaceCollaboration]);
-
-  const discardDeviceDraft = useCallback(() => {
-    if (!deviceDraftRecovery) return;
-    autosave.acknowledgeServerRevision();
-    setDeviceDraftRecovery(null);
-    setNavigationError("The recovered device draft was discarded.");
-  }, [autosave, deviceDraftRecovery]);
-
-  useEffect(() => {
-    if (deviceDraftRecovery && deviceDraftRecovery.questionId !== selectedExamQuestionId) {
-      setDeviceDraftRecovery(null);
-    }
-  }, [deviceDraftRecovery, selectedExamQuestionId]);
-
-  const openCurrentDraft = useCallback(() => {
-    setConflictOpen(false);
-    setNoticeDismissed(false);
-    void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-    if (workspaceCollaboration) workspaceCollaboration.retry();
-    else coedit.retry();
-  }, [coedit, examId, queryClient, workspaceCollaboration]);
-
-  const reviewCoeditChanges = useCallback(() => {
-    setConflictOpen(true);
-  }, []);
+  });
 
   const coeditHeaderPresenceSlot =
     draft && coeditUiActive ? (
@@ -1141,386 +722,80 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         displayMode="coedit"
         announce={false}
         status={coeditDisplayStatus}
-        lastSavedAt={workspaceCollaboration ? null : autosave.lastSavedAt}
+        lastSavedAt={workspaceCollaboration ? null : persistence.lastSavedAt}
         diverged={showLegacyDivergenceSurface}
         onRetry={handleRetrySave}
         onReviewConflict={workspaceCollaboration ? undefined : openReview}
       />
     ) : null;
 
-  // The room and the legacy queue are independent sources of unsaved work: a
-  // room never enqueues a legacy autosave, and the legacy branch never opens
-  // one. Warning from only one of them would let a browser close discard the
-  // other's content, so each contributes its own truth.
-  const roomNeedsUnloadWarning = workspaceCollaboration
-    ? coeditRoomShouldWarnBeforeUnload(workspaceCollaboration.workspaceSnapshot)
-    : false;
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const shouldWarn =
-      roomNeedsUnloadWarning ||
-      (autosave.hasPendingChanges &&
-        (autosave.isOffline || ["unsaved", "saving", "error"].includes(autosave.status)));
-    if (!shouldWarn) return;
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warnBeforeUnload);
-    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [autosave.hasPendingChanges, autosave.isOffline, autosave.status, roomNeedsUnloadWarning]);
-
-  /**
-   * The in-page barrier, run before a question/module switch and before every
-   * HTTP structural mutation.
-   *
-   * `mutation` is the default because most callers are about to change the exam
-   * over HTTP (create, duplicate, delete, reorder, bulk, import, validate), and
-   * the room cannot see those writes: running one while the room has not
-   * committed the same exam applies it to a revision the author has already
-   * moved past.
-   *
-   * `selection` is a move INSIDE the room. The previous question's content
-   * stays in the Y.Doc and in its IndexedDB copy whether or not the network has
-   * acknowledged it, so waiting on the service here would only make switching
-   * slower — and would make it impossible offline, which is the state this
-   * layer exists to survive. The room is still consulted for a genuinely
-   * at-risk state, which is why an author offline in a merely-pending room can
-   * keep working but a refused room cannot.
-   */
-  const flushBeforeNavigation = useCallback(async (intent: "selection" | "mutation" = "mutation") => {
-    // Shared scalar and rich fields are sent through the exam-level room. Do
-    // not gate navigation on the legacy question autosave queue, which should
-    // remain empty while this provider owns the workspace.
-    if (workspaceCollaboration) {
-      if (intent === "selection") return true;
-      const result = await workspaceCollaboration.flushAndWaitForSaved(
-        COEDIT_MUTATION_FLUSH_TIMEOUT_MS,
-      );
-      // Read the snapshot AFTER the wait: a refusal, a freeze, or a fresh
-      // acknowledgement all arrive while it is pending.
-      const block = coeditRoomBlockMessage(
-        workspaceCollaboration.workspaceSnapshot,
-        result.outcome,
-      );
-      if (block === null) return true;
-      setNavigationError(block);
-      return false;
-    }
-    if (!draft || autosave.status === "saved") return true;
-    const result = await autosave.flushNow(draft);
-    if (result.ok) return true;
-    setNavigationError(
-      // Fenced and diverged are the same condition with the same answer, so
-      // they share one sentence: review the newer version, or take your work
-      // with you. Neither accuses the save of failing.
-      autosave.status === "conflict" ||
-        networkSavePausedRef.current ||
-        autosave.isNetworkPaused
-        ? SAVE_CONFLICT_COPY.fencedBeforeLeaving
-        : autosave.isOffline
-          ? "You are offline. This draft is saved on this device; reconnect before leaving so it can sync."
-          : SAVE_CONFLICT_COPY.failed
-    );
-    return false;
-  }, [autosave, draft, workspaceCollaboration]);
-
-  /**
-   * The route barrier, run before leaving the authoring surface.
-   *
-   * The next screen (exam preview, release, exam library) reads the committed
-   * MySQL projection rather than the room, so nothing less than a durable
-   * acknowledgement of THIS tab's state proves it will show the author's work.
-   * A refusal is not navigated past: the author is told what the next screen
-   * would hide and stays with their content. Query invalidation is awaited
-   * before the route changes so the preview cannot mount on a cached exam
-   * detail still inside its five-minute staleTime.
-   */
-  const flushBeforeRouteChange = useCallback(async (): Promise<boolean> => {
-    if (!workspaceCollaboration) return flushBeforeNavigation("mutation");
-    const result = await workspaceCollaboration.flushAndWaitForSaved(
-      COEDIT_ROUTE_FLUSH_TIMEOUT_MS,
-    );
-    const block = coeditRoomBlockMessage(
-      workspaceCollaboration.workspaceSnapshot,
-      result.outcome,
-    );
-    if (block !== null) {
-      setNavigationError(block);
-      return false;
-    }
-    // A refetch failure must not strand the author here: the room is durable,
-    // which is the promise; freshness is best-effort on top of it.
-    await Promise.allSettled([
-      queryClient.invalidateQueries({ queryKey: examKeys.detail(examId) }),
-      queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) }),
-      queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) }),
-    ]);
-    return true;
-  }, [examId, flushBeforeNavigation, queryClient, workspaceCollaboration]);
-
-  const selectQuestion = useCallback(
-    async (questionId: string, moduleId = selectedModuleId) => {
-      if (rowMutationFlight.current) return false;
-      if (questionId === selectedExamQuestionId) return true;
-      setNavigationError(null);
-      if (!(await flushBeforeNavigation("selection"))) return false;
-      if (moduleId) setSelectedModuleId(moduleId);
-      setDraft(null);
-      setSelectedExamQuestionId(questionId);
-      return true;
-    },
-    [flushBeforeNavigation, selectedExamQuestionId, selectedModuleId]
-  );
-
-  const selectModule = useCallback(
-    async (moduleId: string) => {
-      if (rowMutationFlight.current || moduleId === selectedModuleId) return;
-      if (!(await flushBeforeNavigation("selection"))) return;
-      const module = shell?.sections
-        .flatMap((section) => section.modules)
-        .find((item) => item.id === moduleId);
-      setSearchQuery("");
-      setFilter("all");
-      setSelectedIds(new Set());
+  // Both durability barriers — in-page (`flushBeforeNavigation`) and across a
+  // route change (`flushBeforeRouteChange`) — belong to the persistence owner,
+  // which is the only module that knows whether a room or the legacy autosave
+  // queue holds the unsaved work. This component only decides WHICH moves need
+  // a barrier, and the navigation guard owns the two moves that need one.
+  const { selectQuestion, selectModule } = useAuthoringNavigationGuard({
+    selectedModuleId,
+    selectedExamQuestionId,
+    shellSections: shell?.sections ?? [],
+    entryQuestionFor,
+    flushBeforeNavigation,
+    rowMutationFlightRef,
+    hasPendingChanges: persistence.hasPendingChanges,
+    isOffline: persistence.isOffline,
+    saveStatus: persistence.status,
+    // The room and the legacy queue are independent sources of unsaved work: a
+    // room never enqueues a legacy autosave, and the legacy branch never opens
+    // one. Warning from only one of them would let a browser close discard the
+    // other's content.
+    roomNeedsUnloadWarning: workspaceCollaboration
+      ? coeditRoomShouldWarnBeforeUnload(workspaceCollaboration.workspaceSnapshot)
+      : false,
+    setNavigationError,
+    setSelectedModuleId,
+    setSelectedExamQuestionId,
+    setDraft,
+    setSelectedIds,
+    setSearchQuery,
+    setFilter,
+    clearSelectionAnchor: () => {
       selectionAnchorRef.current = null;
-      setSelectedModuleId(moduleId);
-      setDraft(null);
-      // Entering a module returns to the question the author was last on there,
-      // not to its first question and never to the question of the module they
-      // came from.
-      setSelectedExamQuestionId(entryQuestionFor(module ?? null));
     },
-    [entryQuestionFor, flushBeforeNavigation, selectedModuleId, shell]
-  );
+  });
 
-  const handleChange = useCallback(
-    (next: QuestionRevision) => {
-      setWorkbookUndo(null);
-      setDraft(next);
-      const writer = fieldWriter;
-      // The exam room persists every field of the question it owns, including
-      // the scalar settings, through its own exact Yjs acknowledgement. Never
-      // enqueue a whole-question HTTP autosave beside it.
-      if (writer === "workspace" && publishWorkspaceScalar(next)) return;
-      // While co-editing owns the prompt, a prompt-only change stays OUT of the
-      // legacy autosave queue: the Y.Doc is the source of truth for the prompt,
-      // the service persists it, and scheduling a whole-question save here
-      // would either fail (COEDIT_ACTIVE) or bump a revision for a keystroke.
-      // The projection the composer emits is still real — it feeds preview and
-      // validation — it just does not schedule a save.
-      const baseline = promptFreeBaselineRef.current;
-      if (writer === "prompt-room" && baseline && isPromptOnlyChange(baseline, next)) {
-        return;
-      }
-      autosave.scheduleAutosave(next);
+  // What an edit MEANS (which single writer it reaches) and what a manual save
+  // answers when the write is held back are one owner's rules, not the render
+  // body's. The writers stay injected: this component is the composition root.
+  const { handleChange, handleSaveNow } = useAuthoringEdits({
+    writers: {
+      mode: persistenceMode,
+      publishWorkspaceScalar,
+      scheduleAutosave: persistence.scheduleAutosave,
+      promptFreeBaselineRef,
     },
-    [autosave, fieldWriter, publishWorkspaceScalar]
-  );
-
-  useEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
-  const handleSaveNow = useCallback(async () => {
-    if (!draft) return;
-    setNavigationError(null);
-    // The exam-level workspace is already the durable save queue. A manual
-    // save shortcut must not send a stale whole-question HTTP revision beside
-    // the shared Yjs roots; the workspace acknowledgement is the only source
-    // of save truth in SAT co-edit mode.
-    if (workspaceCollaboration) {
-      if (coeditDisplayStatus === "error") workspaceCollaboration.retry();
-      return;
-    }
-    const result = await autosave.flushNow(draft);
-    if (result.ok) return;
-    if (networkSavePausedRef.current || autosave.isNetworkPaused) {
-      // Diverged, not failed: the write is held back on purpose because the
-      // server already holds a newer revision. The author asked to save, so
-      // answer with the decision they actually have to make.
-      openReview();
-      return;
-    }
-    setNavigationError(SAVE_CONFLICT_COPY.failed);
-  }, [autosave, coeditDisplayStatus, draft, openReview, workspaceCollaboration]);
-
-  const handleCreateQuestion = useCallback(
-    async (inheritFrom?: QuestionRevision) => {
-      if (
-        rowMutationFlight.current ||
-        !selectedModuleId ||
-        !selectedModule ||
-        selectedModule.questions.length >= selectedModule.targetQuestionCount
-      )
-        return;
-      if (!(await flushBeforeNavigation())) return;
-      try {
-        const created = await createQuestion.mutateAsync(selectedModuleId);
-        let createdQuestion = created.question;
-        if (inheritFrom) {
-          const inherited: QuestionRevision = {
-            ...created.question,
-            metadata: {
-              ...created.question.metadata,
-              domain: inheritFrom.metadata.domain,
-              skill: inheritFrom.metadata.skill,
-              difficulty: inheritFrom.metadata.difficulty,
-            },
-          };
-          createdQuestion = await assessmentAuthoringApi.saveQuestionRevision(inherited.id, {
-            revision: inherited.revision,
-            questionType: inherited.questionType,
-            stimulus: inherited.stimulus,
-            prompt: inherited.prompt,
-            answer: inherited.answer,
-            rationale: inherited.rationale,
-            metadata: inherited.metadata,
-            accessibility: inherited.accessibility,
-          });
-          updateSummaryCache(created.examQuestionId, createdQuestion);
-          void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-        }
-        setSelectedExamQuestionId(created.examQuestionId);
-        setDraft(createdQuestion);
-        announceWorkspaceCommand("question.created", {
-          questionId: created.examQuestionId,
-          moduleId: selectedModuleId,
-        });
-      } catch (error) {
-        setNavigationError(
-          error instanceof Error ? error.message : "Question could not be created."
-        );
-      }
+    editing: { setDraft, withdrawWorkbookUndo },
+    save: {
+      workspaceCollaboration,
+      coeditDisplayStatus,
+      flushNow: persistence.flushNow,
     },
-    [
-      announceWorkspaceCommand,
-      createQuestion,
-      examId,
-      flushBeforeNavigation,
-      queryClient,
-      selectedModule,
-      selectedModuleId,
-      updateSummaryCache,
-    ]
-  );
-
-  const handleBatchImport = useCallback(
-    async (drafts: BatchQuestionDraft[]) => {
-      if (!selectedModuleId) throw new Error("Choose a SAT module before importing questions.");
-      if (!(await flushBeforeNavigation()))
-        throw new Error("Save the current question before importing.");
-      const result = await batchCreate.mutateAsync({
-        moduleId: selectedModuleId,
-        request: { questions: drafts, operationKey: crypto.randomUUID() },
-      });
-      await queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-      announceWorkspaceCommand("question.created", {
-        moduleId: selectedModuleId,
-        questionIds: result.createdQuestionIds,
-      });
-      setImportOpen(false);
-      const first = result.createdQuestionIds[0];
-      if (first) {
-        setSelectedExamQuestionId(first);
-        setDraft(null);
-      }
-    },
-    [announceWorkspaceCommand, batchCreate, examId, flushBeforeNavigation, queryClient, selectedModuleId, setImportOpen]
-  );
-
-  const openWorkbookImport = useCallback(async () => {
-    setNavigationError(null);
-    if (!(await flushBeforeNavigation())) return;
-    try {
-      const baseline = await assessmentAuthoringApi.getShell(examId);
-      setWorkbookBaseline(baseline);
-      setWorkbookImportOpen(true);
-    } catch (error) {
-      setNavigationError(
-        error instanceof Error ? error.message : "The SAT workbook importer could not be opened."
-      );
-    }
-  }, [examId, flushBeforeNavigation, setWorkbookImportOpen]);
-
-  const handleWorkbookCommitted = useCallback(
-    (result: SatWorkbookCommitResult) => {
-      const nextShell = result.shell;
-      queryClient.setQueryData(assessmentKeys.shell(examId), nextShell);
-      queryClient.removeQueries({ queryKey: ["assessment-question"] });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-      const firstModule = nextShell.sections[0]?.modules[0] ?? null;
-      setWorkspaceMode("build");
-      setSelectedIds(new Set());
-      selectionAnchorRef.current = null;
-      setDraft(null);
-      setSelectedModuleId(firstModule?.id ?? null);
-      setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
-      setWorkbookImportOpen(false);
-      setWorkbookBaseline(null);
-      setWorkbookUndo(result.undo.available ? result.undo : null);
-      announceWorkspaceCommand("workbook.imported", {
-        questionCount: nextShell.sections.reduce(
-          (total, section) => total + section.modules.reduce((count, module) => count + module.questions.length, 0),
-          0,
-        ),
-      });
-    },
-    [announceWorkspaceCommand, examId, queryClient, setWorkbookImportOpen]
-  );
-
-  const handleWorkbookUndo = useCallback(async () => {
-    if (!workbookUndo?.available || workbookUndoBusy) return;
-    if (autosave.status !== "saved") {
-      setWorkbookUndo(null);
-      setNavigationError("Undo is no longer available after editing the imported SAT.");
-      return;
-    }
-    setWorkbookUndoBusy(true);
-    setNavigationError(null);
-    try {
-      const nextShell = await assessmentAuthoringApi.undoSatWorkbookImport(
-        examId,
-        workbookUndo.importId
-      );
-      queryClient.setQueryData(assessmentKeys.shell(examId), nextShell);
-      queryClient.removeQueries({ queryKey: ["assessment-question"] });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-      const firstModule = nextShell.sections[0]?.modules[0] ?? null;
-      setWorkspaceMode("build");
-      setSelectedIds(new Set());
-      selectionAnchorRef.current = null;
-      setDraft(null);
-      setSelectedModuleId(firstModule?.id ?? null);
-      setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
-      setWorkbookUndo(null);
-      announceWorkspaceCommand("workbook.undone", { importId: workbookUndo.importId });
-    } catch (error) {
-      setWorkbookUndo(null);
-      setNavigationError(
-        error instanceof Error ? error.message : "The Excel import could not be undone."
-      );
-    } finally {
-      setWorkbookUndoBusy(false);
-    }
-  }, [announceWorkspaceCommand, autosave.status, examId, queryClient, workbookUndo, workbookUndoBusy]);
+    draft,
+    conflicted: draftLifecycle.conflicted,
+    openReview,
+    setNotice: setNavigationError,
+  });
 
   const handleLoadSampleExam = useCallback(async () => {
     setNavigationError(null);
     if (!(await flushBeforeNavigation())) return;
     try {
-      const latestShell = await assessmentAuthoringApi.getShell(examId);
+      const latest = await assessmentAuthoringApi.getShell(examId);
+      if (!latest.shell) {
+        throw new Error("This exam has no editable draft to load the sample into yet.");
+      }
       const { buildCompleteSatSample } = await import("../providers/sat/sampleExam");
-      const nextShell = await loadSampleExam.mutateAsync(buildCompleteSatSample(latestShell));
-      const firstModule = nextShell.sections[0]?.modules[0] ?? null;
-      setWorkspaceMode("build");
-      setSelectedIds(new Set());
-      selectionAnchorRef.current = null;
-      setDraft(null);
-      setSelectedModuleId(firstModule?.id ?? null);
-      setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
+      const nextShell = await loadSampleExam.mutateAsync(buildCompleteSatSample(latest.shell));
+      applyReplacedShell(nextShell);
       setSampleDialogOpen(false);
       announceWorkspaceCommand("sample.loaded", { questionCount: nextShell.sections.reduce((total, section) => total + section.modules.reduce((count, module) => count + module.questions.length, 0), 0) });
     } catch (error) {
@@ -1529,180 +804,14 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         error instanceof Error ? error.message : "The sample SAT could not be loaded."
       );
     }
-  }, [announceWorkspaceCommand, examId, flushBeforeNavigation, loadSampleExam, setSampleDialogOpen]);
-
-  // Explicit target IDs: never select a row and invoke a stale selected-row closure.
-  const handleDuplicate = useCallback(async (targetId = selectedExamQuestionId) => {
-    const module = shell?.sections.flatMap(section=>section.modules).find(module=>module.questions.some(q=>q.examQuestionId===targetId));
-    if (!targetId || !module || module.questions.length>=module.targetQuestionCount || rowMutationFlight.current) return;
-    rowMutationFlight.current=true;setRowMutationBusy(true);
-    try {
-      if (!(await flushBeforeNavigation())) return;
-      const created=await duplicateQuestion.mutateAsync({examQuestionId:targetId,request:{destinationModuleId:module.id,insertAfterExamQuestionId:targetId,operationKey:crypto.randomUUID()}});
-      setSelectedModuleId(module.id);setSelectedExamQuestionId(created.examQuestionId);setDraft(created.question);
-      announceWorkspaceCommand("question.duplicated", { questionId: created.examQuestionId, sourceQuestionId: targetId, moduleId: module.id });
-    } catch(error) {setNavigationError(error instanceof Error?error.message:"Question could not be duplicated.");}
-    finally {rowMutationFlight.current=false;setRowMutationBusy(false);}
-  },[announceWorkspaceCommand,duplicateQuestion,flushBeforeNavigation,selectedExamQuestionId,shell]);
-
-  const handleDelete = useCallback(async (targetId = selectedExamQuestionId) => {
-    const module=shell?.sections.flatMap(section=>section.modules).find(module=>module.questions.some(q=>q.examQuestionId===targetId));
-    if(!targetId||!module||rowMutationFlight.current)return false;
-    rowMutationFlight.current=true;setRowMutationBusy(true);
-    const deletingActive=targetId===selectedExamQuestionId;
-    const index=module.questions.findIndex(q=>q.examQuestionId===targetId);
-    const fallback=selectionAfterDelete(module.questions.filter(q=>q.examQuestionId!==targetId),index);
-    try {
-      if(!(await flushBeforeNavigation()))return false;
-      await assessmentAuthoringApi.deleteQuestion(targetId);
-      queryClient.removeQueries({queryKey:assessmentKeys.question(targetId)});
-      if(deletingActive){setDraft(null);setSelectedExamQuestionId(fallback.examQuestionId);}
-      setSelectedIds(current=>{const next=new Set(current);next.delete(targetId);return next;});
-      await queryClient.invalidateQueries({queryKey:assessmentKeys.shell(examId)});
-      void queryClient.invalidateQueries({queryKey:assessmentKeys.release(examId)});
-      void queryClient.invalidateQueries({queryKey:assessmentKeys.readinessRoot(examId)});
-      announceWorkspaceCommand("question.deleted", { questionId: targetId, moduleId: module.id });
-      return true;
-    }catch(error){setNavigationError(error instanceof Error?error.message:"Question could not be deleted.");return false;}
-    finally {rowMutationFlight.current=false;setRowMutationBusy(false);}
-  },[announceWorkspaceCommand,examId,flushBeforeNavigation,queryClient,selectedExamQuestionId,shell]);
-
-  const handleSaveAndNext = useCallback(async () => {
-    if (rowMutationFlight.current || !draft || !selectedModule) return;
-    if (workspaceCollaboration) {
-      if (coeditDisplayStatus === "error") {
-        workspaceCollaboration.retry();
-        return;
-      }
-      const currentIndex = selectedModule.questions.findIndex(
-        (question) => question.examQuestionId === selectedExamQuestionId
-      );
-      const next = selectedModule.questions[currentIndex + 1];
-      if (next) {
-        setDraft(null);
-        setSelectedExamQuestionId(next.examQuestionId);
-        return;
-      }
-      if (selectedModule.questions.length < selectedModule.targetQuestionCount) {
-        await handleCreateQuestion(keepMetadataForNext ? draft : undefined);
-      }
-      return;
-    }
-    const result = await autosave.commitAndAdvance(draft);
-    if (!result.ok || !result.isLatest) {
-      setNavigationError("Save failed. The next question was not opened.");
-      return;
-    }
-    const currentIndex = selectedModule.questions.findIndex(
-      (question) => question.examQuestionId === selectedExamQuestionId
-    );
-    const next = selectedModule.questions[currentIndex + 1];
-    if (next) {
-      setDraft(null);
-      setSelectedExamQuestionId(next.examQuestionId);
-      return;
-    }
-    if (selectedModule.questions.length < selectedModule.targetQuestionCount)
-      await handleCreateQuestion(keepMetadataForNext ? draft : undefined);
   }, [
-    autosave,
-    coeditDisplayStatus,
-    draft,
-    handleCreateQuestion,
-    keepMetadataForNext,
-    selectedExamQuestionId,
-    selectedModule,
-    workspaceCollaboration,
+    announceWorkspaceCommand,
+    applyReplacedShell,
+    examId,
+    flushBeforeNavigation,
+    loadSampleExam,
+    setSampleDialogOpen,
   ]);
-
-  const handleReorder = useCallback(
-    async (questionIds: string[], expectedQuestionIds: string[]) => {
-      if (!selectedModuleId || !(await flushBeforeNavigation())) return;
-      try {
-        await reorderQuestions.mutateAsync({
-          moduleId: selectedModuleId,
-          request: { questionIds, expectedQuestionIds },
-        });
-        announceWorkspaceCommand("question.reordered", {
-          moduleId: selectedModuleId,
-          questionIds,
-        });
-      } catch (error) {
-        setNavigationError(
-          error instanceof Error ? error.message : "Question order could not be saved."
-        );
-        throw error;
-      }
-    },
-    [announceWorkspaceCommand, flushBeforeNavigation, reorderQuestions, selectedModuleId]
-  );
-
-  const handleBulkAction = useCallback(
-    async (
-      questionIds: string[],
-      action: BulkQuestionAction,
-      expectedRevisions?: Record<string, number>
-    ) => {
-      if (!(await flushBeforeNavigation()))
-        throw new Error("Save the current question before applying a bulk action.");
-      try {
-        await bulkQuestions.mutateAsync({
-          questionIds,
-          action,
-          ...(expectedRevisions ? { expectedRevisions } : {}),
-          operationKey: crypto.randomUUID(),
-        });
-        announceWorkspaceCommand("question.bulk_changed", {
-          questionIds,
-          action,
-        });
-        setSelectedIds(new Set());
-        selectionAnchorRef.current = null;
-        if (
-          action.type === "delete" &&
-          selectedExamQuestionId &&
-          questionIds.includes(selectedExamQuestionId)
-        ) {
-          setDraft(null);
-          setSelectedExamQuestionId(null);
-        }
-        if (
-          action.type === "move" &&
-          selectedExamQuestionId &&
-          questionIds.includes(selectedExamQuestionId)
-        )
-          setSelectedModuleId(action.destinationModuleId);
-      } catch (error) {
-        setNavigationError(
-          error instanceof Error ? error.message : "Bulk action could not be completed."
-        );
-        throw error;
-      }
-    },
-    [announceWorkspaceCommand, bulkQuestions, flushBeforeNavigation, selectedExamQuestionId]
-  );
-
-  const handlePretestChange = useCallback(
-    (isPretest: boolean) => {
-      if (!selectedExamQuestionId) return;
-      if (workspaceCollaboration) {
-        const path = `question/${selectedExamQuestionId}/scalar`;
-        const current = workspaceCollaboration.workspaceSnapshot.values[path];
-        const scalar = isQuestionWorkspaceScalar(current)
-          ? { ...current, isPretest }
-          : draft
-            ? questionWorkspaceScalar(draft, isPretest)
-            : null;
-        if (scalar) workspaceCollaboration.setValue(path, scalar);
-        return;
-      }
-      void handleBulkAction(
-        [selectedExamQuestionId],
-        { type: "set_pretest", value: isPretest },
-      ).catch(() => undefined);
-    },
-    [draft, handleBulkAction, selectedExamQuestionId, workspaceCollaboration],
-  );
 
   const toggleSelection = useCallback(
     (questionId: string, range: boolean) => {
@@ -1725,18 +834,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     [selectedModule]
   );
 
-  const openIssues = useCallback(async () => {
-    if (!(await flushBeforeNavigation())) return;
-    setWorkspaceMode("issues");
-    try {
-      await validation.mutateAsync();
-    } catch (error) {
-      setNavigationError(
-        error instanceof Error ? error.message : "Validation could not be completed."
-      );
-    }
-  }, [flushBeforeNavigation, validation]);
-
   const openIssue = useCallback(
     async (issue: AssessmentValidationIssue) => {
       const match = issue.path.match(/^examQuestion:([^:]+):(.*)$/);
@@ -1758,164 +855,48 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     [selectQuestion, shell, requestField]
   );
 
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => {
-      const command = event.metaKey || event.ctrlKey;
-      const target = event.target instanceof Element ? event.target : null;
-      const editing = Boolean(target?.closest('input, textarea, select, [contenteditable="true"]'));
-      const interactive = Boolean(
-        target?.closest(
-          'button, a[href], summary, [role="button"], [role="menu"], [role^="menuitem"], [role="dialog"], [data-radix-popper-content-wrapper]'
-        )
-      );
-      const inOverlay = Boolean(
-        target?.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [data-radix-popper-content-wrapper]')
-      );
-      if (event.defaultPrevented || event.isComposing || inOverlay) return;
-      if(command&&event.key.toLowerCase()==='s'){
-        if(event.shiftKey){if(!editing){event.preventDefault();openInspector();}return;}
-        event.preventDefault();void handleSaveNow();return;
-      }
-      if(!editing&&command&&event.key==='/'){event.preventDefault();setShortcutHelpOpen(true);return;}
-      if (interactive || editing) {
-        if (editing && event.key === "Escape") {
-          (document.activeElement as HTMLElement | null)?.blur();
-          document
-            .querySelector<HTMLElement>(`[data-question-list-row="${selectedExamQuestionId}"] button`)
-            ?.focus();
-        }
-        return;
-      }
-      if (command && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        setWorkspaceMode("build");
-        window.requestAnimationFrame(() => searchInputRef.current?.focus());
-        return;
-      }
-      if (command && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        if (selectedModule) {
-          setWorkspaceMode("build");
-          setJumpPaletteOpen(true);
-          return;
-        }
-        setWorkspaceMode("build");
-        window.requestAnimationFrame(() => searchInputRef.current?.focus());
-        return;
-      }
-      if (!command && event.key === "?") {
-        event.preventDefault();
-        setShortcutHelpOpen(true);
-        return;
-      }
-      if (command && event.key === "Enter") {
-        event.preventDefault();
-        void handleSaveAndNext();
-        return;
-      }
-      if (command && /^[1-4]$/.test(event.key) && draft?.answer.kind === "single_choice") {
-        event.preventDefault();
-        const optionId = draft.answer.options[Number(event.key) - 1]?.id;
-        if (optionId)
-          handleChange({ ...draft, answer: { ...draft.answer, correctOptionId: optionId } });
-        return;
-      }
-      if (command && event.key.toLowerCase() === "d" && !interactive && !editing) {
-        event.preventDefault();
-        void handleDuplicate();
-        return;
-      }
-      if (!interactive && !inOverlay && !editing && !command && (event.key === "ArrowDown" || event.key === "ArrowUp") && selectedModule) {
-        const direction = event.key === "ArrowDown" ? 1 : -1;
-        const next = selectedModule.questions[selectedModuleIndex + direction];
-        if (next) {
-          event.preventDefault();
-          void selectQuestion(next.examQuestionId);
-        }
-        return;
-      }
-      if (!interactive && !inOverlay && !editing && (event.key === "j" || event.key === "k") && selectedModule) {
-        const direction = event.key === "j" ? 1 : -1;
-        const next = selectedModule.questions[selectedModuleIndex + direction];
-        if (next) {
-          event.preventDefault();
-          void selectQuestion(next.examQuestionId);
-        }
-        return;
-      }
-      if (!interactive && !inOverlay && !editing && event.code === "Space" && draft) {
-        event.preventDefault();
-        setPreviewOpen((value) => !value);
-        return;
-      }
-    };
-    window.addEventListener("keydown", listener);
-    return () => window.removeEventListener("keydown", listener);
-  }, [
+  // Keyboard commands are a named surface, not a rule table buried in this
+  // component. The hook owns the rules and their guard order; every command it
+  // can fire is a callback already declared above.
+  useAuthoringKeyboard({
     draft,
-    handleChange,
-    handleDuplicate,
-    handleSaveAndNext,
-    handleSaveNow,
-    selectQuestion,
     selectedExamQuestionId,
     selectedModule,
     selectedModuleIndex,
-    setJumpPaletteOpen,setPreviewOpen,setShortcutHelpOpen,openInspector,
-  ]);
+    searchInputRef,
+    onModeChange: setWorkspaceMode,
+    onChange: handleChange,
+    onSaveNow: () => void handleSaveNow(),
+    onSaveAndNext: () => void handleSaveAndNext(),
+    onDuplicate: () => void handleDuplicate(),
+    onSelectQuestion: (questionId) => void selectQuestion(questionId),
+    onOpenInspector: () => openInspector(),
+    onTogglePreview: () => setPreviewOpen((value) => !value),
+    onOpenJumpPalette: () => setJumpPaletteOpen(true),
+    onOpenShortcutHelp: () => setShortcutHelpOpen(true),
+  });
 
-  if (shellQuery.isLoading) return <SatAuthoringLoadingSurface label="Opening SAT workspace…" />;
-  // Phase 04: the shell query is now GET-only. A 404 means "no editable draft
-  // yet" — a state DISTINCT from the generic error surface. Editors get an
-  // explicit, role-gated "Open draft" CTA that runs the ensure mutation
-  // (POST) once per click; observers never see the CTA and never trigger it.
-  // Ensure success installs the shell via setQueryData so this component
-  // re-renders with data; ensure failure shows the error with no auto-loop.
-  const isNoDraft = !shell && isBackendNotFound(shellQuery.error);
-  if (isNoDraft) {
-    const ensureInfo = ensureDraft.error
-      ? toEnsureDraftShellErrorInfo(ensureDraft.error)
-      : null;
-    const ensureDescription =
-      ensureInfo?.kind === "exam-missing"
-        ? "This exam does not exist, so there is no draft to open."
-        : ensureInfo?.kind === "forbidden"
-          ? "You do not have permission to open an editable draft for this exam."
-          : ensureInfo?.kind === "conflict"
-            ? "The draft changed while opening. Retry the open, or refresh to load the latest state."
-            : ensureInfo
-              ? ensureInfo.message
-              : "This exam has no editable draft yet. Opening a draft creates one explicitly — refreshing never creates one.";
+  // The shell read is GET-only and never creates a draft. When there is no
+  // shell we render the lifecycle surface, which is the ONLY place that decides
+  // what NO_DRAFT vs EXAM_NOT_FOUND vs a real failure looks like. The explicit,
+  // role-gated "Open draft" CTA (POST) lives there and runs once per click;
+  // observers never see it and never trigger it. The ensure mutation installs
+  // the shell in cache so this component re-renders with data, and never
+  // auto-loops on failure.
+  if (!shell) {
     return (
-      <SatAuthoringErrorSurface
-        title="No editable draft"
-        description={ensureDescription}
-        actionLabel={canOpenDraft ? (ensureDraft.isPending ? "Opening draft…" : "Open draft") : undefined}
-        onAction={
-          canOpenDraft
-            ? () => {
-                if (ensureDraft.isPending) return;
-                ensureDraft.mutate();
-              }
-            : undefined
-        }
-        actionDisabled={ensureDraft.isPending}
+      <AuthoringLifecycleSurface
+        state={shellState}
+        canOpenDraft={canOpenDraft}
+        draftOpen={{
+          isPending: ensureDraft.isPending,
+          error: ensureDraft.error,
+          open: () => ensureDraft.mutate(),
+        }}
+        onRetry={() => void shellLifecycle.refetch()}
       />
     );
   }
-  if (shellQuery.error || !shell)
-    return (
-      <SatAuthoringErrorSurface
-        title="Unable to load the SAT authoring workspace"
-        description={
-          shellQuery.error instanceof Error
-            ? shellQuery.error.message
-            : "This SAT draft is unavailable right now."
-        }
-        actionLabel="Retry"
-        onAction={() => void shellQuery.refetch()}
-      />
-    );
 
   const moveTargets =
     selectedSection?.modules.filter((module) => module.id !== selectedModuleId) ?? [];
@@ -2041,8 +1022,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                   <SaveCluster
                     transientSaved
                     announce={false}
-                    status={combineSaveStatus(autosave.status, coeditSaveStatus)}
-                    lastSavedAt={autosave.lastSavedAt}
+                    status={combineSaveStatus(persistence.status, coeditSaveStatus)}
+                    lastSavedAt={persistence.lastSavedAt}
                     diverged={Boolean(diverged) || Boolean(publishedFrozen)}
                     onRetry={handleRetrySave}
                     onReviewConflict={openReview}
@@ -2100,7 +1081,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
           inspector={draft?<Inspector open={inspectorOpen&&(!inspectorModal||overlayStack.openSheet==='inspector')} modal={inspectorModal} question={draft} issues={selectedQuestionIssues} onChange={handleChange} onClose={closeInspector} readOnly={collaborationReadOnly} isPretest={sharedQuestionScalar?.isPretest ?? questionQuery.data?.isPretest} onPretestChange={selectedExamQuestionId && !collaborationReadOnly ? handlePretestChange : undefined}/>:undefined}
           banner={
             <>
-              {deviceDraftRecovery ? (
+              {deviceRecovery.recovery ? (
                 <DeviceDraftRecoverySurface
                   onKeepChanges={keepDeviceDraft}
                   onDiscardChanges={discardDeviceDraft}
@@ -2186,8 +1167,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                   headerPresenceSlot={coeditHeaderPresenceSlot}
                   headerSaveSlot={coeditHeaderSaveSlot}
                   hideFooterSaveStatus={coeditUiActive}
-                  saveStatus={combineSaveStatus(autosave.status, coeditSaveStatus)}
-                  lastSavedAt={autosave.lastSavedAt}
+                  saveStatus={combineSaveStatus(persistence.status, coeditSaveStatus)}
+                  lastSavedAt={persistence.lastSavedAt}
                   issues={selectedQuestionIssues}
                   keepMetadataForNext={keepMetadataForNext}
                   onKeepMetadataForNextChange={setKeepMetadataForNext}
@@ -2296,7 +1277,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
         <SpinePreviewSheet
           open={previewOpen}
           question={draft}
-          saveStatus={autosave.status}
+          saveStatus={persistence.status}
           onOpenChange={(next) => {
             if (!next) setPreviewOpen(false);
           }}
@@ -2327,10 +1308,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             examId={examId}
             shell={workbookBaseline}
             existingQuestionCount={totalAuthored}
-            onClose={() => {
-              setWorkbookImportOpen(false);
-              setWorkbookBaseline(null);
-            }}
+            onClose={closeWorkbookImport}
             onCommitted={handleWorkbookCommitted}
           />
         ) : null}

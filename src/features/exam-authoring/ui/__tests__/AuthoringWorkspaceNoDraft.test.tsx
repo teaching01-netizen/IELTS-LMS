@@ -31,6 +31,7 @@ vi.mock("../../api/assessmentQueries", () => ({
     readiness: (examId: string, v: string, r: number) => ["assessment", examId, "readiness", v, r],
     question: (id: string) => ["assessment-question", id],
   },
+  setReadyShell: vi.fn(),
   useAuthoringShell: (...args: unknown[]) => (harness.useAuthoringShell as (...a: unknown[]) => unknown)(...args),
   useExamQuestion: (...args: unknown[]) => (harness.useExamQuestion as (...a: unknown[]) => unknown)(...args),
   useCreateAssessmentQuestion: (...args: unknown[]) => (harness.useCreate as (...a: unknown[]) => unknown)(...args),
@@ -42,18 +43,6 @@ vi.mock("../../api/assessmentQueries", () => ({
   useAssessmentReleaseReadiness: (...args: unknown[]) => (harness.useReleaseReadiness as (...a: unknown[]) => unknown)(...args),
   useLoadSatSampleExam: (...args: unknown[]) => (harness.useLoadSample as (...a: unknown[]) => unknown)(...args),
   useEnsureDraftShell: (...args: unknown[]) => (harness.useEnsureDraft as (...a: unknown[]) => unknown)(...args),
-  toEnsureDraftShellErrorInfo: (error: unknown) => {
-    if (error instanceof ApiError && error.status === 409) {
-      return { kind: "conflict", message: String((error as Error).message) };
-    }
-    if (error instanceof ApiError && error.status === 403) {
-      return { kind: "forbidden", message: String((error as Error).message) };
-    }
-    if (error instanceof ApiError && error.status === 404) {
-      return { kind: "exam-missing", message: String((error as Error).message) };
-    }
-    return { kind: "unknown", message: error instanceof Error ? error.message : "failed" };
-  },
 }));
 vi.mock("../../api/assessmentAuthoringApi", () => ({
   assessmentAuthoringApi: {
@@ -84,9 +73,14 @@ vi.mock("../../providers/sat/contentTemplates", () => ({
 }));
 import { AuthoringWorkspace } from "../AuthoringWorkspace";
 
-function setupNoDraft(role: string | null) {
-  const notFound = new ApiError({ code: "NOT_FOUND", message: "no draft", status: 404 });
-  harness.shellResult = { data: null, isLoading: false, error: notFound, refetch: vi.fn() };
+const NO_DRAFT = { state: "NO_DRAFT" as const, shell: null };
+
+function setupLifecycle(
+  shellData: unknown,
+  role: string | null,
+  shellError: unknown = null
+) {
+  harness.shellResult = { data: shellData, isLoading: false, error: shellError, refetch: vi.fn() };
   for (const fn of [harness.useAuthoringShell, harness.useExamQuestion, harness.useQuestionAutosave, harness.useOptionalAuthSession, harness.useCreate, harness.useBatchCreate, harness.useDuplicate, harness.useReorder, harness.useBulk, harness.useValidation, harness.useLoadSample, harness.useReleaseReadiness, harness.useEnsureDraft]) (fn as { mockReset: () => void }).mockReset();
   harness.ensureState = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, error: null };
   (harness.useAuthoringShell as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => harness.shellResult);
@@ -117,20 +111,20 @@ function renderWorkspace() {
   );
 }
 
-describe("AuthoringWorkspace no-draft state (Phase 04)", () => {
-  beforeEach(() => { setupNoDraft("builder"); });
+describe("AuthoringWorkspace shell lifecycle surfaces", () => {
+  beforeEach(() => { setupLifecycle(NO_DRAFT, "builder"); });
 
-  it("shows a distinct No editable draft state with an Open draft CTA for editors", async () => {
+  it("renders NO_DRAFT as a distinct state with an Open draft CTA for editors", async () => {
     renderWorkspace();
     expect(await screen.findByRole("heading", { name: "No editable draft" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Unable to load the SAT authoring workspace" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Exam not found" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open draft" })).toBeInTheDocument();
   });
 
   it("disables the CTA while the ensure is pending (single-flight)", async () => {
     harness.ensureState.isPending = true;
-    const { rerender: _rerender } = renderWorkspace();
-    void _rerender;
+    renderWorkspace();
     const cta = await screen.findByRole("button", { name: "Opening draft…" });
     expect(cta).toBeDisabled();
     // A disabled button cannot dispatch click events: no ensure call happens.
@@ -146,7 +140,7 @@ describe("AuthoringWorkspace no-draft state (Phase 04)", () => {
   });
 
   it("hides the CTA and never triggers ensure for preview-only roles", async () => {
-    setupNoDraft("proctor");
+    setupLifecycle(NO_DRAFT, "proctor");
     renderWorkspace();
     expect(await screen.findByRole("heading", { name: "No editable draft" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /open draft/i })).not.toBeInTheDocument();
@@ -155,7 +149,7 @@ describe("AuthoringWorkspace no-draft state (Phase 04)", () => {
   });
 
   it("hides the CTA for signed-out sessions", async () => {
-    setupNoDraft(null);
+    setupLifecycle(NO_DRAFT, null);
     renderWorkspace();
     expect(await screen.findByRole("heading", { name: "No editable draft" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /open draft/i })).not.toBeInTheDocument();
@@ -163,10 +157,48 @@ describe("AuthoringWorkspace no-draft state (Phase 04)", () => {
   });
 
   it("surfaces ensure failure (409) without auto-looping", async () => {
-    setupNoDraft("admin");
+    setupLifecycle(NO_DRAFT, "admin");
     harness.ensureState.error = new ApiError({ code: "VERSION_CONFLICT", message: "draft changed", status: 409 });
     renderWorkspace();
     expect(await screen.findByText(/draft changed while opening/i)).toBeInTheDocument();
     expect(harness.ensureState.mutate).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes a missing exam from a missing draft and offers no Open draft CTA", async () => {
+    // EXAM_NOT_FOUND is a 404 error, NOT the no-draft lifecycle state: the two
+    // must never share a surface, because opening a draft for an exam that does
+    // not exist cannot succeed.
+    setupLifecycle(
+      undefined,
+      "admin",
+      new ApiError({ code: "EXAM_NOT_FOUND", message: "Exam not found.", status: 404 })
+    );
+    renderWorkspace();
+    expect(await screen.findByRole("heading", { name: "Exam not found" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "No editable draft" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open draft/i })).not.toBeInTheDocument();
+    expect(harness.ensureState.mutate).not.toHaveBeenCalled();
+  });
+
+  it("renders permission failures as their own surface", async () => {
+    setupLifecycle(
+      undefined,
+      "proctor",
+      new ApiError({ code: "FORBIDDEN", message: "nope", status: 403 })
+    );
+    renderWorkspace();
+    expect(await screen.findByRole("heading", { name: "You cannot author this exam" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open draft/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps an unexpected failure recoverable with a retry action", async () => {
+    setupLifecycle(undefined, "admin", new ApiError({ code: "INTERNAL", message: "boom", status: 500 }));
+    renderWorkspace();
+    expect(
+      await screen.findByRole("heading", { name: "Unable to load the SAT authoring workspace" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(harness.shellResult.refetch).toHaveBeenCalledTimes(1);
   });
 });

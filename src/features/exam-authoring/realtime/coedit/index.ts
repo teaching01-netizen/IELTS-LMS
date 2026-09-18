@@ -133,11 +133,11 @@ export {
   useSatAuthoringCollaboration,
   type SatAuthoringCollaborationValue,
 } from "./useSatAuthoringCollaboration";
-export {
-  SatAuthoringCollaborationBoundary,
-  invalidateForWorkspaceAcknowledgement,
-  invalidateForWorkspaceCommand,
-} from "./SatAuthoringCollaborationBoundary";
+// The command/acknowledgement invalidation helpers that used to live beside
+// this boundary are now authoringEffects.applyWorkspaceCommand /
+// applyWorkspaceAcknowledgement: the boundary owns transport, the effects layer
+// owns which projections an event invalidates.
+export { SatAuthoringCollaborationBoundary } from "./SatAuthoringCollaborationBoundary";
 export {
   usePromptCoediting,
   type CoeditingComposerBinding,

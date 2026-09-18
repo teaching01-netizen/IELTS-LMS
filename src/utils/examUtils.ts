@@ -11,7 +11,7 @@ import {
   SentenceBlank, TableCell, QuestionType
 } from '../types';
 import { createDefaultConfig, normalizeExamConfig } from '../constants/examDefaults';
-import { hydrateExamState } from '../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { hydrateExamState } from '../features/exam-authoring/api/examAuthoringGateway';
 import { resolveAcceptedAnswers } from './acceptedAnswers';
 import { getMultiSelectCorrectCount, getMultiSelectSelectionLimit } from './multiSelectMcq';
 import { countUniqueSharedSentenceKeys } from './sentenceCompletionAnswerPool';

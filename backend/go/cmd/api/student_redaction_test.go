@@ -25,13 +25,13 @@ func redactedOf(t *testing.T, raw any) map[string]any {
 
 func TestRedactionDropsSnakeCaseKeyMaterial(t *testing.T) {
 	decoded := redactedOf(t, map[string]any{
-		"kind":                 "single_choice",
-		"options":              []any{map[string]any{"id": "A", "content": "x"}},
-		"correct_option_id":    "A",
-		"accepted_responses":   []any{"A"},
-		"normalize_fraction":   true,
-		"rationale":            "why A",
-		"is_pretest":           true,
+		"kind":               "single_choice",
+		"options":            []any{map[string]any{"id": "A", "content": "x"}},
+		"correct_option_id":  "A",
+		"accepted_responses": []any{"A"},
+		"normalize_fraction": true,
+		"rationale":          "why A",
+		"is_pretest":         true,
 	})
 	for _, key := range []string{"correct_option_id", "correctOptionId", "accepted_responses", "acceptedResponses", "rationale", "is_pretest", "isPretest"} {
 		if _, ok := decoded[key]; ok {
@@ -80,11 +80,11 @@ func TestRedactionStripsNestedOptionCorrectness(t *testing.T) {
 
 func TestRedactionAcceptsSnakeCaseNormalizationContract(t *testing.T) {
 	decoded := redactedOf(t, map[string]any{
-		"kind":                "student_produced_response",
-		"normalize_fraction":  true,
-		"normalize_decimal":   false,
-		"numeric_tolerance":   "0.01",
-		"accepted_responses":  []any{"7"},
+		"kind":               "student_produced_response",
+		"normalize_fraction": true,
+		"normalize_decimal":  false,
+		"numeric_tolerance":  "0.01",
+		"accepted_responses": []any{"7"},
 	})
 	if decoded["normalizeFraction"] != true {
 		t.Fatalf("snake input must emit canonical normalizeFraction: %v", decoded)

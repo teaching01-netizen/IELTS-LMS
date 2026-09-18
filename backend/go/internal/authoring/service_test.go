@@ -19,6 +19,21 @@ func codeOf(err error) apperrors.Code {
 	return ""
 }
 
+// messageOf returns the user-visible part of an app error. Equivalence and
+// parity harnesses compare messages through this: a code may legitimately
+// become MORE specific on the live path (EXAM_NOT_FOUND vs the retired
+// generic NOT_FOUND), while the message a user reads must not drift.
+func messageOf(t *testing.T, err error) string {
+	t.Helper()
+	if e, ok := apperrors.As(err); ok {
+		return e.Message
+	}
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 func begin(mock sqlmock.Sqlmock) {
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))

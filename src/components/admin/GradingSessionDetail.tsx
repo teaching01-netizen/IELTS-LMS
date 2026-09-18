@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, ArrowLeft, Clock, AlertCircle, CheckCircle, User, ChevronRight, FileCheck2 } from 'lucide-react';
 import type { GradingSession, StudentSubmission, SessionDetailFilters, OverallGradingStatus, SectionGradingStatus, WritingTaskSubmission } from '../../types/grading';
 import { gradingService, gradingRepository } from '../../features/grading/infrastructure/gradingGateway';
-import { examRepository, seedDevelopmentFixtures } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { examRepository, seedDevelopmentFixtures } from '../../features/exam-authoring/api/examAuthoringGateway';
 import { TableLoadingSkeleton } from '@components/ui';
 import { GradingExportButtons } from './GradingExportButtons';
 import { ObjectiveOverridesPanel } from './ObjectiveOverridesPanel';

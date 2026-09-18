@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
-import { assessmentKeys } from "../api/assessmentQueries";
+import { authoringEffects } from "../api/authoringQueryEffects";
 import type { QuestionRevision } from "../contracts/assessment";
 import type { DivergenceEvent } from "../realtime";
 import {
@@ -171,18 +171,11 @@ export function useAuthoringSaveRouting(
         recoveredQuestionDraftKeyRef.current = null;
       }
       updateSummaryCache(examQuestionId, saved);
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.shell(examId),
-        refetchType: "none",
-      });
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.readinessRoot(examId),
-        refetchType: "none",
-      });
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.release(examId),
-        refetchType: "none",
-      });
+      // The save moved the summary row and the reports derived from it; the
+      // tree's rows themselves did not move. Stale-only, because the refetch
+      // policy here belongs to the screen, not to the autosave: an active
+      // refetch on every keystroke's write would race the next keystroke.
+      void authoringEffects.shellChanged(queryClient, examId, { refetchType: "none" });
       return saved;
     },
     [

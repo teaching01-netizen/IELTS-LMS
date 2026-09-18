@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCoalescedReload } from '../../hooks/useCoalescedReload';
 import { AlertTriangle, CheckCircle2, ChevronRight, ListChecks, LoaderCircle, MousePointerClick, SlidersHorizontal } from 'lucide-react';
 import type { ExamState, ModuleType } from '../../types';
-import { examRepository, getStudentQuestionsForModule } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { examRepository, getStudentQuestionsForModule } from '../../features/exam-authoring/api/examAuthoringGateway';
 import {
   gradingErrorMessage,
   gradingService,
@@ -14,7 +14,7 @@ import type {
   ObjectiveOverrideMutationResponse,
   ObjectiveOverrideUpsertRequest,
 } from '../../types/grading';
-import type { StudentQuestionDescriptor } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import type { StudentQuestionDescriptor } from '../../features/exam-authoring/api/examAuthoringGateway';
 import { getCorrectAnswerDisplay, getQuestionPrompt } from './gradingAnswerUtils';
 import { notifyObjectiveGradingUpdated } from '../../utils/objectiveGradingSync';
 

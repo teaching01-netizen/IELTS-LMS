@@ -107,6 +107,26 @@ jobs:
           TEST_MYSQL_DSN: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
         run: go test ./integration/ -v -count=1
 
+      - name: Authoring lifecycle suites (real MySQL)
+        env:
+          TEST_MYSQL_DSN: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
+        run: |
+          # The authoring contract suites (shell lifecycle, concurrent draft
+          # open, nested-vs-bulk read equivalence, preview cache) are gated on
+          # TEST_MYSQL_DSN and used to SKIP here, so the contract this repo
+          # relies on was never actually executed in CI. Run them explicitly
+          # and fail if any of them skips: a silent skip is indistinguishable
+          # from a pass and is exactly how the suites rot.
+          set -o pipefail
+          log="$RUNNER_TEMP/authoring-contract.log"
+          go test ./internal/authoring/ -count=1 -v \
+            -run 'TestShell|TestOpenShell|TestEquivalence|TestBulk|TestPreview|TestAssembleShellTree' \
+            | tee "$log"
+          if grep -q -- '--- SKIP' "$log"; then
+            echo "Authoring MySQL-backed suites reported SKIP; they must run in CI."
+            exit 1
+          fi
+
       - name: OpenAPI lint
         run: bunx @redocly/cli lint ../../api/openapi/openapi.yaml
 
@@ -159,7 +179,7 @@ jobs:
           mapfile -t files < <(git diff --name-only "$base" HEAD -- \
             ':(glob)src/**/*.{ts,tsx}' \
             ':(glob)e2e/**/*.ts' \
-            ':(glob)playwright.config.ts')
+            ':(glob)playwright*.config.ts')
           if (( ${#files[@]} == 0 )); then
             echo "No changed TypeScript files require formatting checks."
           else
@@ -336,6 +356,49 @@ jobs:
         with:
           name: playwright-report
           path: playwright-report/
+          retention-days: 30
+
+  # The authoring lifecycle gate (plan Phase 16).
+  #
+  # Deliberately its OWN job with NO database and NO Go build: the suite answers
+  # the transport itself and runs against `vite dev` alone. That is the point —
+  # the plan's mandatory regression (a pre-draft exam must read 200 NO_DRAFT,
+  # issue zero POSTs, and print nothing to the console) is a BROWSER property,
+  # and it must not be able to disappear because the backend harness could not
+  # start, or because a MySQL service was unavailable on some day.
+  sat-authoring-lifecycle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright
+        run: bunx playwright install --with-deps chromium
+
+      - name: Run authoring lifecycle suite
+        run: bunx playwright test --config=playwright.sat-authoring.config.ts
+
+      - name: Upload authoring lifecycle report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-sat-authoring
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 30
 
   performance-check:

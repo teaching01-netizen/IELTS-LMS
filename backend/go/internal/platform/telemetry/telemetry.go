@@ -40,6 +40,8 @@ var metricHelpText = map[string]string{
 	MRatelimitDBErrorTotal:         "Total distributed rate-limit database errors by tier and key class.",
 	MRatelimitCapacityTotal:        "Total rate-limit capacity rejections by tier and key class.",
 	MAuthoringOpTotal:              "Total authoring mutations by operation and outcome (save, create, batch, bulk, commit, publish).",
+	MAuthoringShellReadTotal:       "Total authoring shell reads by lifecycle state (ready, no_draft, exam_not_found, integrity_violation, failed). A no_draft read is a normal answer, not a fault.",
+	MAuthoringDraftOpenTotal:       "Total explicit draft-open commands by outcome (opened, exam_not_found, conflict, no_source, integrity_violation, failed).",
 	MAuthoringEventPublishTotal:    "Total authoring realtime events appended in-tx by operation and outcome.",
 	MAuthoringEventPublishFailures: "Total authoring realtime event append failures by operation (rolls the mutation back).", MAuthoringWSConnectionsCurrent: "Authoring sockets currently subscribed, sampled at every accept and close.",
 	MAuthoringReconnectsTotal:          "Authoring resubscribe outcomes: resumed, snapshot_required, or rejected.",
@@ -156,6 +158,15 @@ const (
 	MRatelimitCapacityTotal = "http_ratelimit_capacity_rejected_total"
 
 	MAuthoringOpTotal = "authoring_operation_total"
+	// Shell lifecycle series. `state` is the answer the read returned and
+	// `outcome` is how the explicit open ended; both are closed vocabularies
+	// (see the ShellState* / DraftOpen* label values below). A NO_DRAFT read is
+	// counted here as the normal lifecycle answer it is — it must never reach
+	// an error series, a console error, or a server exception log.
+	MAuthoringShellReadTotal  = "authoring_shell_reads_total"
+	MAuthoringDraftOpenTotal  = "authoring_draft_open_total"
+	MAuthoringExamNotFound    = "exam_not_found"
+	MAuthoringIntegrityFailed = "integrity_violation"
 	// Phase 02 publish-side series: outcome rate of the in-tx event append,
 	// independent of the mutation outcome mix. Low-cardinality labels
 	// (operation + outcome) only; ids stay in logs/traces.
@@ -342,6 +353,8 @@ func Names() []string {
 		MRatelimitDBErrorTotal,
 		MRatelimitCapacityTotal,
 		MAuthoringOpTotal,
+		MAuthoringShellReadTotal,
+		MAuthoringDraftOpenTotal,
 		MAuthoringEventPublishTotal,
 		MAuthoringEventPublishFailures,
 		MAuthoringWSConnectionsTotal,

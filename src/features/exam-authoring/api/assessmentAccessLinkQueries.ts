@@ -1,21 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { assessmentAccessLinksApi } from "./assessmentAccessLinksApi";
-import { assessmentKeys } from "./assessmentQueries";
+import { accessLinkKeys } from "./accessLinkKeys";
+import { authoringEffects } from "./authoringQueryEffects";
 import type {
   CreateAssessmentAccessLinkRequest,
   DuplicateAssessmentAccessLinkRequest,
   SetAccessLinkLifecycleRequest,
   UpdateAssessmentAccessLinkRequest,
 } from "../contracts/accessLinks";
-
-export const accessLinkKeys = {
-  root: ["assessment-access-links"] as const,
-  overview: (examId: string) => [...accessLinkKeys.root, "overview", examId] as const,
-  link: (linkId: string) => [...accessLinkKeys.root, "link", linkId] as const,
-  members: (linkId: string) => [...accessLinkKeys.root, "members", linkId] as const,
-  activity: (linkId: string) => [...accessLinkKeys.root, "activity", linkId] as const,
-  public: (linkId: string) => [...accessLinkKeys.root, "public", linkId] as const,
-};
 
 export function useAccessDistributionOverview(examId: string, enabled = true) {
   return useQuery({
@@ -59,18 +51,13 @@ export function usePublicAccessLink(linkId: string) {
   });
 }
 
-function invalidateOverview(queryClient: ReturnType<typeof useQueryClient>, examId: string) {
-  void queryClient.invalidateQueries({ queryKey: accessLinkKeys.overview(examId) });
-  void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-}
-
 export function useCreateAccessLink(examId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (request: CreateAssessmentAccessLinkRequest) => assessmentAccessLinksApi.create(examId, request),
     onSuccess: (link) => {
       queryClient.setQueryData(accessLinkKeys.link(link.id), link);
-      invalidateOverview(queryClient, examId);
+      authoringEffects.accessChanged(queryClient, examId);
     },
   });
 }
@@ -82,8 +69,7 @@ export function useUpdateAccessLink(examId: string) {
       assessmentAccessLinksApi.update(linkId, request),
     onSuccess: (link) => {
       queryClient.setQueryData(accessLinkKeys.link(link.id), link);
-      void queryClient.invalidateQueries({ queryKey: accessLinkKeys.members(link.id) });
-      invalidateOverview(queryClient, examId);
+      authoringEffects.accessChanged(queryClient, examId, link.id);
     },
   });
 }
@@ -95,7 +81,7 @@ export function useSetAccessLinkLifecycle(examId: string) {
       assessmentAccessLinksApi.setLifecycle(linkId, request),
     onSuccess: (link) => {
       queryClient.setQueryData(accessLinkKeys.link(link.id), link);
-      invalidateOverview(queryClient, examId);
+      authoringEffects.accessChanged(queryClient, examId);
     },
   });
 }
@@ -107,7 +93,7 @@ export function useDuplicateAccessLink(examId: string) {
       assessmentAccessLinksApi.duplicate(linkId, request),
     onSuccess: (link) => {
       queryClient.setQueryData(accessLinkKeys.link(link.id), link);
-      invalidateOverview(queryClient, examId);
+      authoringEffects.accessChanged(queryClient, examId);
     },
   });
 }

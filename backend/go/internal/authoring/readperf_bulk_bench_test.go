@@ -15,6 +15,7 @@ package authoring
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"example.com/ielts-proctoring/internal/delivery"
@@ -27,21 +28,25 @@ func readPerfBulkEndpoints(fixture *readPerfFixture) []readPerfEndpoint {
 		{
 			name: "bulk-shell",
 			call: func(ctx context.Context) (int, error) {
-				shell, err := fixture.Service.bulkShell(ctx, fixture.ExamID)
+				result, err := fixture.Service.bulkShell(ctx, fixture.ExamID)
 				if err != nil {
 					return 0, err
 				}
-				return readPerfJSONSize(shell), nil
+				return readPerfJSONSize(result), nil
 			},
 		},
 		{
 			name: "bulk-preview",
 			call: func(ctx context.Context) (int, error) {
 				// The Phase-03 composition: bulk shell + bulk delivery tree.
-				shell, err := fixture.Service.bulkShell(ctx, fixture.ExamID)
+				result, err := fixture.Service.bulkShell(ctx, fixture.ExamID)
 				if err != nil {
 					return 0, err
 				}
+				if result.Shell == nil {
+					return 0, fmt.Errorf("fixture exam %s has no draft", fixture.ExamID)
+				}
+				shell := *result.Shell
 				sections, err := delivery.NewService(fixture.DB, fixture.Runner).LoadSectionsBulk(ctx, shell.VersionID)
 				if err != nil {
 					return 0, err

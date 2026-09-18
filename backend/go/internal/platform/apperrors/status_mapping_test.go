@@ -18,6 +18,8 @@ func TestStatusForMapsEveryCode(t *testing.T) {
 		{CodeUnauthorized, http.StatusUnauthorized},
 		{CodeForbidden, http.StatusForbidden},
 		{CodeNotFound, http.StatusNotFound},
+		{CodeExamNotFound, http.StatusNotFound},
+		{CodeDraftIntegrity, http.StatusInternalServerError},
 		{CodeMethodNotAllowed, http.StatusMethodNotAllowed},
 		{CodeConflict, http.StatusConflict},
 		{CodeRateLimited, http.StatusTooManyRequests},

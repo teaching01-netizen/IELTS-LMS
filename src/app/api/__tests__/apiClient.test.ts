@@ -48,7 +48,7 @@ describe('apiClient', () => {
       new Response(
         JSON.stringify({
           success: false,
-          error: { code: 'NOT_FOUND', message: 'Draft version not found.' },
+          error: { code: 'NOT_FOUND', message: 'Not found.' },
         }),
         { status: 404, headers: { 'content-type': 'application/json' } },
       ),
@@ -56,7 +56,7 @@ describe('apiClient', () => {
     global.fetch = fetchMock as unknown as typeof fetch;
 
     const failure = await apiClient
-      .get('/v1/assessment-authoring/exams/exam-1/shell', { retries: 0, expectedStatuses: [404] })
+      .get('/v1/assessment-authoring/exams/exam-1/coedit-token', { retries: 0, expectedStatuses: [404] })
       .catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(ApiError);

@@ -1,7 +1,7 @@
 import type {
   StudentQuestionDescriptor,
-} from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
-import { getQuestionAnswer } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+} from '../../features/exam-authoring/api/examAuthoringGateway';
+import { getQuestionAnswer } from '../../features/exam-authoring/api/examAuthoringGateway';
 import type { StudentAnswerValue } from '../../types/answers';
 import type { SentenceCompletionQuestion } from '../../types';
 import { normalizeAnswerForMatching, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';

@@ -3,7 +3,7 @@ import { describe, expect, test, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { GradingSessionList } from '../GradingSessionList';
 import { gradingService } from '../../../features/grading/infrastructure/gradingGateway';
-import { seedDevelopmentFixtures } from '../../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { seedDevelopmentFixtures } from '../../../features/exam-authoring/api/examAuthoringGateway';
 import { downloadCsv } from '../../../utils/csvExport';
 import type { GradingSession } from '../../../types/grading';
 
@@ -23,7 +23,7 @@ vi.mock('../../../features/grading/infrastructure/gradingGateway', async (import
   };
 });
 
-vi.mock('../../../features/exam-authoring/infrastructure/examAuthoringGateway', () => ({
+vi.mock('../../../features/exam-authoring/api/examAuthoringGateway', () => ({
   seedDevelopmentFixtures: vi.fn().mockResolvedValue(undefined),
 }));
 

@@ -382,11 +382,17 @@ func comparePerLevel(t *testing.T, db *sql.DB, service *Service, oldShell Shell,
 	if err != nil {
 		t.Fatalf("loadBulkQuestionRows: %v", err)
 	}
+	// Assemble the bulk tree ONCE from the full row set and reuse it for the
+	// per-level routing diff below. A partial assembly (one section row, no
+	// modules, no questions) cannot project the same routing policy: the
+	// operational count is DERIVED from the section's base module, so an
+	// assembly without modules reports the floor of 1 for every section.
+	bulkAssembledSections := assembleShellTree(
+		shellIdentity{providerKey: oldShell.ProviderKey, versionID: versionID, revision: oldShell.VersionRevision},
+		bulkSections, bulkModules, bulkRouting, bulkQuestions, oldShell.ExamID).Sections
 	requireIdentical(t, "sections[] (loadSections vs loadBulkSections)",
 		canonicalJSON(t, "loadSections", oldSections),
-		canonicalJSON(t, "assembleShellTree", assembleShellTree(
-			shellIdentity{providerKey: oldShell.ProviderKey, versionID: versionID, revision: oldShell.VersionRevision},
-			bulkSections, bulkModules, bulkRouting, bulkQuestions, oldShell.ExamID).Sections))
+		canonicalJSON(t, "assembleShellTree", bulkAssembledSections))
 
 	for _, section := range oldSections {
 		oldModules, err := service.loadModules(ctx, db, section.ID)
@@ -421,24 +427,21 @@ func comparePerLevel(t *testing.T, db *sql.DB, service *Service, oldShell Shell,
 			canonicalJSON(t, "loadModules", stripQuestions(oldModules)),
 			canonicalJSON(t, "loadBulkModules", stripQuestions(bulkSectionModules)))
 
-		oldRouting, err := service.loadRouting(ctx, db, section.ID)
-		if err != nil {
-			t.Fatalf("loadRouting(%s): %v", section.ID, err)
-		}
+		// Both sides must be what PRODUCTION projects: the nested side is
+		// loadSections' derived policy (loadRouting alone returns the raw row,
+		// with the operational count still at its zero value because
+		// production derives it in loadSections), and the bulk side is the
+		// full-assembly value computed above.
 		var bulkSectionRouting *RoutingPolicy
-		for i := range bulkRouting {
-			if bulkRouting[i].sectionID == section.ID {
-				assembled := assembleShellTree(
-					shellIdentity{},
-					[]bulkSectionRow{{id: section.ID}},
-					nil, bulkRouting[i:i+1], nil, "x").Sections
-				bulkSectionRouting = assembled[0].RoutingPolicy
+		for i := range bulkAssembledSections {
+			if bulkAssembledSections[i].ID == section.ID {
+				bulkSectionRouting = bulkAssembledSections[i].RoutingPolicy
 				break
 			}
 		}
 		requireIdentical(t, "routingPolicy for section "+section.SectionKey,
-			canonicalJSON(t, "loadRouting", oldRouting),
-			canonicalJSON(t, "loadBulkRouting", bulkSectionRouting))
+			canonicalJSON(t, "loadSections.routingPolicy", section.RoutingPolicy),
+			canonicalJSON(t, "assembleShellTree.routingPolicy", bulkSectionRouting))
 
 		for _, module := range oldModules {
 			oldQuestions, err := service.loadSummaries(ctx, db, module.ID)
@@ -690,23 +693,38 @@ func TestEquivalenceNotFoundParity(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(fixture.DB, fixture.Runner)
 
-	// Unknown exam id -> "Exam not found." on both paths.
+	// Unknown exam id -> "Exam not found." on both paths. The CODE is now
+	// EXAM_NOT_FOUND on the live path (a 404 on this route has exactly one
+	// meaning) while the retired nested reference keeps the generic NOT_FOUND
+	// it was written with; the message is unchanged on both.
+	const unknownExamID = "00000000-0000-0000-0000-000000000000"
 	oldErr := func() error {
-		_, err := legacyNestedShell(ctx, fixture.DB, service, "00000000-0000-0000-0000-000000000000")
+		_, err := legacyNestedShell(ctx, fixture.DB, service, unknownExamID)
 		return err
 	}()
 	newErr := func() error {
-		_, err := service.Shell(ctx, "00000000-0000-0000-0000-000000000000")
+		_, err := service.Shell(ctx, unknownExamID)
 		return err
 	}()
-	if codeOf(oldErr) != apperrors.CodeNotFound || codeOf(newErr) != apperrors.CodeNotFound {
-		t.Fatalf("unknown exam must be NOT_FOUND on both paths, got nested=%v bulk=%v", oldErr, newErr)
+	if codeOf(oldErr) != apperrors.CodeNotFound || codeOf(newErr) != apperrors.CodeExamNotFound {
+		t.Fatalf("unknown exam must be NOT_FOUND (nested) / EXAM_NOT_FOUND (live), got nested=%v bulk=%v", oldErr, newErr)
 	}
-	if oldErr.Error() != newErr.Error() {
-		t.Fatalf("error message drift: nested=%q bulk=%q", oldErr.Error(), newErr.Error())
+	// The MESSAGE is the user-visible part and must not drift; the code is
+	// deliberately more specific on the live path.
+	if messageOf(t, oldErr) != messageOf(t, newErr) {
+		t.Fatalf("error message drift: nested=%q bulk=%q", messageOf(t, oldErr), messageOf(t, newErr))
+	}
+	if _, err := service.ShellLifecycle(ctx, unknownExamID); codeOf(err) != apperrors.CodeExamNotFound {
+		t.Fatalf("ShellLifecycle on an unknown exam must report EXAM_NOT_FOUND, got %v", err)
+	}
+	if _, err := service.ShellLifecycle(ctx, unknownExamID); messageOf(t, err) != messageOf(t, oldErr) {
+		t.Fatalf("ShellLifecycle message = %q, want %q", messageOf(t, err), messageOf(t, oldErr))
 	}
 
-	// Exam without a draft pointer -> "Draft version not found." on both paths.
+	// Exam without a draft pointer: the STRICT Shell() keeps its historical
+	// "Draft version not found." 404 for the internal callers that require a
+	// draft, while the lifecycle read answers the same row as a 200 NO_DRAFT.
+	// The two must not be confused in either direction.
 	examID, _ := seedEquivVersion(t, fixture.DB, fixture.Runner, nil)
 	if _, err := fixture.DB.ExecContext(ctx, "UPDATE exam_entities SET current_draft_version_id = NULL WHERE id = ?", examID); err != nil {
 		t.Fatalf("clear draft pointer: %v", err)
@@ -714,21 +732,43 @@ func TestEquivalenceNotFoundParity(t *testing.T) {
 	oldErr = func() error { _, err := legacyNestedShell(ctx, fixture.DB, service, examID); return err }()
 	newErr = func() error { _, err := service.Shell(ctx, examID); return err }()
 	if codeOf(oldErr) != apperrors.CodeNotFound || codeOf(newErr) != apperrors.CodeNotFound {
-		t.Fatalf("missing draft pointer must be NOT_FOUND on both paths, got nested=%v bulk=%v", oldErr, newErr)
+		t.Fatalf("missing draft pointer must be NOT_FOUND for strict Shell on both paths, got nested=%v bulk=%v", oldErr, newErr)
 	}
-	if oldErr.Error() != newErr.Error() {
-		t.Fatalf("error message drift: nested=%q bulk=%q", oldErr.Error(), newErr.Error())
+	if messageOf(t, oldErr) != messageOf(t, newErr) {
+		t.Fatalf("error message drift: nested=%q bulk=%q", messageOf(t, oldErr), messageOf(t, newErr))
+	}
+	noDraft, err := service.ShellLifecycle(ctx, examID)
+	if err != nil {
+		t.Fatalf("ShellLifecycle on an exam without a draft must not error: %v", err)
+	}
+	if noDraft.State != ShellStateNoDraft || noDraft.Shell != nil {
+		t.Fatalf("ShellLifecycle = %q/%v, want NO_DRAFT with a nil shell", noDraft.State, noDraft.Shell)
 	}
 
-	// Draft pointer set but the version row is gone -> "Draft version not
-	// found." on both paths (the LEFT JOIN must not collapse to Exam-not-found).
+	// Draft pointer set but the version row is gone: the exam's pointer
+	// disagrees with the version table, so this is corrupted state, NOT the
+	// legitimate NO_DRAFT answer (which would offer the user an "Open draft"
+	// command on top of it) and not EXAM_NOT_FOUND either.
 	examID2, versionID2 := seedEquivVersion(t, fixture.DB, fixture.Runner, nil)
 	if _, err := fixture.DB.ExecContext(ctx, "DELETE FROM exam_versions WHERE id = ?", versionID2); err != nil {
 		t.Fatalf("delete draft version: %v", err)
 	}
 	oldErr = func() error { _, err := legacyNestedShell(ctx, fixture.DB, service, examID2); return err }()
 	newErr = func() error { _, err := service.Shell(ctx, examID2); return err }()
-	if codeOf(oldErr) != apperrors.CodeNotFound || codeOf(newErr) != apperrors.CodeNotFound {
-		t.Fatalf("dangling draft pointer must be NOT_FOUND on both paths, got nested=%v bulk=%v", oldErr, newErr)
+	if codeOf(newErr) != apperrors.CodeDraftIntegrity {
+		t.Fatalf("dangling draft pointer must be DRAFT_INTEGRITY_VIOLATION, got %v", newErr)
+	}
+	dangling, err := service.ShellLifecycle(ctx, examID2)
+	if codeOf(err) != apperrors.CodeDraftIntegrity {
+		t.Fatalf("ShellLifecycle on a dangling pointer must report DRAFT_INTEGRITY_VIOLATION, got %q/%v", dangling.State, err)
+	}
+	if dangling.State == ShellStateNoDraft {
+		t.Fatal("a dangling draft pointer must never be reported as NO_DRAFT")
+	}
+	// The retired nested path is kept only as the projection reference; it has
+	// no lifecycle contract of its own, so its dangling answer is unspecified
+	// beyond "an error".
+	if oldErr == nil {
+		t.Fatal("legacy nested path must error on a dangling draft pointer")
 	}
 }

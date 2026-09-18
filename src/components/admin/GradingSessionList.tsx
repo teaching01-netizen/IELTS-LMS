@@ -6,7 +6,7 @@ import {
   gradingService,
 } from '../../features/grading/infrastructure/gradingGateway';
 import { TableLoadingSkeleton } from '@components/ui';
-import { seedDevelopmentFixtures } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { seedDevelopmentFixtures } from '../../features/exam-authoring/api/examAuthoringGateway';
 import { downloadCsv } from '../../utils/csvExport';
 
 interface GradingSessionListProps {

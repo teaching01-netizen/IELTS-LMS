@@ -1,10 +1,8 @@
 import { useContext, useEffect, useRef, type ReactNode } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
-import { assessmentKeys } from "../../api/assessmentQueries";
-import { accessLinkKeys } from "../../api/assessmentAccessLinkQueries";
+import { authoringEffects } from "../../api/authoringQueryEffects";
 import { CollaborationLiveRegion } from "../../ui/collaboration/CollaborationLiveRegion";
 import { coeditDisplayStatusFor } from "../../ui/spine/coeditSaveTruth";
-import type { SatWorkspaceCommand } from "./workspaceCommands";
 import {
   SatAuthoringCollaborationProvider,
   useSatAuthoringCollaboration,
@@ -12,8 +10,14 @@ import {
 
 /**
  * The single exam-level collaboration boundary for every SAT authoring route.
- * Keeping the provider and the room-wide query invalidation together prevents
- * one route family from silently falling back to a local-only editor.
+ * Keeping the provider and the outlet together prevents one route family from
+ * silently falling back to a local-only editor.
+ *
+ * This component owns TRANSPORT concerns only: provider lifetime, room
+ * subscription, command/acknowledgement deduplication, and the collaboration
+ * live region. It deliberately does not know the React Query dependency graph —
+ * an event it receives is reported to `authoringEffects`, which owns the
+ * question of which projections that event invalidates.
  */
 export function SatAuthoringCollaborationBoundary({
   examId,
@@ -47,9 +51,11 @@ function SatAuthoringCollaborationOutlet({ children }: { children: ReactNode }) 
     }
     const commands = collaboration.workspaceSnapshot.commands;
     for (const command of commands) {
+      // Deduplication is a transport concern: the same command must be relayed
+      // once, however many times the room snapshot is re-delivered.
       if (seenCommandsRef.current.ids.has(command.commandId)) continue;
       seenCommandsRef.current.ids.add(command.commandId);
-      invalidateForWorkspaceCommand(queryClient, collaboration.examId, command);
+      void authoringEffects.applyWorkspaceCommand(queryClient, collaboration.examId, command);
     }
   }, [collaboration, collaboration?.workspaceSnapshot.commands, queryClient]);
 
@@ -68,7 +74,7 @@ function SatAuthoringCollaborationOutlet({ children }: { children: ReactNode }) 
       return;
     }
     seenAckRef.current = { examId: collaboration.examId, revision: ackRevision };
-    invalidateForWorkspaceAcknowledgement(
+    void authoringEffects.applyWorkspaceAcknowledgement(
       queryClient,
       collaboration.examId,
       collaboration.workspaceSnapshot.values,
@@ -105,99 +111,4 @@ function SatAuthoringCollaborationOutlet({ children }: { children: ReactNode }) 
       {children}
     </>
   );
-}
-
-export function invalidateForWorkspaceAcknowledgement(
-  queryClient: {
-    invalidateQueries: (options: { queryKey: readonly unknown[] }) => Promise<unknown> | unknown;
-  },
-  examId: string,
-  values: Record<string, unknown>,
-): void {
-  const questionIds = new Set<string>();
-  let hasDelivery = false;
-  let hasAccess = false;
-  for (const path of Object.keys(values)) {
-    const questionPath = path.startsWith("rich:question/")
-      ? path.slice("rich:".length)
-      : path;
-    if (questionPath.startsWith("question/")) {
-      const questionId = questionPath.split("/")[1];
-      if (questionId) questionIds.add(questionId);
-    } else if (path.startsWith("delivery/")) {
-      hasDelivery = true;
-    } else if (path.startsWith("access/")) {
-      hasAccess = true;
-    }
-  }
-  for (const questionId of questionIds) {
-    void queryClient.invalidateQueries({ queryKey: assessmentKeys.question(questionId) });
-  }
-  if (questionIds.size > 0 || hasDelivery) {
-    void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-    void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-    void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-  }
-  if (hasAccess) {
-    void queryClient.invalidateQueries({ queryKey: accessLinkKeys.overview(examId) });
-    void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-  }
-}
-
-export function invalidateForWorkspaceCommand(
-  queryClient: {
-    invalidateQueries: (options: { queryKey: readonly unknown[] }) => Promise<unknown> | unknown;
-  },
-  examId: string,
-  command: SatWorkspaceCommand,
-): void {
-  const payload = command.payload;
-  const questionIds = new Set<string>();
-  if (typeof payload["questionId"] === "string") questionIds.add(payload["questionId"]);
-  if (Array.isArray(payload["questionIds"])) {
-    for (const value of payload["questionIds"]) {
-      if (typeof value === "string" && value.trim()) questionIds.add(value);
-    }
-  }
-  const linkId = typeof payload["linkId"] === "string" ? payload["linkId"] : null;
-
-  switch (command.command) {
-    case "question.created":
-    case "question.duplicated":
-    case "question.deleted":
-    case "question.reordered":
-    case "question.bulk_changed":
-    case "workbook.imported":
-    case "workbook.undone":
-    case "sample.loaded":
-      for (const id of questionIds) {
-        void queryClient.invalidateQueries({ queryKey: assessmentKeys.question(id) });
-      }
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-      return;
-    case "delivery.changed":
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-      return;
-    case "access.created":
-    case "access.updated":
-    case "access.lifecycle_changed":
-    case "access.duplicated":
-      void queryClient.invalidateQueries({ queryKey: accessLinkKeys.overview(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-      if (linkId) {
-        void queryClient.invalidateQueries({ queryKey: accessLinkKeys.link(linkId) });
-        void queryClient.invalidateQueries({ queryKey: accessLinkKeys.members(linkId) });
-      }
-      return;
-    case "exam.published":
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-      void queryClient.invalidateQueries({ queryKey: accessLinkKeys.overview(examId) });
-      return;
-  }
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -48,6 +49,81 @@ func observeAuthoringOp(operation string, err error) {
 	if outcome == telemetry.OutcomeVersionConflict {
 		authoringrealtime.EmitConflict(authoringrealtime.ConflictOperationFor(operation))
 	}
+}
+
+// observeShellRead records authoring_shell_reads_total{state}.
+//
+// The state label is the lifecycle ANSWER, not a status code: ready, no_draft,
+// exam_not_found, integrity_violation or failed. Counting no_draft here as an
+// ordinary state is the point — a pre-draft exam is normal, and this series is
+// the only place its frequency is visible. Nothing about it is logged at error
+// level, because treating it as a fault is exactly what produced the
+// production console noise this contract removes.
+func observeShellRead(out *authoring.ShellResult, err error) {
+	state := "failed"
+	switch code := errorCode(err); code {
+	case "":
+		if out != nil {
+			state = strings.ToLower(string(out.State))
+		}
+	case apperrors.CodeExamNotFound:
+		state = telemetry.MAuthoringExamNotFound
+	case apperrors.CodeDraftIntegrity:
+		state = telemetry.MAuthoringIntegrityFailed
+	}
+	telemetry.IncCounter(telemetry.MAuthoringShellReadTotal, "state", state)
+}
+
+// errorCode returns the apperrors code for err, or "" when err is nil or not a
+// classified application error.
+func errorCode(err error) apperrors.Code {
+	if err == nil {
+		return ""
+	}
+	if appErr, ok := apperrors.As(err); ok {
+		return appErr.Code
+	}
+	return ""
+}
+
+// observeDraftOpen records authoring_draft_open_total{outcome}.
+//
+// `ready` covers both shapes of success (an existing draft returned, or a
+// published version cloned) because the API answers the same way for both and
+// a label that claimed to tell them apart would be a guess. Conflicts and
+// no-source rejections are counted separately: they are the two outcomes a
+// caller is expected to handle, and they must not be mixed into `failed`.
+func observeDraftOpen(err error) {
+	outcome := "ready"
+	if code := errorCode(err); code != "" {
+		outcome = "failed"
+		switch code {
+		case apperrors.CodeExamNotFound:
+			outcome = telemetry.MAuthoringExamNotFound
+		case apperrors.CodeConflict:
+			outcome = "conflict"
+		case apperrors.CodeValidation:
+			outcome = "no_source"
+		case apperrors.CodeDraftIntegrity:
+			outcome = telemetry.MAuthoringIntegrityFailed
+		}
+	}
+	telemetry.IncCounter(telemetry.MAuthoringDraftOpenTotal, "outcome", outcome)
+}
+
+// reportDraftIntegrityViolation raises the one shell-path condition that is a
+// genuine fault: current_draft_version_id naming a draft that is missing,
+// owned by another exam, or not a draft. No user action produces it, so it is
+// both counted as an invariant violation and logged at error level with the
+// identifiers an operator needs. Ids go in the log; metric labels stay
+// low-cardinality. Question content is never logged.
+func reportDraftIntegrityViolation(w http.ResponseWriter, r *http.Request, examID string, err error) {
+	if errorCode(err) != apperrors.CodeDraftIntegrity {
+		return
+	}
+	telemetry.IncCounter(telemetry.MAuthoringInvariantViolationsTotal, "kind", "dangling_draft_pointer")
+	log.Printf(`{"level":"error","msg":"authoring draft pointer is dangling","examId":%q,"requestId":%q,"err":%q}`,
+		examID, httpx.RequestIDOf(w, r), err.Error())
 }
 
 // authorSatWorkbookTemplateHandler downloads the canonical SAT authoring
@@ -182,7 +258,13 @@ func mediaCompleteHandler(app *App) http.HandlerFunc {
 	}
 }
 
-// authorShellHandler returns the editable-draft authoring shell.
+// authorShellHandler returns the editable-draft authoring shell lifecycle.
+//
+// 200 {state: READY,    shell: {...}} for an exam with a current draft,
+// 200 {state: NO_DRAFT, shell: null}  for an exam that has none, and 404
+// EXAM_NOT_FOUND only when the exam itself does not exist. Collapsing
+// NO_DRAFT into a 404 made a normal pre-draft exam indistinguishable from a
+// broken request on the client. The read never creates a draft.
 func authorShellHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if requireAuthoringExamRead(app, w, r, chi.URLParam(r, "examID")) == nil {
@@ -192,8 +274,11 @@ func authorShellHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring service is unavailable."))
 			return
 		}
-		out, err := app.Authoring.Shell(r.Context(), chi.URLParam(r, "examID"))
+		examID := chi.URLParam(r, "examID")
+		out, err := app.Authoring.ShellLifecycle(r.Context(), examID)
+		observeShellRead(&out, err)
 		if err != nil {
+			reportDraftIntegrityViolation(w, r, examID, err)
 			httpx.WriteError(w, r, err)
 			return
 		}
@@ -201,7 +286,8 @@ func authorShellHandler(app *App) http.HandlerFunc {
 	}
 }
 
-// authorOpenShellHandler opens (or returns) the editable-draft shell.
+// authorOpenShellHandler opens (or returns) the editable-draft shell. This is
+// the one explicit draft-creating command; the GET read never clones.
 func authorOpenShellHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess := requireAuthoringExamWrite(app, w, r, chi.URLParam(r, "examID"))
@@ -212,8 +298,11 @@ func authorOpenShellHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Authoring service is unavailable."))
 			return
 		}
-		out, err := app.Authoring.OpenShell(r.Context(), chi.URLParam(r, "examID"), sess.UserID)
+		examID := chi.URLParam(r, "examID")
+		out, err := app.Authoring.OpenShell(r.Context(), examID, sess.UserID)
+		observeDraftOpen(err)
 		if err != nil {
+			reportDraftIntegrityViolation(w, r, examID, err)
 			httpx.WriteError(w, r, err)
 			return
 		}

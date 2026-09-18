@@ -47,6 +47,7 @@ vi.mock("../../../api/assessmentQueries", () => ({
     readiness: (examId: string, v: string, r: number) => ["assessment", examId, "readiness", v, r],
     question: (id: string) => ["assessment-question", id],
   },
+  setReadyShell: vi.fn(),
   useAuthoringShell: (...args: unknown[]) => (harness.useAuthoringShell as (...a: unknown[]) => unknown)(...args),
   useExamQuestion: (...args: unknown[]) => (harness.useExamQuestion as (...a: unknown[]) => unknown)(...args),
   useCreateAssessmentQuestion: (...args: unknown[]) => (harness.useCreate as (...a: unknown[]) => unknown)(...args),
@@ -139,7 +140,13 @@ function setupDefaults() {
     "eq-2": { examQuestionId: "eq-2", moduleId: "mod-1", moduleKey: "rw-m1", sectionKey: "reading-writing", displayOrder: 1, isPretest: false, question: second },
   };
   harness.details = details;
-  harness.shellResult = { data: shell, isLoading: false, error: null, refetch: vi.fn() };
+  // The shell cache holds a lifecycle envelope: READY carries the shell.
+  harness.shellResult = {
+    data: { state: "READY", shell },
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  };
   for (const fn of [harness.useAuthoringShell, harness.useExamQuestion, harness.useQuestionAutosave, harness.useOptionalAuthSession, harness.useCreate, harness.useBatchCreate, harness.useDuplicate, harness.useReorder, harness.useBulk, harness.useValidation, harness.useLoadSample, harness.useReleaseReadiness, harness.useEnsureDraft]) (fn as { mockReset: () => void }).mockReset();
   for (const fn of Object.values(harness.mutations)) (fn as { mockReset: () => void }).mockReset();
   for (const fn of Object.values(harness.api)) (fn as { mockReset: () => void }).mockReset();

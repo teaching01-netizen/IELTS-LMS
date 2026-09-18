@@ -1,6 +1,6 @@
 import type { ExamState } from '../../../types';
 import { gradingService, gradingRepository } from '../../../features/grading/infrastructure/gradingGateway';
-import { examRepository } from '../../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { examRepository } from '../../../features/exam-authoring/api/examAuthoringGateway';
 import {
   resolveObjectiveGradingVersionId,
 } from '../gradingReviewUtils';

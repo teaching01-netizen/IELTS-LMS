@@ -10,7 +10,7 @@ import type {
 } from "./api/assessmentContracts";
 import { getAssessmentMediaAsset } from "../exam-authoring/api/assessmentMediaApi";
 import { satImagePresentation } from "../exam-authoring/api/satImagePresentation";
-import { documentFromStructuredContent } from "../exam-authoring/api/structuredContentPublic";
+import { documentFromStructuredContent } from "../exam-authoring/api/renderingPublic";
 import {
   SAT_IMAGE_ENLARGE_FIT_VIEW,
   SAT_IMAGE_ENLARGE_NO_GEOMETRY,

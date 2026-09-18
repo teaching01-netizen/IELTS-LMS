@@ -4,7 +4,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient, UseMutationOptions } from '@tanstack/react-query';
-import { examAuthoringFacade } from '../../features/exam-authoring/application/examAuthoringFacade';
+import { examAuthoringFacade } from '../../features/exam-authoring/api/examAuthoringFacade';
 import { liveQueryPolicy, queryKeys } from './queryClient';
 import { ExamState } from '../../types';
 import { ExamSchedule, ExamSessionRuntime, ExamStatus } from '../../types/domain';

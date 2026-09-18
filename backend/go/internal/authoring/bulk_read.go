@@ -27,14 +27,11 @@ import (
 // EQUIVALENCE CONTRACT (proved by readperf_equivalence_test.go against real
 // MySQL): the assembler below reproduces the nested loaders byte for byte —
 // same ordering keys, same empty-array-not-null behavior, same routing nil,
-// same tool_policy default, same error codes. Every ORDER BY below is
-// deliberately IDENTICAL to the per-entity query it replaces; no new
-// tie-breakers are invented, because adding one would both change the
-// contract and defeat the (exam_version_id, display_order) index that makes
-// the old queries cheap (see baseline-report.md §4).
-//
-// Nothing here is wired into Shell() yet: Phase 02 is additive. Phase 03
-// performs the cutover.
+// same tool_policy default. Every ORDER BY below is deliberately IDENTICAL to
+// the per-entity query it replaces; no new tie-breakers are invented, because
+// adding one would both change the contract and defeat the
+// (exam_version_id, display_order) index that makes the old queries cheap
+// (see baseline-report.md §4).
 
 // shellIdentity is the exam/draft header resolved before the tree load.
 type shellIdentity struct {
@@ -51,20 +48,31 @@ type queryRowContexter interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
+// shellResolution is the explicit outcome of the exam/draft identity probe.
+//
+// The three outcomes used to be one error type (404 NOT_FOUND), which forced
+// every caller to re-derive which one it had. They are separate now because
+// they mean different things:
+//   - no such exam      -> EXAM_NOT_FOUND, a request that named nothing
+//   - no draft pointer  -> NO_DRAFT, legitimate state the user can open from
+//   - dangling pointer  -> DRAFT_INTEGRITY_VIOLATION, corrupted state no user
+//     action can repair
+//
+// draftPresent is false for the NO_DRAFT case and true only when identity
+// describes a usable draft version.
+type shellResolution struct {
+	identity     shellIdentity
+	draftPresent bool
+}
+
 // resolveShellIdentity resolves the provider, current draft version id and
 // draft revision in ONE statement, replacing Shell()'s two sequential probes.
-//
-// Error parity with the two-probe original is exact:
-//   - exam row absent                      -> "Exam not found."            (404)
-//   - draft pointer NULL/empty             -> "Draft version not found."   (404)
-//   - pointer set but version row absent,
-//     owned by another exam, or not draft  -> "Draft version not found."   (404)
 //
 // The draft predicate lives in the JOIN's ON clause (not WHERE) so a missing
 // or non-draft version keeps the exam row and yields a NULL revision instead
 // of collapsing into ErrNoRows — which would have reported "Exam not found."
 // for an exam that exists.
-func resolveShellIdentity(ctx context.Context, q queryRowContexter, examID string) (shellIdentity, error) {
+func resolveShellIdentity(ctx context.Context, q queryRowContexter, examID string) (shellResolution, error) {
 	var providerKey string
 	var draftID sql.NullString
 	var revision sql.NullInt64
@@ -75,21 +83,30 @@ func resolveShellIdentity(ctx context.Context, q queryRowContexter, examID strin
 			AND v.exam_id = e.id AND v.is_draft = TRUE
 		WHERE e.id = ?`, examID).Scan(&providerKey, &draftID, &revision)
 	if err == sql.ErrNoRows {
-		return shellIdentity{}, notFoundError("Exam not found.")
+		return shellResolution{}, examNotFoundError("Exam not found.")
 	}
 	if err != nil {
-		return shellIdentity{}, err
+		return shellResolution{}, err
 	}
 	if !draftID.Valid || strings.TrimSpace(draftID.String) == "" {
-		return shellIdentity{}, notFoundError("Draft version not found.")
+		// The exam exists and nobody has opened a draft for it yet. NOT an
+		// error: the caller reports the NO_DRAFT lifecycle state.
+		return shellResolution{}, nil
 	}
 	if !revision.Valid {
-		return shellIdentity{}, notFoundError("Draft version not found.")
+		// The pointer names a version the LEFT JOIN could not resolve, so the
+		// exam's own pointer disagrees with the version table. Reporting this
+		// as NO_DRAFT would invite an "Open draft" command to clone a
+		// published version on top of corrupted state.
+		return shellResolution{}, draftIntegrityError(examID, strings.TrimSpace(draftID.String))
 	}
-	return shellIdentity{
-		providerKey: providerKey,
-		versionID:   strings.TrimSpace(draftID.String),
-		revision:    int(revision.Int64),
+	return shellResolution{
+		draftPresent: true,
+		identity: shellIdentity{
+			providerKey: providerKey,
+			versionID:   strings.TrimSpace(draftID.String),
+			revision:    int(revision.Int64),
+		},
 	}, nil
 }
 
@@ -538,27 +555,32 @@ var errNoDatabase = sql.ErrConnDone
 // revision outside the transaction and the tree inside it could report a
 // revision that does not describe the tree that was returned.
 //
-// NOT wired into Shell() (Phase 03 owns the cutover). Note there is
-// deliberately NO provider gate here: Shell() has none, and adding one would
-// change the contract for non-SAT drafts. OpenShell/Preview keep their gates.
-func (s *Service) bulkShell(ctx context.Context, examID string) (Shell, error) {
+// The result carries the lifecycle state, so an exam with no draft pointer
+// returns (NO_DRAFT, nil) with ZERO tree statements instead of an error. Note
+// there is deliberately NO provider gate here: Shell() has none, and adding
+// one would change the contract for non-SAT drafts. OpenShell/Preview keep
+// their gates.
+func (s *Service) bulkShell(ctx context.Context, examID string) (ShellResult, error) {
 	if s == nil {
-		return Shell{}, errNoDatabase
+		return ShellResult{}, errNoDatabase
 	}
-	var shell Shell
+	result := ShellResult{State: ShellStateNoDraft}
 	if err := s.withReadSnapshot(ctx, func(ctx context.Context, q queryRowContexter) error {
-		identity, err := resolveShellIdentity(ctx, q, examID)
+		resolution, err := resolveShellIdentity(ctx, q, examID)
 		if err != nil {
 			return err
 		}
-		loaded, err := loadShellTree(ctx, q, identity, examID)
+		if !resolution.draftPresent {
+			return nil
+		}
+		loaded, err := loadShellTree(ctx, q, resolution.identity, examID)
 		if err != nil {
 			return err
 		}
-		shell = loaded
+		result = ShellResult{State: ShellStateReady, Shell: &loaded}
 		return nil
 	}); err != nil {
-		return Shell{}, err
+		return ShellResult{}, err
 	}
-	return shell, nil
+	return result, nil
 }

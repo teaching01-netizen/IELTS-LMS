@@ -170,10 +170,7 @@ func TestGoldenShellBulkProjection(t *testing.T) {
 	})
 	mock.ExpectRollback()
 
-	shell, err := service.bulkShell(context.Background(), "exam-1")
-	if err != nil {
-		t.Fatalf("bulkShell: %v", err)
-	}
+	shell := readPerfBulkShell(t, service, "exam-1")
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("bulk Shell statement shape drifted: %v", err)
 	}
@@ -205,10 +202,7 @@ func TestGoldenShellEmptyDraftBulk(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "revision"}))
 	mock.ExpectRollback()
 
-	shell, err := service.bulkShell(context.Background(), "exam-1")
-	if err != nil {
-		t.Fatalf("bulkShell: %v", err)
-	}
+	shell := readPerfBulkShell(t, service, "exam-1")
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
@@ -222,65 +216,120 @@ func TestGoldenShellEmptyDraftBulk(t *testing.T) {
 	}
 }
 
-// TestGoldenShellBulkNotFoundParity pins the bulk path's NOT_FOUND shapes at
-// the sqlmock boundary, including the case the LEFT JOIN could get wrong: a
-// dangling draft pointer must report \"Draft version not found.\", never
-// \"Exam not found.\".
-func TestGoldenShellBulkNotFoundParity(t *testing.T) {
-	cases := []struct {
-		name       string
-		rows       *sqlmock.Rows
-		wantDetail string
+// readPerfBulkShell unwraps the READY shell from a bulkShell lifecycle result.
+//
+// The unwrap is itself an assertion: every fixture these projection oracles
+// use HAS a draft, so anything other than READY + a non-nil shell means the
+// fixture is broken. The lifecycle outcomes themselves (NO_DRAFT,
+// EXAM_NOT_FOUND, DRAFT_INTEGRITY_VIOLATION) have their own oracle in
+// shell_lifecycle_test.go.
+func readPerfBulkShell(t *testing.T, service *Service, examID string) Shell {
+	t.Helper()
+	result, err := service.bulkShell(context.Background(), examID)
+	if err != nil {
+		t.Fatalf("bulkShell: %v", err)
+	}
+	if result.State != ShellStateReady || result.Shell == nil {
+		t.Fatalf("bulkShell state = %q with shell %v, want READY", result.State, result.Shell)
+	}
+	return *result.Shell
+}
+
+// TestGoldenShellBulkLifecycleParity pins the identity probe's three outcomes
+// at the sqlmock boundary, including the distinction the LEFT JOIN could get
+// wrong. A dangling draft pointer must NEVER be reported as NO_DRAFT (which
+// would offer the user an "Open draft" command on top of corrupted state), and
+// it must not be reported as EXAM_NOT_FOUND either.
+func TestGoldenShellBulkLifecycleParity(t *testing.T) {
+	const identityQuery = "SELECT e.provider_key, e.current_draft_version_id, v.revision"
+
+	t.Run("exam row absent -> EXAM_NOT_FOUND", func(t *testing.T) {
+		_, runner, mock := readPerfBulkGoldenDB(t)
+		service := NewService(nil, runner)
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(identityQuery)).
+			WithArgs("exam-1").
+			WillReturnRows(sqlmock.NewRows([]string{"provider_key", "current_draft_version_id", "revision"}))
+		mock.ExpectRollback()
+
+		_, err := service.bulkShell(context.Background(), "exam-1")
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), "Exam not found.") {
+			t.Fatalf("error = %q, want it to contain %q", err.Error(), "Exam not found.")
+		}
+		if codeOf(err) != apperrors.CodeExamNotFound {
+			t.Fatalf("error code = %q, want EXAM_NOT_FOUND", codeOf(err))
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// No draft pointer is a lifecycle answer, not an error: 200 NO_DRAFT with a
+	// null shell and ZERO tree statements (the assertions below declare none).
+	for _, testCase := range []struct {
+		name string
+		rows *sqlmock.Rows
 	}{
 		{
-			name:       "exam row absent",
-			rows:       sqlmock.NewRows([]string{"provider_key", "current_draft_version_id", "revision"}),
-			wantDetail: "Exam not found.",
+			name: "draft pointer null -> NO_DRAFT",
+			rows: sqlmock.NewRows([]string{"provider_key", "current_draft_version_id", "revision"}).AddRow("sat", nil, nil),
 		},
 		{
-			name: "draft pointer null",
-			rows: sqlmock.NewRows([]string{"provider_key", "current_draft_version_id", "revision"}).
-				AddRow("sat", nil, nil),
-			wantDetail: "Draft version not found.",
+			name: "draft pointer blank -> NO_DRAFT",
+			rows: sqlmock.NewRows([]string{"provider_key", "current_draft_version_id", "revision"}).AddRow("sat", "   ", nil),
 		},
-		{
-			name: "draft pointer dangling (version row gone)",
-			rows: sqlmock.NewRows([]string{"provider_key", "current_draft_version_id", "revision"}).
-				AddRow("sat", "draft-v1", nil),
-			wantDetail: "Draft version not found.",
-		},
-		{
-			name: "draft pointer blank",
-			rows: sqlmock.NewRows([]string{"provider_key", "current_draft_version_id", "revision"}).
-				AddRow("sat", "   ", nil),
-			wantDetail: "Draft version not found.",
-		},
-	}
-	for _, testCase := range cases {
+	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, runner, mock := readPerfBulkGoldenDB(t)
 			service := NewService(nil, runner)
 			mock.ExpectBegin()
-			mock.ExpectQuery(regexp.QuoteMeta("SELECT e.provider_key, e.current_draft_version_id, v.revision")).
+			mock.ExpectQuery(regexp.QuoteMeta(identityQuery)).
 				WithArgs("exam-1").
 				WillReturnRows(testCase.rows)
 			mock.ExpectRollback()
 
-			_, err := service.bulkShell(context.Background(), "exam-1")
-			if err == nil {
-				t.Fatal("expected an error")
+			result, err := service.bulkShell(context.Background(), "exam-1")
+			if err != nil {
+				t.Fatalf("no draft pointer must not error: %v", err)
 			}
-			if !strings.Contains(err.Error(), testCase.wantDetail) {
-				t.Fatalf("error = %q, want it to contain %q", err.Error(), testCase.wantDetail)
+			if result.State != ShellStateNoDraft {
+				t.Fatalf("state = %q, want NO_DRAFT", result.State)
 			}
-			if codeOf(err) != apperrors.CodeNotFound {
-				t.Fatalf("error code = %q, want NOT_FOUND", codeOf(err))
+			if result.Shell != nil {
+				t.Fatalf("shell = %+v, want nil", result.Shell)
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Fatal(err)
 			}
 		})
 	}
+
+	t.Run("draft pointer dangling -> DRAFT_INTEGRITY_VIOLATION", func(t *testing.T) {
+		_, runner, mock := readPerfBulkGoldenDB(t)
+		service := NewService(nil, runner)
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(identityQuery)).
+			WithArgs("exam-1").
+			WillReturnRows(sqlmock.NewRows([]string{"provider_key", "current_draft_version_id", "revision"}).AddRow("sat", "draft-v1", nil))
+		mock.ExpectRollback()
+
+		result, err := service.bulkShell(context.Background(), "exam-1")
+		if err == nil {
+			t.Fatalf("dangling pointer must error, got state %q", result.State)
+		}
+		if codeOf(err) != apperrors.CodeDraftIntegrity {
+			t.Fatalf("error code = %q, want DRAFT_INTEGRITY_VIOLATION", codeOf(err))
+		}
+		if !strings.Contains(err.Error(), "draft-v1") {
+			t.Fatalf("error = %q, want it to name the dangling version id", err.Error())
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 // TestGoldenShellBulkStatementBudget is the query-count regression gate the
@@ -318,10 +367,7 @@ func TestGoldenShellBulkStatementBudget(t *testing.T) {
 	})
 	mock.ExpectRollback()
 
-	shell, err := service.bulkShell(context.Background(), "exam-1")
-	if err != nil {
-		t.Fatalf("bulkShell: %v", err)
-	}
+	shell := readPerfBulkShell(t, service, "exam-1")
 	// ExpectationsWereMet fails both on an unmet expectation AND on an
 	// unexpected statement, which is exactly the <= treeBudget assertion.
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -407,10 +453,7 @@ func TestGoldenShellBulkPolicyConfigParsingGolden(t *testing.T) {
 	readPerfBulkQuestionRows(mock, [][]driver.Value{})
 	mock.ExpectRollback()
 
-	shell, err := service.bulkShell(context.Background(), "exam-1")
-	if err != nil {
-		t.Fatalf("bulkShell: %v", err)
-	}
+	shell := readPerfBulkShell(t, service, "exam-1")
 	policy := shell.Sections[0].RoutingPolicy
 	if policy == nil {
 		t.Fatal("routing policy missing")
@@ -444,10 +487,7 @@ func TestGoldenShellBulkModuleToolPolicyGolden(t *testing.T) {
 	readPerfBulkQuestionRows(mock, [][]driver.Value{})
 	mock.ExpectRollback()
 
-	shell, err := service.bulkShell(context.Background(), "exam-1")
-	if err != nil {
-		t.Fatalf("bulkShell: %v", err)
-	}
+	shell := readPerfBulkShell(t, service, "exam-1")
 	if got := string(shell.Sections[0].Modules[0].ToolPolicy); got != "{\"calculator\":false}" {
 		t.Fatalf("object tool_policy = %q", got)
 	}

@@ -64,10 +64,10 @@ func TestFinalizeModuleScoresV2AnswersWithoutLegacyRows(t *testing.T) {
 		t.Fatal(txerr)
 	}
 	next, err := svc.finalizeModuleTx(context.Background(), tx, "att-1", saveActiveModule{
-		id: "ma-base", moduleID:    "mod-base",
+		id: "ma-base", moduleID: "mod-base",
 		state: "active", allocatedSeconds: 3600,
-		availableAt:     &started,
-		startedAt:       &started,
+		availableAt:              &started,
+		startedAt:                &started,
 		accumulatedPausedSeconds: 0,
 	}, "student_submit")
 	if err != nil {
@@ -130,10 +130,10 @@ func TestFinalizeModuleLegacyFallbackWithoutV2Rows(t *testing.T) {
 		t.Fatal(txerr)
 	}
 	next, err := svc.finalizeModuleTx(context.Background(), tx, "att-1", saveActiveModule{
-		id: "ma-base", moduleID:    "mod-base",
+		id: "ma-base", moduleID: "mod-base",
 		state: "active", allocatedSeconds: 3600,
-		availableAt:     &started,
-		startedAt:       &started,
+		availableAt:              &started,
+		startedAt:                &started,
 		accumulatedPausedSeconds: 0,
 	}, "student_submit")
 	if err != nil {
@@ -201,10 +201,10 @@ func TestFinalizeModuleDedupsDualV2IdentityRows(t *testing.T) {
 		t.Fatal(txerr)
 	}
 	next, err := svc.finalizeModuleTx(context.Background(), tx, "att-1", saveActiveModule{
-		id: "ma-base", moduleID:    "mod-base",
+		id: "ma-base", moduleID: "mod-base",
 		state: "active", allocatedSeconds: 3600,
-		availableAt:     &started,
-		startedAt:       &started,
+		availableAt:              &started,
+		startedAt:                &started,
 		accumulatedPausedSeconds: 0,
 	}, "student_submit")
 	if err != nil {
@@ -270,10 +270,10 @@ func TestFinalizeModuleZeroAnswerPassRoutesLower(t *testing.T) {
 		t.Fatal(txerr)
 	}
 	next, err := svc.finalizeModuleTx(context.Background(), tx, "att-1", saveActiveModule{
-		id: "ma-base", moduleID:    "mod-base",
+		id: "ma-base", moduleID: "mod-base",
 		state: "active", allocatedSeconds: 3600,
-		availableAt:     &started,
-		startedAt:       &started,
+		availableAt:              &started,
+		startedAt:                &started,
 		accumulatedPausedSeconds: 0,
 	}, "student_submit")
 	if err != nil {

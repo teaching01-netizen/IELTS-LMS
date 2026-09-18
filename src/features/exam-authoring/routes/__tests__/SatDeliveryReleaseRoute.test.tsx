@@ -13,16 +13,22 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../api/assessmentQueries", () => ({
+  // The shell read answers a lifecycle envelope now; this route renders the
+  // release page for a READY draft.
   useAuthoringShell: () => ({
     data: {
-      examId: "exam-sat-1",
-      providerKey: "sat",
-      versionId: "draft-v5",
-      versionRevision: 42,
-      sections: [],
+      state: "READY",
+      shell: {
+        examId: "exam-sat-1",
+        providerKey: "sat",
+        versionId: "draft-v5",
+        versionRevision: 42,
+        sections: [],
+      },
     },
     isLoading: false,
     error: null,
+    refetch: vi.fn(),
   }),
   useAssessmentReleaseState: () => ({
     data: {

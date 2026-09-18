@@ -105,16 +105,12 @@ func sameLifecycleOwner(owner sql.NullString, operationID string) bool {
 }
 
 // CoeditMarkFreezing durably fences prompt rooms for one operation. The
-// variadic form keeps old in-repository callers source-compatible while
-// refusing to perform an unsafe unowned transition.
-func (s *Service) CoeditMarkFreezing(ctx context.Context, documentIDs []string, operations ...authoringcoedit.CoeditLifecycleOperation) error {
+// operation is a required argument: an unowned freeze transition is refused,
+// and requiring the owner at the signature makes that unrepresentable.
+func (s *Service) CoeditMarkFreezing(ctx context.Context, documentIDs []string, operation authoringcoedit.CoeditLifecycleOperation) error {
 	if len(documentIDs) == 0 {
 		return nil
 	}
-	if len(operations) != 1 {
-		return requireLifecycleOperation(authoringcoedit.CoeditLifecycleOperation{})
-	}
-	operation := operations[0]
 	if err := requireFreshFreezeOperation(operation); err != nil {
 		return err
 	}
@@ -298,27 +294,13 @@ func abortCoeditDocumentFreeze(ctx context.Context, q tx.Tx, id string, operatio
 	}
 }
 
-// CoeditReopenActive is retained as a compatibility name, but it cannot be
-// called without an owner anymore. New code should use CoeditAbortFreeze.
-func (s *Service) CoeditReopenActive(ctx context.Context, documentIDs []string, operations ...authoringcoedit.CoeditLifecycleOperation) error {
-	if len(documentIDs) == 0 {
-		return nil
-	}
-	if len(operations) != 1 {
-		return requireLifecycleOperation(authoringcoedit.CoeditLifecycleOperation{})
-	}
-	return s.CoeditAbortFreeze(ctx, documentIDs, operations[0])
-}
-
 // CoeditWorkspaceMarkFreezing is the owner-aware lifecycle fence for v2 rooms.
-func (s *Service) CoeditWorkspaceMarkFreezing(ctx context.Context, documentIDs []string, operations ...authoringcoedit.CoeditLifecycleOperation) error {
+// Like its prompt-room counterpart, the operation is required rather than
+// optional: an unowned freeze transition is refused.
+func (s *Service) CoeditWorkspaceMarkFreezing(ctx context.Context, documentIDs []string, operation authoringcoedit.CoeditLifecycleOperation) error {
 	if len(documentIDs) == 0 {
 		return nil
 	}
-	if len(operations) != 1 {
-		return requireLifecycleOperation(authoringcoedit.CoeditLifecycleOperation{})
-	}
-	operation := operations[0]
 	if err := requireFreshFreezeOperation(operation); err != nil {
 		return err
 	}
@@ -496,17 +478,6 @@ func abortCoeditWorkspaceFreeze(ctx context.Context, q tx.Tx, id string, operati
 	default:
 		return lifecycleStateError(state, operation.FreezeOperationID)
 	}
-}
-
-// CoeditWorkspaceReopenActive is retained as a safe compatibility wrapper.
-func (s *Service) CoeditWorkspaceReopenActive(ctx context.Context, documentIDs []string, operations ...authoringcoedit.CoeditLifecycleOperation) error {
-	if len(documentIDs) == 0 {
-		return nil
-	}
-	if len(operations) != 1 {
-		return requireLifecycleOperation(authoringcoedit.CoeditLifecycleOperation{})
-	}
-	return s.CoeditWorkspaceAbortFreeze(ctx, documentIDs, operations[0])
 }
 
 func lifecycleExpiryTime(operation authoringcoedit.CoeditLifecycleOperation) time.Time {

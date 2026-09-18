@@ -18,13 +18,15 @@ package authoring
 // WHY NOT (b): a read-first fast path (probe the draft pointer without a
 // write Tx, enter the Tx only when NULL) would skip the lock on the hot
 // existing-draft path, but it opens a check-then-act race — N concurrent
-// opens on a NULL pointer all enter the Tx and race the clone — that this
-// phase could not prove safe: there is no published-version fixture path in
-// the read-perf harness that yields a cloneable SAT exam without draft, and
-// manufacturing one (publish flow) is outside Phase 03 scope. Phase 04
+// opens on a NULL pointer all enter the Tx and race the clone. Phase 04
 // reduces POST frequency (GET for refresh), which shrinks the cost of (a)
 // without any CAS risk. Revisit (b) only with the N=20 proof the phase spec
-// demands.
+// demands — and that proof NOW EXISTS for the clone path that blocked it:
+// TestOpenShellConcurrentNoDraftClonesFromPublished publishes the read-perf
+// fixture's own tree (two UPDATEs, no publish flow needed) and shows 20
+// concurrent opens on published+no-draft converging on one cloned draft with
+// the source intact. Option (b) is therefore still a deliberate choice on the
+// hot path, not an unproven one.
 //
 // Gated on TEST_MYSQL_DSN; skips otherwise.
 
@@ -119,16 +121,154 @@ func TestOpenShellConcurrentExistingDraft(t *testing.T) {
 	t.Logf("N=%d concurrent OpenShell on existing draft: all shell, 1 draft, 0 clones", racers)
 }
 
-// TestOpenShellConcurrentNoDraftSingleClone documents the no-draft race under
-// option (a): N openers race the clone; lock serialization + the pointer CAS
-// mean at most one clone wins and every loser gets the winner's shell or the
-// documented 409. This test uses a real SAT exam whose draft pointer was
-// cleared AND whose published pointer is empty, so every opener takes the
-// validation path — the clone race itself needs a published version, which
-// the publish flow (out of Phase 03 scope) would provide; the assertion here
-// pins the observable contract (shell-or-documented-error, never a split
-// draft) rather than manufacturing a publish.
-func TestOpenShellConcurrentNoDraftDocumented(t *testing.T) {
+// TestOpenShellConcurrentNoDraftClonesFromPublished is the REAL cloning race,
+// and the fixture the earlier decision record said did not exist.
+//
+// The documented gap was: "there is no published-version fixture path in the
+// read-perf harness that yields a cloneable SAT exam without draft". There is
+// one, and it needs no publish flow: the read-perf fixture already seeds a
+// complete SAT tree, so publishing it is two UPDATEs — flip the version to
+// is_published, then point the exam at it with a NULL draft pointer. That is
+// exactly the shape clone_published_sat_to_draft_tx exists for.
+//
+// What this proves (the thing a no-version fixture cannot): N concurrent
+// opens on a PUBLISHED exam with NO draft converge on ONE cloned draft. The
+// FOR UPDATE serializes them; the first clones and wins the pointer CAS, and
+// every later opener takes the existing-draft shortcut to the same draft. No
+// racer may mint a second draft, and the published source must be untouched.
+func TestOpenShellConcurrentNoDraftClonesFromPublished(t *testing.T) {
+	fixture := seedReadPerfFixture(t)
+	ctx := context.Background()
+	actor := "openshell-clone-" + uuid.NewString()
+	authors := NewService(fixture.DB, fixture.Runner)
+
+	// Publish the seeded tree and clear the draft pointer: published exam, no
+	// editable draft.
+	if _, err := fixture.DB.ExecContext(ctx, "UPDATE exam_versions SET is_draft = FALSE, is_published = TRUE, revision = revision + 1 WHERE id = ?", fixture.VersionID); err != nil {
+		t.Fatalf("publish seeded version: %v", err)
+	}
+	if _, err := fixture.DB.ExecContext(ctx, "UPDATE exam_entities SET current_published_version_id = ?, current_draft_version_id = NULL WHERE id = ?", fixture.VersionID, fixture.ExamID); err != nil {
+		t.Fatalf("point exam at the published version: %v", err)
+	}
+
+	// Precondition, and a regression guard in its own right: the read reports
+	// NO_DRAFT and creates nothing. Refreshing a pre-draft exam must never be
+	// the thing that opens a draft.
+	before, err := authors.ShellLifecycle(ctx, fixture.ExamID)
+	if err != nil {
+		t.Fatalf("ShellLifecycle before any open: %v", err)
+	}
+	if before.State != ShellStateNoDraft || before.Shell != nil {
+		t.Fatalf("precondition: state = %q shell = %v, want NO_DRAFT with no shell", before.State, before.Shell)
+	}
+	assertDraftCount(t, ctx, fixture, 0)
+
+	const racers = 20
+	var wg sync.WaitGroup
+	shells := make([]Shell, racers)
+	errs := make([]error, racers)
+	start := make(chan struct{})
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			shells[index], errs[index] = authors.OpenShell(ctx, fixture.ExamID, actor)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	versionIDs := map[string]int{}
+	successes, conflicts := 0, 0
+	for i, err := range errs {
+		if err != nil {
+			// The only other documented outcome is the pointer CAS losing — which
+			// the row lock is supposed to make unreachable. Accept it as a known
+			// escape hatch, but never a silent success with a different draft.
+			if e, ok := apperrors.As(err); !ok || e.Code != apperrors.CodeConflict {
+				t.Fatalf("racer %d: unexpected error %v", i, err)
+			}
+			conflicts++
+			continue
+		}
+		successes++
+		if shells[i].ExamID != fixture.ExamID || shells[i].ProviderKey != "sat" {
+			t.Fatalf("racer %d: unexpected shell %+v", i, shells[i])
+		}
+		versionIDs[shells[i].VersionID]++
+	}
+	if len(versionIDs) == 0 {
+		t.Fatal("no racer produced a shell: the clone never succeeded")
+	}
+	if len(versionIDs) != 1 {
+		t.Fatalf("concurrent opens converged on %d drafts: %v", len(versionIDs), versionIDs)
+	}
+	for versionID := range versionIDs {
+		if versionID == fixture.VersionID {
+			t.Fatal("the open returned the PUBLISHED version instead of a cloned draft")
+		}
+	}
+
+	// The database is the final authority: exactly one editable draft.
+	assertDraftCount(t, ctx, fixture, 1)
+
+	// The clone carries the published content, and the published source is
+	// still published and still draft-free.
+	clonedID := ""
+	for id := range versionIDs {
+		clonedID = id
+	}
+	var sourceSections, clonedSections int
+	if err := fixture.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM assessment_sections WHERE exam_version_id = ?", fixture.VersionID).Scan(&sourceSections); err != nil {
+		t.Fatalf("count published sections: %v", err)
+	}
+	if err := fixture.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM assessment_sections WHERE exam_version_id = ?", clonedID).Scan(&clonedSections); err != nil {
+		t.Fatalf("count cloned sections: %v", err)
+	}
+	if clonedSections != sourceSections || clonedSections == 0 {
+		t.Fatalf("cloned draft has %d sections, published source has %d", clonedSections, sourceSections)
+	}
+	var isDraft, isPublished bool
+	if err := fixture.DB.QueryRowContext(ctx, "SELECT is_draft, is_published FROM exam_versions WHERE id = ?", fixture.VersionID).Scan(&isDraft, &isPublished); err != nil {
+		t.Fatalf("re-read published version: %v", err)
+	}
+	if isDraft || !isPublished {
+		t.Fatalf("the published source was mutated by the clone: is_draft=%v is_published=%v", isDraft, isPublished)
+	}
+
+	// …and the read now answers READY with the single cloned draft.
+	after, err := authors.ShellLifecycle(ctx, fixture.ExamID)
+	if err != nil {
+		t.Fatalf("ShellLifecycle after the opens: %v", err)
+	}
+	if after.State != ShellStateReady || after.Shell == nil || after.Shell.VersionID != clonedID {
+		t.Fatalf("post-open lifecycle = %q/%v, want READY on the cloned draft %s", after.State, after.Shell, clonedID)
+	}
+	t.Logf("N=%d concurrent OpenShell on published+no-draft: %d shell, %d documented conflicts, 1 cloned draft (%d sections), source intact", racers, successes, conflicts, clonedSections)
+}
+
+// assertDraftCount asserts how many draft versions exist for the fixture exam.
+func assertDraftCount(t *testing.T, ctx context.Context, fixture *readPerfFixture, want int) {
+	t.Helper()
+	var drafts int
+	if err := fixture.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM exam_versions WHERE exam_id = ? AND is_draft = TRUE", fixture.ExamID).Scan(&drafts); err != nil {
+		t.Fatalf("count drafts: %v", err)
+	}
+	if drafts != want {
+		t.Fatalf("draft versions = %d, want %d", drafts, want)
+	}
+}
+
+// TestOpenShellConcurrentNoDraftSingleClone covers the no-version no-draft
+// race: an exam with NEITHER a draft NOR a published version, where every
+// opener must fail closed. It pins the observable contract (documented error,
+// never a split draft, never a partial shell).
+//
+// The clone race itself — published source, no draft, N concurrent opens — is
+// proven by TestOpenShellConcurrentNoDraftClonesFromPublished above, so this
+// case no longer has to stand in for it.
+func TestOpenShellConcurrentNoDraftSingleClone(t *testing.T) {
 	dsn := readPerfDSN(t)
 	db, _ := readPerfCountedDB(t, dsn)
 	ctx := context.Background()

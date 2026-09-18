@@ -815,7 +815,7 @@ func TestCoeditVerifyManifestRejectsUnknownDocumentName(t *testing.T) {
 	}
 }
 
-func TestCoeditMarkFreezingAndReopenAreIdempotent(t *testing.T) {
+func TestCoeditMarkFreezingAndAbortFreezeAreIdempotent(t *testing.T) {
 	svc, mock := contractService(t)
 	operation := authoringcoedit.CoeditLifecycleOperation{
 		FreezeOperationID: "phase3-operation",
@@ -835,11 +835,11 @@ func TestCoeditMarkFreezingAndReopenAreIdempotent(t *testing.T) {
 	begin(mock)
 	mock.ExpectExec("UPDATE authoring_coedit_documents").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	if err := svc.CoeditReopenActive(context.Background(), []string{coeditDocID}, operation); err != nil {
+	if err := svc.CoeditAbortFreeze(context.Background(), []string{coeditDocID}, operation); err != nil {
 		t.Fatal(err)
 	}
 
-	if svc.CoeditMarkFreezing(context.Background(), nil) != nil {
+	if svc.CoeditMarkFreezing(context.Background(), nil, operation) != nil {
 		t.Fatal("an empty freeze set must be a no-op")
 	}
 }

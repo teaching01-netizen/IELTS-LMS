@@ -8,6 +8,7 @@ export {
 export {
   collectCoeditTransportBoundaryViolations,
   collectDomainPurityViolations,
+  collectFeatureInternalBoundaryViolations,
   collectFeatureIsolationViolations,
   collectForbiddenBrowserBoundaryViolations,
   collectLayerDependencyViolations,

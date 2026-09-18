@@ -23,7 +23,10 @@ export function restoreAuthoringFocus(element: HTMLElement | null): void {
 export interface AuthoringDialogProps {
   open: boolean;
   title: string;
-  /** Optional compatibility name for callers whose visual title changed. */
+  /**
+   * Accessible name for the dialog, when the visible title is not a usable
+   * name (a headerless palette) or names something else than the region does.
+   */
   ariaLabel?: string;
   description?: string;
   onClose: () => void;

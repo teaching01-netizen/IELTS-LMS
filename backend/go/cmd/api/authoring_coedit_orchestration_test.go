@@ -273,7 +273,7 @@ func expectFamilyClose(
 	t.Helper()
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
-	expectation := mock.ExpectExec(regexp.QuoteMeta("UPDATE " + table)).
+	expectation := mock.ExpectExec(regexp.QuoteMeta("UPDATE "+table)).
 		WithArgs("closed", string(reason), coeditTestDocID, "closed")
 	if failure != nil {
 		expectation.WillReturnError(failure)

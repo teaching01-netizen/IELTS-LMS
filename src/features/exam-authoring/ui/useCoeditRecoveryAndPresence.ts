@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import { assessmentKeys } from "../api/assessmentQueries";
+import { authoringEffects } from "../api/authoringQueryEffects";
 import type { QuestionSaveStatus } from "../hooks/useQuestionAutosave";
 import type {
   CoeditLifecycleIssue,
@@ -40,9 +40,6 @@ export interface CoeditRecoveryAndPresenceInput {
   coeditUiActive: boolean;
   selectedExamQuestionId: string | null;
   autosaveStatus: QuestionSaveStatus;
-  /** Recorded by the lifecycle/publish signals owned by the workspace. */
-  publishedFrozen: boolean;
-  setPublishedFrozen: (frozen: boolean) => void;
 }
 
 /** What the recovery surface can offer, already decided. */
@@ -86,9 +83,7 @@ export function coeditRecoverySurfaceFor(input: {
 }
 
 export interface CoeditRecoveryAndPresence {
-  handleRealtimeLifecycle: (
-    signal: "draft-replaced" | "published" | "exam-changed",
-  ) => void;
+  handleRealtimeLifecycle: (signal: "draft-replaced" | "published" | "exam-changed") => void;
   /** The room's own save truth, in the legacy vocabulary, for `combineSaveStatus`. */
   coeditSaveStatus: ReturnType<typeof coeditSaveStatusFor> | null;
   coeditRecovery: WorkspaceRecovery | CoeditRecovery | null;
@@ -100,10 +95,16 @@ export interface CoeditRecoveryAndPresence {
   collaborationLifecyclePhase: string | null;
   collaborationIsReadOnly: boolean | null;
   hasCollaborationSession: boolean;
+  /**
+   * The lifecycle's frozen state. `collaborationReadOnly` and
+   * `coeditDisplayStatus` are derived from it above; the workspace reads it for
+   * the draft lifecycle machine and the stale banner. Nothing else writes it.
+   */
+  publishedFrozen: boolean;
 }
 
 export function useCoeditRecoveryAndPresence(
-  input: CoeditRecoveryAndPresenceInput,
+  input: CoeditRecoveryAndPresenceInput
 ): CoeditRecoveryAndPresence {
   const {
     examId,
@@ -115,11 +116,22 @@ export function useCoeditRecoveryAndPresence(
     coeditUiActive,
     selectedExamQuestionId,
     autosaveStatus,
-    publishedFrozen,
-    setPublishedFrozen,
   } = input;
 
   const coeditSession = coedit.session;
+
+  /**
+   * The collaboration lifecycle is FROZEN (published, or a room that went
+   * read-only), owned here.
+   *
+   * It used to have two writers and three re-derivers: the workspace recorded
+   * it from the lifecycle signals, `handleRealtimeLifecycle` recorded it from
+   * the `published` signal, and `coeditDisplayStatus`, `collaborationReadOnly`
+   * and the workspace's draft lifecycle each re-decided what it implied. One
+   * owner now: the signals below (and the publish signal) set it, and every
+   * reader receives the same value.
+   */
+  const [publishedFrozen, setPublishedFrozen] = useState(false);
   /**
    * The exam room, when there is one.
    *
@@ -139,9 +151,10 @@ export function useCoeditRecoveryAndPresence(
   // from the legacy autosave counter, which knows nothing about the CRDT. Both
   // are combined below by taking the LEAST advanced of the two, so neither can
   // claim "Saved" for work the other is still holding.
-  const coeditSaveStatus = !workspaceUiActive && coeditRoomOpen
-    ? coeditSaveStatusFor(coeditSession?.saveState.name ?? "idle")
-    : null;
+  const coeditSaveStatus =
+    !workspaceUiActive && coeditRoomOpen
+      ? coeditSaveStatusFor(coeditSession?.saveState.name ?? "idle")
+      : null;
 
   // A room that cannot continue must say so and offer the recovery the design
   // requires ("Offline and recovery behavior", docs/sat-authoring-coedit.md):
@@ -157,9 +170,11 @@ export function useCoeditRecoveryAndPresence(
 
   const handleRealtimeLifecycle = useCallback(
     (signal: "draft-replaced" | "published" | "exam-changed") => {
-      // Re-fetch the shell so the workspace re-resolves the current draft; the
-      // draft binding change re-mounts the socket against the new draft.
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
+      // The draft this session was bound to ended (or the exam changed under
+      // it), so the whole tree plus its reports are suspect: the shell is
+      // re-read to re-resolve the current draft, and readiness/release go stale
+      // because a publish or a replacement is exactly what moves them.
+      void authoringEffects.shellChanged(queryClient, examId);
       if (signal === "published") {
         setPublishedFrozen(true);
       }
@@ -175,7 +190,8 @@ export function useCoeditRecoveryAndPresence(
     [coedit, examId, queryClient, setPublishedFrozen, workspaceCollaboration]
   );
 
-  const coeditPendingSince = workspaceCollaboration?.pendingSince ?? coeditSession?.pendingSince ?? null;
+  const coeditPendingSince =
+    workspaceCollaboration?.pendingSince ?? coeditSession?.pendingSince ?? null;
   useEffect(() => {
     if (coeditPendingSince === null) return undefined;
     setCoeditSaveClock(Date.now());
@@ -201,14 +217,14 @@ export function useCoeditRecoveryAndPresence(
           })
     : coeditUiActive
       ? coedit.error !== null &&
-        (!coeditSession ||
-          (coeditSession.lifecyclePhase === "active" && !coeditSession.readOnly))
+        (!coeditSession || (coeditSession.lifecyclePhase === "active" && !coeditSession.readOnly))
         ? "error"
         : coeditDisplayStatusFor({
             saveState: coeditSession?.saveState ?? null,
             connectionPhase: coeditSession?.connectionPhase ?? "connecting",
             hasEstablishedConnection: coeditSession?.hasEstablishedConnection ?? false,
-            lifecyclePhase: coeditSession?.lifecyclePhase ?? (publishedFrozen ? "frozen" : "active"),
+            lifecyclePhase:
+              coeditSession?.lifecyclePhase ?? (publishedFrozen ? "frozen" : "active"),
             readOnly: Boolean(coeditSession?.readOnly ?? publishedFrozen),
             pendingSince: coeditPendingSince,
             autosaveStatus,
@@ -219,13 +235,31 @@ export function useCoeditRecoveryAndPresence(
     ? room.workspaceSnapshot.readOnly || room.lifecyclePhase !== "active"
     : Boolean(coeditSession?.readOnly || publishedFrozen);
   const collaborationPublished = Boolean(
-    room?.workspaceSnapshot.published || coeditSession?.recovery.published,
+    room?.workspaceSnapshot.published || coeditSession?.recovery.published
   );
-  const collaborationLifecyclePhase =
-    room?.lifecyclePhase ?? coeditSession?.lifecyclePhase ?? null;
+  const collaborationLifecyclePhase = room?.lifecyclePhase ?? coeditSession?.lifecyclePhase ?? null;
   const collaborationIsReadOnly =
     room?.workspaceSnapshot.readOnly ?? coeditSession?.readOnly ?? null;
   const hasCollaborationSession = Boolean(room || coeditSession);
+
+  // The freeze, stated once from the signals it is derived from. A publish
+  // close can arrive through the dedicated co-edit room without the legacy exam
+  // event socket, and a failed/cancelled publish broadcasts `active` again —
+  // the collaborative room is the authority for that staged transition.
+  useEffect(() => {
+    if (collaborationPublished) {
+      setPublishedFrozen(true);
+      return;
+    }
+    if (!hasCollaborationSession) return;
+    if (collaborationLifecyclePhase !== "active" || collaborationIsReadOnly) return;
+    setPublishedFrozen(false);
+  }, [
+    collaborationIsReadOnly,
+    collaborationLifecyclePhase,
+    collaborationPublished,
+    hasCollaborationSession,
+  ]);
 
   // The author's own presence in the exam room: which question the builder is
   // looking at. Published from here so a route cannot forget to announce it.
@@ -249,5 +283,6 @@ export function useCoeditRecoveryAndPresence(
     collaborationLifecyclePhase,
     collaborationIsReadOnly,
     hasCollaborationSession,
+    publishedFrozen,
   };
 }

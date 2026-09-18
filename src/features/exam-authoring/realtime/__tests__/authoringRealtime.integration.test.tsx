@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthoringSocketFactory, SnapshotSource } from "../contracts";
-import { assessmentKeys } from "../../api/assessmentQueries";
+import { assessmentKeys } from "../../api/authoringQueryEffects";
 import { useAuthoringRealtime } from "../useAuthoringRealtime";
 import { makeEventFrame, makeQuestionDetail, makeShell } from "./fixtures";
 

@@ -7,6 +7,7 @@ import {
 import type { ApiRequestConfig } from "../infrastructure/examAuthoringBackendGateway";
 import type {
   AssessmentAuthoringShell,
+  AssessmentAuthoringShellResult,
   AssessmentPreviewProjection,
   AssessmentQuestionDetail,
   AssessmentQuestionSummary,
@@ -44,16 +45,18 @@ function withIdempotency(operationKey: string | undefined, base?: ApiRequestConf
 
 export const assessmentAuthoringApi = {
   /**
-   * The editable shell, or a 404 that MEANS something: an exam with no editable
-   * draft answers here, and the workspace renders that as its own state (with
-   * the explicit "Open draft" action) rather than as a load failure. The caller
-   * still receives the ApiError — `expectedStatuses` only retires the console
-   * warning, so a normal pre-draft exam stops looking like a broken app.
+   * The explicit shell lifecycle. A pre-draft exam answers
+   * `200 {state: "NO_DRAFT", shell: null}` — a normal state, not a failed
+   * request — so nothing on this path produces a console error. Only a missing
+   * exam answers 404 (`EXAM_NOT_FOUND`), and that is a real error the caller
+   * renders differently from NO_DRAFT.
+   *
+   * This read never opens a draft. Opening stays an explicit command
+   * (`openShell`) driven by a user gesture.
    */
-  getShell(examId: string): Promise<AssessmentAuthoringShell> {
-    return backendGet<AssessmentAuthoringShell>(
+  getShell(examId: string): Promise<AssessmentAuthoringShellResult> {
+    return backendGet<AssessmentAuthoringShellResult>(
       `/v1/assessment-authoring/exams/${examId}/shell`,
-      { expectedStatuses: [404] },
     );
   },
 

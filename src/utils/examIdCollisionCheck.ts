@@ -1,4 +1,4 @@
-import { getStudentQuestionsForModule } from '../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { getStudentQuestionsForModule } from '../features/exam-authoring/api/examAuthoringGateway';
 import type { ExamState, QuestionBlock, TableCompletionBlock } from '../types';
 
 export type ExamIntegrityIssue = {

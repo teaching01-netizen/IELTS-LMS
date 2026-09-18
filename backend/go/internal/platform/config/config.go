@@ -541,12 +541,19 @@ type Config struct {
 	// unset/off.
 	AuthoringRealtimeConflictCompare bool
 
-	// AuthoringRealtimeCoediting is retained as a compatibility field for the
-	// SAT prompt co-editing capability. The application posture is always on;
-	// the old environment gate no longer controls it.
+	// AuthoringRealtimeCoediting is the SAT prompt co-editing posture gate.
+	// Default on. No environment variable sets it: an env-var gate would have
+	// been a second, silently-drifting copy of a posture the application
+	// already decides, so flipping it is a code/deploy change and both values
+	// are exercised by the co-edit orchestration test. Read once at startup
+	// (cmd/api/main.go): it gates token minting, the control client, the
+	// service's own co-edit guard, and the capability advertised to browsers.
 	AuthoringRealtimeCoediting bool
-	// AuthoringCoeditServiceEnabled is retained for compatibility. The
-	// Hocuspocus admission posture is always on in the application build.
+	// AuthoringCoeditServiceEnabled is the Hocuspocus admission gate, the
+	// second half of the same posture. Also default on and never env-set, for
+	// the same reason. Kept separate from the flag above because the two
+	// failures differ: a browser may hold a valid token while the control
+	// client that admits its room was never wired.
 	AuthoringCoeditServiceEnabled bool
 	// AuthoringCoeditServiceURL is the private base URL of the singleton
 	// Hocuspocus service (AUTHORING_COEDIT_SERVICE_URL).

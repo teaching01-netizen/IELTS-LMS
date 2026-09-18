@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type {
-  AssessmentAuthoringShell,
-  AssessmentQuestionDetail,
-} from "../contracts/assessment";
+import type { AssessmentQuestionDetail } from "../contracts/assessment";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
-import { assessmentKeys } from "../api/assessmentQueries";
+import { authoringEffects, setReadyShell } from "../api/authoringQueryEffects";
 import {
   createAuthoringRealtimeStats,
   type AuthoringConnectionState,
@@ -26,6 +23,27 @@ import {
 } from "./authoringEventReducer";
 import { reconcileAuthoringEvent } from "./authoringCacheReconciler";
 import { recoverAuthoringSnapshot } from "./recovery";
+import type { SnapshotSource } from "./contracts";
+
+/**
+ * The default HTTP snapshot source for recovery.
+ *
+ * Recovery exists for a workspace that is already editing a draft, and it needs
+ * the SHELL, not the lifecycle answer. The shell read reports NO_DRAFT as a
+ * successful 200 now, so it is converted here: a draft that disappeared while
+ * the user was editing it is a failure to surface, never an empty shell the
+ * reconciler would treat as "nothing to reconcile".
+ */
+const authoringSnapshotSource: SnapshotSource = {
+  getShell: async (examId) => {
+    const result = await assessmentAuthoringApi.getShell(examId);
+    if (!result.shell) {
+      throw new Error("This exam no longer has an editable draft to recover.");
+    }
+    return result.shell;
+  },
+  getQuestion: (examQuestionId) => assessmentAuthoringApi.getQuestion(examQuestionId),
+};
 
 /**
  * Workspace-owned orchestrator. Mounted ONCE (AuthoringWorkspace) — never in an
@@ -64,28 +82,23 @@ export function useAuthoringRealtime(
       isQuestionDirty: (examQuestionId) =>
         optionsRef.current.isQuestionDirty(examQuestionId),
       selectedExamQuestionId: options.selectedExamQuestionId,
+      // This port is key-free by construction: each callback names an effect,
+      // so the module that knows what "the shell" or "a question detail" is
+      // made of stays `authoringQueryEffects`. The refetch policy stays here,
+      // because it is the reconciler's own decision — a passive shell touch
+      // must not become an active refetch just because it shares a port with
+      // the structural events that do want one.
       invalidateShell: (refetch) => {
-        void queryClient.invalidateQueries({
-          queryKey: assessmentKeys.shell(options.examId),
-          refetchType: refetch,
-        });
+        void authoringEffects.shellDocumentChanged(queryClient, options.examId, refetch);
       },
       invalidateQuestion: (examQuestionId, refetch) => {
-        void queryClient.invalidateQueries({
-          queryKey: assessmentKeys.question(examQuestionId),
-          refetchType: refetch,
-        });
+        void authoringEffects.questionDetailChanged(queryClient, examQuestionId, refetch);
       },
       removeQuestionCache: (examQuestionId) => {
-        queryClient.removeQueries({ queryKey: assessmentKeys.question(examQuestionId) });
+        authoringEffects.questionDetailRemoved(queryClient, examQuestionId);
       },
       invalidateReadinessAndRelease: () => {
-        void queryClient.invalidateQueries({
-          queryKey: assessmentKeys.readinessRoot(options.examId),
-        });
-        void queryClient.invalidateQueries({
-          queryKey: assessmentKeys.release(options.examId),
-        });
+        void authoringEffects.readinessAndReleaseChanged(queryClient, options.examId);
       },
       noteRemoteRevision: (examQuestionId, eventRevision, actorId) => {
         optionsRef.current.onRemoteRevision?.(examQuestionId, eventRevision, actorId);
@@ -106,39 +119,32 @@ export function useAuthoringRealtime(
   const refetchAuthoritativeSurface = useCallback(() => {
     const { examId: boundExamId, selectedExamQuestionId: selected, isQuestionDirty } =
       optionsRef.current;
-    void queryClient.invalidateQueries({
-      queryKey: assessmentKeys.shell(boundExamId),
-      refetchType: "active",
-    });
-    void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(boundExamId) });
-    void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(boundExamId) });
+    // The whole tree and the reports derived from it: this is the read that
+    // decides whether the socket's binding still exists at all.
+    void authoringEffects.shellChanged(queryClient, boundExamId);
     if (selected && !isQuestionDirty(selected)) {
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.question(selected),
-        refetchType: "active",
-      });
+      // Detail-only on purpose: the tree was just invalidated above, so the
+      // composite `questionChanged` would invalidate it a second time.
+      void authoringEffects.questionDetailChanged(queryClient, selected);
     }
   }, [queryClient]);
 
   const runRecovery = useCallback(
     async (reason: string) => {
-      const source = optionsRef.current.snapshotSource ?? assessmentAuthoringApi;
+      const source = optionsRef.current.snapshotSource ?? authoringSnapshotSource;
       const result = await recoverAuthoringSnapshot(
         {
           examId: optionsRef.current.examId,
           selectedExamQuestionId: optionsRef.current.selectedExamQuestionId,
           source,
           setShellData: (shell) => {
-            queryClient.setQueryData<AssessmentAuthoringShell>(
-              assessmentKeys.shell(optionsRef.current.examId),
-              shell,
-            );
+            setReadyShell(queryClient, optionsRef.current.examId, shell);
           },
           setQuestionData: (examQuestionId, detail: AssessmentQuestionDetail) => {
-            queryClient.setQueryData(assessmentKeys.question(examQuestionId), detail);
+            authoringEffects.questionDetailLoaded(queryClient, examQuestionId, detail);
           },
           removeQuestionCache: (examQuestionId) => {
-            queryClient.removeQueries({ queryKey: assessmentKeys.question(examQuestionId) });
+            authoringEffects.questionDetailRemoved(queryClient, examQuestionId);
           },
           listCachedQuestionIds: () =>
             queryClient

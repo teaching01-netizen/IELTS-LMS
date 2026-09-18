@@ -4,9 +4,9 @@ import type { ExamEntity } from "../../../types/domain";
 import {
   useAssessmentReleaseReadiness,
   useAssessmentReleaseState,
-  useAuthoringShell,
   usePublishAssessment,
 } from "../api/assessmentQueries";
+import { useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
 import { useAccessDistributionOverview } from "../api/assessmentAccessLinkQueries";
 import type { AssessmentValidationIssue } from "../contracts/assessment";
 import { parseIssueLink } from "../ui/release/releaseSelectors";
@@ -29,11 +29,22 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const inSatWorkspace = location.pathname.startsWith("/sat/");
-  const shellQuery = useAuthoringShell(exam.id);
+  const shellLifecycle = useAuthoringShellLifecycle(exam.id);
   const publishMutation = usePublishAssessment(exam.id);
   const releaseQuery = useAssessmentReleaseState(exam.id);
   const distributionQuery = useAccessDistributionOverview(exam.id);
-  const shell = shellQuery.data;
+  const shellState = shellLifecycle.state;
+  // Publish needs READY. Every other lifecycle state is reported through
+  // loadError instead of being passed off as a missing draft.
+  const shell = shellState.kind === "ready" ? shellState.shell : null;
+  const shellLoadError =
+    shellState.kind === "error"
+      ? shellState.error.message
+      : shellState.kind === "exam-not-found"
+        ? "This exam does not exist."
+        : shellState.kind === "forbidden"
+          ? "You do not have permission to view this exam."
+          : null;
   const releaseState = releaseQuery.data ?? null;
   const shouldCheckReadiness = releaseState?.state !== "published_current";
   const readinessQuery = useAssessmentReleaseReadiness(
@@ -145,15 +156,12 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
   return (
     <SatDeliveryReleasePage
       exam={exam}
-      shell={shell ?? null}
+      shell={shell}
       releaseState={releaseState}
-      isLoading={shellQuery.isLoading || releaseQuery.isLoading}
+      isLoading={shellState.kind === "loading" || releaseQuery.isLoading}
       loadError={
-        shellQuery.error instanceof Error
-          ? shellQuery.error.message
-          : releaseQuery.error instanceof Error
-            ? releaseQuery.error.message
-            : null
+        shellLoadError ??
+        (releaseQuery.error instanceof Error ? releaseQuery.error.message : null)
       }
       readiness={readinessQuery.data ?? null}
       isChecking={readinessQuery.isFetching}

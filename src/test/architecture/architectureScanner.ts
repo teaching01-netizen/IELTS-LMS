@@ -10,6 +10,7 @@ export type SourceImport = Readonly<{
 export type ArchitectureRuleName =
   | 'layer-dependencies'
   | 'feature-isolation'
+  | 'feature-internal-boundary'
   | 'domain-purity'
   | 'legacy-services'
   | 'forbidden-browser-boundaries'

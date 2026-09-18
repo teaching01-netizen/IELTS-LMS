@@ -1707,7 +1707,13 @@ paths:
   /assessment-authoring/exams/{examId}/shell:
     get:
       tags: [authoring]
-      summary: Get authoring shell (current draft)
+      summary: Get the authoring shell lifecycle (current draft, or none)
+      description: >
+        Read-only, and never creates a draft. 200 READY carries the shell; 200
+        NO_DRAFT means the exam exists and has no editable draft yet (a normal
+        lifecycle answer, not an error — render it with an explicit open-draft
+        action rather than as a load failure). A 404 on this route means
+        exactly one thing: the exam does not exist (code EXAM_NOT_FOUND).
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - name: examId
@@ -1716,12 +1722,22 @@ paths:
           schema: { type: string }
       responses:
         "200":
-          description: Shell
+          description: Shell lifecycle state
           headers:
             X-Request-Id: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                type: object
+                required: [state, shell]
+                properties:
+                  state:
+                    type: string
+                    enum: [READY, NO_DRAFT]
+                  shell:
+                    description: The editable shell when state is READY, otherwise null.
+                    type: object
+                    nullable: true
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
     post:

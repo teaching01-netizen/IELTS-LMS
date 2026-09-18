@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { shouldRetryQuery } from "../../../shared/api/queryClient";
 import { hasBackendStatusCode, isBackendNotFound } from "../infrastructure/examAuthoringBackendGateway";
-import { examKeys } from "./examQueries";
 import { assessmentAuthoringApi } from "./assessmentAuthoringApi";
 import { assessmentReleaseApi } from "./assessmentReleaseApi";
+import { assessmentKeys, authoringEffects } from "./authoringQueryEffects";
 import type {
-  AssessmentAuthoringShell,
+  AssessmentAuthoringShellResult,
   BatchCreateQuestionsRequest,
   BulkQuestionRequest,
   DuplicateQuestionRequest,
@@ -15,62 +15,43 @@ import type {
   UpdateSectionDeliverySettingsRequest,
 } from "../contracts/assessment";
 
-export const assessmentKeys = {
-  shell: (examId: string) => ["assessment", examId, "shell"] as const,
-  release: (examId: string) => ["assessment", examId, "release"] as const,
-  readinessRoot: (examId: string) => ["assessment", examId, "readiness"] as const,
-  readiness: (examId: string, versionId: string, versionRevision: number) =>
-    ["assessment", examId, "readiness", versionId, versionRevision] as const,
-  question: (examQuestionId: string) => ["assessment-question", examQuestionId] as const,
-};
+/**
+ * Authoring queries and mutations.
+ *
+ * This module owns exactly four things: the query functions, their retry
+ * policy, the mutation functions, and which SEMANTIC effect each mutation
+ * reports. It never enumerates cache keys — `authoringQueryEffects` owns that.
+ */
 
 export const AUTHORING_SHELL_STALE_TIME_MS = 30_000;
 
 export function useAuthoringShell(examId: string) {
   return useQuery({
     queryKey: assessmentKeys.shell(examId),
-    // Phase 04: refresh/remount/focus reads use GET /shell (5 stmts, no write Tx).
+    // Refresh/remount/focus reads use GET /shell (5 stmts, no write Tx).
     // POST /shell is reserved for the explicit draft-open in useEnsureDraftShell.
+    // The response carries the lifecycle state, so "no editable draft" arrives
+    // as a success and never as an error.
     queryFn: () => assessmentAuthoringApi.getShell(examId),
     staleTime: AUTHORING_SHELL_STALE_TIME_MS,
-    // A 404 is the answer "this exam has no editable draft yet", not a transient
-    // failure: retrying it asks the same question four more times, and each
-    // attempt is a request the network panel reports as an error.
-    retry: (failureCount, error) => !isBackendNotFound(error) && shouldRetryQuery(failureCount, error),
+    // A 404 here is a definitive answer (the exam does not exist), and 403 is a
+    // permission answer. Neither is transient, so retrying them would only
+    // re-ask the same question while multiplying network and console noise.
+    retry: (failureCount, error) =>
+      !isBackendNotFound(error) &&
+      !hasBackendStatusCode(error, 403) &&
+      shouldRetryQuery(failureCount, error),
   });
 }
 
-export type EnsureDraftShellErrorKind = "exam-missing" | "forbidden" | "conflict" | "unknown";
-
-export interface EnsureDraftShellErrorInfo {
-  kind: EnsureDraftShellErrorKind;
-  message: string;
-}
-
-export function toEnsureDraftShellErrorInfo(error: unknown): EnsureDraftShellErrorInfo {
-  const message =
-    error instanceof Error ? error.message : "The editable draft could not be opened.";
-  if (isBackendNotFound(error)) {
-    return { kind: "exam-missing", message };
-  }
-  if (hasBackendStatusCode(error, 403)) {
-    return { kind: "forbidden", message };
-  }
-  if (hasBackendStatusCode(error, 409)) {
-    return { kind: "conflict", message };
-  }
-  return { kind: "unknown", message };
-}
-
 /**
- * Phase 04 explicit draft-open: the ONLY sanctioned POST /shell caller besides
- * load-sample-style writes. Callers render an explicit CTA and invoke this
- * mutation from a user gesture (or a single mount-time ensure when the shell
- * query reports 404-no-draft AND the user holds an editing role).
+ * Explicit draft-open: the ONLY sanctioned POST /shell caller. Callers render an
+ * explicit CTA and invoke this mutation from a user gesture — a refresh can
+ * never reach it.
  *
  * - retry:false: never blindly retry a write.
- * - onSuccess installs the shell via setQueryData so the workspace renders
- *   without waiting for a refetch, then marks readiness + release stale.
+ * - onSuccess installs the shell via `draftOpened` so the workspace renders
+ *   without waiting for a refetch.
  * - onError only classifies; the caller owns display and must NEVER auto-loop.
  */
 export function useEnsureDraftShell(examId: string) {
@@ -78,19 +59,8 @@ export function useEnsureDraftShell(examId: string) {
   return useMutation({
     mutationFn: () => assessmentAuthoringApi.openShell(examId),
     retry: false,
-    onSuccess: (shell) => {
-      queryClient.setQueryData<AssessmentAuthoringShell>(
-        assessmentKeys.shell(examId),
-        shell
-      );
-      // The draft pointer is part of the exam entity, and the collaboration
-      // boundary refuses to open a room until the exam says there is a draft
-      // to co-edit. Opening one from this screen must therefore refresh that
-      // entity, or the room would stay closed until the cache expired.
-      void queryClient.invalidateQueries({ queryKey: examKeys.detail(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-    },
+    // `void`: a mutation reports the effect, it does not wait for the refresh.
+    onSuccess: (shell) => void authoringEffects.draftOpened(queryClient, examId, shell),
   });
 }
 
@@ -121,11 +91,9 @@ export function useCreateAssessmentQuestion(examId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (moduleId: string) => assessmentAuthoringApi.createQuestion(moduleId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-    },
+    // A row was added: the tree changed, but no specific cached question detail
+    // is affected, so this is a structure effect rather than questionChanged.
+    onSuccess: () => void authoringEffects.shellChanged(queryClient, examId),
   });
 }
 
@@ -140,11 +108,19 @@ export function useBatchCreateAssessmentQuestions(examId: string) {
       request: BatchCreateQuestionsRequest;
     }) => assessmentAuthoringApi.batchCreateQuestions(moduleId, request),
     onSuccess: (result, variables) => {
-      queryClient.setQueryData<AssessmentAuthoringShell>(assessmentKeys.shell(examId), (current) =>
-        current
-          ? {
-              ...current,
-              sections: current.sections.map((section) => ({
+      // The batch response carries the module's new question list, so apply it
+      // instead of refetching the whole tree: an active refetch here would race
+      // the author's next edit.
+      queryClient.setQueryData<AssessmentAuthoringShellResult>(
+        assessmentKeys.shell(examId),
+        (current) => {
+          if (!current || current.state !== "READY" || !current.shell) return current;
+          const shell = current.shell;
+          return {
+            ...current,
+            shell: {
+              ...shell,
+              sections: shell.sections.map((section) => ({
                 ...section,
                 modules: section.modules.map((module) =>
                   module.id === variables.moduleId
@@ -152,21 +128,11 @@ export function useBatchCreateAssessmentQuestions(examId: string) {
                     : module
                 ),
               })),
-            }
-          : current
+            },
+          };
+        }
       );
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.shell(examId),
-        refetchType: "none",
-      });
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.readinessRoot(examId),
-        refetchType: "none",
-      });
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.release(examId),
-        refetchType: "none",
-      });
+      void authoringEffects.shellChanged(queryClient, examId, { refetchType: "none" });
     },
   });
 }
@@ -176,12 +142,7 @@ export function useLoadSatSampleExam(examId: string) {
   return useMutation({
     mutationFn: (request: LoadSampleExamRequest) =>
       assessmentAuthoringApi.loadSampleExam(examId, request),
-    onSuccess: (shell) => {
-      queryClient.setQueryData(assessmentKeys.shell(examId), shell);
-      queryClient.removeQueries({ queryKey: ["assessment-question"] });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-    },
+    onSuccess: (shell) => void authoringEffects.questionsReplaced(queryClient, examId, shell),
   });
 }
 
@@ -221,14 +182,7 @@ export function usePublishAssessment(examId: string) {
       const releaseState = await assessmentReleaseApi.get(examId);
       return { publishedVersion, releaseState };
     },
-    onSuccess: ({ releaseState }) => {
-      queryClient.setQueryData(assessmentKeys.release(examId), releaseState);
-      void queryClient.invalidateQueries({ queryKey: ["exams"] });
-      void queryClient.invalidateQueries({ queryKey: ["exam-authoring"] });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: ["assessment-access-links", "overview", examId] });
-      queryClient.removeQueries({ queryKey: assessmentKeys.shell(examId) });
-    },
+    onSuccess: ({ releaseState }) => void authoringEffects.published(queryClient, examId, releaseState),
   });
 }
 
@@ -242,11 +196,9 @@ export function useDuplicateAssessmentQuestion(examId: string) {
       examQuestionId: string;
       request: DuplicateQuestionRequest;
     }) => assessmentAuthoringApi.duplicateQuestion(examQuestionId, request),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-    },
+    // The duplicate is a NEW row: nothing cached describes it yet, so the
+    // effect is the structure change, not a change to an existing question.
+    onSuccess: () => void authoringEffects.shellChanged(queryClient, examId),
   });
 }
 
@@ -255,11 +207,7 @@ export function useReorderAssessmentQuestions(examId: string) {
   return useMutation({
     mutationFn: ({ moduleId, request }: { moduleId: string; request: ReorderQuestionsRequest }) =>
       assessmentAuthoringApi.reorderQuestions(moduleId, request),
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-    },
+    onSettled: () => void authoringEffects.shellChanged(queryClient, examId),
   });
 }
 
@@ -267,11 +215,7 @@ export function useBulkAssessmentQuestions(examId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (request: BulkQuestionRequest) => assessmentAuthoringApi.bulkQuestions(request),
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.readinessRoot(examId) });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-    },
+    onSettled: () => void authoringEffects.shellChanged(queryClient, examId),
   });
 }
 
@@ -285,15 +229,6 @@ export function useUpdateSectionDeliverySettings(examId: string) {
       sectionId: string;
       request: UpdateSectionDeliverySettingsRequest;
     }) => assessmentAuthoringApi.updateSectionDeliverySettings(examId, sectionId, request),
-    onSuccess: (shell) => {
-      queryClient.setQueryData(assessmentKeys.shell(examId), shell);
-      // Mark readiness stale without an active refetch storm: the page's
-      // explicit "Run checks" is the source of truth for validateExam.
-      void queryClient.invalidateQueries({
-        queryKey: assessmentKeys.readinessRoot(examId),
-        refetchType: "none",
-      });
-      void queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) });
-    },
+    onSuccess: (shell) => void authoringEffects.deliveryChanged(queryClient, examId, shell),
   });
 }

@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 import { useOptionalAuthSession } from '../../features/auth/authSession';
 import { Exam } from '../../types';
 import { ExamEntity, ExamSchedule, ExamVersion } from '../../types/domain';
-import { examRepository, examDeliveryService } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { examRepository, examDeliveryService } from '../../features/exam-authoring/api/examAuthoringGateway';
 
 interface ScheduleSessionModalProps {
   isOpen: boolean;

@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { SatPageError } from '../ui/SatPage';
 import { useAuthSession } from '../../../features/auth/authSession';
 import { invalidateExamList, useExamListQuery } from '../../../features/exam-authoring/api/examQueries';
-import { examAuthoringFacade } from '../../../features/exam-authoring/application/examAuthoringFacade';
+import { examAuthoringFacade } from '../../../features/exam-authoring/api/examAuthoringFacade';
 import type { ExamEntity } from '../../../types/domain';
 import { SatConfirmDialog, SatFormDialog, isSatCreationDirty } from '../ui/ConfirmDialog';
 import {

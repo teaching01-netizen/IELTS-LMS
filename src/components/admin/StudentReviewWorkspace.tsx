@@ -15,7 +15,7 @@ import {
   gradingRepository,
   gradingService,
 } from '../../features/grading/infrastructure/gradingGateway';
-import { examRepository, hydrateExamState } from '../../features/exam-authoring/infrastructure/examAuthoringGateway';
+import { examRepository, hydrateExamState } from '../../features/exam-authoring/api/examAuthoringGateway';
 import type { ExamState, WritingTaskContent } from '../../types';
 import { WritingAnnotationCanvas } from './WritingAnnotationCanvas';
 import { ConfirmModal } from '../ConfirmModal';
