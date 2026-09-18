@@ -110,3 +110,79 @@ func TestV2MarkedForReview(t *testing.T) {
 		t.Fatal("expected false for empty/malformed")
 	}
 }
+
+func TestV2EliminatedOptions(t *testing.T) {
+	cases := []struct {
+		name      string
+		canonical string
+		want      string
+	}{
+		{"present", `{"answer":"A","eliminatedOptions":["B","C"]}`, `["B","C"]`},
+		{"empty array kept", `{"eliminatedOptions":[]}`, `[]`},
+		{"null becomes default", `{"eliminatedOptions":null}`, `[]`},
+		{"missing becomes default", `{"answer":"A"}`, `[]`},
+		{"empty payload becomes default", "", `[]`},
+		{"malformed payload becomes default", "not-json", `[]`},
+		{"whitespace normalized", "{\"eliminatedOptions\": [ \"B\" ]}", `["B"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := string(V2EliminatedOptions(tc.canonical)); got != tc.want {
+				t.Fatalf("V2EliminatedOptions(%q) = %s, want %s", tc.canonical, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestV2AnnotationsEnvelope(t *testing.T) {
+	cases := []struct {
+		name      string
+		canonical string
+		want      string
+	}{
+		{
+			"wrapped sat_annotations element unwraps to the legacy envelope",
+			`{"answer":"A","annotations":[{"id":"x","kind":"sat_annotations","version":2,"legacyQuestionNote":"note","annotations":[{"id":"a1","kind":"highlight"}]}]}`,
+			`{"version":2,"legacyQuestionNote":"note","annotations":[{"id":"a1","kind":"highlight"}]}`,
+		},
+		{
+			"wrapped element with null inner array projects empty array",
+			`{"annotations":[{"kind":"sat_annotations","version":2,"annotations":null}]}`,
+			`{"version":2,"annotations":[]}`,
+		},
+		{
+			"non-sat_annotations elements are ignored",
+			`{"annotations":[{"kind":"other","version":1}]}`,
+			`{}`,
+		},
+		{
+			"bare envelope object passes through",
+			`{"annotations":{"version":1,"annotations":[]}}`,
+			`{"annotations":[],"version":1}`,
+		},
+		{
+			"empty array becomes default",
+			`{"annotations":[]}`,
+			`{}`,
+		},
+		{
+			"null becomes default",
+			`{"annotations":null}`,
+			`{}`,
+		},
+		{
+			"missing becomes default",
+			`{"answer":"A"}`,
+			`{}`,
+		},
+		{"empty payload becomes default", "", `{}`},
+		{"malformed payload becomes default", "not-json", `{}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := string(V2AnnotationsEnvelope(tc.canonical)); got != tc.want {
+				t.Fatalf("V2AnnotationsEnvelope(%q) = %s, want %s", tc.canonical, got, tc.want)
+			}
+		})
+	}
+}

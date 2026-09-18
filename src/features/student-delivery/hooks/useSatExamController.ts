@@ -1262,16 +1262,15 @@ export function useSatExamController({
   const personalModuleRemainingSeconds = stateModuleAttempt
     ? personalModuleCountdown(stateModuleAttempt, snapshotReceivedAt, now, serverClockOffsetMs, cohortStageRunning)
     : 0;
-  // D2: min(personal, section) is the STUDENT-FACING allotment only. The
-  // server's section clock is the sole expiry authority — a module past its
-  // personal clock is not force-closed while its section is live, so this
-  // minimum never has to agree with a server-side deadline.
-  // A section-keyed cohort model publishes one clock for the whole section, so
-  // the student's allotment is min(their module, the section) — but only while
-  // the published stage is the section they are actually in. A stage-keyed
-  // cohort model already publishes the running module's own clock.
-  // SAT-003 policy lives in application/satTimingPolicy.ts: display is what the
-  // student reads, expiry is the only clock allowed to close the module.
+  // Cohort clock contract: for section-keyed cohort models the shared section
+  // clock is BOTH the display and the expiry — the server gates these modules
+  // on the section clock alone (`usesPersonalDeadline()` is legacy-only), and
+  // a personal term in the display would give students who entered at
+  // different moments different countdowns for the same shared exam. The
+  // personal module clock remains the display/expiry authority for the legacy
+  // model only. SAT-003 policy lives in application/satTimingPolicy.ts:
+  // display is what the student reads, expiry is the only clock allowed to
+  // close the module.
   const { displaySeconds: remainingSeconds, expirySeconds: expiryRemainingSeconds } = satCountdown({
     timingModel: effectiveTiming?.timingModel,
     stageKey: effectiveTiming?.stageKey ?? null,

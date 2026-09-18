@@ -100,6 +100,14 @@ export interface AuthoringPersistenceInput {
    * and acknowledging it are the two writes, both from this module's paths.
    */
   recoveredQuestionDraftKeyRef: MutableRefObject<string | null>;
+  /**
+   * The draft owner's acknowledgment that a recovered key no longer guards the
+   * server document. The hold path below takes custody of a recovered copy
+   * without adopting it, and the adoption rule must stop treating that key as
+   * an unanswered recovery — or the server question can never hydrate the base
+   * editor and the recovery banner stays hidden behind a loading skeleton.
+   */
+  acknowledgeRecoveredDraftKey: (draftKey: string) => void;
 }
 
 export interface AuthoringPersistence {
@@ -152,6 +160,7 @@ export function useAuthoringPersistence(
     applySavedRevision,
     holdRecoveredDraft,
     recoveredQuestionDraftKeyRef,
+    acknowledgeRecoveredDraftKey,
   } = input;
 
   /**
@@ -208,12 +217,19 @@ export function useAuthoringPersistence(
     networkPausedRef: networkSavePausedRef,
     onRecover: (recovered) => {
       if (!questionDraftKey) return;
-      recoveredQuestionDraftKeyRef.current = questionDraftKey;
       if (selectedExamQuestionId && holdRecoveredDraft?.(selectedExamQuestionId, recovered)) {
-        // A room owns the visible editor, so this must not be adopted silently.
+        // A room owns the visible editor, so this must not be adopted silently:
+        // the copy is held by the recovery owner and offered beside the editor.
+        // The hold IS the resolution of the recovery for the adoption rule, so
+        // the key is acknowledged rather than armed — arming it would make the
+        // adoption rule block the server document forever, and the author would
+        // see a loading skeleton where the editor and the recovery banner
+        // should both be visible.
+        acknowledgeRecoveredDraftKey(questionDraftKey);
         setNavigationError(null);
         return;
       }
+      recoveredQuestionDraftKeyRef.current = questionDraftKey;
       setDraft(recovered);
       // A device-local draft came back after a reload. That is its own state,
       // not a remote conflict: nobody else's save is implied.

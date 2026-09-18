@@ -42,7 +42,12 @@ describe("SAT countdown policy (SAT-003)", () => {
     ).toEqual({ displaySeconds: 4000, expirySeconds: 4000 });
   });
 
-  it("shows min(personal, section) but expires only on the section clock", () => {
+  // The cohort clock contract: in a synchronized cohort the shared section
+  // clock is BOTH the display and the expiry, regardless of the student's
+  // personal allotment. A personal term in the display would give two students
+  // who entered at different moments two different countdowns for the same
+  // shared exam, so started_at never creates the visible cohort clock.
+  it("shows the section clock as both display and expiry for a section-keyed cohort", () => {
     expect(
       satCountdown({
         timingModel: SECTION,
@@ -51,7 +56,7 @@ describe("SAT countdown policy (SAT-003)", () => {
         personalSeconds: 90,
         authoritativeSeconds: 4000,
       }),
-    ).toEqual({ displaySeconds: 90, expirySeconds: 4000 });
+    ).toEqual({ displaySeconds: 4000, expirySeconds: 4000 });
     expect(
       satCountdown({
         timingModel: SECTION,
@@ -61,6 +66,25 @@ describe("SAT countdown policy (SAT-003)", () => {
         authoritativeSeconds: 4000,
       }),
     ).toEqual({ displaySeconds: 4000, expirySeconds: 4000 });
+  });
+
+  // Two students in one cohort section: A entered at section start, B entered
+  // 12s later with a full personal allotment. Their personal clocks disagree;
+  // the displayed countdown must not.
+  it("shows every student in the cohort the same countdown regardless of entry time", () => {
+    const shared = (personalSeconds: number) =>
+      satCountdown({
+        timingModel: SECTION,
+        stageKey: "RW1",
+        sectionKey: "RW1",
+        personalSeconds,
+        authoritativeSeconds: 4000,
+      });
+    const studentA = shared(4000);
+    const studentB = shared(3988);
+    expect(studentA.displaySeconds).toBe(studentB.displaySeconds);
+    expect(studentA.expirySeconds).toBe(studentB.expirySeconds);
+    expect(studentA.displaySeconds).toBe(4000);
   });
 
   // No section identity (absent or empty key) is not "this module's section":

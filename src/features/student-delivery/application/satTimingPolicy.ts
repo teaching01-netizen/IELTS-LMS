@@ -112,10 +112,18 @@ export interface SatCountdown {
  * apart:
  *   legacy         -> personal clock is both;
  *   cohort-stage   -> the published stage clock is both;
- *   cohort-section -> display is min(personal, section) while the stage names
- *                     this module's section; expiry is the section clock, and
+ *   cohort-section -> the shared section clock is both, and the expiry is
  *                     null (inert) when the stage names another section — the
  *                     backend would reject a submit under that stage anyway.
+ *
+ * The section-keyed display deliberately ignores `personalSeconds`: the
+ * server gates cohort modules on the shared section clock alone
+ * (`usesPersonalDeadline()` is legacy-only), and a personal term in the
+ * display would make two students who entered at different moments see two
+ * different countdowns for the same shared exam — the cohort-clock divergence
+ * this model exists to prevent. The student's started_at stays on the attempt
+ * for audit/analytics/entry checks; it no longer creates the visible cohort
+ * clock.
  */
 export function satCountdown(input: {
   timingModel: MaybeString;
@@ -136,9 +144,7 @@ export function satCountdown(input: {
   const stageMatchesSection =
     Boolean(input.sectionKey) && input.stageKey === input.sectionKey;
   return {
-    displaySeconds: stageMatchesSection
-      ? Math.min(input.personalSeconds, input.authoritativeSeconds)
-      : 0,
+    displaySeconds: stageMatchesSection ? input.authoritativeSeconds : 0,
     expirySeconds: stageMatchesSection ? input.authoritativeSeconds : null,
   };
 }

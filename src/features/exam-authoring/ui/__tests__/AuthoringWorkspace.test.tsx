@@ -177,15 +177,22 @@ function setupDefaults() {
   (harness.api.getShell as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => Promise.resolve(shell));
 }
 
-function renderWorkspace() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
+function workspaceTree() {
+  return (
+    <QueryClientProvider client={renderWorkspaceClient()}>
       <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
         <AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+}
+
+function renderWorkspaceClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+}
+
+function renderWorkspace() {
+  return render(workspaceTree());
 }
 
 describe("AuthoringWorkspace (spine-only)", () => {
@@ -411,5 +418,118 @@ describe("AuthoringWorkspace conflict routing without a socket", () => {
     expect(banner).toHaveTextContent(/recovered unsaved changes from this device/i);
     expect(banner).toHaveTextContent(/not saved on the server yet/i);
     expect(banner.textContent ?? "").not.toMatch(/another author|reload/i);
+  });
+});
+
+/**
+ * The question-load state machine.
+ *
+ * WHY THIS FILE EXISTS (this describe, specifically)
+ * --------------------------------------------------
+ * The editor rendered from the open draft, and the draft was installed by an
+ * adoption rule that answered with a bare boolean — so a 200 that was declined
+ * (recovery held, local work protected, stale payload) was indistinguishable
+ * from a request still in flight, and the loading skeleton meant two things.
+ * The second meaning — "the question arrived and was dropped" — is the state
+ * machine hole that stranded a successful question behind an indefinite
+ * skeleton. The invariant these tests pin: the skeleton renders ONLY while the
+ * question query has not answered; a 200 always lands on a surface.
+ */
+describe("AuthoringWorkspace question load state machine", () => {
+  beforeEach(() => { setupDefaults(); });
+
+  async function renderAndAnswer(): Promise<ReturnType<typeof renderWorkspace>> {
+    const view = renderWorkspace();
+    await screen.findByLabelText("Question prompt");
+    return view;
+  }
+
+  it("renders the editor from a successful question response", async () => {
+    await renderAndAnswer();
+    expect(screen.queryByTestId("editor-skeleton")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert", { name: "Question could not be loaded" })).toBeNull();
+  });
+
+  it("renders the skeleton only while the question query has not answered", async () => {
+    // The real query is pending until it answers; the mock must say so.
+    (harness.useExamQuestion as unknown as { mockImplementation: (f: (id: string | null) => unknown) => void }).mockImplementation(
+      (id: string | null) => {
+        if (!id) return { data: undefined, error: null, isPending: false, refetch: vi.fn() };
+        const detail = harness.details[id];
+        return detail
+          ? { data: detail, error: null, isPending: false, refetch: vi.fn() }
+          : { data: undefined, error: null, isPending: true, refetch: vi.fn() };
+      },
+    );
+    // The query is genuinely pending: no detail exists yet.
+    harness.details = {};
+    const client = renderWorkspaceClient();
+    const view = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
+          <AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByTestId("editor-skeleton")).toBeInTheDocument();
+
+    // The request answers, and the skeleton gives way to the editor.
+    harness.details = {
+      "eq-1": {
+        examQuestionId: "eq-1",
+        moduleId: "mod-1",
+        moduleKey: "rw-m1",
+        sectionKey: "reading-writing",
+        displayOrder: 0,
+        isPretest: false,
+        question: makeDraft("rev-1", "First prompt"),
+      },
+    };
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
+          <AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByLabelText("Question prompt");
+    expect(screen.queryByTestId("editor-skeleton")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a failed request as a retryable load error", async () => {
+    (harness.useExamQuestion as unknown as { mockImplementation: (f: (id: string | null) => unknown) => void }).mockImplementation(
+      (id: string | null) =>
+        id
+          ? { data: undefined, error: new Error("The service refused the request"), isPending: false, refetch: vi.fn() }
+          : { data: undefined, error: null, isPending: false, refetch: vi.fn() },
+    );
+    renderWorkspace();
+    await screen.findByRole("heading", { name: "Question could not be loaded" });
+    const alert = screen.getAllByRole("alert").find((node) =>
+      node.textContent?.includes("The service refused the request"),
+    );
+    expect(alert).toBeDefined();
+    expect(screen.getByRole("button", { name: "Retry question" })).toBeInTheDocument();
+    expect(screen.queryByTestId("editor-skeleton")).not.toBeInTheDocument();
+  });
+
+  it("never leaves a successful response in the skeleton, even when it cannot be adopted", async () => {
+    // The stale-payload shape: the queue named eq-1, but the answer describes
+    // eq-2. The adoption rule must decline it ("stale-selection") — and the
+    // workspace must then surface that fact, not sit on an unexplained
+    // skeleton forever as it used to.
+    harness.details["eq-1"] = harness.details["eq-2"];
+    renderWorkspace();
+
+    await screen.findByRole("heading", { name: "Question could not be loaded" });
+    const alert = screen.getAllByRole("alert").find((node) =>
+      node.textContent?.includes(
+        "The question loaded successfully but could not be opened. Try again, or reopen it from the question list.",
+      ),
+    );
+    expect(alert).toBeDefined();
+    expect(screen.queryByTestId("editor-skeleton")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Question prompt")).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry question" })).toBeInTheDocument();
   });
 });

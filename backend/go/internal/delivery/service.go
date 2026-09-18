@@ -723,7 +723,10 @@ func (s *Service) loadResponsesLegacy(ctx context.Context, attemptID string) ([]
 // loadResponsesV2 reads V2 canonical payloads for the attempt and projects
 // each to the legacy ResponseSnapshot shape: the response is the canonical
 // "answer" field (assessscore.V2ResponseToScorerInput), MarkedForReview
-// comes from the same envelope. ModuleAttemptID is the resolved module
+// comes from the same envelope, eliminatedOptions projects to [] when
+// missing/null, and the wrapped sat_annotations element unwraps to the legacy
+// per-question envelope ({} when missing/null). ModuleAttemptID is the
+// resolved module
 // ATTEMPT id (ma.id via v.module_id); when no module attempt exists yet it
 // falls back to the raw v.module_id (a module id, not an attempt id) so
 // hydrate/save paths can still key the question — callers must treat it as
@@ -766,6 +769,11 @@ func (s *Service) loadResponsesV2(ctx context.Context, attemptID string) ([]Resp
 			ExamQuestionID:  examID,
 			Revision:        int(serverRev),
 		}
+		// Candidate-facing metadata defaults: missing/null optional metadata
+		// projects to the canonical []/{} shapes, so V2 and legacy snapshots
+		// merge into one aggregate shape (Phase 1 acceptance contract).
+		r.EliminatedOptions = assessscore.V2EliminatedOptions(canonical.String)
+		r.Annotations = assessscore.V2AnnotationsEnvelope(canonical.String)
 		if canonical.Valid && canonical.String != "" {
 			if input, ok := assessscore.V2ResponseToScorerInput(canonical.String); ok {
 				r.Response = json.RawMessage(input)

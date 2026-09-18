@@ -1274,4 +1274,69 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       expect(screen.queryByText("Preview landed")).not.toBeInTheDocument();
     });
   });
+
+  /**
+   * The held-recovery contradiction.
+   *
+   * The room owns the editor, so a recovered device draft is HELD beside the
+   * editor rather than adopted — and there was a time when taking custody also
+   * armed the recovery key, which made the adoption rule refuse the server
+   * question forever. The author saw a loading skeleton where both the editor
+   * and the recovery banner should be, and the only writer that could clear the
+   * key was the author's own answer to a banner that never got to render.
+   */
+  describe("recovery held while the room owns the editor", () => {
+    it("hydrates the server editor AND keeps the recovery banner, never a skeleton", async () => {
+      // The real order on a reload: the room opens before the question query
+      // answers, and the durable autosave finds unsaved work in between.
+      harness.details["eq-1"] = undefined as unknown as AssessmentQuestionDetail;
+      const view = render(treeWithWorkspaceRoom());
+      await waitFor(() => expect(harness.transports).toHaveLength(1), { timeout: 5_000 });
+      const transport = harness.transports[0]!;
+      await act(async () => {
+        transport.status("connected");
+        transport.sync();
+      });
+
+      // A device-local draft for THIS question comes back (as the durable
+      // autosave would). The room owns the editor, so the recovery owner must
+      // take custody of it — and taking custody must NOT arm the adoption
+      // guard against the server document that is about to arrive.
+      const calls = (harness.useQuestionAutosave as { mock: { calls: unknown[][] } }).mock.calls;
+      const options = calls[calls.length - 1]![0] as {
+        onRecover: (revision: QuestionRevision) => void;
+      };
+      await act(async () => {
+        options.onRecover(makeDraft("rev-1", "Typed while offline"));
+      });
+      const recovery = await screen.findByTestId("device-draft-recovery-surface");
+      expect(recovery).toHaveTextContent(
+        "Unsaved changes from this device are available. Add them to the shared draft when ready.",
+      );
+
+      // The question query answers…
+      harness.details["eq-1"] = {
+        examQuestionId: "eq-1",
+        moduleId: "mod-1",
+        moduleKey: "rw-m1",
+        sectionKey: "reading-writing",
+        displayOrder: 0,
+        isPretest: false,
+        question: makeDraft("rev-1", "First prompt"),
+      };
+      await act(async () => {
+        view.rerender(treeWithWorkspaceRoom());
+      });
+
+      // …and the canonical server draft becomes the editor's base document,
+      // with the held copy still offered beside it. The old behavior stranded
+      // BOTH behind the skeleton: the armed key refused the server document and
+      // nothing else could clear it.
+      await waitFor(() => expect(promptText(currentDraft().prompt)).toContain("First prompt"));
+      expect(screen.queryByTestId("editor-skeleton")).not.toBeInTheDocument();
+      expect(screen.getByTestId("device-draft-recovery-surface")).toBeInTheDocument();
+      // Nothing about this state is a failure of the question read.
+      expect(screen.queryByRole("alert", { name: "Question could not be loaded" })).toBeNull();
+    });
+  });
 });

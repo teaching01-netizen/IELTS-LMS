@@ -133,6 +133,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     setDraft,
     clearDocument,
     adoptServerDocumentIfPermitted,
+    acknowledgeRecoveredDraftKey,
     draftRevisionRef,
     draftRef,
     draftProtectedRef,
@@ -350,6 +351,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     applySavedRevision: updateSummaryCache,
     holdRecoveredDraft: deviceRecovery.hold,
     recoveredQuestionDraftKeyRef,
+    acknowledgeRecoveredDraftKey,
   });
   const {
     mode: persistenceMode,
@@ -628,6 +630,9 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   // the only survivor — which is what turns "review the newer version" into
   // "recovered unsaved changes from this device" a reload later. The clean case
   // keeps its refetch-replace: that IS the intended freshness path (Phase 04).
+  // Every outcome in which the rule declines is a deliberate state — held
+  // recovery, protected work, stale data — and each one renders a surface; the
+  // one state that renders nothing here is the rule answering "adopted".
   useEffect(() => {
     adoptServerDocumentIfPermitted({
       server: serverDocument,
@@ -1214,8 +1219,24 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               error={questionQuery.error}
               onRetry={() => void questionQuery.refetch()}
             />
-          ) : selectedExamQuestionId ? (
+          ) : selectedExamQuestionId && questionQuery.isPending ? (
+            // The skeleton means ONLY "the request has not answered": a 200 that
+            // the adoption rule declined is a named state above (held recovery,
+            // protected work, stale data) and must never be re-rendered as
+            // loading — that was the state machine hole that stranded a
+            // successful question behind an indefinite skeleton.
             <EditorSkeleton />
+          ) : selectedExamQuestionId ? (
+            // Fail-safe for the impossible remainder — the query answered, but
+            // no rule above rendered it. A successful request can never be an
+            // indefinite skeleton, so this surfaces as an explicit retryable
+            // error instead.
+            <QuestionLoadError
+              error={new Error(
+                "The question loaded successfully but could not be opened. Try again, or reopen it from the question list."
+              )}
+              onRetry={() => void questionQuery.refetch()}
+            />
           ) : (
             <EmptyEditor
               moduleTitle={selectedModule?.title ?? null}
