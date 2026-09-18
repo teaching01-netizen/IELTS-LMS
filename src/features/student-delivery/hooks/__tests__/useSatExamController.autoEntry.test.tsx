@@ -162,8 +162,18 @@ function submitted(moduleId: string): ModuleAttempt {
   };
 }
 
-/** The proctor has not pressed Start: the runtime is scheduled, module locked. */
-function scheduledBootstrap(): AssessmentDeliveryBootstrap {
+/**
+ * The proctor has not pressed Start.
+ *
+ * This is the REAL pre-start payload: the server persists no
+ * exam_session_runtimes row, so the bootstrap projects
+ * proctor.NotStartedRuntimeForProvider — status not_started, timing authority
+ * cohort_runtime, model cohort_section_v3, no stage, no deadline, zero
+ * remaining. It used to project the legacy attempt clock here (status
+ * "live", authority legacy_attempt), which is the defect that let a waiting
+ * student auto-enter and 409 against /modules/start.
+ */
+function notStartedCohortBootstrap(): AssessmentDeliveryBootstrap {
   return {
     scheduleId: "schedule",
     examId: "exam",
@@ -171,16 +181,16 @@ function scheduledBootstrap(): AssessmentDeliveryBootstrap {
     versionId: "version",
     serverNow: SERVER_NOW,
     candidateName: "Candidate",
-    scheduleRuntimeStatus: "scheduled",
+    scheduleRuntimeStatus: "not_started",
     timing: {
       authority: "cohort_runtime",
       timingModel: "cohort_section_v3",
-      stageKey: "reading-writing",
-      stageStatus: "locked",
+      stageKey: null,
+      stageStatus: "not_started",
       serverNow: SERVER_NOW,
       deadlineAt: null,
       remainingSeconds: 0,
-      runtimeRevision: 1,
+      runtimeRevision: 0,
     },
     proctorStatus: "active",
     proctorNote: null,
@@ -323,7 +333,7 @@ describe("useSatExamController auto-entry", () => {
   });
 
   it("enters the first module with no student action once the proctor starts the session", async () => {
-    gatewayMocks.bootstrap.mockResolvedValueOnce(scheduledBootstrap());
+    gatewayMocks.bootstrap.mockResolvedValueOnce(notStartedCohortBootstrap());
     gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(2));
     gatewayMocks.startModule.mockResolvedValue(
       openedModule(liveFirstModuleBootstrap(2), MODULE_RW, 3),
@@ -332,7 +342,7 @@ describe("useSatExamController auto-entry", () => {
     const hook = renderController();
 
     await waitFor(() =>
-      expect(hook.result.current.data?.scheduleRuntimeStatus).toBe("scheduled"),
+      expect(hook.result.current.data?.scheduleRuntimeStatus).toBe("not_started"),
     );
     // Nothing may start while the proctor has not made the runtime live.
     expect(gatewayMocks.startModule).not.toHaveBeenCalled();
@@ -346,6 +356,81 @@ describe("useSatExamController auto-entry", () => {
       moduleId: MODULE_RW,
     });
     await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+  });
+
+  // The waiting-room 409 storm: a real pre-start bootstrap used to say
+  // "live", so auto-entry fired, POST /modules/start answered 409
+  // RUNTIME_NOT_LIVE, and the 2s retry window re-fired it forever. With the
+  // corrected pre-start projection the entry gate never opens, so the student
+  // sits on the directions screen through every recovery poll.
+  it("stays in the waiting room through recovery polls while the runtime is not_started", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SERVER_NOW));
+    try {
+      gatewayMocks.bootstrap.mockResolvedValue(notStartedCohortBootstrap());
+
+      const hook = renderController();
+      await act(async () => {
+        for (let i = 0; i < 12; i++) await Promise.resolve();
+      });
+
+      expect(hook.result.current.data?.scheduleRuntimeStatus).toBe("not_started");
+      expect(hook.result.current.state.phase).toBe("directions");
+
+      // 30s without a live socket = many 1-2s recovery polls (plus the 500ms
+      // clock tick that drives the entry retry window).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      // Verified against the pre-fix payload (status "live", authority
+      // legacy_attempt): this same test fires 16 startModule calls in 30s.
+      expect(gatewayMocks.bootstrap.mock.calls.length).toBeGreaterThan(1);
+      expect(gatewayMocks.startModule).not.toHaveBeenCalled();
+      expect(hook.result.current.state.phase).toBe("directions");
+      // No recoverable entry surface: nothing was ever attempted, so the
+      // manual start button is not offered as error recovery.
+      expect(hook.result.current.autoEntryRecoverable).toBe(false);
+      expect(hook.result.current.error).toBeNull();
+
+      // The proctor starts; one live payload is enough for automatic entry.
+      gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(2));
+      gatewayMocks.startModule.mockResolvedValue(
+        openedModule(liveFirstModuleBootstrap(2), MODULE_RW, 3),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1);
+      expect(gatewayMocks.startModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, {
+        moduleId: MODULE_RW,
+      });
+      hook.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A duplicate wake-up (a re-delivered bus row, a reconnect replay, or a
+  // second effect run) must not open the same module twice: entry is
+  // single-flight per target, and only a confirmed open is terminal.
+  it("starts the first module once when duplicate live payloads arrive mid-start", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(liveFirstModuleBootstrap(2));
+    // The start stays in flight for the whole assertion window, so the only
+    // thing that can produce a second call is a missing in-flight guard.
+    gatewayMocks.startModule.mockImplementation(() => new Promise(() => {}));
+
+    const hook = renderController();
+
+    await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1));
+    hook.rerender({ token: 1 });
+    hook.rerender({ token: 2 });
+    await act(async () => {
+      await sleep(600);
+    });
+
+    expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1);
+    hook.unmount();
   });
 
   it("enters the next section with no student action once the authoritative break has ended", async () => {

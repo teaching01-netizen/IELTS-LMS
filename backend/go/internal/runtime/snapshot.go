@@ -1,15 +1,14 @@
-// Snapshot is the plan-B2 lock-free runtime view for student steady-state
-// writes. It carries exactly what the write path needs to decide
-// writability WITHOUT locking exam_session_runtimes + section rows:
-// status, active section, revision, timing model, and liveness flags.
+// Snapshot is the plan-B2 lock-free runtime view: status, active section,
+// revision, timing model, and liveness flags, read WITHOUT locking
+// exam_session_runtimes + section rows.
 //
-// Correctness bound (explicit, stakeholder-signed in the scale plan): the
-// snapshot may be up to SnapshotTTL stale (default 1s). A write landing
-// ~1s past a pause boundary is still fenced by:
-//   - lease/control epochs (control commands bump control_epoch+1),
-//   - closing_grace_until checked in-tx on the locked attempt row,
-//   - exactly one synchronous refresh + retry on mismatch before failing
-//     with today's 422/409 codes (never a lost write, never a silent accept).
+// Correctness bound (audit finding 3): this view may be up to SnapshotTTL stale
+// (default 1s), so it can serve READS that tolerate that — student runtime polls
+// (Service.PollView) — and nothing else. It must never authorize a write: the V2
+// answer-write gate reads the current runtime + section state on the writing
+// transaction itself (cmd/api/v2locker_snapshot.go and v2Locker). There is no
+// cached pre-gate left to be trusted, and no "the in-tx re-check makes it safe"
+// assumption: that assumption is what let a write land against a stale view.
 //
 // Seal, runtime commands, and reconcile-finalize keep FOR UPDATE locking.
 package runtime
@@ -20,22 +19,27 @@ import (
 	"sync"
 	"time"
 
-	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
 
 // SnapshotTTL bounds snapshot staleness (plan B2 default 1s).
 const SnapshotTTL = time.Second
 
-// Snapshot is one schedule's cached runtime view.
+// Snapshot is one schedule's runtime view: the fields below are what the V2
+// write gate needs, and they are only trustworthy when the read happened on the
+// writing transaction (LoadSnapshot is called that way by both gate modes). The
+// cached copy (SnapshotCache) exists for student polls, which ignore the
+// liveness flags — a cache entry must never be a gate input.
 type Snapshot struct {
 	Status           string
 	ActiveSectionKey *string
 	Revision         int64
 	TimingModel      string
-	SectionLive      bool
-	SectionPaused    bool
-	SectionStarted   bool
+	// SectionLive/Paused/Started come from SectionLiveness and are consumed by
+	// attempts.ensureWritable: only a live section is writable.
+	SectionLive    bool
+	SectionPaused  bool
+	SectionStarted bool
 	// WaitingForNextSection mirrors exam_session_runtimes.waiting_for_next_section:
 	// the active section is complete and the next has not gone live. Writes are
 	// refused for the whole window (same 422 family as the liveness gate).
@@ -43,26 +47,28 @@ type Snapshot struct {
 	LoadedAt              time.Time
 }
 
-// CheckWritable enforces the snapshot pre-gate with the same 422 code family
-// as ensureWritable (attempts/service.go): it mirrors the runtime-status
-// and section-liveness clauses so a stale-snapshot accept can never slip a
-// write past the in-tx ensureWritable re-check (which stays authoritative).
-func (s Snapshot) CheckWritable() error {
-	switch s.Status {
-	case StatusLive:
-		// live gate below
-	case StatusNotStarted, StatusPaused, StatusCompleted, StatusCancelled:
-		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is not live.", HTTPStatus: 422}
+// SectionLiveness maps a stored section status to the write gate's liveness
+// booleans. It is the single owner of that mapping: the FOR UPDATE gate
+// (v2Locker) and the lock-free gate (LoadSnapshot) both call it, so the two
+// modes cannot drift into rejecting different writes.
+//
+//	live      opened and writable
+//	paused    opened, clock stopped: not writable
+//	locked    planned but never opened: not writable ("has not started")
+//	completed ran and is over: not writable (the between-sections window,
+//	          where the runtime deliberately keeps pointing at this section)
+func SectionLiveness(status string) (started, live, paused bool) {
+	switch status {
+	case SectionLive:
+		return true, true, false
+	case SectionPaused:
+		return true, false, true
+	case SectionLocked:
+		return false, false, false
 	default:
-		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is not live.", HTTPStatus: 422}
+		// completed or an unrecognised status: it ran, it is no longer live.
+		return true, false, false
 	}
-	if s.WaitingForNextSection {
-		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is waiting.", HTTPStatus: 422}
-	}
-	if s.SectionPaused || !s.SectionLive || !s.SectionStarted {
-		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is not live.", HTTPStatus: 422}
-	}
-	return nil
 }
 
 // SnapshotCache is a mutex-guarded TTL map: scheduleID -> Snapshot.
@@ -189,13 +195,10 @@ func LoadSnapshot(ctx context.Context, q SnapshotQuerier, scheduleID string, now
 			return Snapshot{}, serr
 		}
 		if serr == nil && secStatus.Valid {
-			snap.SectionStarted = true
-			switch secStatus.String {
-			case SectionLive:
-				snap.SectionLive = true
-			case SectionPaused:
-				snap.SectionPaused = true
-			}
+			// SectionLiveness keeps SectionStarted false for a planned-but-
+			// locked section, so the gate refuses a write on a section that has
+			// not begun instead of reading the row's mere existence as a start.
+			snap.SectionStarted, snap.SectionLive, snap.SectionPaused = SectionLiveness(secStatus.String)
 		}
 	} else {
 		snap.ActiveSectionKey = strptr("*")

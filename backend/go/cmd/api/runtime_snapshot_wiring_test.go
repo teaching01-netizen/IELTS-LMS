@@ -10,10 +10,11 @@ import (
 	"example.com/ielts-proctoring/internal/runtime"
 )
 
-// WS-16: BuildApp snapshot-cache wiring - behavioral divergence (locker type
-// + shared TTL view), not a nil guard. Off must route V2 writes through
-// v2Locker (today's FOR UPDATE path); on with a pool must route through
-// snapshotLocker sharing the app cache (fresh+live TTL hit = zero SQL).
+// WS-16: BuildApp runtime wiring. RUNTIME_SNAPSHOT chooses the LOCKING of the V2
+// write gate, not its authority: both lockers read current runtime state on the
+// writing transaction. The SnapshotCache stays wired (always non-nil) because it
+// serves student runtime polls, and it is deliberately not consulted by the
+// write gate — a cached view must never authorize a write.
 // Load-bearing lines: main.go RuntimeSnapshots wiring +
 // RuntimeLockerFor Config.RuntimeSnapshotEnabled branch.
 func TestBuildAppRuntimeSnapshotWiring(t *testing.T) {
@@ -48,13 +49,10 @@ func TestBuildAppRuntimeSnapshotWiring(t *testing.T) {
 	if on.RuntimeSnapshots == nil {
 		t.Fatalf("BuildApp must set RuntimeSnapshots when enabled")
 	}
-	locker, ok := on.RuntimeLockerFor().(snapshotLocker)
-	if !ok {
+	if _, ok := on.RuntimeLockerFor().(snapshotLocker); !ok {
 		t.Fatalf("snapshot-on with pool must route through snapshotLocker, got %T", on.RuntimeLockerFor())
 	}
-	if locker.cache != on.RuntimeSnapshots {
-		t.Fatalf("snapshotLocker must share the app RuntimeSnapshots cache (one TTL view)")
-	}
+	// The cache remains available to the poll path (one TTL view per schedule).
 	seedLive(on.RuntimeSnapshots)
 	if got := on.RuntimeSnapshots.Len(); got != 1 {
 		t.Fatalf("seeded snapshot cache must hold 1 entry, got %d", got)

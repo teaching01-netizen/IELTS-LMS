@@ -6,6 +6,7 @@ import {
   applyQuestionWorkspaceScalar,
   emptyWorkspaceContent,
   isQuestionWorkspaceScalar,
+  questionWorkspaceHydration,
   questionWorkspaceRich,
   questionWorkspaceScalar,
   type QuestionWorkspaceScalar,
@@ -23,6 +24,11 @@ import {
  *   - read : a collaborator's scalar/rich update projects onto the draft;
  *   - write: a local change projects onto the room, field by field, so an
  *            older parent render cannot clobber a concurrent edit elsewhere.
+ *
+ * It also owns the AUTHORITY HANDOFF: the room being connected is not the same
+ * as the room holding this question. `hydration` is that distinction, and every
+ * one of the three directions above waits for it — read and write never cross
+ * the barrier, and a seed proposal is the only thing that may cross it early.
  */
 export interface WorkspaceProjectionWritesInput {
   workspaceCollaboration: SatAuthoringCollaborationValue | null;
@@ -45,9 +51,25 @@ export interface WorkspaceProjectionWritesInput {
   setDraft: Dispatch<SetStateAction<QuestionRevision | null>>;
 }
 
+export interface QuestionHydration {
+  /**
+   * Every root this question needs is owned by the room.
+   *
+   * A connected room is NOT the same thing: the seed is a proposal the service
+   * arbitrates, so there is a real window in which the room has synced and the
+   * question's roots do not exist yet. Everything that hands authority to the
+   * room waits for this flag.
+   */
+  ready: boolean;
+  /** The root paths the room does not hold yet, for diagnostics and surfaces. */
+  pendingPaths: string[];
+}
+
 export interface WorkspaceProjectionWrites {
   /** The room's scalar record for the open question, if it has one yet. */
   sharedQuestionScalar: QuestionWorkspaceScalar | null;
+  /** Whether the room owns the open question's canonical roots yet. */
+  hydration: QuestionHydration;
   /**
    * Projects a local question change onto the room's scalar record.
    * False when no room owns the open question, in which case the caller keeps
@@ -86,6 +108,32 @@ export function useWorkspaceProjectionWrites(
     () => (sharedQuestionScalar ? JSON.stringify(sharedQuestionScalar) : null),
     [sharedQuestionScalar],
   );
+  // Which choice roots this question needs. The room's own scalar wins once it
+  // exists (it is the newer truth); before that the HTTP question states the
+  // shape being seeded. An SPR question requires no choice roots at all.
+  const requiredChoiceIds = useMemo(() => {
+    if (sharedQuestionScalar?.answer.kind === "single_choice") {
+      return sharedQuestionScalar.answer.options.map((option) => option.id);
+    }
+    const source = baseQuestion ?? draft;
+    return source?.answer.kind === "single_choice"
+      ? source.answer.options.map((option) => option.id)
+      : [];
+  }, [baseQuestion, draft, sharedQuestionScalar]);
+
+  // The authority handoff: is the room actually holding this question yet?
+  const hydration = useMemo<QuestionHydration>(() => {
+    if (!workspaceCollaboration || !workspaceQuestionPath) {
+      return { ready: false, pendingPaths: [] };
+    }
+    return questionWorkspaceHydration(
+      workspaceCollaboration.workspaceSnapshot.values,
+      workspaceQuestionPath,
+      { singleChoiceOptionIds: requiredChoiceIds },
+    );
+  }, [requiredChoiceIds, workspaceCollaboration, workspaceQuestionPath]);
+  const hydrated = hydration.ready;
+
   const sharedQuestionRich = useMemo(
     () =>
       workspaceCollaboration && workspaceQuestionPath
@@ -158,6 +206,11 @@ export function useWorkspaceProjectionWrites(
   ]);
 
   useEffect(() => {
+    // Before the question is hydrated the HTTP draft is authoritative: an empty
+    // (or partial) room must not project over it. This is the guard that turns
+    // "an allocated-but-empty root appeared" into nothing at all, even if such a
+    // value ever reached the snapshot.
+    if (!hydrated) return;
     if (!draft || !sharedQuestionScalar || !sharedQuestionScalarJson) return;
     const localWrite = localWorkspaceScalarRef.current;
     const currentScalarJson = JSON.stringify(questionWorkspaceScalar(draft, sharedQuestionScalar.isPretest));
@@ -174,13 +227,17 @@ export function useWorkspaceProjectionWrites(
       if (JSON.stringify(questionWorkspaceScalar(current, sharedQuestionScalar.isPretest)) === sharedQuestionScalarJson) return current;
       return applyQuestionWorkspaceScalar(current, sharedQuestionScalar);
     });
-  }, [draft, selectedExamQuestionId, setDraft, sharedQuestionScalar, sharedQuestionScalarJson]);
+  }, [draft, hydrated, selectedExamQuestionId, setDraft, sharedQuestionScalar, sharedQuestionScalarJson]);
 
   // A supporting-material or rationale editor may be collapsed locally. Keep
   // the question projection current from the shared XML roots anyway, so
   // remote edits are visible as soon as the section is expanded and are also
   // reflected in preview/validation without requiring a local remount.
   useEffect(() => {
+    // Same barrier as the scalar projection above: the room may only replace a
+    // field of the HTTP question once it owns that question's roots. Until then
+    // a partial room (one root seeded, three still empty) is not authority.
+    if (!hydrated) return;
     if (!draft || !sharedQuestionRich || !workspaceQuestionPath) return;
     const next = applyQuestionWorkspaceRich(draft, sharedQuestionRich);
     if (JSON.stringify(next) === JSON.stringify(draft)) return;
@@ -189,11 +246,17 @@ export function useWorkspaceProjectionWrites(
       const projected = applyQuestionWorkspaceRich(current, sharedQuestionRich);
       return JSON.stringify(projected) === JSON.stringify(current) ? current : projected;
     });
-  }, [draft, setDraft, sharedQuestionRich, workspaceQuestionPath]);
+  }, [draft, hydrated, setDraft, sharedQuestionRich, workspaceQuestionPath]);
 
   const publishScalar = useCallback(
     (question: QuestionRevision): boolean => {
       if (!workspaceCollaboration || !selectedExamQuestionId) return false;
+      // A room is mounted for this question, but it does not hold the question's
+      // canonical roots yet: the author cannot be editing this question through
+      // it, so a write here would be the second writer filling an empty room.
+      // `true` keeps the legacy HTTP autosave out, which is the invariant that
+      // matters — the room owns the question, its seed just has not landed.
+      if (!hydrated) return true;
       const currentShared = workspaceCollaboration.workspaceSnapshot.values[
         `question/${selectedExamQuestionId}/scalar`
       ];
@@ -219,12 +282,15 @@ export function useWorkspaceProjectionWrites(
       }
       return true;
     },
-    [draftRef, isPretest, selectedExamQuestionId, workspaceCollaboration],
+    [draftRef, hydrated, isPretest, selectedExamQuestionId, workspaceCollaboration],
   );
 
   const handleLocalRichChange = useCallback(
     (next: QuestionRevision) => {
       if (!workspaceCollaboration || !selectedExamQuestionId) return;
+      // Same barrier as `publishScalar`: never write rich content into a room
+      // that has not yet been handed the question's canonical roots.
+      if (!hydrated) return;
       const path = `question/${selectedExamQuestionId}`;
       // The editor binding already wrote the field that changed. The explicit
       // projection also covers non-editor rich actions (for example replacing
@@ -267,8 +333,8 @@ export function useWorkspaceProjectionWrites(
       // The workspace provider owns every rich field, not only the prompt.
       // Its Yjs store acknowledgement drives the save surface.
     },
-    [draftRef, selectedExamQuestionId, workspaceCollaboration],
+    [draftRef, hydrated, selectedExamQuestionId, workspaceCollaboration],
   );
 
-  return { sharedQuestionScalar, publishScalar, handleLocalRichChange };
+  return { sharedQuestionScalar, hydration, publishScalar, handleLocalRichChange };
 }

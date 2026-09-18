@@ -388,7 +388,7 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
-	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, now)
+	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, providerKey, now)
 	if err != nil {
 		return nil, err
 	}

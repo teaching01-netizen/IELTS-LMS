@@ -34,7 +34,7 @@ func TestSubmitRejectsDuplicateFinalWriteIDs(t *testing.T) {
 		FinalCommands: []ResponseCommand{dup, dup}}
 	// Must be a 400 envelope rejection — not a mock/SQL failure (which
 	// would prove the gate did NOT fire and the tx began anyway).
-	_, err = svc.Submit(context.Background(), bearer, cmd, qr, rl, ProviderIELTS, nil)
+	_, err = svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderIELTS), nil)
 	if codeOf(err) != apperrors.CodeBadRequest {
 		t.Fatalf("submit with duplicate final write IDs must 400 at the envelope, got %v", err)
 	}

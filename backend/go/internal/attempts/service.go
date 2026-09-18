@@ -34,11 +34,21 @@ type Service struct {
 	// SELECT/UPDATE per answer). Off keeps mergeProjection. Wired via
 	// SetRowFirst (BuildApp from ROW_FIRST_WRITES); tests set directly.
 	rowFirst bool
+	// bulkMin overrides bulkWriteThreshold (tests only; zero = the constant).
+	bulkMin int
 }
 
 // SetRowFirst selects the B3 row-first write path. Chainable.
 func (s *Service) SetRowFirst(on bool) *Service {
 	s.rowFirst = on
+	return s
+}
+
+// SetBulkThresholdForTest forces the batch I/O threshold so a test can drive
+// the same batch through both strategies. Tests only: production uses
+// bulkWriteThreshold.
+func (s *Service) SetBulkThresholdForTest(n int) *Service {
+	s.bulkMin = n
 	return s
 }
 
@@ -62,7 +72,31 @@ type QuestionResolver interface {
 	Resolve(ctx context.Context, q tx.Tx, attemptID, questionID string) (QuestionOwner, error)
 }
 
-// RuntimeGate is the locked runtime projection used for writability.
+// QuestionVerdict is one question's resolution outcome. ResolveMany carries
+// errors per question (not per call) so a batch can resolve every question it
+// touched in one statement while the write loop still reports each error at the
+// command that owns it.
+type QuestionVerdict struct {
+	Owner QuestionOwner
+	Err   error
+}
+
+// BulkQuestionResolver is the optional set-based variant of QuestionResolver.
+// A resolver that implements it lets a batch resolve all of its questions in
+// one statement instead of one question->module query (plus, for legacy
+// snapshot exams, one content-snapshot load) per answer. Resolvers that do not
+// implement it keep the per-question contract.
+type BulkQuestionResolver interface {
+	ResolveMany(ctx context.Context, q tx.Tx, attemptID string, questionIDs []string) (map[string]QuestionVerdict, error)
+}
+
+// RuntimeGate is the runtime projection used for writability. Every field is
+// read on the caller's transaction — the transaction that commits the write —
+// either under the runtime/section row locks (v2Locker) or lock-free
+// (snapshotLocker). A cached or otherwise stale view must never populate this
+// struct: it authorizes writes, so its source has to be as current as the write
+// itself. ensureWritable consumes every liveness field below, so none of them
+// can silently go unenforced.
 type RuntimeGate struct {
 	Status                string
 	WaitingForNextSection bool
@@ -182,8 +216,9 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 	}
 	// Exact-replay fast path: authorized at current lease, skips epoch
 	// equality + runtime gate; never mutates twice (plan 21).
+	io := s.ioFor(ctx, q, cmd, attempt, qr)
 	if len(cmd.Commands) > 0 {
-		replay, acks, rev, err := exactReplay(ctx, q, cmd)
+		replay, acks, rev, err := exactReplay(ctx, q, io, cmd)
 		if err != nil {
 			return SaveResult{}, err
 		}
@@ -241,35 +276,31 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 			return SaveResult{}, err
 		}
 		// Idempotency probe.
-		var storedHash string
-		var storedRev uint64
-		var storedResp string
-		var storedResponseHash, storedOutcome string
-		err = q.QueryRowContext(ctx, `SELECT request_hash, response_hash, outcome, server_revision, CAST(canonical_response AS CHAR) FROM attempt_mutations_v2 WHERE attempt_id=? AND client_write_id=? FOR UPDATE`, cmd.AttemptID, c.WriteID).Scan(&storedHash, &storedResponseHash, &storedOutcome, &storedRev, &storedResp)
-		switch {
-		case err == nil:
-			if storedHash != reqHash {
+		stored, err := io.ledgerByWrite(c.WriteID)
+		if err != nil {
+			return SaveResult{}, err
+		}
+		if stored != nil {
+			if stored.RequestHash != reqHash {
 				return SaveResult{}, &apperrors.Error{Code: apperrors.CodeWriteIDConflict, Message: fmt.Sprintf("Write %q was already used with different content.", c.WriteID), HTTPStatus: 409, Details: map[string]any{"writeId": c.WriteID}}
 			}
-			canonical, err := decodeResponsePayload(storedResp)
+			canonical, err := decodeResponsePayload(stored.CanonicalRaw)
 			if err != nil {
 				return SaveResult{}, err
 			}
 			acks = append(acks, Ack{
 				WriteID: c.WriteID, QuestionID: c.QuestionID, ClientVersion: c.ClientVersion,
-				Outcome: "duplicate", ServerRevision: storedRev, Replayed: true,
-				CanonicalResponse: canonical, ContentHash: storedResponseHash,
+				Outcome: "duplicate", ServerRevision: stored.ServerRevision, Replayed: true,
+				CanonicalResponse: canonical, ContentHash: stored.ResponseHash,
 			})
 			continue
-		case err != sql.ErrNoRows:
-			return SaveResult{}, err
 		}
 		// New write: writability applies only to new write IDs so exact
 		// duplicates stay replayable post-terminal (per spec).
 		if err := ensureWritable(attempt, gate, now); err != nil {
 			return SaveResult{}, err
 		}
-		owner, err := qr.Resolve(ctx, q, cmd.AttemptID, c.QuestionID)
+		owner, err := io.owner(c.QuestionID)
 		if err != nil {
 			return SaveResult{}, err
 		}
@@ -277,27 +308,25 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 			return SaveResult{}, err
 		}
 		// Version-collision probe.
-		var existingWrite string
-		err = q.QueryRowContext(ctx, `SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id=? AND lease_epoch=? AND question_id=? AND client_version=? FOR UPDATE`, cmd.AttemptID, cmd.LeaseEpoch, c.QuestionID, c.ClientVersion).Scan(&existingWrite)
-		if err == nil {
-			return SaveResult{}, &apperrors.Error{Code: apperrors.CodeVersionCollision, Message: "Client version already used by another write.", HTTPStatus: 409, Details: map[string]any{"questionId": c.QuestionID, "clientVersion": c.ClientVersion, "existingWriteId": existingWrite}}
-		} else if err != sql.ErrNoRows {
+		colliding, err := io.ledgerByVersion(cmd.LeaseEpoch, c.QuestionID, c.ClientVersion)
+		if err != nil {
 			return SaveResult{}, err
+		}
+		if colliding != nil {
+			return SaveResult{}, &apperrors.Error{Code: apperrors.CodeVersionCollision, Message: "Client version already used by another write.", HTTPStatus: 409, Details: map[string]any{"questionId": c.QuestionID, "clientVersion": c.ClientVersion, "existingWriteId": colliding.WriteID}}
 		}
 		respHash, err := HashResponse(payloadToAny(c.Response))
 		if err != nil {
 			return SaveResult{}, err
 		}
 		// Projection with per-question monotonic rule (plan 22).
-		var curLease *uint64
-		var curVersion *uint64
-		var curRev *uint64
-		err = q.QueryRowContext(ctx, `SELECT lease_epoch, client_version, server_revision FROM attempt_responses_v2 WHERE attempt_id=? AND question_id=? FOR UPDATE`, cmd.AttemptID, c.QuestionID).Scan(&curLease, &curVersion, &curRev)
-		newer := true
-		if err == nil && curLease != nil && curVersion != nil {
-			newer = cmd.LeaseEpoch > *curLease || (cmd.LeaseEpoch == *curLease && c.ClientVersion > *curVersion)
-		} else if err != nil && err != sql.ErrNoRows {
+		cur, err := io.projection(c.QuestionID)
+		if err != nil {
 			return SaveResult{}, err
+		}
+		newer := true
+		if cur != nil && cur.LeaseEpoch != nil && cur.ClientVersion != nil {
+			newer = cmd.LeaseEpoch > *cur.LeaseEpoch || (cmd.LeaseEpoch == *cur.LeaseEpoch && c.ClientVersion > *cur.ClientVersion)
 		}
 		outcome := "applied"
 		serverRev := revision + 1
@@ -305,19 +334,18 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 		ackHash := respHash
 		if !newer {
 			outcome = "superseded"
-			if curRev != nil {
-				serverRev = *curRev
+			if cur.ServerRevision != nil {
+				serverRev = *cur.ServerRevision
 			}
-			var currentRaw string
-			var currentHash string
-			if err := q.QueryRowContext(ctx, `SELECT CAST(response AS CHAR), response_hash FROM attempt_responses_v2 WHERE attempt_id=? AND question_id=?`, cmd.AttemptID, c.QuestionID).Scan(&currentRaw, &currentHash); err != nil {
-				return SaveResult{}, err
-			}
-			ackCanonical, err = decodeResponsePayload(currentRaw)
+			current, err := io.projectionContent(c.QuestionID)
 			if err != nil {
 				return SaveResult{}, err
 			}
-			ackHash = currentHash
+			ackCanonical, err = decodeResponsePayload(current.CanonicalRaw)
+			if err != nil {
+				return SaveResult{}, err
+			}
+			ackHash = current.ResponseHash
 		} else {
 			revision++
 			serverRev = revision
@@ -329,22 +357,19 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 			if err != nil {
 				return SaveResult{}, err
 			}
-			// B3: row-first path persists only the answer cell row (no blob
-			// SELECT/UPDATE); legacy path keeps mergeProjection. Both share
-			// the same canonical bytes + idempotency/version fencing above.
-			if s.rowFirst {
-				if err := upsertResponseRow(ctx, q, cmd.AttemptID, c.QuestionID, owner.ModuleID, cmd.LeaseEpoch, cmd.ControlEpoch, c.ClientVersion, c.WriteID, reqHash, canonical, respHash, serverRev, now); err != nil {
-					return SaveResult{}, err
-				}
-			} else {
-				writing := strings.Contains(strings.ToLower(owner.ModuleID), "writing")
-				answersJSON, writingJSON, flagsJSON, err := mergeProjection(ctx, q, cmd.AttemptID, c.QuestionID, canonical, c, writing, owner.ModuleID, cmd.LeaseEpoch, cmd.ControlEpoch, reqHash, serverRev, respHash, now)
-				if err != nil {
-					return SaveResult{}, err
-				}
-				_ = answersJSON
-				_ = writingJSON
-				_ = flagsJSON
+			// B3: row-first persists only the answer cell row (no blob
+			// SELECT/UPDATE); legacy keeps the blob merge. Both share the
+			// same canonical bytes + idempotency/version fencing above, and
+			// the I/O strategy only decides WHEN those statements are
+			// issued (per command, or once for the whole batch).
+			writing := strings.Contains(strings.ToLower(owner.ModuleID), "writing")
+			if err := io.applyProjection(projectionWrite{
+				AttemptID: cmd.AttemptID, QuestionID: c.QuestionID, ModuleID: owner.ModuleID,
+				LeaseEpoch: cmd.LeaseEpoch, ControlEpoch: cmd.ControlEpoch, ClientVersion: c.ClientVersion,
+				WriteID: c.WriteID, RequestHash: reqHash, ResponseHash: respHash, ServerRevision: serverRev,
+				Canonical: canonical, Payload: c.Response, Writing: writing, Now: now,
+			}); err != nil {
+				return SaveResult{}, err
 			}
 		}
 		canonical, err := CanonicalJSON(commandToAny(cmd.LeaseEpoch, c))
@@ -356,16 +381,23 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 		if err != nil {
 			return SaveResult{}, err
 		}
-		if _, err := q.ExecContext(ctx, `INSERT INTO attempt_mutations_v2 (id, attempt_id, client_write_id, lease_epoch, control_epoch, question_id, client_version, request_hash, response_hash, outcome, server_revision, canonical_response, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), cmd.AttemptID, c.WriteID, cmd.LeaseEpoch, cmd.ControlEpoch, c.QuestionID, c.ClientVersion, reqHash, ackHash, outcome, serverRev, string(payloadCanon), now); err != nil {
-			if isDup(err) {
-				return SaveResult{}, &apperrors.Error{Code: apperrors.CodeWriteIDConflict, Message: fmt.Sprintf("Write %q was already used with different content.", c.WriteID), HTTPStatus: 409}
-			}
+		if err := io.insertLedger(ledgerWrite{
+			AttemptID: cmd.AttemptID, WriteID: c.WriteID, LeaseEpoch: cmd.LeaseEpoch, ControlEpoch: cmd.ControlEpoch,
+			QuestionID: c.QuestionID, ClientVersion: c.ClientVersion, RequestHash: reqHash,
+			ResponseHash: ackHash, Outcome: outcome, ServerRevision: serverRev,
+			CanonicalPayload: string(payloadCanon), Now: now,
+		}); err != nil {
 			return SaveResult{}, err
 		}
 		acks = append(acks, Ack{
 			WriteID: c.WriteID, QuestionID: c.QuestionID, ClientVersion: c.ClientVersion,
 			Outcome: outcome, ServerRevision: serverRev, CanonicalResponse: ackCanonical, ContentHash: ackHash,
 		})
+	}
+	// The set-based strategy emits its deferred writes here, in the same
+	// order the per-command strategy writes them: projection, then ledger.
+	if err := io.flush(); err != nil {
+		return SaveResult{}, err
 	}
 	if changed > 0 {
 		if _, err := q.ExecContext(ctx, `UPDATE student_attempts SET response_revision=?, answer_revision=answer_revision+?, revision=revision+1 WHERE id=?`, revision, changed, cmd.AttemptID); err != nil {
@@ -475,33 +507,56 @@ func ensureActiveSession(ctx context.Context, q tx.Tx, a AttemptState, claims cr
 }
 
 // exactReplay returns stored acks when every write ID matches stored hash.
-func exactReplay(ctx context.Context, q tx.Tx, cmd SaveResponsesCommand) (bool, []Ack, uint64, error) {
+// ioFor picks the batch's I/O strategy (batch_io.go). Both drive the same
+// validation loop; only the number of round trips under the attempt lock
+// differs. bulkMin overrides the threshold in tests that need to force a
+// strategy (it is not a deployment option: the value is the package constant).
+func (s *Service) ioFor(ctx context.Context, q tx.Tx, cmd SaveResponsesCommand, attempt AttemptState, qr QuestionResolver) saveIO {
+	threshold := bulkWriteThreshold
+	if s.bulkMin > 0 {
+		threshold = s.bulkMin
+	}
+	if len(cmd.Commands) > threshold {
+		return &batchIO{
+			ctx: ctx, q: q, attemptID: cmd.AttemptID, lease: cmd.LeaseEpoch,
+			rowFirst: s.rowFirst, qr: qr, commands: cmd.Commands,
+		}
+	}
+	return perCommandIO{ctx: ctx, q: q, attemptID: cmd.AttemptID, rowFirst: s.rowFirst, qr: qr}
+}
+
+// exactReplay is the plan-21 fast path: when EVERY command of the batch is
+// already in the ledger with matching content, the batch returns the stored
+// acks and mutates nothing. It short-circuits at the first unseen write id
+// (today's semantics: a partial replay falls through to the normal loop, which
+// re-classifies each command), and a stored row with different content fails
+// the batch here — before the epoch fences. The I/O strategy only changes
+// whether those probes are one statement or N.
+func exactReplay(ctx context.Context, q tx.Tx, io saveIO, cmd SaveResponsesCommand) (bool, []Ack, uint64, error) {
 	acks := make([]Ack, 0, len(cmd.Commands))
 	for _, c := range cmd.Commands {
 		reqHash, err := commandHash(c)
 		if err != nil {
 			return false, nil, 0, err
 		}
-		var storedHash, responseHash, outcome, storedResp string
-		var storedRev uint64
-		err = q.QueryRowContext(ctx, `SELECT request_hash, response_hash, outcome, server_revision, CAST(canonical_response AS CHAR) FROM attempt_mutations_v2 WHERE attempt_id=? AND client_write_id=? FOR UPDATE`, cmd.AttemptID, c.WriteID).Scan(&storedHash, &responseHash, &outcome, &storedRev, &storedResp)
-		if err == sql.ErrNoRows {
-			return false, nil, 0, nil
-		}
+		stored, err := io.ledgerByWrite(c.WriteID)
 		if err != nil {
 			return false, nil, 0, err
 		}
-		if storedHash != reqHash {
+		if stored == nil {
+			return false, nil, 0, nil
+		}
+		if stored.RequestHash != reqHash {
 			return false, nil, 0, &apperrors.Error{Code: apperrors.CodeWriteIDConflict, Message: fmt.Sprintf("Write %q was already used with different content.", c.WriteID), HTTPStatus: 409, Details: map[string]any{"writeId": c.WriteID}}
 		}
-		canonical, err := decodeResponsePayload(storedResp)
+		canonical, err := decodeResponsePayload(stored.CanonicalRaw)
 		if err != nil {
 			return false, nil, 0, err
 		}
 		acks = append(acks, Ack{
 			WriteID: c.WriteID, QuestionID: c.QuestionID, ClientVersion: c.ClientVersion,
-			Outcome: "duplicate", ServerRevision: storedRev, Replayed: true,
-			CanonicalResponse: canonical, ContentHash: responseHash,
+			Outcome: "duplicate", ServerRevision: stored.ServerRevision, Replayed: true,
+			CanonicalResponse: canonical, ContentHash: stored.ResponseHash,
 		})
 	}
 	var rev uint64
@@ -528,6 +583,20 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	}
 	if gate.WaitingForNextSection {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is waiting.", HTTPStatus: 422}
+	}
+	// Section liveness (audit finding 3). These flags used to be computed by both
+	// lockers and read by nobody, so a paused section was enforced only by the
+	// snapshot pre-gate (and not at all with RUNTIME_SNAPSHOT off, where the
+	// FOR UPDATE path's SectionPaused had no consumer). The rule is enforced here
+	// — on the write's own transaction — so both modes reject the same writes.
+	if !gate.SectionStarted {
+		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section has not started.", HTTPStatus: 422}
+	}
+	if gate.SectionPaused {
+		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section is paused.", HTTPStatus: 422}
+	}
+	if !gate.SectionLive {
+		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section is not live.", HTTPStatus: 422}
 	}
 	if a.ClosingGraceUntil != nil && now.After(*a.ClosingGraceUntil) {
 		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
@@ -635,19 +704,8 @@ func mergeProjection(ctx context.Context, q tx.Tx, attemptID, questionID string,
 	answers := mapToAny(answersRaw.String)
 	writingMap := mapToAny(writingRaw.String)
 	flags := mapToAny(flagsRaw.String)
-	ansCanon, err := CanonicalJSON(payloadAnswer(c.Response))
-	if err != nil {
+	if err := mergeProjectionBlob(answers, writingMap, flags, questionID, c.Response, writing); err != nil {
 		return "", "", "", err
-	}
-	if writing {
-		writingMap[questionID] = json.RawMessage(ansCanon)
-	} else {
-		answers[questionID] = json.RawMessage(ansCanon)
-	}
-	if c.Response.MarkedForReview {
-		flags[questionID] = json.RawMessage("true")
-	} else {
-		delete(flags, questionID)
 	}
 	aJ, err := json.Marshal(answers)
 	if err != nil {
@@ -664,10 +722,33 @@ func mergeProjection(ctx context.Context, q tx.Tx, attemptID, questionID string,
 	if _, err := q.ExecContext(ctx, `UPDATE student_attempts SET answers=?, writing_answers=?, flags=? WHERE id=?`, string(aJ), string(wJ), string(fJ), attemptID); err != nil {
 		return "", "", "", err
 	}
-	if _, err := q.ExecContext(ctx, `INSERT INTO attempt_responses_v2 (attempt_id, question_id, module_id, lease_epoch, control_epoch, client_version, client_write_id, request_hash, response, response_hash, server_revision, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE module_id=VALUES(module_id), lease_epoch=VALUES(lease_epoch), control_epoch=VALUES(control_epoch), client_version=VALUES(client_version), client_write_id=VALUES(client_write_id), request_hash=VALUES(request_hash), response=VALUES(response), response_hash=VALUES(response_hash), server_revision=VALUES(server_revision), updated_at=VALUES(updated_at)`, attemptID, questionID, moduleID, leaseEpoch, controlEpoch, c.ClientVersion, c.WriteID, reqHash, string(canonical), respHash, serverRev, now); err != nil {
+	if _, err := q.ExecContext(ctx, cellInsertPrefix+"(?,?,?,?,?,?,?,?,?,?,?,?)"+cellUpsertUpdates, attemptID, questionID, moduleID, leaseEpoch, controlEpoch, c.ClientVersion, c.WriteID, reqHash, string(canonical), respHash, serverRev, now); err != nil {
 		return "", "", "", err
 	}
 	return string(aJ), string(wJ), string(fJ), nil
+}
+
+// mergeProjectionBlob applies one accepted response to the legacy answer blob
+// maps in memory. It is the single owner of the blob merge rule (answer cell
+// routing + the review flag): the per-command strategy writes the maps back
+// immediately, the set-based strategy merges every accepted command into the
+// same maps and writes them once.
+func mergeProjectionBlob(answers, writingMap, flags map[string]json.RawMessage, questionID string, payload ResponsePayload, writing bool) error {
+	ansCanon, err := CanonicalJSON(payloadAnswer(payload))
+	if err != nil {
+		return err
+	}
+	if writing {
+		writingMap[questionID] = json.RawMessage(ansCanon)
+	} else {
+		answers[questionID] = json.RawMessage(ansCanon)
+	}
+	if payload.MarkedForReview {
+		flags[questionID] = json.RawMessage("true")
+	} else {
+		delete(flags, questionID)
+	}
+	return nil
 }
 
 func mapToAny(s string) map[string]json.RawMessage {

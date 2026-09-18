@@ -27,6 +27,7 @@ import (
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/proctor"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
@@ -332,7 +333,7 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
-	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, now)
+	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, providerKey, now)
 	if err != nil {
 		return nil, err
 	}
@@ -827,10 +828,28 @@ func (s *Service) loadAttemptControl(ctx context.Context, attemptID string, boun
 // probe inside LoadSessionRuntimeBySchedule (same row, twice, on the 2k-herd
 // hot path). One probe row now: NoRows -> legacy fallback, else hydrate in
 // the same call (runtime + sections legs, skipping the duplicate).
-func (s *Service) loadTiming(ctx context.Context, scheduleID string, now time.Time) (TimingSnapshot, string, error) {
+//
+// Round 146: the NoRows branch is provider-aware. A SAT schedule with no
+// runtime row has NOT started, but this branch used to project the legacy
+// attempt clock ("live"), which opened the student entry gate before the
+// proctor pressed Start and turned the waiting room into a 409
+// RUNTIME_NOT_LIVE storm (the client re-fired /modules/start every
+// SAT_ENTRY_RETRY_WINDOW_MS). providerKey is already resolved by Bootstrap,
+// so this costs no extra query. The pre-start shape comes from
+// proctor.NotStartedRuntimeForProvider — the same projection the proctor
+// dashboard serves — so the two APIs cannot disagree about "not started"
+// (pinned by TestTimingContractPreStartAgreesWithProctorProjection).
+//
+// Non-SAT providers keep the legacy attempt clock: a legacy run has no cohort
+// runtime to wait for.
+func (s *Service) loadTiming(ctx context.Context, scheduleID, providerKey string, now time.Time) (TimingSnapshot, string, error) {
 	var status string
 	err := s.db.QueryRowContext(ctx, "SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&status)
 	if err == sql.ErrNoRows {
+		if examruntime.IsPreStartCohort(providerKey) {
+			runtime := proctor.NotStartedRuntimeForProvider(scheduleID, "", providerKey, now)
+			return timingFromRuntime(runtime), runtime.Status, nil
+		}
 		return TimingSnapshot{Authority: "legacy_attempt", TimingModel: examruntime.TimingModelLegacy, StageStatus: "live", ServerNow: now}, "live", nil
 	}
 	if err != nil {
@@ -1164,6 +1183,12 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 // mirroring the Rust with_details reason. Plain Rust Conflict without a
 // reason (the terminal-attempt guard) uses CodeAssessmentConflict bare.
 func assessmentConflict(reason, msg string) *apperrors.Error {
+	// Every structured SAT conflict is counted at its single construction
+	// point, labeled by the stable reason. This is the release signal for the
+	// waiting-room storm this work fixed: RUNTIME_NOT_LIVE from waiting
+	// students must sit at zero, and if it reappears the reason label says
+	// which read/write contract diverged.
+	telemetry.IncCounter(telemetry.MAssessmentConflict, "reason", reason)
 	err := apperrors.New(apperrors.CodeAssessmentConflict, msg)
 	err.Details = map[string]any{"reason": reason}
 	return err

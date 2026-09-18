@@ -96,6 +96,25 @@ export interface WorkspaceProviderDeps {
 
 const RICH_ROOT_PREFIX = "rich:";
 
+/**
+ * Whether a shared rich root has ever been written to.
+ *
+ * A root is ALLOCATED the moment anything asks the document for it — a field
+ * binding, a recovery export, a projection pass — and an allocated root is not
+ * an initialized one. Projecting the two as if they were the same published an
+ * empty document for a question nobody had seeded yet, and that empty value
+ * then replaced the HTTP question the author was looking at (the "sidebar has
+ * content but the editor is blank" state).
+ *
+ * The shipped structured-content contract always writes at least the
+ * document's own paragraph, so a root its owner has initialized is never
+ * zero-length: an empty paragraph is a real, author-made blank and stays
+ * authoritative. `root allocated ≠ root initialized`.
+ */
+export function isInitializedRichRoot(shared: unknown): boolean {
+  return shared instanceof Y.XmlFragment && shared.length > 0;
+}
+
 /** The shipped projection: a shared fragment read back as structured content. */
 function projectRichFragmentFromDocument(ydoc: Y.Doc, rootName: string): unknown {
   return structuredContentFromDocument(
@@ -513,7 +532,17 @@ export class SatAuthoringWorkspaceProvider {
     // remains the writer; this is read-only UI projection.
     for (const [name, shared] of this.ydoc.share) {
       if (!name.startsWith(RICH_ROOT_PREFIX) || !(shared instanceof Y.XmlFragment)) continue;
+      // Observe first, so a root that is empty now becomes dirty the moment its
+      // seed (or a collaborator) puts content in it.
       this.observeRichRoot(name, shared);
+      if (!isInitializedRichRoot(shared)) {
+        // Never initialized: not content, so it is absent from the projection.
+        // Any cached projection for this name is dropped too, so a stale value
+        // from a previous life of the root cannot outlive its content.
+        this.richProjections.delete(name);
+        this.richDirty.delete(name);
+        continue;
+      }
       if (!this.richDirty.has(name) && this.richProjections.has(name)) {
         this.values.set(name, this.richProjections.get(name));
         continue;

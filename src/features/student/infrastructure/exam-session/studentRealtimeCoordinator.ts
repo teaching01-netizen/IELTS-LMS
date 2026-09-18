@@ -77,6 +77,22 @@ export function createStudentRealtimeCoordinator(
       if (event.scheduleId && event.scheduleId !== input.scheduleId) {
         return 'ignored';
       }
+      // Runtime revisions are monotonic: a schedule_runtime frame naming a
+      // revision the client already applied carries no new state, so it must
+      // not start another authoritative refresh (a reconnect replay or a
+      // re-delivered bus row would otherwise re-refresh identical state).
+      //
+      // Only runtime frames are gated: `attempt` revisions are a different
+      // sequence owned by the attempt, and comparing them against the runtime
+      // revision would silently drop real answer updates.
+      if (
+        event.kind === 'schedule_runtime' &&
+        appliedRuntimeRevision !== null &&
+        Number.isFinite(event.revision) &&
+        event.revision <= appliedRuntimeRevision
+      ) {
+        return 'ignored';
+      }
       void input.cache.invalidateLiveSession();
       return 'invalidated';
     },

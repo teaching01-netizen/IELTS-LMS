@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -86,11 +85,37 @@ func TestLoadSnapshotPausedSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSnapshot: %v", err)
 	}
-	if !snap.SectionPaused || !snap.SectionStarted {
+	if !snap.SectionPaused || !snap.SectionStarted || snap.SectionLive {
 		t.Fatalf("paused section flags mismatch: %+v", snap)
 	}
-	if err := snap.CheckWritable(); err == nil {
-		t.Fatalf("paused-section snapshot must block writes")
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A planned-but-locked section row exists from the moment the runtime is
+// planned, but the section has not opened: SectionStarted must stay false so the
+// write gate refuses it as "has not started" instead of treating the row's
+// existence as a start.
+func TestLoadSnapshotLockedSectionNotStarted(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section"}).
+			AddRow("rt-1", "live", "math", 2, "legacy_section_v1", false))
+	mock.ExpectQuery("FROM exam_session_runtime_sections WHERE").
+		WithArgs("rt-1", "math").
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("locked"))
+	snap, err := LoadSnapshot(context.Background(), db, "sched-1", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("LoadSnapshot: %v", err)
+	}
+	if snap.SectionStarted || snap.SectionLive || snap.SectionPaused {
+		t.Fatalf("a locked section must not report started/live/paused: %+v", snap)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -98,9 +123,9 @@ func TestLoadSnapshotPausedSection(t *testing.T) {
 }
 
 // Between sections: the active section is complete and the runtime is waiting
-// for the next one. LoadSnapshot must surface the flag so the snapshot
-// pre-gate (and the in-tx ensureWritable it mirrors) refuses writes with the
-// explicit waiting message rather than a generic liveness failure.
+// for the next one. LoadSnapshot must surface the flag so the in-tx
+// ensureWritable refuses the window with the explicit waiting message rather than
+// a generic liveness failure.
 func TestLoadSnapshotBetweenSectionsBlocksWrites(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -121,23 +146,13 @@ func TestLoadSnapshotBetweenSectionsBlocksWrites(t *testing.T) {
 	if !snap.WaitingForNextSection {
 		t.Fatalf("waiting flag must be projected: %+v", snap)
 	}
-	err = snap.CheckWritable()
-	if err == nil {
-		t.Fatal("between-sections snapshot must block writes")
-	}
-	if !strings.Contains(err.Error(), "waiting") {
-		t.Fatalf("expected the explicit waiting refusal, got %v", err)
+	// The completed section is not live, and the waiting flag is what makes the
+	// gate answer "Exam runtime is waiting." rather than "Exam section is not
+	// live." (pinned in attempts' writability matrix).
+	if snap.SectionLive || !snap.SectionStarted {
+		t.Fatalf("completed section flags mismatch: %+v", snap)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// The between-sections window is also a wait for the *proctor*: an unrelated
-// schedule that is live on a live section must not be affected by the flag.
-func TestLoadSnapshotWaitingFlagFalseAllowsWrites(t *testing.T) {
-	if err := (Snapshot{Status: StatusLive, ActiveSectionKey: strptr("rw"),
-		SectionLive: true, SectionStarted: true}).CheckWritable(); err != nil {
-		t.Fatalf("live section with no waiting must allow writes: %v", err)
 	}
 }

@@ -134,6 +134,6 @@ type RowWriter interface {
 // Column list matches migration 0049's NOT NULL set (module_id,
 // control_epoch, client_write_id, request_hash, response).
 func upsertResponseRow(ctx context.Context, q RowWriter, attemptID, questionID, moduleID string, leaseEpoch, controlEpoch, clientVersion uint64, writeID, reqHash string, canonical []byte, respHash string, serverRev uint64, now time.Time) error {
-	_, err := q.ExecContext(ctx, `INSERT INTO attempt_responses_v2 (attempt_id, question_id, module_id, lease_epoch, control_epoch, client_version, client_write_id, request_hash, response, response_hash, server_revision, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE module_id=VALUES(module_id), lease_epoch=VALUES(lease_epoch), control_epoch=VALUES(control_epoch), client_version=VALUES(client_version), client_write_id=VALUES(client_write_id), request_hash=VALUES(request_hash), response=VALUES(response), response_hash=VALUES(response_hash), server_revision=VALUES(server_revision), updated_at=VALUES(updated_at)`, attemptID, questionID, moduleID, leaseEpoch, controlEpoch, clientVersion, writeID, reqHash, string(canonical), respHash, serverRev, now)
+	_, err := q.ExecContext(ctx, cellInsertPrefix+"(?,?,?,?,?,?,?,?,?,?,?,?)"+cellUpsertUpdates, attemptID, questionID, moduleID, leaseEpoch, controlEpoch, clientVersion, writeID, reqHash, string(canonical), respHash, serverRev, now)
 	return err
 }

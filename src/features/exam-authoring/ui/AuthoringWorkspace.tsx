@@ -265,6 +265,18 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const selectedQuestionIssues = draft
     ? validateSatQuestion(draft.metadata.sectionKey, draft)
     : [];
+  // A draft may only render while the CURRENT shell owns its placement.
+  //
+  // A shell replacement (a newly opened draft version, a workbook import, the
+  // sample exam) changes every placement id, and the selection effect adopts the
+  // new shell's question one commit later. Without this fence that commit
+  // renders the new sidebar beside the previous shell's question — the visible
+  // form of "the editor is showing a question this draft no longer has".
+  const renderableDraft =
+    draft !== null &&
+    allQuestions.some((question) => question.examQuestionId === selectedExamQuestionId)
+      ? draft
+      : null;
   const totalAuthored = allQuestions.length;
   const totalErrors = allQuestions.reduce(
     (sum, question) => sum + (question.readiness.status === "error" ? 1 : 0),
@@ -392,6 +404,40 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     setImportOpen: setWorkbookImportOpen,
   });
 
+  // The server's copy of the open question. ONE projection, read by both rules
+  // that need it: the seed the editors, the room and the three-way compare are
+  // authored against, and the document a refetch may install. The projection
+  // itself is the draft owner's (`serverQuestionDocument`), so the two can no
+  // longer disagree about what the server holds.
+  const serverDocument = useMemo(
+    () => serverQuestionDocument(questionQuery.data),
+    [questionQuery.data]
+  );
+  const baseQuestion = serverDocument.revision;
+  // Reading and writing the open question against the exam room: seeding,
+  // remote projection onto the draft, and the local write path. The hook owns
+  // the "who wrote this value" bookkeeping so no call site re-invents it — and
+  // it owns the AUTHORITY HANDOFF: `hydration` says whether the room has been
+  // given this question yet, which is what the bridge below and every writer
+  // wait for. Declared before the bridge because the bridge must not hand a
+  // field to an editor from a room that does not hold the question.
+  const {
+    sharedQuestionScalar,
+    hydration: questionHydration,
+    publishScalar: publishWorkspaceScalar,
+    handleLocalRichChange,
+  } = useWorkspaceProjectionWrites({
+    workspaceCollaboration,
+    workspaceQuestionPath,
+    selectedExamQuestionId,
+    baseQuestionExamQuestionId: questionQuery.data?.examQuestionId ?? null,
+    baseQuestion,
+    isPretest: questionQuery.data?.isPretest,
+    draft,
+    draftRef,
+    setDraft,
+  });
+
   // Which capabilities are live, whether the open question is dirty for the
   // transport, and WHICH writer owns a field are the collaboration bridge's
   // business; the workspace only threads them into the mount and the panels.
@@ -409,6 +455,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     workspaceCollaboration,
     selectedExamQuestionId,
     workspaceQuestionPath,
+    questionHydrated: questionHydration.ready,
     hasPendingChanges: persistence.hasPendingChanges,
   });
 
@@ -537,35 +584,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             : { type: "REMOTE_BULK_CHANGED", examQuestionId };
       divergenceDispatchRef.current(event);
     },
-  });
-
-  // The server's copy of the open question. ONE projection, read by both rules
-  // that need it: the seed the editors, the room and the three-way compare are
-  // authored against, and the document a refetch may install. The projection
-  // itself is the draft owner's (`serverQuestionDocument`), so the two can no
-  // longer disagree about what the server holds.
-  const serverDocument = useMemo(
-    () => serverQuestionDocument(questionQuery.data),
-    [questionQuery.data]
-  );
-  const baseQuestion = serverDocument.revision;
-  // Reading and writing the open question against the exam room: seeding,
-  // remote projection onto the draft, and the local write path. The hook owns
-  // the "who wrote this value" bookkeeping so no call site re-invents it.
-  const {
-    sharedQuestionScalar,
-    publishScalar: publishWorkspaceScalar,
-    handleLocalRichChange,
-  } = useWorkspaceProjectionWrites({
-    workspaceCollaboration,
-    workspaceQuestionPath,
-    selectedExamQuestionId,
-    baseQuestionExamQuestionId: questionQuery.data?.examQuestionId ?? null,
-    baseQuestion,
-    isPretest: questionQuery.data?.isPretest,
-    draft,
-    draftRef,
-    setDraft,
   });
 
   const { divergence, isDirty: isQuestionDiverged, dispatch: dispatchDivergence } =
@@ -1143,7 +1161,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             </>
           }
         >
-          {draft ? (
+          {renderableDraft ? (
               <motion.div
                 key={selectedExamQuestionId}
                 initial={reduceMotion ? false : { opacity: 0.96 }}
@@ -1151,7 +1169,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                 transition={spineMotion.question}
               >
                 <SpineQuestionView
-                  question={draft}
+                  question={renderableDraft}
                   focusField={focusField}
                   onOpenSettings={openInspector}
                   isMutating={rowMutationBusy}

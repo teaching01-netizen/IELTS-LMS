@@ -1243,7 +1243,15 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       // MySQL, and this tab's work has not reached it.
       await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/You are offline/));
       expect(screen.queryByText("Preview landed")).not.toBeInTheDocument();
-      expect(screen.getByRole("textbox", { name: "Question prompt" })).toBeInTheDocument();
+      // The author keeps their surface. This fixture's room never receives the
+      // question's seed (the fake service records proposals, it does not
+      // arbitrate them), so the room does not hold the question yet and the
+      // prompt is correctly the pending collaboration surface rather than an
+      // editor bound to an empty document.
+      expect(
+        harness.transports[0]!.document.getMap("workspace").has("question/eq-1/scalar"),
+      ).toBe(false);
+      expect(document.querySelector('[data-coedit-pending="true"]')).not.toBeNull();
     });
 
     it("does not leave when the room refused the latest changes", async () => {

@@ -220,6 +220,21 @@ describe('SAT delivery domain', () => {
     expect(entry({ data: { ...data, scheduleRuntimeStatus: 'scheduled' } })).toMatchObject({
       shouldStart: false, reason: 'runtime-not-live',
     });
+    // not_started is the value the server actually projects before the proctor
+    // presses Start (a SAT schedule has no exam_session_runtimes row yet), so
+    // this is the case that decides whether a waiting student POSTs
+    // /modules/start and eats a 409 RUNTIME_NOT_LIVE per retry window.
+    expect(entry({
+      data: {
+        ...data,
+        scheduleRuntimeStatus: 'not_started',
+        timing: {
+          authority: 'cohort_runtime', timingModel: 'cohort_section_v3',
+          stageKey: null, stageStatus: 'not_started', serverNow: data.serverNow,
+          deadlineAt: null, remainingSeconds: 0,
+        },
+      },
+    })).toMatchObject({ shouldStart: false, reason: 'runtime-not-live' });
     // idle/connecting are legal attempt statuses but not a live exam: automatic
     // entry and the manual button now share this one verdict.
     expect(entry({ data: { ...data, proctorStatus: 'idle' } })).toMatchObject({

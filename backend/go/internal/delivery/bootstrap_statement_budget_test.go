@@ -77,7 +77,7 @@ func TestLoadTimingRuntimeRowReadOnce(t *testing.T) {
 			"accumulated_paused_seconds", "extension_minutes", "completion_reason",
 			"projected_start_at", "projected_end_at",
 		}).AddRow("sec-1", "rt-1", "rw", "Reading", 0, 30, 0, "live", nil, now, nil, nil, 0, 0, nil, nil, nil))
-	timing, status, err := deliverySvc(db).loadTiming(context.Background(), "sched-1", now)
+	timing, status, err := deliverySvc(db).loadTiming(context.Background(), "sched-1", "sat", now)
 	if err != nil {
 		t.Fatalf("loadTiming failed: %v", err)
 	}

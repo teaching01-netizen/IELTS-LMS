@@ -811,6 +811,29 @@ describe("useStudentSessionRouteData backend mode", () => {
         }
         return Promise.resolve(jsonResponse(regressedRuntimeLive));
       }
+      // The second refresh has to come from the versioned runtime poll now that
+      // the loop actually ticks (it used to refresh the snapshot on every tick
+      // because the tick branch was unreachable). A revision the client has
+      // not seen is exactly what makes the poll pull the live session.
+      //
+      // This route is the one student surface that is NOT enveloped: the delta
+      // is the whole body ({revision,status,activeSection,pollAfterSecs}, see
+      // cmd/api/runtime_poll_test.go). Wrapping it in {success,data} makes the
+      // client parse an empty record, read notModified forever, and never
+      // refresh — a fixture that silently asserts nothing.
+      if (String(url).includes("/runtime?sinceRevision=")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              revision: 11,
+              status: "live",
+              activeSection: "reading",
+              pollAfterSecs: 2,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
       return Promise.resolve(jsonResponse(buildBootstrapContext(buildAttempt())));
     });
     global.fetch = fetchMock as typeof fetch;
@@ -823,6 +846,15 @@ describe("useStudentSessionRouteData backend mode", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
+    await waitFor(
+      () => {
+        const liveCalls = fetchMock.mock.calls.filter(([calledUrl]) =>
+          String(calledUrl).includes("/live?candidateId="),
+        );
+        expect(liveCalls.length).toBeGreaterThanOrEqual(2);
+      },
+      { timeout: 3_000 },
+    );
     await waitFor(() => {
       expect(result.current.attemptSnapshot?.revision).toBe(2);
       expect(result.current.attemptSnapshot?.answers.q1).toBe("SERVER_FRESH_ATTEMPT");
@@ -1228,5 +1260,286 @@ describe("useStudentSessionRouteData backend mode", () => {
         missingUsableImageCount: 1,
       })
     );
+  });
+
+  /**
+   * Phase 3/4: the student socket is a real transport again — behind one
+   * switch — and it is only ever a WAKE-UP plus snapshot. Revisions stay
+   * monotonic on the client: a frame for a revision already applied cannot
+   * start a second refresh, while a newer transition refreshes immediately
+   * instead of waiting out the 500ms coalescer meant for answer bursts.
+   */
+  describe("student realtime transport", () => {
+    const originalWebSocket = globalThis.WebSocket;
+
+    class MockSocket {
+      static instances: MockSocket[] = [];
+      url: string;
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+
+      constructor(url: string) {
+        this.url = url;
+        MockSocket.instances.push(this);
+      }
+
+      open() {
+        this.onopen?.(new Event("open"));
+      }
+
+      emit(data: unknown) {
+        this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(data) }));
+      }
+
+      close() {
+        this.onclose?.(new CloseEvent("close"));
+      }
+
+      send() {}
+    }
+
+    function installSocket() {
+      MockSocket.instances = [];
+      // @ts-expect-error test shim: deterministic WebSocket.
+      globalThis.WebSocket = MockSocket;
+      return MockSocket;
+    }
+
+    function liveFetchCount(fetchMock: { mock: { calls: unknown[][] } }) {
+      return fetchMock.mock.calls.filter((call) => String(call[0]).includes("/live")).length;
+    }
+
+    function stubSessionFetch() {
+      vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
+      vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(buildStaticSessionContext()))
+        .mockResolvedValueOnce(jsonResponse(buildLiveSessionContext(null)))
+        .mockResolvedValueOnce(jsonResponse(buildBootstrapContext(buildAttempt())))
+        .mockResolvedValue(jsonResponse(buildLiveSessionContext(buildAttempt())));
+      global.fetch = fetchMock as unknown as typeof fetch;
+      return fetchMock;
+    }
+
+    afterEach(() => {
+      globalThis.WebSocket = originalWebSocket;
+    });
+
+    it("keeps the socket closed when the rollout flag is absent", async () => {
+      installSocket();
+      stubSessionFetch();
+
+      const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+        wrapper: createWrapper(),
+      });
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(MockSocket.instances).toHaveLength(0);
+      expect(result.current.liveSocketConnected).toBe(false);
+    });
+
+    it("opens the student socket and applies only newer runtime snapshots", async () => {
+      installSocket();
+      vi.stubEnv("VITE_STUDENT_REALTIME", "websocket");
+      const fetchMock = stubSessionFetch();
+
+      const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+        wrapper: createWrapper(),
+      });
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => expect(MockSocket.instances.length).toBeGreaterThan(0));
+
+      const socket = MockSocket.instances[MockSocket.instances.length - 1]!;
+      expect(socket.url).toContain("scheduleId=sched-1");
+      expect(socket.url).toContain("attemptId=attempt-1");
+      // The reconnect gap closer: the client tells the server what it has.
+      expect(socket.url).toContain("lastSeenRuntimeRevision=");
+
+      socket.open();
+      await waitFor(() => expect(result.current.liveSocketConnected).toBe(true));
+
+      const baseline = liveFetchCount(fetchMock);
+      socket.emit({
+        type: "runtime_snapshot",
+        scheduleId: "sched-1",
+        runtime: { ...buildRuntime(), revision: 42, status: "paused" },
+      });
+      await waitFor(() => expect(result.current.runtimeSnapshot?.status).toBe("paused"));
+
+      // A re-delivered revision behind the applied one is ignored whole: no
+      // state change and no refetch.
+      socket.emit({
+        type: "runtime_snapshot",
+        scheduleId: "sched-1",
+        runtime: { ...buildRuntime(), revision: 41, status: "live" },
+      });
+      expect(result.current.runtimeSnapshot?.status).toBe("paused");
+      expect(liveFetchCount(fetchMock)).toBe(baseline);
+
+      // A schedule_runtime frame AT the applied revision is a replay: ignored.
+      socket.emit({ kind: "schedule_runtime", id: "sched-1", revision: 42, event: "pause_runtime" });
+      expect(liveFetchCount(fetchMock)).toBe(baseline);
+
+      // A newer transition refreshes immediately (the 500ms coalescer is for
+      // answer bursts, not for the frame that opens the exam).
+      socket.emit({ kind: "schedule_runtime", id: "sched-1", revision: 43, event: "start_runtime" });
+      await waitFor(() => expect(liveFetchCount(fetchMock)).toBe(baseline + 1));
+    });
+
+    // The race the monotonic-revision rule exists for: a poll response that
+    // overtook the socket frame in flight carries an OLDER revision. It must
+    // never regress state the socket already applied.
+    it("does not let a stale poll response regress a newer socket snapshot", async () => {
+      installSocket();
+      vi.stubEnv("VITE_STUDENT_REALTIME", "websocket");
+      const fetchMock = stubSessionFetch();
+
+      const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+        wrapper: createWrapper(),
+      });
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => expect(MockSocket.instances.length).toBeGreaterThan(0));
+
+      const socket = MockSocket.instances[MockSocket.instances.length - 1]!;
+      socket.open();
+      await waitFor(() => expect(result.current.liveSocketConnected).toBe(true));
+
+      socket.emit({
+        type: "runtime_snapshot",
+        scheduleId: "sched-1",
+        runtime: { ...buildRuntime(), revision: 42, status: "paused" },
+      });
+      await waitFor(() => expect(result.current.runtimeSnapshot?.revision).toBe(42));
+
+      // Every later authoritative fetch answers with the older revision.
+      fetchMock.mockResolvedValue(
+        jsonResponse(
+          buildLiveSessionContext(buildAttempt(), "ver-1", { revision: 41, status: "live" }),
+        ),
+      );
+      const baseline = liveFetchCount(fetchMock);
+      socket.emit({ kind: "schedule_runtime", id: "sched-1", revision: 43, event: "start_runtime" });
+      await waitFor(() => expect(liveFetchCount(fetchMock)).toBe(baseline + 1));
+      // Give the (discarded) payload a chance to land before asserting.
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(result.current.runtimeSnapshot?.revision).toBe(42);
+      expect(result.current.runtimeSnapshot?.status).toBe("paused");
+    });
+
+    /**
+     * A rollout you cannot see is not a rollout. These are the client-side
+     * signals that say whether enabling student sockets is working: did it
+     * connect, did it drop after opening, how much did a reconnect snapshot
+     * have to close, how long did a runtime frame take to arrive.
+     */
+    it("reports the realtime rollout lifecycle metrics", async () => {
+      installSocket();
+      vi.stubEnv("VITE_STUDENT_REALTIME", "websocket");
+      stubSessionFetch();
+
+      const captured: Array<Record<string, unknown>> = [];
+      const listener = (event: Event) => {
+        const detail = (event as CustomEvent).detail;
+        if (detail && typeof detail === "object") captured.push(detail as Record<string, unknown>);
+      };
+      window.addEventListener("student-observability-metric", listener);
+
+      try {
+        const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+          wrapper: createWrapper(),
+        });
+        await waitFor(() => expect(result.current.isLoading).toBe(false));
+        await waitFor(() => expect(MockSocket.instances.length).toBeGreaterThan(0));
+
+        const socket = MockSocket.instances[MockSocket.instances.length - 1]!;
+        socket.open();
+        await waitFor(() => expect(result.current.liveSocketConnected).toBe(true));
+        expect(captured.some((metric) => metric['name'] === "student_ws_connect_success")).toBe(true);
+
+        // The server's reconnect snapshot is ahead of what the client held.
+        socket.emit({
+          type: "runtime_snapshot",
+          scheduleId: "sched-1",
+          runtime: { ...buildRuntime(), revision: 42, status: "paused" },
+        });
+        await waitFor(() =>
+          expect(captured.some((metric) => metric['name'] === "runtime_revision_gap_on_reconnect")).toBe(
+            true,
+          ),
+        );
+        const gap = captured.find((metric) => metric['name'] === "runtime_revision_gap_on_reconnect");
+        expect(typeof gap?.['revisionGap']).toBe("number");
+        expect(gap?.['revisionGap'] as number).toBeGreaterThan(0);
+
+        // A runtime transition frame carries its commit instant.
+        socket.emit({
+          kind: "schedule_runtime",
+          id: "sched-1",
+          revision: 43,
+          event: "start_runtime",
+          createdAt: new Date(Date.now() - 120).toISOString(),
+        });
+        await waitFor(() =>
+          expect(captured.some((metric) => metric['name'] === "runtime_event_to_client_ms")).toBe(true),
+        );
+        const latency = captured.find((metric) => metric['name'] === "runtime_event_to_client_ms");
+        expect(latency?.['reason']).toBe("start_runtime");
+        expect(latency?.['latencyMs'] as number).toBeGreaterThanOrEqual(100);
+
+        // A drop after a healthy open is its own signal.
+        socket.close();
+        await waitFor(() =>
+          expect(captured.some((metric) => metric['name'] === "student_ws_disconnect_after_open")).toBe(
+            true,
+          ),
+        );
+      } finally {
+        window.removeEventListener("student-observability-metric", listener);
+      }
+    });
+
+    // The fallback firing is the rollout's safety property: with the socket
+    // enabled but unavailable, the versioned poll must take over — and say so.
+    it("reports the poll fallback when the socket never comes up", async () => {
+      vi.useFakeTimers();
+      installSocket();
+      vi.stubEnv("VITE_STUDENT_REALTIME", "websocket");
+      stubSessionFetch();
+
+      const captured: Array<Record<string, unknown>> = [];
+      const listener = (event: Event) => {
+        const detail = (event as CustomEvent).detail;
+        if (detail && typeof detail === "object") captured.push(detail as Record<string, unknown>);
+      };
+      window.addEventListener("student-observability-metric", listener);
+
+      try {
+        const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+          wrapper: createWrapper(),
+        });
+        // Let the bootstrap/poll promises settle, then run past the poll
+        // interval: the loop probes once, then ticks.
+        await act(async () => {
+          for (let i = 0; i < 20; i++) await Promise.resolve();
+        });
+        expect(result.current.isLoading).toBe(false);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(40_000);
+        });
+
+        expect(
+          captured.some((metric) => metric['name'] === 'poll_fallback_activation'),
+        ).toBe(true);
+      } finally {
+        window.removeEventListener("student-observability-metric", listener);
+        vi.useRealTimers();
+      }
+    });
   });
 });

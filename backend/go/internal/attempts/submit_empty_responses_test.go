@@ -69,6 +69,10 @@ func TestSubmitZeroResponsesClaimsSATProvisionalSubmit(t *testing.T) {
 	// The defect's trigger: the projection is genuinely empty.
 	mock.ExpectQuery("FROM attempt_responses_v2").
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
+	// Audit finding 1: zero ANSWERS is legal, an incomplete MODULE topology is
+	// not — the claim is gated on a terminal module attempt in each SAT section.
+	mock.ExpectQuery("FROM assessment_module_attempts").WithArgs("att-1").
+		WillReturnRows(satModuleRows(satRW(SATModuleSubmitted), satMath(SATModuleLocked)))
 	// SAT provisional claim (never sets submitted_at/final_submission).
 	mock.ExpectExec("delivery_status='submitted', phase='post-exam'").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -78,7 +82,7 @@ func TestSubmitZeroResponsesClaimsSATProvisionalSubmit(t *testing.T) {
 	mock.ExpectCommit()
 
 	cmd := SubmitCommand{AttemptID: "att-1", LeaseEpoch: 3, SubmissionID: "sub-zero"}
-	res, err := svc.Submit(context.Background(), bearer, cmd, qr, rl, ProviderSAT, nil)
+	res, err := svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderSAT), nil)
 	if err != nil {
 		t.Fatalf("zero-response SAT submit must terminate, got %v", err)
 	}

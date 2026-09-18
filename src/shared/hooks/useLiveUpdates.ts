@@ -6,6 +6,10 @@ export interface LiveUpdateEvent {
   revision: number;
   event: string;
   scheduleId?: string;
+  // Server commit instant of the bus row (RFC3339). Only used to measure
+  // delivery latency client-side — never to decide state, because a client
+  // clock has no authority over the runtime clock.
+  createdAt?: string;
 }
 
 type LiveUpdateFrame =
@@ -56,12 +60,23 @@ function isLiveUpdateEvent(frame: unknown): frame is LiveUpdateEvent {
   );
 }
 
-// Plan C1: STUDENT_ROLE_SOCKET_RETIRED — student sockets are retired in favor
-// of the versioned runtime poll (GET .../runtime?sinceRevision=). The student
-// exam hook must NOT open this socket (pass role: 'proctor-observer' only for
-// staff surfaces, or leave enabled=false). This hook stays for proctor-only
-// live updates; student callers migrate to createStudentRuntimePoll.
+// Plan C1 retired student sockets in favor of the versioned runtime poll
+// (GET .../runtime?sinceRevision=). Plan C1 is now a ROLLOUT, not a law: the
+// server admits student sockets again under STUDENT_WS=allow, and the student
+// route decides the transport from one client switch
+// (resolveStudentRealtimeTransport). `role` still matters — it is what the
+// server authorizes and filters on — but it no longer silently disables
+// transport, because a role that cannot connect is indistinguishable from a
+// role whose updates were dropped.
+//
+// Emergency rollback: STUDENT_WS=gone answers 410 before the upgrade. A
+// browser cannot see that status, so students pass a bounded connect budget
+// (maxConnectAttemptsWithoutOpen) and fall back to the poll instead of
+// burning a reconnect loop.
 export const STUDENT_ROLE_SOCKET_RETIRED = 'STUDENT_WS_RETIRED' as const;
+
+/** Default connect budget when a caller sets one; 0 = retry forever. */
+export const DEFAULT_MAX_CONNECT_ATTEMPTS_WITHOUT_OPEN = 5;
 
 export function useLiveUpdates(options: {
   scheduleId?: string;
@@ -69,13 +84,24 @@ export function useLiveUpdates(options: {
   lastSeenRuntimeRevision?: number;
   enabled?: boolean;
   debounceMs?: number;
-  // role gates the socket: 'student' short-circuits to disconnected (the
-  // server answers 410 STUDENT_WS_RETIRED; do not burn reconnect loops).
-  // Staff surfaces pass 'proctor-observer'. Defaults to proctor-observer
-  // for backward compatibility with existing staff callers.
+  // role describes the caller to the server (authorization + fan-out filter).
+  // It no longer gates the socket: whether a student connects is the caller's
+  // `enabled` decision (see resolveStudentRealtimeTransport).
+  // Staff surfaces pass 'proctor-observer'.
   role?: 'student' | 'proctor-observer';
+  // Bounded connect budget: after this many failed attempts while this mount
+  // has NEVER opened, stop reconnecting and report disconnected so the poll
+  // takes over. 0 (default) retries forever — staff behavior. Students pass
+  // DEFAULT_MAX_CONNECT_ATTEMPTS_WITHOUT_OPEN: one emergency rollback flag
+  // (STUDENT_WS=gone) must cost five handshakes, not a reconnect loop.
+  maxConnectAttemptsWithoutOpen?: number;
   onConnected?: () => void;
   onDisconnected?: () => void;
+  // Fired once when the connect budget is spent without a single open. It is a
+  // rollout signal, not an error path: the fallback transport already owns the
+  // session by then (onDisconnected fired), so this only has to make the
+  // "we spent the budget" state observable instead of silent.
+  onConnectExhausted?: () => void;
   onError?: (error: { code?: string; message?: string }) => void;
   onRuntimeSnapshot?: (payload: { scheduleId?: string; runtime: unknown }) => void;
   onEvent: (event: LiveUpdateEvent) => void;
@@ -94,6 +120,7 @@ export function useLiveUpdates(options: {
   const shouldReconnectRef = useRef(true);
   const onConnectedRef = useRef(options.onConnected);
   const onDisconnectedRef = useRef(options.onDisconnected);
+  const onConnectExhaustedRef = useRef(options.onConnectExhausted);
   const onErrorRef = useRef(options.onError);
   const onRuntimeSnapshotRef = useRef(options.onRuntimeSnapshot);
   const lastSeenRuntimeRevisionRef = useRef(options.lastSeenRuntimeRevision);
@@ -111,6 +138,10 @@ export function useLiveUpdates(options: {
   }, [options.onDisconnected]);
 
   useEffect(() => {
+    onConnectExhaustedRef.current = options.onConnectExhausted;
+  }, [options.onConnectExhausted]);
+
+  useEffect(() => {
     onRuntimeSnapshotRef.current = options.onRuntimeSnapshot;
   }, [options.onRuntimeSnapshot]);
 
@@ -123,13 +154,6 @@ export function useLiveUpdates(options: {
   }, [options.lastSeenRuntimeRevision]);
 
   useEffect(() => {
-    // Plan C1: student role never opens the socket. Report disconnected so
-    // callers fall back to the runtime poll (no 410 round-trip, no retry
-    // storm, zero student sockets — the 1M enabler).
-    if (options.role === 'student') {
-      onDisconnectedRef.current?.();
-      return () => undefined;
-    }
     const staticUrl = buildLiveUpdatesUrl({
       ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
       ...(options.attemptId ? { attemptId: options.attemptId } : {}),
@@ -140,9 +164,23 @@ export function useLiveUpdates(options: {
 
     let disposed = false;
     shouldReconnectRef.current = true;
+    // Connect budget state. A mount that never opened is either misconfigured
+    // (STUDENT_WS=gone) or pointed at a dead origin; a mount that opened once
+    // and later dropped is a real outage and keeps retrying.
+    let everOpened = false;
+    let attemptsWithoutOpen = 0;
+    const maxAttemptsWithoutOpen = Math.max(0, options.maxConnectAttemptsWithoutOpen ?? 0);
 
     const scheduleReconnect = () => {
       if (disposed || !shouldReconnectRef.current) {
+        return;
+      }
+      if (!everOpened && maxAttemptsWithoutOpen > 0 && attemptsWithoutOpen >= maxAttemptsWithoutOpen) {
+        // Budget exhausted: stop reconnecting. The caller has already been told
+        // it is disconnected, so its fallback transport (the versioned runtime
+        // poll) owns the session. Never a silent hole: onDisconnected fired.
+        shouldReconnectRef.current = false;
+        onConnectExhaustedRef.current?.();
         return;
       }
 
@@ -278,6 +316,9 @@ export function useLiveUpdates(options: {
       if (typeof frame.scheduleId === 'string') {
         nextEvent.scheduleId = frame.scheduleId;
       }
+      if (typeof (frame as { createdAt?: unknown }).createdAt === 'string') {
+        nextEvent.createdAt = (frame as { createdAt: string }).createdAt;
+      }
       queuedEventsRef.current.push(nextEvent);
       flushDebounced();
     };
@@ -309,6 +350,8 @@ export function useLiveUpdates(options: {
           return;
         }
         reconnectAttemptRef.current = 0;
+        everOpened = true;
+        attemptsWithoutOpen = 0;
         onConnectedRef.current?.();
       };
       socket.onmessage = (raw) => handleMessage(raw, socket);
@@ -319,6 +362,9 @@ export function useLiveUpdates(options: {
         socketRef.current = null;
         if (disposed) {
           return;
+        }
+        if (!everOpened) {
+          attemptsWithoutOpen += 1;
         }
         onDisconnectedRef.current?.();
         scheduleReconnect();
@@ -347,5 +393,12 @@ export function useLiveUpdates(options: {
       socketRef.current = null;
       socket?.close();
     };
-  }, [debounceMs, enabled, options.attemptId, options.scheduleId]);
+  }, [
+    debounceMs,
+    enabled,
+    options.attemptId,
+    options.maxConnectAttemptsWithoutOpen,
+    options.role,
+    options.scheduleId,
+  ]);
 }

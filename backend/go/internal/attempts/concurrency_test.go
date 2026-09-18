@@ -34,6 +34,23 @@ func (s stubLocker) Lock(_ context.Context, _ tx.Tx, _ string) (RuntimeGate, err
 	return s.gate, nil
 }
 
+// stubProviders implements ProviderResolver: the submit transaction asks for
+// the provider on the locked attempt row. Tests pass the value the attempt's
+// exam row would carry; calls counts the resolutions so a test can prove the
+// decision was taken exactly once, in-tx.
+type stubProviders struct {
+	provider Provider
+	err      error
+	calls    int
+}
+
+func providerStub(p Provider) *stubProviders { return &stubProviders{provider: p} }
+
+func (s *stubProviders) ResolveProvider(_ context.Context, _ tx.Tx, _ string) (Provider, error) {
+	s.calls++
+	return s.provider, s.err
+}
+
 func testService(db *sql.DB, secret []byte) *Service {
 	return NewService(tx.NewRunner(db), clock.FixedAt(time.Now().UTC()), secret)
 }
@@ -255,7 +272,7 @@ func TestSubmitVsResponseOnPausedAttempt(t *testing.T) {
 	mock.ExpectRollback()
 
 	cmd := SubmitCommand{AttemptID: "att-1", LeaseEpoch: 3, SubmissionID: "sub-race"}
-	_, err = svc.Submit(context.Background(), bearer, cmd, nil, nil, ProviderIELTS, nil)
+	_, err = svc.Submit(context.Background(), bearer, cmd, nil, nil, providerStub(ProviderIELTS), nil)
 	if codeOf(err) != apperrors.CodeAttemptNotWritable {
 		t.Fatalf("expected ATTEMPT_NOT_WRITABLE, got %v", err)
 	}
@@ -288,7 +305,7 @@ func TestSubmitVsSubmitReplayMisuse(t *testing.T) {
 
 	cmd := SubmitCommand{AttemptID: "att-1", LeaseEpoch: 3, SubmissionID: "sub-new"}
 	qr, rl := liveStubs()
-	_, err = svc.Submit(context.Background(), bearer, cmd, qr, rl, ProviderIELTS, nil)
+	_, err = svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderIELTS), nil)
 	if codeOf(err) != apperrors.CodeSubmissionReplayMisuse {
 		t.Fatalf("expected SUBMISSION_ID_MISUSE, got %v", err)
 	}

@@ -11,6 +11,13 @@ interface StudentObservabilityDimensions {
   pendingMutationCount?: StudentObservabilityField;
   platform?: StudentObservabilityField;
   reason?: StudentObservabilityField;
+  // Realtime rollout dimensions (Phase 3). `realtimeTransport` is the client's
+  // resolved mode, `latencyMs` a measured delay (e.g. server commit -> client
+  // frame), and `revisionGap` how many runtime revisions a reconnect snapshot
+  // closed. All low-cardinality.
+  realtimeTransport?: StudentObservabilityField;
+  latencyMs?: StudentObservabilityField;
+  revisionGap?: StudentObservabilityField;
   scheduleId?: StudentObservabilityField;
   statusCode?: StudentObservabilityField;
   syncState?: StudentObservabilityField;
@@ -68,6 +75,9 @@ export function withStudentObservabilityDimensions(
     durablePersistResult: normalizeStringField(fields.durablePersistResult) ?? null,
     pendingMutationAgeMs: normalizeNumberField(fields.pendingMutationAgeMs),
     pendingMutationCount: normalizeNumberField(fields.pendingMutationCount),
+    realtimeTransport: normalizeStringField(fields.realtimeTransport) ?? null,
+    latencyMs: normalizeNumberField(fields.latencyMs),
+    revisionGap: normalizeNumberField(fields.revisionGap),
   };
 }
 

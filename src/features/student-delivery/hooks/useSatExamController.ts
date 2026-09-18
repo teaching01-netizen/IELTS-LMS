@@ -1229,7 +1229,31 @@ export function useSatExamController({
   // deadlines advance together (same skew correction). cohortRunning mirrors
   // the authoritative clock's `running` gate: a paused cohort stage freezes
   // both clocks (defect 9), never just the section one.
-  const serverClockOffsetMs = satClockOffsetMs(data?.timing.serverNow, snapshotReceivedAt);
+  //
+  //
+  // One accepted timing snapshot = one correction, and the correction is
+  // (serverNow - the instant THAT serverNow was received). Pairing one
+  // snapshot's serverNow with another snapshot's receipt instant invents skew
+  // out of the delta between two reads, so the pair follows whichever leg won
+  // the merge above: the runtime snapshot stamps its own receipt here, and the
+  // bootstrap leg's stamp is snapshotReceivedAt (set exactly when this
+  // controller accepted the payload carrying its serverNow).
+  const runtimeServerNow = runtimeTiming?.serverNow ?? null;
+  const runtimeTimingReceiptRef = useRef<{ serverNow: string | null; receivedAt: number }>({
+    serverNow: null,
+    receivedAt: 0,
+  });
+  if (runtimeServerNow !== null && runtimeServerNow !== runtimeTimingReceiptRef.current.serverNow) {
+    runtimeTimingReceiptRef.current = { serverNow: runtimeServerNow, receivedAt: Date.now() };
+  }
+  const effectiveTimingReceivedAt =
+    runtimeServerNow !== null && effectiveTiming?.serverNow === runtimeServerNow
+      ? runtimeTimingReceiptRef.current.receivedAt || snapshotReceivedAt
+      : snapshotReceivedAt;
+  const serverClockOffsetMs = satClockOffsetMs(
+    effectiveTiming?.serverNow ?? null,
+    effectiveTimingReceivedAt,
+  );
   const cohortStageRunning = satPersonalClockRunning({
     timingModel: effectiveTiming?.timingModel,
     runtimeStatus: data?.scheduleRuntimeStatus,

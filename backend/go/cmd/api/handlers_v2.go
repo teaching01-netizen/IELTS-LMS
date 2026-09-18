@@ -19,6 +19,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/schedules"
 	"example.com/ielts-proctoring/internal/terminalization"
 )
@@ -107,27 +108,191 @@ func isSATAttempt(ctx context.Context, q tx.Tx, attemptID string) bool {
 }
 
 func resolveSnapshotQuestion(ctx context.Context, q tx.Tx, attemptID, questionID string) (attempts.QuestionOwner, error) {
-	var raw string
-	err := q.QueryRowContext(ctx, `SELECT CAST(v.content_snapshot AS CHAR) FROM student_attempts a JOIN exam_versions v ON v.id = a.published_version_id WHERE a.id = ?`, attemptID).Scan(&raw)
-	if err == sql.ErrNoRows {
-		return attempts.QuestionOwner{}, apperrors.New(apperrors.CodeNotFound, "Question is not part of the attempt exam.")
-	}
+	root, err := loadAttemptSnapshotRoot(ctx, q, attemptID)
 	if err != nil {
 		return attempts.QuestionOwner{}, err
 	}
+	owner, ok := snapshotOwnerFor(root, questionID)
+	if !ok {
+		return attempts.QuestionOwner{}, errQuestionNotInExam()
+	}
+	return owner, nil
+}
+
+// loadAttemptSnapshotRoot loads and unwraps the attempt's published content
+// snapshot. One load serves every question of a batch (ResolveMany), which is
+// what keeps a legacy flush from re-reading and re-parsing the whole tree per
+// answer.
+func loadAttemptSnapshotRoot(ctx context.Context, q tx.Tx, attemptID string) (map[string]any, error) {
+	var raw string
+	err := q.QueryRowContext(ctx, `SELECT CAST(v.content_snapshot AS CHAR) FROM student_attempts a JOIN exam_versions v ON v.id = a.published_version_id WHERE a.id = ?`, attemptID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, errQuestionNotInExam()
+	}
+	if err != nil {
+		return nil, err
+	}
 	var root map[string]any
 	if err := json.Unmarshal([]byte(raw), &root); err != nil {
-		return attempts.QuestionOwner{}, err
+		return nil, err
 	}
 	if nested, ok := root["contentSnapshot"].(map[string]any); ok {
 		root = nested
 	}
+	return root, nil
+}
+
+// snapshotOwnerFor reports the snapshot section/module owning a question.
+func snapshotOwnerFor(root map[string]any, questionID string) (attempts.QuestionOwner, bool) {
 	for _, candidate := range snapshotQuestionRoots(root) {
 		if snapshotContainsQuestion(candidate.value, questionID) {
-			return attempts.QuestionOwner{ModuleID: candidate.moduleKey, SectionKey: candidate.sectionKey, ModuleState: "active"}, nil
+			return attempts.QuestionOwner{ModuleID: candidate.moduleKey, SectionKey: candidate.sectionKey, ModuleState: "active"}, true
 		}
 	}
-	return attempts.QuestionOwner{}, apperrors.New(apperrors.CodeNotFound, "Question is not part of the attempt exam.")
+	return attempts.QuestionOwner{}, false
+}
+
+// errQuestionNotInExam is the shared not-found verdict for an unknown question.
+func errQuestionNotInExam() error {
+	return apperrors.New(apperrors.CodeNotFound, "Question is not part of the attempt exam.")
+}
+
+var _ attempts.BulkQuestionResolver = v2Resolver{}
+
+// ResolveMany resolves a whole batch of questions in one statement and shares
+// the legacy snapshot load across the questions that need it (audit finding 4:
+// a multi-answer flush used to pay one normalized lookup — plus one full
+// content-snapshot load for legacy exams — per answer while holding the attempt
+// row lock). Verdicts are per question, so the write loop still reports each
+// unresolvable question at the command that owns it.
+func (v2Resolver) ResolveMany(ctx context.Context, q tx.Tx, attemptID string, questionIDs []string) (map[string]attempts.QuestionVerdict, error) {
+	verdicts := make(map[string]attempts.QuestionVerdict, len(questionIDs))
+	if len(questionIDs) == 0 {
+		return verdicts, nil
+	}
+	normalized, err := normalizedQuestionOwners(ctx, q, attemptID, questionIDs)
+	if err != nil {
+		return nil, err
+	}
+	missing := make([]string, 0, len(questionIDs))
+	for _, questionID := range questionIDs {
+		if owner, ok := normalized[questionID]; ok {
+			verdicts[questionID] = attempts.QuestionVerdict{Owner: owner}
+			continue
+		}
+		missing = append(missing, questionID)
+	}
+	if len(missing) == 0 {
+		return verdicts, nil
+	}
+	// Snapshot fallback, exactly as the per-question path: SAT questions never
+	// resolve through a snapshot tree (defect 6), and the provider gate plus
+	// the snapshot read happen once for the whole batch.
+	if isSATAttempt(ctx, q, attemptID) {
+		for _, questionID := range missing {
+			verdicts[questionID] = attempts.QuestionVerdict{Err: errQuestionNotInExam()}
+		}
+		return verdicts, nil
+	}
+	root, err := loadAttemptSnapshotRoot(ctx, q, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	for _, questionID := range missing {
+		if owner, ok := snapshotOwnerFor(root, questionID); ok {
+			verdicts[questionID] = attempts.QuestionVerdict{Owner: owner}
+			continue
+		}
+		verdicts[questionID] = attempts.QuestionVerdict{Err: errQuestionNotInExam()}
+	}
+	return verdicts, nil
+}
+
+// normalizedQuestionOwners resolves the batch's questions against the published
+// normalized assessment tree in one statement. A question matches by
+// assessment_exam_questions.id first and by question_id second — the same
+// preference the per-question query expresses with ORDER BY + LIMIT 1.
+func normalizedQuestionOwners(ctx context.Context, q tx.Tx, attemptID string, questionIDs []string) (map[string]attempts.QuestionOwner, error) {
+	query := `SELECT eq.id, eq.question_id, m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key` +
+		` FROM assessment_exam_questions eq` +
+		` JOIN assessment_modules m ON m.id = eq.module_id` +
+		` JOIN assessment_sections s ON s.id = m.section_id` +
+		` JOIN exam_versions v ON v.id = s.exam_version_id` +
+		` JOIN exam_entities e ON e.id = v.exam_id` +
+		` LEFT JOIN assessment_module_attempts ma ON ma.module_id = m.id AND ma.attempt_id = ?` +
+		` WHERE (eq.id IN (` + sqlPlaceholders(len(questionIDs)) + `) OR eq.question_id IN (` + sqlPlaceholders(len(questionIDs)) + `))` +
+		` AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ?)`
+	args := make([]any, 0, 2*len(questionIDs)+2)
+	args = append(args, attemptID)
+	for _, id := range questionIDs {
+		args = append(args, id)
+	}
+	for _, id := range questionIDs {
+		args = append(args, id)
+	}
+	args = append(args, attemptID)
+	rows, err := q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	owners := make(map[string]attempts.QuestionOwner, len(questionIDs))
+	matchedByID := make(map[string]bool, len(questionIDs))
+	type candidate struct {
+		examQuestionID string
+		questionID     string
+		owner          attempts.QuestionOwner
+	}
+	all := make([]candidate, 0, len(questionIDs))
+	for rows.Next() {
+		var examQuestionID, questionID, moduleID, sectionKey, state string
+		var providerKey sql.NullString
+		if err := rows.Scan(&examQuestionID, &questionID, &moduleID, &sectionKey, &state, &providerKey); err != nil {
+			return nil, err
+		}
+		owner := attempts.QuestionOwner{ModuleID: moduleID, SectionKey: sectionKey}
+		// Exam-day P1: a normalized question without an assigned module attempt
+		// for this attempt (unassigned adaptive branch, future module) must not
+		// resolve as writable.
+		if state == "" {
+			owner.ModuleState = "unassigned"
+		} else {
+			owner.ModuleState = state
+		}
+		all = append(all, candidate{examQuestionID: examQuestionID, questionID: questionID, owner: owner})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, questionID := range questionIDs {
+		for _, c := range all {
+			if c.examQuestionID == questionID {
+				owners[questionID] = c.owner
+				matchedByID[questionID] = true
+				break
+			}
+		}
+	}
+	for _, questionID := range questionIDs {
+		if matchedByID[questionID] {
+			continue
+		}
+		for _, c := range all {
+			if c.questionID == questionID {
+				owners[questionID] = c.owner
+				break
+			}
+		}
+	}
+	return owners, nil
+}
+
+// sqlPlaceholders renders n comma-separated binds for an IN (...) list.
+func sqlPlaceholders(n int) string {
+	if n <= 0 {
+		return "NULL"
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 type snapshotQuestionRoot struct {
@@ -255,13 +420,10 @@ func (v2Locker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.
 			return attempts.RuntimeGate{}, serr
 		}
 		if serr == nil && secStatus.Valid {
-			gate.SectionStarted = true
-			switch secStatus.String {
-			case "live":
-				gate.SectionLive = true
-			case "paused":
-				gate.SectionPaused = true
-			}
+			// SectionLiveness is the single owner of status -> liveness, shared
+			// with the snapshot gate (runtime.LoadSnapshot) so an unopened or
+			// completed section is refused identically in both modes.
+			gate.SectionStarted, gate.SectionLive, gate.SectionPaused = runtime.SectionLiveness(secStatus.String)
 		}
 	} else {
 		gate.SectionLive = true
@@ -291,6 +453,10 @@ type terminalSealer struct {
 var _ attempts.Sealer = terminalSealer{}
 
 func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, scheduleID, submissionID, digest, provider, actorID string, effectiveAt time.Time) error {
+	// No provider fence here: this value now arrives from the resolver that ran
+	// on THIS transaction after the attempt lock (attempts.submitInTx), so it is
+	// already the single authoritative decision rather than a pre-tx guess to be
+	// re-checked.
 	var existing string
 	err := q.QueryRowContext(ctx, `SELECT outcome FROM attempt_terminalizations WHERE attempt_id = ? FOR UPDATE`, attemptID).Scan(&existing)
 	switch {
@@ -449,7 +615,6 @@ func v2SubmitHandler(app *App) http.HandlerFunc {
 			return
 		}
 		attemptID := chi.URLParam(r, "attemptID")
-		provider := scheduleProvider(r.Context(), app, attemptID)
 		if app.Attempts == nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Attempt service is unavailable."))
 			return
@@ -459,7 +624,9 @@ func v2SubmitHandler(app *App) http.HandlerFunc {
 			v := body.ExpectedAttemptRevision
 			cmd.ExpectedRevision = &v
 		}
-		res, err := app.Attempts.Submit(r.Context(), bearer, cmd, v2Resolver{}, app.RuntimeLockerFor(), attempts.Provider(provider), terminalSealer{scorer: app.ACT, materializer: app.Terminal, outboxExecOnly: app.Config.OutboxExecOnly})
+		// The provider is resolved by v2ProviderResolver on the submit
+		// transaction itself (attempts.ProviderResolver), never here.
+		res, err := app.Attempts.Submit(r.Context(), bearer, cmd, v2Resolver{}, app.RuntimeLockerFor(), v2ProviderResolver{}, terminalSealer{scorer: app.ACT, materializer: app.Terminal, outboxExecOnly: app.Config.OutboxExecOnly})
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -542,36 +709,61 @@ func loadV2Acknowledgements(ctx context.Context, db *sql.DB, attemptID string, w
 	return acks, nil
 }
 
-// scheduleProvider resolves the V2 submit provider for an attempt via the
-// central effective-provider rule: legacy ACT rows (provider_key='ielts',
-// exam_type='ACT') route to the ACT direct-seal path, never the IELTS path
-// (Phase 02 blocker 4). Unknown/unreadable rows fail closed to IELTS — the
-// pre-existing default — so the submit preamble never misroutes on DB
-// uncertainty.
-func scheduleProvider(ctx context.Context, app *App, attemptID string) string {
-	if app.DB == nil {
-		return string(attempts.ProviderIELTS)
-	}
+// v2ProviderResolver implements attempts.ProviderResolver: the provider
+// identity decision is taken inside the submit transaction, on the same
+// connection that holds the attempt row lock.
+type v2ProviderResolver struct{}
+
+var _ attempts.ProviderResolver = v2ProviderResolver{}
+
+func (v2ProviderResolver) ResolveProvider(ctx context.Context, q tx.Tx, attemptID string) (attempts.Provider, error) {
+	return loadSubmitProvider(ctx, q, attemptID)
+}
+
+// loadSubmitProvider reads the attempt's exam identity and applies the central
+// effective-provider rule. It takes a tx.Tx (not a pool) on purpose: provider
+// identity is only ever decided under the attempt row lock. A missing attempt is
+// a 404; an unrecognised provider_key is refused (422).
+func loadSubmitProvider(ctx context.Context, q tx.Tx, attemptID string) (attempts.Provider, error) {
 	var provider, examType sql.NullString
-	if err := app.DB.QueryRowContext(ctx, `SELECT e.provider_key, e.exam_type FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id WHERE a.id = ?`, attemptID).Scan(&provider, &examType); err != nil || !provider.Valid || provider.String == "" {
-		return string(attempts.ProviderIELTS)
+	err := q.QueryRowContext(ctx, `SELECT e.provider_key, e.exam_type FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id WHERE a.id = ?`, attemptID).Scan(&provider, &examType)
+	if err == sql.ErrNoRows {
+		return "", apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+	}
+	if err != nil {
+		return "", err
 	}
 	return effectiveProviderForSubmit(provider.String, examType.String)
 }
 
 // effectiveProviderForSubmit mirrors exams.EffectiveProviderKey without
-// importing the exams package at the HTTP edge (cmd/api already depends on
-// it transitively; the local mirror keeps the submit preamble dependency
-// surface minimal and is pinned by TestScheduleProviderHealsLegacyACT).
-func effectiveProviderForSubmit(providerKey, examType string) string {
+// importing the exams package at the HTTP edge: exam_type ACT always wins, so
+// legacy ACT rows (provider_key='ielts', exam_type='ACT') route to the ACT
+// direct-seal path instead of the IELTS path (Phase 02 blocker 4).
+//
+// A blank/NULL provider_key is the legacy IELTS identity, not an unresolvable
+// row: older schemas declared provider_key nullable and predate sat/act, so
+// those exams previously submitted through the IELTS path and still must. (Data
+// check: the only blank rows in any local database carry exam_type='Academic'.)
+// Only an unrecognised NON-BLANK key is refused — that is the genuinely
+// unresolvable case, and it used to be forwarded verbatim into the terminal
+// write, sealing an unscored attempt.
+func effectiveProviderForSubmit(providerKey, examType string) (attempts.Provider, error) {
 	if strings.EqualFold(strings.TrimSpace(examType), "ACT") {
-		return string(attempts.ProviderACT)
+		return attempts.ProviderACT, nil
 	}
-	p := strings.ToLower(strings.TrimSpace(providerKey))
-	if p == "" {
-		return string(attempts.ProviderIELTS)
+	switch key := strings.ToLower(strings.TrimSpace(providerKey)); key {
+	case "":
+		return attempts.ProviderIELTS, nil
+	case string(attempts.ProviderIELTS):
+		return attempts.ProviderIELTS, nil
+	case string(attempts.ProviderSAT):
+		return attempts.ProviderSAT, nil
+	case string(attempts.ProviderACT):
+		return attempts.ProviderACT, nil
+	default:
+		return "", apperrors.New(apperrors.CodeUnsupportedProvider, "The exam provider identity is unknown; refusing to submit.")
 	}
-	return p
 }
 
 func v2TakeoverHandler(app *App) http.HandlerFunc {

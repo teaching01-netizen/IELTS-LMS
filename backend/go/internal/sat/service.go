@@ -25,22 +25,20 @@ import (
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
-// Terminal states for assessment_module_attempts accepted at completion.
+// Section keys owned by the SAT provider. The terminal-state vocabulary and the
+// rule that consumes it live in attempts (the package below this one, which also
+// gates the provisional submit on them): every check in this file that asks
+// "may this attempt be finished?" calls attempts.SATModuleTerminal.
 const (
-	ModuleSubmitted = "submitted"
-	ModuleLocked    = "locked"
-)
-
-// Section keys owned by the SAT provider.
-const (
-	SectionReadingWriting = "reading-writing"
-	SectionMath           = "math"
+	SectionReadingWriting = attempts.SATSectionReadingWriting
+	SectionMath           = attempts.SATSectionMath
 )
 
 // maxSubmissionIDLen is the scoring-boundary submission-id limit:
@@ -333,10 +331,10 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 		  AND EXISTS (SELECT 1 FROM assessment_module_attempts ma WHERE ma.attempt_id = a.id)
 		  AND NOT EXISTS (
 			SELECT 1 FROM assessment_module_attempts ma
-			WHERE ma.attempt_id = a.id AND ma.state NOT IN ('submitted', 'locked')
+			WHERE ma.attempt_id = a.id AND ma.state NOT IN (?, ?)
 		  )
 		ORDER BY a.updated_at ASC
-		LIMIT ?`, batchSize)
+		LIMIT ?`, attempts.SATModuleSubmitted, attempts.SATModuleLocked, batchSize)
 	if err != nil {
 		return 0, err
 	}
@@ -450,10 +448,8 @@ func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID, receiptS
 		if len(mods) == 0 {
 			return nil
 		}
-		for _, m := range mods {
-			if m.State != ModuleSubmitted && m.State != ModuleLocked {
-				return nil
-			}
+		if !moduleStatesAcceptable(mods) {
+			return nil
 		}
 		if _, err := loadPolicy(ctx, t, attempt.PublishedVerID); err != nil {
 			return nil
@@ -515,10 +511,8 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 	if len(mods) == 0 {
 		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "The SAT attempt has no module submissions.", HTTPStatus: 409}
 	}
-	for _, m := range mods {
-		if m.State != ModuleSubmitted && m.State != ModuleLocked {
-			return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "All SAT modules must be submitted before finalization.", HTTPStatus: 409}
-		}
+	if !moduleStatesAcceptable(mods) {
+		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "All SAT modules must be submitted before finalization.", HTTPStatus: 409}
 	}
 	policy, err := loadPolicy(ctx, t, attempt.PublishedVerID)
 	if err != nil {
@@ -798,6 +792,20 @@ func lockedSubmissionID(ctx context.Context, t tx.Tx, attemptID string) (string,
 		return "", err
 	}
 	return id.String, nil
+}
+
+// moduleStatesAcceptable reports whether every loaded module row is in a state
+// the completion path accepts as done. The rule is owned by attempts
+// (SATModuleTerminal, which the provisional submit gate also uses); this is only
+// the loop over already-loaded rows, shared by the finalizer and the watchdog so
+// the check cannot drift between them.
+func moduleStatesAcceptable(mods []moduleRow) bool {
+	for _, m := range mods {
+		if !attempts.SATModuleTerminal(m.State) {
+			return false
+		}
+	}
+	return true
 }
 
 func loadModules(ctx context.Context, t tx.Tx, attemptID string) ([]moduleRow, error) {

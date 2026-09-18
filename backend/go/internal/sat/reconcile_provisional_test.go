@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+
+	"example.com/ielts-proctoring/internal/attempts"
 )
 
 // SAT-001 acceptance seam: a committed V2 provisional receipt (delivery
@@ -183,8 +185,12 @@ func TestReconcileProvisionalBatchIncludesReceiptCandidates(t *testing.T) {
 	defer db.Close()
 	svc := satTwinService(db)
 
-	mock.ExpectQuery(regexp.QuoteMeta("LEFT JOIN attempt_submissions_v2 r ON r.attempt_id = a.id")).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "schedule_id", "submission_id"}).AddRow("att-1", "sched-1", "sub-receipt"))
+	// WithArgs pins the placeholder order of the parameterised terminal-state
+	// filter: the two states, then the batch limit.
+	mock.ExpectQuery(regexp.QuoteMeta("LEFT JOIN attempt_submissions_v2 r ON r.attempt_id = a.id")).
+		WithArgs(attempts.SATModuleSubmitted, attempts.SATModuleLocked, int64(250)).
+		WillReturnRows(
+			sqlmock.NewRows([]string{"id", "schedule_id", "submission_id"}).AddRow("att-1", "sched-1", "sub-receipt"))
 	satBegin(mock)
 	satDBTime(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(satAttemptRow("submitted", "post-exam", "active"))

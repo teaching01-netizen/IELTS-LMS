@@ -580,18 +580,32 @@ func hydrateSessionRuntime(row sessionRuntimeRow, sections []SessionRuntimeSecti
 // Rust build_not_started_runtime minus the version-plan load (see package
 // doc): empty plan/sections arrays keep the wire shape.
 func notStartedSessionRuntime(schedule SessionSchedule, now time.Time) SessionRuntime {
-	timing := examruntime.TimingModelLegacy
-	if schedule.ProviderKey == "sat" {
-		timing = examruntime.TimingModelCohortSection
-	}
+	return NotStartedRuntimeForProvider(schedule.ID, schedule.ExamID, schedule.ProviderKey, now)
+}
+
+// NotStartedRuntimeForProvider is the ONE pre-start projection for a schedule
+// whose exam_session_runtimes row does not exist yet: status not_started, no
+// active section, no deadline, zero remaining seconds.
+//
+// Both readers of "what is this schedule doing right now?" call it: the
+// proctor dashboard (loadSessionRuntimes / loadSessionRuntime /
+// LoadSessionRuntimeByStatus) and the student bootstrap
+// (delivery.loadTiming). They used to answer differently — the proctor said
+// not_started while the student bootstrap said "live legacy attempt", so a
+// waiting SAT student's entry gate opened, POSTed /modules/start, and got a
+// 409 RUNTIME_NOT_LIVE every retry window.
+//
+// examID may be empty when the caller keyed off a schedule id it did not
+// re-read; the wire projection only needs it for the id echo.
+func NotStartedRuntimeForProvider(scheduleID, examID, providerKey string, now time.Time) SessionRuntime {
 	return SessionRuntime{
 		ID:                             nilUUID,
-		ScheduleID:                     schedule.ID,
-		ExamID:                         schedule.ExamID,
-		ProviderKey:                    schedule.ProviderKey,
-		Status:                         "not_started",
+		ScheduleID:                     scheduleID,
+		ExamID:                         examID,
+		ProviderKey:                    providerKey,
+		Status:                         examruntime.StatusNotStarted,
 		PlanSnapshot:                   []SessionPlanEntry{},
-		TimingModel:                    timing,
+		TimingModel:                    examruntime.ProviderTimingModel(providerKey),
 		CurrentSectionRemainingSeconds: 0,
 		ServerNow:                      now,
 		CreatedAt:                      now,

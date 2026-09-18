@@ -135,7 +135,7 @@ type QuestionWorkspaceRich = {
   choices: Record<string, StructuredContent>;
 };
 
-function isWorkspaceRichContent(value: unknown): value is StructuredContent {
+export function isWorkspaceRichContent(value: unknown): value is StructuredContent {
   if (value === null || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
   return (
@@ -145,6 +145,53 @@ function isWorkspaceRichContent(value: unknown): value is StructuredContent {
     candidate["document"] !== null &&
     typeof candidate["document"] === "object"
   );
+}
+
+/**
+ * The workspace roots the room must own before a question is hydrated.
+ *
+ * "Hydrated" means the room holds the question's CANONICAL roots, not that they
+ * match the HTTP answer: a collaborator may already have edited this question,
+ * and their content is the newer truth. It is the HTTP response that is only a
+ * seed PROPOSAL.
+ *
+ * A single-choice question needs one root per choice; an SPR question has no
+ * choices at all, so requiring them would leave it un-hydrated forever.
+ */
+export function requiredQuestionWorkspacePaths(
+  questionPath: string,
+  input: { singleChoiceOptionIds: readonly string[] },
+): string[] {
+  const paths = [
+    `${questionPath}/scalar`,
+    `rich:${questionPath}/prompt`,
+    `rich:${questionPath}/stimulus`,
+    `rich:${questionPath}/rationale`,
+  ];
+  for (const optionId of input.singleChoiceOptionIds) {
+    paths.push(`rich:${questionPath}/choice/${optionId}`);
+  }
+  return paths;
+}
+
+/**
+ * Which of the question's required roots the room does not hold yet.
+ *
+ * Read straight off the published workspace values, so it is the SAME signal the
+ * editors project from: a root the provider refuses to project (an allocated
+ * but never-initialized fragment) can never count as hydrated.
+ */
+export function questionWorkspaceHydration(
+  values: Record<string, unknown>,
+  questionPath: string,
+  input: { singleChoiceOptionIds: readonly string[] },
+): { ready: boolean; pendingPaths: string[] } {
+  const pendingPaths = requiredQuestionWorkspacePaths(questionPath, input).filter((path) =>
+    path === `${questionPath}/scalar`
+      ? !isQuestionWorkspaceScalar(values[path])
+      : !isWorkspaceRichContent(values[path]),
+  );
+  return { ready: pendingPaths.length === 0, pendingPaths };
 }
 
 export function questionWorkspaceRich(

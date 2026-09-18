@@ -14,6 +14,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { plainContentFromText } from "../../../editor/richContent";
+import {
+  emptyWorkspaceContent,
+  isWorkspaceRichContent,
+} from "../../../ui/authoringWorkspaceModel";
 import { encodeStateVectorBase64 } from "../stateVector";
 import { parseWorkspaceSeedFrame } from "../workspaceSeed";
 import {
@@ -582,5 +586,75 @@ describe("authoring save Retry", () => {
     provider.retry();
 
     expect(framesOn(transport)).toEqual([]);
+  });
+});
+
+/**
+ * Root ALLOCATED is not root INITIALIZED.
+ *
+ * A shared rich root exists from the moment anything asks the document for it:
+ * a field binding, an editor mounting its Collaboration plugin, a recovery
+ * export. Projecting such a root published an empty document for a question
+ * nobody had seeded, and that empty value then replaced the HTTP question the
+ * author was looking at — the "sidebar has content but the editor is blank"
+ * state. These tests pin both halves of the rule: a root nobody has written to
+ * is not content, and an author-made blank IS.
+ */
+describe("SAT workspace rich-root initialization", () => {
+  it("does not project a rich root that was only allocated", () => {
+    const { provider } = openRoom();
+    // What opening a field binding does: resolve the fragment by name, which
+    // ALLOCATES it in the shared document without writing anything.
+    provider.fieldBinding(PROMPT_FIELD);
+    const fragment = provider.ydoc.getXmlFragment(ROOT_B);
+    expect(fragment.length).toBe(0);
+
+    const snapshots: WorkspaceCoeditSnapshot[] = [];
+    provider.subscribe((next) => snapshots.push(next));
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]!.values[ROOT_B]).toBeUndefined();
+
+    // A later unrelated change re-reads every root; the allocated one stays out.
+    provider.setValue("ui/selectedQuestionId", "q-1");
+    expect(snapshots.at(-1)!.values["ui/selectedQuestionId"]).toBe("q-1");
+    expect(snapshots.at(-1)!.values[ROOT_B]).toBeUndefined();
+    expect(Object.keys(snapshots.at(-1)!.values)).not.toContain(ROOT_A);
+  });
+
+  it("still proposes the seed for a bound-but-empty root, then projects the accepted seed", () => {
+    const { provider, transport } = openRoom();
+    provider.fieldBinding(PROMPT_FIELD);
+    provider.ydoc.getXmlFragment(ROOT_B);
+    const snapshots: WorkspaceCoeditSnapshot[] = [];
+    provider.subscribe((next) => snapshots.push(next));
+
+    // A binding is not content, so it cannot block the question's own seed.
+    expect(provider.seedRichField(PROMPT_FIELD, plainContentFromText("From the HTTP question"))).toBe(
+      true,
+    );
+    expect(
+      transport.stateless.some((payload) => payload.includes("From the HTTP question")),
+    ).toBe(true);
+
+    // The accepted seed arrives as an ordinary Yjs update from the service.
+    provider.setRichField(PROMPT_FIELD, plainContentFromText("From the HTTP question"));
+    expect(textWithin(snapshots.at(-1)!.values[ROOT_B])).toContain("From the HTTP question");
+  });
+
+  it("treats an author-made blank field as initialized, authoritative content", () => {
+    const { provider } = openRoom();
+    const snapshots: WorkspaceCoeditSnapshot[] = [];
+    provider.subscribe((next) => snapshots.push(next));
+
+    // Empty structured content is still a DOCUMENT: the contract writes the
+    // document's own paragraph, so the root is non-zero-length and initialized.
+    provider.setRichField(PROMPT_FIELD, emptyWorkspaceContent());
+    expect(provider.ydoc.getXmlFragment(ROOT_B).length).toBeGreaterThan(0);
+
+    const projected = snapshots.at(-1)!.values[ROOT_B];
+    expect(isWorkspaceRichContent(projected)).toBe(true);
+    // No visible text, and still the field's truth: an author who cleared the
+    // prompt must not be shown the pre-clear HTTP content again.
+    expect(textWithin(projected)).toBe("");
   });
 });

@@ -90,6 +90,34 @@ export function useAuthoringSelection({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const selectionAnchorRef = useRef<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  // The selection the adoption rule compares against. Kept here rather than
+  // read from state so `adoptQuestion` stays identity-stable: the effects that
+  // call it must not re-run on every selection change, and one of them (the
+  // deep link) strips its own query string on the way through.
+  const selectedExamQuestionIdRef = useRef(selectedExamQuestionId);
+  selectedExamQuestionIdRef.current = selectedExamQuestionId;
+
+  /**
+   * The ONE path that moves the selection to a question.
+   *
+   * Deep links, the shell-replacement fallback and the module-entry correction
+   * all land here. They used to set the two ids themselves, which meant the
+   * automatic paths skipped `onQuestionAdopted` AND left the previous
+   * question's draft open beside the new selection — the state in which the
+   * sidebar shows the new draft version while the editor still holds the old
+   * version's question.
+   */
+  const adoptQuestion = useCallback(
+    (moduleId: string | null, examQuestionId: string | null) => {
+      if (examQuestionId !== selectedExamQuestionIdRef.current) {
+        selectedExamQuestionIdRef.current = examQuestionId;
+        onQuestionAdopted?.(examQuestionId);
+      }
+      setSelectedModuleId(moduleId);
+      setSelectedExamQuestionId(examQuestionId);
+    },
+    [onQuestionAdopted],
+  );
 
   const selectedSection = useMemo(
     () =>
@@ -119,10 +147,7 @@ export function useAuthoringSelection({
   const { entryQuestionFor } = useModuleQuestionSelection({
     module: selectedModule,
     selectedExamQuestionId,
-    onAdoptQuestion: (examQuestionId) => {
-      onQuestionAdopted?.(examQuestionId);
-      setSelectedExamQuestionId(examQuestionId);
-    },
+    onAdoptQuestion: (examQuestionId) => adoptQuestion(selectedModuleId, examQuestionId),
   });
 
   const clearRowSelection = useCallback(() => {
@@ -148,8 +173,7 @@ export function useAuthoringSelection({
         )
         .find((candidate) => candidate.question);
       if (target?.question) {
-        setSelectedModuleId(target.module.id);
-        setSelectedExamQuestionId(target.question.examQuestionId);
+        adoptQuestion(target.module.id, target.question.examQuestionId);
         onDeepLinkField?.(deepField);
         const next = new URLSearchParams(searchParams);
         next.delete("question");
@@ -169,10 +193,9 @@ export function useAuthoringSelection({
       );
     if (!selectedStillExists) {
       const firstModule = shell.sections[0]?.modules[0] ?? null;
-      setSelectedModuleId(firstModule?.id ?? null);
-      setSelectedExamQuestionId(firstModule?.questions[0]?.examQuestionId ?? null);
+      adoptQuestion(firstModule?.id ?? null, firstModule?.questions[0]?.examQuestionId ?? null);
     }
-  }, [searchParams, selectedModuleId, setSearchParams, shell, onDeepLinkField]);
+  }, [adoptQuestion, searchParams, selectedModuleId, setSearchParams, shell, onDeepLinkField]);
 
   return {
     selectedModuleId,

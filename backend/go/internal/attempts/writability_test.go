@@ -34,6 +34,12 @@ func TestEnsureWritableMatrix(t *testing.T) {
 		{"proctor-paused", func(a *AttemptState, g *RuntimeGate) { a.ProctorStatus = "paused" }, apperrors.CodeAttemptProctorBlocked},
 		{"runtime-not-live", func(a *AttemptState, g *RuntimeGate) { g.Status = "paused" }, apperrors.CodeAttemptNotWritable},
 		{"runtime-waiting", func(a *AttemptState, g *RuntimeGate) { g.WaitingForNextSection = true }, apperrors.CodeAttemptNotWritable},
+		// Section liveness (audit finding 3): these flags are read on the write's
+		// own transaction, so a planned-but-locked, paused or completed section
+		// refuses in both locker modes instead of being ignored.
+		{"section-not-started", func(a *AttemptState, g *RuntimeGate) { g.SectionStarted = false; g.SectionLive = false }, apperrors.CodeAttemptNotWritable},
+		{"section-paused", func(a *AttemptState, g *RuntimeGate) { g.SectionPaused = true; g.SectionLive = false }, apperrors.CodeAttemptNotWritable},
+		{"section-completed", func(a *AttemptState, g *RuntimeGate) { g.SectionLive = false }, apperrors.CodeAttemptNotWritable},
 		{"past-grace", func(a *AttemptState, g *RuntimeGate) { t := now.Add(-time.Microsecond); a.ClosingGraceUntil = &t }, apperrors.CodeDeadlineExpired},
 		{"at-grace-inclusive", func(a *AttemptState, g *RuntimeGate) { t := now; a.ClosingGraceUntil = &t }, ""},
 	}
@@ -120,6 +126,35 @@ func TestEnsureWritableBetweenSections(t *testing.T) {
 	}
 	if appErr.Message != "Exam runtime is waiting." {
 		t.Fatalf("expected the waiting message, got %q", appErr.Message)
+	}
+}
+
+// The section verdicts carry distinct messages, so a client can tell "the
+// proctor paused your section" from "your section has not opened yet".
+func TestEnsureWritableSectionMessages(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name    string
+		mut     func(*RuntimeGate)
+		message string
+	}{
+		{"not started", func(g *RuntimeGate) { g.SectionStarted = false; g.SectionLive = false }, "Exam section has not started."},
+		{"paused", func(g *RuntimeGate) { g.SectionPaused = true; g.SectionLive = false }, "Exam section is paused."},
+		{"completed", func(g *RuntimeGate) { g.SectionLive = false }, "Exam section is not live."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, g := openAttempt(), liveGate(now)
+			tc.mut(&g)
+			err := ensureWritable(a, g, now)
+			appErr, ok := apperrors.As(err)
+			if !ok || appErr.Code != apperrors.CodeAttemptNotWritable || appErr.HTTPStatus != 422 {
+				t.Fatalf("want 422 NOT_WRITABLE, got %v", err)
+			}
+			if appErr.Message != tc.message {
+				t.Fatalf("want %q, got %q", tc.message, appErr.Message)
+			}
+		})
 	}
 }
 
