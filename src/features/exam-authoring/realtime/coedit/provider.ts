@@ -33,7 +33,11 @@ import {
   parseSatWorkspaceCommand,
   type SatWorkspaceCommand,
 } from "./workspaceCommands";
-import type { WorkspaceSeedFrame } from "./workspaceSeed";
+import {
+  parseWorkspaceSeedResultFrame,
+  type WorkspaceSeedFrame,
+  type WorkspaceSeedOutcome,
+} from "./workspaceSeed";
 import {
   auditEpochCaches,
   clearEpochCache,
@@ -163,6 +167,15 @@ export interface PromptCoeditSnapshot {
   issue: CoeditLifecycleIssue;
   issueMessage: string | null;
   published: boolean;
+  /**
+   * Seed outcomes the room reported, keyed by the workspace path they were
+   * proposed for. Absent while every proposal is still outstanding or applied,
+   * which keeps the common case out of the snapshot's identity.
+   *
+   * This is what turns "the root never appeared" from an eternal wait into a
+   * fact an editor can render recovery for.
+   */
+  seedFailures?: Record<string, { outcome: WorkspaceSeedOutcome; retryable: boolean }>;
 }
 
 /**
@@ -184,6 +197,16 @@ export class PromptCoeditProvider {
   private readonly hocuspocus: HocuspocusProvider;
   private readonly listeners = new Set<
     (snapshot: PromptCoeditSnapshot, reason: CoeditChangeReason) => void
+  >();
+
+  /**
+   * Seed outcomes the service reported, by workspace path. Applied seeds are
+   * removed rather than recorded: the common case must not grow this map, and
+   * "the room holds this root" is already visible in the document itself.
+   */
+  private readonly seedFailures = new Map<
+    string,
+    { outcome: WorkspaceSeedOutcome; retryable: boolean }
   >();
 
   private token: PromptCoeditToken;
@@ -532,7 +555,13 @@ export class PromptCoeditProvider {
       issue: this.issue,
       issueMessage: this.issueMessage,
       published: this.published,
+      ...(this.seedFailures.size === 0 ? {} : { seedFailures: this.seedFailureMap() }),
     };
+  }
+
+  /** The reported seed failures as a plain record for the snapshot. */
+  private seedFailureMap(): Record<string, { outcome: WorkspaceSeedOutcome; retryable: boolean }> {
+    return Object.fromEntries(this.seedFailures);
   }
 
   /**
@@ -928,6 +957,21 @@ export class PromptCoeditProvider {
         retryable: saveFailure.retryable,
       };
       this.storeInFlight = false;
+      this.recompute("status");
+      return;
+    }
+    const seedResult = parseWorkspaceSeedResultFrame(parsed, {
+      documentName: this.documentName,
+    });
+    if (seedResult) {
+      if (seedResult.outcome === "applied") {
+        this.seedFailures.delete(seedResult.path);
+      } else {
+        this.seedFailures.set(seedResult.path, {
+          outcome: seedResult.outcome,
+          retryable: seedResult.retryable,
+        });
+      }
       this.recompute("status");
       return;
     }

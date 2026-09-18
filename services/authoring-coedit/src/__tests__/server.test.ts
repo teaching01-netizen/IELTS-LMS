@@ -767,6 +767,93 @@ describe("service integration", () => {
     expect(received.some((payload) => JSON.parse(payload).type === "coedit.seed")).toBe(false);
   });
 
+  it("reports each seed outcome back to its proposer instead of leaving it waiting", async () => {
+    // A seed used to be fire-and-forget. The browser proposed a root, the
+    // service applied/refused/conflicted it, and the ONLY thing the proposer
+    // could observe was "the root is not there yet" — which is also what a
+    // proposal still in flight looks like. Every editor that bound to that root
+    // then pulsed forever with no way out.
+    const running = await startService();
+    const alice = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-alice" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    const observer = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-obs", mode: "read" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => alice.isSynced && observer.isSynced, 5_000, "seed result clients");
+
+    const results: Array<Record<string, unknown>> = [];
+    const collect = ({ payload }: { payload: string }) => {
+      const parsed = JSON.parse(payload) as Record<string, unknown>;
+      if (parsed["type"] === "coedit.seed_result") results.push(parsed);
+    };
+    alice.on("stateless", collect);
+    observer.on("stateless", collect);
+
+    const applied = createWorkspaceSeedFrame({
+      documentName: WORKSPACE_DOCUMENT_NAME,
+      root: "scalar",
+      path: "question/q1/scalar",
+      value: { source: "alice" },
+      sourceQuestionRevision: 1,
+    });
+    alice.sendStateless(JSON.stringify(applied));
+    await waitFor(
+      () => results.some((frame) => frame["seedId"] === applied.seedId),
+      5_000,
+      "the applied seed result",
+    );
+    const appliedResult = results.find((frame) => frame["seedId"] === applied.seedId);
+    expect(appliedResult?.["outcome"]).toBe("applied");
+    expect(appliedResult?.["path"]).toBe("question/q1/scalar");
+    expect(appliedResult?.["root"]).toBe("scalar");
+    expect(appliedResult?.["retryable"]).toBe(false);
+
+    // A proposal for a root the room already holds is a CONFLICT, not a
+    // silent no-op: the proposer must adopt the room's content.
+    const conflicting = createWorkspaceSeedFrame({
+      documentName: WORKSPACE_DOCUMENT_NAME,
+      root: "scalar",
+      path: "question/q1/scalar",
+      value: { source: "bob" },
+      sourceQuestionRevision: 1,
+    });
+    alice.sendStateless(JSON.stringify(conflicting));
+    await waitFor(
+      () => results.some((frame) => frame["seedId"] === conflicting.seedId),
+      5_000,
+      "the conflicted seed result",
+    );
+    const conflictResult = results.find((frame) => frame["seedId"] === conflicting.seedId);
+    expect(conflictResult?.["outcome"]).toBe("conflict");
+    expect(conflictResult?.["retryable"]).toBe(false);
+
+    // A read token cannot seed at all. That is a fact the browser needs: the
+    // root will never appear, and a retry cannot change it.
+    const refused = createWorkspaceSeedFrame({
+      documentName: WORKSPACE_DOCUMENT_NAME,
+      root: "scalar",
+      path: "question/q2/scalar",
+      value: { source: "observer" },
+      sourceQuestionRevision: 1,
+    });
+    observer.sendStateless(JSON.stringify(refused));
+    await waitFor(
+      () => results.some((frame) => frame["seedId"] === refused.seedId),
+      5_000,
+      "the refused seed result",
+    );
+    const refusedResult = results.find((frame) => frame["seedId"] === refused.seedId);
+    expect(refusedResult?.["outcome"]).toBe("rejected");
+    expect(refusedResult?.["retryable"]).toBe(false);
+
+    // Addressed to the PROPOSER, not broadcast: it resolves one editor's wait,
+    // and a peer's conflict is not another peer's news.
+    expect(results.filter((frame) => frame["seedId"] === refused.seedId)).toHaveLength(1);
+  });
+
   it("reports a refused seed store and stays up instead of dying on it", async () => {
     // The outage this pins: a seed proposal whose store was refused rejected the
     // `onStateless` hook. Hocuspocus does not catch a rejected stateless hook,

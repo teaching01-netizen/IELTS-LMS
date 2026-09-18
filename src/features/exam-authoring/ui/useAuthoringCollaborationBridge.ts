@@ -10,6 +10,7 @@ import type {
   UsePromptCoeditingResult,
   WorkspaceFieldBinding,
 } from "../realtime/coedit";
+import type { WorkspaceFieldHydration } from "./useWorkspaceProjectionWrites";
 
 /**
  * Placeholder binding used while a room is being opened: it renders the
@@ -58,16 +59,22 @@ export interface AuthoringCollaborationBridgeInput {
   /** `question/<examQuestionId>` for the open question, when one is selected. */
   workspaceQuestionPath: string | null;
   /**
-   * The room holds the selected question's canonical roots.
+   * Readiness of ONE editor's root, named relative to the open question.
    *
-   * A connected room is not the same thing, and this is the distinction the
-   * blank-editor bug hid in: the seed is a proposal the service arbitrates, so
-   * there is a real window in which the room has synced and the question's
-   * roots do not exist yet. A binding that claimed readiness inside that window
-   * mounted an editable, EMPTY collaborative editor over the question the
+   * A connected room is not the same thing as a room holding a field, and this
+   * is the distinction the blank-editor bug hid in: the seed is a proposal the
+   * service arbitrates, so there is a real window in which the room has synced
+   * and the roots do not exist yet. A binding that claimed readiness inside that
+   * window mounted an editable, EMPTY collaborative editor over the question the
    * author was looking at — the room's emptiness replacing HTTP content.
+   *
+   * Asked PER FIELD: gating every editor on the whole question meant one
+   * un-seeded optional root (a rationale nobody had written) held the prompt and
+   * all four choices in a pulse forever.
    */
-  questionHydrated: boolean;
+  fieldHydration: (fieldPath: string) => WorkspaceFieldHydration;
+  /** Re-proposes the seeds for fields still waiting after a bounded failure. */
+  onRetryInitialization: () => void;
   /** The persistence owner's answer: does the open question have unsaved work? */
   hasPendingChanges: boolean;
 }
@@ -92,7 +99,8 @@ export function useAuthoringCollaborationBridge({
   workspaceCollaboration,
   selectedExamQuestionId,
   workspaceQuestionPath,
-  questionHydrated,
+  fieldHydration,
+  onRetryInitialization,
   hasPendingChanges,
 }: AuthoringCollaborationBridgeInput): AuthoringCollaborationBridge {
   const realtimeFlags = useMemo(
@@ -131,9 +139,20 @@ export function useAuthoringCollaborationBridge({
   // is — a viewer cannot seed, so withholding its binding would only replace a
   // real (if empty) room document with a permanent loading surface.
   const hydrateBinding = useCallback(
-    (binding: WorkspaceFieldBinding): WorkspaceFieldBinding =>
-      questionHydrated || binding.readOnly ? binding : { ...binding, ready: false },
-    [questionHydrated],
+    (fieldPath: string, binding: WorkspaceFieldBinding): WorkspaceFieldBinding => {
+      if (binding.readOnly) return binding;
+      const hydration = fieldHydration(fieldPath);
+      if (hydration.state === "hydrated") return binding;
+      // A field the room refused to seed can never become ready by waiting, so
+      // it reports the failure and carries the retry the composer offers.
+      return {
+        ...binding,
+        ready: false,
+        initializationFailed: hydration.state === "failed",
+        onRetryInitialization,
+      };
+    },
+    [fieldHydration, onRetryInitialization],
   );
   const workspacePromptBinding = useMemo(() => {
     if (!workspaceCollaboration || !selectedExamQuestionId) return null;
@@ -141,7 +160,7 @@ export function useAuthoringCollaborationBridge({
       `question/${selectedExamQuestionId}/prompt`
     );
     return (
-      (binding ? hydrateBinding(binding) : null) ??
+      (binding ? hydrateBinding("prompt", binding) : null) ??
       (workspaceCollaboration.status === "preparing" || workspaceCollaboration.status === "error"
         ? PENDING_PROMPT_COLLABORATION
         : null)
@@ -168,7 +187,7 @@ export function useAuthoringCollaborationBridge({
       const binding = workspaceCollaboration.fieldBinding(
         `${workspaceQuestionPath}/${fieldPath}`
       );
-      return binding ? hydrateBinding(binding) : null;
+      return binding ? hydrateBinding(fieldPath, binding) : null;
     },
     [hydrateBinding, workspaceCollaboration, workspaceQuestionPath]
   );

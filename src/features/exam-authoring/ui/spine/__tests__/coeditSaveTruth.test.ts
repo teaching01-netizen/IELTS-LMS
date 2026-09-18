@@ -62,6 +62,7 @@ describe("coeditDisplayStatusFor", () => {
     readOnly: boolean;
     pendingSince: number | null;
     autosaveStatus: "saved" | "unsaved" | "saving" | "offline" | "error" | "conflict";
+    questionPending: boolean;
     now: number;
   }> = {}) => ({
     saveState: state("saved"),
@@ -71,6 +72,7 @@ describe("coeditDisplayStatusFor", () => {
     readOnly: false,
     pendingSince: null,
     autosaveStatus: "saved" as const,
+    questionPending: false,
     now: 10_000,
     ...overrides,
   });
@@ -103,6 +105,21 @@ describe("coeditDisplayStatusFor", () => {
     expect(coeditDisplayStatusFor(input({ lifecyclePhase: "freezing" }))).toBe("finishing");
     expect(coeditDisplayStatusFor(input({ lifecyclePhase: "frozen" }))).toBe("view_only");
     expect(coeditDisplayStatusFor(input({ autosaveStatus: "conflict" }))).toBe("conflict");
+  });
+
+  it("does not claim Saved for a question whose editors have not initialized", () => {
+    // Room durability is not editor readiness. The room can have committed
+    // everything it holds while a field the author is looking at never
+    // initialized; Saved beside a pulsing editor is a claim about a different
+    // question than the one on screen.
+    expect(coeditDisplayStatusFor(input({ questionPending: true }))).toBe("saving");
+    expect(
+      coeditDisplayStatusFor(input({ questionPending: true, pendingSince: 6_000 })),
+    ).toBe("still_saving");
+    // Once the question's fields are all initialized the room's own truth wins.
+    expect(coeditDisplayStatusFor(input({ questionPending: false }))).toBe("saved");
+    // A destructive room state is still reported as itself, not downgraded.
+    expect(coeditDisplayStatusFor(input({ questionPending: true, saveState: state("error") }))).toBe("error");
   });
 
   it("never flashes Saved during initial setup or after a stale acknowledgement", () => {

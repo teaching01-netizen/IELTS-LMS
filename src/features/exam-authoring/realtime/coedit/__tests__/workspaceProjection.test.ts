@@ -658,3 +658,66 @@ describe("SAT workspace rich-root initialization", () => {
     expect(textWithin(projected)).toBe("");
   });
 });
+
+/**
+ * The seed RESULT channel.
+ *
+ * A proposal whose outcome never reaches the browser is indistinguishable from
+ * one still in flight, so the editor that bound to the root waits forever. The
+ * provider records the outcome per workspace path and publishes it with the
+ * snapshot, which is what lets a field stop waiting and offer recovery.
+ */
+describe("SAT workspace seed results", () => {
+  const result = (overrides: Record<string, unknown>) => ({
+    type: "coedit.seed_result",
+    documentName: DOCUMENT_NAME,
+    seedId: `seed-${"a".repeat(32)}`,
+    root: "rich",
+    path: "question/q-1/rationale",
+    outcome: "rejected",
+    retryable: false,
+    ...overrides,
+  });
+
+  it("records a non-applied outcome against the path it was proposed for", () => {
+    const { provider, transport } = openRoom();
+    expect(provider.snapshot().seedFailures).toBeUndefined();
+
+    transport.deliver(result({}));
+
+    expect(provider.snapshot().seedFailures).toEqual({
+      "question/q-1/rationale": { outcome: "rejected", retryable: false },
+    });
+  });
+
+  it("keeps a retryable failure flagged so the editor can offer a retry", () => {
+    const { provider, transport } = openRoom();
+    transport.deliver(result({ outcome: "failed", retryable: true }));
+
+    expect(provider.snapshot().seedFailures?.["question/q-1/rationale"]).toEqual({
+      outcome: "failed",
+      retryable: true,
+    });
+  });
+
+  it("clears the report once the room says the seed applied", () => {
+    const { provider, transport } = openRoom();
+    transport.deliver(result({ outcome: "failed", retryable: true }));
+    expect(provider.snapshot().seedFailures).toBeDefined();
+
+    transport.deliver(result({ outcome: "applied", retryable: false }));
+
+    // The common case must not accumulate: an applied seed is not a failure,
+    // and "the room holds this root" is already visible in the document.
+    expect(provider.snapshot().seedFailures).toBeUndefined();
+  });
+
+  it("ignores a result addressed to another room or naming another root", () => {
+    const { provider, transport } = openRoom();
+    transport.deliver(result({ documentName: "coedit:v2:00000000-0000-4000-8000-000000000000" }));
+    transport.deliver(result({ path: "not/a/workspace/path" }));
+    transport.deliver(result({ outcome: "not_an_outcome" }));
+
+    expect(provider.snapshot().seedFailures).toBeUndefined();
+  });
+});

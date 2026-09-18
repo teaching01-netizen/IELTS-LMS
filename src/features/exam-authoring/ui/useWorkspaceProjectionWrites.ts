@@ -1,16 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { QuestionRevision } from "../contracts/assessment";
 import type { SatAuthoringCollaborationValue } from "../realtime/coedit";
 import {
   applyQuestionWorkspaceRich,
   applyQuestionWorkspaceScalar,
   emptyWorkspaceContent,
+  isQuestionFieldHydrated,
   isQuestionWorkspaceScalar,
   questionWorkspaceHydration,
   questionWorkspaceRich,
+  questionWorkspaceRichFieldPaths,
   questionWorkspaceScalar,
   type QuestionWorkspaceScalar,
 } from "./authoringWorkspaceModel";
+
+/**
+ * How long one rich root may stay un-seeded before its editor stops waiting.
+ *
+ * A seed proposal is a proposal: it can be refused, conflict, or fail, and the
+ * browser used to learn none of that. The wait is therefore bounded — past the
+ * deadline the field reports `failed` and offers a retry, which is strictly
+ * better than an infinite pulse because it is a state the author can leave.
+ */
+export const WORKSPACE_FIELD_INITIALIZATION_DEADLINE_MS = 15_000;
 
 /**
  * The open question's content, projected both ways against the exam room.
@@ -65,11 +85,37 @@ export interface QuestionHydration {
   pendingPaths: string[];
 }
 
+export type WorkspaceFieldHydrationState = "hydrated" | "pending" | "failed";
+
+export interface WorkspaceFieldHydration {
+  /**
+   * `hydrated` — the room holds this field's root;
+   * `pending`  — its seed is still outstanding inside the bounded wait;
+   * `failed`   — the wait expired, or the room reported a non-applied outcome.
+   */
+  state: WorkspaceFieldHydrationState;
+  /** When this field began waiting, for copy and diagnostics. */
+  pendingSince: number | null;
+}
+
 export interface WorkspaceProjectionWrites {
   /** The room's scalar record for the open question, if it has one yet. */
   sharedQuestionScalar: QuestionWorkspaceScalar | null;
   /** Whether the room owns the open question's canonical roots yet. */
   hydration: QuestionHydration;
+  /**
+   * Readiness of ONE editor's root, named relative to the open question.
+   *
+   * Deliberately per-field: the whole-question `hydration` above is the
+   * authority handoff for read/write projection, and using it to gate editors
+   * made one missing optional root (a rationale nobody has written, a refused
+   * seed) block the prompt and every choice too.
+   */
+  fieldHydration: (fieldPath: string) => WorkspaceFieldHydration;
+  /** Re-proposes the seeds for fields still waiting and restarts their wait. */
+  retryFieldInitialization: () => void;
+  /** True while any rich root of the open question is still waiting. */
+  questionFieldsPending: boolean;
   /**
    * Projects a local question change onto the room's scalar record.
    * False when no room owns the open question, in which case the caller keeps
@@ -157,6 +203,102 @@ export function useWorkspaceProjectionWrites(
       workspaceCollaboration.workspaceSnapshot.localReady,
   );
 
+  // --- Field-scoped initialization -----------------------------------------
+  //
+  // Which rich roots this question needs, and which of them the room does not
+  // hold yet. Readiness is answered per field so a missing root can only affect
+  // the editor that binds to it.
+  const richFieldPaths = useMemo(
+    () => questionWorkspaceRichFieldPaths({ singleChoiceOptionIds: requiredChoiceIds }),
+    [requiredChoiceIds],
+  );
+  const pendingRichFieldPaths = useMemo(() => {
+    if (!workspaceCollaboration || !workspaceQuestionPath) return [];
+    const values = workspaceCollaboration.workspaceSnapshot.values;
+    return richFieldPaths.filter(
+      (fieldPath) => !isQuestionFieldHydrated(values, workspaceQuestionPath, fieldPath),
+    );
+  }, [richFieldPaths, workspaceCollaboration, workspaceQuestionPath]);
+  // Effects key off the CONTENT of this set, not its identity: snapshots arrive
+  // on every collaborator keystroke, and a dep that changed per snapshot would
+  // restart the bounded wait forever.
+  const pendingRichFieldKey = pendingRichFieldPaths.join("|");
+  const [failedFieldPaths, setFailedFieldPaths] = useState<readonly string[]>([]);
+  // Bumped by an explicit retry so the seeding effect proposes again.
+  const [seedAttempt, setSeedAttempt] = useState(0);
+  const fieldPendingSinceRef = useRef<number | null>(null);
+
+  // A questioned move restarts the wait: the previous question's fields say
+  // nothing about this one's.
+  useEffect(() => {
+    fieldPendingSinceRef.current = null;
+    setFailedFieldPaths((current) => (current.length === 0 ? current : []));
+  }, [workspaceQuestionPath]);
+
+  // The bounded wait. It never resets its start time on a new snapshot — only
+  // a new question or an explicit retry does — so a busy room cannot postpone
+  // the failure indefinitely.
+  useEffect(() => {
+    if (!seedBarrierOpen || !workspaceQuestionPath || !workspaceCollaboration) {
+      fieldPendingSinceRef.current = null;
+      setFailedFieldPaths((current) => (current.length === 0 ? current : []));
+      return;
+    }
+    if (pendingRichFieldKey === "") {
+      fieldPendingSinceRef.current = null;
+      setFailedFieldPaths((current) => (current.length === 0 ? current : []));
+      return;
+    }
+    fieldPendingSinceRef.current ??= Date.now();
+    const elapsed = Date.now() - fieldPendingSinceRef.current;
+    if (elapsed >= WORKSPACE_FIELD_INITIALIZATION_DEADLINE_MS) {
+      const next = pendingRichFieldKey.split("|");
+      setFailedFieldPaths((current) =>
+        current.length === next.length && current.every((field, index) => field === next[index])
+          ? current
+          : next,
+      );
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setFailedFieldPaths(pendingRichFieldKey.split("|"));
+    }, WORKSPACE_FIELD_INITIALIZATION_DEADLINE_MS - elapsed);
+    return () => window.clearTimeout(timer);
+  }, [pendingRichFieldKey, seedBarrierOpen, workspaceCollaboration, workspaceQuestionPath]);
+
+  const fieldHydration = useCallback(
+    (fieldPath: string): WorkspaceFieldHydration => {
+      if (!workspaceCollaboration || !workspaceQuestionPath) {
+        return { state: "pending", pendingSince: null };
+      }
+      const values = workspaceCollaboration.workspaceSnapshot.values;
+      if (isQuestionFieldHydrated(values, workspaceQuestionPath, fieldPath)) {
+        return { state: "hydrated", pendingSince: null };
+      }
+      if (!seedBarrierOpen) {
+        // The room has not finished syncing, so nothing has been proposed yet
+        // and nothing has failed: this is still ordinary startup.
+        return { state: "pending", pendingSince: null };
+      }
+      // Keyed by the path the service was told to seed (`question/<id>/…`),
+      // which is the same string every seed frame carries.
+      const reported =
+        workspaceCollaboration.workspaceSnapshot.seedFailures?.[
+          `${workspaceQuestionPath}/${fieldPath}`
+        ];
+      if ((reported && reported.outcome !== "applied") || failedFieldPaths.includes(fieldPath)) {
+        return { state: "failed", pendingSince: fieldPendingSinceRef.current };
+      }
+      return { state: "pending", pendingSince: fieldPendingSinceRef.current };
+    },
+    [failedFieldPaths, seedBarrierOpen, workspaceCollaboration, workspaceQuestionPath],
+  );
+  const retryFieldInitialization = useCallback(() => {
+    fieldPendingSinceRef.current = Date.now();
+    setFailedFieldPaths([]);
+    setSeedAttempt((attempt) => attempt + 1);
+  }, []);
+
   // The HTTP question is only the seed, and the seed is a proposal the room
   // arbitrates: two tabs opening the same empty question both see an empty
   // root, so a local write would let whichever merges second silently win. Once
@@ -199,6 +341,10 @@ export function useWorkspaceProjectionWrites(
     baseQuestion,
     baseQuestionExamQuestionId,
     isPretest,
+    // An explicit retry re-proposes every still-empty root. The service keys a
+    // seed by its content, so this is idempotent: a proposal that already
+    // applied is refused as a duplicate rather than applied twice.
+    seedAttempt,
     selectedExamQuestionId,
     seedBarrierOpen,
     workspaceCollaboration,
@@ -336,5 +482,13 @@ export function useWorkspaceProjectionWrites(
     [draftRef, hydrated, selectedExamQuestionId, workspaceCollaboration],
   );
 
-  return { sharedQuestionScalar, hydration, publishScalar, handleLocalRichChange };
+  return {
+    sharedQuestionScalar,
+    hydration,
+    fieldHydration,
+    retryFieldInitialization,
+    questionFieldsPending: pendingRichFieldKey !== "",
+    publishScalar,
+    handleLocalRichChange,
+  };
 }

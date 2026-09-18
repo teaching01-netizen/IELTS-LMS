@@ -425,7 +425,13 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   // field to an editor from a room that does not hold the question.
   const {
     sharedQuestionScalar,
-    hydration: questionHydration,
+    // The whole-question `hydration` summary is deliberately NOT read here: an
+    // editor's readiness is answered per field below, because gating every
+    // editor on the whole question is what left one missing root pulsing the
+    // prompt and all four choices forever.
+    fieldHydration,
+    retryFieldInitialization,
+    questionFieldsPending,
     publishScalar: publishWorkspaceScalar,
     handleLocalRichChange,
   } = useWorkspaceProjectionWrites({
@@ -457,7 +463,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     workspaceCollaboration,
     selectedExamQuestionId,
     workspaceQuestionPath,
-    questionHydrated: questionHydration.ready,
+    fieldHydration,
+    onRetryInitialization: retryFieldInitialization,
     hasPendingChanges: persistence.hasPendingChanges,
   });
 
@@ -489,6 +496,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     coeditUiActive,
     selectedExamQuestionId,
     autosaveStatus: persistence.status,
+    questionFieldsPending,
   });
 
   // The question command surface: create, import, duplicate, delete, reorder,

@@ -21,8 +21,11 @@ import type {
   QuestionRevision,
   StructuredContent,
 } from "../../contracts/assessment";
-import { plainContentFromText } from "../../editor/richContent";
+import { prosemirrorJSONToYXmlFragment } from "y-prosemirror";
+import { documentFromStructuredContent, plainContentFromText } from "../../editor/richContent";
+import { getRichTextSchema } from "../../editor/schema/richTextSchema";
 import { encodeStateVectorBase64 } from "../../realtime/coedit/stateVector";
+import { questionWorkspaceScalar } from "../authoringWorkspaceModel";
 
 const DOCUMENT_NAME = "coedit:v1:2f1b6c1e-6a0a-4a5b-9f0e-9d3a2f4c5b6d";
 const WORKSPACE_DOCUMENT_NAME = "coedit:v2:9c2f5a44-1f6e-4c31-8b0d-77e0c2b41a53";
@@ -1337,6 +1340,73 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       expect(screen.getByTestId("device-draft-recovery-surface")).toBeInTheDocument();
       // Nothing about this state is a failure of the question read.
       expect(screen.queryByRole("alert", { name: "Question could not be loaded" })).toBeNull();
+    });
+  });
+
+  /**
+   * One unresolved root must not freeze the whole question.
+   *
+   * The screenshot this pins: HTTP 200, the room connected, the header saying
+   * Saved, and every rich editor on the question a grey pulse. One root of the
+   * question had not been seeded, and readiness was answered for the question
+   * AS A WHOLE — so the prompt and all four choices waited on a decision that
+   * had nothing to do with them, with no state the author could leave.
+   */
+  describe("field-scoped collaboration readiness", () => {
+    /** Writes one workspace rich root the way the provider's own seed does. */
+    function writeRoomRoot(
+      transport: FakeTransport,
+      fieldPath: string,
+      content: StructuredContent,
+    ): void {
+      prosemirrorJSONToYXmlFragment(
+        getRichTextSchema(),
+        documentFromStructuredContent(content),
+        transport.document.getXmlFragment(`rich:${fieldPath}`),
+      );
+    }
+
+    it("renders the fields the room holds while one root is still unseeded", async () => {
+      const { transport } = await renderWithWorkspaceRoom();
+      const question = currentDraft();
+
+      // The room owns the question except the LAST choice's root: exactly the
+      // shape the screenshot was taken in.
+      await act(async () => {
+        transport.document.transact(() => {
+          transport.document
+            .getMap("workspace")
+            .set("question/eq-1/scalar", JSON.stringify(questionWorkspaceScalar(question, false)));
+        });
+        writeRoomRoot(transport, "question/eq-1/prompt", question.prompt);
+        const options = question.answer.kind === "single_choice" ? question.answer.options : [];
+        for (const option of options.slice(0, -1)) {
+          writeRoomRoot(transport, `question/eq-1/choice/${option.id}`, option.content);
+        }
+      });
+
+      // The prompt — the field this question is actually about — is editable.
+      // Before the fix this was the pending surface, because the question as a
+      // whole was not hydrated.
+      const prompt = await screen.findByRole("textbox", { name: "Question prompt" });
+      expect(prompt).toBeInTheDocument();
+
+      // The field waiting for its root did not write itself into the room: a
+      // pending composer must not bind an editor to the fragment, because
+      // y-tiptap initializes an empty root from the editor's own document and
+      // the room's emptiness would then replace the HTTP content.
+      expect(transport.document.getXmlFragment("rich:question/eq-1/choice/D").length).toBe(0);
+
+      // Exactly ONE field is still waiting: the choice whose root is missing.
+      // Not five, and not "everything, until the last root lands".
+      await waitFor(() =>
+        expect(document.querySelectorAll('[data-coedit-pending="true"]')).toHaveLength(1),
+      );
+
+      // The header does not claim the question is Saved while a field the
+      // author is looking at has not initialized: room durability and editor
+      // readiness are two different facts.
+      expect(saveStatusText()).toContain("Saving");
     });
   });
 });

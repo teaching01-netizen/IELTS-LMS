@@ -188,6 +188,18 @@ export interface RichComposerCollaboration {
   ready: boolean;
   /** Read-only collaborators (observers, frozen rooms) cannot type. */
   readOnly?: boolean;
+  /**
+   * This field's shared root could not be initialized: its seed proposal was
+   * refused, or the bounded wait expired.
+   *
+   * Waiting can no longer change the outcome, so the composer shows the
+   * recovery surface instead of a pulse. An editor that is still loading and a
+   * field that will never load are different states, and only one of them is
+   * fixed by time.
+   */
+  initializationFailed?: boolean;
+  /** Re-proposes this field's seed and restarts its bounded wait. */
+  onRetryInitialization?: (() => void) | undefined;
 }
 
 export function RichQuestionComposer({
@@ -255,8 +267,21 @@ export function RichQuestionComposer({
   // Identity of the collaboration extension list, not of the binding object:
   // rebuilding extensions on every save-state change would destroy and recreate
   // the editor on each acknowledgement.
-  const collaborationExtensions = collaboration?.extensions;
-  const collaborative = collaboration !== undefined;
+  // The collaboration extensions BIND an editor to the field's shared root, and
+  // y-tiptap initializes an empty fragment from the editor's own document the
+  // moment it binds. Attaching them before the field is ready therefore writes
+  // an empty paragraph into the room's root — the room's emptiness replaces the
+  // HTTP content, and the field then counts as hydrated because the browser
+  // itself put something there. The loading surface would be a lie: the editor
+  // is already mounted and bound underneath it.
+  //
+  // A read-only binding is attached immediately: it cannot write, so
+  // withholding it would only replace a real (if empty) room document with a
+  // permanent loading surface.
+  const collaborationAttached =
+    collaboration !== undefined && (collaboration.ready || Boolean(collaboration.readOnly));
+  const collaborationExtensions = collaborationAttached ? collaboration?.extensions : undefined;
+  const collaborative = collaborationAttached;
   const collaborationReady = collaboration?.ready ?? false;
   const collaborationReadOnly = Boolean(collaboration?.readOnly);
   // A collaborative editor is EMPTY until the room's document is applied, and
@@ -372,7 +397,7 @@ export function RichQuestionComposer({
       // Collaborative mode never seeds from props: the Y.Doc (seeded by the
       // service when the room first opens) is the single source of truth, and
       // passing `content` would race the initial sync.
-      ...(collaboration ? {} : { content: initialContent as JSONContent }),
+      ...(collaborationAttached ? {} : { content: initialContent as JSONContent }),
       immediatelyRender: false,
       editable: !collaborationReadOnly,
       editorProps: {
@@ -395,7 +420,14 @@ export function RichQuestionComposer({
           // marked, but IS an author action. Which transactions carry that mark
           // is the co-editing package's business — this file stays free of the
           // transport, and the architecture rule keeps it that way.
-          if (!isCollaborativeTransaction(transaction)) onLocalChangeRef.current?.(next);
+          //
+          // A field still waiting for its shared root has no collaborative
+          // writer yet, and must not grow a legacy one: the room is about to
+          // own this field, and a second writer here is exactly the
+          // double-write the authority handoff exists to prevent.
+          if (collaborative && !isCollaborativeTransaction(transaction)) {
+            onLocalChangeRef.current?.(next);
+          }
         } else {
           onLocalChangeRef.current?.(next);
         }
@@ -448,6 +480,32 @@ export function RichQuestionComposer({
   // status is unresolved: the composer shows the loading surface until the
   // provider reports initial sync.
   if (collaboration && !collaboration.ready) {
+    // A field whose root will never arrive must not pulse forever. The wait is
+    // bounded upstream, and once it fails the author is given a way out that
+    // keeps the HTTP copy the question is still showing them.
+    if (collaboration.initializationFailed) {
+      return (
+        <div
+          data-editor-surface="rich"
+          data-coedit-pending="true"
+          data-coedit-error="true"
+          role="status"
+          className={`${minHeightClassName} flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-au-separator bg-au-fill px-3.5 py-3 text-[12px] font-medium text-slate-600`}
+        >
+          <span data-coedit-error-message>Live editing could not start for this field.</span>
+          {collaboration.onRetryInitialization ? (
+            <button
+              type="button"
+              data-coedit-retry="true"
+              className="authoring-interactive min-h-8 rounded-lg border border-au-separator bg-au-surface px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-au-fill-strong"
+              onClick={collaboration.onRetryInitialization}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <div
         data-editor-surface="rich"

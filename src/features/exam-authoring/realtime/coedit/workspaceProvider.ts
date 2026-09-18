@@ -32,6 +32,7 @@ import {
 import {
   createWorkspaceSeedFrame,
   type WorkspaceSeedFrame,
+  type WorkspaceSeedOutcome,
   type WorkspaceSeedRoot,
 } from "./workspaceSeed";
 
@@ -64,6 +65,14 @@ export interface WorkspaceCoeditSnapshot {
   issue: CoeditLifecycleIssue;
   issueMessage: string | null;
   published: boolean;
+  /**
+   * Seed outcomes the room reported, keyed by workspace path. Absent while
+   * every proposal is outstanding or applied.
+   *
+   * A field whose seed was refused can never become hydrated, so this is the
+   * fact that lets its editor stop waiting and offer recovery instead.
+   */
+  seedFailures?: Record<string, { outcome: WorkspaceSeedOutcome; retryable: boolean }>;
 }
 
 export interface WorkspaceFieldBinding extends RichComposerCollaboration {
@@ -283,6 +292,7 @@ export class SatAuthoringWorkspaceProvider {
       issue: coreSnapshot.issue,
       issueMessage: coreSnapshot.issueMessage,
       published: coreSnapshot.published,
+      ...(coreSnapshot.seedFailures ? { seedFailures: coreSnapshot.seedFailures } : {}),
     };
   }
 

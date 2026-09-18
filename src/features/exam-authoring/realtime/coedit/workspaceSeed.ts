@@ -205,6 +205,102 @@ export function createWorkspaceSeedFrame(input: WorkspaceSeedInput): WorkspaceSe
   return frame;
 }
 
+/**
+ * What the room did with one seed proposal.
+ *
+ * A seed used to be fire-and-forget: the service logged a refusal and the
+ * browser kept evaluating "is this root initialized yet?" forever. A field
+ * whose seed was refused is not going to become ready, so the refusal has to
+ * reach the proposer as a fact rather than as an absence.
+ *
+ *   applied  — the room wrote it; the root arrives as an ordinary Yjs update
+ *   conflict — the room already held this root; the held content is the truth
+ *   rejected — no write permission (a read token, or a frozen room)
+ *   failed   — the proposal itself or its store failed
+ */
+export type WorkspaceSeedOutcome = "applied" | "conflict" | "rejected" | "failed";
+
+export const WORKSPACE_SEED_RESULT_TYPE = "coedit.seed_result";
+
+export interface WorkspaceSeedResultFrame {
+  type: typeof WORKSPACE_SEED_RESULT_TYPE;
+  documentName: string;
+  seedId: string;
+  root: WorkspaceSeedRoot;
+  path: string;
+  outcome: WorkspaceSeedOutcome;
+  /** False when a verbatim re-proposal cannot change the outcome. */
+  retryable: boolean;
+}
+
+export function createWorkspaceSeedResultFrame(input: {
+  documentName: string;
+  seedId: string;
+  root: WorkspaceSeedRoot;
+  path: string;
+  outcome: WorkspaceSeedOutcome;
+  retryable: boolean;
+}): WorkspaceSeedResultFrame {
+  return {
+    type: WORKSPACE_SEED_RESULT_TYPE,
+    documentName: input.documentName,
+    seedId: input.seedId,
+    root: input.root,
+    path: input.path,
+    outcome: input.outcome,
+    retryable: input.retryable,
+  };
+}
+
+function isSeedOutcome(value: unknown): value is WorkspaceSeedOutcome {
+  return value === "applied" || value === "conflict" || value === "rejected" || value === "failed";
+}
+
+/**
+ * Parses a seed result. Invalid or foreign frames are ignored, like every other
+ * stateless frame in this vocabulary.
+ */
+export function parseWorkspaceSeedResultFrame(
+  raw: unknown,
+  options: ParseWorkspaceSeedOptions = {},
+): WorkspaceSeedResultFrame | null {
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    if (utf8Bytes(raw) > MAX_WORKSPACE_SEED_FRAME_BYTES) return null;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(value) || value["type"] !== WORKSPACE_SEED_RESULT_TYPE) return null;
+  if (
+    typeof value["documentName"] !== "string" ||
+    value["documentName"] !== value["documentName"].trim() ||
+    parseAnyDocumentName(value["documentName"])?.fieldSet !== "workspace"
+  ) return null;
+  if (options.documentName !== undefined && value["documentName"] !== options.documentName) return null;
+  if (typeof value["seedId"] !== "string" || !SEED_ID.test(value["seedId"])) return null;
+  if (value["root"] !== "scalar" && value["root"] !== "rich") return null;
+  if (
+    typeof value["path"] !== "string" ||
+    value["path"] !== value["path"].trim() ||
+    value["path"].length === 0 ||
+    value["path"].length > MAX_WORKSPACE_SEED_PATH_LENGTH ||
+    workspaceSeedPathRoot(value["path"]) !== value["root"]
+  ) return null;
+  if (!isSeedOutcome(value["outcome"]) || typeof value["retryable"] !== "boolean") return null;
+  return {
+    type: WORKSPACE_SEED_RESULT_TYPE,
+    documentName: value["documentName"],
+    seedId: value["seedId"],
+    root: value["root"],
+    path: value["path"],
+    outcome: value["outcome"],
+    retryable: value["retryable"],
+  };
+}
+
 /** Parses either a decoded frame or a wire JSON string. Invalid input is ignored. */
 export function parseWorkspaceSeedFrame(
   raw: unknown,

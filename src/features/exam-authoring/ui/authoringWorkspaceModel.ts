@@ -162,16 +162,64 @@ export function requiredQuestionWorkspacePaths(
   questionPath: string,
   input: { singleChoiceOptionIds: readonly string[] },
 ): string[] {
-  const paths = [
+  return [
     `${questionPath}/scalar`,
-    `rich:${questionPath}/prompt`,
-    `rich:${questionPath}/stimulus`,
-    `rich:${questionPath}/rationale`,
+    ...questionWorkspaceRichFieldPaths(input).map((fieldPath) =>
+      workspaceRichFieldPath(questionPath, fieldPath),
+    ),
   ];
-  for (const optionId of input.singleChoiceOptionIds) {
-    paths.push(`rich:${questionPath}/choice/${optionId}`);
-  }
-  return paths;
+}
+
+/**
+ * The rich field paths a question needs, named relative to its question.
+ *
+ * An SPR question has no choices at all, so requiring them would leave it
+ * un-hydrated forever.
+ */
+export function questionWorkspaceRichFieldPaths(input: {
+  singleChoiceOptionIds: readonly string[];
+}): string[] {
+  return [
+    "prompt",
+    "stimulus",
+    "rationale",
+    ...input.singleChoiceOptionIds.map((optionId) => `choice/${optionId}`),
+  ];
+}
+
+/**
+ * The rich roots one editor binds to, named relative to its question.
+ *
+ * These are the same strings the spine passes to the field-binding lookup
+ * (`prompt`, `stimulus`, `rationale`, `choice/<optionId>`), so a field's
+ * readiness can be asked about using the path its editor already knows.
+ */
+export type QuestionWorkspaceFieldPath =
+  | "prompt"
+  | "stimulus"
+  | "rationale"
+  | `choice/${string}`;
+
+/** The absolute workspace path one relative rich field path maps to. */
+export function workspaceRichFieldPath(questionPath: string, fieldPath: string): string {
+  return `rich:${questionPath}/${fieldPath}`;
+}
+
+/**
+ * Whether the room holds THIS field's canonical root.
+ *
+ * Deliberately field-scoped rather than question-scoped. Waiting for every
+ * root of a question before ANY editor may render makes one missing optional
+ * root (a rationale nobody has written yet, a seed the room refused) disable
+ * the prompt and all four choices too — every rich editor pulses forever with
+ * no way out. Each editor waits only for the root it binds to.
+ */
+export function isQuestionFieldHydrated(
+  values: Record<string, unknown>,
+  questionPath: string,
+  fieldPath: string,
+): boolean {
+  return isWorkspaceRichContent(values[workspaceRichFieldPath(questionPath, fieldPath)]);
 }
 
 /**
@@ -179,7 +227,9 @@ export function requiredQuestionWorkspacePaths(
  *
  * Read straight off the published workspace values, so it is the SAME signal the
  * editors project from: a root the provider refuses to project (an allocated
- * but never-initialized fragment) can never count as hydrated.
+ * but never-initialized fragment) can never count as hydrated. This is a whole
+ * question SUMMARY — for diagnostics, save truth, and seeding — and must not be
+ * used to gate an individual editor's readiness.
  */
 export function questionWorkspaceHydration(
   values: Record<string, unknown>,

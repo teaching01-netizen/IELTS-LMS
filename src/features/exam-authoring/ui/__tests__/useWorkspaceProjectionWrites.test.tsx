@@ -10,9 +10,9 @@
  * These tests drive the real hook with a fake collaboration value, so the rules
  * are asserted where they live rather than through a mounted workspace.
  */
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { useMemo, useRef, useState } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuestionRevision, StructuredContent } from "../../contracts/assessment";
 import { plainContentFromText } from "../../editor/richContent";
 import type { SatAuthoringCollaborationValue } from "../../realtime/coedit";
@@ -22,6 +22,7 @@ import {
   type QuestionWorkspaceScalar,
 } from "../authoringWorkspaceModel";
 import {
+  WORKSPACE_FIELD_INITIALIZATION_DEADLINE_MS,
   useWorkspaceProjectionWrites,
   type WorkspaceProjectionWrites,
 } from "../useWorkspaceProjectionWrites";
@@ -76,7 +77,10 @@ interface FakeRoom {
  * stated by the caller: `values` IS the published workspace projection, so an
  * absent key is a root the room does not hold.
  */
-function makeRoom(values: Record<string, unknown>): FakeRoom {
+function makeRoom(
+  values: Record<string, unknown>,
+  seedFailures?: Record<string, { outcome: string; retryable: boolean }>,
+): FakeRoom {
   const room = {
     setValueCalls: [] as FakeRoom["setValueCalls"],
     setRichFieldCalls: [] as FakeRoom["setRichFieldCalls"],
@@ -90,6 +94,7 @@ function makeRoom(values: Record<string, unknown>): FakeRoom {
       readOnly: false,
       lifecyclePhase: "active",
       values,
+      ...(seedFailures ? { seedFailures } : {}),
     },
     setValue: (path: string, value: unknown) => {
       room.setValueCalls.push({ path, value });
@@ -125,6 +130,8 @@ interface HarnessProps {
   values: Record<string, unknown>;
   baseQuestion: QuestionRevision | null;
   initialDraft: QuestionRevision | null;
+  /** What the room reported for a seed it did not apply. */
+  seedFailures?: Record<string, { outcome: string; retryable: boolean }> | undefined;
 }
 
 let writes: WorkspaceProjectionWrites | null = null;
@@ -137,7 +144,10 @@ function Harness(props: HarnessProps) {
   draftRef.current = draft;
   // A new projection is a new collaboration value, exactly as the provider
   // publishes one per snapshot.
-  const nextRoom = useMemo(() => makeRoom(props.values), [props.values]);
+  const nextRoom = useMemo(
+    () => makeRoom(props.values, props.seedFailures),
+    [props.values, props.seedFailures],
+  );
   room = nextRoom;
   writes = useWorkspaceProjectionWrites({
     workspaceCollaboration: nextRoom.collaboration,
@@ -311,5 +321,118 @@ describe("SAT workspace authority handoff", () => {
       rationale: plainContentFromText("ROOM RATIONALE EDITED"),
     });
     expect(fakeRoom().setRichFieldCalls.map((call) => call.path)).toEqual([RATIONALE_PATH]);
+  });
+});
+
+/**
+ * One unresolved root must not stop the whole question from being editable.
+ *
+ * Readiness used to be answered for the question as a whole, so a single
+ * missing root (a rationale nobody has written, a seed the room refused) made
+ * "this question is hydrated" false and every rich editor pulse forever: the
+ * prompt, the supporting material, all four choices, and the explanation. The
+ * screenshot this suite exists for is exactly that state — HTTP 200, room
+ * synced, header Saved, every field a grey block.
+ */
+describe("SAT workspace field-scoped initialization", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps one field waiting instead of the whole question", () => {
+    const base = question();
+    const values = hydratedValues();
+    delete values[`rich:${RATIONALE_PATH}`];
+    const { value } = open({ values, baseQuestion: base, initialDraft: base });
+
+    // The question as a whole is still not hydrated...
+    expect(value().hydration.ready).toBe(false);
+    expect(value().hydration.pendingPaths).toEqual([`rich:${RATIONALE_PATH}`]);
+
+    // ...and every OTHER field is, so those editors render immediately.
+    expect(value().fieldHydration("prompt").state).toBe("hydrated");
+    expect(value().fieldHydration("stimulus").state).toBe("hydrated");
+    expect(value().fieldHydration("choice/A").state).toBe("hydrated");
+    expect(value().fieldHydration("choice/B").state).toBe("hydrated");
+    expect(value().fieldHydration("rationale").state).toBe("pending");
+    expect(value().questionFieldsPending).toBe(true);
+  });
+
+  it("names exactly the choice whose root is missing", () => {
+    const base = question();
+    const values = hydratedValues();
+    delete values[`rich:${QUESTION_PATH}/choice/B`];
+    const { value } = open({ values, baseQuestion: base, initialDraft: base });
+
+    expect(value().fieldHydration("choice/A").state).toBe("hydrated");
+    expect(value().fieldHydration("choice/B").state).toBe("pending");
+    expect(value().fieldHydration("prompt").state).toBe("hydrated");
+    expect(value().fieldHydration("rationale").state).toBe("hydrated");
+  });
+
+  it("leaves every field untouched once the room holds the whole question", () => {
+    const base = question();
+    const { value } = open({
+      values: hydratedValues(),
+      baseQuestion: base,
+      initialDraft: base,
+    });
+
+    expect(value().hydration.ready).toBe(true);
+    expect(value().questionFieldsPending).toBe(false);
+    for (const field of ["prompt", "stimulus", "rationale", "choice/A", "choice/B"]) {
+      expect(value().fieldHydration(field).state).toBe("hydrated");
+    }
+  });
+
+  it("bounded wait: a field that never fills is waiting, then failed", () => {
+    vi.useFakeTimers();
+    const base = question();
+    const values = hydratedValues();
+    delete values[`rich:${RATIONALE_PATH}`];
+    const { value, fakeRoom } = open({ values, baseQuestion: base, initialDraft: base });
+
+    expect(value().fieldHydration("rationale").state).toBe("pending");
+
+    act(() => {
+      vi.advanceTimersByTime(WORKSPACE_FIELD_INITIALIZATION_DEADLINE_MS + 1);
+    });
+
+    // The wait ended in a state the author can act on, not an endless pulse.
+    expect(value().fieldHydration("rationale").state).toBe("failed");
+    expect(value().fieldHydration("rationale").pendingSince).not.toBeNull();
+    // A neighbour's failure is not a neighbour's problem.
+    expect(value().fieldHydration("prompt").state).toBe("hydrated");
+
+    // Retry proposes again rather than only re-arming a timer.
+    const seedsBefore = fakeRoom().seedRichFieldCalls.length;
+    act(() => {
+      value().retryFieldInitialization();
+    });
+    expect(fakeRoom().seedRichFieldCalls.length).toBeGreaterThan(seedsBefore);
+    expect(fakeRoom().seedRichFieldCalls).toContain(RATIONALE_PATH);
+    expect(value().fieldHydration("rationale").state).toBe("pending");
+  });
+
+  it("stops waiting as soon as the room reports the seed was not applied", () => {
+    const base = question();
+    const values = hydratedValues();
+    delete values[`rich:${RATIONALE_PATH}`];
+    const { value, view } = open({
+      values,
+      baseQuestion: base,
+      initialDraft: base,
+      seedFailures: { [RATIONALE_PATH]: { outcome: "rejected", retryable: false } },
+    });
+
+    // No deadline needed: the room has already answered, and the answer is no.
+    expect(value().fieldHydration("rationale").state).toBe("failed");
+    expect(value().fieldHydration("prompt").state).toBe("hydrated");
+
+    // The report is about the PROPOSAL, not the field: the moment the shared
+    // root exists the editor is ready, whatever the room said about the seed.
+    const resolved = hydratedValues();
+    view.rerender({ values: resolved, baseQuestion: base, initialDraft: base });
+    expect(value().fieldHydration("rationale").state).toBe("hydrated");
   });
 });
