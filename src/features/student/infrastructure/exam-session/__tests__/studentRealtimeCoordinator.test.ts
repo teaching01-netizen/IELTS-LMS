@@ -116,9 +116,33 @@ describe('student realtime coordinator', () => {
     for (const status of [null, 'not_started', 'paused'] as const) {
       expect(coordinator.getPollingPolicy(status)).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
     }
+    // Waiting phases with no runtime row are exactly the cohort-before-Start
+    // shape: still tight.
+    for (const phase of ['lobby', 'pre-check'] as const) {
+      expect(coordinator.getPollingPolicy(null, { attemptPhase: phase })).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+    }
     // A terminal runtime has nothing left to observe.
     expect(coordinator.getPollingPolicy('completed')).toEqual({ intervalMs: 15_000, maxIntervalMs: 25_000 });
     expect(coordinator.getPollingPolicy('cancelled')).toEqual({ intervalMs: 15_000, maxIntervalMs: 25_000 });
+  });
+
+  // `null` is ambiguous: a self-paced attempt never gets a runtime row at all.
+  // Once it is in (or past) its exam there is no Start for the poll to catch,
+  // so a three-hour paper must not poll every 1.5s for its whole duration.
+  it('rests lazily for a self-paced attempt that is already in its exam and has no runtime row', () => {
+    const coordinator = createStudentRealtimeCoordinator({
+      scheduleId: 'schedule-1',
+      candidateId: 'candidate-1',
+      cache: { invalidateLiveSession: vi.fn(), updateLiveRuntime: vi.fn() },
+    });
+
+    for (const phase of ['exam', 'post-exam', 'submitted'] as const) {
+      expect(coordinator.getPollingPolicy(null, { attemptPhase: phase })).toEqual({ intervalMs: 15_000, maxIntervalMs: 25_000 });
+    }
+    // The phase only disambiguates a MISSING runtime row: a live runtime is
+    // still polled tightly whatever the attempt phase says.
+    expect(coordinator.getPollingPolicy('live', { attemptPhase: 'exam' })).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+    expect(coordinator.getPollingPolicy('paused', { attemptPhase: 'exam' })).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
   });
 
   it('rests lazily while the socket carries the transitions', () => {

@@ -155,6 +155,7 @@ export function useStudentSessionRouteData(
   const highestSeenAttemptRevisionRef = useRef(0);
   const appliedFreshnessRef = useRef<LiveSnapshotFreshness | null>(null);
   const runtimeSnapshotRef = useRef<ExamSessionRuntime | null>(null);
+  const attemptSnapshotRef = useRef<StudentAttempt | null>(null);
   const realtimeCoordinatorRef = useRef<StudentRealtimeCoordinator | null>(null);
   // Realtime rollout telemetry (Phase 3): whether THIS mount ever opened the
   // socket (so a disconnect can be told apart from "never connected"), the
@@ -202,6 +203,10 @@ export function useStudentSessionRouteData(
   useEffect(() => {
     runtimeSnapshotRef.current = runtimeSnapshot;
   }, [runtimeSnapshot]);
+
+  useEffect(() => {
+    attemptSnapshotRef.current = attemptSnapshot;
+  }, [attemptSnapshot]);
 
   useEffect(() => {
     scheduleRef.current = schedule;
@@ -996,7 +1001,9 @@ export function useStudentSessionRouteData(
   // refresh; 304 = steady, no work. The coordinator's policy depends on
   // whether the socket is connected, so a healthy socket polls lazily and a
   // missing one polls tightly.
-  const pollingPolicy = realtimeCoordinator?.getPollingPolicy(runtimeSnapshot?.status ?? null) ?? {
+  const pollingPolicy = realtimeCoordinator?.getPollingPolicy(runtimeSnapshot?.status ?? null, {
+    attemptPhase: attemptSnapshot?.phase ?? null,
+  }) ?? {
     intervalMs: 15_000,
     maxIntervalMs: 25_000,
   };
@@ -1056,6 +1063,7 @@ export function useStudentSessionRouteData(
       cadence: () => {
         const policy = realtimeCoordinatorRef.current?.getPollingPolicy(
           runtimeSnapshotRef.current?.status ?? null,
+          { attemptPhase: attemptSnapshotRef.current?.phase ?? null },
         );
         return policy
           ? { floorMs: policy.intervalMs, ceilingMs: policy.maxIntervalMs }

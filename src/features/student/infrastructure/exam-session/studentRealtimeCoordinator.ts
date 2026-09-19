@@ -1,3 +1,5 @@
+import { STUDENT_EXAM_PHASE, type StudentExamPhase } from '../../domain/exam-session/studentExamPhase';
+
 export interface StudentRealtimeCache {
   invalidateLiveSession(): void | Promise<void>;
   updateLiveRuntime(runtime: unknown, revision: number | null): void | Promise<void>;
@@ -28,6 +30,16 @@ export interface StudentPollingPolicy {
   readonly maxIntervalMs: number;
 }
 
+export interface StudentPollingContext {
+  /**
+   * The attempt's phase, consulted only when there is no runtime row
+   * (`runtimeStatus === null`), which is ambiguous on its own: a cohort
+   * waiting on Start (lobby / pre-check) or a self-paced attempt that never
+   * gets a runtime row and is already in its exam.
+   */
+  readonly attemptPhase?: StudentExamPhase | null;
+}
+
 export type RuntimeSnapshotResult = 'applied' | 'ignored';
 
 export interface StudentRealtimeCoordinator {
@@ -35,7 +47,23 @@ export interface StudentRealtimeCoordinator {
   handleSocketDisconnected(): void;
   handleRuntimeSnapshot(frame: StudentRuntimeSnapshotFrame): RuntimeSnapshotResult;
   handleEvent(event: StudentRealtimeEvent): 'invalidated' | 'ignored';
-  getPollingPolicy(runtimeStatus: 'not_started' | 'live' | 'paused' | 'completed' | 'cancelled' | null): StudentPollingPolicy;
+  getPollingPolicy(
+    runtimeStatus: 'not_started' | 'live' | 'paused' | 'completed' | 'cancelled' | null,
+    context?: StudentPollingContext,
+  ): StudentPollingPolicy;
+}
+
+/**
+ * A self-paced attempt (no runtime row, ever) that has moved past the waiting
+ * phases has no proctor transition left for the poll to catch: Start never
+ * comes, and pause/resume/extend arrive on the attempt itself.
+ */
+function isSelfPacedPastWaiting(phase: StudentExamPhase | null | undefined): boolean {
+  return (
+    phase === STUDENT_EXAM_PHASE.EXAM ||
+    phase === STUDENT_EXAM_PHASE.POST_EXAM ||
+    phase === STUDENT_EXAM_PHASE.SUBMITTED
+  );
 }
 
 function isNewerRevision(incoming: number | null, applied: number | null): boolean {
@@ -96,7 +124,7 @@ export function createStudentRealtimeCoordinator(
       void input.cache.invalidateLiveSession();
       return 'invalidated';
     },
-    getPollingPolicy(runtimeStatus) {
+    getPollingPolicy(runtimeStatus, context) {
       // A terminal runtime has nothing left to observe: rest lazily whatever
       // the transport is.
       if (runtimeStatus === 'completed' || runtimeStatus === 'cancelled') {
@@ -107,6 +135,14 @@ export function createStudentRealtimeCoordinator(
         return runtimeStatus === 'live'
           ? { intervalMs: 20_000, maxIntervalMs: 30_000 }
           : { intervalMs: 15_000, maxIntervalMs: 25_000 };
+      }
+      // No socket and no runtime row: before Start a runtime-backed cohort
+      // looks exactly like this too, so `null` alone cannot decide. A
+      // self-paced attempt already in (or past) its exam never gets a runtime
+      // row, and polling it every 1.5s for a three-hour paper would buy
+      // nothing — rest lazily there and only there.
+      if (runtimeStatus === null && isSelfPacedPastWaiting(context?.attemptPhase)) {
+        return { intervalMs: 15_000, maxIntervalMs: 25_000 };
       }
       // No socket: the poll IS the live channel, and that is as true for a
       // cohort waiting on Start (no runtime row yet, so `null`, or

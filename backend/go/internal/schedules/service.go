@@ -932,7 +932,10 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 		// A runtime may have started before this candidate checked in. Project
 		// the active section's deadline onto the new V2 attempt immediately so
 		// its first response is governed by the same server clock as existing
-		// candidates.
+		// candidates. Scoped to THIS attempt: the other candidates' clocks did
+		// not change, and re-projecting them bumped their control_epoch, so a
+		// late arrival made every writing student's next save
+		// CONTROL_EPOCH_STALE.
 		var runtimeID, activeSection string
 		runtimeErr := q.QueryRowContext(ctx, "SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE", scheduleID).Scan(&runtimeID, &activeSection)
 		if runtimeErr != nil && runtimeErr != sql.ErrNoRows {
@@ -940,7 +943,7 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 		}
 		if runtimeErr == nil && strings.TrimSpace(activeSection) != "" {
 			running := "running"
-			if err := examruntime.SyncV2TimingInTx(ctx, q, scheduleID, runtimeID, activeSection, &running); err != nil {
+			if err := examruntime.SyncV2TimingForAttemptInTx(ctx, q, scheduleID, runtimeID, activeSection, attemptID, &running); err != nil {
 				return err
 			}
 		}

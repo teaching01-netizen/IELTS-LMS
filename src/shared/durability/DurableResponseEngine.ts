@@ -1722,6 +1722,22 @@ export class DurableResponseEngine {
               this.blockQueuedOnControlStale();
               break;
             }
+            // A heal in this drain adopted the server's epoch and re-issued
+            // the drafts, so the fence itself is satisfied; when the very
+            // next envelope is refused by the writability gate (runtime
+            // waiting for the next section, section not started, attempt
+            // paused a moment after the snapshot) the control change was a
+            // gate, not a terminal state. Those drafts take the same blocked,
+            // re-checkable posture the fence would have given them — never
+            // the quarantine a true terminal code earns.
+            if (controlHeals > 0 && errorCode === "ATTEMPT_NOT_WRITABLE") {
+              for (const [questionId, command] of this.inFlight) {
+                if (!this.outbox.has(questionId)) this.outbox.set(questionId, command);
+              }
+              this.inFlight.clear();
+              this.blockQueuedOnControlStale("ATTEMPT_NOT_WRITABLE");
+              break;
+            }
             // Bug 6: a payload-scoped rejection (one invalid answer, one
             // unknown question or reused write id) is about THIS envelope, not
             // the attempt. Quarantine only the chunk that was rejected — still
@@ -2035,7 +2051,9 @@ export class DurableResponseEngine {
    * (reconcilable) instead of quarantining it away. Lease fences never come
    * here — they keep the strict quarantine path.
    */
-  private blockQueuedOnControlStale(): void {
+  private blockQueuedOnControlStale(
+    reason: "CONTROL_EPOCH_STALE" | "ATTEMPT_NOT_WRITABLE" = "CONTROL_EPOCH_STALE"
+  ): void {
     let blockedAny = false;
     const touch = (command: ResponseCommandV2): void => {
       const pending = this.states.get(command.questionId)?.pending;
@@ -2048,7 +2066,7 @@ export class DurableResponseEngine {
       pending.blocked = mark;
       this.checkpointIntentSync(command.questionId, pending);
       this.emitDurabilityEvent("control_epoch_blocked", {
-        reason: "CONTROL_EPOCH_STALE",
+        reason,
         controlEpoch: this.controlEpoch,
       });
       blockedAny = true;
@@ -2794,27 +2812,52 @@ export class DurableResponseEngine {
     this.controlEpoch = snapshot.controlEpoch;
 
     // Every queued and in-flight draft was minted under the old epoch and is
-    // non-sendable now (isBlockedPending compares enqueue-time epochs), so
-    // each one is re-issued — or, when the server already holds a newer write
-    // for it, left queued as blocked for the explicit reconcile path.
-    const candidates = new Map<string, ResponseCommandV2>();
-    for (const [questionId, command] of this.outbox) candidates.set(questionId, command);
-    for (const [questionId, command] of this.inFlight) candidates.set(questionId, command);
+    // non-sendable now (isBlockedPending compares enqueue-time epochs). Per
+    // question the LIVE draft decides: it is re-issued as a new write and
+    // every stale command for that question — queued or in flight, whatever
+    // writeId it carried — is dropped, so no superseded envelope can fly and
+    // nothing lingers in the outbox as an unsendable zombie. A draft the
+    // snapshot already superseded has nothing left to send; a blocked draft
+    // keeps exactly its own command queued for the explicit reconcile path.
+    const stale = [...this.inFlight.values(), ...this.outbox.values()];
     this.inFlight.clear();
+    const questionIds = new Set(stale.map((command) => command.questionId));
+    const keepOnlyLiveCommand = (
+      questionId: string,
+      live: PendingResponseState,
+      staleForQuestion: readonly ResponseCommandV2[]
+    ): void => {
+      const own = staleForQuestion.find((command) => command.writeId === live.writeId);
+      for (const command of staleForQuestion) {
+        // By writeId, not identity: removeCommand on a same-writeId duplicate
+        // would drop the live draft's own issued/epoch bookkeeping.
+        if (command.writeId !== live.writeId) this.removeCommand(command);
+      }
+      if (own && !this.outbox.has(questionId)) this.outbox.set(questionId, own);
+    };
     let reissued = 0;
-    for (const [questionId, command] of candidates) {
-      if (!this.outbox.has(questionId)) this.outbox.set(questionId, command);
+    for (const questionId of questionIds) {
+      const staleForQuestion = stale.filter((command) => command.questionId === questionId);
       const live = this.states.get(questionId)?.pending;
-      if (!live || live.writeId !== command.writeId) continue;
-      if (live.blocked) continue;
+      if (!live) {
+        // installServerResponse cleared the draft: the server already holds
+        // this write, so the refused command is spent, not re-sendable.
+        for (const command of staleForQuestion) this.removeCommand(command);
+        continue;
+      }
+      if (live.blocked) {
+        keepOnlyLiveCommand(questionId, live, staleForQuestion);
+        continue;
+      }
       const server = snapshot.responses.find((entry) => entry.questionId === questionId);
       const neverIssuedDraft = live.clientVersion <= 0;
       if (
         !neverIssuedDraft &&
         server &&
-        server.writeId !== command.writeId &&
+        server.writeId !== live.writeId &&
         server.clientVersion >= live.clientVersion
       ) {
+        keepOnlyLiveCommand(questionId, live, staleForQuestion);
         const mark: BlockedInfoEx = {
           reason: "EPOCH_STALE",
           blockedAt: new Date().toISOString(),
@@ -2828,6 +2871,7 @@ export class DurableResponseEngine {
         });
         continue;
       }
+      for (const command of staleForQuestion) this.removeCommand(command);
       this.reissueUnderCurrentEpochs(questionId, live, server ? server.clientVersion : 0);
       reissued += 1;
     }

@@ -636,6 +636,26 @@ func (s *Service) SyncV2Timing(ctx context.Context, scheduleID, runtimeID, secti
 // grace=+30s, only for protocol 2 non-terminal attempts. control_epoch+1 fences
 // in-flight V2 writers. lifecycle nil leaves delivery/phase untouched.
 func SyncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, sectionKey string, lifecycle *string) error {
+	return syncV2TimingInTx(ctx, q, scheduleID, runtimeID, sectionKey, "", lifecycle)
+}
+
+// SyncV2TimingForAttemptInTx is the single-attempt form of SyncV2TimingInTx,
+// for a candidate admitted after Start: the new attempt receives the active
+// section's projected deadline without re-fencing anyone else. Check-in used
+// the schedule-wide form, so every late arrival bumped control_epoch on every
+// other candidate's attempt and their next save was refused as
+// CONTROL_EPOCH_STALE (or their unsent drafts were parked as "needs re-check")
+// for a clock that had not changed.
+func SyncV2TimingForAttemptInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, sectionKey, attemptID string, lifecycle *string) error {
+	if strings.TrimSpace(attemptID) == "" {
+		return fmt.Errorf("runtime.SyncV2TimingForAttemptInTx: attemptID is required")
+	}
+	return syncV2TimingInTx(ctx, q, scheduleID, runtimeID, sectionKey, attemptID, lifecycle)
+}
+
+// syncV2TimingInTx is the shared statement; an empty attemptID means the
+// whole schedule.
+func syncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, sectionKey, attemptID string, lifecycle *string) error {
 	lifecycleAssign := ""
 	switch s := strval(lifecycle); s {
 	case "paused":
@@ -659,7 +679,12 @@ func SyncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, secti
 		"AND sa.protocol_version = 2 " +
 		"AND sa.submitted_at IS NULL " +
 		"AND COALESCE(sa.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')"
-	_, err := q.ExecContext(ctx, stmt, runtimeID, sectionKey, scheduleID)
+	args := []any{runtimeID, sectionKey, scheduleID}
+	if attemptID != "" {
+		stmt += " AND sa.id = ?"
+		args = append(args, attemptID)
+	}
+	_, err := q.ExecContext(ctx, stmt, args...)
 	return err
 }
 

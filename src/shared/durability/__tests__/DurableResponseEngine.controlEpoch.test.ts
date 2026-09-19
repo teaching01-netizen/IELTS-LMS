@@ -72,7 +72,7 @@ function fencingServer(initialControlEpoch: number) {
       });
       throw error;
     }
-    return {
+    const response: ResponseBatchResponseV2 = {
       attemptRevision: 5,
       serverTime: new Date().toISOString(),
       acknowledgements: request.commands.map((command) => ({
@@ -84,7 +84,8 @@ function fencingServer(initialControlEpoch: number) {
         canonicalResponse: command.response,
         contentHash: `hash-${command.writeId}`,
       })),
-    } as unknown as ResponseBatchResponseV2;
+    };
+    return response;
   });
   return {
     sendBatch,
@@ -194,6 +195,84 @@ describe('DurableResponseEngine × CONTROL_EPOCH_STALE', () => {
     expect(engine.getStatus()).toBe('synced');
   });
 
+  it('re-issues the newest draft when the answer changed while the refused write was in flight', async () => {
+    const server = fencingServer(2);
+    const fencing = server.sendBatch.getMockImplementation()!;
+    let releaseFirstSend: () => void = () => undefined;
+    const firstSendReleased = new Promise<void>((resolve) => {
+      releaseFirstSend = resolve;
+    });
+    // The first envelope sits on the wire until the test releases it.
+    server.sendBatch.mockImplementationOnce(async (attemptId: string, request: ResponseBatchRequestV2) => {
+      await firstSendReleased;
+      return fencing(attemptId, request);
+    });
+    const fetchSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(snapshot({ controlEpoch: 2 }))
+      .mockResolvedValue(snapshot({ controlEpoch: 3 }));
+    const { engine } = createEngine({ fetchSnapshot, sendBatch: server.sendBatch });
+    await engine.recover();
+    server.bumpTo(3);
+
+    await engine.acceptResponse('q1', payload('A'));
+    const flushing = engine.flush();
+    await vi.waitFor(() => expect(server.sendBatch).toHaveBeenCalledTimes(1));
+    // While 'A' is in flight under the stale epoch the student changes to 'B':
+    // the outbox now holds a newer write than the one about to be refused.
+    await engine.acceptResponse('q1', payload('B'));
+    releaseFirstSend();
+    await flushing;
+
+    // The heal re-issues the LIVE draft ('B') and drops the refused 'A'; the
+    // newer queued command must not be left behind under the old epoch as an
+    // unsendable entry that keeps the engine "saving" forever.
+    expect(server.requests.map((request) => request.controlEpoch)).toEqual([2, 3]);
+    const healed = server.requests[1]!.commands;
+    expect(healed).toHaveLength(1);
+    expect(healed[0]!.response.answer).toBe('B');
+    expect(engine.getPendingCount()).toBe(0);
+    expect(engine.getStatus()).toBe('synced');
+    expect(engine.getBlockedQuestionIds()).toEqual([]);
+    expect(engine.getQuarantined()).toHaveLength(0);
+  });
+
+  it('parks the drafts as blocked, not terminal, when a healed re-send hits the writability gate', async () => {
+    const server = fencingServer(2);
+    const fencing = server.sendBatch.getMockImplementation()!;
+    const fetchSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(snapshot({ controlEpoch: 2 }))
+      .mockResolvedValue(snapshot({ controlEpoch: 3 }));
+    const { engine } = createEngine({ fetchSnapshot, sendBatch: server.sendBatch });
+    await engine.recover();
+    // The proctor advanced the section: the epoch moved AND the runtime is
+    // now between sections, so a write at the current epoch is refused by the
+    // writability gate rather than the fence.
+    server.bumpTo(3);
+    server.sendBatch.mockImplementation(async (attemptId: string, request: ResponseBatchRequestV2) => {
+      if (request.controlEpoch === 3) {
+        server.requests.push(request);
+        throw Object.assign(new Error('Exam runtime is waiting.'), {
+          code: 'ATTEMPT_NOT_WRITABLE',
+          status: 422,
+        });
+      }
+      return fencing(attemptId, request);
+    });
+
+    await engine.acceptResponse('q1', payload('B'));
+    await engine.flush();
+
+    expect(server.requests.map((request) => request.controlEpoch)).toEqual([2, 3]);
+    expect(engine.getControlEpoch()).toBe(3);
+    // Kept on the device and re-checkable — the answer is never quarantined
+    // and the engine never goes terminal over a gate that will reopen.
+    expect(engine.getStatus()).toBe('blocked_attention');
+    expect(engine.getBlockedQuestionIds()).toEqual(['q1']);
+    expect(engine.getQuarantined()).toHaveLength(0);
+  });
+
   it('keeps the draft blocked (never re-sends) when the attempt is paused', async () => {
     const server = fencingServer(2);
     const fetchSnapshot = vi
@@ -283,9 +362,9 @@ describe('DurableResponseEngine × CONTROL_EPOCH_STALE', () => {
     await engine.acceptResponse('q1', payload('B'));
     await engine.flush();
 
-    // Initial send + at most MAX_CONTROL_EPOCH_HEALS_PER_DRAIN re-issues, then
-    // the draft parks as blocked instead of chasing the epoch forever.
-    expect(server.requests.length).toBeLessThanOrEqual(3);
+    // Initial send + exactly MAX_CONTROL_EPOCH_HEALS_PER_DRAIN (2) re-issues,
+    // then the draft parks as blocked instead of chasing the epoch forever.
+    expect(server.requests.length).toBe(3);
     expect(engine.getStatus()).toBe('blocked_attention');
     expect(engine.getBlockedQuestionIds()).toEqual(['q1']);
   });

@@ -157,6 +157,18 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID string, autoSubmit bool, asOf time.Time, origin string) (*int64, error) {
 	var runtimeRevision *int64
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		// Global lock order: schedule -> attempts -> runtime -> sections. The
+		// reconciler writes exam_schedules when it completes a runtime, so it
+		// takes the schedule row before the attempt/runtime rows; otherwise it
+		// forms a cycle with check-in (schedule -> runtime) and with the
+		// proctor's CompleteExam (schedule -> attempts/runtime), and InnoDB
+		// would kill one side exactly when the session is ending.
+		if _, err := examruntime.LockScheduleRow(ctx, q, scheduleID); err != nil {
+			if e, ok := apperrors.As(err); ok && e.Code == apperrors.CodeNotFound {
+				return nil
+			}
+			return err
+		}
 		if _, err := lockAllScheduleAttempts(ctx, q, scheduleID); err != nil {
 			return err
 		}

@@ -253,7 +253,12 @@ func TestStartWaitsForTheScheduleLockAndPlansFromTheVersionItFinds(t *testing.T)
 	case <-time.After(20 * time.Second):
 		t.Fatal("Start did not complete after the schedule row was released")
 	}
-	planned := <-plannedFrom
+	var planned string
+	select {
+	case planned = <-plannedFrom:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start returned success without ever planning (idempotent path taken on a schedule with no runtime)")
+	}
 	if planned != h.v2 {
 		t.Fatalf("Start planned from %s, but the schedule it made live names %s", planned, h.v2)
 	}
@@ -282,8 +287,10 @@ func TestStartAndCheckInDoNotDeadlock(t *testing.T) {
 	h := newStartRaceHarness(t)
 	ctx := context.Background()
 	var absorbed atomic.Int64
-	defer tx.SetRetryHook(nil)()
-	tx.SetRetryHook(func(error) { absorbed.Add(1) })
+	// SetRetryHook returns the restore closure for the hook it installed;
+	// deferring it directly is what keeps the counting hook from leaking into
+	// later tests in the package.
+	defer tx.SetRetryHook(func(error) { absorbed.Add(1) })()
 
 	const rounds = 6
 	const students = 4
