@@ -8,7 +8,12 @@ import {
   type SetStateAction,
 } from "react";
 import type { QuestionRevision } from "../contracts/assessment";
-import type { SatAuthoringCollaborationValue } from "../realtime/coedit";
+import type {
+  CoeditLifecyclePhase,
+  CoeditSeedDeliveryState,
+  SatAuthoringCollaborationValue,
+  WorkspaceSeedOutcome,
+} from "../realtime/coedit";
 import {
   applyQuestionWorkspaceRich,
   applyQuestionWorkspaceScalar,
@@ -96,6 +101,69 @@ export interface WorkspaceFieldHydration {
   state: WorkspaceFieldHydrationState;
   /** When this field began waiting, for copy and diagnostics. */
   pendingSince: number | null;
+  /**
+   * Why this field is not usable, in the author's words, or null while it is
+   * hydrated or merely starting up.
+   *
+   * Assembled from facts the client actually holds — the delivery ledger, the
+   * room's reported outcome, the session's own read-only/lifecycle posture —
+   * rather than a generic sentence. "This field never initialized" is not
+   * something an author or an engineer can act on; "the shared copy was never
+   * requested" and "the room refused it" are.
+   */
+  reason: string | null;
+}
+
+/**
+ * The one place the client explains a field that will not initialize.
+ *
+ * Pure and exported so the vocabulary can be asserted without mounting a
+ * workspace: every branch is a fact the browser already knows, and the order
+ * matters — a decided outcome outranks a transport guess, and the session's own
+ * posture outranks both.
+ */
+export function fieldInitializationReason(input: {
+  delivery: CoeditSeedDeliveryState | null;
+  reported: { outcome: WorkspaceSeedOutcome; retryable: boolean } | null;
+  barrierOpen: boolean;
+  readOnly: boolean;
+  lifecyclePhase: CoeditLifecyclePhase;
+}): string | null {
+  // Before the room has synced and replayed, waiting is ordinary startup and
+  // there is nothing to explain.
+  if (!input.barrierOpen) return null;
+  if (input.readOnly) {
+    return "This session is read-only, so this field's shared copy cannot be created from here.";
+  }
+  if (input.lifecyclePhase !== "active") {
+    return "The room is frozen for publishing, so this field's shared copy cannot be created.";
+  }
+  if (input.reported) {
+    switch (input.reported.outcome) {
+      case "rejected":
+        return "The room refused the shared copy of this field. Reload the question to try again.";
+      case "conflict":
+        return "The room already holds a different copy of this field. Reload the question to see it.";
+      case "failed":
+        return "The room could not store the shared copy of this field.";
+      default:
+        return "The room did not apply the shared copy of this field.";
+    }
+  }
+  const delivery = input.delivery;
+  if (!delivery) return "The shared copy of this field was never requested.";
+  switch (delivery.delivery) {
+    case "invalid-frame":
+      return `This field's shared copy was rejected before it was sent (${delivery.detail ?? "invalid proposal"}).`;
+    case "relay-failed":
+      return `This field's shared copy could not be sent (${delivery.detail ?? "the transport refused it"}).`;
+    case "queued":
+      return "This field's shared copy is waiting for the collaboration socket.";
+    default:
+      // Sent, and the room said nothing at all back. That is the service's
+      // validator dropping the frame, and naming it is the whole point.
+      return "This field's shared copy was sent, but the room never answered for it.";
+  }
 }
 
 export interface WorkspaceProjectionWrites {
@@ -269,27 +337,43 @@ export function useWorkspaceProjectionWrites(
   const fieldHydration = useCallback(
     (fieldPath: string): WorkspaceFieldHydration => {
       if (!workspaceCollaboration || !workspaceQuestionPath) {
-        return { state: "pending", pendingSince: null };
+        return { state: "pending", pendingSince: null, reason: null };
       }
       const values = workspaceCollaboration.workspaceSnapshot.values;
       if (isQuestionFieldHydrated(values, workspaceQuestionPath, fieldPath)) {
-        return { state: "hydrated", pendingSince: null };
+        return { state: "hydrated", pendingSince: null, reason: null };
       }
       if (!seedBarrierOpen) {
         // The room has not finished syncing, so nothing has been proposed yet
         // and nothing has failed: this is still ordinary startup.
-        return { state: "pending", pendingSince: null };
+        return { state: "pending", pendingSince: null, reason: null };
       }
       // Keyed by the path the service was told to seed (`question/<id>/…`),
       // which is the same string every seed frame carries.
-      const reported =
-        workspaceCollaboration.workspaceSnapshot.seedFailures?.[
-          `${workspaceQuestionPath}/${fieldPath}`
-        ];
-      if ((reported && reported.outcome !== "applied") || failedFieldPaths.includes(fieldPath)) {
-        return { state: "failed", pendingSince: fieldPendingSinceRef.current };
+      const seedPath = `${workspaceQuestionPath}/${fieldPath}`;
+      const reported = workspaceCollaboration.workspaceSnapshot.seedFailures?.[seedPath] ?? null;
+      const decidedOutcome = reported && reported.outcome !== "applied" ? reported : null;
+      const delivery = workspaceCollaboration.workspaceSnapshot.seedDeliveries?.[seedPath] ?? null;
+      // A proposal the shared validator refused, or one the transport could not
+      // send, is DECIDED: it is not a wait, and making the author sit out the
+      // bounded deadline to be told so would hide the one fact they need. A
+      // `queued` or `relayed` proposal is a genuine wait and stays pending.
+      const decidedDelivery =
+        delivery?.delivery === "invalid-frame" || delivery?.delivery === "relay-failed";
+      // The reason is carried for a merely-pending field too, not only a failed
+      // one: "its copy was rejected before it was sent" is worth saying the
+      // moment it is known, rather than after a 15-second wait proves it.
+      const reason = fieldInitializationReason({
+        delivery,
+        reported: decidedOutcome,
+        barrierOpen: seedBarrierOpen,
+        readOnly: workspaceCollaboration.workspaceSnapshot.readOnly,
+        lifecyclePhase: workspaceCollaboration.workspaceSnapshot.lifecyclePhase,
+      });
+      if (decidedOutcome || decidedDelivery || failedFieldPaths.includes(fieldPath)) {
+        return { state: "failed", pendingSince: fieldPendingSinceRef.current, reason };
       }
-      return { state: "pending", pendingSince: fieldPendingSinceRef.current };
+      return { state: "pending", pendingSince: fieldPendingSinceRef.current, reason };
     },
     [failedFieldPaths, seedBarrierOpen, workspaceCollaboration, workspaceQuestionPath],
   );

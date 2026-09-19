@@ -346,6 +346,31 @@ describe("SAT rich question composer capabilities", () => {
     expect(onRetryInitialization).toHaveBeenCalledTimes(1);
   });
 
+  it("shows the actual reason when the client knows one", () => {
+    // "Could not start" is not actionable; the client already holds the fact
+    // (never requested, rejected before it was sent, refused by the room), and
+    // it is the only trace a proposal that never left the browser has.
+    const collaboration: RichComposerCollaboration = {
+      extensions: [],
+      ready: false,
+      initializationFailed: true,
+      initializationReason: "The shared copy of this field was never requested.",
+      onRetryInitialization: vi.fn(),
+    };
+    const { container } = render(
+      <RichQuestionComposer
+        value={plainContentFromText("Question prompt")}
+        onChange={vi.fn()}
+        label="Question prompt"
+        collaboration={collaboration}
+      />
+    );
+
+    expect(container.querySelector("[data-coedit-error-message]")?.textContent).toContain(
+      "never requested"
+    );
+  });
+
   it("still shows the plain loading surface while a field is merely waiting", () => {
     const collaboration: RichComposerCollaboration = {
       extensions: [],

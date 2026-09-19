@@ -198,6 +198,15 @@ export interface RichComposerCollaboration {
    * fixed by time.
    */
   initializationFailed?: boolean;
+  /**
+   * WHY this field's shared copy is not usable, from facts the client holds:
+   * never requested, rejected before it was sent, waiting for the socket,
+   * refused by the room. Absent means the client does not know yet.
+   *
+   * Distinct from `initializationFailed`: a field can be legitimately pending
+   * and already have something specific to say about it.
+   */
+  initializationReason?: string | undefined;
   /** Re-proposes this field's seed and restarts its bounded wait. */
   onRetryInitialization?: (() => void) | undefined;
 }
@@ -492,7 +501,9 @@ export function RichQuestionComposer({
           role="status"
           className={`${minHeightClassName} flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-au-separator bg-au-fill px-3.5 py-3 text-[12px] font-medium text-slate-600`}
         >
-          <span data-coedit-error-message>Live editing could not start for this field.</span>
+          <span data-coedit-error-message>
+            {collaboration.initializationReason ?? "Live editing could not start for this field."}
+          </span>
           {collaboration.onRetryInitialization ? (
             <button
               type="button"

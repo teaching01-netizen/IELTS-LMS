@@ -23,6 +23,7 @@ import {
 } from "../authoringWorkspaceModel";
 import {
   WORKSPACE_FIELD_INITIALIZATION_DEADLINE_MS,
+  fieldInitializationReason,
   useWorkspaceProjectionWrites,
   type WorkspaceProjectionWrites,
 } from "../useWorkspaceProjectionWrites";
@@ -80,6 +81,7 @@ interface FakeRoom {
 function makeRoom(
   values: Record<string, unknown>,
   seedFailures?: Record<string, { outcome: string; retryable: boolean }>,
+  seedDeliveries?: Record<string, { delivery: string; detail: string | null }>,
 ): FakeRoom {
   const room = {
     setValueCalls: [] as FakeRoom["setValueCalls"],
@@ -95,6 +97,7 @@ function makeRoom(
       lifecyclePhase: "active",
       values,
       ...(seedFailures ? { seedFailures } : {}),
+      ...(seedDeliveries ? { seedDeliveries } : {}),
     },
     setValue: (path: string, value: unknown) => {
       room.setValueCalls.push({ path, value });
@@ -132,6 +135,8 @@ interface HarnessProps {
   initialDraft: QuestionRevision | null;
   /** What the room reported for a seed it did not apply. */
   seedFailures?: Record<string, { outcome: string; retryable: boolean }> | undefined;
+  /** How far each proposal got on its way to the room. */
+  seedDeliveries?: Record<string, { delivery: string; detail: string | null }> | undefined;
 }
 
 let writes: WorkspaceProjectionWrites | null = null;
@@ -145,8 +150,8 @@ function Harness(props: HarnessProps) {
   // A new projection is a new collaboration value, exactly as the provider
   // publishes one per snapshot.
   const nextRoom = useMemo(
-    () => makeRoom(props.values, props.seedFailures),
-    [props.values, props.seedFailures],
+    () => makeRoom(props.values, props.seedFailures, props.seedDeliveries),
+    [props.values, props.seedFailures, props.seedDeliveries],
   );
   room = nextRoom;
   writes = useWorkspaceProjectionWrites({
@@ -434,5 +439,135 @@ describe("SAT workspace field-scoped initialization", () => {
     const resolved = hydratedValues();
     view.rerender({ values: resolved, baseQuestion: base, initialDraft: base });
     expect(value().fieldHydration("rationale").state).toBe("hydrated");
+  });
+
+  it("says why a field cannot initialize, and says nothing about a working one", () => {
+    const base = question();
+    const values = hydratedValues();
+    delete values[`rich:${RATIONALE_PATH}`];
+    const { value } = open({
+      values,
+      baseQuestion: base,
+      initialDraft: base,
+      seedFailures: { [RATIONALE_PATH]: { outcome: "rejected", retryable: false } },
+    });
+
+    const rationale = value().fieldHydration("rationale");
+    expect(rationale.state).toBe("failed");
+    expect(rationale.reason).toContain("refused");
+    // A field the room holds has nothing to explain.
+    expect(value().fieldHydration("prompt").reason).toBeNull();
+  });
+
+  it("distinguishes a proposal that never left the browser", () => {
+    const base = question();
+    const values = hydratedValues();
+    delete values[`rich:${RATIONALE_PATH}`];
+    const { value } = open({
+      values,
+      baseQuestion: base,
+      initialDraft: base,
+      seedDeliveries: {
+        [RATIONALE_PATH]: { delivery: "invalid-frame", detail: "the value is too large" },
+      },
+    });
+
+    // The one trace this failure has, surfaced where the author can see it.
+    const rationale = value().fieldHydration("rationale");
+    expect(rationale.reason).toContain("the value is too large");
+    // And decided immediately: a proposal that was refused before it was sent
+    // is not a wait, so the author is not made to sit out the deadline to learn
+    // the one fact that explains their blank field.
+    expect(rationale.state).toBe("failed");
+  });
+
+  it("keeps a genuinely queued proposal in the waiting state", () => {
+    const base = question();
+    const values = hydratedValues();
+    delete values[`rich:${RATIONALE_PATH}`];
+    const { value } = open({
+      values,
+      baseQuestion: base,
+      initialDraft: base,
+      seedDeliveries: {
+        [RATIONALE_PATH]: { delivery: "queued", detail: "waiting for the collaboration socket" },
+      },
+    });
+
+    // A held proposal is a real wait: the socket may come back, so this is not
+    // a failure yet — but the wait is already named.
+    const rationale = value().fieldHydration("rationale");
+    expect(rationale.state).toBe("pending");
+    expect(rationale.reason).toContain("waiting for the collaboration socket");
+  });
+
+  it("separates 'sent but never answered' from 'never requested'", () => {
+    const base = question();
+    const values = hydratedValues();
+    delete values[`rich:${RATIONALE_PATH}`];
+    const sent = open({
+      values,
+      baseQuestion: base,
+      initialDraft: base,
+      seedDeliveries: { [RATIONALE_PATH]: { delivery: "relayed", detail: null } },
+    });
+    expect(sent.value().fieldHydration("rationale").reason).toContain("never answered");
+
+    const silent = open({ values, baseQuestion: base, initialDraft: base });
+    expect(silent.value().fieldHydration("rationale").reason).toContain("never requested");
+  });
+});
+
+/**
+ * The one place a stalled field is explained.
+ *
+ * Asserted directly because the vocabulary IS the contract: every branch is a
+ * fact the browser already holds, and an author reading the wrong one is worse
+ * off than reading nothing.
+ */
+describe("fieldInitializationReason", () => {
+  const input = (overrides: Partial<Parameters<typeof fieldInitializationReason>[0]> = {}) => ({
+    delivery: null,
+    reported: null,
+    barrierOpen: true,
+    readOnly: false,
+    lifecyclePhase: "active" as const,
+    ...overrides,
+  });
+
+  it("stays quiet until the room has synced and replayed", () => {
+    // Before the barrier opens, waiting is ordinary startup.
+    expect(fieldInitializationReason(input({ barrierOpen: false }))).toBeNull();
+  });
+
+  it("names the session's own posture before guessing at the transport", () => {
+    expect(fieldInitializationReason(input({ readOnly: true }))).toContain("read-only");
+    expect(fieldInitializationReason(input({ lifecyclePhase: "frozen" }))).toContain("frozen");
+    expect(
+      fieldInitializationReason(input({ lifecyclePhase: "freezing", delivery: { delivery: "queued", detail: null } })),
+    ).toContain("frozen");
+  });
+
+  it("prefers the room's decision over the delivery guess", () => {
+    const reported = { outcome: "conflict" as const, retryable: false };
+    expect(
+      fieldInitializationReason(input({ reported, delivery: { delivery: "relayed", detail: null } })),
+    ).toContain("already holds");
+    expect(
+      fieldInitializationReason(input({ reported: { outcome: "failed", retryable: true } })),
+    ).toContain("could not store");
+  });
+
+  it("tells the three silent failures apart", () => {
+    expect(fieldInitializationReason(input())).toContain("never requested");
+    expect(
+      fieldInitializationReason(input({ delivery: { delivery: "invalid-frame", detail: "the path is not writable" } })),
+    ).toContain("the path is not writable");
+    expect(
+      fieldInitializationReason(input({ delivery: { delivery: "relay-failed", detail: null } })),
+    ).toContain("could not be sent");
+    expect(
+      fieldInitializationReason(input({ delivery: { delivery: "relayed", detail: null } })),
+    ).toContain("never answered");
   });
 });

@@ -854,6 +854,55 @@ describe("service integration", () => {
     expect(results.filter((frame) => frame["seedId"] === refused.seedId)).toHaveLength(1);
   });
 
+  it("answers a seed its validator refuses instead of dropping it in silence", async () => {
+    // The one path where a proposal vanished with nothing written anywhere: the
+    // browser had already built it and believed it was in flight, and this
+    // handler read it as "not a command, ignore". The frame's IDENTITY is intact
+    // — only its value is unusable — so the refusal is answerable, and the field
+    // waiting on that root is told rather than left to time out with no cause.
+    const running = await startService();
+    const alice = connect(running, {
+      token: mintToken(workspaceClaims({ actorId: "actor-alice" })),
+      documentName: WORKSPACE_DOCUMENT_NAME,
+    });
+    await waitFor(() => alice.isSynced, 5_000, "seed client");
+
+    const results: Array<Record<string, unknown>> = [];
+    alice.on("stateless", ({ payload }: { payload: string }) => {
+      const parsed = JSON.parse(payload) as Record<string, unknown>;
+      if (parsed["type"] === "coedit.seed_result") results.push(parsed);
+    });
+
+    const seedId = `seed-${"b".repeat(32)}`;
+    alice.sendStateless(
+      JSON.stringify({
+        type: "coedit.seed",
+        documentName: WORKSPACE_DOCUMENT_NAME,
+        seedId,
+        root: "rich",
+        path: "question/q9/prompt",
+        value: "not an object",
+      }),
+    );
+
+    await waitFor(
+      () => results.some((frame) => frame["seedId"] === seedId),
+      5_000,
+      "the refused seed result",
+    );
+    const refused = results.find((frame) => frame["seedId"] === seedId);
+    expect(refused?.["outcome"]).toBe("failed");
+    expect(refused?.["path"]).toBe("question/q9/prompt");
+    expect(refused?.["retryable"]).toBe(false);
+
+    // A payload that is not a seed at all still gets no reply: the new branch
+    // answers seeds, it does not become a chatty echo.
+    const beforeForeign = results.length;
+    alice.sendStateless(JSON.stringify({ type: "coedit.command", nope: true }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(results).toHaveLength(beforeForeign);
+  });
+
   it("reports a refused seed store and stays up instead of dying on it", async () => {
     // The outage this pins: a seed proposal whose store was refused rejected the
     // `onStateless` hook. Hocuspocus does not catch a rejected stateless hook,

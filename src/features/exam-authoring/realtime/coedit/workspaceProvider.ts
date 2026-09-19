@@ -23,7 +23,12 @@ import type {
 } from "./contracts";
 import { FIELD_SET_WORKSPACE } from "./documentIdentity";
 import { collaborationExtensions } from "./editorBinding";
-import { PromptCoeditProvider, type CoeditChangeReason, type PromptCoeditSnapshot } from "./provider";
+import {
+  PromptCoeditProvider,
+  type CoeditChangeReason,
+  type CoeditSeedDeliveryState,
+  type PromptCoeditSnapshot,
+} from "./provider";
 import {
   createSatWorkspaceCommand,
   type SatWorkspaceCommand,
@@ -73,6 +78,14 @@ export interface WorkspaceCoeditSnapshot {
    * fact that lets its editor stop waiting and offer recovery instead.
    */
   seedFailures?: Record<string, { outcome: WorkspaceSeedOutcome; retryable: boolean }>;
+  /**
+   * How far each seed proposal got on its way to the room, by workspace path.
+   *
+   * The arbitration half (`seedFailures`) says what the room decided; this half
+   * says whether the proposal ever reached it. Without both, "this field never
+   * initialized" has no cause an author or an engineer can act on.
+   */
+  seedDeliveries?: Record<string, CoeditSeedDeliveryState>;
 }
 
 export interface WorkspaceFieldBinding extends RichComposerCollaboration {
@@ -293,6 +306,7 @@ export class SatAuthoringWorkspaceProvider {
       issueMessage: coreSnapshot.issueMessage,
       published: coreSnapshot.published,
       ...(coreSnapshot.seedFailures ? { seedFailures: coreSnapshot.seedFailures } : {}),
+      ...(coreSnapshot.seedDeliveries ? { seedDeliveries: coreSnapshot.seedDeliveries } : {}),
     };
   }
 
@@ -422,10 +436,16 @@ export class SatAuthoringWorkspaceProvider {
     let frame: WorkspaceSeedFrame;
     try {
       frame = createWorkspaceSeedFrame({ documentName: this.documentName, ...input });
-    } catch {
+    } catch (error) {
       // A proposal the shared validator refuses (unsupported path, malformed or
       // oversized value) is not sent: the service would ignore it, and a local
       // fallback here would resurrect the double-seed this path removes.
+      //
+      // It is also not SILENT any more. This catch used to be the only place a
+      // seed could disappear with nothing written anywhere, which made a field
+      // that can never initialize indistinguishable from one still loading.
+      const detail = error instanceof Error ? error.message : "the shared validator refused it";
+      this.core.recordSeedDelivery(input.path, "invalid-frame", detail);
       return false;
     }
     return this.core.sendWorkspaceSeed(frame);

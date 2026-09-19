@@ -1408,5 +1408,33 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       // readiness are two different facts.
       expect(saveStatusText()).toContain("Saving");
     });
+
+    it("tells the author WHY a field's shared copy was refused", async () => {
+      const { transport } = await renderWithWorkspaceRoom();
+
+      // The room's own verdict, delivered the way the service sends it.
+      await act(async () => {
+        transport.stateless({
+          type: "coedit.seed_result",
+          documentName: WORKSPACE_DOCUMENT_NAME,
+          seedId: `seed-${"c".repeat(32)}`,
+          root: "rich",
+          path: "question/eq-1/prompt",
+          outcome: "rejected",
+          retryable: false,
+        });
+      });
+
+      // For the field it is about, and naming the decision — not a generic
+      // "live editing could not start", which explains nothing to anyone.
+      await waitFor(() =>
+        expect(document.querySelector('[data-coedit-error="true"]')).not.toBeNull()
+      );
+      await waitFor(() =>
+        expect(document.querySelector("[data-coedit-error-message]")?.textContent).toContain(
+          "refused"
+        )
+      );
+    });
   });
 });

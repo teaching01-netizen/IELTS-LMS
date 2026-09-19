@@ -149,6 +149,9 @@ export function useAuthoringCollaborationBridge({
         ...binding,
         ready: false,
         initializationFailed: hydration.state === "failed",
+        // Carried even while the field is merely pending: a copy that was
+        // rejected before it was sent is worth saying immediately.
+        initializationReason: hydration.reason ?? undefined,
         onRetryInitialization,
       };
     },

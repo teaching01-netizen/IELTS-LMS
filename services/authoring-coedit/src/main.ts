@@ -42,8 +42,10 @@ import { parseSatWorkspaceCommand } from "../../../src/features/exam-authoring/r
 import { parseCoeditStoreRequest } from "../../../src/features/exam-authoring/realtime/coedit/storeRequest.js";
 import {
   createWorkspaceSeedResultFrame,
+  parseRefusedWorkspaceSeedIdentity,
   parseWorkspaceSeedFrame,
   type WorkspaceSeedFrame,
+  type WorkspaceSeedIdentity,
   type WorkspaceSeedOutcome,
 } from "../../../src/features/exam-authoring/realtime/coedit/workspaceSeed.js";
 
@@ -594,6 +596,25 @@ export class CoeditService {
           await this.applyWorkspaceSeed(documentName, document, connection, seed);
           return;
         }
+        // A frame that presents itself as a seed but cannot be applied is not
+        // dropped in silence any more. This is the one path where a proposal
+        // vanished with nothing written anywhere: the browser had already built
+        // it and believed it was in flight, and the handler below reads it as
+        // "not a command, ignore". When the frame's identity survived, the
+        // proposer is told, because the field waiting on that root has no other
+        // way to learn why it will never arrive.
+        const refusedSeed = parseRefusedWorkspaceSeedIdentity(payload, { documentName });
+        if (refusedSeed) {
+          metrics.incCounter("authoring_coedit_seed_total", { outcome: "rejected" });
+          log("warn", "co-edit workspace seed refused by validation", {
+            event: "seed",
+            outcome: "rejected",
+            stage: "validate",
+            reason: "other",
+          });
+          this.sendSeedResult(documentName, connection, refusedSeed, "failed", false);
+          return;
+        }
         if (connection.readOnly || this.lifecycle.isReadOnly(documentName)) return;
         const command = parseSatWorkspaceCommand(payload, {
           documentName,
@@ -763,7 +784,7 @@ export class CoeditService {
   private sendSeedResult(
     documentName: string,
     connection: Connection<CoeditConnectionContext>,
-    seed: WorkspaceSeedFrame,
+    seed: WorkspaceSeedIdentity,
     outcome: WorkspaceSeedOutcome,
     retryable: boolean,
   ): void {

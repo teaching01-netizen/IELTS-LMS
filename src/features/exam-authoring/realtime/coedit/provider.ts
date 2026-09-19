@@ -176,6 +176,49 @@ export interface PromptCoeditSnapshot {
    * fact an editor can render recovery for.
    */
   seedFailures?: Record<string, { outcome: WorkspaceSeedOutcome; retryable: boolean }>;
+  /**
+   * How far each seed proposal got on its way to the room, by workspace path.
+   * Absent until a proposal is made.
+   *
+   * A proposal that never reached the service used to look exactly like one the
+   * service refused, and exactly like one still in flight: all three are just
+   * "the root is not there yet". This is the DELIVERY half of that fact; the
+   * `seedFailures` report above is the arbitration half.
+   */
+  seedDeliveries?: Record<string, CoeditSeedDeliveryState>;
+}
+
+/**
+ * How far a seed proposal got on its way to the room.
+ *
+ * Presence in the ledger IS the "proposed" fact, and only TERMINAL states are
+ * stored: an intermediate `proposed` value would be overwritten by the terminal
+ * one on every pass, so the ledger would alternate, each alternation would
+ * publish a snapshot, and the snapshot would re-run the effect that proposes.
+ *
+ *   relayed       — put on the wire
+ *   queued        — held until the transport comes up
+ *   invalid-frame — the shared validator refused to build it; never sent
+ *   relay-failed  — the transport threw, or the frame was dropped unsent
+ */
+export type CoeditSeedDelivery = "relayed" | "queued" | "invalid-frame" | "relay-failed";
+
+export interface CoeditSeedDeliveryState {
+  delivery: CoeditSeedDelivery;
+  /** Content-free explanation when the delivery is not a plain `relayed`. */
+  detail: string | null;
+}
+
+/** The workspace path inside a queued seed frame, or null for any other frame. */
+function seedPathOfPayload(payload: string): string | null {
+  try {
+    const parsed = JSON.parse(payload) as { type?: unknown; path?: unknown };
+    return parsed.type === "coedit.seed" && typeof parsed.path === "string" && parsed.path
+      ? parsed.path
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -208,6 +251,14 @@ export class PromptCoeditProvider {
     string,
     { outcome: WorkspaceSeedOutcome; retryable: boolean }
   >();
+
+  /**
+   * How far each seed proposal got, by workspace path.
+   *
+   * Records the LAST attempt, so a retry that reaches the wire clears an
+   * earlier failure rather than leaving a stale verdict on screen.
+   */
+  private readonly seedDeliveries = new Map<string, CoeditSeedDeliveryState>();
 
   private token: PromptCoeditToken;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -283,6 +334,27 @@ export class PromptCoeditProvider {
       token: () => this.requestToken(),
       onSynced: () => {
         this.networkSynced = true;
+        // Initial sync is itself proof that the socket is live and
+        // authenticated, so the connectivity fact is derived from it as well as
+        // from the status callback. Relying on `onStatus` alone is a silent
+        // single point of failure: if it never reports "connected" for this
+        // client, `connected` stays false, every stateless frame is held, and a
+        // seed proposal never reaches the room while the editor waits for a
+        // root that was never asked for.
+        if (!this.connected) {
+          this.connected = true;
+          this.connectionPhase = "connected";
+          this.hasEstablishedConnection = true;
+          if (this.issue === "offline") {
+            this.issue = "none";
+            this.issueMessage = null;
+          }
+        }
+        // Flush on sync as well as on a status transition: the common case is a
+        // seed proposed in the same window the room opened, and a frame queued
+        // after the last transition would otherwise wait for a transition that
+        // may never come.
+        this.flushStatelessFrames();
         this.openReadinessBarrier();
       },
       onAuthenticationFailed: () => {
@@ -430,14 +502,51 @@ export class PromptCoeditProvider {
    * reconnects.
    */
   sendWorkspaceSeed(frame: WorkspaceSeedFrame): boolean {
-    if (this.disposed || this.isTerminal) return false;
+    if (this.disposed || this.isTerminal) {
+      this.recordSeedDelivery(frame.path, "relay-failed", "the room is no longer open");
+      return false;
+    }
     let payload: string;
     try {
       payload = JSON.stringify(frame);
     } catch {
+      this.recordSeedDelivery(frame.path, "invalid-frame", "the proposal is not serializable");
       return false;
     }
-    return this.sendStatelessFrame(frame.seedId, payload);
+    // Read the transport state BEFORE the send: `sendStatelessFrame` either
+    // relays now or holds the frame, and the two mean different things to an
+    // editor that is waiting on the result.
+    const queued = !this.connected;
+    if (!this.sendStatelessFrame(frame.seedId, payload)) {
+      this.recordSeedDelivery(frame.path, "relay-failed", "the transport refused the proposal");
+      return false;
+    }
+    this.recordSeedDelivery(
+      frame.path,
+      queued ? "queued" : "relayed",
+      queued ? "waiting for the collaboration socket" : null,
+    );
+    return true;
+  }
+
+  /**
+   * Records how far one seed proposal got. Content-free, and published with the
+   * snapshot so a field that is waiting can say WHICH wait it is in.
+   *
+   * `proposed` and `relayed` clear any previous detail: a retry that reached the
+   * wire must not leave an earlier refusal on screen.
+   */
+  recordSeedDelivery(
+    path: string,
+    delivery: CoeditSeedDelivery,
+    detail: string | null = null,
+  ): void {
+    const normalized = path.trim();
+    if (!normalized) return;
+    const previous = this.seedDeliveries.get(normalized);
+    if (previous && previous.delivery === delivery && previous.detail === detail) return;
+    this.seedDeliveries.set(normalized, { delivery, detail });
+    if (!this.disposed) this.recompute("status");
   }
 
   /**
@@ -449,14 +558,33 @@ export class PromptCoeditProvider {
   private sendStatelessFrame(frameId: string, payload: string): boolean {
     if (!this.connected) {
       this.pendingStatelessFrames.set(frameId, payload);
-      while (this.pendingStatelessFrames.size > PromptCoeditProvider.MAX_PENDING_STATELESS_FRAMES) {
-        const oldest = this.pendingStatelessFrames.keys().next().value;
-        if (typeof oldest !== "string") break;
-        this.pendingStatelessFrames.delete(oldest);
-      }
+      this.evictOutboundOverflow();
       return true;
     }
     return this.relayStatelessFrame(frameId, payload);
+  }
+
+  /**
+   * Keeps the off-line outbound queue bounded without losing a seed.
+   *
+   * Evicting the oldest entry blindly dropped exactly the frames an editor was
+   * waiting on: a seed whose proposal never leaves the browser is a field that
+   * can never initialize. Non-seed frames (commands, store requests) are
+   * signals that a later state subsumes, so they are evicted first — and if a
+   * seed must go, its path records that it did.
+   */
+  private evictOutboundOverflow(): void {
+    while (this.pendingStatelessFrames.size > PromptCoeditProvider.MAX_PENDING_STATELESS_FRAMES) {
+      const frameIds = [...this.pendingStatelessFrames.keys()];
+      const victim = frameIds.find((frameId) => !frameId.startsWith("seed-")) ?? frameIds[0];
+      if (typeof victim !== "string") return;
+      const payload = this.pendingStatelessFrames.get(victim);
+      this.pendingStatelessFrames.delete(victim);
+      const path = payload === undefined ? null : seedPathOfPayload(payload);
+      if (path !== null) {
+        this.recordSeedDelivery(path, "relay-failed", "dropped from the outbound queue");
+      }
+    }
   }
 
   /** Apply a lifecycle read-only decision without remounting editors. */
@@ -556,6 +684,9 @@ export class PromptCoeditProvider {
       issueMessage: this.issueMessage,
       published: this.published,
       ...(this.seedFailures.size === 0 ? {} : { seedFailures: this.seedFailureMap() }),
+      ...(this.seedDeliveries.size === 0
+        ? {}
+        : { seedDeliveries: Object.fromEntries(this.seedDeliveries) }),
     };
   }
 
@@ -685,6 +816,10 @@ export class PromptCoeditProvider {
     if (!this.connected || this.disposed || this.isTerminal) return;
     for (const [frameId, payload] of this.pendingStatelessFrames) {
       if (!this.relayStatelessFrame(frameId, payload)) break;
+      // A seed that was waiting is on the wire now, and the field waiting on it
+      // should stop reporting a transport problem.
+      const path = seedPathOfPayload(payload);
+      if (path !== null) this.recordSeedDelivery(path, "relayed");
     }
   }
 

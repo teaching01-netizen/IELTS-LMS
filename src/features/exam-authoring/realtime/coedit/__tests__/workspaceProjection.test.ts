@@ -19,6 +19,7 @@ import {
   isWorkspaceRichContent,
 } from "../../../ui/authoringWorkspaceModel";
 import { encodeStateVectorBase64 } from "../stateVector";
+import { PromptCoeditProvider } from "../provider";
 import { parseWorkspaceSeedFrame } from "../workspaceSeed";
 import {
   SatAuthoringWorkspaceProvider,
@@ -154,6 +155,14 @@ function openRoom(
     transport.sync();
   }
   return { provider, transport };
+}
+
+/** Every workspace path a seed frame on this transport was addressed to. */
+function seededPaths(transport: FakeTransport): string[] {
+  return transport.stateless.flatMap((payload) => {
+    const parsed = parseWorkspaceSeedFrame(payload);
+    return parsed ? [parsed.path] : [];
+  });
 }
 
 /** Fails the test on a missing root instead of yielding undefined. */
@@ -656,6 +665,102 @@ describe("SAT workspace rich-root initialization", () => {
     // No visible text, and still the field's truth: an author who cleared the
     // prompt must not be shown the pre-clear HTTP content again.
     expect(textWithin(projected)).toBe("");
+  });
+});
+
+/**
+ * The seed DELIVERY ledger.
+ *
+ * A proposal the room refuses is one failure; a proposal that never reached the
+ * room is a completely different one, and they used to look identical from the
+ * editor: both are just "the root is not there yet". These tests pin the second
+ * half, including the two ways a frame could previously disappear in silence —
+ * evicted from the off-line queue, or refused by the shared validator.
+ */
+describe("SAT workspace seed delivery", () => {
+  it("puts a proposal on the wire and says so", () => {
+    const { provider, transport } = openRoom();
+
+    const accepted = provider.seedRichField(PROMPT_FIELD, plainContentFromText("Prompt"));
+
+    expect(accepted).toBe(true);
+    expect(seededPaths(transport)).toEqual([PROMPT_FIELD]);
+    expect(provider.snapshot().seedDeliveries?.[PROMPT_FIELD]).toEqual({
+      delivery: "relayed",
+      detail: null,
+    });
+  });
+
+  it("holds a proposal while the transport is down and relays it when it returns", () => {
+    const { provider, transport } = openRoom(undefined, { connect: false });
+
+    provider.seedRichField(PROMPT_FIELD, plainContentFromText("Prompt"));
+
+    // Nothing on the wire, and the wait is NAMED rather than implied.
+    expect(seededPaths(transport)).toEqual([]);
+    expect(provider.snapshot().seedDeliveries?.[PROMPT_FIELD]).toEqual({
+      delivery: "queued",
+      detail: "waiting for the collaboration socket",
+    });
+
+    transport.status("connected");
+
+    expect(seededPaths(transport)).toEqual([PROMPT_FIELD]);
+    expect(provider.snapshot().seedDeliveries?.[PROMPT_FIELD]).toEqual({
+      delivery: "relayed",
+      detail: null,
+    });
+  });
+
+  it("flushes a queued proposal on initial sync, with no status frame needed", () => {
+    // The connectivity fact is derived from sync as well as from the status
+    // callback. When only `onStatus` could establish it, a client whose status
+    // callback never reported `connected` held every proposal forever, and the
+    // editor waited on a root nobody had asked for.
+    const { provider, transport } = openRoom(undefined, { connect: false });
+    provider.seedRichField(PROMPT_FIELD, plainContentFromText("Prompt"));
+
+    transport.sync();
+
+    expect(seededPaths(transport)).toEqual([PROMPT_FIELD]);
+    expect(provider.snapshot().seedDeliveries?.[PROMPT_FIELD]?.delivery).toBe("relayed");
+    expect(provider.snapshot().connectionPhase).toBe("connected");
+  });
+
+  it("never evicts a proposal to make room for a command", () => {
+    const { provider, transport } = openRoom(undefined, { connect: false });
+    provider.seedRichField(PROMPT_FIELD, plainContentFromText("Prompt"));
+
+    // Overflow the off-line queue with signals a later state subsumes.
+    for (
+      let index = 0;
+      index < PromptCoeditProvider.MAX_PENDING_STATELESS_FRAMES + 5;
+      index += 1
+    ) {
+      provider.publishCommand("question.deleted", { questionId: `q-${index}` });
+    }
+
+    expect(provider.snapshot().seedDeliveries?.[PROMPT_FIELD]?.delivery).toBe("queued");
+
+    transport.status("connected");
+
+    // The proposal survived the queue pressure: a dropped seed is an editor
+    // that can never initialize, which no later command can make up for.
+    expect(seededPaths(transport)).toContain(PROMPT_FIELD);
+  });
+
+  it("records a proposal the shared validator refuses instead of dropping it", () => {
+    const { provider, transport } = openRoom();
+
+    const accepted = provider.seedRichField("question/q-1/unknown", plainContentFromText("Prompt"));
+
+    expect(accepted).toBe(false);
+    expect(seededPaths(transport)).toEqual([]);
+    const recorded = provider.snapshot().seedDeliveries?.["question/q-1/unknown"];
+    expect(recorded?.delivery).toBe("invalid-frame");
+    // The specific rule is the useful part: it is what the waiting field
+    // reports, and it is the only trace this failure has.
+    expect(recorded?.detail).toContain("question/q-1/unknown");
   });
 });
 
