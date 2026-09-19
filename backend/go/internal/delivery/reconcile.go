@@ -382,13 +382,23 @@ func reconcileCohortStageExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runt
 }
 
 // reconcileCohortSectionExpiredTx mirrors the cohort_section_v3 branch: the
-// stage-identity skeleton against the plain section key, with the SECTION clock
-// as the only expiry authority (decision D2). The personal module clock stays
-// the student-facing allotment (the client submits at min(personal, section))
-// but never force-closes a module server-side: closing a module early would
-// consume the student's remaining section time without the section having
-// ended. A stalled client can therefore hold one module for the rest of its
-// section, which the section clock still bounds.
+// stage-identity skeleton against the plain section key, with TWO expiry
+// anchors that mirror the student's clock.
+//
+// The client displays and expires a module at min(personal module allotment,
+// section clock) — the module's own time, capped by the shared section clock —
+// so the server backstop closes on the same anchor: a module whose personal
+// allotment elapsed while its section is still live is finalized (the
+// reconciler then routes it to its adaptive successor), and a module still open
+// when the section clock runs out is finalized too. The section clock remains
+// the cap; the personal anchor can only bring a module's end forward, never
+// extend it past the section.
+//
+// This reverses the earlier D2 decision (section clock only). That decision
+// assumed the shared section clock was also the student-facing countdown; now
+// that the visible clock is the module's allotment, a stalled client whose
+// module clock has run out would otherwise sit on a module the student's own
+// screen says is over.
 func reconcileCohortSectionExpiredTx(ctx context.Context, t tx.Tx, runtimeID, runtimeStatus string, currentStageKey sql.NullString, currentStageOrder *int, mod *reconcileRow, asOf time.Time) (bool, error) {
 	if runtimeStatus == "completed" || runtimeStatus == "cancelled" {
 		return true, nil
@@ -424,7 +434,14 @@ func reconcileCohortSectionExpiredTx(ctx context.Context, t tx.Tx, runtimeID, ru
 			case stage.status == "live" && stage.startedAt != nil:
 				sectionExpired = stageRemainingSeconds(*stage.startedAt, stage.pausedAt, stage.plannedMinutes, stage.extensionMinutes, stage.pausedSeconds, asOf) <= 0
 			}
-			return sectionExpired, nil
+			if sectionExpired {
+				return true, nil
+			}
+			// Personal module clock: the same rule the legacy branch uses — only a
+			// started, unpaused, still-active module can expire on its own
+			// allotment, and the section clock checked above is still the cap.
+			return mod.state == "active" && mod.pausedAt == nil &&
+				moduleRemainingSeconds(mod.startedAt, mod.pausedAt, mod.allocatedSeconds, mod.extensionSeconds, mod.accumulatedPausedSeconds, asOf) <= 0, nil
 		}
 	}
 	return false, nil

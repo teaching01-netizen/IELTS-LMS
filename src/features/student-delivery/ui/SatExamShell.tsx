@@ -371,6 +371,9 @@ export function SatExamShell(props: SatExamShellProps) {
    * shell only wires props — it no longer derives whether the column is open.
    * ------------------------------------------------------------------ */
 
+  // Persistence truth stays observable without being drawn: the exam shows
+  // nothing while saving is healthy, so `data-sat-save-state` below is the one
+  // machine-readable answer (durability diagnostics and the e2e legs wait on it).
   return (
     <SatContrastContext.Provider value={props.readingPreferences.contrastMode ?? 'default'}>
     <div
@@ -378,6 +381,7 @@ export function SatExamShell(props: SatExamShellProps) {
       data-testid="sat-exam-shell"
       data-sat-contrast={props.readingPreferences.contrastMode ?? 'default'}
       data-sat-keyboard-open={props.keyboardOpen ? "true" : "false"}
+      data-sat-save-state={props.saveState}
       style={shellStyle}
     >
     {/* Blocking inert covers the whole exam grid (Phase 0.6, corrected Phase 1
@@ -386,7 +390,7 @@ export function SatExamShell(props: SatExamShellProps) {
         Help/Shortcuts stay available through the route-level BlockingOverlay
         (outside inert), which is the only read-only surface during pause.
         Save retry / Take over live in SatSaveStatus below, also outside inert
-        (WCAG 2.1.1 / 4.1.3). */}
+        (WCAG 2.1.1 / 4.1.3); it renders nothing while saving is healthy. */}
     <div
       data-testid="sat-exam-blocked-region"
       inert={props.blocked}
@@ -593,8 +597,6 @@ export function SatExamShell(props: SatExamShellProps) {
         navigatorButtonId={navigatorButtonId}
         navigatorPanelId={navigatorPanelId}
         blocked={props.blocked}
-        saveState={props.saveState}
-        onRetrySave={props.onRetrySave}
         onPrevious={props.onPrevious}
         onNext={props.onNext}
         onOpenNavigator={() => toggleOverlay("navigator")}

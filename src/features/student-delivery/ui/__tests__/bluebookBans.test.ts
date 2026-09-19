@@ -8,14 +8,18 @@ import { describe, expect, it } from "vitest";
 
 const DELIVERY_ROOT = resolve(__dirname, "../..");
 
-// Contract tests name the values they pin, so they self-match the hex
-// pattern by construction. Exclude bluebook contract tests from the
-// production-source scan (the token test asserts values live in CSS;
-// this test asserts they live NOWHERE ELSE in shipped sources).
-// Coexistence + extended overlay suites also name Bluebook values in their
-// assert strings (TDD-red by design until Ph8-9 implementation lands).
-// Those contract-adjacent TEST files are excluded too; SHIPPED sources stay covered.
-const CONTRACT_TEST_FILES = new Set(["bluebookTokens.test.ts", "bluebookBans.test.ts", "bluebookOverlays.test.ts", "SatFloatingCoexistence.test.tsx", "SatHelpModal.test.tsx", "SatCenterModal.test.tsx", "SatLineReader.test.tsx", "SatSingleChoiceAnswer.test.tsx", "SatQuestionHeader.test.tsx", "SatAnnotationFlow.test.tsx", "SatAnnotatedContent.test.tsx", "satAnnotationRoundTrip.test.ts"]);
+// Every ban below is a ban on SHIPPED sources. Tests are out of scope, and
+// must be: a contract test pins the very values it asserts, so it self-matches
+// these patterns by construction (the token test asserts values live in CSS;
+// these tests assert they live NOWHERE ELSE in shipped sources, and several
+// assert a class is ABSENT by naming it). Excluding them by pattern rather than
+// by name is deliberate — a hand-maintained list silently goes stale the moment
+// someone adds a new contract test, which is exactly how this scan went red when
+// SatImageViewer.test.tsx landed after the list was written.
+function isTestFile(entry: string): boolean {
+  return /\.test\.tsx?$/.test(entry);
+}
+
 function collectSources(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
@@ -23,7 +27,7 @@ function collectSources(dir: string, out: string[] = []): string[] {
       if (entry === "__tests__") continue;
       collectSources(full, out);
     } else if (/\.(tsx?|css)$/.test(entry)) {
-      if (!CONTRACT_TEST_FILES.has(entry)) out.push(full);
+      if (!isTestFile(entry)) out.push(full);
     }
   }
   return out;
@@ -104,7 +108,6 @@ describe("bluebook bans (Phase 0 skeleton)", () => {
   // comments, never the token.
   it("restricts attention-yellow to the Help Close pill", () => {
     for (const file of sources) {
-      if (file.endsWith(".test.tsx") || file.endsWith(".test.ts")) continue;
       if (file.endsWith("ui/help/SatHelpModal.tsx")) continue;
       expect(readText(file)).not.toMatch(/sat-attention/);
     }

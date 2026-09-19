@@ -172,25 +172,17 @@ export const SAT_COPY = {
     hideTimer: "Hide timer",
     showTimer: "Show timer",
   },
+  // Failure-only save copy. Healthy saving is never narrated: there is no
+  // "Saving…"/"Saved"/offline string because the exam no longer shows them.
+  // What remains is what asks the student to do something.
   saveStatus: {
-    saving: "Saving" + "\u2026",
-    // Wave C R-16b: reassurance clause appended; retrying branch unchanged.
-    offline: "Offline \u2014 answers kept on this device. Keep working; saving resumes automatically.",
-    retrying: "Reconnecting \u2014 retrying save" + "\u2026",
     failed: "Save failed.",
     superseded: "Opened in another session \u2014 answers here are paused.",
     takeOver: "Take over",
     retryNow: "Retry now",
     retry: "Retry",
-    // Persistent footer indicator (Phase 6f): lives next to the hand, never
-    // a transient overlay. Short nouns — the banner carries the sentence.
-    saved: "All answers saved",
-    savingShort: "Saving answers",
-    offlineShort: "Offline \u2014 kept on this device",
-    failedShort: "Save needs attention",
   },
   submitReadiness: {
-    waitingForSaves: "Waiting for answers to save" + "\u2026",
     offlineBlocked: "You are offline. Answers are kept on this device.",
     errorBlocked: "Saving needs attention before you can submit.",
   },
@@ -407,12 +399,6 @@ export function satSubmitConfirmTitle(moduleTitle: string): string {
 
 export function satSubmitConfirmSummary(unanswered: number, flagged: number): string {
   return unanswered + " unanswered \u00B7 " + flagged + " flagged";
-}
-
-export function satWaitingForSavesLabel(pendingCount: number): string {
-  return pendingCount === 1
-    ? "Waiting for 1 answer to save" + "\u2026"
-    : "Waiting for " + pendingCount + " answers to save" + "\u2026";
 }
 
 export function satLastQuestionLabel(questionNumber: number, questionCount: number): string {

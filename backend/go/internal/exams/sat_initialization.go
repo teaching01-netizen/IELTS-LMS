@@ -128,7 +128,18 @@ func initializeSATDraftTx(ctx context.Context, q tx.Tx, examID, actorID string) 
 
 	for sectionIndex, section := range satInitialBlueprint {
 		sectionID := uuid.NewString()
-		sectionDuration := section.modules[0].duration * 2
+		// The section's authored length is base + the longer branch (a candidate
+		// sits Module 1 plus exactly one Module 2), not the sum of all three
+		// authored modules — the runtime clocks the section from this value.
+		durationByRole := make(map[string]int, len(section.modules))
+		for _, module := range section.modules {
+			durationByRole[module.role] = module.duration
+		}
+		sectionDuration := CandidateSectionSeconds(
+			durationByRole[satInitialBaseRole],
+			durationByRole[satInitialLowerRole],
+			durationByRole[satInitialHigherRole],
+		)
 		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_sections (id, exam_version_id, section_key, title, display_order, duration_seconds, break_after_seconds, instructions, tool_policy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", sectionID, versionID, section.key, section.title, sectionIndex, sectionDuration, section.breakSeconds, `{"version":1,"nodes":[]}`, `[]`); err != nil {
 			return "", err
 		}

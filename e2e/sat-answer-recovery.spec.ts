@@ -38,12 +38,14 @@ async function selectFirstStimulusText(page: Page) {
 }
 
 async function waitForSatSaved(page: Page) {
-  await expect(page.getByTestId('sat-footer-save-indicator')).toHaveAttribute(
+  // The exam deliberately draws no save state. The durability contract is
+  // still observable on the shell's machine-readable attribute, which is the
+  // only remaining answer to "has this question's write landed?"
+  await expect(page.getByTestId('sat-exam-shell')).toHaveAttribute(
     'data-sat-save-state',
     'idle',
     { timeout: 30_000 },
   );
-  await expect(page.getByTestId('sat-footer-save-indicator')).toContainText('Saved');
 }
 
 async function createLiveSatSession(page: Page, browser: Browser) {

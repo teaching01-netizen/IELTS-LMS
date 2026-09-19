@@ -78,13 +78,14 @@ describe("Wave B R-07 save-failed paints above navigator/More", () => {
     expect(SAT_OVERLAY_Z.routeAlert).toBeLessThanOrEqual(SAT_OVERLAY_Z.breakConfirm);
   });
 
-  it("failed banner rides the routeAlert layer while offline/retrying/saving stay low", () => {
+  it("the failure banner is the only save surface and rides routeAlert", () => {
     const source = read("feedback/SatSaveStatus.tsx");
     expect(source).toContain("z-[85]");
     expect(source).not.toContain("z-[75]");
-    // Untouched layers: saving hint 55, offline/retrying dock 65.
-    expect(source).toContain("z-[55]");
-    expect(source).toContain("z-[65]");
+    // The routine layers are gone with their branches (no saving hint, no
+    // offline dock): only a failure or a lost lease ever paints here.
+    expect(source).not.toContain("z-[55]");
+    expect(source).not.toContain("z-[65]");
   });
 
   it("navigator open + save-failed keeps banner + Retry visible and clickable above", async () => {

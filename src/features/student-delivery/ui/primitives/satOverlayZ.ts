@@ -9,16 +9,15 @@
  * blocking (100) > timer warning (96) > submission (95) > break veil (94) > lease (90) >
  * image viewer (89) > help/shortcuts (88) > break confirm (86) > route
  * alerts (85, incl. save-failed/superseded) > more menu (84) > navigator (80) >
- * compact modal backdrops (83/79/78) > tools (70) > save-status dock (65) >
- * saving hint (55).
+ * compact modal backdrops (83/79/78) > tools (70).
  *
  * Bluebook elevation (Phase 10): 4 levels. BLOCKING 100 (pause veils own
  * the screen) > MODAL 88-96 (timer warning, submission, help/shortcuts,
  * image viewer, break confirm — centered dialogs with the 72% scrim) >
  * TOOLS 70 (floating calculator/reference + More menu + popover panels —
  * floating shadow only, light or no backdrop, never the modal scrim) >
- * CHROME/SURFACE 0-65 (header/footer chrome, question canvas,
- * save-status dock, banners — borders carry structure, no shadow).
+ * CHROME/SURFACE 0-69 (header/footer chrome, question canvas, banners —
+ * borders carry structure, no shadow).
  *
  * Priority summary: timeout/timer warnings can never hide under Desmos;
  * the break confirm sits above every tool; help/shortcuts sit above the
@@ -38,8 +37,6 @@
  * below every modal layer; the sheet never claims space above the navigator.
  */
 export const SAT_OVERLAY_Z = {
-  savingHint: 55,
-  saveStatusDock: 65,
   toolSheet: 70,
   saveAlert: 75,
   notesBackdrop: 78,
@@ -65,8 +62,6 @@ export const SAT_OVERLAY_Z = {
 export type SatOverlayLayer = keyof typeof SAT_OVERLAY_Z;
 
 export const SAT_OVERLAY_Z_CLASS = {
-  savingHint: "z-[55]",
-  saveStatusDock: "z-[65]",
   toolSheet: "z-[70]",
   saveAlert: "z-[75]",
   notesBackdrop: "z-[78]",

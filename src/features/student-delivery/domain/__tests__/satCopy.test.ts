@@ -9,7 +9,6 @@ import {
   satSubmitConfirmSummary,
   satSubmitConfirmTitle,
   satTimerRevealedAnnouncement,
-  satWaitingForSavesLabel,
 } from "../satCopy";
 
 function collectStrings(value: unknown, out: string[]): void {
@@ -97,8 +96,6 @@ describe("satCopy controlled vocabulary", () => {
     expect(satBackToQuestionLabel(7)).toBe("Back to question 7");
     expect(satSubmitConfirmTitle("Module 2")).toBe("Submit Module 2 answers?");
     expect(satSubmitConfirmSummary(3, 2)).toBe("3 unanswered \u00B7 2 flagged");
-    expect(satWaitingForSavesLabel(1)).toBe("Waiting for 1 answer to save\u2026");
-    expect(satWaitingForSavesLabel(4)).toBe("Waiting for 4 answers to save\u2026");
     expect(satLastQuestionLabel(27, 27)).toBe("Question 27 of 27, last question");
     expect(satContinueToDirectionsLabel("Math")).toBe("Continue to Math directions");
     expect(satTimerRevealedAnnouncement()).toContain("5 minutes left");

@@ -42,12 +42,12 @@ describe("SAT countdown policy (SAT-003)", () => {
     ).toEqual({ displaySeconds: 4000, expirySeconds: 4000 });
   });
 
-  // The cohort clock contract: in a synchronized cohort the shared section
-  // clock is BOTH the display and the expiry, regardless of the student's
-  // personal allotment. A personal term in the display would give two students
-  // who entered at different moments two different countdowns for the same
-  // shared exam, so started_at never creates the visible cohort clock.
-  it("shows the section clock as both display and expiry for a section-keyed cohort", () => {
+  // The module clock contract: a candidate sits Module 1 plus exactly one
+  // Module 2, so the section's authored length is M1 + one branch and the
+  // module's own allotment is the countdown the student reads. The shared
+  // section clock is the cap, not the countdown: it is what stops a late
+  // arrival or a stalled device from outliving the section.
+  it("shows the module allotment as both display and expiry for a section-keyed cohort", () => {
     expect(
       satCountdown({
         timingModel: SECTION,
@@ -56,7 +56,7 @@ describe("SAT countdown policy (SAT-003)", () => {
         personalSeconds: 90,
         authoritativeSeconds: 4000,
       }),
-    ).toEqual({ displaySeconds: 4000, expirySeconds: 4000 });
+    ).toEqual({ displaySeconds: 90, expirySeconds: 90 });
     expect(
       satCountdown({
         timingModel: SECTION,
@@ -69,10 +69,11 @@ describe("SAT countdown policy (SAT-003)", () => {
   });
 
   // Two students in one cohort section: A entered at section start, B entered
-  // 12s later with a full personal allotment. Their personal clocks disagree;
-  // the displayed countdown must not.
-  it("shows every student in the cohort the same countdown regardless of entry time", () => {
-    const shared = (personalSeconds: number) =>
+  // 12s later with a full personal allotment. Their module clocks disagree by
+  // that 12s — that is the point of a per-module clock — but neither may exceed
+  // the shared section clock, which every student counts down identically.
+  it("caps every student's module clock at the shared section clock", () => {
+    const shared = (personalSeconds: number | null) =>
       satCountdown({
         timingModel: SECTION,
         stageKey: "RW1",
@@ -80,11 +81,33 @@ describe("SAT countdown policy (SAT-003)", () => {
         personalSeconds,
         authoritativeSeconds: 4000,
       });
-    const studentA = shared(4000);
-    const studentB = shared(3988);
-    expect(studentA.displaySeconds).toBe(studentB.displaySeconds);
-    expect(studentA.expirySeconds).toBe(studentB.expirySeconds);
-    expect(studentA.displaySeconds).toBe(4000);
+    expect(shared(4000).displaySeconds).toBe(4000);
+    expect(shared(3988).displaySeconds).toBe(3988);
+    expect(shared(9000)).toEqual({ displaySeconds: 4000, expirySeconds: 4000 });
+  });
+
+  // A frame that has not hydrated the module attempt yet carries NO personal
+  // clock. Reading it as zero would display 0:00 and arm the expiry on a payload
+  // that is merely early; the section clock alone is the safe fallback.
+  it("falls back to the section clock when the module attempt is not loaded", () => {
+    expect(
+      satCountdown({
+        timingModel: SECTION,
+        stageKey: "RW1",
+        sectionKey: "RW1",
+        personalSeconds: null,
+        authoritativeSeconds: 900,
+      }),
+    ).toEqual({ displaySeconds: 900, expirySeconds: 900 });
+    expect(
+      satCountdown({
+        timingModel: LEGACY,
+        stageKey: null,
+        sectionKey: "RW1",
+        personalSeconds: null,
+        authoritativeSeconds: 900,
+      }),
+    ).toEqual({ displaySeconds: 0, expirySeconds: 0 });
   });
 
   // No section identity (absent or empty key) is not "this module's section":
@@ -102,6 +125,20 @@ describe("SAT countdown policy (SAT-003)", () => {
         }),
       ).toEqual({ displaySeconds: 0, expirySeconds: null });
     }
+  });
+
+  // A module whose section identity is unknown must not be finalised even when
+  // its own allotment is spent: display 0 with an inert expiry.
+  it("stays inert with a spent module clock but no section identity", () => {
+    expect(
+      satCountdown({
+        timingModel: SECTION,
+        stageKey: "RW2",
+        sectionKey: "RW1",
+        personalSeconds: 0,
+        authoritativeSeconds: 900,
+      }),
+    ).toEqual({ displaySeconds: 0, expirySeconds: null });
   });
 
   // The inert case: the shared clock is counting another section, so there is

@@ -1,10 +1,14 @@
 package delivery
 
-// Decision D2 pins: under cohort_section_v3 the SECTION clock is the only
-// server-side expirer. The personal module clock stays the student-facing
-// allotment (the client submits at min(personal, section)), but a module must
-// never be force-closed on it — closing early would consume the student's
-// remaining section time without the section having ended.
+// cohort_section_v3 pins TWO expiry anchors, matching the student's clock:
+// min(personal module allotment, section clock). The module's own allotment
+// closes it (the reconciler then routes it to its adaptive successor), and the
+// shared section clock still caps it — a module never outlives its section.
+//
+// The header this file replaced pinned the earlier D2 decision (section clock
+// only, personal clock never expires). That was true while the shared section
+// clock was also the student-facing countdown; the visible clock is now the
+// module's allotment, so the server backstop has to close on the same anchor.
 
 import (
 	"context"
@@ -22,8 +26,8 @@ const (
 )
 
 // cohortSectionModuleExpired runs the cohort_section_v3 expiry branch against a
-// programmed section clock row.
-func cohortSectionModuleExpired(t *testing.T, mod *reconcileRow, stageStatus string, stageStart *time.Time, stagePausedAt *time.Time, planned int64, asOf time.Time) bool {
+// programmed runtime + section clock row.
+func cohortSectionModuleExpired(t *testing.T, mod *reconcileRow, runtimeStatus, stageStatus string, stageStart *time.Time, stagePausedAt *time.Time, planned int64, asOf time.Time) bool {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -42,7 +46,7 @@ func cohortSectionModuleExpired(t *testing.T, mod *reconcileRow, stageStatus str
 		}).AddRow(int64(1), stageStatus, stageStart, stagePausedAt, planned, int64(0), int64(0)))
 
 	order := 1
-	expired, err := reconcileModuleExpiredTx(context.Background(), db, "rt-1", "live", "cohort_section_v3",
+	expired, err := reconcileModuleExpiredTx(context.Background(), db, "rt-1", runtimeStatus, "cohort_section_v3",
 		sql.NullString{String: "reading-writing", Valid: true}, &order, mod, asOf.UTC())
 	if err != nil {
 		t.Fatalf("expiry branch: %v", err)
@@ -53,9 +57,9 @@ func cohortSectionModuleExpired(t *testing.T, mod *reconcileRow, stageStatus str
 	return expired
 }
 
-// A module whose personal clock is long exhausted but whose section is still
-// live with time on the clock is NOT finalized.
-func TestCohortSectionModuleIsNotExpiredOnPersonalClock(t *testing.T) {
+// The module's own allotment closes it even though its section is still live:
+// this is the module clock the student is reading.
+func TestCohortSectionModuleExpiresOnItsOwnAllotment(t *testing.T) {
 	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
 	startedAt := now.Add(-40 * time.Minute)
 	stageStart := now.Add(-10 * time.Minute)
@@ -63,21 +67,35 @@ func TestCohortSectionModuleIsNotExpiredOnPersonalClock(t *testing.T) {
 		id: "ma-1", moduleID: "mod-1", state: "active",
 		allocatedSeconds: 30 * 60, startedAt: &startedAt,
 	}
-	if cohortSectionModuleExpired(t, mod, "live", &stageStart, nil, 64, now) {
-		t.Fatal("the personal module clock must not expire a module while its section is live")
+	if !cohortSectionModuleExpired(t, mod, "live", "live", &stageStart, nil, 64, now) {
+		t.Fatal("a module past its own allotment must be finalized")
 	}
 }
 
-// The same module is finalized once its section clock has run out.
+// Inside its allotment the module stays open while the section has time left.
+func TestCohortSectionModuleStaysOpenInsideItsAllotment(t *testing.T) {
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	startedAt := now.Add(-5 * time.Minute)
+	stageStart := now.Add(-10 * time.Minute)
+	mod := &reconcileRow{
+		id: "ma-1", moduleID: "mod-1", state: "active",
+		allocatedSeconds: 30 * 60, startedAt: &startedAt,
+	}
+	if cohortSectionModuleExpired(t, mod, "live", "live", &stageStart, nil, 64, now) {
+		t.Fatal("a module inside its allotment must not be finalized")
+	}
+}
+
+// The section clock still caps: a module outlives neither anchor.
 func TestCohortSectionModuleExpiresWhenSectionDeadlinePassed(t *testing.T) {
 	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
-	startedAt := now.Add(-40 * time.Minute)
+	startedAt := now.Add(-5 * time.Minute)
 	stageStart := now.Add(-70 * time.Minute)
 	mod := &reconcileRow{
 		id: "ma-1", moduleID: "mod-1", state: "active",
 		allocatedSeconds: 30 * 60, startedAt: &startedAt,
 	}
-	if !cohortSectionModuleExpired(t, mod, "live", &stageStart, nil, 64, now) {
+	if !cohortSectionModuleExpired(t, mod, "live", "live", &stageStart, nil, 64, now) {
 		t.Fatal("a module past its section deadline must be finalized")
 	}
 }
@@ -91,12 +109,13 @@ func TestCohortSectionModuleExpiresOnCompletedSection(t *testing.T) {
 		id: "ma-1", moduleID: "mod-1", state: "active",
 		allocatedSeconds: 30 * 60, startedAt: &startedAt,
 	}
-	if !cohortSectionModuleExpired(t, mod, "completed", &stageStart, nil, 64, now) {
+	if !cohortSectionModuleExpired(t, mod, "live", "completed", &stageStart, nil, 64, now) {
 		t.Fatal("a completed section must finalize its remaining modules")
 	}
 }
 
-// A paused section clock is frozen: nothing expires while the room is paused.
+// A paused section clock is frozen: neither anchor expires while the room is
+// paused, even with the personal allotment long spent.
 func TestCohortSectionModuleStaysOpenWhileSectionPaused(t *testing.T) {
 	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
 	startedAt := now.Add(-40 * time.Minute)
@@ -106,7 +125,54 @@ func TestCohortSectionModuleStaysOpenWhileSectionPaused(t *testing.T) {
 		id: "ma-1", moduleID: "mod-1", state: "active",
 		allocatedSeconds: 30 * 60, startedAt: &startedAt,
 	}
-	if cohortSectionModuleExpired(t, mod, "live", &stageStart, &pausedAt, 64, now) {
+	if cohortSectionModuleExpired(t, mod, "live", "live", &stageStart, &pausedAt, 64, now) {
 		t.Fatal("a paused section clock must not expire modules")
+	}
+	if cohortSectionModuleExpired(t, mod, "paused", "live", &stageStart, nil, 64, now) {
+		t.Fatal("a paused runtime must not expire modules")
+	}
+}
+
+// A per-student pause freezes that student's module clock: the reconciler must
+// not close a module the student's own screen is holding.
+func TestCohortSectionModuleStaysOpenWhileModulePaused(t *testing.T) {
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	startedAt := now.Add(-40 * time.Minute)
+	stageStart := now.Add(-10 * time.Minute)
+	pausedAt := now.Add(-5 * time.Minute)
+	mod := &reconcileRow{
+		id: "ma-1", moduleID: "mod-1", state: "active",
+		allocatedSeconds: 30 * 60, startedAt: &startedAt, pausedAt: &pausedAt,
+	}
+	if cohortSectionModuleExpired(t, mod, "live", "live", &stageStart, nil, 64, now) {
+		t.Fatal("a paused module must not be finalized on the personal clock")
+	}
+}
+
+// A module the student has not opened yet keeps its full allocation: the
+// personal anchor only starts once the module does.
+func TestCohortSectionModuleNotStartedKeepsItsAllotment(t *testing.T) {
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	stageStart := now.Add(-10 * time.Minute)
+	mod := &reconcileRow{
+		id: "ma-1", moduleID: "mod-1", state: "not_started",
+		allocatedSeconds: 30 * 60,
+	}
+	if cohortSectionModuleExpired(t, mod, "live", "live", &stageStart, nil, 64, now) {
+		t.Fatal("an unstarted module must keep its full allocation")
+	}
+}
+
+// Extensions land on the module allotment, so an extended module stays open.
+func TestCohortSectionModuleHonoursItsExtension(t *testing.T) {
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	startedAt := now.Add(-40 * time.Minute)
+	stageStart := now.Add(-10 * time.Minute)
+	mod := &reconcileRow{
+		id: "ma-1", moduleID: "mod-1", state: "active",
+		allocatedSeconds: 30 * 60, extensionSeconds: 15 * 60, startedAt: &startedAt,
+	}
+	if cohortSectionModuleExpired(t, mod, "live", "live", &stageStart, nil, 64, now) {
+		t.Fatal("an extended module must not be finalized before its extended allotment")
 	}
 }

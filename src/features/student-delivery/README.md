@@ -24,7 +24,7 @@ bootstrap/       parent→controller bootstrap seed handoff
 | which recovery copy a backend rejection gets | `application/satSubmitConflicts.ts` | structured code/`details.reason`, never the HTTP status |
 | which phase action a committed payload produces | `application/satCommitRouting.ts` | pure route table, one entry per producer hint |
 | pending module to open | `application/satRuntimeSelectors.ts` + `application/satEntry.ts` | selectors are pure; entry decision is pure |
-| displayed countdown + expiry authority | `application/satTimingPolicy.ts` (`satCountdown`) | derived together so the two roles cannot drift; legacy → personal clock, cohort-stage → stage clock, cohort-section → section clock (expiry inert on a mismatched stage) |
+| displayed countdown + expiry authority | `application/satTimingPolicy.ts` (`satCountdown`) | derived together so the two roles cannot drift; legacy → personal clock, cohort-stage → stage clock, cohort-section → the module's own allotment capped by the shared section clock (expiry inert on a mismatched stage) |
 | stage readiness, expected stage key, break/section-wait clocks | `application/satTimingPolicy.ts` | all answered from the timing model in one place |
 | whether a clock is running | `application/satTimingPolicy.ts` (`satSharedClockRunning`, `satPersonalClockRunning`) | one rule for the shared section clock; the personal clock adds the legacy "always runs" case |
 | how long until the next recovery poll | `application/satPollCadence.ts` | base cadence + exponential backoff + full jitter |

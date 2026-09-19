@@ -145,22 +145,6 @@ describe("Wave C R-14 complete eyebrow becomes Digital SAT", () => {
   });
 });
 
-describe("Wave C R-16b offline reassurance clause", () => {
-  it("appends the keep-working clause; the retrying branch is unchanged", () => {
-    expect(SAT_COPY.saveStatus.offline).toBe(
-      "Offline \u2014 answers kept on this device. Keep working; saving resumes automatically.",
-    );
-    expect(SAT_COPY.saveStatus.retrying).toBe("Reconnecting \u2014 retrying save\u2026");
-    render(<SatSaveStatus state="offline" onRetrySave={vi.fn()} />);
-    const status = screen.getByTestId("sat-save-status");
-    // Banner renders the full reassured string via the same key.
-    expect(status).toHaveTextContent("Keep working; saving resumes automatically.");
-    // No dead retry action in the offline branch (a dead offline retry is
-    // worse than guidance — F-04-04 judgment).
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
-  });
-});
-
 describe("Wave C R-16c leave-confirm destutter", () => {
   it("states the same two facts without the stutter or the abstract term", () => {
     expect(SAT_COPY.directions.leaveConfirmBody).toBe(
@@ -193,30 +177,20 @@ describe("Wave C R-16c leave-confirm destutter", () => {
   });
 });
 
-describe("Wave C R-13 saving glyph: single polite region announces the identical string exactly once", () => {
-  it("prepends one aria-hidden 16px neutral glyph; live region unchanged", () => {
-    const { container } = render(<SatSaveStatus state="saving" />);
-    const status = screen.getByTestId("sat-save-status");
-    expect(status).toHaveAttribute("role", "status");
-    expect(status).toHaveAttribute("aria-live", "polite");
-    // Identical string, exactly once.
-    expect(status).toHaveTextContent(SAT_COPY.saveStatus.saving);
-    // Exactly one live region in the banner — no new live region.
-    expect(container.querySelectorAll('[aria-live]').length).toBe(1);
-    expect(screen.getAllByTestId("sat-save-status")).toHaveLength(1);
-    // The glyph: 16px (h-4 w-4), neutral (inherits the banner secondary
-    // color — no color class of its own), hidden from AT, calm under
-    // reduced motion.
-    const glyph = status.querySelector('svg[aria-hidden="true"]');
-    expect(glyph).not.toBeNull();
-    expect(glyph?.getAttribute("class")).toContain("h-4");
-    expect(glyph?.getAttribute("class")).toContain("w-4");
-    expect(glyph?.getAttribute("class")).toContain("motion-reduce:animate-none");
-    expect(glyph?.getAttribute("class")).not.toMatch(/text-\[var\(--sat-(danger|warning|accent)/);
+describe("Wave C R-13 save region: silent while healthy, one alert when it matters", () => {
+  it("Phase-01-style SR sign-off: routine states paint and announce nothing", () => {
+    for (const state of ["idle", "saving", "offline", "retrying"] as const) {
+      const { container, unmount } = render(
+        <SatSaveStatus state={state} onRetrySave={vi.fn()} />,
+      );
+      // Nothing to see and nothing to announce: healthy saving is invisible.
+      expect(container.querySelectorAll('[data-testid="sat-save-status"]').length).toBe(0);
+      unmount();
+    }
   });
 
-  it("Phase-01-style SR sign-off: no new live region in any save state", () => {
-    for (const state of ["saving", "offline", "retrying", "failed", "superseded"] as const) {
+  it("renders exactly the one alert region for a failure or a lost lease", () => {
+    for (const state of ["failed", "superseded"] as const) {
       const { container, unmount } = render(
         <SatSaveStatus
           state={state}
@@ -224,8 +198,6 @@ describe("Wave C R-13 saving glyph: single polite region announces the identical
           onTakeOver={state === "superseded" ? vi.fn() : undefined}
         />,
       );
-      // At most the one banner region (failed/superseded use role=alert by
-      // design; saving/offline/retrying use the single polite region).
       expect(container.querySelectorAll('[data-testid="sat-save-status"]').length).toBe(1);
       unmount();
     }

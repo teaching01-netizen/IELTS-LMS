@@ -112,28 +112,41 @@ export interface SatCountdown {
  * apart:
  *   legacy         -> personal clock is both;
  *   cohort-stage   -> the published stage clock is both;
- *   cohort-section -> the shared section clock is both, and the expiry is
- *                     null (inert) when the stage names another section — the
- *                     backend would reject a submit under that stage anyway.
+ *   cohort-section -> the module's own allotment, capped by the shared section
+ *                     clock, is both; the expiry is null (inert) when the stage
+ *                     names another section — the backend would reject a submit
+ *                     under that stage anyway.
  *
- * The section-keyed display deliberately ignores `personalSeconds`: the
- * server gates cohort modules on the shared section clock alone
- * (`usesPersonalDeadline()` is legacy-only), and a personal term in the
- * display would make two students who entered at different moments see two
- * different countdowns for the same shared exam — the cohort-clock divergence
- * this model exists to prevent. The student's started_at stays on the attempt
- * for audit/analytics/entry checks; it no longer creates the visible cohort
- * clock.
+ * Why the section-keyed pair is a minimum: a candidate sits Module 1 plus
+ * exactly one Module 2, so the section's authored length is M1 + one branch,
+ * and the module's own allotment is the countdown the student is meant to read
+ * (Math Module 1 is 35:00, then Module 2 starts a fresh 35:00). The shared
+ * section clock is still the cap — it is what stops a late arrival or a stalled
+ * device from outliving the section — so the two anchors meet exactly in a
+ * normal run: section = M1 + M2, and the module clock governs until the section
+ * runs out first. The server closes on the same pair
+ * (delivery.reconcileCohortSectionExpiredTx).
+ *
+ * `personalSeconds` is null when this frame has no module attempt to read (a
+ * payload that has not hydrated the row yet). Null must NOT be treated as zero:
+ * a 0:00 display would both misinform the student and arm the expiry. An absent
+ * personal clock falls back to the section clock alone, which is what a frame
+ * with no module identity did before this rule existed.
  */
 export function satCountdown(input: {
   timingModel: MaybeString;
   stageKey: MaybeString;
   sectionKey: MaybeString;
-  personalSeconds: number;
+  personalSeconds: number | null;
   authoritativeSeconds: number;
 }): SatCountdown {
   if (!isCohortTimingModel(input.timingModel)) {
-    return { displaySeconds: input.personalSeconds, expirySeconds: input.personalSeconds };
+    // The legacy model has no shared clock at all; a missing attempt reads as
+    // no time, exactly as it did before this rule existed.
+    return {
+      displaySeconds: input.personalSeconds ?? 0,
+      expirySeconds: input.personalSeconds ?? 0,
+    };
   }
   if (!isSectionKeyedCohortModel(input.timingModel)) {
     return {
@@ -143,10 +156,12 @@ export function satCountdown(input: {
   }
   const stageMatchesSection =
     Boolean(input.sectionKey) && input.stageKey === input.sectionKey;
-  return {
-    displaySeconds: stageMatchesSection ? input.authoritativeSeconds : 0,
-    expirySeconds: stageMatchesSection ? input.authoritativeSeconds : null,
-  };
+  if (!stageMatchesSection) return { displaySeconds: 0, expirySeconds: null };
+  const capped =
+    input.personalSeconds === null
+      ? input.authoritativeSeconds
+      : Math.min(input.personalSeconds, input.authoritativeSeconds);
+  return { displaySeconds: capped, expirySeconds: capped };
 }
 
 /**

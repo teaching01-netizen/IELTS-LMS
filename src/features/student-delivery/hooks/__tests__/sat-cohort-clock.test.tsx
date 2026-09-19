@@ -192,11 +192,11 @@ describe("SAT cohort module clock", () => {
     gatewayMocks.submitAssessment.mockReset();
   });
 
-  // Cohort clock contract: the shared section clock (120s) is the display, not
-  // the student's personal module allotment (60s) — every student in the
-  // section counts the same clock down. It advances locally from the deadline
-  // between bootstraps.
-  it("ticks the cohort section countdown between bootstraps (120 -> 110 after 10s)", async () => {
+  // Module clock contract: the student reads the module's own allotment (60s),
+  // capped by the shared section clock (120s) — min of the two, so the section
+  // clock still bounds a late arrival or a stalled device. It advances locally
+  // from the deadlines between bootstraps.
+  it("ticks the module countdown between bootstraps (60 -> 50 after 10s)", async () => {
     gatewayMocks.bootstrap.mockResolvedValue(cohortBootstrap());
     const hook = renderHook(() =>
       useSatExamController({
@@ -209,24 +209,24 @@ describe("SAT cohort module clock", () => {
     await act(async () => {
       for (let i = 0; i < 12; i++) await Promise.resolve();
     });
-    expect(hook.result.current.remainingSeconds).toBe(120);
+    expect(hook.result.current.remainingSeconds).toBe(60);
     const bootstrapCalls = gatewayMocks.bootstrap.mock.calls.length;
     await act(async () => {
       vi.advanceTimersByTime(10_000);
     });
     // No new bootstrap: the countdown must still advance from the deadline.
     expect(gatewayMocks.bootstrap.mock.calls.length).toBe(bootstrapCalls);
-    expect(hook.result.current.remainingSeconds).toBe(110);
+    expect(hook.result.current.remainingSeconds).toBe(50);
     vi.useRealTimers();
   });
 
-  // SAT-003, restated under the cohort clock contract: the backend applies the
-  // personal deadline only for the legacy timing model (`usesPersonalDeadline()`).
-  // The display tracks the shared section clock, and the personal allotment
-  // hitting zero is invisible: expiry fires exactly when the section clock does.
-  it("never expires a cohort-section module on the personal clock (SAT-003)", async () => {
+  // Module clock contract: the student reads the module's own allotment, so the
+  // module closes when that allotment ends — while the section clock still has
+  // time on it. The section clock only caps (a module never outlives its
+  // section); it is not the clock the module counts down.
+  it("expires a cohort-section module at its own allotment, capped by the section", async () => {
     gatewayMocks.bootstrap.mockResolvedValue(cohortBootstrap());
-    // Keep any (wrong) submission pending so the test observes only the call.
+    // Keep the submission pending so the test observes only the call.
     gatewayMocks.submitModule.mockImplementation(() => new Promise(() => {}));
     const hook = renderHook(() =>
       useSatExamController({
@@ -240,21 +240,20 @@ describe("SAT cohort module clock", () => {
       for (let i = 0; i < 12; i++) await Promise.resolve();
     });
     expect(hook.result.current.state.phase).toBe("module");
-    // The section clock, not the personal 60s allotment.
-    expect(hook.result.current.remainingSeconds).toBe(120);
+    // The module's 60s allotment, not the section's 120s.
+    expect(hook.result.current.remainingSeconds).toBe(60);
 
-    // +61s: the personal allotment is long gone while 59s remain on the
-    // section clock — the display follows the section, not the personal clock.
+    // +59s: still inside the module allotment, so nothing closes.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(61_000);
+      await vi.advanceTimersByTimeAsync(59_000);
     });
-    expect(hook.result.current.remainingSeconds).toBe(59);
     expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
-    expect(hook.result.current.state.phase).toBe("module");
+    expect(hook.result.current.remainingSeconds).toBe(1);
 
-    // +121s: the authoritative section clock reaches 0 — now expiry may fire.
+    // +1s: the module allotment is gone and the module closes, even though the
+    // section clock still reads 60s.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(1_000);
     });
     expect(gatewayMocks.submitModule).toHaveBeenCalledTimes(1);
     hook.unmount();
@@ -287,7 +286,7 @@ describe("SAT cohort module clock", () => {
     await act(async () => {
       for (let i = 0; i < 12; i++) await Promise.resolve();
     });
-    expect(hook.result.current.remainingSeconds).toBe(120);
+    expect(hook.result.current.remainingSeconds).toBe(60);
 
     // The device sleeps 30s: no ticks fire and the device clock does not move;
     // server time advances the same 30s (device clock was in sync).
@@ -301,9 +300,10 @@ describe("SAT cohort module clock", () => {
       hook.rerender({ token: 1 });
       for (let i = 0; i < 12; i++) await Promise.resolve();
     });
-    // Deadline (T0+120) minus server truth (T0+30): 90. NOT 120 (stale frame)
-    // and NOT 60 (the sleep gap counted twice by a stale receipt pairing).
-    expect(hook.result.current.remainingSeconds).toBe(90);
+    // Module deadline (T0+60) minus server truth (T0+30): 30. NOT 60 (stale
+    // frame) and NOT 0 (the sleep gap counted twice by a stale receipt
+    // pairing). The section clock still has 90s, so the module clock governs.
+    expect(hook.result.current.remainingSeconds).toBe(30);
     expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     hook.unmount();
     vi.useRealTimers();
@@ -337,7 +337,7 @@ describe("SAT cohort module clock", () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
     serverNowMs += 10_000;
-    expect(hook.result.current.remainingSeconds).toBe(110);
+    expect(hook.result.current.remainingSeconds).toBe(50);
 
     // The student's device clock jumps +4 minutes; the SERVER clock does not.
     vi.setSystemTime(new Date(Date.now() + 240_000));
@@ -351,13 +351,14 @@ describe("SAT cohort module clock", () => {
     // Corrected offset = (T0+10) - (T0+250) = -240s; after the next display
     // tick (the shared 1s oscillator, whose fake timer clock still sits at
     // T+10s so a full second must elapse to cross a tick boundary) the
-    // adjusted device now lands back on server truth — 11s genuinely consumed,
-    // so 109s remain and nothing expired. The +4min jump was cancelled, not
-    // inherited: without the re-pairing the display would read ~349.
+    // adjusted device now lands back on server truth — 11s genuinely consumed
+    // of the module's 60s, so 49s remain and nothing expired. The +4min jump
+    // was cancelled, not inherited: without the re-pairing the display would
+    // read the module allotment as ~0 and close the module.
     await act(async () => {
       vi.advanceTimersByTime(1_000);
     });
-    expect(hook.result.current.remainingSeconds).toBe(109);
+    expect(hook.result.current.remainingSeconds).toBe(49);
     expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     hook.unmount();
     vi.useRealTimers();

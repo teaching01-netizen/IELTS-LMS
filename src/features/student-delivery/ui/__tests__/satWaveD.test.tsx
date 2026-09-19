@@ -9,43 +9,22 @@ import { SatDirectionsScreen } from "../transitions/SatDirectionsScreen";
 const UI = __dirname + "/..";
 const read = (rel: string) => readFileSync(resolve(UI, rel), "utf8");
 
-describe("Wave D R-21 save banners clear the footer (96px + safe-bottom)", () => {
-  it("all three banner branches ride bottom calc(96px + safe-bottom)", () => {
+describe("Wave D R-21 the failure banner clears the footer (96px + safe-bottom)", () => {
+  it("the one surviving banner branch rides bottom calc(96px + safe-bottom)", () => {
     const source = read("feedback/SatSaveStatus.tsx");
     const hits = source.match(/bottom-\[calc\(96px\+var\(--student-safe-bottom\)\)\]/g) ?? [];
-    expect(hits.length).toBe(3);
+    expect(hits.length).toBe(1);
     expect(source).not.toContain("bottom-[calc(78px+");
     expect(source).not.toContain("bottom-[calc(82px+");
   });
 
-  it("keeps z/role/copy geometry contract: saving 55 polite, offline 65 status, failed 85 alert", () => {
-    for (const state of ["saving", "offline", "failed"] as const) {
-      const { unmount } = render(
-        <SatSaveStatus state={state} onRetrySave={vi.fn()} onTakeOver={vi.fn()} />,
-      );
-      const banner = screen.getByTestId("sat-save-status");
-      const cls = banner.className;
-      const expected = state === "saving" ? "z-[55]" : state === "offline" ? "z-[65]" : "z-[85]";
-      expect(cls).toContain(expected);
-      expect(cls).toContain("bottom-[calc(96px+var(--student-safe-bottom))]");
-      unmount();
-    }
-    // Roles unchanged: saving/offline polite status, failed assertive alert.
-    {
-      const { unmount } = render(<SatSaveStatus state="saving" />);
-      expect(screen.getByTestId("sat-save-status")).toHaveAttribute("role", "status");
-      unmount();
-    }
-    {
-      const { unmount } = render(<SatSaveStatus state="offline" onRetrySave={vi.fn()} />);
-      expect(screen.getByTestId("sat-save-status")).toHaveAttribute("role", "status");
-      unmount();
-    }
-    {
-      const { unmount } = render(<SatSaveStatus state="failed" onRetrySave={vi.fn()} />);
-      expect(screen.getByTestId("sat-save-status")).toHaveAttribute("role", "alert");
-      unmount();
-    }
+  it("keeps the failure geometry contract: the only banner is a z-[85] alert", () => {
+    const { unmount } = render(<SatSaveStatus state="failed" onRetrySave={vi.fn()} />);
+    const banner = screen.getByTestId("sat-save-status");
+    expect(banner.className).toContain("z-[85]");
+    expect(banner.className).toContain("bottom-[calc(96px+var(--student-safe-bottom))]");
+    expect(banner).toHaveAttribute("role", "alert");
+    unmount();
   });
 
   it("banner rect clears the footer pill rect at 390x844 and desktop widths", () => {
@@ -61,7 +40,7 @@ describe("Wave D R-21 save banners clear the footer (96px + safe-bottom)", () =>
     const footerOffsets = [...nav.matchAll(/bottom-\[calc\((\d+)px\+var\(--student-safe-bottom\)\)\]/g)].map(
       (m) => Number(m[1]),
     );
-    expect(bannerOffsets).toHaveLength(3);
+    expect(bannerOffsets).toHaveLength(1);
     expect(footerOffsets.length).toBeGreaterThan(0);
     const footerTop = Math.max(...footerOffsets); // navigator rhythm: 86px
     expect(footerTop).toBe(86);

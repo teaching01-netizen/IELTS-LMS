@@ -182,13 +182,17 @@ function live(attemptId: string, revision: number, runtime: CohortRuntimeState):
   };
 }
 
-/** The student's own start response: their personal module clock now runs
- * from THEIR entry instant (the audit/analytics leg), while the shared section
- * deadline stays put. Under the cohort clock contract the display must ignore
- * the personal leg entirely — that is exactly what Part B asserts. */
-function opened(attemptId: string, revision: number, startedAtMs: number): AssessmentDeliveryBootstrap {
-  const payload = withStartedAttempt(attemptId, startedAtMs, live(attemptId, revision, cohortState));
-  return payload;
+/** The student's own start response: their module clock now runs from THEIR
+ * entry instant, while the shared section deadline stays put. The module clock
+ * is the countdown the student reads, capped by the shared section clock — that
+ * is exactly what Part B asserts. */
+function opened(
+  attemptId: string,
+  revision: number,
+  startedAtMs: number,
+  moduleDeadlineMs: number,
+): AssessmentDeliveryBootstrap {
+  return withStartedAttempt(attemptId, startedAtMs, moduleDeadlineMs, 60, live(attemptId, revision, cohortState));
 }
 
 let cohortState: CohortRuntimeState;
@@ -196,6 +200,8 @@ let cohortState: CohortRuntimeState;
 function withStartedAttempt(
   attemptId: string,
   startedAtMs: number,
+  moduleDeadlineMs: number,
+  remainingSeconds: number,
   payload: AssessmentDeliveryBootstrap,
 ): AssessmentDeliveryBootstrap {
   return {
@@ -206,8 +212,8 @@ function withStartedAttempt(
         {
           ...moduleAttempt(attemptId, true),
           startedAt: new Date(startedAtMs).toISOString(),
-          deadlineAt: new Date(startedAtMs + 60_000).toISOString(),
-          remainingSeconds: 60,
+          deadlineAt: new Date(moduleDeadlineMs).toISOString(),
+          remainingSeconds,
         },
       ],
       responses: [],
@@ -224,6 +230,15 @@ interface CohortRuntimeState {
    * an ACTIVE module attempt from THEIR started_at — a re-bootstrap after
    * entry must not look like a fresh waiting student (duplicate starts). */
   startedAtMs: Record<string, number>;
+  /** Per-attempt personal module deadline. A room pause freezes the module
+   * window it had when the pause landed (pauseSATModules) and the resume gives
+   * the paused wall time back to that deadline (resumeSATModules); a proctor
+   * extension extends every active started module with the room
+   * (extendSATModules). The client displays this clock, so the fake has to
+   * model it, not just the section clock. */
+  moduleDeadlineMs: Record<string, number>;
+  modulePausedRemainingMs: Record<string, number>;
+  modulesPausedAtMs: number | null;
   starts: string[];
   conflicts: string[];
 }
@@ -243,6 +258,9 @@ function createCohort() {
     deadlineMs: null,
     pausedRemainingMs: null,
     startedAtMs: {},
+    moduleDeadlineMs: {},
+    modulePausedRemainingMs: {},
+    modulesPausedAtMs: null,
     starts: [],
     conflicts: [],
   };
@@ -257,12 +275,23 @@ function createCohort() {
     pause() {
       if (state.status !== "live" || state.deadlineMs === null) return;
       state.pausedRemainingMs = Math.max(0, state.deadlineMs - Date.now());
+      for (const [attemptId, deadlineMs] of Object.entries(state.moduleDeadlineMs)) {
+        state.modulePausedRemainingMs[attemptId] = Math.max(0, deadlineMs - Date.now());
+      }
+      state.modulesPausedAtMs = Date.now();
       state.status = "paused";
       state.revision += 1;
     },
     resume() {
       if (state.status !== "paused") return;
       state.deadlineMs = Date.now() + (state.pausedRemainingMs ?? 0);
+      // The room's paused wall time is credited back to every module clock.
+      const pausedForMs = Date.now() - (state.modulesPausedAtMs ?? Date.now());
+      for (const attemptId of Object.keys(state.moduleDeadlineMs)) {
+        state.moduleDeadlineMs[attemptId] += pausedForMs;
+      }
+      state.modulePausedRemainingMs = {};
+      state.modulesPausedAtMs = null;
       state.status = "live";
       state.revision += 1;
     },
@@ -272,6 +301,10 @@ function createCohort() {
       } else if (state.status === "paused" && state.pausedRemainingMs !== null) {
         state.pausedRemainingMs += seconds * 1_000;
       }
+      // extendSATModules: every active started module gains the same minutes.
+      for (const attemptId of Object.keys(state.moduleDeadlineMs)) {
+        state.moduleDeadlineMs[attemptId] += seconds * 1_000;
+      }
       state.revision += 1;
     },
     bootstrap(_scheduleId: string, attemptId: string) {
@@ -280,8 +313,16 @@ function createCohort() {
       }
       const payload = live(attemptId, state.revision, state);
       const startedAt = state.startedAtMs[attemptId];
+      if (startedAt === undefined) return Promise.resolve(payload);
+      const deadlineMs = state.moduleDeadlineMs[attemptId] ?? startedAt + 60_000;
+      // A paused room freezes the module window at the instant the pause
+      // landed; a live one projects it from the (pause-credited) deadline.
+      const remainingSeconds =
+        state.status === "paused"
+          ? Math.max(0, Math.ceil((state.modulePausedRemainingMs[attemptId] ?? 60_000) / 1_000))
+          : Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1_000));
       return Promise.resolve(
-        startedAt === undefined ? payload : withStartedAttempt(attemptId, startedAt, payload),
+        withStartedAttempt(attemptId, startedAt, deadlineMs, remainingSeconds, payload),
       );
     },
     startModule(_scheduleId: string, attemptId: string) {
@@ -292,7 +333,10 @@ function createCohort() {
       }
       const startedAt = state.startedAtMs[attemptId] ?? Date.now();
       state.startedAtMs[attemptId] = startedAt;
-      return Promise.resolve(opened(attemptId, state.revision, startedAt));
+      const moduleDeadlineMs =
+        state.moduleDeadlineMs[attemptId] ?? startedAt + 60_000;
+      state.moduleDeadlineMs[attemptId] = moduleDeadlineMs;
+      return Promise.resolve(opened(attemptId, state.revision, startedAt, moduleDeadlineMs));
     },
   };
 }
@@ -424,13 +468,15 @@ describe("SAT two-student waiting-room convergence", () => {
     }
   });
 
-  // Part B — the cohort clock. A enters at T+0, B at T+12; each records their
-  // own personal started_at (audit leg), but under the cohort clock contract
-  // the DISPLAY comes from the shared section deadline for everyone. This is
-  // the cross-student property: two countdowns that agree within a second no
-  // matter when each student walked in, and survive refresh, continued local
-  // ticking, pause, resume, and a proctor extension.
-  it("shows both students the same shared clock across entry skew, refresh, pause, resume, and extension", async () => {
+  // Part B — the module clock. A enters at T+0, B at T+12; each reads THEIR
+  // OWN module allotment (60s from their entry instant), capped by the one
+  // shared section clock. This is the cross-student property that still holds:
+  // both clocks are capped by the same section deadline, so neither student can
+  // outrun the room, and the skew between them is exactly the entry skew. It
+  // survives refresh, continued local ticking, pause, resume, and a proctor
+  // extension, all of which the fake credits to the module clocks the way
+  // pauseSATModules/resumeSATModules/extendSATModules do.
+  it("gives each student their own module clock, both capped by the shared section clock", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(SERVER_NOW));
     try {
@@ -461,33 +507,40 @@ describe("SAT two-student waiting-room convergence", () => {
       expect(studentA.result.current.state.phase).toBe("module");
       expect(studentB.result.current.state.phase).toBe("module");
 
-      // Observed at T+20: the shared clock reads 100 for BOTH. B's personal
-      // clock (started T+12 with a 60s allotment) reads ~52 — if the display
-      // still mixed in the personal leg, B would show 52 and this would fail.
-      expect(Math.abs(studentA.result.current.remainingSeconds - studentB.result.current.remainingSeconds)).toBeLessThanOrEqual(1);
-      expect(studentA.result.current.remainingSeconds).toBe(100);
+      // Observed at T+20: A is 40s into its 60s module clock, B is 52s in
+      // (started T+12), and the shared section clock reads 100 for both. The
+      // skew between the two students IS the entry skew — that is what a
+      // per-module clock means — while neither may outrun the section clock.
+      expect(studentA.result.current.remainingSeconds).toBe(40);
+      expect(studentB.result.current.remainingSeconds).toBe(52);
+      expect(
+        Math.abs(studentA.result.current.remainingSeconds - studentB.result.current.remainingSeconds),
+      ).toBe(12);
+      expect(studentA.result.current.remainingSeconds).toBeLessThanOrEqual(100);
+      expect(studentB.result.current.remainingSeconds).toBeLessThanOrEqual(100);
 
-      // Refresh B against the server: convergence survives it.
+      // Refresh B against the server: both keep their own module clock.
       await wake();
-      expect(Math.abs(studentA.result.current.remainingSeconds - studentB.result.current.remainingSeconds)).toBeLessThanOrEqual(1);
-      expect(studentB.result.current.remainingSeconds).toBe(100);
+      expect(studentA.result.current.remainingSeconds).toBe(40);
+      expect(studentB.result.current.remainingSeconds).toBe(52);
 
-      // A loses its socket and keeps ticking locally for 15s: the cohort clock
-      // advances from the deadline it already has — no reset, no drift.
+      // A loses its socket and keeps ticking locally for 15s: each module clock
+      // advances from its own deadline — no reset, no drift.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(15_000);
       });
-      expect(Math.abs(studentA.result.current.remainingSeconds - studentB.result.current.remainingSeconds)).toBeLessThanOrEqual(1);
-      expect(studentA.result.current.remainingSeconds).toBe(85);
+      expect(studentA.result.current.remainingSeconds).toBe(25);
+      expect(studentB.result.current.remainingSeconds).toBe(37);
 
-      // Proctor pauses: the shared window freezes for both and stays frozen
-      // across 10s of wall time; nobody's module expires while paused.
+      // Proctor pauses: both module clocks freeze at the window the pause
+      // landed on and stay frozen across 10s of wall time; nobody's module
+      // expires while paused.
       cohort.pause();
       await wake();
       const frozenA = studentA.result.current.remainingSeconds;
       const frozenB = studentB.result.current.remainingSeconds;
-      expect(Math.abs(frozenA - frozenB)).toBeLessThanOrEqual(1);
-      expect(frozenA).toBe(85);
+      expect(frozenA).toBe(25);
+      expect(frozenB).toBe(37);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
@@ -495,27 +548,28 @@ describe("SAT two-student waiting-room convergence", () => {
       expect(studentB.result.current.remainingSeconds).toBe(frozenB);
       expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
 
-      // Proctor resumes: a fresh authoritative deadline reaches both and the
-      // clocks continue from where the freeze left them.
+      // Proctor resumes: the paused wall time is credited back to every module
+      // clock, so both continue from where the freeze left them.
       cohort.resume();
       await wake();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
-      expect(Math.abs(studentA.result.current.remainingSeconds - studentB.result.current.remainingSeconds)).toBeLessThanOrEqual(1);
-      expect(studentA.result.current.remainingSeconds).toBe(80);
+      expect(studentA.result.current.remainingSeconds).toBe(20);
+      expect(studentB.result.current.remainingSeconds).toBe(32);
 
-      // Proctor extends +5 minutes: both gain exactly 300s at the same
-      // observation instant.
+      // Proctor extends +5 minutes: every running module clock gains exactly
+      // 300s, and the shared section clock stays the cap for both.
       const beforeA = studentA.result.current.remainingSeconds;
       const beforeB = studentB.result.current.remainingSeconds;
       cohort.extend(300);
       await wake();
       const afterA = studentA.result.current.remainingSeconds;
       const afterB = studentB.result.current.remainingSeconds;
-      expect(Math.abs(afterA - afterB)).toBeLessThanOrEqual(1);
       expect(afterA - beforeA).toBe(300);
-      expect(afterB - beforeB).toBe(300);      studentA.unmount();
+      expect(afterB - beforeB).toBe(300);
+      expect(afterA).toBeLessThanOrEqual(380);
+      expect(afterB).toBeLessThanOrEqual(380);      studentA.unmount();
         studentB.unmount();
     } finally {
       vi.useRealTimers();

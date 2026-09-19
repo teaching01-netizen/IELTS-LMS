@@ -5,8 +5,28 @@ import (
 	"database/sql"
 	"fmt"
 
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
+
+// sectionCandidateSeconds is the section length a delivery-settings save
+// stores: base module + the longer adaptive branch, indexed by module id. A
+// candidate sits Module 1 plus exactly one Module 2, so summing every authored
+// module would add the branch nobody sits. The SAT runtime clocks the section
+// from assessment_sections.duration_seconds, which is why this rule (owned by
+// exams.CandidateSectionSeconds) has to hold here and not just in the release
+// summary.
+func sectionCandidateSeconds(timings []ModuleTiming, baseID, lowerID, higherID string) int {
+	durations := make(map[string]int, len(timings))
+	for _, t := range timings {
+		durations[t.ModuleID] = t.DurationSeconds
+	}
+	return examdomain.CandidateSectionSeconds(
+		durations[baseID],
+		durations[lowerID],
+		durations[higherID],
+	)
+}
 
 // UpdateDeliverySettings rewrites section break + module timings + routing
 // threshold under locks (mirrors update_section_delivery_settings with
@@ -142,10 +162,7 @@ func (s *Service) UpdateDeliverySettings(ctx context.Context, examID, sectionID 
 				return conflictError("Module timing changed while you were editing.")
 			}
 		}
-		sectionDuration := 0
-		for _, t := range req.ModuleTimings {
-			sectionDuration += t.DurationSeconds
-		}
+		sectionDuration := sectionCandidateSeconds(req.ModuleTimings, baseID, lowerID, higherID)
 		res, err := q.ExecContext(ctx, "UPDATE assessment_sections SET duration_seconds = ?, break_after_seconds = ?, revision = revision + 1, updated_at = NOW(6) WHERE id = ? AND revision = ?", sectionDuration, req.BreakAfterSeconds, sectionID, req.ExpectedSectionRevision)
 		if err != nil {
 			return err

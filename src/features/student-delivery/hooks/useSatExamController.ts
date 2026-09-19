@@ -1259,18 +1259,23 @@ export function useSatExamController({
     runtimeStatus: data?.scheduleRuntimeStatus,
     stageStatus: effectiveTiming?.stageStatus,
   });
+  // Null (never 0) when this frame carries no module attempt: a missing row is
+  // "no module identity yet", and a 0 would both display 0:00 for a module that
+  // has not hydrated and arm the expiry on it. The countdown rule reads an
+  // absent personal clock as "use the section clock alone".
   const personalModuleRemainingSeconds = stateModuleAttempt
     ? personalModuleCountdown(stateModuleAttempt, snapshotReceivedAt, now, serverClockOffsetMs, cohortStageRunning)
-    : 0;
-  // Cohort clock contract: for section-keyed cohort models the shared section
-  // clock is BOTH the display and the expiry — the server gates these modules
-  // on the section clock alone (`usesPersonalDeadline()` is legacy-only), and
-  // a personal term in the display would give students who entered at
-  // different moments different countdowns for the same shared exam. The
-  // personal module clock remains the display/expiry authority for the legacy
-  // model only. SAT-003 policy lives in application/satTimingPolicy.ts:
-  // display is what the student reads, expiry is the only clock allowed to
-  // close the module.
+    : null;
+  // Clock contract: the student reads the MODULE's own allotment, capped by the
+  // shared section clock (min of the two). A candidate sits Module 1 plus
+  // exactly one Module 2, so the section length is M1 + one branch and the two
+  // anchors meet in a normal run; the section clock is what stops a late
+  // arrival or a stalled device from outliving the section. Expiry is the same
+  // pair, and the server backstop closes on it too
+  // (delivery.reconcileCohortSectionExpiredTx). The legacy model has no shared
+  // clock, so its personal clock is both. SAT-003 policy lives in
+  // application/satTimingPolicy.ts: display is what the student reads, expiry is
+  // the only clock allowed to close the module.
   const { displaySeconds: remainingSeconds, expirySeconds: expiryRemainingSeconds } = satCountdown({
     timingModel: effectiveTiming?.timingModel,
     stageKey: effectiveTiming?.stageKey ?? null,
@@ -1306,8 +1311,8 @@ export function useSatExamController({
     ) {
       return;
     }
-    // Phase 04 skew guard: a skew frame that looks like 0 (missing attempt
-    // resolves through the personal-countdown fallback) must neither submit
+    // Phase 04 skew guard: a skew frame that looks like 0 (a missing attempt
+    // resolves through the section-clock fallback) must neither submit
     // nor consume timeoutSubmissionKeyRef — submit fires only from a
     // resolved frame. Key stays moduleId:attemptId-scoped, exactly once.
     if (!data || !findAttemptForModule(data, stateModule.id)) return;

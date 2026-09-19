@@ -1,7 +1,7 @@
 import { useId, useRef, useState, type CSSProperties } from "react";
 import { Bookmark } from "lucide-react";
 import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
-import { SAT_COPY, satSubmitConfirmSummary, satSubmitConfirmTitle, satWaitingForSavesLabel } from "../../domain/satCopy";
+import { SAT_COPY, satSubmitConfirmSummary, satSubmitConfirmTitle } from "../../domain/satCopy";
 import {
   deriveSatSubmitReadiness,
   type SatSubmitReadinessInput,
@@ -43,8 +43,9 @@ export interface SatReviewPageProps {
  *   that names its scope (module), lists unanswered + flagged counts, and
  *   states irreversibility. One tap can never close a module.
  * - The button never dies silently: readiness derives from the same
- *   persistence inputs as the shell save banner. Saving shows an inline
- *   reason with aria-describedby; hard blocks show reason + recovery.
+ *   persistence inputs as the shell save surface. Routine saving is not
+ *   narrated here — it is not a decision the student can act on. Hard blocks
+ *   (offline / failed) show their reason with aria-describedby, plus recovery.
  * - Vocabulary (copy table): "Review your answers" H1, "Review answers"
  *   destination, "Flagged" state, "Back to question N" exit.
  */
@@ -70,8 +71,6 @@ export function SatReviewPage(props: SatReviewPageProps) {
   );
   const submitting = readiness.status === "submitting";
   const hardBlocked = readiness.status === "blocked-offline" || readiness.status === "blocked-error";
-  const saving = readiness.status === "saving";
-  const needsReason = hardBlocked || saving;
 
   const backLabel =
     props.currentQuestionIndex !== undefined
@@ -175,16 +174,14 @@ export function SatReviewPage(props: SatReviewPageProps) {
               type="button"
               onClick={openConfirm}
               disabled={hardBlocked || submitting}
-              aria-disabled={saving ? true : undefined}
-              aria-describedby={needsReason ? reasonId : undefined}
+              aria-describedby={hardBlocked ? reasonId : undefined}
               className="sat-touch-target sat-pressable rounded-full bg-[var(--sat-accent)] px-6 text-[14px] font-semibold text-[var(--sat-accent-text)] hover:bg-[var(--sat-accent-strong)] disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
             >
               {submitting ? SAT_COPY.submit.submitting : SAT_COPY.submit.submitModule}
             </button>
           </div>
-          {needsReason ? (
+          {hardBlocked ? (
             <p id={reasonId} className="mt-2 text-right text-[13px] leading-5 text-[var(--sat-text-secondary)]" role="status">
-              {saving && readiness.status === "saving" ? satWaitingForSavesLabel(readiness.pendingCount) : null}
               {readiness.status === "blocked-offline" ? SAT_COPY.submitReadiness.offlineBlocked : null}
               {readiness.status === "blocked-error" ? SAT_COPY.submitReadiness.errorBlocked : null}
               {readiness.status === "blocked-error" && props.onRetrySave ? (

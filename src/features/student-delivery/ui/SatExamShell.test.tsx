@@ -253,16 +253,14 @@ describe("SatExamShell", () => {
     expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: /^Notes/ })).toBeDisabled();
   });
-  it("shows SAT timer/tools with a quiet persistent save token (Phase 6f)", () => {
+  it("shows SAT timer/tools with no save chrome anywhere in the shell", () => {
     render(<SatExamShell {...props()} />);
     expect(screen.getByText("34:58")).toBeInTheDocument();
     expect(screen.getByText("Ada Candidate")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Calculator" })).toBeInTheDocument();
-    // Phase 6f: status lives next to the hand as a quiet token (not a
-    // transient overlay, not a loud badge) — Saved at idle, no live region.
-    const indicator = screen.getByTestId("sat-footer-save-indicator");
-    expect(indicator).toHaveAttribute("data-sat-save-state", "idle");
-    expect(indicator).toHaveTextContent("All answers saved");
+    // Healthy persistence is invisible: no footer token and no banner.
+    expect(screen.queryByTestId("sat-footer-save-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sat-save-status")).not.toBeInTheDocument();
   });
 
   it("opens Display settings and emits presentation-only preference changes", () => {
@@ -316,14 +314,22 @@ describe("SatExamShell", () => {
     expect(screen.queryByText("34:58")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show timer" })).toBeInTheDocument();
   });
-  it("announces routine saving once through a single polite status region", () => {
+  it("never announces routine saving", () => {
     render(<SatExamShell {...props({ saveState: "saving" })} />);
     const statuses = screen.getAllByRole("status");
-    // Exactly one save-status region (the timer announcer is the only other
-    // status, and it stays empty outside threshold crossings).
+    // No save-status region at all: the timer announcer is the only status,
+    // and it stays empty outside threshold crossings.
     const saveStatuses = statuses.filter((node) => node.hasAttribute("data-sat-save-state"));
-    expect(saveStatuses).toHaveLength(1);
-    expect(saveStatuses[0]).toHaveTextContent("Saving…");
+    expect(saveStatuses).toHaveLength(0);
+  });
+
+  it("surfaces a genuine save failure with its recovery action", () => {
+    const onRetrySave = vi.fn();
+    render(<SatExamShell {...props({ saveState: "failed", onRetrySave })} />);
+    const banner = screen.getByTestId("sat-save-status");
+    expect(banner).toHaveAttribute("role", "alert");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetrySave).toHaveBeenCalledOnce();
   });
 
   it("auto-reveals a hidden timer once at the 5-minute threshold and lets it hide again", () => {
