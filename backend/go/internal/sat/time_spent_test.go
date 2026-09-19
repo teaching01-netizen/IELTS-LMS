@@ -38,6 +38,7 @@ func TestSATResultPersistsDerivedTimeSpent(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(satAttemptRow("running", "exam", "active"))
 	satNoReceipt(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
+	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
@@ -83,6 +84,7 @@ func TestSATResultTimeSpentFallsBackWhenTimingMissing(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(satAttemptRow("running", "exam", "active"))
 	satNoReceipt(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
+	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))

@@ -45,6 +45,7 @@ func TestSATWatchdogRepairsProvisionalReceiptAttempt(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
@@ -105,6 +106,7 @@ func TestSATWatchdogFallsBackFromOversizedReceiptSubmissionID(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
@@ -204,6 +206,7 @@ func TestReconcileProvisionalBatchIncludesReceiptCandidates(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))
+	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(satTerminalModules())
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
 		sqlmock.NewRows([]string{"policy_config"}).AddRow(`{}`))

@@ -314,6 +314,14 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
+	// Student Access scope: a narrowed link must not ship the sections it
+	// dropped to the browser, and the seeded first module must belong to the
+	// first section the run actually includes.
+	scope, err := s.linkSectionScope(ctx, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	sections = deliverySectionsForScope(sections, scope)
 	if err := s.ensureBaseModuleAttempt(ctx, attemptID, sections); err != nil {
 		return nil, err
 	}
@@ -574,7 +582,72 @@ func (s *Service) EnsureBaseModuleAttemptForSchedule(ctx context.Context, attemp
 	if err != nil {
 		return err
 	}
-	return s.ensureBaseModuleAttempt(ctx, attemptID, sections)
+	scope, err := s.linkSectionScope(ctx, scheduleID)
+	if err != nil {
+		return err
+	}
+	return s.ensureBaseModuleAttempt(ctx, attemptID, deliverySectionsForScope(sections, scope))
+}
+
+// linkSectionScope resolves the Student Access link's section scope for a
+// schedule: nil means every section (no link at all — every admin-created
+// schedule — or an unscoped link). One indexed get on
+// assessment_access_links_schedule_unique.
+func (s *Service) linkSectionScope(ctx context.Context, scheduleID string) (map[string]bool, error) {
+	if strings.TrimSpace(scheduleID) == "" {
+		return nil, nil
+	}
+	var raw sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		"SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ?", scheduleID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return examdomain.ParseStoredSectionScope(raw.String), nil
+}
+
+// deliverySectionsForScope narrows a loaded version tree to the sections the
+// run includes. The returned slice is a fresh copy: the version cache's tree is
+// shared across schedules and must never be mutated in place.
+func deliverySectionsForScope(sections []DeliverySection, scope map[string]bool) []DeliverySection {
+	if scope == nil {
+		return sections
+	}
+	filtered := make([]DeliverySection, 0, len(sections))
+	for _, section := range sections {
+		if examdomain.AllowsSection(scope, section.SectionKey) {
+			filtered = append(filtered, section)
+		}
+	}
+	return filtered
+}
+
+// attemptSectionScopeTx resolves the section scope of the Student Access link
+// backing the attempt's schedule, inside the caller's transaction (read-only; no
+// lock, so it never joins a lock-order cycle). Nil means "no narrowing".
+func attemptSectionScopeTx(ctx context.Context, t tx.Tx, attemptID string) (map[string]bool, error) {
+	var raw sql.NullString
+	err := t.QueryRowContext(ctx,
+		"SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a ON a.schedule_id = l.schedule_id WHERE a.id = ?",
+		attemptID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return examdomain.ParseStoredSectionScope(raw.String), nil
+}
+
+// sqlPlaceholders renders "?, ?, ?" for n bound arguments.
+func sqlPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 func (s *Service) ensureBaseModuleAttempt(ctx context.Context, attemptID string, sections []DeliverySection) error {

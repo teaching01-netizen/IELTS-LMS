@@ -68,6 +68,14 @@ func satNoReceipt(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_terminalizations WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
 }
 
+// satUnscopedRun stages the Student Access section-scope read as "no link":
+// the run declares the full SAT pair, which is the pre-feature behaviour every
+// existing scoring case pins. scoreAndPersist reads it before loadModules.
+func satUnscopedRun(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections FROM assessment_access_links")).
+		WillReturnError(sql.ErrNoRows)
+}
+
 func TestSATProvisionalSubmitVsTerminate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -140,6 +148,7 @@ func TestSATTwinRaceConvergesToWinnerResult(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(satAttemptRow("running", "exam", "active"))
 	satNoReceipt(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
+	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(
 		sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
@@ -222,6 +231,7 @@ func TestSATSubmissionPersistsCandidateNameAndEmail(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(satAttemptRow("running", "exam", "active"))
 	satNoReceipt(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
+	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(
 		sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
@@ -276,6 +286,7 @@ func TestSATTwinRaceWinnerPersistingRetries(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(satAttemptRow("running", "exam", "active"))
 	satNoReceipt(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
+	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(
 		sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("reading-writing", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("reading-writing", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_scoring_policies WHERE")).WillReturnRows(
@@ -315,6 +326,7 @@ func TestSATCompletionVsTimeoutUnsealed(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id")).WillReturnRows(satAttemptRow("running", "exam", "active"))
 	satNoReceipt(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
+	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WillReturnRows(
 		sqlmock.NewRows([]string{"section_key", "module_key", "adaptive_role", "state", "raw_correct", "operational_question_count", "target_question_count"}).AddRow("rw", "rw-m1", "base", "submitted", int64(20), int64(27), int64(27)).AddRow("rw", "rw-m2-lower", "lower_branch", "submitted", int64(20), int64(27), int64(27)).AddRow("math", "math-m1", "base", "active", nil, nil, int64(27)))
 	mock.ExpectRollback()

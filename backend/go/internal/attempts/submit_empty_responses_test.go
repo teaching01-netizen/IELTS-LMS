@@ -71,6 +71,7 @@ func TestSubmitZeroResponsesClaimsSATProvisionalSubmit(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
 	// Audit finding 1: zero ANSWERS is legal, an incomplete MODULE topology is
 	// not — the claim is gated on a terminal module attempt in each SAT section.
+	satScopeUnscoped(mock)
 	mock.ExpectQuery("FROM assessment_module_attempts").WithArgs("att-1").
 		WillReturnRows(satModuleRows(satRW(SATModuleSubmitted), satMath(SATModuleLocked)))
 	// SAT provisional claim (never sets submitted_at/final_submission).

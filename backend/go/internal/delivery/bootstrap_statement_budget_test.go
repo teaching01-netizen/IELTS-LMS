@@ -10,11 +10,11 @@ package delivery
 //  1 schedule+exam probe, 1 attempt probe,
 //  2 reconcileSteady probes (module counts; results count only when
 //    terminal modules exist — fresh herd attempts skip it, so budget = 1),
-//  1 version revision probe, 1 ensureBase probe (+1 INSERT only on first
-//    bootstrap), 1 module-attempts SELECT, 1 responses SELECT,
-//  1 attempt-control SELECT, 1 result-gate SELECT (fresh attempts),
-//  1 timing SELECT (+ section leg).
-// Steady fresh-attempt budget: 10 committed reads, 0 write tx.
+//  1 version revision probe, 1 Student Access scope probe (section toggles),
+//  1 ensureBase probe (+1 INSERT only on first bootstrap), 1 module-attempts
+//  SELECT, 1 responses SELECT, 1 attempt-control SELECT, 1 result-gate SELECT
+//  (fresh attempts), 1 timing SELECT (+ section leg).
+// Steady fresh-attempt budget: 11 committed reads, 0 write tx.
 import (
 	"context"
 	"database/sql"
@@ -26,9 +26,9 @@ import (
 )
 
 func TestBootstrapSteadyStatementBudget(t *testing.T) {
-	const wantSteadyReads = 10
+	const wantSteadyReads = 11
 	const wantSteadyWrites = 0
-	if wantSteadyReads != 10 {
+	if wantSteadyReads != 11 {
 		t.Fatalf("budget changed: steady reads = %d", wantSteadyReads)
 	}
 	if wantSteadyWrites != 0 {

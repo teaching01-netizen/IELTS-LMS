@@ -506,6 +506,7 @@ func TestDeliveryReconcileLegacyExpiryFinalizes(t *testing.T) {
 		WithArgs("mod-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "display_order", "adaptive_role", "exam_version_id"}).
 			AddRow("sec-1", "reading", 1, "lower_branch", "pv-1"))
+	deliveryUnscopedAttemptLink(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_sections WHERE exam_version_id = ? AND display_order > ?")).
 		WithArgs("pv-1", 1).
 		WillReturnError(sql.ErrNoRows)

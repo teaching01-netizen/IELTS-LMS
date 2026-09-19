@@ -9,9 +9,12 @@ import {
   RefreshCw,
   Share2,
 } from "lucide-react";
-import type {
-  AccessLinkActivity,
-  AssessmentAccessLink,
+import {
+  accessLinkSectionBadge,
+  selectedAccessLinkSections,
+  ACCESS_LINK_SECTION_LABELS,
+  type AccessLinkActivity,
+  type AssessmentAccessLink,
 } from "../../contracts/accessLinks";
 import {
   SatSectionCard,
@@ -73,6 +76,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
     defaultTab,
   } = props;
   const [activeTab, setActiveTab] = useState<DetailTab>(defaultTab ?? "overview");
+  const sectionBadge = accessLinkSectionBadge(link.enabledSections);
 
   useEffect(() => {
     setActiveTab("overview");
@@ -107,6 +111,11 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
           <p className="mt-1 text-[12px] leading-5 text-slate-500">
             {accessLinkStatusDescription(link)}
           </p>
+          {sectionBadge ? (
+            <span className="mt-2 inline-block rounded-full bg-au-fill px-2.5 py-1 text-[10px] font-semibold text-slate-600">
+              {sectionBadge}
+            </span>
+          ) : null}
         </div>
         <button
           type="button"
@@ -342,6 +351,12 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               </dd>
             </div>
             <div className="flex min-h-11 items-center gap-3 py-2">
+              <dt className="w-28 shrink-0 text-[11px] text-slate-500">Sections</dt>
+              <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
+                {sectionsText(link)}
+              </dd>
+            </div>
+            <div className="flex min-h-11 items-center gap-3 py-2">
               <dt className="w-28 shrink-0 text-[11px] text-slate-500">Availability</dt>
               <dd className="min-w-0 flex-1 break-words text-right text-[12px] font-semibold text-slate-900">
                 {availabilityText(link)}
@@ -377,6 +392,13 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
       ) : null}
     </div>
   );
+}
+
+/** Settings copy for the section scope; the badge is the short form. */
+function sectionsText(link: AssessmentAccessLink): string {
+  const selected = selectedAccessLinkSections(link.enabledSections);
+  const labels = selected.map((key) => ACCESS_LINK_SECTION_LABELS[key]).join(" + ");
+  return accessLinkSectionBadge(link.enabledSections) ? `${labels} only · no total score` : `Both sections · ${labels}`;
 }
 
 function audienceText(link: AssessmentAccessLink): string {

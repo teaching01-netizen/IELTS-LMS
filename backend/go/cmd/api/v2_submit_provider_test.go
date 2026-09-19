@@ -120,6 +120,7 @@ func TestV2SubmitSATTakesProvisionalFromResolver(t *testing.T) {
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery("FROM attempt_responses_v2").
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "response_hash"}))
+	mock.ExpectQuery("SELECT l.enabled_sections FROM assessment_access_links").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("FROM assessment_module_attempts").
 		WillReturnRows(sqlmock.NewRows([]string{"section_key", "state"}).
 			AddRow("reading-writing", "submitted").AddRow("math", "locked"))

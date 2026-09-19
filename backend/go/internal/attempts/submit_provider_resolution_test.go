@@ -116,6 +116,7 @@ func TestSubmitTakesSATBranchFromResolver(t *testing.T) {
 	sealer := &recordingSealer{}
 
 	submitPrefixStubs(mock)
+	satScopeUnscoped(mock)
 	mock.ExpectQuery("FROM assessment_module_attempts").
 		WillReturnRows(satModuleRows(satRW(SATModuleSubmitted), satMath(SATModuleLocked)))
 	mock.ExpectExec("delivery_status='submitted', phase='post-exam'").WillReturnResult(sqlmock.NewResult(0, 1))

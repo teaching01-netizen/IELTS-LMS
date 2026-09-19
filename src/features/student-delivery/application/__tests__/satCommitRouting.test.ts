@@ -228,4 +228,67 @@ describe("SAT commit route table", () => {
       ),
     ).toBeNull();
   });
+
+  // A Student Access link scoped to Reading & Writing: the run's payload holds
+  // ONE section (no Math module attempt anywhere), and the exam must end after
+  // it with no new end-of-exam logic. The route table only ever reads the
+  // payload's module attempts, so the whole walk is: last module submitted ->
+  // submit -> a poll carrying the result -> complete.
+  it("completes after the single section of a one-section run", () => {
+    const verbalOnly: Spec[] = [
+      { id: "rw-m1", sectionKey: "reading-writing", state: "submitted" },
+      { id: "rw-m2", sectionKey: "reading-writing", state: "submitted" },
+    ];
+
+    // Submitting the last module of the only section finalizes instead of
+    // opening a break or a next section.
+    expect(
+      decideSatCommitRoute(
+        state("review", "rw-m2-key"),
+        payload(verbalOnly),
+        { kind: "submitModule", moduleId: "rw-m2" },
+        IDENTITY,
+      ),
+    ).toEqual({ type: "submit" });
+
+    // A poll that arrives after the server finalized the last module starts
+    // finalization from wherever the student is (SAT-002 path).
+    expect(
+      decideSatCommitRoute(
+        state("module", "rw-m2-key"),
+        payload(verbalOnly),
+        { kind: "poll" },
+        IDENTITY,
+      ),
+    ).toEqual({ type: "submit" });
+
+    // The scored result completes the runner, with the one-section score shape.
+    const scored = payload([...verbalOnly], true);
+    scored.result = {
+      ...(scored.result as NonNullable<AssessmentDeliveryBootstrap["result"]>),
+      totalScore: null,
+      sections: [
+        {
+          sectionKey: "reading-writing",
+          route: "lower",
+          rawCorrect: 20,
+          operationalQuestionCount: 27,
+          scaledScore: 560,
+          details: {},
+        },
+      ],
+    };
+    expect(
+      decideSatCommitRoute(state("submitting"), scored, { kind: "poll" }, IDENTITY),
+    ).toEqual({
+      type: "recover",
+      state: {
+        phase: "complete",
+        scheduleId: "schedule",
+        candidateId: "candidate",
+        assessmentId: "version",
+        resultId: "result-1",
+      },
+    });
+  });
 });

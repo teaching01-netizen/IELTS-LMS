@@ -58,6 +58,11 @@ function projectSharedAccessLink(
 ): AssessmentAccessLink {
   const next = { ...fallback };
   if (typeof value["name"] === "string") next.name = value["name"];
+  // The coedit room carries the toggle state as a scope (null = all sections),
+  // so other tabs badge the live value instead of their last server read.
+  if (value["enabledSections"] === null || Array.isArray(value["enabledSections"])) {
+    next.enabledSections = value["enabledSections"] as string[] | null;
+  }
   if (value["audienceType"] === "anyone" || value["audienceType"] === "cohort" || value["audienceType"] === "selected_students") next.audienceType = value["audienceType"];
   if (typeof value["audienceLabel"] === "string" || value["audienceLabel"] === null) next.audienceLabel = value["audienceLabel"];
   if (value["accessMode"] === "student_code" || value["accessMode"] === "open") next.accessMode = value["accessMode"];
@@ -455,7 +460,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         </div>
       </SatContainer>
 
-      <AccessLinkEditorSheet open={editorOpen} link={editingLink} members={(membersQuery.data ?? []) as AccessLinkMemberInput[]} isSaving={saving} onClose={() => { if (!saving) { setEditorOpen(false); setEditingLink(null); } }} onCreate={createLink} onUpdate={updateLink} />
+      <AccessLinkEditorSheet open={editorOpen} link={editingLink} providerKey={exam.providerKey ?? null} members={(membersQuery.data ?? []) as AccessLinkMemberInput[]} isSaving={saving} onClose={() => { if (!saving) { setEditorOpen(false); setEditingLink(null); } }} onCreate={createLink} onUpdate={updateLink} />
       <AccessLinkShareSheet open={Boolean(shareLink)} link={shareLink} onClose={() => setShareLink(null)} onPresent={() => { setPresentLink(shareLink); setShareLink(null); }} />
       <AccessLinkPresentView open={Boolean(presentLink)} link={presentLink} onClose={() => setPresentLink(null)} />
       <AuthoringConfirmDialog

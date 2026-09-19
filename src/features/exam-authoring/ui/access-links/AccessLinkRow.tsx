@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Ellipsis } from "lucide-react";
-import type { AssessmentAccessLink } from "../../contracts/accessLinks";
+import { accessLinkSectionBadge, type AssessmentAccessLink } from "../../contracts/accessLinks";
 import { SatMenu, type SatMenuItem } from "../../../../products/sat/ui/Menu";
 import { SatStatusPill } from "../../../../products/sat/ui/SatPage";
 import {
@@ -50,6 +50,9 @@ export const AccessLinkRow = memo(function AccessLinkRow({
   resultIndex,
 }: AccessLinkRowProps) {
   const tone = accessLinkStatusTone(link.status);
+  // Nobody should share a verbal-only link with a math class by accident, so a
+  // scoped link is labelled in the list itself.
+  const sectionBadge = accessLinkSectionBadge(link.enabledSections);
   return (
     <div className="relative mb-1.5">
       <button
@@ -71,6 +74,11 @@ export const AccessLinkRow = memo(function AccessLinkRow({
             <span className="truncate text-[13px] font-semibold text-slate-900">{link.name}</span>
             {isStaleRelease ? (
               <span className="shrink-0 text-[10px] font-medium text-slate-400">Version {link.versionNumber}</span>
+            ) : null}
+            {sectionBadge ? (
+              <span className="shrink-0 rounded-full bg-au-fill px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                {sectionBadge}
+              </span>
             ) : null}
           </span>
           <span className="mt-1 flex items-center gap-1.5">

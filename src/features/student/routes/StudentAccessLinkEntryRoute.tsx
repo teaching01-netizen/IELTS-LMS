@@ -5,6 +5,25 @@ import { useAuthSession, type StudentQueuedAdmission } from '../../auth/api/auth
 import { useStudentAccessLink } from '../api/access-link/studentAccessLinkQueries';
 import type { PublicStudentAccessLink } from '../contracts/access-link/PublicStudentAccessLink';
 
+const SECTION_LABELS: Record<string, string> = {
+  'reading-writing': 'Reading & Writing',
+  math: 'Math',
+};
+
+/**
+ * The scope copy for a narrowed link, or null when the link admits every
+ * section. Stated on the entry card so a student knows the exam ends after one
+ * section BEFORE they commit, instead of discovering it mid-sitting.
+ */
+export function accessLinkScopeCopy(link: PublicStudentAccessLink): string | null {
+  const sections = (link.enabledSections ?? []).filter((key) => key in SECTION_LABELS);
+  if (sections.length === 0 || sections.length >= Object.keys(SECTION_LABELS).length) return null;
+  const labels = Object.keys(SECTION_LABELS)
+    .filter((key) => sections.includes(key))
+    .map((key) => SECTION_LABELS[key]);
+  return `You'll take ${labels.join(' and ')} only. The exam ends after that section.`;
+}
+
 interface AccessForm {
   studentCode: string;
   studentName: string;
@@ -316,6 +335,8 @@ export function StudentAccessLinkEntryRoute() {
   if (linkQuery.error || !link) return <EntryShell><UnavailableState icon={<AlertCircle size={24}/>} title="This Student Link isn't available" description={linkQuery.error instanceof Error ? linkQuery.error.message : 'Ask your teacher for a current link.'}/></EntryShell>;
   if (!canEnter) return <EntryShell><LinkAvailabilityState link={link}/></EntryShell>;
 
+  const scopeCopy = accessLinkScopeCopy(link);
+
   return (
     <EntryShell>
       <div className="p-6 sm:p-8">
@@ -323,6 +344,7 @@ export function StudentAccessLinkEntryRoute() {
         <p className="mt-5 text-[11px] font-semibold text-slate-400">{link.examTitle} · Version {link.versionNumber}</p>
         <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.04em] text-slate-950">{link.name}</h1>
         <p className="mt-2 text-sm leading-6 text-slate-500">Check your details, then continue to the exam.</p>
+        {scopeCopy ? <div role="note" className="mt-4 flex items-start gap-2 rounded-xl border border-[#0071e3]/15 bg-[#0071e3]/5 px-3 py-2.5 text-[11px] font-medium leading-4 text-[#0b5cad]"><Clock3 size={13} className="mt-0.5 shrink-0"/><span>{scopeCopy}</span></div> : null}
         {link.audienceLabel ? <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[#f5f5f7] px-2.5 py-1.5 text-[10px] font-semibold text-slate-600"><LockKeyhole size={11}/>{link.audienceLabel}</div> : null}
 
         {submitError ? <div role="alert" className="mt-5 rounded-xl border border-red-100 bg-red-50 px-3 py-2.5 text-[11px] font-medium text-red-700">{submitError}</div> : null}

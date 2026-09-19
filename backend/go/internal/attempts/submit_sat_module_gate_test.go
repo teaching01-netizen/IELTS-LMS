@@ -39,6 +39,13 @@ func satMath(state string) []driver.Value {
 	return []driver.Value{SATSectionMath, state}
 }
 
+// satScopeUnscoped stages the Student Access scope read as "no link": the run
+// declares the full SAT pair, which is the pre-feature behaviour every
+// existing case pins.
+func satScopeUnscoped(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery("SELECT l.enabled_sections FROM assessment_access_links").WillReturnError(sql.ErrNoRows)
+}
+
 // submitPrefixStubs stages the shared prefix every submit walks before the
 // provider branch: tx begin, attempt lock, session binding, receipt probes,
 // writer-session check, and the (empty) response digest read.
@@ -71,6 +78,7 @@ func satTopologyRefusal(t *testing.T, rows *sqlmock.Rows) *apperrors.Error {
 	qr, rl := liveStubs()
 
 	submitPrefixStubs(mock)
+	satScopeUnscoped(mock)
 	mock.ExpectQuery("FROM assessment_module_attempts").WithArgs("att-1").WillReturnRows(rows)
 	mock.ExpectRollback()
 
@@ -162,6 +170,20 @@ func TestSATModuleTopologyValidate(t *testing.T) {
 	full := SATModuleTopology{Terminal: 4, Sections: map[string]int{SATSectionReadingWriting: 2, SATSectionMath: 2}}
 	if err := full.Validate(); err != nil {
 		t.Fatalf("base+routed topology must validate, got %v", err)
+	}
+	// A run narrowed to Reading & Writing declares that one section: the same
+	// terminal rows that are refused as "missing math" above are complete for
+	// a verbal-only sitting.
+	narrowed := SATModuleTopology{Terminal: 2, Sections: map[string]int{SATSectionReadingWriting: 2}}
+	if err := narrowed.Validate(SATSectionReadingWriting); err != nil {
+		t.Fatalf("a one-section terminal topology must validate against its declared set, got %v", err)
+	}
+	if err := narrowed.Validate(); err == nil {
+		t.Fatal("the same topology must still be refused against the full SAT pair")
+	}
+	mathOnly := SATModuleTopology{Terminal: 2, Sections: map[string]int{SATSectionMath: 2}}
+	if err := mathOnly.Validate(SATSectionMath); err != nil {
+		t.Fatalf("a math-only declared set must validate, got %v", err)
 	}
 
 	cases := []struct {

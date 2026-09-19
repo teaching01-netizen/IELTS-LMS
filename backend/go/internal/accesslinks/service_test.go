@@ -27,7 +27,7 @@ func begin(mock sqlmock.Sqlmock) {
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
 }
 
-// linkRow returns the 24-column link_selectSQL() projection.
+// linkRow returns the 25-column link_selectSQL() projection.
 func linkRow(live bool) *sqlmock.Rows {
 	var opens, closes any
 	now := time.Now().UTC()
@@ -40,19 +40,25 @@ func linkRow(live bool) *sqlmock.Rows {
 	}
 	return sqlmock.NewRows([]string{
 		"id", "exam_id", "exam_title", "provider_key",
-		"published_version_id", "version_number", "schedule_id", "name",
+		"published_version_id", "version_number", "schedule_id", "name", "enabled_sections",
 		"audience_type", "audience_label", "access_mode", "availability_type",
 		"opens_at", "closes_at", "lifecycle_state", "revision", "created_at", "updated_at",
 		"selected_student_count", "registered_count", "started_count", "submitted_count",
 		"is_current_release", "has_participation",
 	}).AddRow(
 		"link-1", "exam-1", "IELTS Mock", "ielts",
-		"ver-1", 3, "sched-1", "Saturday Class",
+		"ver-1", 3, "sched-1", "Saturday Class", nil,
 		"anyone", nil, "student_code", "scheduled",
 		opens, closes, "active", 2, now, now,
 		0, 1, 1, 0,
 		1, 1,
 	)
+}
+
+// linkLockRow returns the 5-column lock_link_tx() projection.
+func linkLockRow(participation int, enabledSections any) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"schedule_id", "lifecycle_state", "revision", "enabled_sections", "has_participation"}).
+		AddRow("sched-1", "active", 4, enabledSections, participation)
 }
 
 // expectLinkSelect stubs the post-commit re-read in s.Get.
@@ -239,9 +245,7 @@ func TestSetLifecycleStaleRevisionConflicts(t *testing.T) {
 	defer db.Close()
 	s := svc(db)
 	begin(mock)
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_access_links WHERE id")).WillReturnRows(
-		sqlmock.NewRows([]string{"schedule_id", "lifecycle_state", "revision"}).
-			AddRow("sched-1", "active", 4))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_access_links WHERE id")).WillReturnRows(linkLockRow(0, nil))
 	mock.ExpectRollback()
 	if _, err := s.SetLifecycle(context.Background(), "link-1", SetLifecycleRequest{
 		Revision: 1,

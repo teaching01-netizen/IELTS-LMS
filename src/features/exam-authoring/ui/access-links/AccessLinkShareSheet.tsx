@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, Copy, Download, ExternalLink, Presentation, Share2, X } from "lucide-react";
-import type { AssessmentAccessLink } from "../../contracts/accessLinks";
+import { accessLinkSectionBadge, accessLinkSectionStudentCopy, type AssessmentAccessLink } from "../../contracts/accessLinks";
 import { copyText, studentJoinUrl } from "./accessLinkUi";
 import { AuthoringDialog } from "../authoringPrimitives";
 export function useAccessLinkQrCode(linkId: string | null, size = 640) {
@@ -25,6 +25,7 @@ export function useAccessLinkQrCode(linkId: string | null, size = 640) {
 
 export function AccessLinkShareSheet({ open, link, onClose, onPresent }: { open: boolean; link: AssessmentAccessLink | null; onClose: () => void; onPresent: () => void }) {
   const [copied, setCopied] = useState(false);
+  const sectionBadge = accessLinkSectionBadge(link?.enabledSections);
   const [shareError, setShareError] = useState<string | null>(null);
   const { dataUrl, error: qrError } = useAccessLinkQrCode(open ? link?.id ?? null : null, 640);
   useEffect(() => { if (open) { setCopied(false); setShareError(null); } }, [open, link?.id]);
@@ -61,7 +62,7 @@ export function AccessLinkShareSheet({ open, link, onClose, onPresent }: { open:
       showHeader={false}
       contentClassName="w-[calc(100vw-2rem)] max-w-[440px] overflow-hidden rounded-[22px] p-0"
     >
-          <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4"><div className="min-w-0 flex-1"><p className="text-[10px] font-medium text-slate-400">Share with students</p><h2 className="truncate text-[16px] font-semibold text-slate-950">{link.name}</h2></div><button type="button" aria-label="Close share sheet" onClick={onClose} className="authoring-icon-button"><X size={15} aria-hidden="true"/></button></header>
+          <header className="flex items-center gap-3 border-b border-au-separator px-5 py-4"><div className="min-w-0 flex-1"><p className="text-[10px] font-medium text-slate-400">Share with students</p><h2 className="truncate text-[16px] font-semibold text-slate-950">{link.name}</h2>{sectionBadge ? <p className="mt-1 text-[10px] font-semibold text-slate-500">{sectionBadge} · {accessLinkSectionStudentCopy(link.enabledSections)}</p> : null}</div><button type="button" aria-label="Close share sheet" onClick={onClose} className="authoring-icon-button"><X size={15} aria-hidden="true"/></button></header>
           <div className="p-5">
             <div className="mx-auto flex h-52 w-52 items-center justify-center rounded-[18px] bg-au-fill p-3">{dataUrl ? <img src={dataUrl} alt={`QR code for ${link.name}`} className="h-full w-full" /> : <span role="status" className="px-4 text-center text-[11px] text-slate-500">{qrError ?? "Generating QR code…"}</span>}</div>
             <div className="mt-4 rounded-xl bg-au-fill px-3 py-2.5"><p className="break-all font-mono text-[11px] leading-5 text-slate-600 select-all">{url}</p></div>
@@ -91,6 +92,7 @@ export function AccessLinkPresentView({ open, link, onClose }: { open: boolean; 
         <div>
           <p className="text-[12px] font-medium text-slate-400">{link.examTitle} · Version {link.versionNumber}</p>
           <h2 className="mt-1 text-2xl font-semibold tracking-[-0.03em]">{link.name}</h2>
+          {accessLinkSectionBadge(link.enabledSections) ? <p className="mt-1 text-sm font-semibold text-slate-500">{accessLinkSectionStudentCopy(link.enabledSections)}</p> : null}
         </div>
         <button type="button" onClick={onClose} aria-label="Close presentation" className="authoring-icon-button h-11 w-11 bg-au-fill text-slate-500 hover:bg-au-fill-strong">
           <X size={18} aria-hidden="true"/>

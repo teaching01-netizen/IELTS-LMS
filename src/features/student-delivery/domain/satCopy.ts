@@ -165,6 +165,15 @@ export const SAT_COPY = {
     completeSubtitle: "All responses submitted.",
     practiceScoreReady: "Your unofficial practice score is ready.",
     backToDashboard: "Back to dashboard",
+    // A Student Link may admit only one section. That sitting has a section
+    // score (200\u2013800) and deliberately NO total \u2014 the 400\u20131600 scale is
+    // defined over both sections \u2014 so the completion screen names the section
+    // instead of leaving the score area blank.
+    sectionScoreHeading: "Section score",
+    sectionScoreOnlyNote:
+      "This link covered one section, so there is no total score. This is your unofficial practice result for that section.",
+    sectionLabelReadingWriting: "Reading and Writing",
+    sectionLabelMath: "Math",
   },
   timer: {
     hidden: "Timer hidden",

@@ -525,6 +525,7 @@ func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cm
 func (s *Service) startPlanner() examruntime.StartPlanner {
 	return func(ctx context.Context, q tx.Tx, sch examruntime.StartSchedule) ([]examruntime.PlanEntry, string, error) {
 		return runtimePlanIn(ctx, q, Schedule{
+			ID:                     sch.ID,
 			ProviderKey:            sch.ProviderKey,
 			PublishedVersionID:     sch.PublishedVersionID,
 			PlannedDurationMinutes: sch.PlannedDurationMinutes,
@@ -543,6 +544,12 @@ type planQuerier interface {
 // runtimePlanIn derives the persisted cohort clock plan from the pinned
 // published version, reading through q. Disabled config sections are omitted
 // so a proctor start cannot create clocks for a section the author turned off.
+//
+// The plan is then intersected with the backing Student Access link's section
+// scope (when the schedule has one): a link may only NARROW the run, never
+// re-enable a section the version disabled. Intersecting rather than replacing
+// is what keeps the two levels of section on/off composable — the link toggle
+// and config_snapshot.sections[key].enabled are ANDed, not merged.
 func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examruntime.PlanEntry, string, error) {
 	var configRaw sql.NullString
 	var examType string
@@ -555,6 +562,10 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 	// Legacy ACT rows carry provider_key='ielts' with exam_type='ACT'; the
 	// effective provider heals that mismatch so science survives planning.
 	effectiveProvider := examdomain.EffectiveProviderKey(sch.ProviderKey, examType)
+	linkSections, err := linkEnabledSections(ctx, q, sch.ID)
+	if err != nil {
+		return nil, "", err
+	}
 	enabled := configuredRuntimeSections(configRaw.String)
 	rows, err := q.QueryContext(ctx, "SELECT section_key, title, display_order, duration_seconds, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id", sch.PublishedVersionID)
 	if err != nil {
@@ -568,7 +579,7 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 		if err := rows.Scan(&key, &label, &order, &durationSeconds, &gapSeconds); err != nil {
 			return nil, "", err
 		}
-		if !examdomain.ValidSectionKey(effectiveProvider, key) || (enabled != nil && !enabled[key]) {
+		if !examdomain.ValidSectionKey(effectiveProvider, key) || (enabled != nil && !enabled[key]) || !linkAllowsSection(linkSections, key) {
 			continue
 		}
 		plan = append(plan, examruntime.PlanEntry{
@@ -582,17 +593,62 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 	if err := rows.Err(); err != nil {
 		return nil, "", err
 	}
+	// The fallbacks are filtered too: an unusable config must not silently
+	// hand a narrowed link back its dropped section.
 	if len(plan) == 0 {
-		plan = configuredRuntimePlan(configRaw.String, effectiveProvider)
+		plan = filterPlanBySections(configuredRuntimePlan(configRaw.String, effectiveProvider), linkSections)
 	}
 	if len(plan) == 0 {
-		plan = fallbackRuntimePlan(effectiveProvider, sch.PlannedDurationMinutes)
+		plan = filterPlanBySections(fallbackRuntimePlan(effectiveProvider, sch.PlannedDurationMinutes), linkSections)
 	}
 	timingModel := examruntime.TimingModelLegacy
 	if strings.EqualFold(sch.ProviderKey, examdomain.ProviderSAT) {
 		timingModel = examruntime.TimingModelCohortSection
 	}
 	return plan, timingModel, nil
+}
+
+// linkEnabledSections reads the section scope of the Student Access link
+// backing the schedule (assessment_access_links_schedule_unique makes this a
+// single indexed get). A schedule with no link — every admin-created schedule —
+// returns nil, meaning "no narrowing". The stored shape, its fail-open read,
+// and the section vocabulary are owned by internal/exams.
+func linkEnabledSections(ctx context.Context, q planQuerier, scheduleID string) (map[string]bool, error) {
+	if strings.TrimSpace(scheduleID) == "" {
+		return nil, nil
+	}
+	var raw sql.NullString
+	err := q.QueryRowContext(ctx,
+		"SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ?", scheduleID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return examdomain.ParseStoredSectionScope(raw.String), nil
+}
+
+// linkAllowsSection reports whether a link scope admits a section.
+func linkAllowsSection(allowed map[string]bool, sectionKey string) bool {
+	return examdomain.AllowsSection(allowed, sectionKey)
+}
+
+// filterPlanBySections narrows an already-built plan to a link scope, keeping
+// the plan's own order. Section order is left untouched: gaps are harmless
+// (every consumer orders by section_order) and renumbering would rewrite the
+// authored display order of a plan that was not narrowed at all.
+func filterPlanBySections(plan []examruntime.PlanEntry, allowed map[string]bool) []examruntime.PlanEntry {
+	if allowed == nil {
+		return plan
+	}
+	filtered := make([]examruntime.PlanEntry, 0, len(plan))
+	for _, entry := range plan {
+		if allowed[entry.SectionKey] {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func configuredRuntimePlan(raw, providerKey string) []examruntime.PlanEntry {

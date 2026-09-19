@@ -25,6 +25,7 @@ func requireAccessLinks(w http.ResponseWriter, r *http.Request, app *App) bool {
 type accessLinkCreateBody struct {
 	PublishedVersionID *string                      `json:"publishedVersionId"`
 	Name               string                       `json:"name"`
+	EnabledSections    []string                     `json:"enabledSections"`
 	AudienceType       accesslinks.AudienceType     `json:"audienceType"`
 	AudienceLabel      *string                      `json:"audienceLabel"`
 	AccessMode         accesslinks.Mode             `json:"accessMode"`
@@ -39,6 +40,7 @@ type accessLinkCreateBody struct {
 type accessLinkUpdateBody struct {
 	Revision         int32                        `json:"revision"`
 	Name             string                       `json:"name"`
+	EnabledSections  *[]string                    `json:"enabledSections"`
 	AudienceType     accesslinks.AudienceType     `json:"audienceType"`
 	AudienceLabel    *string                      `json:"audienceLabel"`
 	AccessMode       accesslinks.Mode             `json:"accessMode"`
@@ -122,6 +124,7 @@ func examLinkCreate(app *App) http.HandlerFunc {
 		out, err := app.AccessLinks.Create(r.Context(), chi.URLParam(r, "examID"), sess.UserID, accesslinks.CreateRequest{
 			PublishedVersionID: body.PublishedVersionID,
 			Name:               body.Name,
+			EnabledSections:    body.EnabledSections,
 			AudienceType:       body.AudienceType,
 			AudienceLabel:      body.AudienceLabel,
 			AccessMode:         body.AccessMode,
@@ -179,6 +182,7 @@ func linkUpdate(app *App) http.HandlerFunc {
 		out, err := app.AccessLinks.Update(r.Context(), linkID, accesslinks.UpdateRequest{
 			Revision:         body.Revision,
 			Name:             body.Name,
+			EnabledSections:  body.EnabledSections,
 			AudienceType:     body.AudienceType,
 			AudienceLabel:    body.AudienceLabel,
 			AccessMode:       body.AccessMode,

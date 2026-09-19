@@ -54,7 +54,7 @@ func expectLinkIDs(mock sqlmock.Sqlmock, scheduleID string, ids ...string) {
 		WillReturnRows(rows)
 }
 
-// resolveLinkRow returns the 24-column link_selectSQL() projection for a
+// resolveLinkRow returns the 25-column link_selectSQL() projection for a
 // live (or ended, when live=false) scheduled link bound to sched-1.
 func resolveLinkRow(live bool) *sqlmock.Rows {
 	var opens, closes any
@@ -68,14 +68,14 @@ func resolveLinkRow(live bool) *sqlmock.Rows {
 	}
 	return sqlmock.NewRows([]string{
 		"id", "exam_id", "exam_title", "provider_key",
-		"published_version_id", "version_number", "schedule_id", "name",
+		"published_version_id", "version_number", "schedule_id", "name", "enabled_sections",
 		"audience_type", "audience_label", "access_mode", "availability_type",
 		"opens_at", "closes_at", "lifecycle_state", "revision", "created_at", "updated_at",
 		"selected_student_count", "registered_count", "started_count", "submitted_count",
 		"is_current_release", "has_participation",
 	}).AddRow(
 		"link-1", "exam-1", "IELTS Mock", "ielts",
-		"ver-1", 3, "sched-1", "Saturday Class",
+		"ver-1", 3, "sched-1", "Saturday Class", nil,
 		"selected_students", nil, "student_code", "scheduled",
 		opens, closes, "active", 2, now, now,
 		1, 0, 0, 0,
@@ -96,7 +96,8 @@ func expectResolveEntrySuccess(mock sqlmock.Sqlmock, memberName, memberEmail any
 		WillReturnRows(sqlmock.NewRows([]string{
 			"schedule_id", "provider_key", "access_mode", "audience_type",
 			"lifecycle_state", "availability_type", "opens_at", "closes_at",
-		}).AddRow("sched-1", "ielts", "student_code", "selected_students", "active", "scheduled", time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(time.Hour)))
+			"enabled_sections",
+		}).AddRow("sched-1", "ielts", "student_code", "selected_students", "active", "scheduled", time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(time.Hour), nil))
 	now := time.Now().UTC()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id")).
 		WillReturnRows(sqlmock.NewRows([]string{"start_time", "end_time"}).
@@ -223,7 +224,8 @@ func TestVerifyDirectEntryCode(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{
 				"schedule_id", "provider_key", "access_mode", "audience_type",
 				"lifecycle_state", "availability_type", "opens_at", "closes_at",
-			}).AddRow("sched-1", "ielts", "student_code", "selected_students", "active", "scheduled", time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(time.Hour)))
+				"enabled_sections",
+			}).AddRow("sched-1", "ielts", "student_code", "selected_students", "active", "scheduled", time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(time.Hour), nil))
 		now := time.Now().UTC()
 		mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id")).
 			WillReturnRows(sqlmock.NewRows([]string{"start_time", "end_time"}).

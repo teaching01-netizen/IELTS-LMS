@@ -26,6 +26,7 @@ import (
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/attempts"
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
@@ -504,6 +505,14 @@ func (s *Service) OldestProvisionalAgeSeconds(ctx context.Context) (int64, error
 // student_submissions + assessment_results(scored/ready_to_release) +
 // section rows, then seals sat_complete. Callers hold the attempt lock.
 func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptCore, submissionID, actorKind, actorID, requestID string, now time.Time) (*AssessmentResult, error) {
+	// "Declared" is the Student Access link's section scope, or the full SAT
+	// pair when the link is unscoped — the same set the submit gate and the
+	// delivery gates use, so a run cannot be admitted by one boundary and
+	// refused by another. Read first: every refusal below is scoped to it.
+	required, err := loadRunSectionsTx(ctx, t, attempt.ID)
+	if err != nil {
+		return nil, err
+	}
 	mods, err := loadModules(ctx, t, attempt.ID)
 	if err != nil {
 		return nil, err
@@ -551,22 +560,25 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 	}
 
 	// Audit finding 5 (second half): totalScore tolerates a nil section, so a
-	// partial topology — a math-only terminal set, or a section whose adaptive
-	// route was never recorded — would otherwise persist a plausible-looking SAT
-	// total. A score may only be minted from exactly one Reading & Writing route
-	// plus exactly one Math route; anything else fails closed instead of
-	// becoming a legitimate-looking result.
-	for _, required := range []string{SectionReadingWriting, SectionMath} {
-		a, ok := aggs[required]
+	// partial topology — a section whose adaptive route was never recorded —
+	// would otherwise persist a plausible-looking SAT total. A score may only be
+	// minted from exactly one terminal route per section the RUN declared;
+	// anything else fails closed instead of becoming a legitimate-looking
+	// result.
+	//
+	for _, sectionKey := range required {
+		a, ok := aggs[sectionKey]
 		if !ok {
-			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has no submitted %s modules.", required), HTTPStatus: 400}
+			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has no submitted %s modules.", sectionKey), HTTPStatus: 400}
 		}
 		if a.route == nil {
-			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has no completed adaptive route for %s.", required), HTTPStatus: 400}
+			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has no completed adaptive route for %s.", sectionKey), HTTPStatus: 400}
 		}
 	}
-	if len(aggs) != 2 {
-		return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: "The SAT attempt has modules outside the Reading & Writing and Math sections.", HTTPStatus: 400}
+	for sectionKey := range aggs {
+		if !containsSection(required, sectionKey) {
+			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has modules outside its %s sections.", strings.Join(required, " and ")), HTTPStatus: 400}
+		}
 	}
 
 	var sections []SectionResult
@@ -608,7 +620,15 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 	for i := range sections {
 		scaledBy[sections[i].SectionKey] = sections[i].ScaledScore
 	}
-	total := totalScore(scaledBy[SectionReadingWriting], scaledBy[SectionMath])
+	// A one-section sitting has no composite total: the 400–1600 scale is
+	// defined over Reading & Writing + Math, so a lone section score must not
+	// be published as — or mistaken for — an SAT total. totalScore stays NULL
+	// and the section score (200–800) carries the result.
+	var total *int
+	if len(required) > 1 {
+		composite := totalScore(scaledBy[SectionReadingWriting], scaledBy[SectionMath])
+		total = &composite
+	}
 	scorePayload := map[string]any{
 		"providerKey": "sat", "scoreKind": "practice",
 		"totalScore": total, "sections": sections,
@@ -629,7 +649,13 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "submissionId is already bound to another attempt.", HTTPStatus: 409, Details: map[string]any{"code": "SUBMISSION_ID_MISUSE"}}
 	case err == sql.ErrNoRows:
 		candidate, name, email, cohort := attemptCandidate(ctx, t, attempt.ID)
-		sectionStatuses, _ := json.Marshal(map[string]string{SectionReadingWriting: "auto_graded", SectionMath: "auto_graded"})
+		// Section statuses mirror the sections this run actually took; a
+		// narrowed run must not claim an auto-graded section it never ran.
+		statuses := make(map[string]string, len(required))
+		for _, sectionKey := range required {
+			statuses[sectionKey] = "auto_graded"
+		}
+		sectionStatuses, _ := json.Marshal(statuses)
 		if _, err := t.ExecContext(ctx, `
 			INSERT INTO student_submissions
 				(id, attempt_id, schedule_id, exam_id, published_version_id, provider_key,
@@ -706,7 +732,7 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 		INSERT INTO assessment_results
 			(id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status)
 		VALUES (?, ?, ?, 'sat', 'scored', ?, ?, 'ready_to_release')`,
-		resultID, attempt.ID, submissionID, total, string(payloadJSON)); err != nil {
+		resultID, attempt.ID, submissionID, nullableIntPtr(total), string(payloadJSON)); err != nil {
 		return nil, err
 	}
 	for _, sec := range sections {
@@ -731,7 +757,7 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 	}
 	return &AssessmentResult{
 		ID: resultID, SubmissionID: submissionID, AttemptID: attempt.ID,
-		ProviderKey: "sat", OutcomeStatus: "scored", TotalScore: &total,
+		ProviderKey: "sat", OutcomeStatus: "scored", TotalScore: total,
 		ScoreKind:    "practice",
 		ScorePayload: scorePayload, ReleaseStatus: "ready_to_release", Sections: sections,
 	}, nil
@@ -831,6 +857,48 @@ func loadModules(ctx context.Context, t tx.Tx, attemptID string) ([]moduleRow, e
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// loadRunSectionsTx resolves the section set this run declared: the backing
+// Student Access link's scope when it narrows the run, otherwise the full SAT
+// pair. One indexed-ish join read, no lock, so it can run beside the attempt
+// row lock the scorers already hold. This is the same source
+// (assessment_access_links.enabled_sections) the runtime plan seam and the
+// submit gate read.
+func loadRunSectionsTx(ctx context.Context, t tx.Tx, attemptID string) ([]string, error) {
+	var raw sql.NullString
+	err := t.QueryRowContext(ctx,
+		"SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a ON a.schedule_id = l.schedule_id WHERE a.id = ?",
+		attemptID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return attempts.SATModuleRequiredSections, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	sections := examdomain.SectionScopeKeys(examdomain.ParseStoredSectionScope(raw.String))
+	if len(sections) == 0 {
+		return attempts.SATModuleRequiredSections, nil
+	}
+	return sections, nil
+}
+
+// containsSection reports whether a section key is part of a declared set.
+func containsSection(sections []string, sectionKey string) bool {
+	for _, section := range sections {
+		if section == sectionKey {
+			return true
+		}
+	}
+	return false
+}
+
+// nullableIntPtr renders an optional integer for a nullable column.
+func nullableIntPtr(value *int) any {
+	if value == nil {
+		return nil
+	}
+	return *value
 }
 
 // loadTimeSpentSeconds derives the attempt's active exam time from the
