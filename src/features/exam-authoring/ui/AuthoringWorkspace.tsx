@@ -21,6 +21,8 @@ import {
 import { authoringEffects } from "../api/authoringQueryEffects";
 import { useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
 import { AuthoringLifecycleSurface } from "./AuthoringLifecycleSurface";
+import { useDraftOpenOnEntry } from "./useDraftOpenOnEntry";
+import { SatAuthoringLoadingSurface } from "./SatAuthoringStateSurfaces";
 import { combineSaveStatus } from "./spine/coeditSaveTruth";
 import {
   authorForActor,
@@ -202,6 +204,21 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   // a real shell or the lifecycle surface; no status code is inspected here.
   const shellState = shellLifecycle.state;
   const shell = shellState.kind === "ready" ? shellState.shell : undefined;
+  // An author who ARRIVED here by choosing this exam in the Exam Library asked
+  // to edit it, so a NO_DRAFT answer opens the draft for them instead of
+  // stopping at the wall. The gesture is in-memory and one-shot
+  // (`authoringEntryIntent`), which is what keeps every READ — a reload, a
+  // restored session, a new tab — from creating anything: only a click can arm
+  // it, and only once. Every other arrival (a preview exit, a pasted URL, a
+  // refresh) still gets the explicit CTA.
+  const draftOnEntry = useDraftOpenOnEntry({
+    examId,
+    state: shellState,
+    canOpenDraft,
+    isOpening: ensureDraft.isPending,
+    isFailed: Boolean(ensureDraft.error),
+    openDraft: ensureDraft.mutate,
+  });
   // Which module and question the author is on (plus the queue's filter and row
   // multi-selection) is one owner. It also owns the two rules that used to be
   // effects here: the deep-link adoption and the "selection must still exist in
@@ -911,10 +928,16 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   // shell we render the lifecycle surface, which is the ONLY place that decides
   // what NO_DRAFT vs EXAM_NOT_FOUND vs a real failure looks like. The explicit,
   // role-gated "Open draft" CTA (POST) lives there and runs once per click;
-  // observers never see it and never trigger it. The ensure mutation installs
-  // the shell in cache so this component re-renders with data, and never
-  // auto-loops on failure.
+  // observers never see it and never trigger it. The one other way that command
+  // runs is `draftOnEntry` above, from an explicit navigation gesture: while it
+  // is opening we show progress, because telling an author who just asked to
+  // edit that they have no draft is an answer they did not ask for. The ensure
+  // mutation installs the shell in cache so this component re-renders with
+  // data, and never auto-loops on failure.
   if (!shell) {
+    if (draftOnEntry.opening) {
+      return <SatAuthoringLoadingSurface label="Opening SAT workspace…" />;
+    }
     return (
       <AuthoringLifecycleSurface
         state={shellState}

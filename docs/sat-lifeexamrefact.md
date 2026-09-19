@@ -352,6 +352,38 @@ This is the mandatory regression test for the bug that triggered this work.
 
 ---
 
+# Phase 4b — The Entry Gesture
+
+Phase 4 fixed the console and the lifecycle, and left one product gap: publishing
+seals the draft (`current_draft_version_id -> NULL`), so opening that published
+exam from the Exam Library landed on "No editable draft" — a correct READ but an
+answer to a question the author did not ask.
+
+Refreshing must still never create a draft, so the two arrivals have to be told
+apart, and the only honest difference between them is the GESTURE:
+
+```text
+Exam Library row click        -> a navigation gesture -> open the draft, edit
+release "Back to builder"     -> a navigation gesture -> open the draft, edit
+release blocker click         -> a navigation gesture -> open the draft, edit
+reload / new tab / pasted URL -> no gesture           -> read only, show the CTA
+```
+
+```text
+application/authoringEntryIntent.ts carries the gesture in module memory
+  (a navigation survives it, a document reload does not; bounded by a TTL)
+SatExamLibraryRoute's row click and SatDeliveryReleaseRoute's two exits back
+  into the editor arm it (SAT path only; the legacy builder heals its own)
+ui/useDraftOpenOnEntry.ts turns it into exactly one POST /shell for NO_DRAFT
+AuthoringWorkspace shows progress while that open is outstanding
+```
+
+Every invariant above still holds: no READ creates anything, a refresh issues
+zero POSTs, a READY exam is never re-opened, and every other arrival (preview
+exit, deep link, Sessions, Results) keeps the explicit, role-gated CTA.
+
+---
+
 # Phase 5 — Make React Query a Transport Layer, Not a Domain Layer
 
 Refactor:

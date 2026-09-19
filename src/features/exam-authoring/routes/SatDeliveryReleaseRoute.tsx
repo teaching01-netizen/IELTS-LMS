@@ -7,6 +7,7 @@ import {
   usePublishAssessment,
 } from "../api/assessmentQueries";
 import { useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
+import { requestAuthoringDraftOnEntry } from "../application/authoringEntryIntent";
 import { useAccessDistributionOverview } from "../api/assessmentAccessLinkQueries";
 import type { AssessmentValidationIssue } from "../contracts/assessment";
 import { parseIssueLink } from "../ui/release/releaseSelectors";
@@ -115,16 +116,37 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
     openStudentAccess();
   };
 
+  /**
+   * The ONE way out of Release back into the editor: "Back to builder", and a
+   * clicked release blocker (which adds the deep-link `search` for the question
+   * and field to fix).
+   *
+   * Both are the author saying "let me keep editing" — the same gesture as
+   * choosing the exam in the Exam Library — and both matter for the same
+   * reason: publishing SEALS the draft, so a published exam answers NO_DRAFT and
+   * these clicks must continue from the published version instead of stopping at
+   * the wall.
+   *
+   * The gesture is armed only for the SAT workspace, because that is the only
+   * surface that consumes it. The legacy builder path is left alone: it heals
+   * its own draft (`ReopenDraft`) and arming a slot nothing there can spend
+   * would only leave a stale gesture behind.
+   */
+  const openBuilder = (examId: string, search?: string) => {
+    const base = inSatWorkspace
+      ? `/sat/exams/${encodeURIComponent(examId)}`
+      : `/builder/${encodeURIComponent(examId)}`;
+    if (inSatWorkspace) requestAuthoringDraftOnEntry(examId);
+    navigate(search ? `${base}?${search}` : base);
+  };
+
   const handleIssue = (issue: AssessmentValidationIssue) => {
     const { questionId, field } = parseIssueLink(issue.path);
     if (!questionId && !field) return;
     const params = new URLSearchParams();
     if (questionId) params.set("question", questionId);
     if (field) params.set("field", field);
-    const base = inSatWorkspace
-      ? `/sat/exams/${encodeURIComponent(exam.id)}`
-      : `/builder/${encodeURIComponent(exam.id)}`;
-    navigate(params.toString() ? `${base}?${params.toString()}` : base);
+    openBuilder(exam.id, params.toString());
   };
 
 
@@ -169,7 +191,7 @@ export function SatDeliveryReleaseRoute({ exam, onExamRefresh }: SatDeliveryRele
       onOpenStudentAccess={openStudentAccess}
       isPublishing={publishMutation.isPending}
       publishError={publishMutation.error instanceof Error ? publishMutation.error.message : null}
-      onBackToBuilder={() => navigate(inSatWorkspace ? `/sat/exams/${encodeURIComponent(exam.id)}` : `/builder/${encodeURIComponent(exam.id)}`)}
+      onBackToBuilder={() => openBuilder(exam.id)}
       onBackToExams={() => navigate(inSatWorkspace ? "/sat/exams" : "/admin/exams")}
       onRefreshReadiness={() => readinessQuery.refetch()}
       onPublish={handlePublish}

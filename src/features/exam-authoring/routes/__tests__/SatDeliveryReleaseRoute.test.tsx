@@ -3,6 +3,10 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExamEntity } from "../../../../types/domain";
 import type { AssessmentValidationIssue } from "../../contracts/assessment";
+import {
+  consumeAuthoringDraftOnEntry,
+  peekAuthoringDraftOnEntry,
+} from "../../application/authoringEntryIntent";
 import { SatDeliveryReleaseRoute } from "../SatDeliveryReleaseRoute";
 
 const mocks = vi.hoisted(() => ({
@@ -86,12 +90,17 @@ vi.mock("../../ui/SatDeliveryReleasePage", () => ({
     onIssueClick,
     onPublish,
     onOpenStudentAccess,
+    onBackToBuilder,
   }: {
     onIssueClick: (issue: AssessmentValidationIssue) => void;
     onPublish: (notes?: string) => Promise<void>;
     onOpenStudentAccess: () => void;
+    onBackToBuilder: () => void;
   }) => (
     <div>
+      <button type="button" onClick={onBackToBuilder}>
+        Back to builder
+      </button>
       <button
         type="button"
         onClick={() =>
@@ -161,6 +170,20 @@ function LocationProbe() {
   );
 }
 
+function renderSatRoute() {
+  render(
+    <MemoryRouter initialEntries={[`/sat/exams/${exam.id}/release`]}>
+      <Routes>
+        <Route
+          path="/sat/exams/:examId/release"
+          element={<SatDeliveryReleaseRoute exam={exam} onExamRefresh={vi.fn()} />}
+        />
+        <Route path="/sat/exams/:examId" element={<LocationProbe />} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
 function renderRoute(onExamRefresh = vi.fn().mockResolvedValue(undefined)) {
   render(
     <MemoryRouter initialEntries={[`/builder/${exam.id}/review`]}>
@@ -225,6 +248,23 @@ describe("SatDeliveryReleaseRoute", () => {
     expect(location).toContain(`"pathname":"/builder/${exam.id}"`);
     expect(location).toContain("question=q-17");
     expect(location).toContain("field=metadata.domain");
+    // The legacy builder heals its own draft, so this path arms nothing.
+    expect(peekAuthoringDraftOnEntry(exam.id)).toBe(false);
+  });
+
+  it("arms the edit gesture when a release blocker deep-links into the SAT workspace", () => {
+    renderSatRoute();
+    expect(peekAuthoringDraftOnEntry(exam.id)).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open issue" }));
+
+    expect(peekAuthoringDraftOnEntry(exam.id)).toBe(true);
+    const location = screen.getByTestId("location").textContent ?? "";
+    expect(location).toContain(`"pathname":"/sat/exams/${exam.id}"`);
+    expect(location).toContain("question=q-17");
+    expect(location).toContain("field=metadata.domain");
+
+    consumeAuthoringDraftOnEntry(exam.id);
   });
 
   it("persists Student Access as the canonical URL-addressable review mode", () => {
@@ -252,6 +292,31 @@ describe("SatDeliveryReleaseRoute", () => {
 
     expect(await screen.findByText("student-links-dashboard")).toBeInTheDocument();
     expect(onExamRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("arms the edit gesture when the product's Back to builder returns to the SAT workspace", () => {
+    // Publishing sealed the draft, so this click has to continue from the
+    // published version instead of landing on "No editable draft".
+    renderSatRoute();
+    expect(peekAuthoringDraftOnEntry(exam.id)).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to builder" }));
+
+    expect(peekAuthoringDraftOnEntry(exam.id)).toBe(true);
+    const location = screen.getByTestId("location").textContent ?? "";
+    expect(location).toContain(`"pathname":"/sat/exams/${exam.id}"`);
+
+    consumeAuthoringDraftOnEntry(exam.id);
+  });
+
+  it("does not arm the gesture for the legacy builder path, which heals its own draft", () => {
+    renderRoute();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to builder" }));
+
+    expect(peekAuthoringDraftOnEntry(exam.id)).toBe(false);
+    const location = screen.getByTestId("location").textContent ?? "";
+    expect(location).toContain(`"pathname":"/builder/${exam.id}"`);
   });
 
   it("accepts legacy Student Links URLs and returns to Release", () => {
