@@ -8,7 +8,18 @@ import { satHighlightInk, satHighlightMarkStyle } from './satAnnotationPalette';
 import { measureSatNoteMarkers } from './satAnnotationDom';
 import { satNoteMarkersEqual, type SatNoteMarker } from '../../domain/satNoteMarkers';
 import { useSatAnnotationView } from './SatAnnotationViewContext';
-import { captureSatTextSelection, isSatSelectionInsideAnnotationUi } from './satTextSelection';
+import {
+  captureSatTextRange,
+  captureSatTextSelection,
+  isSatSelectionInsideAnnotationUi,
+  satAnnotationBlockForPoint,
+} from './satTextSelection';
+import { StudentTouchSelectionOverlay } from '@shared/ui/touch-selection/StudentTouchSelectionOverlay';
+import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
+import {
+  browserCaretResolver,
+  useStudentTouchTextSelection,
+} from '@shared/ui/touch-selection/useStudentTouchTextSelection';
 import { isSatDragRelease, markSatPointerDown, markSatSelectionGestureEnded } from './satSelectionDragGuard';
 
 export const SAT_ANNOTATION_LIMIT = 200;
@@ -34,6 +45,16 @@ export const SAT_ANNOTATION_LIMIT = 200;
  * hands the platform a Copy / Look Up / Search / Share bar to show the student.
  * An unarmed or unanchorable selection is left exactly as the browser made it —
  * that is the browser's business, not ours to clear.
+ *
+ * ON A TOUCH DEVICE THERE IS NO BROWSER SELECTION TO CAPTURE, and that is the
+ * point. Retiring the selection the moment it is made is not enough there: the
+ * platform paints its Copy / Look Up / Share bar off the SELECTION EVENT, so the
+ * menu is already on screen before any handler of ours runs — which is exactly
+ * what an iPad showed, with the exam's own toolbar beside it. Exam prose is
+ * therefore `user-select: none` under a coarse pointer (see index.css) and the
+ * selection comes from the exam instead: `useStudentTouchTextSelection` builds a
+ * range the platform never learns about, and it feeds the same
+ * `captureSatTextRange` core the desktop selection does.
  */
 export function SatAnnotatedContent({ content, annotations, region, enabled, enlarge, onLimitReached }: {
   content: StructuredContent;
@@ -46,6 +67,10 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
 }) {
   const root = useRef<HTMLDivElement>(null);
   const view = useSatAnnotationView();
+  // Declared by the session route, never inferred here: a preview that renders
+  // this same component reads the conservative default and keeps the platform's
+  // own selection.
+  const examScope = useStudentExamInteractionScope();
   const [limitNotice, setLimitNotice] = useState(false);
   const limitTimer = useRef<number | null>(null);
   useEffect(() => () => { if (limitTimer.current !== null) window.clearTimeout(limitTimer.current); }, []);
@@ -64,6 +89,25 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
   reportSelection.current = view.onSelectionCaptured ?? null;
   const modeEnabled = useRef(view.annotationModeEnabled);
   modeEnabled.current = view.annotationModeEnabled;
+
+  /**
+   * Report a captured anchor, or the cap that refuses it.
+   *
+   * One path for both selection gestures — the browser's own on a mouse, the
+   * exam's on a touch device — because a captured anchor is the same fact
+   * either way, and the cap is a rule about the response rather than about how
+   * the text was chosen.
+   */
+  const reportAnchor = useCallback(
+    (anchor: SatTextAnchor) => {
+      if (annotations.annotations.length >= SAT_ANNOTATION_LIMIT) {
+        flashLimitNotice();
+        return;
+      }
+      reportSelection.current?.(anchor);
+    },
+    [annotations, flashLimitNotice],
+  );
 
   /**
    * Selection gesture. Capture is deliberately passive: a completed selection
@@ -95,10 +139,6 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         allowAnnotationControls: true,
       });
       if (!anchor) return;
-      if (annotations.annotations.length >= SAT_ANNOTATION_LIMIT) {
-        flashLimitNotice();
-        return;
-      }
       // Capture FIRST, then retire the browser's own selection. By this line the
       // anchor is fully serialized (offsets plus the exact text) and the toolbar
       // measures itself from that stored anchor rather than from
@@ -107,7 +147,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
       // Copy / Look Up / Search / Share bar over the passage — a long-press that
       // blocking `contextmenu` does not fully suppress on touch.
       selection?.removeAllRanges();
-      reportSelection.current?.(anchor);
+      reportAnchor(anchor);
     };
     // Where the gesture began, so a release far from it reads as a drag rather
     // than a tap on whatever mark it happened to end over.
@@ -130,7 +170,45 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
       document.removeEventListener('pointerup', report);
       document.removeEventListener('keyup', keyboard);
     };
-  }, [annotations, enabled, flashLimitNotice, region]);
+  }, [annotations, enabled, flashLimitNotice, region, reportAnchor]);
+
+  /**
+   * The touch path into the same capture.
+   *
+   * The range is built by the exam, so there is nothing to retire afterwards —
+   * no browser selection was ever made — and the span is confined to the
+   * paragraph the press landed in, which is the one shape an anchor can name.
+   */
+  const reportOwnedRange = useCallback(
+    (range: Range) => {
+      const element = root.current;
+      if (!element) return;
+      const anchor = captureSatTextRange(element, region, range, { allowAnnotationControls: true });
+      if (!anchor) return;
+      reportAnchor(anchor);
+    },
+    [region, reportAnchor],
+  );
+
+  // Built once: the resolver is a capability probe over `document`, and handing
+  // the hook a fresh function every render would be noise, not configuration.
+  const resolveCaretAtPoint = useMemo(() => browserCaretResolver(), []);
+
+  /**
+   * Owned selection, armed only while Highlights & Notes is.
+   *
+   * The prose is unselectable under a coarse pointer (index.css), so the mode
+   * being OFF means passage text cannot be selected at all — which is the
+   * intended anti-cheat outcome, not a gap: an unarmed mode has no use for a
+   * selection, and a platform selection is what raises the Copy / Look Up bar.
+   */
+  const touchSelection = useStudentTouchTextSelection({
+    enabled: enabled && view.annotationModeEnabled && examScope.ownedTouchSelection,
+    rootRef: root,
+    resolveCaretAtPoint,
+    onSelect: reportOwnedRange,
+    boundaryFor: satAnnotationBlockForPoint,
+  });
 
   const contentKey = JSON.stringify(content);
 
@@ -322,6 +400,10 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
           </div>
         ) : null}
       </div>
+
+      {touchSelection.rects.length > 0 ? (
+        <StudentTouchSelectionOverlay rects={touchSelection.rects} />
+      ) : null}
 
       {limitNotice ? (
         <p role="alert" data-testid={"sat-annotation-limit-" + region} className="mb-2 rounded-[8px] border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-3 py-2 text-[13px] font-medium text-[var(--sat-danger)]">

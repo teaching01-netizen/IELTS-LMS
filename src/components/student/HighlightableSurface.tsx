@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
 import type { RefObject } from 'react';
+import { StudentTouchSelectionOverlay } from '@shared/ui/touch-selection/StudentTouchSelectionOverlay';
+import type { TouchSelectionRect } from '@shared/ui/touch-selection/touchSelectionRange';
 
 interface HighlightableSurfaceProps {
   as: 'div' | 'p' | 'span';
@@ -10,6 +12,8 @@ interface HighlightableSurfaceProps {
   suppressTouchCallout?: boolean | undefined;
   highlightSelectionColor?: string | undefined;
   announce?: string | null | undefined;
+  /** Lines of an owned touch selection, when the session declared one. */
+  selectionRects?: readonly TouchSelectionRect[] | undefined;
 }
 
 export function HighlightableSurface({
@@ -21,6 +25,7 @@ export function HighlightableSurface({
   suppressTouchCallout = false,
   highlightSelectionColor,
   announce = null,
+  selectionRects = [],
 }: HighlightableSurfaceProps) {
   const Tag = as as any;
   // If this object identity changes on every render, React may re-apply innerHTML
@@ -57,6 +62,10 @@ export function HighlightableSurface({
       <span className="sr-only" role="status" aria-live="polite">
         {announce ?? ''}
       </span>
+      {/* An owned selection has no browser selection behind it, so the surface
+          paints the lines itself — otherwise a student dragging across text
+          would see nothing at all until the mark appeared. */}
+      <StudentTouchSelectionOverlay rects={selectionRects} />
       {hint ? (
         <div
           role="status"

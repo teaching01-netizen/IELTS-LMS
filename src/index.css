@@ -887,6 +887,46 @@
     user-select: text;
   }
 
+  /* ON A TOUCH DEVICE THE SELECTION ITSELF IS THE LEAK.
+
+     The rule above keeps the platform's long-press callout off the passage
+     while leaving text selectable. An iPad showed that is not enough: Apple's
+     Copy / Find / Look Up bar is attached to the SELECTION, not to the callout,
+     so it appeared over the passage anyway — with the exam's own Highlights
+     toolbar beside it, two menus fighting over one gesture.
+
+     There is no property that keeps a selection and drops the menu; the menu is
+     the platform's response to the selection existing. So under a coarse
+     pointer the selection is removed here, and the exam supplies its own
+     (`useStudentTouchTextSelection`): a long press then a drag builds a range
+     the platform never learns about, and it paints its own selection and the
+     student's own Highlight / Underline / Note toolbar.
+
+     Both content surfaces are named here, and both must stay paired with a
+     gesture that replaces what this removes: SAT prose, and IELTS's highlightable
+     passages and transcripts. A selector listed without a gesture behind it
+     deletes a feature instead of protecting it.
+
+     The SAT boundary holds because the answer controls are rendered as a
+     SIBLING of `.sat-exam-prose`, never its descendant (see `SatQuestionBody`
+     and `SatQuestionWorkspace`), so answer fields, the note editor, and the
+     calculator keep every native behavior. Nothing here is `selectstart`,
+     `touchstart`, or a document-wide `user-select: none`.
+
+     Scoped to `pointer: coarse` (the PRIMARY input) rather than `any-pointer`,
+     so a touchscreen laptop with a mouse keeps the desktop behavior. An iPad
+     reports `coarse` even with a trackpad attached, which is why the owned
+     gesture handles mouse drags there too — the JS and this query agree. */
+  @media (pointer: coarse) {
+    .student-exam-active .sat-exam-prose,
+    .student-exam-active .sat-exam-prose *,
+    .student-exam-active [data-student-highlightable="true"],
+    .student-exam-active [data-student-highlightable="true"] * {
+      -webkit-user-select: none;
+      user-select: none;
+    }
+  }
+
   /* Exam content is not a drag source: dragging an image or a link would carry
      what the student is reading out of the exam. This is element dragging, not
      text selection — a text drag inside the passage still behaves natively. */

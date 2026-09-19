@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   addHighlightRange,
+  captureSurfaceRange,
   captureSurfaceSelection,
   eraseHighlightRange,
   HIGHLIGHT_ENGINE,
@@ -57,6 +58,53 @@ describe('highlight v2 engine', () => {
       { start: 0, end: 3, color: YELLOW },
       { start: 7, end: 10, color: BLUE },
     ]);
+  });
+
+  it('captures a span from a range the app made, with no browser selection involved', () => {
+    const container = document.createElement('div');
+    container.innerHTML = '<p>Alpha beta gamma</p>';
+    const textNode = container.querySelector('p')?.firstChild;
+    if (!(textNode instanceof Text)) throw new Error('Expected paragraph text node');
+    const range = document.createRange();
+    range.setStart(textNode, 6);
+    range.setEnd(textNode, 10);
+
+    // The owned touch path: exam prose is unselectable on a coarse pointer, so
+    // the range is what the app built, and the captured highlight is identical
+    // to the one the platform's own selection would have produced.
+    expect(captureSurfaceRange(container, range)).toEqual({
+      start: 6,
+      end: 10,
+      selectedText: 'beta',
+    });
+    expect(window.getSelection()?.rangeCount).toBe(0);
+  });
+
+  it('captures a span that crosses blocks, and refuses one over a control', () => {
+    const container = document.createElement('div');
+    container.innerHTML = '<p>Alpha</p><p>beta</p>';
+    const [first, second] = Array.from(container.querySelectorAll('p')).map(
+      (element) => element.firstChild as Text,
+    );
+    const acrossBlocks = document.createRange();
+    acrossBlocks.setStart(first!, 2);
+    acrossBlocks.setEnd(second!, 2);
+
+    // A highlight may span blocks within one surface, and the captured offsets
+    // are measured over the surface's text: "pha" then "be".
+    expect(captureSurfaceRange(container, acrossBlocks)).toEqual({
+      start: 2,
+      end: 7,
+      selectedText: 'phabe',
+    });
+
+    const withField = document.createElement('div');
+    withField.innerHTML = '<textarea>Alpha</textarea>';
+    const fieldRange = document.createRange();
+    fieldRange.setStart(withField.querySelector('textarea')!.firstChild!, 0);
+    fieldRange.setEnd(withField.querySelector('textarea')!.firstChild!, 5);
+
+    expect(captureSurfaceRange(withField, fieldRange)).toBeNull();
   });
 
   it('enforces per-surface range cap', () => {

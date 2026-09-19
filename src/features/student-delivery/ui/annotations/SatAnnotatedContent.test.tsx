@@ -1,9 +1,10 @@
-import { fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSatTextAnnotation, emptySatAnnotations } from '../../domain/satResponses';
 import { clearSatGestureOrigin, clearSatSelectionGesture, markSatPointerDown } from './satSelectionDragGuard';
 import { SatAnnotatedContent } from './SatAnnotatedContent';
 import { SatAnnotationViewContext, type SatAnnotationView } from './SatAnnotationViewContext';
+import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
 
 const content = (text = 'A tree grows.') => ({ version: 1 as const, nodes: [{ type: 'paragraph' as const, id: 'p', text }] });
 
@@ -57,17 +58,28 @@ function stubMarkLines(tops: Record<string, number>) {
   };
 }
 
-function renderContent(props: Partial<React.ComponentProps<typeof SatAnnotatedContent>> = {}, annotationView = view()) {
+/**
+ * Render the passage. `ownedTouchSelection` stands for the session scope the
+ * route declares: it defaults OFF here, exactly as it is outside real student
+ * delivery, so a case that needs it has to say so.
+ */
+function renderContent(
+  props: Partial<React.ComponentProps<typeof SatAnnotatedContent>> = {},
+  annotationView = view(),
+  options: { ownedTouchSelection?: boolean } = {},
+) {
   return render(
-    <SatAnnotationViewContext.Provider value={annotationView}>
-      <SatAnnotatedContent
-        content={content()}
-        annotations={emptySatAnnotations()}
-        region="stimulus"
-        enabled
-        {...props}
-      />
-    </SatAnnotationViewContext.Provider>,
+    <StudentExamInteractionScopeProvider ownedTouchSelection={options.ownedTouchSelection ?? false}>
+      <SatAnnotationViewContext.Provider value={annotationView}>
+        <SatAnnotatedContent
+          content={content()}
+          annotations={emptySatAnnotations()}
+          region="stimulus"
+          enabled
+          {...props}
+        />
+      </SatAnnotationViewContext.Provider>
+    </StudentExamInteractionScopeProvider>,
   );
 }
 
@@ -435,5 +447,169 @@ describe('SAT annotation rendering', () => {
     const mark = container.querySelector('[data-sat-highlight="true"]')!;
     expect(mark).not.toHaveAttribute('role');
     expect(mark).not.toHaveAttribute('data-sat-annotation-control');
+  });
+});
+
+type PointCapable = Document & {
+  caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+};
+
+/**
+ * The owned touch gesture, end to end.
+ *
+ * This is the iPad case. The exam's prose is `user-select: none` under a coarse
+ * pointer, so the platform never makes a selection — and the exam makes one
+ * itself instead. What these cases pin is that the owned range reaches the very
+ * same capture the desktop selection does, while `window.getSelection()` stays
+ * empty the whole time. The empty selection is the point: it is what the
+ * platform attaches its Copy / Find / Look Up bar to.
+ *
+ * jsdom has no hit test and no media queries, so both capabilities are stubbed
+ * at the boundary the hook takes them from. Everything else — the hold, the
+ * tolerance, the ordering, the capture — runs for real.
+ */
+describe('SAT owned touch selection', () => {
+  let restoreEnvironment: (() => void) | null = null;
+
+  afterEach(() => {
+    restoreEnvironment?.();
+    restoreEnvironment = null;
+    vi.useRealTimers();
+  });
+
+  function stubCoarsePointerDevice() {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes('pointer: coarse'),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    return () => {
+      window.matchMedia = original;
+    };
+  }
+
+  function stubHitTest(leaf: Text) {
+    const capable = document as PointCapable;
+    const original = capable.caretPositionFromPoint;
+    capable.caretPositionFromPoint = (x: number) => ({ offsetNode: leaf, offset: Math.round(x) });
+    return () => {
+      if (original) capable.caretPositionFromPoint = original;
+      else delete capable.caretPositionFromPoint;
+    };
+  }
+
+  function longPressAndDrag(clientX: number[]) {
+    const region = document.querySelector('[data-sat-annotation-region]')!;
+    vi.useFakeTimers();
+    fireEvent.pointerDown(region, { pointerType: 'touch', pointerId: 1, clientX: clientX[0], clientY: 10 });
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+    for (const x of clientX.slice(1)) {
+      fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: x, clientY: 10 });
+    }
+    fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
+  }
+
+  it('captures an anchor from a hold-and-drag without ever making a browser selection', () => {
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ onSelectionCaptured }), { ownedTouchSelection: true });
+    const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
+    const restoreMedia = stubCoarsePointerDevice();
+    const restoreHit = stubHitTest(leaf);
+    restoreEnvironment = () => {
+      restoreHit();
+      restoreMedia();
+    };
+
+    longPressAndDrag([2, 4, 6]);
+
+    expect(onSelectionCaptured).toHaveBeenCalledWith({
+      nodeId: 'stimulus:p',
+      startOffset: 2,
+      endOffset: 6,
+      exact: 'tree',
+      prefix: 'A ',
+      suffix: ' grows.',
+    });
+    expect(window.getSelection()?.rangeCount).toBe(0);
+  });
+
+  it('takes the word under the hold when the finger never travels', () => {
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ onSelectionCaptured }), { ownedTouchSelection: true });
+    const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
+    const restoreMedia = stubCoarsePointerDevice();
+    const restoreHit = stubHitTest(leaf);
+    restoreEnvironment = () => {
+      restoreHit();
+      restoreMedia();
+    };
+
+    // Offset 7 is the "g" of "grows": a hold, a release, and nothing else.
+    longPressAndDrag([7]);
+
+    expect(onSelectionCaptured).toHaveBeenCalledWith(
+      expect.objectContaining({ exact: 'grows', startOffset: 7, endOffset: 12 }),
+    );
+  });
+
+  it('owns nothing while the annotation mode is off, which is all a platform selection ever did', () => {
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ annotationModeEnabled: false, onSelectionCaptured }), { ownedTouchSelection: true });
+    const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
+    const restoreMedia = stubCoarsePointerDevice();
+    const restoreHit = stubHitTest(leaf);
+    restoreEnvironment = () => {
+      restoreHit();
+      restoreMedia();
+    };
+
+    longPressAndDrag([2, 6]);
+
+    expect(onSelectionCaptured).not.toHaveBeenCalled();
+  });
+
+  it('declares nothing outside a real exam session, so a preview keeps the platform selection', () => {
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ onSelectionCaptured }));
+    const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
+    const restoreMedia = stubCoarsePointerDevice();
+    const restoreHit = stubHitTest(leaf);
+    restoreEnvironment = () => {
+      restoreHit();
+      restoreMedia();
+    };
+
+    // Scope defaults to false: same coarse pointer, same hit test, no ownership.
+    longPressAndDrag([2, 6]);
+    expect(onSelectionCaptured).not.toHaveBeenCalled();
+  });
+
+  it('leaves a fine-pointer device to the platform, which still makes its own selection', () => {
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ onSelectionCaptured }), { ownedTouchSelection: true });
+    const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
+    const restoreMedia = stubCoarsePointerDevice();
+    const restoreHit = stubHitTest(leaf);
+    restoreEnvironment = () => {
+      restoreHit();
+      restoreMedia();
+    };
+    // A desktop browser reports a fine primary pointer, so the owned gesture
+    // stands down and the native path below still works.
+    window.matchMedia = (() => ({ matches: false })) as unknown as typeof window.matchMedia;
+
+    longPressAndDrag([2, 6]);
+    expect(onSelectionCaptured).not.toHaveBeenCalled();
+
+    selectText(container, 2, 6);
+    expect(onSelectionCaptured).toHaveBeenCalledWith(expect.objectContaining({ exact: 'tree' }));
   });
 });

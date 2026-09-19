@@ -72,3 +72,68 @@ describe('student exam content callout guard CSS', () => {
     expect(rulesWith('.student-exam-active a', '-webkit-user-drag: none')).toHaveLength(1);
   });
 });
+
+/** The bodies of every `@media (<query>)` block, brace-counted. */
+function mediaBlocks(css: string, query: string): string[] {
+  const blocks: string[] = [];
+  const marker = `@media ${query}`;
+  let index = css.indexOf(marker);
+  while (index !== -1) {
+    const open = css.indexOf('{', index);
+    let depth = 1;
+    let cursor = open + 1;
+    while (cursor < css.length && depth > 0) {
+      if (css[cursor] === '{') depth += 1;
+      else if (css[cursor] === '}') depth -= 1;
+      cursor += 1;
+    }
+    blocks.push(css.slice(open + 1, cursor - 1));
+    index = css.indexOf(marker, cursor);
+  }
+  return blocks;
+}
+
+describe('owned touch selection CSS', () => {
+  // The selection itself is what iOS and Android attach their Copy / Look Up /
+  // Share bar to, so on a coarse pointer the exam removes the platform's
+  // selection and supplies its own (`useStudentTouchTextSelection`). These
+  // assertions pin the half that cannot be tested in jsdom: which devices get
+  // it, which surfaces it covers, and what it must never touch.
+  const css = readFileSync(resolve(__dirname, '../../../index.css'), 'utf8').replace(
+    /\/\*[\s\S]*?\*\//g,
+    '',
+  );
+  const coarseBlocks = mediaBlocks(css, '(pointer: coarse)');
+  const owned = coarseBlocks.filter((block) => block.includes('.sat-exam-prose'));
+
+  it('removes native selection from both exam content surfaces, and only there', () => {
+    expect(owned).toHaveLength(1);
+    expect(owned[0]).toContain('.student-exam-active .sat-exam-prose');
+    expect(owned[0]).toContain('.student-exam-active .sat-exam-prose *');
+    // IELTS passages and transcripts, whose capture path now takes an owned
+    // range too. A selector here without a gesture behind it would delete
+    // highlighting rather than protect it, so the pairing is asserted, not
+    // assumed.
+    expect(owned[0]).toContain('.student-exam-active [data-student-highlightable="true"]');
+    expect(owned[0]).toContain('.student-exam-active [data-student-highlightable="true"] *');
+    expect(owned[0]).toContain('-webkit-user-select: none');
+    expect(owned[0]).toMatch(/;\s*user-select: none/);
+  });
+
+  it('reaches no answer control, and no surface without an owned gesture behind it', () => {
+    // Selectors only: `user-select` is a declaration here, and reading the raw
+    // block would match the word "select" inside it.
+    const guarded = [...owned.join('\n').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .map(([, selectors = '']) => selectors.trim())
+      .join(',\n');
+
+    expect(guarded).toContain('.student-exam-active .sat-exam-prose');
+    expect(guarded).toContain('data-student-highlightable');
+    expect(guarded).not.toMatch(/input|textarea|select|button|contenteditable/);
+    expect(guarded).not.toContain('student-exam-active img');
+  });
+
+  it('is scoped to the primary pointer, not to any touch-capable screen', () => {
+    expect(css).not.toContain('any-pointer: coarse');
+  });
+});

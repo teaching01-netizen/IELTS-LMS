@@ -6,12 +6,24 @@ import { useAuthSession } from '../../auth/api/authSession';
 import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRouteData';
 import { SatStudentSessionRoute } from '../../student-delivery/routes/SatStudentSessionRoute';
 import { SatLoadingSurface } from '../../student-delivery/api/satStateSurfaces';
+import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
 
 /**
  * Student Session Route
  *
  * Active student delivery is schedule-backed and keeps pre-check/lobby/exam/complete
  * as internal runtime phases inside a single route module.
+ *
+ * This module also DECLARES the session's interaction scope, above the point
+ * where the two products diverge, and it is deliberately the only place that
+ * does. Reaching real delivery means the student is sitting a real, locked exam,
+ * so both providers below — SAT and IELTS — get an owned selection gesture from
+ * the same declaration instead of each deciding for itself.
+ *
+ * Nothing else is in scope, and that is the point: the loading, error, and
+ * not-found surfaces above return without it, and staff preview mounts
+ * `StudentAppWrapper` directly rather than through here, so a preview reads the
+ * conservative default and keeps the platform's own selection.
  */
 export function StudentSessionRoute() {
   const { scheduleId, studentId } = useParams<{ scheduleId: string; studentId?: string }>();
@@ -146,37 +158,41 @@ export function StudentSessionRoute() {
     }
 
     return (
-      <SatStudentSessionRoute
-        scheduleId={scheduleId}
-        attemptId={attemptSnapshot.id}
-        candidateId={attemptSnapshot.candidateId}
-        attemptSnapshot={attemptSnapshot}
-        runtimeSnapshot={runtimeSnapshot}
-        liveSocketConnected={liveSocketConnected}
-        attemptUpdateToken={satAttemptUpdateToken}
-        leaseEpoch={attemptSnapshot.leaseEpoch}
-        controlEpoch={attemptSnapshot.controlEpoch}
-        bootstrapSeed={satBootstrapSeed}
-        initialIsLoading={false}
-        onExit={navigateToStudentCheckIn}
-      />
+      <StudentExamInteractionScopeProvider ownedTouchSelection>
+        <SatStudentSessionRoute
+          scheduleId={scheduleId}
+          attemptId={attemptSnapshot.id}
+          candidateId={attemptSnapshot.candidateId}
+          attemptSnapshot={attemptSnapshot}
+          runtimeSnapshot={runtimeSnapshot}
+          liveSocketConnected={liveSocketConnected}
+          attemptUpdateToken={satAttemptUpdateToken}
+          leaseEpoch={attemptSnapshot.leaseEpoch}
+          controlEpoch={attemptSnapshot.controlEpoch}
+          bootstrapSeed={satBootstrapSeed}
+          initialIsLoading={false}
+          onExit={navigateToStudentCheckIn}
+        />
+      </StudentExamInteractionScopeProvider>
     );
   }
 
   return (
-    <StudentAppWrapper
-      state={state}
-      onExit={navigateToStudentCheckIn}
-      scheduleId={scheduleId}
-      attemptSnapshot={attemptSnapshot}
-      onRuntimeRefresh={refreshRuntime}
-      runtimeSnapshot={runtimeSnapshot}
-      answerInvariantRollout={answerInvariantRollout}
-      // Cohort/runtime-backed IELTS sessions are completed by the proctor or
-      // authoritative timeout. The student can save answers but must not
-      // locally advance or terminalize the shared runtime.
-      showSubmitControls={false}
-      allowExitDuringExam={false}
-    />
+    <StudentExamInteractionScopeProvider ownedTouchSelection>
+      <StudentAppWrapper
+        state={state}
+        onExit={navigateToStudentCheckIn}
+        scheduleId={scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        onRuntimeRefresh={refreshRuntime}
+        runtimeSnapshot={runtimeSnapshot}
+        answerInvariantRollout={answerInvariantRollout}
+        // Cohort/runtime-backed IELTS sessions are completed by the proctor or
+        // authoritative timeout. The student can save answers but must not
+        // locally advance or terminalize the shared runtime.
+        showSubmitControls={false}
+        allowExitDuringExam={false}
+      />
+    </StudentExamInteractionScopeProvider>
   );
 }
