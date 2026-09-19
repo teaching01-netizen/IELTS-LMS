@@ -137,6 +137,33 @@ export function isInitializedRichRoot(shared: unknown): boolean {
   return shared instanceof Y.XmlFragment && shared.length > 0;
 }
 
+/**
+ * The typed fragment behind one `rich:` entry of `ydoc.share`, or null when the
+ * entry is not a rich root at all.
+ *
+ * A root that arrives from the room BEFORE anything in this tab asked the
+ * document for it — which is every root of every question this tab has not
+ * opened an editor on yet — is materialized by Yjs as a bare placeholder
+ * `AbstractType`, not an `XmlFragment`. `Doc.get` upgrades that placeholder in
+ * place on the first typed access and keeps its content. Reading the share map
+ * with a plain `instanceof` skipped exactly those roots, so a question the room
+ * already held was never projected, never counted as hydrated, and its seed
+ * proposal bailed out on a populated fragment without recording anything: the
+ * field sat on "the shared copy was never requested" until some unrelated
+ * change made the room re-publish.
+ */
+function materializeRichRoot(ydoc: Y.Doc, name: string, shared: unknown): Y.XmlFragment | null {
+  if (shared instanceof Y.XmlFragment) return shared;
+  // Only a placeholder may be upgraded. A root defined with another concrete
+  // type under a `rich:` name is a foreign shape and stays out of the projection.
+  if (!(shared instanceof Y.AbstractType) || shared.constructor !== Y.AbstractType) return null;
+  try {
+    return ydoc.getXmlFragment(name);
+  } catch {
+    return null;
+  }
+}
+
 /** The shipped projection: a shared fragment read back as structured content. */
 function projectRichFragmentFromDocument(ydoc: Y.Doc, rootName: string): unknown {
   return structuredContentFromDocument(
@@ -560,8 +587,14 @@ export class SatAuthoringWorkspaceProvider {
     // details. Project them into the snapshot so an optional/collapsed editor
     // still reflects a collaborator's update immediately. The editor binding
     // remains the writer; this is read-only UI projection.
-    for (const [name, shared] of this.ydoc.share) {
-      if (!name.startsWith(RICH_ROOT_PREFIX) || !(shared instanceof Y.XmlFragment)) continue;
+    for (const [name, entry] of this.ydoc.share) {
+      if (!name.startsWith(RICH_ROOT_PREFIX)) continue;
+      // A root synced from the room that this tab never touched is only a
+      // placeholder until it is asked for as a fragment; asking is what makes
+      // it readable here (see `materializeRichRoot`). Upgrading replaces the
+      // map entry for the SAME key, which is safe mid-iteration.
+      const shared = materializeRichRoot(this.ydoc, name, entry);
+      if (!shared) continue;
       // Observe first, so a root that is empty now becomes dirty the moment its
       // seed (or a collaborator) puts content in it.
       this.observeRichRoot(name, shared);

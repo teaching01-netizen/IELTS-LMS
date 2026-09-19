@@ -300,6 +300,39 @@ describe("SAT workspace snapshot", () => {
     expect(valueOf(snapshots.at(-1)!, ROOT_B)).toContain("Prompt from Mira");
   });
 
+  it("projects a rich root the room already holds before this tab ever touched it", () => {
+    // The exam already has content: a previous session seeded the question and
+    // the room replays it at initial sync. This tab has NOT asked its document
+    // for the root (no editor is mounted while the field waits to hydrate), so
+    // Yjs materializes the incoming root as a bare placeholder type rather than
+    // an XmlFragment. Skipping it left the field "never requested" forever: the
+    // seed proposal saw a populated fragment and bailed out without a word.
+    const { provider, transport } = openRoom();
+    const snapshots: WorkspaceCoeditSnapshot[] = [];
+    provider.subscribe((next) => snapshots.push(next));
+
+    const room = new Y.Doc();
+    const peer = new SatAuthoringWorkspaceProvider({
+      documentName: DOCUMENT_NAME,
+      serviceUrl: "ws://127.0.0.1:0",
+      token: { token: "session-token", expiresAt: Math.floor(Date.now() / 1000) + 3600 },
+      self: { actorId: "actor-2", displayName: "Mira" },
+      readOnly: false,
+      refreshToken: async () => ({ token: "session-token", expiresAt: Math.floor(Date.now() / 1000) + 3600 }),
+    });
+    rooms.push(peer);
+    peer.setRichField(PROMPT_FIELD, plainContentFromText("Held by the room"));
+    Y.applyUpdate(room, Y.encodeStateAsUpdate(peer.ydoc));
+    Y.applyUpdate(provider.ydoc, Y.encodeStateAsUpdate(room), "remote");
+    room.destroy();
+
+    expect(isWorkspaceRichContent(snapshots.at(-1)!.values[ROOT_B])).toBe(true);
+    expect(textWithin(snapshots.at(-1)!.values[ROOT_B])).toContain("Held by the room");
+    // A root the room holds is never re-proposed.
+    expect(provider.seedRichField(PROMPT_FIELD, plainContentFromText("Local copy"))).toBe(false);
+    expect(seededPaths(transport)).toEqual([]);
+  });
+
   it("projects rich roots and scalar fields with the shipped conversion by default", () => {
     const { provider } = openRoom();
     const snapshots: WorkspaceCoeditSnapshot[] = [];
