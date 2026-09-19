@@ -57,7 +57,10 @@ vi.mock("../useSatResponsePersistence", () => ({
   useSatResponsePersistence: () => persistenceMock,
 }));
 vi.mock("../useSatIntegrityControl", () => ({
-  useSatIntegrityControl: () => undefined,
+  useSatIntegrityControl: () => ({
+    pendingTabSwitchWarning: null,
+    acknowledgeTabSwitchWarning: () => undefined,
+  }),
 }));
 
 const SERVER_NOW = new Date("2026-09-10T08:00:00.000Z").toISOString();

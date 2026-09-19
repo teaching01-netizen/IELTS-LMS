@@ -1,6 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getDeviceFingerprint } from '../../../utils/deviceFingerprinting';
 import { emitStudentObservabilityMetric } from '../../../utils/studentObservability';
+import { useExamVisibilityIntegrity } from '@student/api/useExamVisibilityIntegrity';
+import {
+  EXAM_VISIBILITY_WARNING_MESSAGE,
+  examVisibilityAuditDetail,
+  type ExamVisibilityExcursion,
+} from '@student/api/examVisibilityIntegrity';
 import { assessmentDeliveryApi } from '../api/assessmentDeliveryApi';
 import { shouldSkipHeartbeat } from '../heartbeatCoalesce';
 
@@ -15,6 +21,20 @@ function violationId(type: string) {
   return `${type}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
 
+/**
+ * SAT adapter for exam integrity.
+ *
+ * Detection itself is provider-neutral (`useExamVisibilityIntegrity`): one
+ * `visible -> hidden -> visible` excursion is one `TAB_SWITCH`. This hook owns
+ * only the SAT-specific reaction — a delivery audit plus the pending warning
+ * the route renders — so IELTS/ACT and SAT cannot drift on what counts as a
+ * tab switch. The old SAT handler reported on `hidden` alone, which double-
+ * counted lifecycle noise and never reached the student.
+ *
+ * Policy note: the client records the violation and shows the warning; whether
+ * the sitting continues or is terminated stays with the existing proctor
+ * auto-response rules on the server (which already understand `TAB_SWITCH`).
+ */
 export function useSatIntegrityControl({
   scheduleId,
   attemptId,
@@ -22,6 +42,69 @@ export function useSatIntegrityControl({
   enforceInteractionGuards,
 }: SatIntegrityControlOptions) {
   const lastViolationAt = useRef(new Map<string, number>());
+  const enforceRef = useRef(enforceInteractionGuards);
+  useEffect(() => {
+    enforceRef.current = enforceInteractionGuards;
+  }, [enforceInteractionGuards]);
+  // A pending warning survives a phase change (the excursion happened during
+  // the exam), and only student acknowledgement clears it.
+  const [pendingTabSwitchWarning, setPendingTabSwitchWarning] =
+    useState<ExamVisibilityExcursion | null>(null);
+  const acknowledgeTabSwitchWarning = useCallback(() => {
+    setPendingTabSwitchWarning(null);
+  }, []);
+  // A rotated attempt must not inherit the previous student's warning.
+  useEffect(() => {
+    setPendingTabSwitchWarning(null);
+  }, [attemptId, scheduleId]);
+
+  /** True while the student may actually answer. The route's phase gate. */
+  const integrityActive = enforceInteractionGuards;
+
+  const reportViolation = useCallback(
+    (
+      type: string,
+      severity: 'low' | 'medium' | 'high' | 'critical',
+      message: string,
+      detail: Record<string, unknown>,
+    ) => {
+      if (!enforceRef.current) return;
+      const now = Date.now();
+      // Interaction noise repeats; a visibility excursion cannot. Charging each
+      // excursion means TAB_SWITCH carries no cooldown (one leave = one event),
+      // while keyboard/clipboard/menu bursts stay coalesced.
+      const cooldownMs = type === 'TAB_SWITCH' ? 0 : 1_000;
+      const last = lastViolationAt.current.get(type) ?? 0;
+      if (cooldownMs > 0 && now - last < cooldownMs) return;
+      lastViolationAt.current.set(type, now);
+      void assessmentDeliveryApi.recordAudit(scheduleId, attemptId, 'VIOLATION_DETECTED', {
+        violationId: violationId(type),
+        violationType: type,
+        severity,
+        message,
+        ...detail,
+      }).catch(() => undefined);
+    },
+    [attemptId, scheduleId],
+  );
+
+  const onVisibilityExcursion = useCallback(
+    (excursion: ExamVisibilityExcursion) => {
+      reportViolation('TAB_SWITCH', 'medium', EXAM_VISIBILITY_WARNING_MESSAGE, {
+        interactionSurface: 'exam',
+        ...examVisibilityAuditDetail(excursion),
+      });
+      setPendingTabSwitchWarning(excursion);
+    },
+    [reportViolation],
+  );
+
+  useExamVisibilityIntegrity({
+    active: integrityActive,
+    enabled: integrityActive,
+    onViolation: onVisibilityExcursion,
+  });
+
   // Plan C5: last successful write stamps presence — beats inside the
   // server window are pure load (the ack echoes presence state).
   const lastWriteAtRef = useRef<number | null>(null);
@@ -86,54 +169,42 @@ export function useSatIntegrityControl({
       if (!(target instanceof Element)) return 'exam';
       return target.closest('[data-sat-trusted-tool="desmos"]') ? 'desmos' : 'exam';
     };
-    const reportViolation = (
-      type: string,
-      severity: 'low' | 'medium' | 'high' | 'critical',
-      message: string,
-      surface = 'exam',
-    ) => {
-      const now = Date.now();
-      const last = lastViolationAt.current.get(type) ?? 0;
-      if (now - last < 1_000) return;
-      lastViolationAt.current.set(type, now);
-      void assessmentDeliveryApi.recordAudit(scheduleId, attemptId, 'VIOLATION_DETECTED', {
-        violationId: violationId(type),
-        violationType: type,
-        severity,
-        message,
-        interactionSurface: surface,
-      }).catch(() => undefined);
-    };
-
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') {
-        reportViolation('TAB_SWITCH', 'medium', 'Candidate left the SAT exam window.');
-      }
-    };
     const blockClipboard = (event: ClipboardEvent) => {
       event.preventDefault();
-      reportViolation('CLIPBOARD_ATTEMPT', 'medium', 'Clipboard use was blocked during the SAT exam.', interactionSurface(event.target));
+      reportViolation('CLIPBOARD_ATTEMPT', 'medium', 'Clipboard use was blocked during the SAT exam.', {
+        interactionSurface: interactionSurface(event.target),
+      });
     };
     const onContextMenu = (event: MouseEvent) => {
       event.preventDefault();
-      reportViolation('CONTEXT_MENU', 'low', 'Context menu use was blocked during the SAT exam.', interactionSurface(event.target));
+      reportViolation('CONTEXT_MENU', 'low', 'Context menu use was blocked during the SAT exam.', {
+        interactionSurface: interactionSurface(event.target),
+      });
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'PrintScreen') {
-        reportViolation('SCREENSHOT_ATTEMPT', 'high', 'Screenshot key was detected during the SAT exam.');
+        reportViolation('SCREENSHOT_ATTEMPT', 'high', 'Screenshot key was detected during the SAT exam.', {
+          interactionSurface: 'exam',
+        });
       }
       const command = event.metaKey || event.ctrlKey;
       if (command && ['f', 'p', 's'].includes(event.key.toLowerCase())) {
         event.preventDefault();
-        reportViolation('RESTRICTED_SHORTCUT', 'low', `Restricted shortcut ${event.key.toUpperCase()} was blocked.`, interactionSurface(event.target));
+        reportViolation('RESTRICTED_SHORTCUT', 'low', `Restricted shortcut ${event.key.toUpperCase()} was blocked.`, {
+          interactionSurface: interactionSurface(event.target),
+        });
       }
     };
     const checkExtendedScreen = () => {
       const extended = (window.screen as Screen & { isExtended?: boolean }).isExtended;
-      if (extended) reportViolation('SECONDARY_SCREEN', 'high', 'A secondary display was detected during the SAT exam.');
+      if (extended) {
+        reportViolation('SECONDARY_SCREEN', 'high', 'A secondary display was detected during the SAT exam.', {
+          interactionSurface: 'exam',
+        });
+      }
     };
 
-    document.addEventListener('visibilitychange', onVisibility);
+    // No `visibilitychange` listener here: the shared integrity rule owns it.
     document.addEventListener('copy', blockClipboard);
     document.addEventListener('cut', blockClipboard);
     document.addEventListener('paste', blockClipboard);
@@ -142,7 +213,6 @@ export function useSatIntegrityControl({
     window.addEventListener('resize', checkExtendedScreen);
     checkExtendedScreen();
     return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
       document.removeEventListener('copy', blockClipboard);
       document.removeEventListener('cut', blockClipboard);
       document.removeEventListener('paste', blockClipboard);
@@ -150,5 +220,7 @@ export function useSatIntegrityControl({
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('resize', checkExtendedScreen);
     };
-  }, [attemptId, enforceInteractionGuards, scheduleId]);
+  }, [enforceInteractionGuards, reportViolation]);
+
+  return { pendingTabSwitchWarning, acknowledgeTabSwitchWarning } as const;
 }

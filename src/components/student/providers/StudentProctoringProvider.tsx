@@ -7,18 +7,31 @@ import React, {
   useRef,
   type ReactNode,
 } from 'react';
+import { useExamVisibilityIntegrity } from '@student/api/useExamVisibilityIntegrity';
+import {
+  EXAM_VISIBILITY_WARNING_MESSAGE,
+  examVisibilityAuditDetail,
+  type ExamVisibilityExcursion,
+} from '@student/api/examVisibilityIntegrity';
 import { saveStudentAuditEvent } from '@student/application/studentAttemptFacade';
 import { ExamConfig, ViolationSeverity } from '../../../types';
-import { isAppleMobileDevice } from '../appleMobileDevice';
 import { useStudentAttempt } from './StudentAttemptProvider';
 import { useStudentRuntime, useStudentRuntimeSession } from './StudentRuntimeProvider';
 import { useStudentTranslationGuard } from './useStudentTranslationGuard';
 
 interface ProctoringContextValue {
+  /**
+   * Records one violation through the existing pipeline: runtime violation →
+   * attempt persistence → `VIOLATION_DETECTED` audit → severity policy. The
+   * optional `details` are merged into the audit payload (never into the
+   * student-visible message) so integrity events can carry the evidence that
+   * applies to them without changing the shared enforcement path.
+   */
   handleViolation: (
     type: string,
     message: string,
     severity?: ViolationSeverity,
+    details?: Record<string, unknown>,
   ) => void;
 }
 
@@ -35,49 +48,6 @@ function isSafariBrowser() {
   return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 }
 
-function isTextInputElement(element: Element | null): boolean {
-  if (!element) {
-    return false;
-  }
-
-  const tag = element.tagName?.toLowerCase?.() ?? '';
-  if (tag === 'textarea') {
-    return true;
-  }
-
-  if (tag === 'input') {
-    const type = (element as HTMLInputElement).type?.toLowerCase?.() ?? 'text';
-    const nonTextTypes = new Set([
-      'button',
-      'checkbox',
-      'color',
-      'date',
-      'datetime-local',
-      'file',
-      'hidden',
-      'image',
-      'month',
-      'radio',
-      'range',
-      'reset',
-      'submit',
-      'time',
-      'week',
-    ]);
-    return !nonTextTypes.has(type);
-  }
-
-  if ('isContentEditable' in element && Boolean((element as HTMLElement).isContentEditable)) {
-    return true;
-  }
-
-  return false;
-}
-
-function getViewportHeight(): number {
-  return window.visualViewport?.height ?? window.innerHeight;
-}
-
 export function ProctoringProvider({
   children,
   config,
@@ -88,7 +58,6 @@ export function ProctoringProvider({
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
   const shouldPreventTranslation = config.security.preventTranslation !== false;
   const cooldownByTypeRef = useRef<Record<string, number>>({});
-  const viewportBaselineHeightRef = useRef<number>(getViewportHeight());
   const defaultViolationCooldownMs = 5_000;
   const secondaryScreenViolationCooldownMs = 15_000;
   const screenDetailsUnsupportedRef = useRef(false);
@@ -121,10 +90,12 @@ export function ProctoringProvider({
     type: string,
     message: string,
     severity: ViolationSeverity = 'medium',
+    details?: Record<string, unknown>,
   ) => {
     if (!enabledRef.current) {
       return;
     }
+    const auditDetail = details ?? {};
 
     const now = Date.now();
     const lastViolationAt = cooldownByTypeRef.current[type] ?? 0;
@@ -176,6 +147,7 @@ export function ProctoringProvider({
           message,
           violationType: type,
           action: 'terminate',
+          ...auditDetail,
         },
         attemptStateRef.current.attemptId ?? undefined,
       );
@@ -198,6 +170,7 @@ export function ProctoringProvider({
             count: violationCountsRef.current.high,
             threshold: highLimit,
             action: configRef.current.progression.allowPause ? 'pause' : 'terminate',
+            ...auditDetail,
           },
           attemptStateRef.current.attemptId ?? undefined,
         );
@@ -225,6 +198,7 @@ export function ProctoringProvider({
             count: violationCountsRef.current.medium,
             threshold: mediumLimit,
             action: 'warn',
+            ...auditDetail,
           },
           attemptStateRef.current.attemptId ?? undefined,
         );
@@ -247,6 +221,7 @@ export function ProctoringProvider({
             count: violationCountsRef.current.low,
             threshold: lowLimit,
             action: 'warn',
+            ...auditDetail,
           },
           attemptStateRef.current.attemptId ?? undefined,
         );
@@ -264,6 +239,7 @@ export function ProctoringProvider({
         severity,
         message,
         violationType: type,
+        ...auditDetail,
       },
       attemptStateRef.current.attemptId ?? undefined,
     );
@@ -273,6 +249,43 @@ export function ProctoringProvider({
     enabled && runtimeState.phase === 'exam' && shouldPreventTranslation,
     handleViolation,
   );
+
+  /**
+   * Tab/app-switch policy adapter.
+   *
+   * Detection is shared (`useExamVisibilityIntegrity`); only the reaction is
+   * IELTS/ACT-specific, and it reuses the existing `handleViolation` pipeline
+   * (runtime violation → attempt persistence → audit → severity policy) rather
+   * than opening a second persistence path.
+   *
+   *   none      -> the shared hook never runs
+   *   warn      -> record + let the blocking warning overlay ask to continue
+   *   terminate -> record + existing termination policy (no escape hatch)
+   */
+  const handleVisibilityExcursion = useCallback((excursion: ExamVisibilityExcursion) => {
+    if (configRef.current.security.tabSwitchRule === 'terminate') {
+      handleViolation(
+        'TAB_SWITCH',
+        `${EXAM_VISIBILITY_WARNING_MESSAGE} The exam has been terminated.`,
+        'critical',
+        examVisibilityAuditDetail(excursion),
+      );
+      return;
+    }
+
+    handleViolation(
+      'TAB_SWITCH',
+      EXAM_VISIBILITY_WARNING_MESSAGE,
+      'medium',
+      examVisibilityAuditDetail(excursion),
+    );
+  }, [handleViolation]);
+
+  useExamVisibilityIntegrity({
+    active: enabled && runtimeState.phase === 'exam',
+    enabled: enabled && config.security.tabSwitchRule !== 'none',
+    onViolation: handleVisibilityExcursion,
+  });
 
   const detectSecondaryScreens = useCallback(async () => {
     if (
@@ -343,25 +356,19 @@ export function ProctoringProvider({
       return;
     }
 
-    let tabSwitchDebounceTimer: number | null = null;
-    let lastTabSwitchTime = 0;
     let secondaryScreenCheckTimer: number | null = null;
-    let closeSignalAt = 0;
-    let lastViewportResizeAt = 0;
 
-    const closeSignalWindowMs = 1_000;
-    const closeSignalDelayMs = 200;
-    const visibilityCloseCorrelationDelayMs = 500;
-    const tabSwitchDedupeWindowMs = 300;
     const secondaryScreenCheckIntervalMs = 3_000;
-    const viewportSettleMs = 1_000;
 
+    // Presence telemetry only. `pagehide`/`beforeunload` are far too
+    // unreliable (especially on mobile) to decide a tab switch, so they are
+    // never consulted for the violation: they only report that the document is
+    // going away.
     const recordCloseSignal = (eventType: string) => {
       if (runtimeStateRef.current.phase !== 'exam') {
         return;
       }
 
-      closeSignalAt = Date.now();
       void saveStudentAuditEvent(
         scheduleIdRef.current,
         'BROWSER_CLOSE_DETECTED',
@@ -371,55 +378,6 @@ export function ProctoringProvider({
         },
         attemptStateRef.current.attemptId ?? undefined,
       );
-    };
-
-    const handleTabSwitch = (eventType: string) => {
-      if (
-        runtimeStateRef.current.phase !== 'exam' ||
-        configRef.current.security.tabSwitchRule === 'none'
-      ) {
-        return;
-      }
-
-      const now = Date.now();
-      
-      // Deduplicate bursts of events.
-      if (now - lastTabSwitchTime <= tabSwitchDedupeWindowMs) {
-        return;
-      }
-      lastTabSwitchTime = now;
-
-      if (tabSwitchDebounceTimer) {
-        window.clearTimeout(tabSwitchDebounceTimer);
-      }
-
-      tabSwitchDebounceTimer = null;
-
-      if (configRef.current.security.tabSwitchRule === 'warn') {
-        handleViolation(
-          'TAB_SWITCH',
-          `Tab switching detected via ${eventType}. You must remain on the examination page at all times.`,
-          'medium',
-        );
-        return;
-      }
-
-      handleViolation('TAB_SWITCH', `Tab switching detected via ${eventType}. Exam terminated.`, 'critical');
-    };
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        return;
-      }
-      window.setTimeout(() => {
-        if (!document.hidden) {
-          return;
-        }
-        if (Date.now() - closeSignalAt < closeSignalWindowMs) {
-          return;
-        }
-        handleTabSwitch('visibilitychange');
-      }, visibilityCloseCorrelationDelayMs);
     };
 
     const handlePageHide = () => {
@@ -449,57 +407,8 @@ export function ProctoringProvider({
       event.returnValue = 'Unsynced answers may be lost.';
     };
 
-    const isIosWebKit = isAppleMobileDevice(navigator.userAgent);
-
-    const isKeyboardLikelyOpen = () => {
-      const baseline = viewportBaselineHeightRef.current;
-      const current = getViewportHeight();
-      const delta = baseline - current;
-      return delta > 140;
-    };
-
-    const shouldIgnoreTextEntryBlur = () => {
-      if (!isIosWebKit || document.hidden) {
-        return false;
-      }
-
-      const focusedTextInput = isTextInputElement(document.activeElement);
-      const viewportRecentlyChanged = Date.now() - lastViewportResizeAt < viewportSettleMs;
-
-      return focusedTextInput || isKeyboardLikelyOpen() || viewportRecentlyChanged;
-    };
-
-    const handleBlur = () => {
-      window.setTimeout(() => {
-        // Ignore blur-only transitions (browser popups/dialogs) unless the tab actually became hidden.
-        if (!document.hidden) {
-          return;
-        }
-
-        if (Date.now() - closeSignalAt < closeSignalWindowMs || shouldIgnoreTextEntryBlur()) {
-          return;
-        }
-        handleTabSwitch('blur');
-      }, closeSignalDelayMs);
-    };
-
-    const handleViewportResize = () => {
-      if (!isIosWebKit) {
-        return;
-      }
-
-      lastViewportResizeAt = Date.now();
-      const currentHeight = getViewportHeight();
-      if (!isTextInputElement(document.activeElement) && currentHeight > viewportBaselineHeightRef.current) {
-        viewportBaselineHeightRef.current = currentHeight;
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
     window.addEventListener('pagehide', handlePageHide);
     window.addEventListener('beforeunload', handleBeforeUnload);
-    window.visualViewport?.addEventListener('resize', handleViewportResize);
 
     if (runtimeState.phase === 'exam' && config.security.detectSecondaryScreen) {
       secondaryScreenCheckTimer = window.setInterval(() => {
@@ -508,14 +417,8 @@ export function ProctoringProvider({
     }
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.visualViewport?.removeEventListener('resize', handleViewportResize);
-      if (tabSwitchDebounceTimer) {
-        window.clearTimeout(tabSwitchDebounceTimer);
-      }
       if (secondaryScreenCheckTimer) {
         window.clearInterval(secondaryScreenCheckTimer);
       }

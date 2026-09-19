@@ -13,6 +13,12 @@
  *   interpolation), not pixels.
  */
 
+import {
+  EXAM_VISIBILITY_WARNING_ACKNOWLEDGE,
+  EXAM_VISIBILITY_WARNING_MESSAGE,
+  EXAM_VISIBILITY_WARNING_TITLE,
+} from "@student/api/examVisibilityIntegrity";
+
 export const SAT_COPY = {
   displaySettings: {
     title: "Display",
@@ -239,6 +245,18 @@ export const SAT_COPY = {
   blocking: {
     pausedTitle: "Your timer is paused",
     pausedBody: "Paused by the proctor \u2014 answers safe.",
+  },
+  // Exam-screen integrity (one shared rule across IELTS, ACT, and SAT). The SAT
+  // surfaces reference the same canonical strings the IELTS warning uses: one
+  // delivery rule must not produce two different sentences for the student.
+  // The browser only establishes that the exam document became hidden, so the
+  // copy names that fact and never claims to know what the student opened.
+  integrity: {
+    visibilityTitle: EXAM_VISIBILITY_WARNING_TITLE,
+    visibilityBody: EXAM_VISIBILITY_WARNING_MESSAGE,
+    visibilityContinue: EXAM_VISIBILITY_WARNING_ACKNOWLEDGE,
+    // Spoken name for the hold itself; the visible copy is the body above.
+    visibilityHoldLabel: "Exam screen integrity warning",
   },
   // Bluebook tool-parity vocabulary (Phase 0 reservation). Values are
   // user-visible strings, never HTML. Components must reference these keys.

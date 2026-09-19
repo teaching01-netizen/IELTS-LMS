@@ -558,7 +558,9 @@ export function useSatExamController({
     void refresh(false);
   }, [attemptUpdateToken, refresh]);
 
-  useSatIntegrityControl({
+  // Integrity is active only while the student may actually answer: waiting on
+  // directions, a break, or a completed attempt is not a tab switch.
+  const satIntegrity = useSatIntegrityControl({
     scheduleId,
     attemptId,
     expectedDeviceFingerprintHash: data?.deviceFingerprintHash ?? null,
@@ -1511,6 +1513,10 @@ export function useSatExamController({
     warning,
     autoSubmitted,
     answersRecorded,
+    // Exam-screen integrity hold: present once the student returns from a
+    // visibility excursion, cleared only by acknowledging it.
+    pendingTabSwitchWarning: satIntegrity.pendingTabSwitchWarning,
+    acknowledgeTabSwitchWarning: satIntegrity.acknowledgeTabSwitchWarning,
     showAlmostUp: remainingSeconds <= 60 && remainingSeconds > 0 && (state.phase === "module" || state.phase === "review"),
     persistence,
     /** Phase 04 test seam: atomic poll-hint commit (see commitForTest). */

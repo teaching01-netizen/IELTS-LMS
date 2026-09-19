@@ -294,6 +294,24 @@ function renderRuntimeBackedPreCheckHarness(config: ExamConfig = mockConfig) {
   );
 }
 
+/**
+ * Drives one real Page Visibility transition. `hidden` is kept in sync with
+ * `visibilityState` so every consumer of the browser API sees one truth.
+ */
+function dispatchVisibility(state: 'visible' | 'hidden') {
+  Object.defineProperty(document, 'visibilityState', {
+    writable: true,
+    configurable: true,
+    value: state,
+  });
+  Object.defineProperty(document, 'hidden', {
+    writable: true,
+    configurable: true,
+    value: state === 'hidden',
+  });
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
 describe('StudentProctoringProvider', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -555,34 +573,120 @@ describe('StudentProctoringProvider', () => {
     expect(harness.result.current.runtime.state.phase).toBe('post-exam');
   });
 
-  it('logs a tab-switch warning when the tab is hidden', async () => {
+  it('records exactly one tab-switch violation for one leave/return excursion', () => {
+    const harness = renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'warn' },
+    });
+
+    // Leaving is not reported while the student is away (they cannot see it,
+    // and a background timer is exactly what iOS suspends).
+    act(() => {
+      dispatchVisibility('hidden');
+    });
+    expect(
+      harness.result.current.runtime.state.violations.filter((violation) => violation.type === 'TAB_SWITCH'),
+    ).toHaveLength(0);
+
+    act(() => {
+      dispatchVisibility('visible');
+    });
+
+    const tabSwitches = harness.result.current.runtime.state.violations.filter(
+      (violation) => violation.type === 'TAB_SWITCH',
+    );
+    expect(tabSwitches).toHaveLength(1);
+    expect(tabSwitches[0]?.description).toMatch(/You left the exam screen/i);
+  });
+
+  it('reports a long background suspension on return without relying on timers', async () => {
     const harness = renderHarness({
       ...mockConfig,
       security: { ...mockConfig.security, tabSwitchRule: 'warn' },
     });
 
     act(() => {
-      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
-      document.dispatchEvent(new Event('visibilitychange'));
+      dispatchVisibility('hidden');
     });
 
+    // Ten minutes in the background: WebKit may not run a single timer here.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(600);
+      await vi.advanceTimersByTimeAsync(600_000);
+    });
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(false);
+
+    act(() => {
+      dispatchVisibility('visible');
     });
 
     expect(
-      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
-    ).toBe(true);
+      harness.result.current.runtime.state.violations.filter((violation) => violation.type === 'TAB_SWITCH'),
+    ).toHaveLength(1);
   });
 
-  it('logs a tab-switch warning on window blur when the tab is hidden', async () => {
+  it('audits the excursion with the visibility evidence and no claims about what was opened', () => {
     const harness = renderHarness({
       ...mockConfig,
       security: { ...mockConfig.security, tabSwitchRule: 'warn' },
     });
 
     act(() => {
-      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      dispatchVisibility('hidden');
+      dispatchVisibility('visible');
+    });
+
+    const auditPayload = vi.mocked(saveStudentAuditEvent).mock.calls.find(
+      ([, actionType]) => actionType === 'VIOLATION_DETECTED',
+    )?.[2];
+
+    expect(auditPayload).toMatchObject({
+      violationType: 'TAB_SWITCH',
+      severity: 'medium',
+      source: 'page_visibility',
+    });
+    expect(typeof auditPayload?.hiddenAt).toBe('string');
+    expect(Date.parse(String(auditPayload?.hiddenAt))).not.toBeNaN();
+    expect(Date.parse(String(auditPayload?.returnedAt))).not.toBeNaN();
+    expect(auditPayload?.hiddenDurationMs).toBe(
+      Date.parse(String(auditPayload?.returnedAt)) - Date.parse(String(auditPayload?.hiddenAt)),
+    );
+    // The browser does not know which tab/app was opened — never claim it did.
+    expect(auditPayload).not.toHaveProperty('openedChatGPT');
+    expect(auditPayload).not.toHaveProperty('cheated');
+
+    expect(harness.result.current.runtime.state.violations).toHaveLength(1);
+  });
+
+  it('records one violation when the browser emits a burst of lifecycle events for one excursion', () => {
+    const harness = renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'warn' },
+    });
+
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+      dispatchVisibility('hidden');
+      window.dispatchEvent(new Event('pagehide'));
+      dispatchVisibility('hidden');
+      window.dispatchEvent(new Event('blur'));
+      dispatchVisibility('visible');
+      dispatchVisibility('visible');
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.filter((violation) => violation.type === 'TAB_SWITCH'),
+    ).toHaveLength(1);
+  });
+
+  it('does not treat window blur as evidence by itself', async () => {
+    const harness = renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'warn' },
+    });
+
+    act(() => {
       window.dispatchEvent(new Event('blur'));
     });
 
@@ -592,7 +696,7 @@ describe('StudentProctoringProvider', () => {
 
     expect(
       harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('does not log a tab-switch warning on blur-only browser popup focus loss', async () => {
@@ -602,12 +706,66 @@ describe('StudentProctoringProvider', () => {
     });
 
     act(() => {
-      Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+      dispatchVisibility('visible');
       window.dispatchEvent(new Event('blur'));
     });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(600);
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(false);
+  });
+
+  it('records a second violation when the student leaves twice', () => {
+    const harness = renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'warn' },
+    });
+
+    act(() => {
+      dispatchVisibility('hidden');
+      dispatchVisibility('visible');
+      dispatchVisibility('hidden');
+      dispatchVisibility('visible');
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.filter((violation) => violation.type === 'TAB_SWITCH'),
+    ).toHaveLength(2);
+  });
+
+  it("does not enforce tab switching when the exam policy is 'none'", () => {
+    const harness = renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'none' },
+    });
+
+    act(() => {
+      dispatchVisibility('hidden');
+      dispatchVisibility('visible');
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(false);
+  });
+
+  it('does not count a visibility excursion after the exam is finished', () => {
+    const harness = renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'warn' },
+    });
+
+    act(() => {
+      harness.result.current.runtime.actions.setPhase('post-exam');
+    });
+
+    act(() => {
+      dispatchVisibility('hidden');
+      dispatchVisibility('visible');
     });
 
     expect(
@@ -660,8 +818,7 @@ describe('StudentProctoringProvider', () => {
     expect(harness.result.current.runtime.state.phase).toBe('pre-check');
 
     act(() => {
-      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
-      window.dispatchEvent(new Event('blur'));
+      dispatchVisibility('hidden');
     });
 
     await act(async () => {
@@ -680,8 +837,10 @@ describe('StudentProctoringProvider', () => {
       await Promise.resolve();
     });
 
+    // Still away when the exam starts: the waiting-room hide is not this
+    // exam's excursion.
     act(() => {
-      window.dispatchEvent(new Event('blur'));
+      dispatchVisibility('visible');
     });
 
     await act(async () => {
@@ -690,25 +849,46 @@ describe('StudentProctoringProvider', () => {
 
     expect(
       harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
-    ).toBe(true);
+    ).toBe(false);
+
+    act(() => {
+      dispatchVisibility('hidden');
+      dispatchVisibility('visible');
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.filter((violation) => violation.type === 'TAB_SWITCH'),
+    ).toHaveLength(1);
   });
 
-  it('terminates the exam when tab-switch policy is terminate', async () => {
+  it('terminates the exam when tab-switch policy is terminate', () => {
     const harness = renderHarness({
       ...mockConfig,
       security: { ...mockConfig.security, tabSwitchRule: 'terminate' },
     });
 
     act(() => {
-      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(600);
+      dispatchVisibility('hidden');
+      dispatchVisibility('visible');
     });
 
     expect(harness.result.current.runtime.state.phase).toBe('post-exam');
+  });
+
+  it('records the violating excursion before terminating when tab-switch policy is terminate', () => {
+    const harness = renderHarness({
+      ...mockConfig,
+      security: { ...mockConfig.security, tabSwitchRule: 'terminate' },
+    });
+
+    act(() => {
+      dispatchVisibility('hidden');
+      dispatchVisibility('visible');
+    });
+
+    expect(
+      harness.result.current.runtime.state.violations.some((violation) => violation.type === 'TAB_SWITCH'),
+    ).toBe(true);
   });
 
   it('does not terminate the exam on close/reload signals (pagehide) even when tab-switch policy is terminate', async () => {
@@ -719,8 +899,7 @@ describe('StudentProctoringProvider', () => {
 
     act(() => {
       window.dispatchEvent(new Event('pagehide'));
-      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
-      document.dispatchEvent(new Event('visibilitychange'));
+      dispatchVisibility('hidden');
     });
 
     await act(async () => {
@@ -739,9 +918,10 @@ describe('StudentProctoringProvider', () => {
       security: { ...mockConfig.security, tabSwitchRule: 'warn' },
     });
 
+    // A reload takes the document away: the hidden half is observed, the
+    // return half never is, so there is no excursion to charge.
     act(() => {
-      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
-      document.dispatchEvent(new Event('visibilitychange'));
+      dispatchVisibility('hidden');
       window.dispatchEvent(new Event('beforeunload'));
     });
 
@@ -761,7 +941,7 @@ describe('StudentProctoringProvider', () => {
     });
 
     act(() => {
-      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      dispatchVisibility('hidden');
       window.dispatchEvent(new Event('blur'));
       window.dispatchEvent(new Event('beforeunload'));
     });

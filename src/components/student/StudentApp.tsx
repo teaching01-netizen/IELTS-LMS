@@ -28,6 +28,11 @@ import { StudentHighlightSelectionManagerProvider } from "./highlightSelectionMa
 import { useStudentSubmissionOrchestration } from "./useStudentSubmissionOrchestration";
 import "./timeExtensionPolicy";
 import { useStudentWarningVisibility } from "./useStudentWarningVisibility";
+import {
+  EXAM_VISIBILITY_WARNING_ACKNOWLEDGE,
+  EXAM_VISIBILITY_WARNING_MESSAGE,
+  EXAM_VISIBILITY_WARNING_TITLE,
+} from "@student/api/examVisibilityIntegrity";
 import { useStudentAttempt } from "./providers/StudentAttemptProvider";
 import { useStudentRuntime, useStudentRuntimeSession } from "./providers/StudentRuntimeProvider";
 import { useStudentUI } from "./providers/StudentUIProvider";
@@ -483,7 +488,6 @@ export function StudentApp({
   }, [latestPendingWarning]);
 
   const {
-    latestTabSwitchViolation,
     shouldShowTabSwitchWarning,
     tabSwitchSeverity,
     latestSecondaryScreenViolation,
@@ -1023,20 +1027,26 @@ export function StudentApp({
           }}
         />
       ) : null}
-      {examState.config.progression.showWarnings ? (
-        <WarningOverlay
-          isOpen={shouldShowTabSwitchWarning}
-          severity={tabSwitchSeverity}
-          message={
-            latestTabSwitchViolation?.description ??
-            "Tab switching detected. You must remain on the examination page at all times."
-          }
-          showCountdown={false}
-          onAcknowledge={() => {
-            acknowledgeTabSwitch();
-          }}
-        />
-      ) : null}
+      {/*
+        Integrity warning, NOT a progression warning: `progression.showWarnings`
+        is an exam-authoring preference about general messaging and must never
+        suppress a security hold. `security.tabSwitchRule === 'warn'` already
+        gates this through `shouldShowTabSwitchWarning`, so an author who asked
+        for a warning always gets one. No countdown and no auto-dismiss: the
+        student leaves the hold only by acknowledging it.
+      */}
+      <WarningOverlay
+        isOpen={shouldShowTabSwitchWarning}
+        severity={tabSwitchSeverity}
+        title={EXAM_VISIBILITY_WARNING_TITLE}
+        message={EXAM_VISIBILITY_WARNING_MESSAGE}
+        showCountdown={false}
+        actionButton={{
+          label: EXAM_VISIBILITY_WARNING_ACKNOWLEDGE,
+          onClick: acknowledgeTabSwitch,
+        }}
+        onAcknowledge={acknowledgeTabSwitch}
+      />
       {examState.config.progression.showWarnings ? (
         <WarningOverlay
           isOpen={shouldShowTranslationWarning}

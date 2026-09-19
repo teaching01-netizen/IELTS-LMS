@@ -326,7 +326,12 @@ describe('StudentKeyboardProvider', () => {
     expect(harness.runtime.state.violations).toHaveLength(0);
   });
 
-  it('allows context menu inside highlightable reading text when highlight mode is active', () => {
+  // The exemption these two cases used to assert WAS the bug: handing the
+  // native menu back to the browser on passage text is exactly what let a
+  // long-press on the reading pane expose Copy / Look Up / Search mid-exam.
+  // Blocking the menu costs the surface nothing, because selection is kept
+  // (`user-select: text`) and only the platform's menu goes away.
+  it('blocks the context menu on highlightable reading text with highlight mode armed', () => {
     const harness = renderHarness();
 
     act(() => {
@@ -343,17 +348,38 @@ describe('StudentKeyboardProvider', () => {
       harness.highlightTarget.dispatchEvent(event);
     });
 
-    expect(event.defaultPrevented).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    // Blocked SILENTLY, like the protected question copy above: long-pressing a
+    // passage is how a student selects the text they are about to highlight, so
+    // charging it as a violation would flag ordinary exam behavior.
     expect(harness.runtime.state.violations).toHaveLength(0);
+    expect(saveStudentAuditEventMock).not.toHaveBeenCalled();
   });
 
-  it('allows context menu inside highlightable text when highlight mode is off', () => {
+  it('blocks the context menu on highlightable text when highlight mode is off', () => {
     const harness = renderHarness();
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
     act(() => {
       harness.highlightTarget.dispatchEvent(event);
     });
+    expect(event.defaultPrevented).toBe(true);
+    expect(harness.runtime.state.violations).toHaveLength(0);
+  });
+
+  it('leaves the context menu to the browser on highlightable text outside the exam phase', () => {
+    const harness = renderHarness();
+    act(() => {
+      harness.runtime.actions.setPhase('pre-check');
+    });
+
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    act(() => {
+      harness.highlightTarget.dispatchEvent(event);
+    });
+
+    // Exam-scoped: check-in, lobby and post-exam keep native browser behavior.
     expect(event.defaultPrevented).toBe(false);
+    expect(harness.runtime.state.violations).toHaveLength(0);
   });
 
   it('blocks paste shortcut inside answer inputs', () => {
