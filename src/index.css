@@ -1260,7 +1260,10 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-background: #ffffff;
   --sat-surface: #ffffff;
   --sat-surface-subtle: #f2f2f7;
-  --sat-viewer-backdrop: rgba(242, 242, 247, 0.72);
+  /* Full-screen figure veil: the same paper the figure sits on, laid over the
+   * exam. It hides the question behind (with the blur) without dimming the
+   * screen to gray, so escalating a figure never repaints the page. */
+  --sat-viewer-backdrop: rgba(255, 255, 255, 0.88);
   --sat-surface-hover: #e9e9ee;
   --sat-text: #1d1d1f;
   --sat-text-secondary: #515154;
@@ -4323,7 +4326,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     --sat-background: #111113;
     --sat-surface: #1c1c1e;
     --sat-surface-subtle: #2c2c2e;
-    --sat-viewer-backdrop: rgba(28, 28, 30, 0.78);
+    --sat-viewer-backdrop: rgba(28, 28, 30, 0.88);
     --sat-surface-hover: #3a3a3c;
     --sat-canvas: #111113;
     --sat-label: #f5f5f7;

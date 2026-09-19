@@ -18,6 +18,18 @@ export const SAT_READING_SPLIT_MIN = 0.38;
 export const SAT_READING_SPLIT_MAX = 0.62;
 export const SAT_READING_SPLIT_STEP = 0.05;
 
+/**
+ * Screen zoom ("Everything") range, inclusive: 50% to 200% on a 25% grid.
+ *
+ * The floor is below 100% on purpose: students shrink the whole exam to fit
+ * more passage or a longer question on screen without touching text size
+ * ("Text only"). 100% stays the resting point, so the reset control and the
+ * default comparison both key off 1.
+ */
+export const SAT_EXAM_ZOOM_MIN = 0.5;
+export const SAT_EXAM_ZOOM_MAX = 2;
+export const SAT_EXAM_ZOOM_STEP = 0.25;
+
 export function createSatReadingPreferences(): SatReadingPreferences {
   return {
     version: 1,
@@ -32,6 +44,18 @@ export function clampSatReadingSplitRatio(value: number): number {
   return Math.min(SAT_READING_SPLIT_MAX, Math.max(SAT_READING_SPLIT_MIN, value));
 }
 
+/**
+ * Snaps exam zoom onto the 25% grid and clamps it to the supported range, so
+ * stored, shortcut, and button input all land on the same tested values and
+ * repeated steps cannot drift off the grid. Non-finite input rests at 100%.
+ */
+export function clampSatExamZoom(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  const steps = Math.round((value - SAT_EXAM_ZOOM_MIN) / SAT_EXAM_ZOOM_STEP);
+  const stepped = SAT_EXAM_ZOOM_MIN + steps * SAT_EXAM_ZOOM_STEP;
+  return Math.min(SAT_EXAM_ZOOM_MAX, Math.max(SAT_EXAM_ZOOM_MIN, stepped));
+}
+
 export function normalizeSatReadingPreferences(value: unknown): SatReadingPreferences {
   if (!value || typeof value !== "object") return createSatReadingPreferences();
   const candidate = value as Partial<SatReadingPreferences>;
@@ -43,7 +67,7 @@ export function normalizeSatReadingPreferences(value: unknown): SatReadingPrefer
   );
   return { version: 1, textScale, lineSpacing, splitRatio,
     ...(typeof candidate.examZoom === 'number' && Number.isFinite(candidate.examZoom)
-      ? { examZoom: Math.max(1, Math.min(2, Math.round(candidate.examZoom * 4) / 4)) } : {}),
+      ? { examZoom: clampSatExamZoom(candidate.examZoom) } : {}),
     ...(candidate.contrastMode === 'default' || candidate.contrastMode === 'high-contrast' ? { contrastMode: candidate.contrastMode } : {}),
     ...(typeof candidate.lineReaderEnabled === 'boolean' ? { lineReaderEnabled: candidate.lineReaderEnabled } : {}),
     ...(typeof candidate.lineReaderPosition === 'number' && Number.isFinite(candidate.lineReaderPosition)

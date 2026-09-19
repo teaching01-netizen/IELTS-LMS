@@ -1,6 +1,10 @@
 import type { RefObject } from "react";
 import {
+  SAT_EXAM_ZOOM_MAX,
+  SAT_EXAM_ZOOM_MIN,
+  SAT_EXAM_ZOOM_STEP,
   SAT_READING_TEXT_SCALES,
+  clampSatExamZoom,
   createSatReadingPreferences,
   isDefaultSatReadingPreferences,
   nextSatReadingTextScale,
@@ -33,6 +37,9 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
   const canDecrease = scaleIndex > 0 && !disabled;
   const canIncrease = scaleIndex < SAT_READING_TEXT_SCALES.length - 1 && !disabled;
   const percent = Math.round(preferences.textScale * 100);
+  const examZoom = preferences.examZoom ?? 1;
+  const canDecreaseZoom = examZoom > SAT_EXAM_ZOOM_MIN && !disabled;
+  const canIncreaseZoom = examZoom < SAT_EXAM_ZOOM_MAX && !disabled;
 
   const update = (next: Partial<SatReadingPreferences>): void => {
     onChange({ ...preferences, ...next, version: 1 });
@@ -76,7 +83,7 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
               className="sat-touch-target sat-pressable text-[17px] font-semibold text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] disabled:text-[var(--sat-disabled-text)] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)]"
               aria-label={SAT_COPY.displaySettings.decreaseTextSize}
             >
-              A\u2212
+              A{"\u2212"}
             </button>
             <div className="grid min-h-11 place-items-center border-x border-[var(--sat-divider-soft)]" aria-hidden="true">
               <span className="font-semibold leading-none text-[var(--sat-text)]" style={{ fontSize: (16 * preferences.textScale) + "px" }}>
@@ -121,12 +128,12 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
             <span className="ml-1 font-normal text-[var(--sat-text-secondary)]">({SAT_COPY.displaySettings.screenZoomHint})</span>
           </h3>
           <div className="mt-2 flex items-center justify-between gap-3 rounded border border-[var(--sat-divider)]">
-            <button type="button" aria-label={SAT_COPY.displaySettings.decreaseZoom} disabled={disabled || (preferences.examZoom ?? 1) <= 1}
-              onClick={() => update({ examZoom: Math.max(1, (preferences.examZoom ?? 1) - 0.25) })}
-              className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">\u2212</button>
-            <output aria-live="polite">{Math.round((preferences.examZoom ?? 1) * 100)}%</output>
-            <button type="button" aria-label={SAT_COPY.displaySettings.increaseZoom} disabled={disabled || (preferences.examZoom ?? 1) >= 2}
-              onClick={() => update({ examZoom: Math.min(2, (preferences.examZoom ?? 1) + 0.25) })}
+            <button type="button" aria-label={SAT_COPY.displaySettings.decreaseZoom} disabled={!canDecreaseZoom}
+              onClick={() => update({ examZoom: clampSatExamZoom(examZoom - SAT_EXAM_ZOOM_STEP) })}
+              className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">{"\u2212"}</button>
+            <output aria-live="polite">{Math.round(examZoom * 100)}%</output>
+            <button type="button" aria-label={SAT_COPY.displaySettings.increaseZoom} disabled={!canIncreaseZoom}
+              onClick={() => update({ examZoom: clampSatExamZoom(examZoom + SAT_EXAM_ZOOM_STEP) })}
               className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">+</button>
           </div>
         </section>

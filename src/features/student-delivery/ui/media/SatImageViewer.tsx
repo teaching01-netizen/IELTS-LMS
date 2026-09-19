@@ -211,12 +211,14 @@ export function SatImageViewer(props: SatImageViewerProps) {
         }
       }}
     >
-      {/* Layer 2: Backdrop material — blurred/tinted overlay that softens the
-          exam behind. The student can perceive exam positioning faintly but
-          cannot read text or interact with answers. */}
+      {/* Layer 2: Backdrop material — the figure's own paper, laid over the
+          exam. The blur alone hides the question behind (the student perceives
+          exam positioning but cannot read text or interact with answers), so the
+          veil carries no separate dimming tint: escalating a figure leaves the
+          screen on its paper instead of washing it gray. */}
       <div
         data-sat-image-backdrop=""
-        className="sat-figure-scrim pointer-events-none absolute inset-0 bg-[var(--sat-viewer-backdrop,rgba(242,242,247,0.72))] backdrop-blur-[20px] backdrop-saturate-150"
+        className="sat-figure-scrim pointer-events-none absolute inset-0 bg-[var(--sat-viewer-backdrop,rgba(255,255,255,0.88))] backdrop-blur-[20px] backdrop-saturate-150"
         aria-hidden="true"
       />
 
@@ -276,7 +278,12 @@ export function SatImageViewer(props: SatImageViewerProps) {
             aria-label={props.alt}
             className={
               "flex min-h-0 flex-1 items-center justify-center overflow-hidden " +
-              "bg-[var(--sat-surface-subtle,#f2f2f7)] " +
+              /* The stage is the *same paper* the figure sits on while embedded:
+                 the frame in the question paints `bg-white`, which the theme
+                 remaps to this same surface. Full screen changes the window, not
+                 the figure's background — escalating must never repaint a white
+                 figure onto a gray stage. */
+              "bg-[var(--sat-surface,#ffffff)] " +
               /* Stage padding: breathing room so image doesn't touch panel edges */
               "p-6 max-sm:p-3 " +
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-focus)] " +

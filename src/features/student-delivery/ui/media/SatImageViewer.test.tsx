@@ -198,6 +198,10 @@ describe("SatImageViewer", () => {
     const backdrop = dialog.querySelector("[data-sat-image-backdrop]");
     expect(backdrop).toBeInTheDocument();
     expect(backdrop).toHaveClass("backdrop-blur-[20px]");
+    // The veil carries the figure's paper, not a separate gray dim: the blur
+    // alone hides the exam, so opening a figure keeps the screen on white.
+    expect(backdrop).toHaveClass("bg-[var(--sat-viewer-backdrop,rgba(255,255,255,0.88))]");
+    expect(backdrop?.className).not.toContain("242,242,247");
     // A floating panel exists inside the dialog (not edge-to-edge).
     const panel = dialog.querySelector("[data-sat-image-panel]");
     expect(panel).toBeInTheDocument();
@@ -217,6 +221,19 @@ describe("SatImageViewer", () => {
     expect(image).toHaveClass("h-full", "w-full", "object-contain");
     expect(image?.className).not.toContain("max-h-full");
     expect(image?.className).not.toContain("max-w-full");
+  });
+
+  it("keeps the figure on the same white stage it had while embedded", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+    const stage = document.querySelector("[data-sat-image-viewport]");
+    expect(stage).toBeInTheDocument();
+    // The embedded frame paints `bg-white`, which the theme remaps to
+    // --sat-surface. The full-screen stage must land on that same surface, so
+    // opening the viewer never repaints a white figure onto a gray stage.
+    expect(stage).toHaveClass("bg-[var(--sat-surface,#ffffff)]");
+    expect(stage?.className).not.toContain("sat-surface-subtle");
   });
 
   it("traps keyboard Tab focus within the modal dialog", async () => {

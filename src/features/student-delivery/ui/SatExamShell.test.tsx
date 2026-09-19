@@ -1,6 +1,10 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { createSatReadingPreferences } from "../domain/satReadingPreferences";
+import {
+  SAT_EXAM_ZOOM_MAX,
+  SAT_EXAM_ZOOM_MIN,
+  createSatReadingPreferences,
+} from "../domain/satReadingPreferences";
 import { createSatTextAnnotation, emptySatAnnotations } from "../domain/satResponses";
 import { SatExamShell, type SatExamShellProps } from "./SatExamShell";
 import { useSatNotesSurface } from "./annotations/SatNotesSurfaceContext";
@@ -276,6 +280,72 @@ describe("SatExamShell", () => {
       lineSpacing: "standard",
       splitRatio: 0.5,
     });
+  });
+
+  it("draws real minus glyphs in Display, never the raw escape text", () => {
+    render(<SatExamShell {...props()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    const dialog = screen.getByRole("dialog", { name: "Display" });
+    expect(within(dialog).getByRole("button", { name: "Decrease text size" }).textContent).toBe(
+      "A\u2212"
+    );
+    expect(within(dialog).getByRole("button", { name: "Decrease screen zoom" }).textContent).toBe(
+      "\u2212"
+    );
+    expect(dialog.textContent).not.toContain("\\u2212");
+  });
+
+  it("steps screen zoom below 100% and stops at the 50% floor and 200% ceiling", () => {
+    const onReadingPreferencesChange = vi.fn();
+    render(<SatExamShell {...props({ onReadingPreferencesChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    const zoomSection = within(screen.getByRole("dialog", { name: "Display" })).getByRole(
+      "region",
+      { name: "Screen zoom" }
+    );
+    expect(within(zoomSection).getByText("100%")).toBeInTheDocument();
+    fireEvent.click(within(zoomSection).getByRole("button", { name: "Decrease screen zoom" }));
+    expect(onReadingPreferencesChange).toHaveBeenCalledWith(
+      expect.objectContaining({ examZoom: 0.75 })
+    );
+  });
+
+  it("disables screen zoom decrease at 50% and increase at 200%", () => {
+    const { rerender } = render(
+      <SatExamShell
+        {...props({
+          readingPreferences: { ...createSatReadingPreferences(), examZoom: SAT_EXAM_ZOOM_MIN },
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    let zoomSection = within(screen.getByRole("dialog", { name: "Display" })).getByRole(
+      "region",
+      { name: "Screen zoom" }
+    );
+    expect(within(zoomSection).getByText("50%")).toBeInTheDocument();
+    expect(within(zoomSection).getByRole("button", { name: "Decrease screen zoom" })).toBeDisabled();
+    expect(
+      within(zoomSection).getByRole("button", { name: "Increase screen zoom" })
+    ).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close display settings" }));
+    rerender(
+      <SatExamShell
+        {...props({
+          readingPreferences: { ...createSatReadingPreferences(), examZoom: SAT_EXAM_ZOOM_MAX },
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    zoomSection = within(screen.getByRole("dialog", { name: "Display" })).getByRole("region", {
+      name: "Screen zoom",
+    });
+    expect(within(zoomSection).getByText("200%")).toBeInTheDocument();
+    expect(within(zoomSection).getByRole("button", { name: "Increase screen zoom" })).toBeDisabled();
+    expect(
+      within(zoomSection).getByRole("button", { name: "Decrease screen zoom" })
+    ).toBeEnabled();
   });
 
   it("does not render calculator controls when the module policy excludes them", () => {
