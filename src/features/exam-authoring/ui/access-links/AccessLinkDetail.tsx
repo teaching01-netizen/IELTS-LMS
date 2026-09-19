@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
 import {
   Check,
   Copy,
@@ -46,6 +47,10 @@ export interface AccessLinkDetailProps {
   onPresent: () => void;
   onCreateForCurrent: () => void;
   defaultTab?: DetailTab;
+  /** Transient copy acknowledgement owned by the dashboard (one timer, one source). */
+  copyConfirmed?: boolean;
+  /** Escape in the pane hands focus back to the selected row, never to the body. */
+  onEscapeToRow?: () => void;
 }
 
 const STATUS_TONE: Record<AssessmentAccessLink["status"], SatStatusTone> = {
@@ -57,6 +62,7 @@ const STATUS_TONE: Record<AssessmentAccessLink["status"], SatStatusTone> = {
 };
 
 const TAB_ORDER: DetailTab[] = ["overview", "activity", "settings"];
+const TAB_INDICATOR_ID = "sat-access-detail-tab-indicator";
 
 export function AccessLinkDetail(props: AccessLinkDetailProps) {
   const {
@@ -74,29 +80,56 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
     onPresent,
     onCreateForCurrent,
     defaultTab,
+    copyConfirmed = false,
+    onEscapeToRow,
   } = props;
   const [activeTab, setActiveTab] = useState<DetailTab>(defaultTab ?? "overview");
   const sectionBadge = accessLinkSectionBadge(link.enabledSections);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setActiveTab("overview");
+  }, [link.id]);
+
+  // A different link starts a different story: without this the pane keeps the
+  // previous link's scroll offset and the new header is already off-screen.
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [link.id]);
 
   const shareLabelId = `access-link-share-${link.id}`;
   const tabId = (tab: DetailTab) => `access-link-tab-${link.id}-${tab}`;
   const panelId = (tab: DetailTab) => `access-link-panel-${link.id}-${tab}`;
 
+  // ARIA tab pattern: Arrow keys wrap, Home/End jump, and focus follows the
+  // selection so the next keystroke stays in the tablist.
   const handleTabListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
     const index = TAB_ORDER.indexOf(activeTab);
-    const delta = event.key === "ArrowRight" ? 1 : -1;
-    const next = TAB_ORDER[(index + delta + TAB_ORDER.length) % TAB_ORDER.length] ?? "overview";
+    let next: DetailTab | null = null;
+    if (event.key === "ArrowRight") next = TAB_ORDER[(index + 1 + TAB_ORDER.length) % TAB_ORDER.length] ?? "overview";
+    else if (event.key === "ArrowLeft") next = TAB_ORDER[(index - 1 + TAB_ORDER.length) % TAB_ORDER.length] ?? "overview";
+    else if (event.key === "Home") next = TAB_ORDER[0] ?? "overview";
+    else if (event.key === "End") next = TAB_ORDER[TAB_ORDER.length - 1] ?? "overview";
+    if (!next) return;
+    event.preventDefault();
     setActiveTab(next);
+    document.getElementById(tabId(next))?.focus();
+  };
+
+  const handlePaneKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Escape" || !onEscapeToRow) return;
+    // Never steal Escape from an open overlay/field: the pane only answers it
+    // when the pane itself is the surrounding context.
+    event.preventDefault();
+    setActiveTab("overview");
+    onEscapeToRow();
   };
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- the pane is a scroll container, not a control: Escape is a convenience shortcut for the focus already inside it (every action is a native button below), so no custom role or tabindex belongs here.
     <div
+      ref={scrollRef}
+      onKeyDown={handlePaneKeyDown}
       className="flex h-full flex-col overflow-y-auto p-4 sm:p-5"
       data-testid="access-link-detail"
     >
@@ -121,7 +154,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
           type="button"
           onClick={onEdit}
           aria-label={`Edit ${link.name}`}
-          className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-[12px] border border-black/[0.08] bg-white px-3 text-[12px] font-semibold text-slate-700"
+          className="sat-press sat-press-fill flex min-h-11 shrink-0 items-center gap-1.5 rounded-[12px] border border-black/[0.08] bg-white px-3 text-[12px] font-semibold text-slate-700"
         >
           <Pencil size={13} aria-hidden="true" />
           Edit
@@ -133,7 +166,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
         role="tablist"
         aria-label="Link details"
         onKeyDown={handleTabListKeyDown}
-        className="mt-4 flex gap-1 border-b border-black/[0.06]"
+        className="relative mt-4 flex gap-1 border-b border-black/[0.06]"
       >
         {TAB_ORDER.map((tab) => {
           const selected = activeTab === tab;
@@ -147,20 +180,28 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               id={tabId(tab)}
               aria-selected={selected}
               aria-controls={panelId(tab)}
+              tabIndex={selected ? 0 : -1}
               onClick={() => setActiveTab(tab)}
               className={
-                "flex min-h-11 items-center border-b-2 px-3 text-[12px] font-semibold " +
-                (selected
-                  ? "border-[#0071e3] font-bold text-slate-950"
-                  : "border-transparent text-slate-500")
+                "sat-press relative flex min-h-11 items-center px-3 text-[12px] font-semibold " +
+                (selected ? "text-slate-950" : "text-slate-500")
               }
             >
-              {label}
+              {selected ? (
+                <motion.span
+                  layoutId={TAB_INDICATOR_ID}
+                  aria-hidden="true"
+                  transition={{ type: "spring", stiffness: 640, damping: 50 }}
+                  className="sat-tab-indicator"
+                />
+              ) : null}
+              <span className="relative" style={selected ? { fontWeight: 700 } : undefined}>{label}</span>
             </button>
           );
         })}
       </div>
 
+      <div key={activeTab} className="sat-panel-enter min-h-0">
       {activeTab === "overview" ? (
         <div role="tabpanel" id={panelId("overview")} aria-labelledby={tabId("overview")}>
           {isStaleRelease ? (
@@ -176,7 +217,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               <button
                 type="button"
                 onClick={onCreateForCurrent}
-                className="flex min-h-11 shrink-0 items-center rounded-[12px] bg-au-accent px-4 text-[12px] font-semibold text-white"
+                className="sat-press sat-press-fill-accent flex min-h-11 shrink-0 items-center rounded-[12px] bg-au-accent px-4 text-[12px] font-semibold text-white hover:bg-au-accent-hover"
               >
                 Create Version {currentVersionNumber} Link
               </button>
@@ -194,7 +235,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               <button
                 type="button"
                 onClick={onShare}
-                className="flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] bg-au-accent px-2 text-[12px] font-semibold text-white"
+                className="sat-press sat-press-fill-accent flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] bg-au-accent px-2 text-[12px] font-semibold text-white hover:bg-au-accent-hover"
               >
                 <Share2 size={14} aria-hidden="true" />
                 Share
@@ -202,15 +243,19 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               <button
                 type="button"
                 onClick={onCopy}
-                className="flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] border border-black/[0.08] bg-white px-2 text-[12px] font-semibold text-slate-700"
+                className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] border border-black/[0.08] bg-white px-2 text-[12px] font-semibold text-slate-700"
               >
-                <Copy size={14} aria-hidden="true" />
-                Copy
+                {copyConfirmed ? (
+                  <Check size={14} className="text-emerald-600" aria-hidden="true" />
+                ) : (
+                  <Copy size={14} aria-hidden="true" />
+                )}
+                {copyConfirmed ? "Copied" : "Copy"}
               </button>
               <button
                 type="button"
                 onClick={onPresent}
-                className="flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] px-2 text-[12px] font-semibold text-slate-600"
+                className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] px-2 text-[12px] font-semibold text-slate-600"
               >
                 <Presentation size={14} aria-hidden="true" />
                 Present
@@ -220,7 +265,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
               href={url}
               target="_blank"
               rel="noreferrer"
-              className="mt-1 flex min-h-11 items-center justify-center gap-1.5 text-[12px] font-semibold text-slate-500"
+              className="sat-press sat-press-fill mt-1 flex min-h-11 items-center justify-center gap-1.5 rounded-[12px] text-[12px] font-semibold text-slate-500"
             >
               <ExternalLink size={13} aria-hidden="true" />
               Open student page
@@ -277,7 +322,7 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
                   <button
                     type="button"
                     onClick={onRetryActivity}
-                    className="mt-2 flex min-h-11 items-center gap-1.5 rounded-[12px] border border-black/[0.08] bg-white px-3 text-[12px] font-semibold text-slate-700"
+                    className="sat-press sat-press-fill mt-2 flex min-h-11 items-center gap-1.5 rounded-[12px] border border-black/[0.08] bg-white px-3 text-[12px] font-semibold text-slate-700"
                   >
                     <RefreshCw size={13} aria-hidden="true" />
                     Retry
@@ -380,16 +425,21 @@ export function AccessLinkDetail(props: AccessLinkDetailProps) {
                   type="button"
                   onClick={onCopy}
                   aria-label="Copy link ID"
-                  className="flex min-h-11 shrink-0 items-center gap-1 rounded-[12px] px-2 text-[12px] font-semibold text-slate-600"
+                  className="sat-press sat-press-fill flex min-h-11 shrink-0 items-center gap-1 rounded-[12px] px-2 text-[12px] font-semibold text-slate-600"
                 >
-                  <Copy size={13} aria-hidden="true" />
-                  Copy
+                  {copyConfirmed ? (
+                    <Check size={13} className="text-emerald-600" aria-hidden="true" />
+                  ) : (
+                    <Copy size={13} aria-hidden="true" />
+                  )}
+                  {copyConfirmed ? "Copied" : "Copy"}
                 </button>
               </dd>
             </div>
           </dl>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }

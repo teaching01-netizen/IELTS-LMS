@@ -50,6 +50,9 @@ describe('SAT system-contracts CSS (sat-* rules only)', () => {
       '--sat-staff-focus-width', '--sat-staff-focus-offset', '--sat-staff-focus-offset-tight',
       '--sat-staff-shimmer-duration', '--sat-staff-skeleton-pulse-duration',
       '--sat-staff-spinner-duration', '--sat-staff-live-dot-duration',
+      // Press geometry (sat-press): scale factors describe the surface's own
+      // size, not a color, so they never invert with appearance.
+      '--sat-staff-press-scale', '--sat-staff-press-scale-row',
     ]);
     for (const n of names(lightBlock)) {
       if (!EXEMPT.has(n)) expect(darkRegion, n).toContain(n + ':');

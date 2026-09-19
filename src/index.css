@@ -2629,6 +2629,11 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-staff-motion-dialog-max: 200ms;
   --sat-staff-stagger-step: 60ms;
   --sat-staff-stagger-cap: 5;
+  /* Press geometry: one scale per surface size. Controls (<=44px) take the
+   * base scale; large surfaces (>=72px) take the row scale. Geometry never
+   * inverts between appearances. */
+  --sat-staff-press-scale: 0.97;
+  --sat-staff-press-scale-row: 0.99;
   --sat-staff-shimmer-duration: 1.35s;
   --sat-staff-shimmer-sweep: rgba(120, 120, 128, 0.14);
   --sat-staff-skeleton-pulse-duration: 1.6s;
@@ -2693,6 +2698,11 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 .sat-menu-item:disabled {
   opacity: 0.4;
   pointer-events: none;
+}
+/* Pressed item: the same instant acknowledgement the row gives, so a menu
+ * choose never feels like the click was dropped while the popup closes. */
+.sat-menu-item:active:not(:disabled) {
+  background: var(--sat-staff-fill-active, rgba(0, 0, 0, 0.065));
 }
 
 /* The shared radio wrapper supplies a default circle indicator. The authoring
@@ -2823,22 +2833,22 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
  * fades without translating; banners fade so content never jumps.
  * Motion tokens: 160ms state / 140ms banner, ease [0.22,1,0.36,1]. */
 .sat-product .sat-row-enter {
-  animation: sat-row-enter 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(min(var(--sat-row-index, 0), 5) * 60ms);
+  animation: sat-row-enter var(--sat-staff-motion-row) cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(min(var(--sat-row-index, 0), var(--sat-staff-stagger-cap, 5)) * var(--sat-staff-stagger-step, 60ms));
 }
 @keyframes sat-row-enter {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .sat-product .sat-route-enter {
-  animation: sat-route-enter 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sat-route-enter var(--sat-staff-motion-row) cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes sat-route-enter {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 .sat-product .sat-banner-enter {
-  animation: sat-route-enter 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sat-route-enter var(--sat-staff-motion-banner) cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 /* F-A12 route fade gate (shell-lane hook): .sat-route-fade opts route chrome
  * out of the enter animation entirely (animation: none); reduced-motion
@@ -2891,13 +2901,81 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 /* List rows: tactile hover + press, never lift (no translate — transform is
  * press-scale only). Chevron nudges on row hover. */
 .sat-product .sat-list-row {
-  transition: background-color 160ms cubic-bezier(0.22, 1, 0.36, 1), transform 100ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color var(--sat-staff-motion-row) var(--sat-staff-ease), transform var(--sat-staff-motion-press) var(--sat-staff-ease-press);
+  touch-action: manipulation;
 }
 .sat-product .sat-list-row:hover {
   background-color: rgba(120, 120, 128, 0.06);
 }
 .sat-product .sat-list-row:active:not(:disabled) {
+  transition-duration: 0ms;
   transform: scale(0.99);
+}
+/* A selected row keeps its accent tint while hovered: the shared hover fill
+ * above would otherwise win over the row's own tint utility and read as a
+ * deselection under the pointer. */
+.sat-product .sat-list-row[aria-current="true"]:hover {
+  background-color: var(--sat-staff-accent-tint, rgba(0, 113, 227, 0.08));
+}
+
+/* Press vocabulary (opt-in): .sat-press for controls, .sat-press-row for large
+ * surfaces (>=72px). The surface answers the pointer in the same frame
+ * (0ms press-in) and settles over --sat-staff-motion-press on release; the
+ * optional fill classes reuse the existing hover/active fill families so no
+ * hue is introduced. Never applied globally — a bare button:active rule would
+ * restyle every page in the product. */
+.sat-product .sat-press {
+  --sat-staff-press-scale: 0.97;
+}
+.sat-product .sat-press-row {
+  --sat-staff-press-scale: var(--sat-staff-press-scale-row, 0.99);
+  touch-action: manipulation;
+}
+.sat-product :is(.sat-press, .sat-press-row) {
+  transition:
+    transform var(--sat-staff-motion-press) var(--sat-staff-ease-press),
+    background-color var(--sat-staff-motion-hover) var(--sat-staff-ease),
+    border-color var(--sat-staff-motion-hover) var(--sat-staff-ease),
+    box-shadow var(--sat-staff-motion-state) var(--sat-staff-ease),
+    opacity var(--sat-staff-motion-hover) var(--sat-staff-ease);
+}
+.sat-product :is(.sat-press, .sat-press-row):active:not(:disabled):not([aria-disabled="true"]) {
+  transition-duration: 0ms;
+  transform: scale(var(--sat-staff-press-scale, 0.97));
+}
+.sat-product .sat-press-fill:active:not(:disabled):not([aria-disabled="true"]) {
+  background-color: var(--sat-staff-fill-active, rgba(0, 0, 0, 0.065));
+}
+.sat-product .sat-press-fill-accent:active:not(:disabled):not([aria-disabled="true"]) {
+  background-color: var(--sat-staff-accent-active, #0067c9);
+}
+
+/* Detail tab panel: opacity-only fade so a tab change is legible without
+ * translating the panel under the pointer (and without animating height).
+ * Reuses the route-fade keyframes; keyed remount is what retriggers it. */
+.sat-product .sat-panel-enter {
+  animation: sat-route-enter var(--sat-staff-motion-banner) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Sliding selection thumbs (segmented/filter pills, detail tabs). The thumb is
+ * one shared element that glides between peers; the label above it stays the
+ * state carrier, so a reduced-motion swap loses nothing. */
+.sat-product .sat-selection-thumb {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--sat-staff-accent, #0071e3);
+  pointer-events: none;
+}
+.sat-product .sat-tab-indicator {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--sat-staff-accent, #0071e3);
+  pointer-events: none;
 }
 .sat-product .sat-row-chevron {
   transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), color 160ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -2955,11 +3033,20 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   .sat-product .sat-skeleton-shimmer::after,
   .sat-product .sat-list-row,
   .sat-product .sat-row-chevron,
-  .sat-product .sat-menu-trigger-chevron {
+  .sat-product .sat-menu-trigger-chevron,
+  .sat-product .sat-press,
+  .sat-product .sat-press-row {
     transition: none !important;
     animation: none !important;
   }
-  .sat-product .sat-list-row:active:not(:disabled) {
+  .authoring-icon-button {
+    transition: none !important;
+  }
+  .authoring-icon-button:active:not(:disabled) {
+    transform: none !important;
+  }
+  .sat-product .sat-list-row:active:not(:disabled),
+  .sat-product :is(.sat-press, .sat-press-row):active:not(:disabled) {
     transform: none !important;
   }
 }
@@ -3156,12 +3243,23 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   color: var(--color-gray-500);
   transition:
     background-color var(--authoring-motion-fast) var(--authoring-ease-standard),
-    color var(--authoring-motion-fast) var(--authoring-ease-standard);
+    color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    transform var(--sat-staff-motion-press, 100ms) var(--sat-staff-ease-press, cubic-bezier(0.4, 0, 0.2, 1));
+  touch-action: manipulation;
 }
 
 .authoring-icon-button:hover:not(:disabled) {
   background: var(--color-au-fill);
   color: var(--color-gray-900);
+}
+
+/* Icon buttons are pressed controls too: instant compression + fill, matching
+ * .authoring-button's scale. Kept inside the authoring family so the round
+ * icon grammar stays one thing across sheets, toolbars and import surfaces. */
+.authoring-icon-button:active:not(:disabled) {
+  transition-duration: 0ms;
+  transform: scale(0.94);
+  background: var(--sat-staff-fill-active, rgba(0, 0, 0, 0.065));
 }
 
 .authoring-icon-button:disabled {

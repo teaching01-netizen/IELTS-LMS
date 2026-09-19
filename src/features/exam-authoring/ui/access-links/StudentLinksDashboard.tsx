@@ -24,8 +24,9 @@ import { AuthoringConfirmDialog } from "../authoringPrimitives";
 import type { SatMenuItem } from "../../../../products/sat/ui/Menu";
 import { AccessLinkPresentView, AccessLinkShareSheet } from "./AccessLinkShareSheet";
 import { AccessLinkDetail } from "./AccessLinkDetail";
-import { AccessLinkRow } from "./AccessLinkRow";
+import { AccessLinkRow, rowElementId } from "./AccessLinkRow";
 import { LinksToolbar, type StatusFilter } from "./LinksToolbar";
+import { useTransientValue } from "./useTransientValue";
 import {
   SatContainer,
   SatEmptyState,
@@ -49,8 +50,32 @@ interface StudentLinksDashboardProps {
 
 const EMPTY_ACCESS_LINKS: AssessmentAccessLink[] = [];
 const STATUS_RANK: Record<AccessLinkStatus, number> = { live: 0, upcoming: 1, paused: 2, ended: 3, revoked: 4 };
+/**
+ * Search echo budget: filtering this list is a linear scan of a handful of
+ * rows, so a small workspace filters on the committed keystroke (the count and
+ * the rows move together, immediately). Only a genuinely large link library
+ * pays the 150ms debounce, where re-sorting on every keystroke is real work.
+ */
+const SEARCH_FAST_PATH_MAX = 150;
+/**
+ * A write in flight for one link. Derived from the mutation itself rather than
+ * mirrored into state, so the pending look can never outlive the request.
+ */
+type PendingWrite = { linkId: string; label: string };
+/**
+ * Transient acknowledgement rendered where the action happened. `kind` lets the
+ * detail pane reuse the copy confirmation without re-deriving it from copy text.
+ */
+type Confirmation = { linkId: string; kind: "copy" | "action"; text: string };
 
 type LinkUpdateOptions = { silent?: boolean };
+
+/** Present-tense label for an in-flight lifecycle write. */
+function lifecyclePendingLabel(state: "active" | "paused" | "revoked"): string {
+  if (state === "active") return "Resuming…";
+  if (state === "paused") return "Pausing…";
+  return "Revoking…";
+}
 
 function projectSharedAccessLink(
   fallback: AssessmentAccessLink,
@@ -147,6 +172,30 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const lifecycleMutation = useSetAccessLinkLifecycle(exam.id);
   const duplicateMutation = useDuplicateAccessLink(exam.id);
   const membersQuery = useAccessLinkMembers(editingLink?.id ?? null);
+  const { value: confirmation, show: showConfirmation } = useTransientValue<Confirmation>(1600);
+
+  const pendingWrite = useMemo<PendingWrite | null>(() => {
+    if (lifecycleMutation.isPending && lifecycleMutation.variables) {
+      return {
+        linkId: lifecycleMutation.variables.linkId,
+        label: lifecyclePendingLabel(lifecycleMutation.variables.request.state),
+      };
+    }
+    if (duplicateMutation.isPending && duplicateMutation.variables) {
+      return { linkId: duplicateMutation.variables.linkId, label: "Duplicating…" };
+    }
+    if (updateMutation.isPending && updateMutation.variables) {
+      return { linkId: updateMutation.variables.linkId, label: "Saving…" };
+    }
+    return null;
+  }, [
+    duplicateMutation.isPending,
+    duplicateMutation.variables,
+    lifecycleMutation.isPending,
+    lifecycleMutation.variables,
+    updateMutation.isPending,
+    updateMutation.variables,
+  ]);
 
   useEffect(() => {
     if (!editingLink) return;
@@ -168,8 +217,12 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     return result;
   }, [links]);
 
+  // Small workspaces echo the keystroke immediately; a large library keeps the
+  // debounced term so re-sorting stays off the typing path.
+  const effectiveSearch = links.length <= SEARCH_FAST_PATH_MAX ? search : debouncedSearch;
+
   const visibleLinks = useMemo(() => {
-    const query = debouncedSearch.trim().toLocaleLowerCase();
+    const query = effectiveSearch.trim().toLocaleLowerCase();
     return links
       .filter((link) => {
         if (statusFilter !== "all" && link.status !== statusFilter) return false;
@@ -178,7 +231,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
           .some((value) => value.toLocaleLowerCase().includes(query));
       })
       .sort((left, right) => STATUS_RANK[left.status] - STATUS_RANK[right.status] || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
-  }, [links, debouncedSearch, statusFilter]);
+  }, [links, effectiveSearch, statusFilter]);
 
   const selectedLink = visibleLinks.find((link) => link.id === selectedId) ?? null;
   const activityQuery = useAccessLinkActivity(selectedLink?.id ?? null);
@@ -187,6 +240,31 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     if (selectedId && visibleLinks.some((link) => link.id === selectedId)) return;
     setSelectedId(visibleLinks[0]?.id ?? null);
   }, [selectedId, visibleLinks]);
+
+  /**
+   * Selecting a link always keeps it under the eye and (optionally) under the
+   * focus ring: arrow-key navigation otherwise moves the right pane while the
+   * selected row stays off-screen.
+   */
+  const selectLink = useCallback((linkId: string, options?: { focus?: boolean }) => {
+    setSelectedId(linkId);
+    // A freshly created/duplicated row does not exist yet in this commit: retry
+    // once on the next frame rather than scrolling nothing.
+    const reveal = (attempt: number) => {
+      const element = document.getElementById(rowElementId(linkId));
+      if (!element) {
+        if (attempt === 0 && typeof window !== "undefined") window.requestAnimationFrame(() => reveal(1));
+        return;
+      }
+      element.scrollIntoView?.({ block: "nearest" });
+      if (options?.focus) element.focus();
+    };
+    reveal(0);
+  }, []);
+
+  const focusSelectedRow = useCallback(() => {
+    if (selectedId) document.getElementById(rowElementId(selectedId))?.focus();
+  }, [selectedId]);
 
   // Global "/" focuses search; list arrows move selection. Skipped inside inputs.
   useEffect(() => {
@@ -204,12 +282,12 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         if (index < 0) return;
         event.preventDefault();
         const next = visibleLinks[(index + (event.key === "ArrowDown" ? 1 : -1) + visibleLinks.length) % visibleLinks.length];
-        if (next) setSelectedId(next.id);
+        if (next) selectLink(next.id);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [confirm, editorOpen, presentLink, selectedId, shareLink, visibleLinks]);
+  }, [confirm, editorOpen, presentLink, selectLink, selectedId, shareLink, visibleLinks]);
 
   const showToast = useCallback((message: string) => {
     notifySuccess(message);
@@ -225,15 +303,21 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     const created = await createMutation.mutateAsync(request);
     collaboration?.setValue(`access/${created.id}`, created);
     announceWorkspaceCommand("access.created", { linkId: created.id });
-    setSelectedId(created.id);
+    selectLink(created.id);
+    // The new row lands already confirmed: the page never relies on a global
+    // channel to say the write was accepted.
+    showConfirmation({ linkId: created.id, kind: "action", text: "Student Link created" });
     showToast("Student Link created");
   };
   const updateLink = async (linkId: string, request: UpdateAssessmentAccessLinkRequest, options?: LinkUpdateOptions) => {
     const updated = await updateMutation.mutateAsync({ linkId, request });
     collaboration?.setValue(`access/${linkId}`, updated);
     announceWorkspaceCommand("access.updated", { linkId });
-    setSelectedId(updated.id);
-    if (!options?.silent) showToast("Student Link updated");
+    selectLink(updated.id);
+    if (!options?.silent) {
+      showConfirmation({ linkId: updated.id, kind: "action", text: "Changes saved" });
+      showToast("Student Link updated");
+    }
   };
   const setLifecycle = async (
     link: AssessmentAccessLink,
@@ -251,6 +335,11 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         },
       });
       announceWorkspaceCommand("access.lifecycle_changed", { linkId: link.id, state });
+      showConfirmation({
+        linkId: link.id,
+        kind: "action",
+        text: state === "active" ? "Resumed" : state === "paused" ? "Paused" : "Revoked",
+      });
       showToast(state === "active" ? "Student Link resumed" : state === "paused" ? "Student Link paused" : "Student Link revoked");
       return true;
     } catch (err) {
@@ -274,7 +363,12 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       const created = await duplicateMutation.mutateAsync({ linkId: link.id, request });
       collaboration?.setValue(`access/${created.id}`, created);
       announceWorkspaceCommand("access.duplicated", { linkId: created.id, sourceLinkId: link.id });
-      setSelectedId(created.id);
+      selectLink(created.id);
+      showConfirmation({
+        linkId: created.id,
+        kind: "action",
+        text: releaseTarget === "current" ? `Created for Version ${version?.versionNumber ?? "current"}` : "Student Link duplicated",
+      });
       showToast(releaseTarget === "current" ? `Created for Version ${version?.versionNumber ?? "current"}` : "Student Link duplicated");
     } catch (err) {
       reportActionError(
@@ -289,27 +383,31 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const copy = useCallback(async (link: AssessmentAccessLink) => {
     try {
       await copyText(studentJoinUrl(link.id));
-      showToast("Link copied");
+      // Confirmed at the control that was pressed (row or detail), not in a
+      // channel the operator has to go looking for.
+      showConfirmation({ linkId: link.id, kind: "copy", text: "Link copied" });
     } catch (err) {
       reportActionError("Link could not be copied. Clipboard is unavailable.", { action: "copy", linkId: link.id }, err);
     }
-  }, [reportActionError, showToast]);
+  }, [reportActionError, showConfirmation]);
 
   const openEditor = useCallback((link: AssessmentAccessLink | null) => {
     setEditingLink(link);
     setEditorOpen(true);
   }, []);
 
-  const menuItemsFor = useCallback((link: AssessmentAccessLink): SatMenuItem[] => [
-    { id: "copy", label: "Copy link", onSelect: () => { void copy(link); } },
-    { id: "share", label: "Share", onSelect: () => setShareLink(link) },
-    { id: "present", label: "Present to Students", onSelect: () => setPresentLink(link) },
-    { id: "edit", label: "Edit Link", onSelect: () => openEditor(link) },
-    { id: "duplicate", label: "Duplicate Link", onSelect: () => { void duplicate(link); } },
+  // While one write is in flight the menu closes behind it; the row keeps the
+  // acknowledgement, so the actions stay visible but cannot be re-fired.
+  const menuItemsFor = useCallback((link: AssessmentAccessLink, busy = false): SatMenuItem[] => [
+    { id: "copy", label: "Copy link", disabled: busy, onSelect: () => { void copy(link); } },
+    { id: "share", label: "Share", disabled: busy, onSelect: () => setShareLink(link) },
+    { id: "present", label: "Present to Students", disabled: busy, onSelect: () => setPresentLink(link) },
+    { id: "edit", label: "Edit Link", disabled: busy, onSelect: () => openEditor(link) },
+    { id: "duplicate", label: "Duplicate Link", disabled: busy, onSelect: () => { void duplicate(link); } },
     ...(link.lifecycleState !== "revoked"
-      ? [{ id: "pause", label: link.lifecycleState === "paused" ? "Resume Link" : "Pause Link", onSelect: () => { void setLifecycle(link, link.lifecycleState === "paused" ? "active" : "paused"); } } as SatMenuItem]
+      ? [{ id: "pause", label: link.lifecycleState === "paused" ? "Resume Link" : "Pause Link", disabled: busy, onSelect: () => { void setLifecycle(link, link.lifecycleState === "paused" ? "active" : "paused"); } } as SatMenuItem]
       : []),
-    { id: "revoke", label: "Revoke Link", onSelect: () => setConfirm({ link, action: "revoke" }), destructive: true, separatorBefore: true, disabled: link.lifecycleState === "revoked" },
+    { id: "revoke", label: "Revoke Link", onSelect: () => setConfirm({ link, action: "revoke" }), destructive: true, separatorBefore: true, disabled: busy || link.lifecycleState === "revoked" },
   ], [copy, duplicate, openEditor, setLifecycle]);
 
   if (isLoading) {
@@ -330,7 +428,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
             <h1 className="text-[16px] font-semibold text-slate-900">Student Access could not load</h1>
             <p className="mt-1.5 text-[13px] leading-5 text-slate-500">{error}</p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <button type="button" onClick={onBackToRelease} className="flex min-h-11 items-center rounded-[12px] px-4 text-[13px] font-semibold text-slate-600 hover:bg-black/[0.04]">Release</button>
+              <button type="button" onClick={onBackToRelease} className="sat-press sat-press-fill flex min-h-11 items-center rounded-[12px] px-4 text-[13px] font-semibold text-slate-600 hover:bg-black/[0.04]">Release</button>
               <SatPrimaryButton onClick={() => { void onRefresh(); }} icon={<RefreshCw size={14} aria-hidden="true" />}>Retry</SatPrimaryButton>
             </div>
           </div>
@@ -359,7 +457,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     <div className="sat-product min-h-screen bg-au-fill text-slate-950">
       <header className="sticky top-0 z-40 border-b border-black/[0.07] authoring-glass">
         <div className="mx-auto flex min-h-[64px] w-full max-w-[1180px] items-center gap-3 px-4 sm:px-6 lg:px-10">
-          <button type="button" onClick={onBackToRelease} className="flex min-h-11 items-center gap-1.5 rounded-[12px] px-2.5 text-[12px] font-semibold text-slate-500 hover:bg-black/[0.04] hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40"><ArrowLeft size={15} aria-hidden="true" />Release</button>
+          <button type="button" onClick={onBackToRelease} className="sat-press sat-press-fill flex min-h-11 items-center gap-1.5 rounded-[12px] px-2.5 text-[12px] font-semibold text-slate-500 hover:bg-black/[0.04] hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40"><ArrowLeft size={15} aria-hidden="true" />Release</button>
           <div className="h-5 w-px bg-black/[0.08]" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-semibold tracking-[-0.01em]">{exam.title}</p>
@@ -376,14 +474,17 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
           title="Student Access"
           description="Share this exam with students. Existing links stay on the release they were created for."
         />
+        {/* One polite region for in-place confirmations: the visual copy lives
+            at the control, and screen readers hear it once. */}
+        <p role="status" aria-live="polite" className="sr-only">{confirmation?.text ?? ""}</p>
         {actionError ? (
-          <div role="alert" className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-red-700/20 bg-red-50 px-4 py-3 text-[12px] font-medium text-red-700">
+          <div role="alert" className="sat-banner-enter mt-4 flex items-center justify-between gap-3 rounded-2xl border border-red-700/20 bg-red-50 px-4 py-3 text-[12px] font-medium text-red-700">
             <span>{actionError}</span>
             <span className="flex shrink-0 items-center gap-1">
               {staleConflict ? (
-                <button type="button" onClick={() => { setActionError(null); setStaleConflict(false); void onRefresh(); }} className="flex min-h-11 items-center gap-1 rounded-[10px] px-2.5 text-[12px] font-semibold hover:bg-red-100"><RefreshCw size={13} aria-hidden="true" />Refresh</button>
+                <button type="button" onClick={() => { setActionError(null); setStaleConflict(false); void onRefresh(); }} className="sat-press sat-press-fill flex min-h-11 items-center gap-1 rounded-[10px] px-2.5 text-[12px] font-semibold hover:bg-red-100"><RefreshCw size={13} aria-hidden="true" />Refresh</button>
               ) : null}
-              <button type="button" onClick={() => { setActionError(null); setStaleConflict(false); }} aria-label="Dismiss error" className="flex h-11 w-11 items-center justify-center rounded-[10px] hover:bg-red-100"><XCircle size={15} aria-hidden="true" /></button>
+              <button type="button" onClick={() => { setActionError(null); setStaleConflict(false); }} aria-label="Dismiss error" className="sat-press sat-press-fill flex h-11 w-11 items-center justify-center rounded-[10px] hover:bg-red-100"><XCircle size={15} aria-hidden="true" /></button>
             </span>
           </div>
         ) : null}
@@ -408,9 +509,12 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
                       link={link}
                       selected={selectedId === link.id}
                       isStaleRelease={link.publishedVersionId !== version.id}
-                      onSelect={() => setSelectedId(link.id)}
-                      menuItems={menuItemsFor(link)}
+                      onSelect={() => selectLink(link.id)}
+                      menuItems={menuItemsFor(link, pendingWrite?.linkId === link.id)}
                       resultIndex={index}
+                      busy={pendingWrite?.linkId === link.id}
+                      pendingLabel={pendingWrite?.linkId === link.id ? pendingWrite.label : null}
+                      confirmation={confirmation?.linkId === link.id ? confirmation.text : null}
                     />
                   ))}
                 </SatList>
@@ -446,6 +550,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
                 onEdit={() => openEditor(selectedLink)}
                 onPresent={() => setPresentLink(selectedLink)}
                 onCreateForCurrent={() => { void duplicate(selectedLink, "current"); }}
+                copyConfirmed={confirmation?.linkId === selectedLink.id && confirmation.kind === "copy"}
+                onEscapeToRow={focusSelectedRow}
               />
             ) : (
               <div className="flex h-full items-center justify-center p-8 text-center">

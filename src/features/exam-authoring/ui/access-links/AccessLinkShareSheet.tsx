@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Check, Copy, Download, ExternalLink, Presentation, Share2, X } from "lucide-react";
 import { accessLinkSectionBadge, accessLinkSectionStudentCopy, type AssessmentAccessLink } from "../../contracts/accessLinks";
 import { copyText, studentJoinUrl } from "./accessLinkUi";
+import { useTransientFlag } from "./useTransientValue";
 import { AuthoringDialog } from "../authoringPrimitives";
 export function useAccessLinkQrCode(linkId: string | null, size = 640) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
@@ -24,18 +25,17 @@ export function useAccessLinkQrCode(linkId: string | null, size = 640) {
 }
 
 export function AccessLinkShareSheet({ open, link, onClose, onPresent }: { open: boolean; link: AssessmentAccessLink | null; onClose: () => void; onPresent: () => void }) {
-  const [copied, setCopied] = useState(false);
+  const { active: copied, trigger: confirmCopied, clear: clearCopied } = useTransientFlag(1800);
   const sectionBadge = accessLinkSectionBadge(link?.enabledSections);
   const [shareError, setShareError] = useState<string | null>(null);
   const { dataUrl, error: qrError } = useAccessLinkQrCode(open ? link?.id ?? null : null, 640);
-  useEffect(() => { if (open) { setCopied(false); setShareError(null); } }, [open, link?.id]);
+  useEffect(() => { if (open) { clearCopied(); setShareError(null); } }, [open, link?.id, clearCopied]);
   if (!link) return null;
   const url = studentJoinUrl(link.id);
   const copy = async () => {
     try {
       await copyText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
+      confirmCopied();
     } catch (error) {
       setShareError(error instanceof Error ? error.message : "Link could not be copied.");
     }
@@ -66,9 +66,9 @@ export function AccessLinkShareSheet({ open, link, onClose, onPresent }: { open:
           <div className="p-5">
             <div className="mx-auto flex h-52 w-52 items-center justify-center rounded-[18px] bg-au-fill p-3">{dataUrl ? <img src={dataUrl} alt={`QR code for ${link.name}`} className="h-full w-full" /> : <span role="status" className="px-4 text-center text-[11px] text-slate-500">{qrError ?? "Generating QR code…"}</span>}</div>
             <div className="mt-4 rounded-xl bg-au-fill px-3 py-2.5"><p className="break-all font-mono text-[11px] leading-5 text-slate-600 select-all">{url}</p></div>
-            <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => void share()} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-accent px-3 text-[12px] font-semibold text-white hover:bg-au-accent-hover"><Share2 size={15} aria-hidden="true"/>Share</button><button type="button" onClick={() => void copy()} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-fill px-3 text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong">{copied ? <Check size={15} className="text-au-success" aria-hidden="true"/> : <Copy size={15} aria-hidden="true"/>} {copied ? "Copied" : "Copy Link"}</button></div>
-            <div className="mt-2 grid grid-cols-2 gap-2"><button type="button" onClick={onPresent} className="flex min-h-11 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-600 hover:bg-au-fill"><Presentation size={14} aria-hidden="true"/>Present</button>{dataUrl ? <a href={dataUrl} download={`${link.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "student-link"}-qr.png`} className="flex min-h-11 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-600 hover:bg-au-fill"><Download size={14} aria-hidden="true"/>Download QR</a> : <span />}</div>
-            <a href={url} target="_blank" rel="noreferrer" className="mt-2 flex min-h-11 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-500 hover:bg-au-fill"><ExternalLink size={13} aria-hidden="true"/>Open student link</a>
+            <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => void share()} className="sat-press sat-press-fill-accent flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-accent px-3 text-[12px] font-semibold text-white hover:bg-au-accent-hover"><Share2 size={15} aria-hidden="true"/>Share</button><button type="button" onClick={() => void copy()} aria-live="polite" className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-2 rounded-xl bg-au-fill px-3 text-[12px] font-semibold text-slate-700 hover:bg-au-fill-strong">{copied ? <Check size={15} className="text-au-success" aria-hidden="true"/> : <Copy size={15} aria-hidden="true"/>} {copied ? "Copied" : "Copy Link"}</button></div>
+            <div className="mt-2 grid grid-cols-2 gap-2"><button type="button" onClick={onPresent} className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-600 hover:bg-au-fill"><Presentation size={14} aria-hidden="true"/>Present</button>{dataUrl ? <a href={dataUrl} download={`${link.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "student-link"}-qr.png`} className="sat-press sat-press-fill flex min-h-11 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-600 hover:bg-au-fill"><Download size={14} aria-hidden="true"/>Download QR</a> : <span />}</div>
+            <a href={url} target="_blank" rel="noreferrer" className="sat-press sat-press-fill mt-2 flex min-h-11 items-center justify-center gap-2 rounded-xl text-[11px] font-semibold text-slate-500 hover:bg-au-fill"><ExternalLink size={13} aria-hidden="true"/>Open student link</a>
             {shareError ? <p role="alert" className="mt-3 rounded-xl bg-au-danger-tint px-3 py-2 text-[11px] text-au-danger-text">{shareError}</p> : null}
           </div>
     </AuthoringDialog>

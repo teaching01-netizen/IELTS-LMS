@@ -1,3 +1,4 @@
+import { motion } from "motion/react";
 import type { AccessLinkStatus } from "../../contracts/accessLinks";
 import { SatSearchField } from "../../../../products/sat/ui/SatPage";
 import { formatAccessLinkStatus } from "./accessLinkUi";
@@ -16,10 +17,15 @@ export interface LinksToolbarProps {
 }
 
 const FILTERS: StatusFilter[] = ["all", "live", "upcoming", "ended", "paused", "revoked"];
+const FILTER_THUMB_ID = "sat-access-status-filter-thumb";
 
 /**
  * Search + status pills + live result count. Pure presentational; the
  * dashboard owns filtering. Pills keep a 44px hitbox with a compact visual.
+ *
+ * Interaction contract: the active pill is marked by one shared selection
+ * thumb that glides between peers (interruptible spring; instant under reduced
+ * motion), plus weight — never by color alone. Every pill presses in place.
  */
 export function LinksToolbar({
   search,
@@ -57,11 +63,21 @@ export function LinksToolbar({
               aria-pressed={active}
               onClick={() => onStatusFilterChange(status)}
               className={
-                "flex min-h-11 shrink-0 items-center rounded-full px-3.5 text-[11px] font-semibold capitalize transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 " +
-                (active ? "bg-au-accent text-white" : "border border-black/[0.08] bg-white text-slate-500 hover:text-slate-900")
+                "sat-press relative flex min-h-11 shrink-0 items-center rounded-full px-3.5 text-[11px] font-semibold capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 " +
+                (active
+                  ? "sat-press-fill-accent text-white"
+                  : "sat-press-fill border border-black/[0.08] bg-white text-slate-500 hover:text-slate-900")
               }
             >
-              {label}
+              {active ? (
+                <motion.span
+                  layoutId={FILTER_THUMB_ID}
+                  aria-hidden="true"
+                  transition={{ type: "spring", stiffness: 640, damping: 50 }}
+                  className="sat-selection-thumb"
+                />
+              ) : null}
+              <span className="relative">{label}</span>
             </button>
           );
         })}
