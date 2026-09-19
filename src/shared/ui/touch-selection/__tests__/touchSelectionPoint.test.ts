@@ -6,6 +6,7 @@ import {
   expandToWordAt,
   firstTextPointIn,
   lastTextPointIn,
+  nearestTextPointIn,
   textPointIsWithin,
   type TextPoint,
   type WordSegmenter,
@@ -23,6 +24,69 @@ function textNodeOf(element: Element): Text {
   const node = walker.nextNode() as Text | null;
   if (!node) throw new Error('no text node');
   return node;
+}
+
+/**
+ * A rendered line, as jsdom refuses to have one.
+ *
+ * The geometric fallback is the one part of the selection gesture that reads
+ * layout, so its tests have to supply layout: a character grid per text node,
+ * with `perLine` characters to a line. Rectangles are synthesized for whatever
+ * a range covers, which is what makes the offset arithmetic assertable — a
+ * point at x is a character index, deterministically.
+ */
+interface FakeLine {
+  node: Text;
+  x0: number;
+  y0: number;
+  charWidth: number;
+  charHeight: number;
+  perLine?: number | undefined;
+}
+
+function installFakeLayout(lines: FakeLine[]): () => void {
+  const byNode = new Map<Text, FakeLine>(lines.map((line) => [line.node, line] as const));
+  const proto = Range.prototype as unknown as {
+    getClientRects?: (this: Range) => unknown;
+    getBoundingClientRect?: (this: Range) => unknown;
+  };
+  const original = {
+    getClientRects: proto.getClientRects,
+    getBoundingClientRect: proto.getBoundingClientRect,
+  };
+
+  const rectsFor = (range: Range) => {
+    if (range.endContainer !== range.startContainer) return [];
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return [];
+    const line = byNode.get(node as Text);
+    if (!line || range.endOffset <= range.startOffset) return [];
+    const perLine = line.perLine ?? Number.MAX_SAFE_INTEGER;
+    const rects: Array<{ left: number; top: number; width: number; height: number }> = [];
+    for (let index = range.startOffset; index < range.endOffset; index += 1) {
+      rects.push({
+        left: line.x0 + (index % perLine) * line.charWidth,
+        top: line.y0 + Math.floor(index / perLine) * line.charHeight,
+        width: line.charWidth,
+        height: line.charHeight,
+      });
+    }
+    return rects;
+  };
+
+  proto.getClientRects = function (this: Range) {
+    return rectsFor(this);
+  };
+  proto.getBoundingClientRect = function (this: Range) {
+    return rectsFor(this)[0] ?? { left: 0, top: 0, width: 0, height: 0 };
+  };
+
+  return () => {
+    if (original.getClientRects) proto.getClientRects = original.getClientRects;
+    else delete proto.getClientRects;
+    if (original.getBoundingClientRect) proto.getBoundingClientRect = original.getBoundingClientRect;
+    else delete proto.getBoundingClientRect;
+  };
 }
 
 describe('compareTextPoints', () => {
@@ -168,6 +232,132 @@ describe('caretPositionAtPoint', () => {
 
   it('returns null when the renderer exposes no hit test at all', () => {
     expect(caretPositionAtPoint(fakeDocument({}), 10, 20)).toBeNull();
+  });
+
+  it('resolves geometry when the hit test answers with an element instead of text', () => {
+    // A finger between two glyphs, or in the whitespace at the end of a line,
+    // hit-tests to the PARAGRAPH. Reporting nothing there left a press with no
+    // gesture at all, and the platform selection is suppressed on these
+    // surfaces — so the student had no way to select that text.
+    const paragraph = host.querySelector('p')!;
+    const restore = installFakeLayout([{ node: text, x0: 100, y0: 50, charWidth: 10, charHeight: 20 }]);
+    const doc = fakeDocument({
+      caretPositionFromPoint: () => ({ offsetNode: paragraph, offset: 0 }),
+    });
+
+    try {
+      expect(caretPositionAtPoint(doc, 133, 60)).toEqual({ node: text, offset: 3 });
+    } finally {
+      restore();
+    }
+  });
+
+  it('resolves geometry from the element under the point when no hit test answers', () => {
+    const paragraph = host.querySelector('p')!;
+    const restore = installFakeLayout([{ node: text, x0: 100, y0: 50, charWidth: 10, charHeight: 20 }]);
+    const doc = fakeDocument({ elementFromPoint: () => paragraph });
+
+    try {
+      expect(caretPositionAtPoint(doc, 137, 60)).toEqual({ node: text, offset: 4 });
+    } finally {
+      restore();
+    }
+  });
+
+  it('still prefers the range hit test over geometry', () => {
+    const range = document.createRange();
+    range.setStart(text, 2);
+    range.collapse(true);
+    const doc = fakeDocument({
+      caretPositionFromPoint: () => ({ offsetNode: host, offset: 0 }),
+      caretRangeFromPoint: () => range,
+      elementFromPoint: () => host,
+    });
+    const restore = installFakeLayout([{ node: text, x0: 100, y0: 50, charWidth: 10, charHeight: 20 }]);
+
+    try {
+      expect(caretPositionAtPoint(doc, 133, 60)).toEqual({ node: text, offset: 2 });
+    } finally {
+      restore();
+    }
+  });
+
+  it('reports nothing rather than a guess when the text cannot be measured', () => {
+    // No layout at all, as in a renderer that measures nothing: an offset picked
+    // out of thin air would anchor an annotation over the wrong words.
+    const paragraph = host.querySelector('p')!;
+    const doc = fakeDocument({
+      caretPositionFromPoint: () => ({ offsetNode: paragraph, offset: 0 }),
+      elementFromPoint: () => paragraph,
+    });
+
+    expect(caretPositionAtPoint(doc, 133, 60)).toBeNull();
+  });
+});
+
+describe('nearestTextPointIn', () => {
+  it('takes the character under the point, on the near side of its midpoint', () => {
+    const host = build('<p>alpha beta gamma</p>');
+    const text = textNodeOf(host.querySelector('p')!);
+    const restore = installFakeLayout([{ node: text, x0: 100, y0: 50, charWidth: 10, charHeight: 20 }]);
+
+    try {
+      // Index 3 spans 130–140 with its midpoint at 135.
+      expect(nearestTextPointIn(host, 133, 60)).toEqual({ node: text, offset: 3 });
+      expect(nearestTextPointIn(host, 137, 60)).toEqual({ node: text, offset: 4 });
+    } finally {
+      restore();
+    }
+  });
+
+  it('follows the wrap onto a later line', () => {
+    const host = build('<p>abcdefghijkl</p>');
+    const text = textNodeOf(host.querySelector('p')!);
+    const restore = installFakeLayout([
+      { node: text, x0: 0, y0: 0, charWidth: 10, charHeight: 20, perLine: 4 },
+    ]);
+
+    try {
+      // Character 9 starts the third line at x 10, y 40.
+      expect(nearestTextPointIn(host, 12, 50)).toEqual({ node: text, offset: 9 });
+    } finally {
+      restore();
+    }
+  });
+
+  it('picks the nearer of two rendered runs', () => {
+    const host = build('<p id="one">first run</p><p id="two">second run</p>');
+    const first = textNodeOf(host.querySelector('#one')!);
+    const second = textNodeOf(host.querySelector('#two')!);
+    const restore = installFakeLayout([
+      { node: first, x0: 0, y0: 0, charWidth: 10, charHeight: 20 },
+      { node: second, x0: 0, y0: 40, charWidth: 10, charHeight: 20 },
+    ]);
+
+    try {
+      expect(nearestTextPointIn(host, 25, 45)).toEqual({ node: second, offset: 3 });
+      expect(nearestTextPointIn(host, 25, 5)).toEqual({ node: first, offset: 3 });
+    } finally {
+      restore();
+    }
+  });
+
+  it('passes over a run that renders nothing for one that can be measured', () => {
+    const host = build('<p><span id="blank">unmeasured</span><span id="real">real text</span></p>');
+    const real = textNodeOf(host.querySelector('#real')!);
+    const restore = installFakeLayout([{ node: real, x0: 0, y0: 0, charWidth: 10, charHeight: 20 }]);
+
+    try {
+      expect(nearestTextPointIn(host, 2, 5)).toEqual({ node: real, offset: 0 });
+    } finally {
+      restore();
+    }
+  });
+
+  it('reports nothing for an element with no text', () => {
+    const host = build('<p><img alt="" /></p>');
+
+    expect(nearestTextPointIn(host, 5, 5)).toBeNull();
   });
 });
 

@@ -201,9 +201,17 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
    * being OFF means passage text cannot be selected at all — which is the
    * intended anti-cheat outcome, not a gap: an unarmed mode has no use for a
    * selection, and a platform selection is what raises the Copy / Look Up bar.
+   *
+   * `activation: 'drag'` follows from that same arming. Because the mode is on,
+   * the prose has no platform selection to fall back on, and the old contract —
+   * hold still for 350 ms or the gesture is cancelled — meant the ordinary touch
+   * motion of pressing and dragging selected nothing at all. A hold still takes
+   * the word under the finger; a drag past the same tolerance now claims the
+   * text instead of abandoning it.
    */
   const touchSelection = useStudentTouchTextSelection({
     enabled: enabled && view.annotationModeEnabled && examScope.ownedTouchSelection,
+    activation: 'drag',
     rootRef: root,
     resolveCaretAtPoint,
     onSelect: reportOwnedRange,

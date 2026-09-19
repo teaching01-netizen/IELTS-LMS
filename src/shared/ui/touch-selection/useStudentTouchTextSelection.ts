@@ -29,12 +29,29 @@ import {
  * that is also what deletes highlighting unless something else supplies the
  * selection.
  *
- * So this hook supplies it. A long press that stays put, then a drag, produces a
- * DOM `Range` that is NEVER installed into `window.getSelection()`. The platform
- * therefore has no selection to decorate, and the range feeds the same capture
- * functions the desktop path uses — the annotation anchors are computed from
- * character offsets and the toolbars measure themselves from a stored anchor, so
- * nothing downstream needs the platform's selection to exist.
+ * So this hook supplies it, with a DOM `Range` that is NEVER installed into
+ * `window.getSelection()`. The platform therefore has no selection to decorate,
+ * and the range feeds the same capture functions the desktop path uses — the
+ * annotation anchors are computed from character offsets and the toolbars
+ * measure themselves from a stored anchor, so nothing downstream needs the
+ * platform's selection to exist.
+ *
+ * TWO CONTRACTS, DECIDED BY WHAT THE STUDENT HAS ALREADY SAID
+ *
+ * `activation: 'long-press'` (the default) reserves the gesture: a touch must
+ * rest inside the tolerance for `longPressMs` before the text belongs to the
+ * exam, and until then any movement is the platform's scroll. It is the right
+ * contract for a surface that is merely selectable, because a drag there is
+ * far more likely to be reading than marking.
+ *
+ * `activation: 'drag'` is for a surface where the student has ALREADY declared
+ * the intent by arming a tool. Requiring the hold on top of that was a trap: a
+ * finger that starts dragging immediately — which is how touch selection is
+ * performed almost everywhere else — used to cancel the gesture permanently, and
+ * with the platform's own selection suppressed there was then no way to select
+ * text at all. So in this mode a drag past the same tolerance CLAIMS the text
+ * instead of abandoning it, and a hold still takes the word under the finger. A
+ * tap that does neither still selects nothing.
  *
  * WHY THE MOUSE PATH IS HERE TOO
  *
@@ -52,9 +69,20 @@ import {
  * only once the selection is owned, and only for the duration of that gesture.
  */
 
+export type StudentTouchSelectionActivation = 'long-press' | 'drag';
+
 export interface StudentTouchTextSelectionOptions {
   /** Whether the owned gesture runs at all: exam scope AND an armed tool. */
   enabled: boolean;
+  /**
+   * How the gesture claims the text.
+   *
+   * `'long-press'` (default): rest inside the tolerance for `longPressMs`, and a
+   * finger that travels before then is scrolling. `'drag'`: the surface has
+   * already been armed, so travelling past the tolerance claims the text rather
+   * than cancelling — a hold still takes the word under the finger.
+   */
+  activation?: StudentTouchSelectionActivation | undefined;
   /** The element the gesture must begin inside — a passage, a prose block. */
   rootRef: RefObject<HTMLElement | null>;
   /**
@@ -123,6 +151,7 @@ export function useStudentTouchTextSelection(
 ): StudentTouchTextSelectionState {
   const {
     enabled,
+    activation = 'long-press',
     rootRef,
     resolveCaretAtPoint,
     onSelect,
@@ -140,6 +169,7 @@ export function useStudentTouchTextSelection(
   // captured, and arming or disarming during a drag must not lose it either.
   const live = useRef({
     enabled,
+    activation,
     resolveCaretAtPoint,
     onSelect,
     boundaryFor,
@@ -150,6 +180,7 @@ export function useStudentTouchTextSelection(
   });
   live.current = {
     enabled,
+    activation,
     resolveCaretAtPoint,
     onSelect,
     boundaryFor,
@@ -263,6 +294,12 @@ export function useStudentTouchTextSelection(
       clearHoldTimer();
       detachScrollSuppressor();
       ownedRange.current = null;
+      // The state is idled too, not just the gesture. A gesture can be
+      // abandoned after it already claimed the text (a second finger landing,
+      // a mode switched off), and leaving the overlay painted would show a
+      // selection that no longer exists and no longer belongs to anyone.
+      // `IDLE` is a module constant, so setting it over itself is a no-op.
+      setState(IDLE);
     };
 
     const finish = (report: boolean) => {
@@ -280,6 +317,17 @@ export function useStudentTouchTextSelection(
       if (!config.enabled) return;
       if (!config.isCoarsePointer()) return;
       if (typeof event.button === 'number' && event.button > 0) return;
+
+      // A second finger while a gesture is live is the PLATFORM's gesture:
+      // two-finger scrolling and pinch-zoom are how a student reads a passage,
+      // and the finger already down belongs to something. Everything is handed
+      // back — including a selection that had already been claimed — and no new
+      // gesture starts, so the page scrolls as it would without this hook.
+      if (gesture.current) {
+        abandon();
+        return;
+      }
+
       if (config.isExcludedTarget(event.target)) return;
       const root = rootRef.current;
       if (!root) return;
@@ -288,8 +336,6 @@ export function useStudentTouchTextSelection(
       const start = config.resolveCaretAtPoint(event.clientX, event.clientY);
       if (!start) return;
 
-      // A new press always supersedes whatever came before it.
-      abandon();
       gesture.current = {
         pointerId: event.pointerId,
         pointerType: event.pointerType ?? '',
@@ -322,10 +368,17 @@ export function useStudentTouchTextSelection(
       if (current.phase === 'pending') {
         const travelled = Math.hypot(event.clientX - current.originX, event.clientY - current.originY);
         if (travelled <= live.current.moveTolerancePx) return;
-        // The finger is going somewhere: this is a scroll, and scrolling is the
-        // browser's. Nothing is captured and nothing is prevented.
-        abandon();
-        return;
+        if (live.current.activation === 'drag') {
+          // The tool is armed, so the movement means "this", not "scroll me".
+          // Claim and fall through, so the very movement that claimed it also
+          // becomes the far end of the selection.
+          claim();
+        } else {
+          // The finger is going somewhere: this is a scroll, and scrolling is
+          // the browser's. Nothing is captured and nothing is prevented.
+          abandon();
+          return;
+        }
       }
 
       const focus = live.current.resolveCaretAtPoint(event.clientX, event.clientY);

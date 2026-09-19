@@ -61,33 +61,26 @@ function ProviderColorOverrideHarness() {
   );
 }
 
-describe('RichTextHighlighter user-select', () => {
-  it('sets userSelect:text when enabled=true', () => {
+describe('RichTextHighlighter user-select ownership', () => {
+  // The passage stays selectable, but NOT because this component says so: the
+  // declaration lives in the stylesheet, which is the only place that can also
+  // turn selection off for a locked exam on a touch device (index.css). An
+  // inline `user-select` here would outrank that rule on this element and leave
+  // the two contradicting each other. See StudentQuestionCalloutCss.test.ts for
+  // the stylesheet half.
+  it.each([true, false])('declares no inline user-select when enabled=%s', (enabled) => {
     const { container } = render(
       <RichTextHighlighter
         content="<p>Hello world</p>"
         contentType="html"
-        enabled
+        enabled={enabled}
       />,
     );
 
     const wrapper = container.firstElementChild as HTMLElement;
     expect(wrapper).not.toBeNull();
-    expect(wrapper.style.userSelect).toBe('text');
-  });
-
-  it('sets userSelect:text even when enabled=false so passage text remains selectable', () => {
-    const { container } = render(
-      <RichTextHighlighter
-        content="<p>Hello world</p>"
-        contentType="html"
-        enabled={false}
-      />,
-    );
-
-    const wrapper = container.firstElementChild as HTMLElement;
-    expect(wrapper).not.toBeNull();
-    expect(wrapper.style.userSelect).toBe('text');
+    expect(wrapper.style.userSelect).toBe('');
+    expect(wrapper.style.getPropertyValue('-webkit-user-select')).toBe('');
   });
 
   it('sets touchAction:auto when enabled=false so touch text selection works in passage pane', () => {

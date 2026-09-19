@@ -57,15 +57,18 @@ function stubHitTest(leaf: Text) {
   };
 }
 
-function renderSurface(options: { ownedTouchSelection: boolean }) {
+function renderSurface(options: {
+  ownedTouchSelection: boolean;
+  toolMode?: 'off' | 'highlight' | 'erase';
+}) {
   const result = render(
     <StudentExamInteractionScopeProvider ownedTouchSelection={options.ownedTouchSelection}>
       <FormattedText
         text="Alpha beta gamma"
         highlightEnabled
-        highlightToolMode="highlight"
+        highlightToolMode={options.toolMode ?? 'highlight'}
         highlightColor="yellow"
-        highlightSurfaceId={`owned-touch:${options.ownedTouchSelection}`}
+        highlightSurfaceId={`owned-touch:${options.ownedTouchSelection}:${options.toolMode ?? 'highlight'}`}
       />
     </StudentExamInteractionScopeProvider>,
   );
@@ -85,6 +88,18 @@ function longPressAndDrag(from: number, to: number) {
     vi.advanceTimersByTime(350);
   });
   fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: to, clientY: 10 });
+  fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
+}
+
+/** Press and start dragging on the same breath, which is how touch selection is
+ * performed almost everywhere else. The vertical travel is what exceeds the
+ * tolerance; the horizontal coordinates are the character offsets. */
+function immediateDrag(from: number, to: number) {
+  vi.useFakeTimers();
+  const surface = document.querySelector('[data-student-highlightable="true"]')!;
+  fireEvent.pointerDown(surface, { pointerType: 'touch', pointerId: 1, clientX: from, clientY: 10 });
+  fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: from, clientY: 25 });
+  fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: to, clientY: 25 });
   fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
 }
 
@@ -108,6 +123,62 @@ describe('IELTS owned touch highlighting', () => {
     expect(window.getSelection()?.rangeCount).toBe(0);
     expect(addRange).not.toHaveBeenCalled();
     addRange.mockRestore();
+  });
+
+  it('highlights an armed drag that never pauses for a hold', () => {
+    // The regression this pins: with the platform's own selection suppressed,
+    // requiring a 350 ms stationary hold before a drag counted meant a student
+    // who simply dragged — the usual way to select text on touch — got nothing
+    // at all, from either system.
+    const { container } = renderSurface({ ownedTouchSelection: true, toolMode: 'highlight' });
+    const leaf = (document.querySelector('[data-student-highlightable="true"]') as HTMLElement)
+      .firstChild as Text;
+    const restoreMedia = stubCoarsePointerDevice();
+    const restoreHit = stubHitTest(leaf);
+    restoreEnvironment = () => {
+      restoreHit();
+      restoreMedia();
+    };
+
+    immediateDrag(6, 10);
+
+    const marks = container.querySelectorAll('mark[data-highlighted="true"]');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]).toHaveTextContent('beta');
+    expect(window.getSelection()?.rangeCount).toBe(0);
+  });
+
+  it('leaves the passage to the browser while no tool is armed', () => {
+    // With the highlighter off there is nothing to do with a selection, so the
+    // gesture must not take the drag: claiming it would freeze scrolling on a
+    // passage the student is only trying to read.
+    const { container } = renderSurface({ ownedTouchSelection: true, toolMode: 'off' });
+    const leaf = (document.querySelector('[data-student-highlightable="true"]') as HTMLElement)
+      .firstChild as Text;
+    const restoreMedia = stubCoarsePointerDevice();
+    const restoreHit = stubHitTest(leaf);
+    restoreEnvironment = () => {
+      restoreHit();
+      restoreMedia();
+    };
+
+    vi.useFakeTimers();
+    fireEvent.pointerDown(document.querySelector('[data-student-highlightable="true"]')!, {
+      pointerType: 'touch',
+      pointerId: 1,
+      clientX: 6,
+      clientY: 10,
+    });
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+
+    const scroll = new Event('touchmove', { cancelable: true, bubbles: true });
+    document.dispatchEvent(scroll);
+    expect(scroll.defaultPrevented).toBe(false);
+
+    fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
+    expect(container.querySelectorAll('mark')).toHaveLength(0);
   });
 
   it('leaves the platform selection alone in a session that declared no owned gesture', () => {

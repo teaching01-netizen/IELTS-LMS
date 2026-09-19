@@ -128,7 +128,9 @@ describe('student question experience', () => {
     const answerControl = screen.getByRole('textbox', { name: 'Answer for question 1' });
 
     expect(questionCopy).toHaveAttribute('data-student-question-callout-protected', 'true');
-    expect(questionCopy).toHaveStyle({ userSelect: 'text' });
+    // Selection is declared by the stylesheet (index.css), which is what lets a
+    // locked exam suppress it on a touch device without fighting an inline rule.
+    expect(questionCopy.style.userSelect).toBe('');
     expect(answerControl).not.toHaveAttribute('data-student-question-callout-protected');
     expect(answerControl.closest('[data-student-question-callout-protected="true"]')).toBeNull();
   });

@@ -86,12 +86,13 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
           : "lg:w-[var(--reading-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12"
       }`}
       data-student-highlightable="true"
+      // `user-select` is deliberately absent: the stylesheet owns it, so the
+      // exam's coarse-pointer rule can remove the platform's own selection here
+      // without an inline declaration outranking it (index.css).
       style={{
         ...(tabletContentZoomStyle ?? {}),
         fontSize: "var(--student-passage-font-size)",
         lineHeight: "var(--student-passage-line-height)",
-        WebkitUserSelect: "text",
-        userSelect: "text",
       }}
       data-student-zoom-scroll
     >

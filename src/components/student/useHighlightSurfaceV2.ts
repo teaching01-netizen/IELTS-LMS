@@ -179,18 +179,26 @@ export function useHighlightSurfaceV2({
   /**
    * The owned gesture, for the sessions that declare one.
    *
-   * Armed on the session's scope rather than on `toolMode`, and that separation
-   * is the point: a tool says what to do with a selection, this says who makes
-   * it. It runs with the tool off too, which is deliberate — the prose is
-   * unselectable on a coarse pointer either way, so owning the gesture when the
-   * tool is off is what keeps a student from being handed the platform's Copy /
-   * Look Up bar instead; `applySelection` simply does nothing with the span.
+   * Two gates, and they answer different questions. The session's scope says WHO
+   * owns the selection gesture — never inferred here, so authoring and preview
+   * keep the platform's own. The tool says WHETHER there is anything to do with
+   * one. Both must hold before the exam takes a drag, and the second gate is not
+   * bookkeeping: on these surfaces the platform's selection is suppressed, so a
+   * claimed drag cannot fall back to it. Claiming with the tool off would freeze
+   * the passage a student is only trying to scroll and then discard the span,
+   * which is the worst of both.
+   *
+   * `activation: 'drag'` because a tool the student armed is already a statement
+   * of intent. Making them also hold still for 350 ms was the trap: the prose is
+   * unselectable, and a gesture that cancelled itself on the first 8 pixels of
+   * travel left no way to select text at all.
    *
    * The whole surface is the boundary: unlike a SAT anchor, a highlight may span
    * blocks, so the only edge is the container the student is reading in.
    */
   const touchSelection = useStudentTouchTextSelection({
-    enabled: enabled && examScope.ownedTouchSelection,
+    enabled: enabled && examScope.ownedTouchSelection && toolMode !== 'off',
+    activation: 'drag',
     rootRef: containerRef,
     resolveCaretAtPoint,
     onSelect: (range) => {

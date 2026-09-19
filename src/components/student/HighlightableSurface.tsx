@@ -32,9 +32,12 @@ export function HighlightableSurface({
   // even when the string is unchanged, which can blow away the browser's current
   // text selection (blue highlight) when the toolbar toggles visibility.
   const innerHtml = useMemo(() => ({ __html: html }), [html]);
+  // Selection policy is NOT declared here. `user-select` is owned by the
+  // stylesheet (index.css), which is the only place that can also see whether a
+  // locked exam is active: a real student exam removes the platform's own
+  // selection under a coarse pointer, and an inline `text` here would outrank
+  // that rule for this element and leave the two contradicting each other.
   const surfaceStyle: React.CSSProperties = {
-    WebkitUserSelect: 'text',
-    userSelect: 'text',
     touchAction: 'auto',
     ...(highlightSelectionColor
       ? ({ ['--student-highlight-selection-color' as string]: highlightSelectionColor } as React.CSSProperties)

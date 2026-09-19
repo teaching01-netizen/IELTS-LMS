@@ -122,12 +122,30 @@ function edgeTextNode(boundary: Element, fromEnd: boolean): Text | null {
 }
 
 /**
- * The renderer's own hit test, in its two historical spellings.
+ * The renderer's own hit test, in its two historical spellings, plus geometry.
  *
  * `caretPositionFromPoint` is the standard; `caretRangeFromPoint` is WebKit's
  * (and Chrome's) older name. Both are consulted in that order, and a null from
  * the first is not the end of the search — a renderer can expose both and
  * answer only through one of them.
+ *
+ * The two spellings answer at two levels of precision, and only the precise one
+ * used to be accepted: a point between two glyphs, or in the whitespace at the
+ * end of a line, hit-tests to the ELEMENT with a child index. Reporting nothing
+ * for that was a silent dead end on exactly the surfaces that need this most —
+ * the exam prose has its platform selection suppressed, so a press that resolved
+ * to nothing could not become a selection by any other route either. Geometry
+ * resolves it instead, and the element the renderer named is where it looks.
+ *
+ * A renderer with neither hit test still gets one last chance through
+ * `elementFromPoint`, which is layout geometry rather than a caret query and is
+ * therefore a different capability, not a duplicate of the two above.
+ *
+ * ORDER MATTERS, and it is precise queries first, geometry last. An
+ * element-level answer from one spelling is a HINT about where to measure, not
+ * an answer, so it is held while the other spelling is asked — a renderer can
+ * answer precisely through `caretRangeFromPoint` and coarsely through
+ * `caretPositionFromPoint`, and geometry must not shadow that.
  */
 export function caretPositionAtPoint(doc: Document, x: number, y: number): TextPoint | null {
   const capable = doc as Document & {
@@ -135,18 +153,177 @@ export function caretPositionAtPoint(doc: Document, x: number, y: number): TextP
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
   };
 
+  let measuredWithin: Element | null = null;
+
   if (typeof capable.caretPositionFromPoint === 'function') {
     const position = capable.caretPositionFromPoint(x, y);
     const point = textPointFrom(position?.offsetNode ?? null, position?.offset ?? 0);
     if (point) return point;
+    measuredWithin = elementFor(position?.offsetNode ?? null);
   }
 
   if (typeof capable.caretRangeFromPoint === 'function') {
     const range = capable.caretRangeFromPoint(x, y);
-    if (range) return textPointFrom(range.startContainer, range.startOffset);
+    if (range) {
+      const point = textPointFrom(range.startContainer, range.startOffset);
+      if (point) return point;
+      measuredWithin = measuredWithin ?? elementFor(range.startContainer);
+    }
   }
 
-  return null;
+  return nearestTextPointIn(measuredWithin ?? elementAtPoint(doc, x, y), x, y);
+}
+
+function elementFor(node: Node | null): Element | null {
+  if (!node) return null;
+  if (node.nodeType === Node.ELEMENT_NODE) return node as Element;
+  return node.parentElement;
+}
+
+function elementAtPoint(doc: Document, x: number, y: number): Element | null {
+  const capable = doc as Document & {
+    elementFromPoint?: (x: number, y: number) => Element | null;
+  };
+  return typeof capable.elementFromPoint === 'function' ? capable.elementFromPoint(x, y) : null;
+}
+
+/**
+ * The closest position in text, measured rather than guessed.
+ *
+ * For a renderer that answered a coordinate with an element — or answered with
+ * nothing at all — this asks layout instead: the nearest rendered text run under
+ * the root, then the nearest character in it, and an offset on whichever side of
+ * that character's midpoint the point fell. That is the same rule a text cursor
+ * obeys, arrived at from geometry.
+ *
+ * It refuses to answer when nothing is measurable. A fabricated offset would
+ * anchor an annotation over words the student never touched, and on a surface
+ * with its platform selection suppressed there is no second chance to notice.
+ *
+ * Cost is bounded by the text under the root and only runs when a hit test
+ * failed. The character walk stops at the first character whose rectangle
+ * contains the point, which is the common case; a press that lands in a gap
+ * scans that run's characters instead of the whole root.
+ */
+export function nearestTextPointIn(root: Element | null, x: number, y: number): TextPoint | null {
+  if (!root) return null;
+  const doc = root.ownerDocument ?? document;
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+
+  let node = walker.nextNode() as Text | null;
+  let bestNode: Text | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  while (node) {
+    if (node.data.length > 0) {
+      const distance = distanceToNode(doc, node, x, y);
+      if (distance !== null && distance < bestDistance) {
+        bestDistance = distance;
+        bestNode = node;
+      }
+    }
+    node = walker.nextNode() as Text | null;
+  }
+
+  if (!bestNode) return null;
+  const offset = nearestOffsetIn(doc, bestNode, x, y);
+  return offset === null ? null : { node: bestNode, offset };
+}
+
+/** The nearest character of a run, as an offset on one side of its midpoint. */
+function nearestOffsetIn(doc: Document, node: Text, x: number, y: number): number | null {
+  let bestOffset: number | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < node.data.length; index += 1) {
+    const measured = nearestRect(doc, node, index, x, y);
+    if (!measured) continue;
+    if (measured.distance === 0) {
+      // The point is inside this character: nothing later can be closer.
+      return x < measured.rect.left + measured.rect.width / 2 ? index : index + 1;
+    }
+    if (measured.distance < bestDistance) {
+      bestDistance = measured.distance;
+      bestOffset = x < measured.rect.left + measured.rect.width / 2 ? index : index + 1;
+    }
+  }
+
+  return bestOffset;
+}
+
+interface MeasuredRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** The distance to a whole run, or null when it renders nothing measurable. */
+function distanceToNode(doc: Document, node: Text, x: number, y: number): number | null {
+  const rects = measure(doc, () => {
+    const range = doc.createRange();
+    range.selectNodeContents(node);
+    return range.getClientRects();
+  });
+  let best: number | null = null;
+  for (const rect of rects) {
+    const distance = distanceToRect(rect, x, y);
+    if (best === null || distance < best) best = distance;
+  }
+  return best;
+}
+
+/** One character of a run, measured, with its distance from the point. */
+function nearestRect(
+  doc: Document,
+  node: Text,
+  index: number,
+  x: number,
+  y: number,
+): { rect: MeasuredRect; distance: number } | null {
+  const rects = measure(doc, () => {
+    const range = doc.createRange();
+    range.setStart(node, index);
+    range.setEnd(node, index + 1);
+    return range.getClientRects();
+  });
+
+  let best: { rect: MeasuredRect; distance: number } | null = null;
+  for (const rect of rects) {
+    const distance = distanceToRect(rect, x, y);
+    if (!best || distance < best.distance) best = { rect, distance };
+  }
+  return best;
+}
+
+/**
+ * Rects for a range, with zero-area and unmeasurable results dropped.
+ *
+ * A renderer that exposes no range measurement returns nothing here rather than
+ * throwing, which is what keeps every caller's answer honest: no measurement,
+ * no position.
+ */
+function measure(doc: Document, read: () => ArrayLike<MeasuredRect> | null): MeasuredRect[] {
+  let list: ArrayLike<MeasuredRect> | null = null;
+  try {
+    list = read();
+  } catch {
+    return [];
+  }
+  if (!list) return [];
+  const rects: MeasuredRect[] = [];
+  for (let index = 0; index < list.length; index += 1) {
+    const rect = list[index];
+    if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+    rects.push({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+  }
+  return rects;
+}
+
+/** Euclidean distance from a point to a rectangle, zero when inside it. */
+function distanceToRect(rect: MeasuredRect, x: number, y: number): number {
+  const dx = Math.max(rect.left - x, 0, x - (rect.left + rect.width));
+  const dy = Math.max(rect.top - y, 0, y - (rect.top + rect.height));
+  return Math.hypot(dx, dy);
 }
 
 /**

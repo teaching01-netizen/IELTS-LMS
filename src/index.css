@@ -864,6 +864,25 @@
     user-select: text;
   }
 
+  /* A highlightable surface is SELECTABLE BY DEFAULT, and the exam-scoped rules
+     below are the only thing that turns that off.
+
+     This declaration used to live as an inline style on each surface
+     (`HighlightableSurface`, `StudentReading`, `StudentScience`), which made the
+     exam's coarse-pointer rule lose to it on the container element itself: two
+     authorities saying opposite things, and the one that could not be
+     overridden was the one that did not know a student exam was running.
+
+     Selection policy belongs to the stylesheet. It is the only place that can
+     also see whether this is a locked exam, and the only place a reviewer looks
+     to answer "can the student select this?". The default here keeps every
+     non-exam surface — authoring, previews, the way text behaves everywhere
+     else in the product — exactly as it was. */
+  [data-student-highlightable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
   /* Long-press callout suppression for exam CONTENT, scoped to an active
      student exam — `useStudentExamPageLock` puts `student-exam-active` on
      html/body for exactly the exam phases, so authoring and staff preview keep
@@ -916,12 +935,21 @@
      Scoped to `pointer: coarse` (the PRIMARY input) rather than `any-pointer`,
      so a touchscreen laptop with a mouse keeps the desktop behavior. An iPad
      reports `coarse` even with a trackpad attached, which is why the owned
-     gesture handles mouse drags there too — the JS and this query agree. */
+     gesture handles mouse drags there too — the JS and this query agree.
+
+     `html.student-exam-active` rather than `.student-exam-active`, which is not
+     decoration: the class is put on `html` AND `body` by `useStudentExamPageLock`,
+     so `html.` matches while adding specificity. Without it this rule TIES with
+     the translation guard's rule over the same attribute — the guard pins its
+     class to `html` for the whole session — and a tie is decided by file order.
+     Losing that tie would put the platform's own selection, and its Copy / Look
+     Up bar, back on an iPad mid-exam. Now nothing scoped to these surfaces is
+     more specific, so the removal holds wherever in the sheet a rule lands. */
   @media (pointer: coarse) {
-    .student-exam-active .sat-exam-prose,
-    .student-exam-active .sat-exam-prose *,
-    .student-exam-active [data-student-highlightable="true"],
-    .student-exam-active [data-student-highlightable="true"] * {
+    html.student-exam-active .sat-exam-prose,
+    html.student-exam-active .sat-exam-prose *,
+    html.student-exam-active [data-student-highlightable="true"],
+    html.student-exam-active [data-student-highlightable="true"] * {
       -webkit-user-select: none;
       user-select: none;
     }

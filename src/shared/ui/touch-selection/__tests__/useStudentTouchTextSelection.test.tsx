@@ -6,6 +6,7 @@ import { useStudentTouchTextSelection } from '../useStudentTouchTextSelection';
 type Handlers = {
   enabled?: boolean;
   coarse?: boolean;
+  activation?: 'long-press' | 'drag';
   boundaryFor?: (point: { node: Text; offset: number }) => Element | null;
   onSelect?: (range: Range, text: string) => void;
 };
@@ -57,6 +58,7 @@ function harness(handlers: Handlers = {}) {
       isCoarsePointer: () => handlers.coarse ?? true,
       longPressMs: 350,
       moveTolerancePx: 8,
+      ...(handlers.activation ? { activation: handlers.activation } : {}),
       ...(handlers.boundaryFor ? { boundaryFor: handlers.boundaryFor } : {}),
     }),
   );
@@ -78,6 +80,15 @@ function mouseMove(x: number) {
 }
 function release() {
   fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
+}
+function secondFingerDown(target: Element, x: number, y = 10) {
+  fireEvent.pointerDown(target, { pointerType: 'touch', pointerId: 2, clientX: x, clientY: y });
+}
+function secondFingerMove(x: number) {
+  fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 2, clientX: x, clientY: 10 });
+}
+function releaseSecondFinger() {
+  fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 2 });
 }
 
 beforeEach(() => {
@@ -234,6 +245,130 @@ describe('useStudentTouchTextSelection — cancelled gestures stay scrolling', (
     const afterScroll = new Event('touchmove', { cancelable: true, bubbles: true });
     document.dispatchEvent(afterScroll);
     expect(afterScroll.defaultPrevented).toBe(false);
+  });
+});
+
+describe('useStudentTouchTextSelection — armed drag mode', () => {
+  it('claims an early drag rather than handing it back as a scroll', () => {
+    const { view, prose, onSelect } = harness({ activation: 'drag' });
+
+    touchDown(prose, 0);
+    // No hold at all, and 20px is well past the tolerance that abandons a
+    // long-press gesture: while a tool is armed, a drag IS the intent.
+    move(20);
+
+    expect(view.result.current.active).toBe(true);
+    expect(view.result.current.selectionText).toBe('alpha beta gamma');
+
+    release();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('alpha beta gamma');
+  });
+
+  it('suppresses scrolling from the moment the drag claims the text', () => {
+    const { prose } = harness({ activation: 'drag' });
+
+    touchDown(prose, 0);
+    move(20);
+
+    const owned = new Event('touchmove', { cancelable: true, bubbles: true });
+    document.dispatchEvent(owned);
+    expect(owned.defaultPrevented).toBe(true);
+  });
+
+  it('still takes the word under a hold that never drags', () => {
+    const { view, prose, onSelect } = harness({ activation: 'drag' });
+
+    touchDown(prose, 7);
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+    expect(view.result.current.selectionText).toBe('beta');
+
+    release();
+    expect((onSelect.mock.calls[0]![0] as Range).toString()).toBe('beta');
+  });
+
+  it('reports nothing for a tap that neither holds nor drags', () => {
+    const { view, prose, onSelect } = harness({ activation: 'drag' });
+
+    touchDown(prose, 4);
+    release();
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(view.result.current.active).toBe(false);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('keeps the long-press contract unarmed: movement is a scroll, not a selection', () => {
+    const { view, prose, onSelect } = harness({ activation: 'long-press' });
+
+    touchDown(prose, 0);
+    move(20);
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(view.result.current.active).toBe(false);
+    release();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe('useStudentTouchTextSelection — a second finger yields to the platform', () => {
+  it('hands the gesture back to two-finger scrolling while a selection is pending', () => {
+    const { view, prose, onSelect } = harness({ activation: 'drag' });
+
+    touchDown(prose, 0);
+    // The other finger lands: this is a scroll or a pinch, and the platform's
+    // multi-touch gesture wins. Nothing may claim the text from here.
+    secondFingerDown(prose, 40);
+    move(20);
+    secondFingerMove(60);
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(view.result.current.active).toBe(false);
+    releaseSecondFinger();
+    release();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('hands the gesture back even after the first finger already claimed the text', () => {
+    const { view, prose, onSelect } = harness({ activation: 'drag' });
+
+    touchDown(prose, 0);
+    move(20);
+    expect(view.result.current.active).toBe(true);
+
+    secondFingerDown(prose, 40);
+    expect(view.result.current.active).toBe(false);
+
+    const scroll = new Event('touchmove', { cancelable: true, bubbles: true });
+    document.dispatchEvent(scroll);
+    expect(scroll.defaultPrevented).toBe(false);
+
+    releaseSecondFinger();
+    release();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('starts the next gesture cleanly once both fingers have lifted', () => {
+    const { prose, onSelect } = harness({ activation: 'drag' });
+
+    touchDown(prose, 0);
+    secondFingerDown(prose, 40);
+    releaseSecondFinger();
+    release();
+
+    touchDown(prose, 0);
+    move(20);
+    release();
+
+    expect(onSelect).toHaveBeenCalledTimes(1);
   });
 });
 
