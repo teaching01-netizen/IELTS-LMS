@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { StudentAppWrapper } from '@components/student/StudentAppWrapper';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { useAuthSession } from '../../auth/api/authSession';
@@ -7,6 +7,7 @@ import { useStudentSessionRouteData } from '@student/hooks/useStudentSessionRout
 import { SatStudentSessionRoute } from '../../student-delivery/routes/SatStudentSessionRoute';
 import { SatLoadingSurface } from '../../student-delivery/api/satStateSurfaces';
 import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
+import { StudentTouchSelectionDiagnosticsProvider } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
 
 /**
  * Student Session Route
@@ -26,6 +27,7 @@ import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/
  * conservative default and keeps the platform's own selection.
  */
 export function StudentSessionRoute() {
+  const diagnosticsEnabled = new URLSearchParams(useLocation().search).get('touchSelectionDebug') === '1';
   const { scheduleId, studentId } = useParams<{ scheduleId: string; studentId?: string }>();
   const navigate = useNavigate();
   const { logoutAll, status: authStatus } = useAuthSession();
@@ -159,40 +161,44 @@ export function StudentSessionRoute() {
 
     return (
       <StudentExamInteractionScopeProvider ownedTouchSelection>
-        <SatStudentSessionRoute
-          scheduleId={scheduleId}
-          attemptId={attemptSnapshot.id}
-          candidateId={attemptSnapshot.candidateId}
-          attemptSnapshot={attemptSnapshot}
-          runtimeSnapshot={runtimeSnapshot}
-          liveSocketConnected={liveSocketConnected}
-          attemptUpdateToken={satAttemptUpdateToken}
-          leaseEpoch={attemptSnapshot.leaseEpoch}
-          controlEpoch={attemptSnapshot.controlEpoch}
-          bootstrapSeed={satBootstrapSeed}
-          initialIsLoading={false}
-          onExit={navigateToStudentCheckIn}
-        />
+        <StudentTouchSelectionDiagnosticsProvider enabled={diagnosticsEnabled}>
+          <SatStudentSessionRoute
+            scheduleId={scheduleId}
+            attemptId={attemptSnapshot.id}
+            candidateId={attemptSnapshot.candidateId}
+            attemptSnapshot={attemptSnapshot}
+            runtimeSnapshot={runtimeSnapshot}
+            liveSocketConnected={liveSocketConnected}
+            attemptUpdateToken={satAttemptUpdateToken}
+            leaseEpoch={attemptSnapshot.leaseEpoch}
+            controlEpoch={attemptSnapshot.controlEpoch}
+            bootstrapSeed={satBootstrapSeed}
+            initialIsLoading={false}
+            onExit={navigateToStudentCheckIn}
+          />
+        </StudentTouchSelectionDiagnosticsProvider>
       </StudentExamInteractionScopeProvider>
     );
   }
 
   return (
     <StudentExamInteractionScopeProvider ownedTouchSelection>
-      <StudentAppWrapper
-        state={state}
-        onExit={navigateToStudentCheckIn}
-        scheduleId={scheduleId}
-        attemptSnapshot={attemptSnapshot}
-        onRuntimeRefresh={refreshRuntime}
-        runtimeSnapshot={runtimeSnapshot}
-        answerInvariantRollout={answerInvariantRollout}
-        // Cohort/runtime-backed IELTS sessions are completed by the proctor or
-        // authoritative timeout. The student can save answers but must not
-        // locally advance or terminalize the shared runtime.
-        showSubmitControls={false}
-        allowExitDuringExam={false}
-      />
+      <StudentTouchSelectionDiagnosticsProvider enabled={diagnosticsEnabled}>
+        <StudentAppWrapper
+          state={state}
+          onExit={navigateToStudentCheckIn}
+          scheduleId={scheduleId}
+          attemptSnapshot={attemptSnapshot}
+          onRuntimeRefresh={refreshRuntime}
+          runtimeSnapshot={runtimeSnapshot}
+          answerInvariantRollout={answerInvariantRollout}
+          // Cohort/runtime-backed IELTS sessions are completed by the proctor or
+          // authoritative timeout. The student can save answers but must not
+          // locally advance or terminalize the shared runtime.
+          showSubmitControls={false}
+          allowExitDuringExam={false}
+        />
+      </StudentTouchSelectionDiagnosticsProvider>
     </StudentExamInteractionScopeProvider>
   );
 }

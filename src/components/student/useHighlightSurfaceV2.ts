@@ -8,6 +8,7 @@ import {
 import { MAX_HIGHLIGHT_RANGES, captureSurfaceRange, type HighlightSelectionV2 } from './highlightV2Engine';
 import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
 import { browserCaretResolver, useStudentTouchTextSelection } from '@shared/ui/touch-selection/useStudentTouchTextSelection';
+import { useStudentTouchSelectionDiagnostics } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
 import type { TouchSelectionRect } from '@shared/ui/touch-selection/touchSelectionRange';
 import { usePersistedHighlightRangesV2 } from './highlightV2Persistence';
 import { useHighlightSelectionManager } from './highlightSelectionManager';
@@ -59,6 +60,10 @@ export function useHighlightSurfaceV2({
   // scope rather than inferring it keeps authoring and preview on the platform's
   // own selection without this hook having to recognize them.
   const examScope = useStudentExamInteractionScope();
+  const diagnostics = useStudentTouchSelectionDiagnostics(containerRef, {
+    surface: `IELTS ${surfaceId}`, enabled: enabled && examScope.ownedTouchSelection && toolMode !== 'off',
+    ownedTouchSelection: examScope.ownedTouchSelection, toolModeOrAnnotationMode: toolMode,
+  });
   const activeSurfaceId = manager?.activeSurfaceId ?? null;
   const ownsGlobalSelection = !manager || activeSurfaceId === null || activeSurfaceId === instanceIdRef.current;
   const canonicalText = useMemo(() => extractCanonicalTextFromHtml(baseHtml), [baseHtml]);
@@ -95,22 +100,25 @@ export function useHighlightSurfaceV2({
     setHint(null);
     if (toolMode === 'erase') {
       setRanges(eraseHighlight(ranges, selection));
+      diagnostics?.record('mutation:erase', { mutationApplied: true });
       setAnnounce('Highlight erased.');
     } else {
       const next = createHighlight(ranges, selection, resolvedHighlightColor, MAX_HIGHLIGHT_RANGES);
       if (next.limitReached) {
+        diagnostics?.record('mutation:limit', { mutationApplied: false });
         setHint('You reached the highlight limit for this text section.');
         setAnnounce('Highlight limit reached for this text section.');
         manager?.releaseSurface(instanceIdRef.current);
         return true;
       }
       setRanges(next.ranges);
+      diagnostics?.record('mutation:highlight', { mutationApplied: true });
       setAnnounce(`Highlighted with ${resolvedHighlightColor}.`);
     }
     selectionPort.clearSelection();
     manager?.releaseSurface(instanceIdRef.current);
     return true;
-  }, [enabled, manager, ownsGlobalSelection, ranges, resolvedHighlightColor, selectionPort, setRanges, toolMode]);
+  }, [diagnostics, enabled, manager, ownsGlobalSelection, ranges, resolvedHighlightColor, selectionPort, setRanges, toolMode]);
 
   const processCompletedSelection = useCallback(() => {
     if (!enabled || toolMode === 'off' || !ownsGlobalSelection) return false;
@@ -174,7 +182,7 @@ export function useHighlightSurfaceV2({
   }, [manager]);
 
   // Built once: a capability probe over `document`, not per-render state.
-  const resolveCaretAtPoint = useMemo(() => browserCaretResolver(), []);
+  const resolveCaretAtPoint = useMemo(() => browserCaretResolver(document, diagnostics), [diagnostics]);
 
   /**
    * The owned gesture, for the sessions that declare one.
@@ -200,11 +208,15 @@ export function useHighlightSurfaceV2({
     enabled: enabled && examScope.ownedTouchSelection && toolMode !== 'off',
     activation: 'drag',
     rootRef: containerRef,
+    diagnostics,
     resolveCaretAtPoint,
     onSelect: (range) => {
       const container = containerRef.current;
       if (!container) return;
-      applySelection(captureSurfaceRange(container, range));
+      const selection = captureSurfaceRange(container, range);
+      diagnostics?.record('captureSurfaceRange', { captureSucceeded: !!selection });
+      const applied = applySelection(selection);
+      diagnostics?.record('applySelection', { selectionConsumed: applied });
     },
     boundaryFor: () => containerRef.current,
   });

@@ -16,6 +16,7 @@ import {
 } from './satTextSelection';
 import { StudentTouchSelectionOverlay } from '@shared/ui/touch-selection/StudentTouchSelectionOverlay';
 import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
+import { useStudentTouchSelectionDiagnostics } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
 import {
   browserCaretResolver,
   useStudentTouchTextSelection,
@@ -71,6 +72,10 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
   // this same component reads the conservative default and keeps the platform's
   // own selection.
   const examScope = useStudentExamInteractionScope();
+  const diagnostics = useStudentTouchSelectionDiagnostics(root, {
+    surface: `SAT ${region}`, enabled: enabled && view.annotationModeEnabled && examScope.ownedTouchSelection,
+    ownedTouchSelection: examScope.ownedTouchSelection, toolModeOrAnnotationMode: view.annotationModeEnabled,
+  });
   const [limitNotice, setLimitNotice] = useState(false);
   const limitTimer = useRef<number | null>(null);
   useEffect(() => () => { if (limitTimer.current !== null) window.clearTimeout(limitTimer.current); }, []);
@@ -184,15 +189,17 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
       const element = root.current;
       if (!element) return;
       const anchor = captureSatTextRange(element, region, range, { allowAnnotationControls: true });
+      diagnostics?.record('captureSatTextRange', { captureSucceeded: !!anchor });
       if (!anchor) return;
       reportAnchor(anchor);
+      diagnostics?.record('reportAnchor', { anchorReported: !!reportSelection.current && annotations.annotations.length < SAT_ANNOTATION_LIMIT });
     },
-    [region, reportAnchor],
+    [annotations, diagnostics, region, reportAnchor],
   );
 
   // Built once: the resolver is a capability probe over `document`, and handing
   // the hook a fresh function every render would be noise, not configuration.
-  const resolveCaretAtPoint = useMemo(() => browserCaretResolver(), []);
+  const resolveCaretAtPoint = useMemo(() => browserCaretResolver(document, diagnostics), [diagnostics]);
 
   /**
    * Owned selection, armed only while Highlights & Notes is.
@@ -213,6 +220,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
     enabled: enabled && view.annotationModeEnabled && examScope.ownedTouchSelection,
     activation: 'drag',
     rootRef: root,
+    diagnostics,
     resolveCaretAtPoint,
     onSelect: reportOwnedRange,
     boundaryFor: satAnnotationBlockForPoint,

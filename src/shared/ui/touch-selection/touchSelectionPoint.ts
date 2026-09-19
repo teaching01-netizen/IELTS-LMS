@@ -14,6 +14,8 @@
  * anchors an annotation over the wrong words.
  */
 
+import { describeTouchSelectionNode, type TouchSelectionDiagnosticRecord } from './touchSelectionDiagnostics';
+
 /** An offset into one rendered text node. */
 export interface TextPoint {
   node: Text;
@@ -147,7 +149,7 @@ function edgeTextNode(boundary: Element, fromEnd: boolean): Text | null {
  * answer precisely through `caretRangeFromPoint` and coarsely through
  * `caretPositionFromPoint`, and geometry must not shadow that.
  */
-export function caretPositionAtPoint(doc: Document, x: number, y: number): TextPoint | null {
+export function caretPositionAtPoint(doc: Document, x: number, y: number, trace?: TouchSelectionDiagnosticRecord): TextPoint | null {
   const capable = doc as Document & {
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -157,21 +159,31 @@ export function caretPositionAtPoint(doc: Document, x: number, y: number): TextP
 
   if (typeof capable.caretPositionFromPoint === 'function') {
     const position = capable.caretPositionFromPoint(x, y);
+    trace?.('caretPositionFromPoint', { nodeType: position?.offsetNode.nodeType ?? null, node: describeTouchSelectionNode(position?.offsetNode ?? null), offset: position?.offset ?? null, x, y });
     const point = textPointFrom(position?.offsetNode ?? null, position?.offset ?? 0);
     if (point) return point;
     measuredWithin = elementFor(position?.offsetNode ?? null);
+  } else if (trace) {
+    trace('caretPositionFromPoint', { available: false });
   }
 
   if (typeof capable.caretRangeFromPoint === 'function') {
     const range = capable.caretRangeFromPoint(x, y);
+    trace?.('caretRangeFromPoint', { nodeType: range?.startContainer.nodeType ?? null, node: describeTouchSelectionNode(range?.startContainer ?? null), offset: range?.startOffset ?? null, x, y });
     if (range) {
       const point = textPointFrom(range.startContainer, range.startOffset);
       if (point) return point;
       measuredWithin = measuredWithin ?? elementFor(range.startContainer);
     }
+  } else if (trace) {
+    trace('caretRangeFromPoint', { available: false });
   }
 
-  return nearestTextPointIn(measuredWithin ?? elementAtPoint(doc, x, y), x, y);
+  const element = measuredWithin ?? elementAtPoint(doc, x, y);
+  if (!measuredWithin) trace?.('elementFromPoint', { node: describeTouchSelectionNode(element) });
+  const point = nearestTextPointIn(element, x, y);
+  trace?.('geometry', { resolved: !!point, node: describeTouchSelectionNode(point?.node ?? null), offset: point?.offset ?? null, x, y });
+  return point;
 }
 
 function elementFor(node: Node | null): Element | null {

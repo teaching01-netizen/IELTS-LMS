@@ -13,6 +13,7 @@ import {
   touchSelectionRects,
   type TouchSelectionRect,
 } from './touchSelectionRange';
+import { describeTouchSelectionNode, type TouchSelectionDiagnostics } from './touchSelectionDiagnostics';
 
 /**
  * Text selection the exam owns, for devices where the platform's own selection
@@ -125,6 +126,8 @@ export interface StudentTouchTextSelectionOptions {
   longPressMs?: number | undefined;
   /** How far a touch may travel during the hold before it is scrolling. */
   moveTolerancePx?: number | undefined;
+  /** Opt-in, local diagnostics supplied by the session boundary. */
+  diagnostics?: TouchSelectionDiagnostics | undefined;
 }
 
 export interface StudentTouchTextSelectionState {
@@ -175,6 +178,7 @@ export function useStudentTouchTextSelection(
     isCoarsePointer = defaultIsCoarsePointer,
     longPressMs = 350,
     moveTolerancePx = 8,
+    diagnostics,
   } = options;
 
   const [state, setState] = useState<StudentTouchTextSelectionState>(IDLE);
@@ -192,6 +196,7 @@ export function useStudentTouchTextSelection(
     isCoarsePointer,
     longPressMs,
     moveTolerancePx,
+    diagnostics,
   });
   live.current = {
     enabled,
@@ -203,6 +208,7 @@ export function useStudentTouchTextSelection(
     isCoarsePointer,
     longPressMs,
     moveTolerancePx,
+    diagnostics,
   };
 
   const gesture = useRef<Gesture | null>(null);
@@ -247,10 +253,20 @@ export function useStudentTouchTextSelection(
 
     const publish = (range: Range | null) => {
       ownedRange.current = range;
+      live.current.diagnostics?.record('range:created', { rangeText: range?.toString().slice(0, 200) ?? '', rangeCollapsed: range?.collapsed ?? null, rangeStartConnected: range?.startContainer.isConnected ?? null, rangeEndConnected: range?.endContainer.isConnected ?? null });
+      let rects: TouchSelectionRect[];
+      try {
+        rects = touchSelectionRects(range);
+      } catch (error) {
+        live.current.diagnostics?.record('getClientRects:error', { error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
+      live.current.diagnostics?.record('getClientRects', { rangeRectCount: rects.length });
+      live.current.diagnostics?.record('range', { rangeText: range?.toString().slice(0, 200) ?? '', rangeCollapsed: range?.collapsed ?? null, rangeRectCount: rects.length });
       setState({
         active: gesture.current?.phase === 'selecting',
         selectionText: range?.toString() ?? '',
-        rects: touchSelectionRects(range),
+        rects,
       });
     };
 
@@ -289,6 +305,7 @@ export function useStudentTouchTextSelection(
       const current = gesture.current;
       if (!current || current.phase === 'selecting') return;
       current.phase = 'selecting';
+      live.current.diagnostics?.record('claim', { claimed: true });
       // The boundary is resolved once, at the hold: it answers "which block is
       // this gesture about", and that is a fact about where the press landed.
       const boundary = live.current.boundaryFor?.(current.start) ?? null;
@@ -305,6 +322,7 @@ export function useStudentTouchTextSelection(
     };
 
     const abandon = () => {
+      live.current.diagnostics?.record('abandon');
       gesture.current = null;
       clearHoldTimer();
       detachScrollSuppressor();
@@ -324,11 +342,18 @@ export function useStudentTouchTextSelection(
       const owned = current.phase === 'selecting';
       reset();
       if (!report || !owned || !captured) return;
-      live.current.onSelect(captured, captured.toString());
+      live.current.diagnostics?.record('onSelect', { onSelectCalled: true });
+      try {
+        live.current.onSelect(captured, captured.toString());
+      } catch (error) {
+        live.current.diagnostics?.record('onSelect:error', { error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
     };
 
     const onPointerDown = (event: PointerEvent) => {
       const config = live.current;
+      live.current.diagnostics?.record('pointerdown', { pointerDownSeen: true, pointerType: event.pointerType, pointerId: event.pointerId, eventTarget: describeTouchSelectionNode(event.target instanceof Node ? event.target : null), targetInsideRoot: event.target instanceof Node && !!rootRef.current?.contains(event.target) });
       if (!config.enabled) return;
       if (!config.isCoarsePointer()) return;
       if (typeof event.button === 'number' && event.button > 0) return;
@@ -349,6 +374,7 @@ export function useStudentTouchTextSelection(
       if (event.target instanceof Node && !root.contains(event.target)) return;
 
       const start = config.resolveCaretAtPoint(event.clientX, event.clientY);
+      live.current.diagnostics?.record('start-caret', { startCaretResolved: !!start, startCaretInsideRoot: !!start && root.contains(start.node), startConnected: start?.node.isConnected ?? null, startOffset: start?.offset ?? null, startNode: describeTouchSelectionNode(start?.node ?? null) });
       if (!start) return;
 
       gesture.current = {
@@ -379,6 +405,7 @@ export function useStudentTouchTextSelection(
     const onPointerMove = (event: PointerEvent) => {
       const current = gesture.current;
       if (!current || event.pointerId !== current.pointerId) return;
+      live.current.diagnostics?.record('pointermove', { pointerMoveSeen: true });
 
       if (current.phase === 'pending') {
         const travelled = Math.hypot(event.clientX - current.originX, event.clientY - current.originY);
@@ -397,6 +424,7 @@ export function useStudentTouchTextSelection(
       }
 
       const focus = live.current.resolveCaretAtPoint(event.clientX, event.clientY);
+      live.current.diagnostics?.record('focus-caret', { focusCaretResolved: !!focus, focusCaretInsideRoot: !!focus && !!rootRef.current?.contains(focus.node), focusConnected: focus?.node.isConnected ?? null, focusOffset: focus?.offset ?? null, focusNode: describeTouchSelectionNode(focus?.node ?? null) });
       if (!focus) return;
       current.focus = focus;
       publish(rangeFor(current));
@@ -405,22 +433,27 @@ export function useStudentTouchTextSelection(
     const onPointerUp = (event: PointerEvent) => {
       const current = gesture.current;
       if (!current || event.pointerId !== current.pointerId) return;
+      live.current.diagnostics?.record('pointerup', { pointerUpSeen: true });
       finish(true);
     };
 
     const onPointerCancel = (event: PointerEvent) => {
       const current = gesture.current;
       if (!current || event.pointerId !== current.pointerId) return;
+      live.current.diagnostics?.record('pointercancel', { pointerCancelSeen: true });
       finish(false);
     };
 
     const root = rootRef.current;
+    live.current.diagnostics?.record('listener:effect', { rootExistsAtEffect: !!root });
+    live.current.diagnostics?.listener(root);
     root?.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('pointermove', onPointerMove);
     document.addEventListener('pointerup', onPointerUp);
     document.addEventListener('pointercancel', onPointerCancel);
 
     return () => {
+      live.current.diagnostics?.listener(null);
       root?.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('pointermove', onPointerMove);
       document.removeEventListener('pointerup', onPointerUp);
@@ -471,6 +504,14 @@ export function useStudentTouchTextSelection(
  */
 export function browserCaretResolver(
   doc: Document = document,
+  diagnostics?: TouchSelectionDiagnostics,
 ): (x: number, y: number) => TextPoint | null {
-  return (x, y) => caretPositionAtPoint(doc, x, y);
+  return (x, y) => {
+    try {
+      return caretPositionAtPoint(doc, x, y, diagnostics?.record);
+    } catch (error) {
+      diagnostics?.record('caret-error', { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  };
 }

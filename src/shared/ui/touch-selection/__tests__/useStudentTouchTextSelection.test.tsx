@@ -9,6 +9,7 @@ type Handlers = {
   activation?: 'long-press' | 'drag';
   boundaryFor?: (point: { node: Text; offset: number }) => Element | null;
   onSelect?: (range: Range, text: string) => void;
+  diagnostics?: { record: (stage: string, details?: Record<string, unknown>) => void; listener: (root: HTMLElement | null) => void };
 };
 
 function textNodeIn(scope: ParentNode, selector: string): Text {
@@ -58,6 +59,7 @@ function harness(handlers: Handlers = {}) {
       isCoarsePointer: () => handlers.coarse ?? true,
       longPressMs: 350,
       moveTolerancePx: 8,
+      diagnostics: handlers.diagnostics,
       ...(handlers.activation ? { activation: handlers.activation } : {}),
       ...(handlers.boundaryFor ? { boundaryFor: handlers.boundaryFor } : {}),
     }),
@@ -101,6 +103,32 @@ afterEach(() => {
 });
 
 describe('useStudentTouchTextSelection — long press ownership', () => {
+  it('reports the actual gesture stages to an injected diagnostic sink', () => {
+    const diagnostics = { record: vi.fn(), listener: vi.fn() };
+    const { prose, onSelect } = harness({ activation: 'drag', diagnostics });
+    touchDown(prose, 0);
+    move(11);
+    release();
+
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(diagnostics.listener).toHaveBeenCalledWith(prose);
+    const stages = diagnostics.record.mock.calls.map(([stage]) => stage);
+    expect(stages).toEqual(expect.arrayContaining(['pointerdown', 'start-caret', 'claim', 'pointermove', 'focus-caret', 'range', 'pointerup', 'onSelect']));
+    expect(diagnostics.record).toHaveBeenCalledWith('range', expect.objectContaining({ rangeText: 'alpha beta ', rangeCollapsed: false }));
+  });
+
+  it('records cancellation without reporting a completed selection', () => {
+    const diagnostics = { record: vi.fn(), listener: vi.fn() };
+    const { prose, onSelect } = harness({ activation: 'drag', diagnostics });
+    touchDown(prose, 0);
+    move(11);
+    fireEvent.pointerCancel(document, { pointerType: 'touch', pointerId: 1 });
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(diagnostics.record).toHaveBeenCalledWith('pointercancel', expect.objectContaining({ pointerCancelSeen: true }));
+    expect(diagnostics.record.mock.calls.map(([stage]) => stage)).not.toContain('onSelect');
+  });
+
   it('holds off while the finger is merely resting, and starts once the hold completes', () => {
     const { view, prose, onSelect } = harness();
 

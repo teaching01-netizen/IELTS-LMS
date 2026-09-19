@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   caretPositionAtPoint,
   clampTextPointTo,
@@ -262,6 +262,26 @@ describe('caretPositionAtPoint', () => {
     } finally {
       restore();
     }
+  });
+
+  it('traces null and element caret answers before the geometry fallback', () => {
+    const paragraph = host.querySelector('p')!;
+    const restore = installFakeLayout([{ node: text, x0: 100, y0: 50, charWidth: 10, charHeight: 20 }]);
+    const range = document.createRange();
+    range.setStart(paragraph, 0);
+    range.collapse(true);
+    const trace = vi.fn();
+    try {
+      const point = caretPositionAtPoint(fakeDocument({
+        caretPositionFromPoint: () => null,
+        caretRangeFromPoint: () => range,
+      }), 137, 60, trace);
+      expect(point).toEqual({ node: text, offset: 4 });
+      expect(trace.mock.calls.map(([stage]) => stage)).toEqual(['caretPositionFromPoint', 'caretRangeFromPoint', 'geometry']);
+      expect(trace).toHaveBeenCalledWith('caretPositionFromPoint', expect.objectContaining({ nodeType: null }));
+      expect(trace).toHaveBeenCalledWith('caretRangeFromPoint', expect.objectContaining({ nodeType: 1 }));
+      expect(trace).toHaveBeenCalledWith('geometry', expect.objectContaining({ resolved: true, offset: 4 }));
+    } finally { restore(); }
   });
 
   it('still prefers the range hit test over geometry', () => {
