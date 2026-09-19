@@ -955,6 +955,35 @@
     }
   }
 
+  /* THE OTHER HALF OF THAT OWNERSHIP: the browser must be told not to PAN, and
+     told before the finger lands.
+
+     `user-select: none` above stops the platform MAKING a selection. It does not
+     stop it from reading the first pixels of a drag as a scroll: when it does,
+     it takes the touch back with `pointercancel`, and the selection the exam had
+     just built is discarded. With the platform's own selection suppressed too,
+     that left a student on an iPad with nothing selecting at all — and no jsdom
+     test can catch it, because jsdom never runs a real scrolling gesture.
+
+     `touch-action: none` is the only declaration that settles ownership in
+     advance. It applies to touches that begin on this element or anywhere inside
+     it — the used value is taken from the whole ancestor chain — so the prose
+     needs no `*` rule of its own.
+
+     The marker is set by `useStudentTouchTextSelection` only when an armed tool
+     can select on a coarse pointer, and it is ALSO gated on the exam class here,
+     so a marker left on a lobby or preview surface is inert. That gate is not
+     cosmetic: those phases render the same surfaces, and taking their scroll
+     away would be a real regression. `html.student-exam-active` rather than
+     `.student-exam-active` for the same reason as the rule above — it outranks
+     `.student-reading-passage-pane { touch-action: auto }` (0,2,1 against
+     0,1,0) instead of tying with it and being decided by file order. */
+  @media (pointer: coarse) {
+    html.student-exam-active [data-student-owned-touch-selection="true"] {
+      touch-action: none;
+    }
+  }
+
   /* Exam content is not a drag source: dragging an image or a link would carry
      what the student is reading out of the exam. This is element dragging, not
      text selection — a text drag inside the passage still behaves natively. */

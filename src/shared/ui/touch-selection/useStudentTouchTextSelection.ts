@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import {
   caretPositionAtPoint,
   clampTextPointTo,
@@ -35,6 +35,21 @@ import {
  * annotation anchors are computed from character offsets and the toolbars
  * measure themselves from a stored anchor, so nothing downstream needs the
  * platform's selection to exist.
+ *
+ * WHY THE BROWSER HAS TO BE TOLD BEFOREHAND
+ *
+ * Suppressing the platform's selection is only half of owning a gesture. With
+ * `touch-action: auto` the browser is entitled to read the first pixels of a drag
+ * as a pan, and when it does it takes the touch away with `pointercancel` — at
+ * which point the selection is discarded, on a surface where the platform's own
+ * selection does not exist either. Nothing selects at all, and no test in jsdom
+ * can see it, because jsdom never runs a real scrolling gesture.
+ *
+ * So the hook marks its root (`data-student-owned-touch-selection`), and the
+ * stylesheet turns that marker into `touch-action: none` for as long as an armed
+ * tool can select. The declaration has to be in place before the finger lands —
+ * which is why it is a layout effect — and it is deliberately NOT set for the
+ * long-press contract, where a drag is meant to scroll.
  *
  * TWO CONTRACTS, DECIDED BY WHAT THE STUDENT HAS ALREADY SAID
  *
@@ -416,6 +431,29 @@ export function useStudentTouchTextSelection(
       ownedRange.current = null;
     };
   }, [enabled, rootRef]);
+
+  /**
+   * Tell the browser, before any finger lands, that this drag is the app's.
+   *
+   * Set for exactly the contract where a drag means "this text": an armed tool
+   * on a coarse pointer. A layout effect rather than an effect, because the
+   * attribute has to be true by the time the element the student can touch has
+   * been painted; leaving that gap would leave a window in which the browser
+   * still owns the gesture and cancels it.
+   *
+   * The long-press contract is never marked: there a drag is a scroll, and taking
+   * the gesture away from the browser would break the very reading motion the
+   * mode exists to preserve.
+   */
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root || !enabled || activation !== 'drag' || !isCoarsePointer()) return;
+
+    root.dataset['studentOwnedTouchSelection'] = 'true';
+    return () => {
+      delete root.dataset['studentOwnedTouchSelection'];
+    };
+  }, [activation, enabled, isCoarsePointer, rootRef]);
 
   // Disarming mid-gesture (the student turns Highlights off, or the phase ends)
   // must not leave an overlay painted over a mode that no longer exists.

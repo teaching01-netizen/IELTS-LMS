@@ -181,6 +181,32 @@ describe('IELTS owned touch highlighting', () => {
     expect(container.querySelectorAll('mark')).toHaveLength(0);
   });
 
+  it('tells the browser the exam owns the drag while a tool is armed', () => {
+    // The gesture has to be claimed BEFORE the finger lands. With the browser
+    // still entitled to pan, the first few pixels of movement are read as a
+    // scroll, the touch is taken away with `pointercancel`, and the selection the
+    // hook had just built is discarded — on a surface whose platform selection is
+    // suppressed, so nothing selects at all.
+    restoreEnvironment = stubCoarsePointerDevice();
+    const { surface } = renderSurface({ ownedTouchSelection: true, toolMode: 'highlight' });
+
+    expect(surface).toHaveAttribute('data-student-owned-touch-selection', 'true');
+  });
+
+  it('hands the drag back to the browser when no tool is armed', () => {
+    restoreEnvironment = stubCoarsePointerDevice();
+    const { surface } = renderSurface({ ownedTouchSelection: true, toolMode: 'off' });
+
+    expect(surface).not.toHaveAttribute('data-student-owned-touch-selection');
+  });
+
+  it('hands the drag back in a session that declared no owned gesture', () => {
+    restoreEnvironment = stubCoarsePointerDevice();
+    const { surface } = renderSurface({ ownedTouchSelection: false, toolMode: 'highlight' });
+
+    expect(surface).not.toHaveAttribute('data-student-owned-touch-selection');
+  });
+
   it('leaves the platform selection alone in a session that declared no owned gesture', () => {
     // A preview or an authoring surface renders this very component. The scope
     // defaults to false, so the gesture never claims the text there.

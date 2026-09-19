@@ -517,6 +517,31 @@ describe('SAT owned touch selection', () => {
     fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
   }
 
+  it('declares the owned drag to the browser while the mode is armed and only then', () => {
+    const armed = stubCoarsePointerDevice();
+    const { container } = renderContent({}, view({}), { ownedTouchSelection: true });
+    expect(container.querySelector('[data-student-owned-touch-selection="true"]')).not.toBeNull();
+    armed();
+
+    // Mode off: no selection is coming, so the passage keeps its scrolling.
+    const off = stubCoarsePointerDevice();
+    const disabled = renderContent({}, view({ annotationModeEnabled: false }), {
+      ownedTouchSelection: true,
+    });
+    expect(
+      disabled.container.querySelector('[data-student-owned-touch-selection="true"]'),
+    ).toBeNull();
+    off();
+
+    // Outside a real exam session the platform owns everything, as before.
+    const preview = stubCoarsePointerDevice();
+    const previewed = renderContent({}, view({}));
+    expect(
+      previewed.container.querySelector('[data-student-owned-touch-selection="true"]'),
+    ).toBeNull();
+    preview();
+  });
+
   it('captures an anchor from a hold-and-drag without ever making a browser selection', () => {
     const onSelectionCaptured = vi.fn();
     const { container } = renderContent({}, view({ onSelectionCaptured }), { ownedTouchSelection: true });

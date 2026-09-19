@@ -157,6 +157,55 @@ describe('owned touch selection CSS', () => {
     expect(css).not.toContain('any-pointer: coarse');
   });
 
+  it('takes the drag away from the browser while the exam owns the selection', () => {
+    // Removing the platform's selection is only half of it. `user-select: none`
+    // stops the browser MAKING a selection; it does not stop it from reading the
+    // first pixels of a drag as a pan and cancelling the touch, which threw away
+    // the selection the exam had just built. `touch-action: none` is the only
+    // declaration that settles that before the finger lands, and it is applied to
+    // the marker the hook sets — so JS ownership and CSS ownership cannot
+    // disagree about whether this gesture is the app's.
+    const ownership = coarseBlocks.filter((block) =>
+      block.includes('[data-student-owned-touch-selection="true"]'),
+    );
+
+    expect(ownership).toHaveLength(1);
+    expect(ownership[0]).toContain('html.student-exam-active');
+    expect(ownership[0]).toMatch(/touch-action:\s*none/);
+  });
+
+  it('never takes the drag away outside a coarse-pointer exam', () => {
+    // The marker is the hook's to set, and the exam class is the stylesheet's to
+    // insist on, so a marker left on a lobby or preview surface is inert. It also
+    // has to outrank `.student-reading-passage-pane { touch-action: auto }`,
+    // which is what the `html.student-exam-active` prefix does (0,2,1 against
+    // 0,1,0) — a tie here would be decided by file order, exactly like the
+    // selection rule.
+    const depthAt = (index: number) => {
+      let depth = 0;
+      for (let cursor = 0; cursor < index; cursor += 1) {
+        if (css[cursor] === '{') depth += 1;
+        else if (css[cursor] === '}') depth -= 1;
+      }
+      return depth;
+    };
+    const owners = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .map((match) => ({
+        selectors: (match[1] ?? '').trim(),
+        body: (match[2] ?? '').trim(),
+        index: match.index ?? 0,
+      }))
+      .filter(
+        (rule) =>
+          rule.selectors.includes('data-student-owned-touch-selection') &&
+          /touch-action:\s*none/.test(rule.body),
+      );
+
+    expect(owners).toHaveLength(1);
+    expect(owners[0]!.selectors.startsWith('html.student-exam-active')).toBe(true);
+    expect(depthAt(owners[0]!.index)).toBeGreaterThan(0);
+  });
+
   it('makes a highlightable surface selectable by default, and removes it only on a coarse pointer', () => {
     const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((match) => ({
       selectors: (match[1] ?? '').trim(),

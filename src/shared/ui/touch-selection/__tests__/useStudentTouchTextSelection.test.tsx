@@ -372,6 +372,88 @@ describe('useStudentTouchTextSelection — a second finger yields to the platfor
   });
 });
 
+describe('useStudentTouchTextSelection — the browser is told who owns the drag', () => {
+  /**
+   * A gesture cannot be won after the fact. With `touch-action: auto` the
+   * browser is ENTITLED to read the first few pixels of movement as a pan, and
+   * when it does it takes the touch away with `pointercancel` — so the selection
+   * the hook had just claimed was discarded, on a surface where the platform's
+   * own selection is suppressed. The marker is how the hook declares ownership
+   * BEFORE the finger lands, and it is the only thing the stylesheet needs to
+   * turn panning off for exactly as long as a tool is armed.
+   */
+  function armedHarness(initial: { enabled: boolean; activation: 'drag' | 'long-press'; coarse: boolean }) {
+    const host = document.createElement('div');
+    host.innerHTML = '<p id="prose">alpha beta</p>';
+    document.body.appendChild(host);
+    const prose = host.querySelector('#prose') as HTMLElement;
+    const text = textNodeIn(host, '#prose');
+    const rootRef = { current: prose } as RefObject<HTMLElement | null>;
+
+    const view = renderHook(
+      (props: { enabled: boolean; activation: 'drag' | 'long-press'; coarse: boolean }) =>
+        useStudentTouchTextSelection({
+          enabled: props.enabled,
+          activation: props.activation,
+          rootRef,
+          resolveCaretAtPoint: () => ({ node: text, offset: 0 }),
+          onSelect: () => {},
+          isCoarsePointer: () => props.coarse,
+        }),
+      { initialProps: initial },
+    );
+
+    return { view, prose };
+  }
+
+  it('marks the root while an armed drag can run', () => {
+    const { prose } = armedHarness({ enabled: true, activation: 'drag', coarse: true });
+
+    expect(prose).toHaveAttribute('data-student-owned-touch-selection', 'true');
+  });
+
+  it('leaves the root unmarked for the long-press contract, where a drag is a scroll', () => {
+    const { prose } = armedHarness({ enabled: true, activation: 'long-press', coarse: true });
+
+    expect(prose).not.toHaveAttribute('data-student-owned-touch-selection');
+  });
+
+  it('leaves the root unmarked on a fine pointer, where the platform still selects', () => {
+    const { prose } = armedHarness({ enabled: true, activation: 'drag', coarse: false });
+
+    expect(prose).not.toHaveAttribute('data-student-owned-touch-selection');
+  });
+
+  it('leaves the root unmarked while the gesture is disabled', () => {
+    const { prose } = armedHarness({ enabled: false, activation: 'drag', coarse: true });
+
+    expect(prose).not.toHaveAttribute('data-student-owned-touch-selection');
+  });
+
+  it('gives the drag back when the tool is disarmed, so the passage scrolls again', () => {
+    const { view, prose } = armedHarness({ enabled: true, activation: 'drag', coarse: true });
+    expect(prose).toHaveAttribute('data-student-owned-touch-selection', 'true');
+
+    view.rerender({ enabled: false, activation: 'drag', coarse: true });
+    expect(prose).not.toHaveAttribute('data-student-owned-touch-selection');
+
+    view.rerender({ enabled: true, activation: 'long-press', coarse: true });
+    expect(prose).not.toHaveAttribute('data-student-owned-touch-selection');
+
+    view.rerender({ enabled: true, activation: 'drag', coarse: true });
+    expect(prose).toHaveAttribute('data-student-owned-touch-selection', 'true');
+  });
+
+  it('removes the marker on unmount, leaving the platform in charge', () => {
+    const { view, prose } = armedHarness({ enabled: true, activation: 'drag', coarse: true });
+    expect(prose).toHaveAttribute('data-student-owned-touch-selection', 'true');
+
+    view.unmount();
+
+    expect(prose).not.toHaveAttribute('data-student-owned-touch-selection');
+  });
+});
+
 describe('useStudentTouchTextSelection — scope and boundaries', () => {
   it('confines a drag to the boundary the caller names', () => {
     const { host, onSelect, resolveCaretAtPoint } = harness({

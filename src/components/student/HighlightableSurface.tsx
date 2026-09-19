@@ -32,13 +32,16 @@ export function HighlightableSurface({
   // even when the string is unchanged, which can blow away the browser's current
   // text selection (blue highlight) when the toolbar toggles visibility.
   const innerHtml = useMemo(() => ({ __html: html }), [html]);
-  // Selection policy is NOT declared here. `user-select` is owned by the
-  // stylesheet (index.css), which is the only place that can also see whether a
-  // locked exam is active: a real student exam removes the platform's own
-  // selection under a coarse pointer, and an inline `text` here would outrank
-  // that rule for this element and leave the two contradicting each other.
+  // Gesture policy is NOT declared here — neither `user-select` nor
+  // `touch-action`. Both are owned by the stylesheet (index.css), which is the
+  // only place that can also see whether a locked exam is active. A real student
+  // exam removes the platform's own selection under a coarse pointer and, while
+  // a highlight tool is armed, takes the drag itself (`touch-action: none`, keyed
+  // off the marker `useStudentTouchTextSelection` sets on this element). An
+  // inline `auto` here would outrank both rules and leave the two authorities
+  // contradicting each other — which is precisely how the gesture got cancelled
+  // by the browser's own panning on a real device.
   const surfaceStyle: React.CSSProperties = {
-    touchAction: 'auto',
     ...(highlightSelectionColor
       ? ({ ['--student-highlight-selection-color' as string]: highlightSelectionColor } as React.CSSProperties)
       : {}),
