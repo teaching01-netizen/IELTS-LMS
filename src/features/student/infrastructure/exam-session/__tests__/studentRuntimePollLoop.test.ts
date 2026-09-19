@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createStudentRealtimeCoordinator } from '../studentRealtimeCoordinator';
 import {
   clampStudentPollDelay,
   createStudentRuntimePollLoop,
@@ -33,6 +34,70 @@ describe('student runtime poll loop', () => {
     expect(second.notModified).toBe(false);
     expect(onRevision).toHaveBeenCalledWith(8);
     // Fast lane (2s) is clamped UP to the default floor (2s).
+    expect(loop.nextDelayMs()).toBe(2_000);
+  });
+
+  // Acceptance (CONC-001 residual): a student waiting on Start with no live
+  // socket. The room's runtime revision is 7 (not started); the proctor presses
+  // Start and the server exposes revision 8 with a 2s fast lane. The versioned
+  // poll must be what observes it, exactly one refresh must follow, and the
+  // cadence around it must be seconds — not the 15-25s a waiting cohort used
+  // to be clamped to.
+  it('lets a waiting student without a socket observe Start within the fast-lane bound', async () => {
+    const coordinator = createStudentRealtimeCoordinator({
+      scheduleId: 'schedule-1',
+      candidateId: 'candidate-1',
+      cache: { invalidateLiveSession: vi.fn(), updateLiveRuntime: vi.fn() },
+    });
+    coordinator.handleSocketDisconnected();
+    // No runtime row exists before Start, so the hook resolves the status to
+    // null; the coordinator policy is what the loop clamps into.
+    let runtimeStatus: 'not_started' | 'live' | null = null;
+
+    let started = false;
+    const poll = vi.fn().mockImplementation(async (since: number) =>
+      started
+        ? { revision: 8, status: 'live', activeSection: 'reading-writing', pollAfterSecs: 2, notModified: false }
+        : { revision: 7, status: 'not_started', activeSection: null, pollAfterSecs: 25, notModified: since === 7 },
+    );
+    const onRevision = vi.fn();
+    const loop = createStudentRuntimePollLoop({
+      poll,
+      sinceRevision: 7,
+      onRevision,
+      cadence: () => {
+        const policy = coordinator.getPollingPolicy(runtimeStatus);
+        return { floorMs: policy.intervalMs, ceilingMs: policy.maxIntervalMs };
+      },
+    });
+
+    // Waiting: the server's steady 25s is clamped down to the socket-less
+    // ceiling, so the next look is seconds away rather than 15-25s.
+    await loop.tick();
+    expect(poll).toHaveBeenLastCalledWith(7);
+    expect(onRevision).not.toHaveBeenCalled();
+    expect(loop.nextDelayMs()).toBeLessThanOrEqual(3_000);
+
+    // The proctor presses Start.
+    started = true;
+    await loop.tick();
+    expect(poll).toHaveBeenLastCalledWith(7);
+    // Exactly one live snapshot refresh, for revision 8.
+    expect(onRevision).toHaveBeenCalledTimes(1);
+    expect(onRevision).toHaveBeenCalledWith(8);
+    // The server's 2s fast lane is honored, not the coordinator's old 15s floor.
+    expect(loop.nextDelayMs()).toBe(2_000);
+
+    // The refresh applied the live runtime; the loop's cursor advanced, so the
+    // next poll is a 304-style no-op and nothing refreshes twice.
+    runtimeStatus = 'live';
+    poll.mockImplementation(async (since: number) => ({
+      revision: 8, status: 'live', activeSection: 'reading-writing', pollAfterSecs: 2, notModified: since === 8,
+    }));
+    const steady = await loop.tick();
+    expect(poll).toHaveBeenLastCalledWith(8);
+    expect(steady.notModified).toBe(true);
+    expect(onRevision).toHaveBeenCalledTimes(1);
     expect(loop.nextDelayMs()).toBe(2_000);
   });
 

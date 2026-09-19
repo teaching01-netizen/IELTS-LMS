@@ -47,13 +47,35 @@ func (r *recordingOutbox) EnqueueInTx(ctx context.Context, q tx.Tx, kind, id str
 	return SQLOutboxEnqueuer{}.EnqueueInTx(ctx, q, kind, id, revision, family, payload)
 }
 
+// scheduleLockColumns mirrors LockScheduleRow's SELECT list.
+var scheduleLockColumns = []string{"id", "exam_id", "provider_key", "published_version_id", "status", "revision", "planned_duration_minutes"}
+
+// expectScheduleLock stages the schedule row lock that opens every Start and
+// Complete transaction. sqlmock's expectations are ORDERED, so staging it first
+// asserts the global lock order (schedule before attempts before runtime):
+// a Start that locked attempts first would fail every test that uses this.
+func expectScheduleLock(mock sqlmock.Sqlmock, status, versionID string, revision int64) {
+	mock.ExpectQuery("FROM exam_schedules WHERE id = \\? FOR UPDATE").
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows(scheduleLockColumns).AddRow("sched-1", "exam-1", "sat", versionID, status, revision, 154))
+}
+
+// staticPlanner is the injected planner for tests that do not exercise plan
+// derivation itself: it hands back a fixed plan for whatever row Start locked.
+func staticPlanner(plan []PlanEntry, timingModel string) StartPlanner {
+	return func(context.Context, tx.Tx, StartSchedule) ([]PlanEntry, string, error) {
+		return plan, timingModel, nil
+	}
+}
+
 // startStubs stages the exact statement sequence of a one-section Start up to
 // (but not including) the wakeup INSERT and COMMIT, so each test can decide how
 // the event leg behaves.
 func startStubs(mock sqlmock.Sqlmock) {
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
-	// Lock order: schedule attempts before the runtime row.
+	// Lock order: the schedule row, then its attempts, then the runtime row.
+	expectScheduleLock(mock, "scheduled", "ver-1", 3)
 	mock.ExpectQuery("FROM student_attempts WHERE schedule_id").
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
@@ -68,8 +90,9 @@ func startStubs(mock sqlmock.Sqlmock) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO exam_session_runtime_sections").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	// The live transition is fenced on exactly the row the plan came from.
 	mock.ExpectExec("UPDATE exam_schedules SET status = 'live'").
-		WithArgs("sched-1").
+		WithArgs("sched-1", "ver-1", int64(3)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	// V2 deadline projection for the section that just went live.
 	mock.ExpectExec("UPDATE student_attempts sa JOIN").
@@ -104,7 +127,7 @@ func TestStartCommitsRuntimeAndWakeupTogether(t *testing.T) {
 	mock.ExpectExec("INSERT INTO outbox_events").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	runtimeID, err := svc.Start(context.Background(), "sched-1", "exam-1", startPlan(), TimingModelCohortSection, "admin-1")
+	runtimeID, err := svc.Start(context.Background(), "sched-1", "admin-1", staticPlanner(startPlan(), TimingModelCohortSection))
 	if err != nil {
 		t.Fatalf("start must commit: %v", err)
 	}
@@ -149,7 +172,7 @@ func TestStartRollsBackWhenTheWakeupCannotBeWritten(t *testing.T) {
 	mock.ExpectExec("INSERT INTO outbox_events").WillReturnError(errors.New("outbox unavailable"))
 	mock.ExpectRollback()
 
-	runtimeID, err := svc.Start(context.Background(), "sched-1", "exam-1", startPlan(), TimingModelCohortSection, "admin-1")
+	runtimeID, err := svc.Start(context.Background(), "sched-1", "admin-1", staticPlanner(startPlan(), TimingModelCohortSection))
 	if err == nil {
 		t.Fatal("a failed wakeup write must fail Start, not leave a live runtime behind")
 	}
@@ -177,6 +200,8 @@ func TestStartIsIdempotentForALiveRuntime(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
+	// The schedule is already live: the idempotent path still locks it first.
+	expectScheduleLock(mock, "live", "ver-1", 4)
 	mock.ExpectQuery("FROM student_attempts WHERE schedule_id").
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
@@ -185,9 +210,16 @@ func TestStartIsIdempotentForALiveRuntime(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow("rt-1", StatusLive))
 	mock.ExpectCommit()
 
-	runtimeID, err := svc.Start(context.Background(), "sched-1", "exam-1", startPlan(), TimingModelCohortSection, "admin-1")
+	planned := 0
+	runtimeID, err := svc.Start(context.Background(), "sched-1", "admin-1", func(context.Context, tx.Tx, StartSchedule) ([]PlanEntry, string, error) {
+		planned++
+		return startPlan(), TimingModelCohortSection, nil
+	})
 	if err != nil {
 		t.Fatalf("a second start on a live runtime must be a no-op: %v", err)
+	}
+	if planned != 0 {
+		t.Fatalf("an idempotent start must not re-plan the runtime, planned %d times", planned)
 	}
 	if runtimeID != "rt-1" {
 		t.Fatalf("idempotent start must return the existing runtime, got %q", runtimeID)

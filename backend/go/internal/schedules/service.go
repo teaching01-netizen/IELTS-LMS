@@ -471,7 +471,9 @@ func (s *Service) GetRuntime(ctx context.Context, scheduleID string) (Runtime, e
 // ApplyRuntimeCommand applies start/pause/resume/complete with revision
 // fencing (mirrors apply_runtime_command; stale expected revision is a 409
 // "Runtime changed; refresh before retrying."). Lock order everywhere:
-// schedule attempt rows -> runtime row -> section rows.
+// schedule row (when the command writes it: start/complete) -> schedule
+// attempt rows -> runtime row -> section rows. Check-in takes the schedule row
+// first too, so the two can only ever queue behind each other, never cycle.
 func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cmd RuntimeCommand) (Runtime, error) {
 	normalized, err := ValidateRuntimeCommandAction(cmd.Action)
 	if err != nil {
@@ -483,8 +485,9 @@ func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cm
 		cmd.ActorID = "system"
 	}
 
-	sch, err := s.Get(ctx, scheduleID)
-	if err != nil {
+	// Existence gate only: nothing below plans from this read. Start derives
+	// its plan from the schedule row it locks inside its own transaction.
+	if _, err := s.Get(ctx, scheduleID); err != nil {
 		return Runtime{}, err
 	}
 	fence := examruntime.RevisionFence{
@@ -493,11 +496,7 @@ func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cm
 	}
 	switch cmd.Action {
 	case CommandStart:
-		plan, timingModel, err := s.runtimePlan(ctx, sch)
-		if err != nil {
-			return Runtime{}, err
-		}
-		if _, err := s.runtime.Start(ctx, scheduleID, sch.ExamID, plan, timingModel, cmd.ActorID); err != nil {
+		if _, err := s.runtime.Start(ctx, scheduleID, cmd.ActorID, s.startPlanner()); err != nil {
 			return Runtime{}, err
 		}
 	case CommandPause:
@@ -516,13 +515,38 @@ func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cm
 	return s.GetRuntime(ctx, scheduleID)
 }
 
-// runtimePlan derives the persisted cohort clock plan from the pinned
-// published version. Disabled config sections are omitted so a proctor start
-// cannot create clocks for a section the author turned off.
-func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.PlanEntry, string, error) {
+// startPlanner derives the cohort clock plan INSIDE runtime.Start's
+// transaction, from the schedule row Start locked, through Start's own tx
+// handle. Planning from any other read — the pre-transaction Get this command
+// used to plan from — let a concurrent version switch commit between the read
+// and the live transition, so the runtime's section/timing topology described
+// one version while the schedule (and every attempt minted after it) named
+// another.
+func (s *Service) startPlanner() examruntime.StartPlanner {
+	return func(ctx context.Context, q tx.Tx, sch examruntime.StartSchedule) ([]examruntime.PlanEntry, string, error) {
+		return runtimePlanIn(ctx, q, Schedule{
+			ProviderKey:            sch.ProviderKey,
+			PublishedVersionID:     sch.PublishedVersionID,
+			PlannedDurationMinutes: sch.PlannedDurationMinutes,
+		})
+	}
+}
+
+// planQuerier is the read surface plan derivation needs. Both *sql.DB and
+// tx.Tx satisfy it, so the same derivation can run inside a caller's
+// transaction (Start) or against the pool.
+type planQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// runtimePlanIn derives the persisted cohort clock plan from the pinned
+// published version, reading through q. Disabled config sections are omitted
+// so a proctor start cannot create clocks for a section the author turned off.
+func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examruntime.PlanEntry, string, error) {
 	var configRaw sql.NullString
 	var examType string
-	if err := s.db.QueryRowContext(ctx, "SELECT CAST(v.config_snapshot AS CHAR), e.exam_type FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.id = ?", sch.PublishedVersionID).Scan(&configRaw, &examType); err != nil {
+	if err := q.QueryRowContext(ctx, "SELECT CAST(v.config_snapshot AS CHAR), e.exam_type FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.id = ?", sch.PublishedVersionID).Scan(&configRaw, &examType); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, "", notFoundError("Published exam version not found.")
 		}
@@ -532,7 +556,7 @@ func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.
 	// effective provider heals that mismatch so science survives planning.
 	effectiveProvider := examdomain.EffectiveProviderKey(sch.ProviderKey, examType)
 	enabled := configuredRuntimeSections(configRaw.String)
-	rows, err := s.db.QueryContext(ctx, "SELECT section_key, title, display_order, duration_seconds, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id", sch.PublishedVersionID)
+	rows, err := q.QueryContext(ctx, "SELECT section_key, title, display_order, duration_seconds, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id", sch.PublishedVersionID)
 	if err != nil {
 		return nil, "", err
 	}

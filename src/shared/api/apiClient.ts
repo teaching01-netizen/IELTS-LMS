@@ -530,29 +530,28 @@ class ApiClient {
       metadata?: unknown;
     };
 
-    const error = root.error;
+    // Two wire shapes reach this client:
+    //   legacy  {success:false, error:{code,message,details}, metadata:{requestId}}
+    //   current {code, message, details, requestId}   (Go apperrors.Envelope)
+    // The envelope fields are read from the nested `error` object when the
+    // body has one, and from the root otherwise. Reading only the nested
+    // shape turned every current-backend code into UNKNOWN and dropped
+    // `details` — so no caller could tell CONTROL_EPOCH_STALE, LEASE_FENCED
+    // or VERSION_COLLISION apart from a transient failure, and the durability
+    // engine re-sent a stale control epoch in a loop during a live exam.
+    const nested = root.error;
+    const envelope: Record<string, unknown> =
+      nested && typeof nested === "object" && !Array.isArray(nested)
+        ? (nested as Record<string, unknown>)
+        : (errorData as Record<string, unknown>);
     const metadata = root.metadata;
 
-    const code =
-      error &&
-      typeof error === "object" &&
-      "code" in error &&
-      typeof (error as { code?: unknown }).code === "string"
-        ? ((error as { code: string }).code as string)
-        : undefined;
+    const code = typeof envelope["code"] === "string" ? (envelope["code"] as string) : undefined;
 
     const message =
-      error &&
-      typeof error === "object" &&
-      "message" in error &&
-      typeof (error as { message?: unknown }).message === "string"
-        ? ((error as { message: string }).message as string)
-        : undefined;
+      typeof envelope["message"] === "string" ? (envelope["message"] as string) : undefined;
 
-    const detailsRaw =
-      error && typeof error === "object" && "details" in error
-        ? (error as { details?: unknown }).details
-        : undefined;
+    const detailsRaw = envelope["details"];
     const details =
       detailsRaw && typeof detailsRaw === "object" && !Array.isArray(detailsRaw)
         ? (detailsRaw as Record<string, unknown>)
@@ -560,13 +559,16 @@ class ApiClient {
           ? { items: detailsRaw }
           : undefined;
 
-    const requestId =
+    const requestIdFromMetadata =
       metadata &&
       typeof metadata === "object" &&
       "requestId" in metadata &&
       typeof (metadata as { requestId?: unknown }).requestId === "string"
         ? ((metadata as { requestId: string }).requestId as string)
         : undefined;
+    const requestIdFromEnvelope =
+      typeof envelope["requestId"] === "string" ? (envelope["requestId"] as string) : undefined;
+    const requestId = requestIdFromMetadata ?? requestIdFromEnvelope;
 
     return { code, message, details, requestId };
   }

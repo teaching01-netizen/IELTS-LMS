@@ -55,6 +55,24 @@ const DURABLE_DRAFT_PREFIX = "v2_attempt_";
 const QUARANTINE_PREFIX = "v2_quarantine:";
 const MAX_RETRY_ATTEMPTS_PER_DRAIN = 8;
 /**
+ * Control-epoch self-heal budget. The server bumps `control_epoch` on every
+ * cohort-clock or attempt-control transition — runtime start, pause/resume,
+ * extend, a proctor warning, and the SAT module start itself — and this engine
+ * learns the new value only from an authoritative snapshot. A student who
+ * checked in after the proctor pressed Start snapshots epoch N, then
+ * `modules/start` moves the attempt to N+1 and nothing tells the engine, so
+ * the FIRST answer of the exam is refused as CONTROL_EPOCH_STALE.
+ *
+ * That refusal is a pure skew, not a conflict: same lease, attempt still
+ * running, no newer server write for the question. It heals by re-reading the
+ * snapshot and re-issuing the queued drafts under the current epoch — the
+ * same operation an explicit reconcile performs, without the author having to
+ * find a "re-check" button mid-exam. The budget bounds a server that keeps
+ * moving the epoch during one drain; past it the drafts stay blocked, visible
+ * and reconcilable, exactly as before.
+ */
+const MAX_CONTROL_EPOCH_HEALS_PER_DRAIN = 2;
+/**
  * N1b self-heal budget: a per-question VERSION_COLLISION means another writer
  * under the SAME lease already consumed the version this engine minted (a
  * second tab sharing the client session, or a reload that could not seed the
@@ -1576,6 +1594,7 @@ export class DurableResponseEngine {
 
     let retryAttempt = 0;
     let collisionHeals = 0;
+    let controlHeals = 0;
     try {
       while (this.outbox.size > 0 && !this.isDestroyed && !this.submissionPromise) {
         this.inFlight.clear();
@@ -1682,6 +1701,20 @@ export class DurableResponseEngine {
             // blockPendingOnControlBump), never the quarantine path. Only
             // lease-stale and true terminal codes fence/quarantine here.
             if (errorCode === "CONTROL_EPOCH_STALE") {
+              // A control-only skew (same lease, attempt running, server
+              // holds nothing newer) is healed in place: re-read the
+              // authoritative epoch and re-issue the drafts under it. Only
+              // when that is not provably safe do the drafts fall through to
+              // the blocked/reconcilable posture below.
+              if (controlHeals < MAX_CONTROL_EPOCH_HEALS_PER_DRAIN && !this.isDestroyed) {
+                const healed = await this.recoverControlEpochSkew();
+                if (this.isDestroyed) return;
+                if (healed) {
+                  controlHeals += 1;
+                  retryAttempt = 0;
+                  continue;
+                }
+              }
               for (const [questionId, command] of this.inFlight) {
                 if (!this.outbox.has(questionId)) this.outbox.set(questionId, command);
               }
@@ -2636,10 +2669,25 @@ export class DurableResponseEngine {
       this.installServerResponse(response);
     }
     const server = snapshot.responses.find((entry) => entry.questionId === questionId);
-    const floor = Math.max(
-      this.versionTrackers.get(questionId) ?? 0,
-      server ? server.clientVersion : 0
-    );
+    this.reissueUnderCurrentEpochs(questionId, live, server ? server.clientVersion : 0);
+    this.emitDurabilityEvent("version_collision_recovered", { reason: "VERSION_COLLISION" });
+    this.notifyStateChange();
+    return true;
+  }
+
+  /**
+   * Re-issues one live draft as a NEW write under the engine's current lease
+   * and control epochs, minted above `serverVersionFloor`, replacing both the
+   * queued and the in-flight entry for the question so the superseded version
+   * can never fly again. Shared by the VERSION_COLLISION and CONTROL_EPOCH
+   * heals; the caller decides whether re-issuing is safe.
+   */
+  private reissueUnderCurrentEpochs(
+    questionId: string,
+    live: PendingResponseState,
+    serverVersionFloor: number
+  ): void {
+    const floor = Math.max(this.versionTrackers.get(questionId) ?? 0, serverVersionFloor);
     const issuedVersion = floor + 1;
     this.versionTrackers.set(questionId, issuedVersion);
 
@@ -2663,8 +2711,6 @@ export class DurableResponseEngine {
       () => undefined
     );
 
-    // Replace BOTH the queued and the in-flight entry for Q so the same
-    // colliding version can never be re-sent.
     const staleQueued = this.outbox.get(questionId);
     if (staleQueued) {
       this.outbox.delete(questionId);
@@ -2689,7 +2735,114 @@ export class DurableResponseEngine {
       leaseEpoch: this.leaseEpoch,
       controlEpoch: this.controlEpoch,
     });
-    this.emitDurabilityEvent("version_collision_recovered", { reason: "VERSION_COLLISION" });
+  }
+
+  /**
+   * Heals a CONTROL_EPOCH_STALE refusal that is a pure epoch skew.
+   *
+   * The server refused the batch because its control epoch moved past the
+   * one this engine holds (a runtime command, a proctor action, or the SAT
+   * module start bumped it after our last snapshot). Re-read the authoritative
+   * snapshot and, ONLY when every fence still holds — same attempt, same
+   * lease, attempt running, epoch genuinely ahead of ours — adopt the epoch
+   * and re-issue every queued and in-flight draft under it. A draft the server
+   * has already moved past stays queued as blocked for an explicit reconcile.
+   *
+   * Anything else (a lease change, a paused or terminal attempt, a snapshot
+   * that does not show a newer epoch, a fetch failure) returns false and the
+   * caller keeps the blocked/reconcilable posture. Lease fences are never
+   * crossed here; a paused attempt is not writable, so re-sending would trade
+   * a recoverable block for a terminal refusal.
+   */
+  private async recoverControlEpochSkew(): Promise<boolean> {
+    if (this.isDestroyed || this.terminalState || this.submissionPromise) return false;
+    const fail = (reason: string): false => {
+      this.emitDurabilityEvent("control_epoch_recovery_failed", { reason });
+      return false;
+    };
+    let snapshot: SnapshotResponse;
+    try {
+      snapshot = await fetchSnapshotWithTimeout(
+        (attemptId) => this.transport.fetchSnapshot(attemptId),
+        this.attemptId
+      );
+    } catch {
+      return fail("snapshot_fetch_failed");
+    }
+    if (this.isDestroyed || this.terminalState || this.submissionPromise) return false;
+    if (!isSnapshotResponse(snapshot)) return fail("snapshot_not_authoritative");
+    if (snapshot.attemptId !== this.attemptId) return fail("attempt_mismatch");
+    if (["submitted", "terminated", "locked", "cancelled"].includes(snapshot.deliveryStatus)) {
+      return fail("attempt_terminal");
+    }
+    if (snapshot.leaseEpoch !== this.leaseEpoch) return fail("lease_changed");
+    if (snapshot.deliveryStatus !== "running") return fail("attempt_not_running");
+    if (
+      !Number.isSafeInteger(snapshot.controlEpoch) ||
+      snapshot.controlEpoch <= this.controlEpoch
+    ) {
+      // The server refused our epoch but does not show a newer one: not a
+      // skew this engine can reason about, so it must not spin on it.
+      return fail("epoch_not_advanced");
+    }
+
+    this.attemptRevision = Math.max(this.attemptRevision, snapshot.attemptRevision);
+    for (const response of snapshot.responses) {
+      this.installServerResponse(response);
+    }
+    const previousControlEpoch = this.controlEpoch;
+    this.controlEpoch = snapshot.controlEpoch;
+
+    // Every queued and in-flight draft was minted under the old epoch and is
+    // non-sendable now (isBlockedPending compares enqueue-time epochs), so
+    // each one is re-issued — or, when the server already holds a newer write
+    // for it, left queued as blocked for the explicit reconcile path.
+    const candidates = new Map<string, ResponseCommandV2>();
+    for (const [questionId, command] of this.outbox) candidates.set(questionId, command);
+    for (const [questionId, command] of this.inFlight) candidates.set(questionId, command);
+    this.inFlight.clear();
+    let reissued = 0;
+    for (const [questionId, command] of candidates) {
+      if (!this.outbox.has(questionId)) this.outbox.set(questionId, command);
+      const live = this.states.get(questionId)?.pending;
+      if (!live || live.writeId !== command.writeId) continue;
+      if (live.blocked) continue;
+      const server = snapshot.responses.find((entry) => entry.questionId === questionId);
+      const neverIssuedDraft = live.clientVersion <= 0;
+      if (
+        !neverIssuedDraft &&
+        server &&
+        server.writeId !== command.writeId &&
+        server.clientVersion >= live.clientVersion
+      ) {
+        const mark: BlockedInfoEx = {
+          reason: "EPOCH_STALE",
+          blockedAt: new Date().toISOString(),
+          originLeaseEpoch: live.leaseEpoch,
+        };
+        live.blocked = mark;
+        this.checkpointIntentSync(questionId, live);
+        this.emitDurabilityEvent("control_epoch_blocked", {
+          reason: "CONTROL_EPOCH_STALE",
+          controlEpoch: this.controlEpoch,
+        });
+        continue;
+      }
+      this.reissueUnderCurrentEpochs(questionId, live, server ? server.clientVersion : 0);
+      reissued += 1;
+    }
+    this.emitDurabilityEvent("control_epoch_recovered", {
+      reason: "CONTROL_EPOCH_STALE",
+      previousControlEpoch,
+      controlEpoch: this.controlEpoch,
+      reissued,
+    });
+    if (this.getBlockedCount() > 0 && this.syncStatus !== "conflict_fenced" && this.syncStatus !== "conflict_terminal") {
+      this.syncStatus = "blocked_attention";
+      this.lastError =
+        "Exam timing changed. Your latest answers are kept on this device and need re-check.";
+      this.notifyStatusChange();
+    }
     this.notifyStateChange();
     return true;
   }

@@ -97,12 +97,25 @@ export function createStudentRealtimeCoordinator(
       return 'invalidated';
     },
     getPollingPolicy(runtimeStatus) {
-      if (runtimeStatus === 'live') {
-        return socketConnected
-          ? { intervalMs: 20_000, maxIntervalMs: 30_000 }
-          : { intervalMs: 1_500, maxIntervalMs: 3_000 };
+      // A terminal runtime has nothing left to observe: rest lazily whatever
+      // the transport is.
+      if (runtimeStatus === 'completed' || runtimeStatus === 'cancelled') {
+        return { intervalMs: 15_000, maxIntervalMs: 25_000 };
       }
-      return { intervalMs: 15_000, maxIntervalMs: 25_000 };
+      if (socketConnected) {
+        // The socket carries every transition; the poll is only recovery.
+        return runtimeStatus === 'live'
+          ? { intervalMs: 20_000, maxIntervalMs: 30_000 }
+          : { intervalMs: 15_000, maxIntervalMs: 25_000 };
+      }
+      // No socket: the poll IS the live channel, and that is as true for a
+      // cohort waiting on Start (no runtime row yet, so `null`, or
+      // `not_started`) or on Resume (`paused`) as for one mid-exam. These
+      // bounds used to apply only to `live`, so a waiting student without a
+      // socket sat on a 15-25s cadence and the server's 2s fast lane was
+      // clamped away — the proctor pressed Start and the room learned of it
+      // up to 25s later.
+      return { intervalMs: 1_500, maxIntervalMs: 3_000 };
     },
   };
 }

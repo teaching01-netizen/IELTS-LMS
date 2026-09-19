@@ -100,4 +100,41 @@ describe('student realtime coordinator', () => {
 
     expect(coordinator.getPollingPolicy('live')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
   });
+
+  // A cohort waiting on Start has no runtime row yet (`null`) or a
+  // `not_started` one; a paused cohort is waiting on Resume. Without a socket
+  // the poll is their only live channel, so it must be as tight as mid-exam:
+  // the 15-25s cadence here is what made a proctor's Start reach the room up
+  // to 25s late.
+  it('polls a waiting cohort as tightly as a live one when the socket is unavailable', () => {
+    const coordinator = createStudentRealtimeCoordinator({
+      scheduleId: 'schedule-1',
+      candidateId: 'candidate-1',
+      cache: { invalidateLiveSession: vi.fn(), updateLiveRuntime: vi.fn() },
+    });
+
+    for (const status of [null, 'not_started', 'paused'] as const) {
+      expect(coordinator.getPollingPolicy(status)).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+    }
+    // A terminal runtime has nothing left to observe.
+    expect(coordinator.getPollingPolicy('completed')).toEqual({ intervalMs: 15_000, maxIntervalMs: 25_000 });
+    expect(coordinator.getPollingPolicy('cancelled')).toEqual({ intervalMs: 15_000, maxIntervalMs: 25_000 });
+  });
+
+  it('rests lazily while the socket carries the transitions', () => {
+    const coordinator = createStudentRealtimeCoordinator({
+      scheduleId: 'schedule-1',
+      candidateId: 'candidate-1',
+      cache: { invalidateLiveSession: vi.fn(), updateLiveRuntime: vi.fn() },
+    });
+    coordinator.handleSocketConnected();
+
+    expect(coordinator.getPollingPolicy('live')).toEqual({ intervalMs: 20_000, maxIntervalMs: 30_000 });
+    expect(coordinator.getPollingPolicy(null)).toEqual({ intervalMs: 15_000, maxIntervalMs: 25_000 });
+    expect(coordinator.getPollingPolicy('not_started')).toEqual({ intervalMs: 15_000, maxIntervalMs: 25_000 });
+
+    // Losing the socket tightens the waiting cohort immediately.
+    coordinator.handleSocketDisconnected();
+    expect(coordinator.getPollingPolicy('not_started')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+  });
 });
