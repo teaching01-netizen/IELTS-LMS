@@ -864,6 +864,37 @@
     user-select: text;
   }
 
+  /* Long-press callout suppression for exam CONTENT, scoped to an active
+     student exam — `useStudentExamPageLock` puts `student-exam-active` on
+     html/body for exactly the exam phases, so authoring and staff preview keep
+     their native callouts.
+
+     Selection stays `text` on purpose: Highlights & Notes and the SAT
+     annotations are built on the browser's own selection, so this removes the
+     OS action bar (Copy / Look Up / Search / Share) without removing the
+     student's ability to select. Notice this says nothing about `user-select:
+     none` — that would delete the feature it is meant to protect.
+
+     `.sat-exam-prose` is the SAT passage/question prose wrapper and is a
+     deliberate boundary: the answer controls are rendered OUTSIDE it, so they
+     keep their native behaviour. */
+  .student-exam-active .sat-exam-prose,
+  .student-exam-active .sat-exam-prose *,
+  .student-exam-active [data-student-highlightable="true"],
+  .student-exam-active [data-student-highlightable="true"] * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* Exam content is not a drag source: dragging an image or a link would carry
+     what the student is reading out of the exam. This is element dragging, not
+     text selection — a text drag inside the passage still behaves natively. */
+  .student-exam-active img,
+  .student-exam-active a {
+    -webkit-user-drag: none;
+  }
+
   .student-stimulus-content p {
     margin-top: var(--student-reading-paragraph-spacing, 1rem);
     margin-bottom: var(--student-reading-paragraph-spacing, 1rem);

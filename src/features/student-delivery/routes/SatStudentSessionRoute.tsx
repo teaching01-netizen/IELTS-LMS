@@ -323,6 +323,7 @@ export function SatStudentSessionRoute({
         isStarting={exam.isStarting}
         stageReady={exam.pendingStageReady}
         entryRecoverable={exam.autoEntryRecoverable}
+        autoStartPending={exam.entryAutoStartPending}
         error={error}
         onStart={() => void commands.startPendingModule()}
         onExit={onExit}

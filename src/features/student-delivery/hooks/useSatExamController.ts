@@ -74,7 +74,11 @@ import {
   moduleForAttempt,
   sectionForModule,
 } from "../application/satRuntimeSelectors";
-import { deriveSatEntryDecision, type SatEntryOutcome } from "../application/satEntry";
+import {
+  deriveSatEntryDecision,
+  previousModuleTimedOut as previousModuleEndedByClock,
+  type SatEntryOutcome,
+} from "../application/satEntry";
 import { seedMatchesIdentity, type SatBootstrapSeed } from "../bootstrap/satBootstrapSeed";
 import {
   isEquivalentBootstrap,
@@ -766,7 +770,16 @@ export function useSatExamController({
         })
       : 0;
 
-
+  // Module-advance fix: a branch module (Module 2) is opened by the automatic
+  // path only when the module before it in the same section ended because its
+  // own clock ran out — the timeout hand-off the runbook describes. Read from
+  // the payload rather than from local submit state so a reload or an offline
+  // reconnect reaches the same verdict (see application/satEntry.ts on why
+  // `completionReason` cannot answer this).
+  const previousModuleTimedOut = useMemo(
+    () => (data && pendingModule ? previousModuleEndedByClock(data, pendingModule) : false),
+    [data, pendingModule],
+  );
 
   /**
    * Starts the pending module and reports what actually happened:
@@ -800,6 +813,15 @@ export function useSatExamController({
       // A resolved call that did not open a module is not a completed entry:
       // report it retryable instead of burning the entry attempt.
       if (!activeModule) return "noop";
+      // Module-advance fix (observability): this bug was invisible in
+      // telemetry — a student stranded before Module 2 looked exactly like one
+      // mid-module. One event per confirmed open makes "Module 1 timed out,
+      // Module 2 never opened" a queryable funnel step.
+      emitStudentObservabilityMetric("sat_module_advance", {
+        reason: previousModuleTimedOut ? "timeout" : "student",
+        sectionKey: pendingSection?.sectionKey ?? null,
+        adaptiveRole: pendingModule.adaptiveRole,
+      });
       return "opened";
     } catch (startError) {
       if (identityGenerationRef.current === generation) {
@@ -826,7 +848,16 @@ export function useSatExamController({
     } finally {
       if (identityGenerationRef.current === generation) setIsStarting(false);
     }
-  }, [acceptPayloadAndRoute, attemptId, data, isStarting, pendingModule, scheduleId]);
+  }, [
+    acceptPayloadAndRoute,
+    attemptId,
+    data,
+    isStarting,
+    pendingModule,
+    pendingSection,
+    previousModuleTimedOut,
+    scheduleId,
+  ]);
 
   // Phase 3 (client-forced break end): once the authoritative break has run
   // out, pull the advanced projection ourselves instead of waiting out the
@@ -867,6 +898,7 @@ export function useSatExamController({
     breakSeconds: pendingBreakSeconds,
     sectionWaitSeconds: pendingSectionWaitSeconds,
     phase: state.phase,
+    previousModuleTimedOut,
   });
 
   // Phase 4: the entry surface is what the student sees when the break
@@ -1466,6 +1498,10 @@ export function useSatExamController({
     pendingSectionWaitSeconds,
     pendingStageReady,
     autoEntryRecoverable: entrySurface.recoverable,
+    // True while the automatic entry path owns the pending module; the
+    // directions screen keeps its Start button recovery-only only then, so a
+    // branch module nobody will auto-start keeps a working button.
+    entryAutoStartPending: entryDecision.autoStartPending,
     effectiveTiming,
     stateModule,
     stateModuleAttempt,

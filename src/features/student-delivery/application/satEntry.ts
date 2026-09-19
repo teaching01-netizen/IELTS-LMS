@@ -3,6 +3,11 @@ import type {
   AssessmentDeliveryModule,
   AssessmentModuleAttemptSnapshot,
 } from "../contracts/assessmentDelivery";
+import {
+  findAttemptForModule,
+  matchesFinalModuleState,
+  sectionForModule,
+} from "./satRuntimeSelectors";
 
 /**
  * Single owner for SAT entry policy (Phase 2).
@@ -15,6 +20,15 @@ import type {
  * (`canEnterModule`), the pure decision both entry paths read
  * (`deriveSatEntryDecision`), and the attempt bookkeeping the entry hook keeps
  * (`canAttemptEntry` / `settleEntry`).
+ *
+ * Module 2 (Phase: module-advance fix). The adaptive lower/higher branch module
+ * used to be vetoed outright (`not-base-module`), which left the student on a
+ * directions screen whose Start button was disabled (it is recovery-only while
+ * the automatic path owns the module) and whose copy promised an automatic
+ * open. Module 2 now has an owner: the module before it in the same section
+ * ended because its own clock ran out (`previousModuleTimedOut`), i.e. the
+ * timeout hand-off — a student who submits Module 1 early still gets the
+ * directions screen, but with a working button.
  */
 
 export type SatEntryReason =
@@ -24,18 +38,26 @@ export type SatEntryReason =
   | "runtime-not-live"
   | "proctor-blocked"
   | "stage-not-ready"
-  | "not-base-module"
   | "unknown-section"
   | "initial-entry-not-on-directions"
   | "already-started"
   | "break-active"
   | "section-wait"
   | "initial-entry"
-  | "next-section-entry";
+  | "next-section-entry"
+  | "next-module-entry"
+  | "awaiting-student";
 
 export interface SatEntryDecision {
   shouldStart: boolean;
   reason: SatEntryReason;
+  /**
+   * The automatic path owns this module: it starts as soon as the gates open.
+   * The directions screen may keep its Start button recovery-only while this is
+   * true, and may say the module is opening. False means nothing will ever
+   * start this module for the student — the screen must offer a working button.
+   */
+  autoStartPending: boolean;
 }
 
 /** The gates shared by auto-entry and the directions screen's start button. */
@@ -54,6 +76,14 @@ export interface SatEntryDecisionInput {
   breakSeconds: number;
   sectionWaitSeconds: number;
   phase: string;
+  /**
+   * Whether the module before this one in the SAME section ended because its
+   * own allotment ran out (see `previousModuleTimedOut`). Only a branch module
+   * reads it: a base module's rules never depend on how its section started.
+   * Absent/false is the safe answer — a branch module whose predecessor cannot
+   * be proven timed out is the student's to open.
+   */
+  previousModuleTimedOut?: boolean;
 }
 
 /**
@@ -93,9 +123,69 @@ function isUnstartedAttempt(attempt: AssessmentModuleAttemptSnapshot): boolean {
 }
 
 /**
+ * Tolerance for "this module's clock had run out by the time it ended". The
+ * student-facing countdown is ceil-based and driven by a server-clock offset,
+ * and the verdict is read from the submit response a round trip later, so an
+ * exact `deadline <= serverNow` would be brittle by up to a second either way.
+ */
+export const SAT_MODULE_TIMEOUT_TOLERANCE_MS = 1_000;
+
+/**
+ * Whether one finished module attempt ended on its own clock rather than by a
+ * student submit.
+ *
+ * This is read from the payload, not from local submit state, so the live
+ * session, a poll that discovers a server-side finalization, an offline
+ * reconnect, and a page reload all reach the same verdict. `completionReason`
+ * cannot answer it: the client's own expiry submit goes through SubmitModule,
+ * which records `student_submit` for every client-driven module close, and only
+ * the server reconciler writes `time_expired`.
+ */
+export function moduleAttemptEndedByOwnClock(
+  attempt: AssessmentModuleAttemptSnapshot | undefined,
+  serverNow: string,
+): boolean {
+  if (!attempt || !matchesFinalModuleState(attempt.state)) return false;
+  if (!attempt.deadlineAt) return false;
+  const deadline = Date.parse(attempt.deadlineAt);
+  const now = Date.parse(serverNow);
+  if (!Number.isFinite(deadline) || !Number.isFinite(now)) return false;
+  return deadline <= now + SAT_MODULE_TIMEOUT_TOLERANCE_MS;
+}
+
+/**
+ * Whether the module that precedes `module` inside its own section ended on its
+ * own clock. A section holds one base module and exactly one branch module, so
+ * "the other module in the section" is the predecessor whose hand-off decides
+ * whether Module 2 opens by itself.
+ */
+export function previousModuleTimedOut(
+  payload: AssessmentDeliveryBootstrap,
+  module: AssessmentDeliveryModule,
+): boolean {
+  const section = sectionForModule(payload, module.id);
+  if (!section) return false;
+  return section.modules.some(
+    (candidate) =>
+      candidate.id !== module.id &&
+      moduleAttemptEndedByOwnClock(
+        findAttemptForModule(payload, candidate.id),
+        payload.serverNow,
+      ),
+  );
+}
+
+/** Not enterable, but the automatic path still owns the module. */
+function waiting(reason: SatEntryReason): SatEntryDecision {
+  return { shouldStart: false, reason, autoStartPending: true };
+}
+
+/**
  * The one decision both entry paths read. Section 0 is the first module (the
  * proctor's Start opens it); a later section only opens once the authoritative
- * break and the previous section's clock are both over.
+ * break and the previous section's clock are both over. A branch module
+ * (Module 2) opens by itself only on the timeout hand-off from the module
+ * before it; otherwise the student opens it.
  */
 export function deriveSatEntryDecision({
   data,
@@ -105,11 +195,12 @@ export function deriveSatEntryDecision({
   breakSeconds,
   sectionWaitSeconds,
   phase,
+  previousModuleTimedOut: predecessorTimedOut = false,
 }: SatEntryDecisionInput): SatEntryDecision {
   if (phase !== "directions" && phase !== "break") {
-    return { shouldStart: false, reason: "phase-not-entering" };
+    return waiting("phase-not-entering");
   }
-  if (!data) return { shouldStart: false, reason: "no-data" };
+  if (!data) return waiting("no-data");
 
   const blocked = satEntryBlockedReason({
     module,
@@ -117,32 +208,42 @@ export function deriveSatEntryDecision({
     proctorStatus: data.proctorStatus,
     stageReady,
   });
-  if (blocked) return { shouldStart: false, reason: blocked };
-  if (!module) return { shouldStart: false, reason: "no-module" };
-
-  if (module.adaptiveRole !== "base") return { shouldStart: false, reason: "not-base-module" };
-  if (sectionDisplayOrder === null) return { shouldStart: false, reason: "unknown-section" };
-
-  if (sectionDisplayOrder === 0) {
-    // First module: only from the directions screen, and only while nothing in
-    // the attempt has started (the backend seeds just the entry module row).
-    if (phase !== "directions") {
-      return { shouldStart: false, reason: "initial-entry-not-on-directions" };
-    }
-    return data.attempt.moduleAttempts.every(isUnstartedAttempt)
-      ? { shouldStart: true, reason: "initial-entry" }
-      : { shouldStart: false, reason: "already-started" };
-  }
-
-  if (breakSeconds > 0) return { shouldStart: false, reason: "break-active" };
-  if (sectionWaitSeconds > 0) return { shouldStart: false, reason: "section-wait" };
+  if (blocked) return waiting(blocked);
+  if (!module) return waiting("no-module");
+  if (sectionDisplayOrder === null) return waiting("unknown-section");
 
   const attempt = data.attempt.moduleAttempts.find(
     (candidate) => candidate.moduleId === module.id,
   );
+  const isBranch = module.adaptiveRole !== "base";
+
+  // Section 0's first module keeps its own rule, still checked before the break
+  // gates: only the directions screen opens it, and only while nothing in the
+  // attempt has started (the backend seeds just the entry module row).
+  if (sectionDisplayOrder === 0 && !isBranch) {
+    if (phase !== "directions") return waiting("initial-entry-not-on-directions");
+    return data.attempt.moduleAttempts.every(isUnstartedAttempt)
+      ? { shouldStart: true, reason: "initial-entry", autoStartPending: true }
+      : waiting("already-started");
+  }
+
+  if (breakSeconds > 0) return waiting("break-active");
+  if (sectionWaitSeconds > 0) return waiting("section-wait");
+
+  if (isBranch) {
+    // Module 2 of a section. The rows exist only because the server already
+    // scored Module 1 and wrote its routing decision in the same transaction
+    // that created this one, so there is nothing left to decide here — the only
+    // question is who opens it.
+    if (!attempt || !isUnstartedAttempt(attempt)) return waiting("already-started");
+    return predecessorTimedOut
+      ? { shouldStart: true, reason: "next-module-entry", autoStartPending: true }
+      : { shouldStart: false, reason: "awaiting-student", autoStartPending: false };
+  }
+
   return attempt && isUnstartedAttempt(attempt)
-    ? { shouldStart: true, reason: "next-section-entry" }
-    : { shouldStart: false, reason: "already-started" };
+    ? { shouldStart: true, reason: "next-section-entry", autoStartPending: true }
+    : waiting("already-started");
 }
 
 /**

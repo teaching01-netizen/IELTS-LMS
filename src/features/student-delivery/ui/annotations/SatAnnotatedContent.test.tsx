@@ -105,6 +105,27 @@ describe('SAT annotation rendering', () => {
     });
   });
 
+  // Anti-cheat friction, at the gesture. The anchor is serialized by the time the
+  // report happens, so the live selection has already done its job — and while it
+  // stays live the platform is free to paint its Copy / Look Up / Search / Share
+  // bar over the passage, which blocking `contextmenu` does not fully suppress on
+  // touch. The anchor, not the selection, is what the toolbar acts on.
+  it('retires the native selection once the anchor is captured', () => {
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ onSelectionCaptured }));
+    selectText(container, 2, 6);
+
+    expect(onSelectionCaptured).toHaveBeenCalledTimes(1);
+    expect(window.getSelection()?.rangeCount).toBe(0);
+    // What the toolbar still needs survived the clear: the span itself.
+    expect(onSelectionCaptured.mock.calls[0]![0]).toMatchObject({
+      nodeId: 'stimulus:p',
+      startOffset: 2,
+      endOffset: 6,
+      exact: 'tree',
+    });
+  });
+
   it('ignores a collapsed selection and pointers outside the annotatable region', () => {
     const onSelectionCaptured = vi.fn();
     const { container } = renderContent({}, view({ onSelectionCaptured }));

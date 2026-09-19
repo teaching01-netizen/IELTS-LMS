@@ -28,6 +28,12 @@ export const SAT_ANNOTATION_LIMIT = 200;
  * is not read as a tap on it). Detaching it would trade a visible bug for an
  * invisible one. The mode is read through a ref and the listener exits before
  * capturing anything, so no annotation state is touched either way.
+ *
+ * A CAPTURED selection is retired at the gesture: once the anchor is serialized
+ * the browser's own selection has done its job, and leaving it live is what
+ * hands the platform a Copy / Look Up / Search / Share bar to show the student.
+ * An unarmed or unanchorable selection is left exactly as the browser made it —
+ * that is the browser's business, not ours to clear.
  */
 export function SatAnnotatedContent({ content, annotations, region, enabled, enlarge, onLimitReached }: {
   content: StructuredContent;
@@ -93,6 +99,14 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         flashLimitNotice();
         return;
       }
+      // Capture FIRST, then retire the browser's own selection. By this line the
+      // anchor is fully serialized (offsets plus the exact text) and the toolbar
+      // measures itself from that stored anchor rather than from
+      // `window.getSelection()`, so nothing downstream needs a live selection to
+      // still be there. Leaving it live is what lets the platform paint its
+      // Copy / Look Up / Search / Share bar over the passage — a long-press that
+      // blocking `contextmenu` does not fully suppress on touch.
+      selection?.removeAllRanges();
       reportSelection.current?.(anchor);
     };
     // Where the gesture began, so a release far from it reads as a drag rather

@@ -163,6 +163,124 @@ function submitted(moduleId: string): ModuleAttempt {
 }
 
 /**
+ * Module-advance fixtures (module-advance fix).
+ *
+ * Module 2 is the adaptive branch module the server creates in the same
+ * transaction that scores Module 1 and writes its routing decision. Whether the
+ * automatic path opens it depends on the module before it ending on its own
+ * clock, which the payload carries as a deadline already behind serverNow —
+ * `completionReason` cannot express it, because the client's own expiry submit
+ * is recorded as `student_submit`.
+ */
+const MODULE_RW_M2 = "module-rw-m2";
+
+function rwBranchModule(role: "lower_branch" | "higher_branch"): DeliveredSection["modules"][number] {
+  return {
+    id: MODULE_RW_M2,
+    moduleKey: MODULE_RW_M2,
+    title:
+      role === "higher_branch"
+        ? "Reading and Writing Module 2 - Higher"
+        : "Reading and Writing Module 2 - Lower",
+    displayOrder: 1,
+    durationSeconds: 60,
+    targetQuestionCount: 1,
+    adaptiveRole: role,
+    instructions: { version: 1, nodes: [] },
+    toolPolicy: [],
+    questions: [],
+  };
+}
+
+function rwSectionWithBranch(role: "lower_branch" | "higher_branch"): DeliveredSection {
+  const section = rwSection();
+  return { ...section, modules: [...section.modules, rwBranchModule(role)] };
+}
+
+/** Module 1 closed by its own clock: its deadline is already behind serverNow. */
+function endedByOwnClock(moduleId: string): ModuleAttempt {
+  return {
+    ...submitted(moduleId),
+    deadlineAt: new Date(Date.parse(SERVER_NOW) - 5_000).toISOString(),
+  };
+}
+
+/** Module 1 submitted with time left: its own deadline is still ahead. */
+function submittedEarly(moduleId: string): ModuleAttempt {
+  return {
+    ...submitted(moduleId),
+    deadlineAt: new Date(Date.parse(SERVER_NOW) + 600_000).toISOString(),
+  };
+}
+
+/** Module 2 open and already past its own deadline: the timeout runs out. */
+function activeExpired(moduleId: string): ModuleAttempt {
+  return {
+    ...active(moduleId),
+    deadlineAt: new Date(Date.parse(SERVER_NOW) - 5_000).toISOString(),
+  };
+}
+
+/** Module 1 timed out; the routed Module 2 waits to be opened. */
+function timedOutBranchBootstrap(
+  role: "lower_branch" | "higher_branch",
+  revision = 3,
+): AssessmentDeliveryBootstrap {
+  const base = liveFirstModuleBootstrap(revision);
+  return {
+    ...base,
+    sections: [rwSectionWithBranch(role)],
+    attempt: {
+      ...base.attempt,
+      moduleAttempts: [endedByOwnClock(MODULE_RW), notStarted(MODULE_RW_M2)],
+    },
+  };
+}
+
+/** Module 1 submitted early; the routed Module 2 waits for the student. */
+function earlySubmitBranchBootstrap(revision = 3): AssessmentDeliveryBootstrap {
+  const base = liveFirstModuleBootstrap(revision);
+  return {
+    ...base,
+    sections: [rwSectionWithBranch("lower_branch")],
+    attempt: {
+      ...base.attempt,
+      moduleAttempts: [submittedEarly(MODULE_RW), notStarted(MODULE_RW_M2)],
+    },
+  };
+}
+
+/** Module 2 is open and its own clock has run out. */
+function branchExpiredBootstrap(revision = 4): AssessmentDeliveryBootstrap {
+  const base = liveFirstModuleBootstrap(revision);
+  return {
+    ...base,
+    sections: [rwSectionWithBranch("higher_branch")],
+    attempt: {
+      ...base.attempt,
+      moduleAttempts: [endedByOwnClock(MODULE_RW), activeExpired(MODULE_RW_M2)],
+    },
+  };
+}
+
+/** Module 2 finished; the next section has not gone live yet. */
+function betweenSectionsPendingBootstrap(revision = 5): AssessmentDeliveryBootstrap {
+  const base = liveFirstModuleBootstrap(revision);
+  return {
+    ...base,
+    sections: [rwSectionWithBranch("lower_branch"), mathSection()],
+    attempt: {
+      ...base.attempt,
+      moduleAttempts: [
+        endedByOwnClock(MODULE_RW),
+        submitted(MODULE_RW_M2),
+        notStarted(MODULE_MATH),
+      ],
+    },
+  };
+}
+
+/**
  * The proctor has not pressed Start.
  *
  * This is the REAL pre-start payload: the server persists no
@@ -591,4 +709,92 @@ describe("useSatExamController auto-entry", () => {
       });
     },
   );
+
+  // Module-advance fix (AT-01/AT-02/AT-10): Module 1's clock ran out, so the
+  // routed Module 2 opens with no student action. Which branch the student gets
+  // is the server's routing decision; the client only enters what the payload
+  // hands it. The same payload is what a reload or an offline reconnect sees,
+  // which is why the verdict is read from the payload and not from the local
+  // submit that produced it.
+  it.each([
+    ["lower_branch", "Lower"],
+    ["higher_branch", "Higher"],
+  ] as const)(
+    "opens the routed Module 2 (%s) with no student action after Module 1 times out",
+    async (role) => {
+      gatewayMocks.bootstrap.mockResolvedValue(timedOutBranchBootstrap(role));
+      gatewayMocks.startModule.mockResolvedValue(
+        openedModule(timedOutBranchBootstrap(role), MODULE_RW_M2, 4),
+      );
+
+      const hook = renderController();
+
+      await waitFor(() => expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1));
+      expect(gatewayMocks.startModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, {
+        moduleId: MODULE_RW_M2,
+      });
+      await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+      expect(hook.result.current.state.phase === "module" && hook.result.current.state.moduleKey).toBe(
+        MODULE_RW_M2,
+      );
+    },
+  );
+
+  // AT-03: a deliberate early submit is not a timeout. The module is still the
+  // student's to open, and the screen must say so with a working button rather
+  // than waiting for an automatic entry that will never come.
+  it("leaves Module 2 to the student when Module 1 was submitted early", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(earlySubmitBranchBootstrap());
+
+    const hook = renderController();
+
+    await waitFor(() =>
+      expect(hook.result.current.data?.attempt.moduleAttempts.length).toBe(2),
+    );
+    await act(async () => {
+      await sleep(600);
+    });
+
+    expect(gatewayMocks.startModule).not.toHaveBeenCalled();
+    expect(hook.result.current.state.phase).toBe("directions");
+    expect(hook.result.current.entryAutoStartPending).toBe(false);
+    expect(hook.result.current.autoEntryRecoverable).toBe(false);
+  });
+
+  // AT-06/AT-09: Module 2's own clock runs out, the route moves to the next
+  // section, and nothing finalizes the attempt while that section's Module 1 is
+  // still waiting its turn.
+  it("moves a timed-out Module 2 to the next section's wait without finalizing", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(branchExpiredBootstrap());
+    gatewayMocks.submitModule.mockResolvedValue(betweenSectionsPendingBootstrap());
+
+    const hook = renderController();
+
+    await waitFor(() => expect(gatewayMocks.submitModule).toHaveBeenCalledTimes(1));
+    expect(gatewayMocks.submitModule).toHaveBeenCalledWith("schedule", ATTEMPT_ID, {
+      moduleId: MODULE_RW_M2,
+    });
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("break"));
+    expect(gatewayMocks.submitAssessment).not.toHaveBeenCalled();
+    // The next section is not live yet, so its Module 1 waits: the wait is what
+    // holds the student, not a premature result screen.
+    expect(gatewayMocks.startModule).not.toHaveBeenCalled();
+    expect(hook.result.current.pendingSectionWaitSeconds).toBeGreaterThan(0);
+  });
+
+  it("never finalizes an attempt whose next section module is still waiting", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(betweenSectionsPendingBootstrap());
+
+    const hook = renderController();
+
+    await waitFor(() =>
+      expect(hook.result.current.data?.attempt.moduleAttempts.length).toBe(3),
+    );
+    await act(async () => {
+      await sleep(600);
+    });
+
+    expect(gatewayMocks.submitAssessment).not.toHaveBeenCalled();
+    expect(hook.result.current.state.phase).toBe("directions");
+  });
 });
