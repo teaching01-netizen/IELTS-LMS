@@ -447,7 +447,7 @@ jobs:
         with:
           urls: |
             http://127.0.0.1:4173/
-          uploadArtifacts: true
+          uploadArtifacts: false
           temporaryPublicStorage: true
 
   railway-deploy:
