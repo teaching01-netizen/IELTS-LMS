@@ -202,7 +202,10 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     setFilters({ ...filters, searchQuery: query });
   };
 
-  const getSectionBadge = (status: SectionGradingStatus) => {
+  const getSectionBadge = (status?: SectionGradingStatus) => {
+    if (!status) {
+      return <span className="text-gray-300">—</span>;
+    }
     const styles = {
       pending: 'bg-gray-100 text-gray-600',
       auto_graded: 'bg-green-100 text-green-700',
@@ -265,6 +268,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
     if (diffHours > 0) return `${diffHours}h ago`;
     return 'Just now';
   };
+
+  const hasScienceSection = submissions.some((submission) => Boolean(submission.sectionStatuses.science));
 
   const resolveExamState = async (
     scheduleId: string,
@@ -373,7 +378,11 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
       const bundles = await Promise.all(
         fullSubmissions.map(async (submission) => ({
           submission,
-          sections: await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id),
+          // Terminal projection can finish after the grading page first read
+          // the bundle. CSV must never reuse that stale 30-minute cache.
+          sections: await gradingRepository.getSectionSubmissionsBySubmissionId(submission.id, {
+            fresh: true,
+          }),
         })),
       );
       const sessionContext = {
@@ -723,6 +732,8 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
             onExportReadingManual={() => void handleExportSection('reading_manual')}
             onExportListening={() => void handleExportSection('listening')}
             onExportListeningManual={() => void handleExportSection('listening_manual')}
+            onExportScience={hasScienceSection ? () => void handleExportSection('science') : undefined}
+            scienceOnly={hasScienceSection}
             onPrintWriting={() => void handleExportSection('writing')}
             onOpenExportBuilder={openPerStudentExportDialog}
           />
@@ -829,10 +840,16 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                 <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-200">
                   <th className="px-3 md:px-6 py-3 font-medium">Student</th>
                   <th className="px-3 md:px-6 py-3 font-medium hidden sm:table-cell">Submitted</th>
-                  <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Listening</th>
-                  <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Reading</th>
-                  <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Writing</th>
-                  <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Speaking</th>
+                  {hasScienceSection ? (
+                    <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Science</th>
+                  ) : (
+                    <>
+                      <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Listening</th>
+                      <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Reading</th>
+                      <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Writing</th>
+                      <th className="px-3 md:px-6 py-3 font-medium hidden md:table-cell">Speaking</th>
+                    </>
+                  )}
                   <th className="px-3 md:px-6 py-3 font-medium hidden sm:table-cell">Status</th>
                   <th className="px-3 md:px-6 py-3 font-medium text-right">Action</th>
                 </tr>
@@ -868,18 +885,26 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                     <td className="px-3 md:px-6 py-4 text-gray-700 hidden sm:table-cell">
                       {getTimeAgo(submission.submittedAt)}
                     </td>
-                    <td className="px-3 md:px-6 py-4 hidden md:table-cell">
-                      {getSectionBadge(submission.sectionStatuses.listening)}
-                    </td>
-                    <td className="px-3 md:px-6 py-4 hidden md:table-cell">
-                      {getSectionBadge(submission.sectionStatuses.reading)}
-                    </td>
-                    <td className="px-3 md:px-6 py-4 hidden md:table-cell">
-                      {getSectionBadge(submission.sectionStatuses.writing)}
-                    </td>
-                    <td className="px-3 md:px-6 py-4 hidden md:table-cell">
-                      {getSectionBadge(submission.sectionStatuses.speaking)}
-                    </td>
+                    {hasScienceSection ? (
+                      <td className="px-3 md:px-6 py-4 hidden md:table-cell">
+                        {getSectionBadge(submission.sectionStatuses.science)}
+                      </td>
+                    ) : (
+                      <>
+                        <td className="px-3 md:px-6 py-4 hidden md:table-cell">
+                          {getSectionBadge(submission.sectionStatuses.listening)}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 hidden md:table-cell">
+                          {getSectionBadge(submission.sectionStatuses.reading)}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 hidden md:table-cell">
+                          {getSectionBadge(submission.sectionStatuses.writing)}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 hidden md:table-cell">
+                          {getSectionBadge(submission.sectionStatuses.speaking)}
+                        </td>
+                      </>
+                    )}
                     <td className="px-3 md:px-6 py-4 hidden sm:table-cell">
                       {getOverallStatusBadge(submission.gradingStatus)}
                     </td>

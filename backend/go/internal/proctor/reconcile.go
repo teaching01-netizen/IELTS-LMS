@@ -3,6 +3,7 @@ package proctor
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"example.com/ielts-proctoring/internal/outbox"
@@ -12,10 +13,10 @@ import (
 )
 
 // sectionClosingGrace is the extra time a section stays writable after its
-// planned deadline. It is the same 30 seconds the V2 write gate uses
+// planned deadline. It is the same five seconds the V2 write gate uses
 // (closing_grace_until / SyncV2TimingInTx), so the worker advances exactly
 // when the gate closes.
-const sectionClosingGrace = 30 * time.Second
+const sectionClosingGrace = examruntime.SectionClosingGrace
 
 // autoSubmitExpr is the authored auto-submit flag. It is written once and
 // interpolated into the candidate scan so the three predicates cannot drift.
@@ -81,6 +82,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 	}
 
 	candidates := make([]sectionReconcileCandidate, 0)
+	graceSeconds := strconv.Itoa(int(sectionClosingGrace / time.Second))
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		rows, err := q.QueryContext(ctx, `
 			SELECT r.schedule_id, `+autoSubmitExpr+` = 'true'
@@ -100,7 +102,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 					  AND `+autoSubmitExpr+` = 'true'
 					  AND ? >= DATE_ADD(
 							rs.actual_start_at,
-							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + 30) SECOND
+							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + `+graceSeconds+`) SECOND
 						  )
 					)
 					-- Between sections: the authored gap has elapsed, start the next.
@@ -116,9 +118,9 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 					  rs.status = 'live'
 					  AND r.is_overrun = false
 					  AND rs.actual_start_at IS NOT NULL
-					  AND ? >= DATE_ADD(
+						  AND ? >= DATE_ADD(
 							rs.actual_start_at,
-							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + 30) SECOND
+							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + `+graceSeconds+`) SECOND
 						  )
 					)
 				  )
@@ -322,6 +324,13 @@ func planSectionAdvance(runtime reconcileRuntime, locked []runtimeSection, autoS
 			return plan
 		}
 		startAt := endAt.Add(time.Duration(active.gap) * time.Minute)
+		// The closing grace exists to let the browser flush the final answer
+		// batch. It must not consume the next IELTS section's authored time:
+		// once the worker is ready to hand over, a late transition starts the
+		// next section at the handover instant and grants its full duration.
+		if startAt.Before(asOf) {
+			startAt = asOf
+		}
 		if asOf.Before(startAt) {
 			if !waiting {
 				plan.steps = append(plan.steps, advanceStep{

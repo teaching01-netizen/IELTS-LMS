@@ -49,7 +49,7 @@ export default defineConfig({
   reporter: "html",
   globalSetup: "./e2e/global-setup.ts",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://localhost:33000",
     trace: "on-first-retry",
   },
   projects: [
@@ -89,7 +89,7 @@ export default defineConfig({
     {
       command: "cd backend/go && exec go run ./cmd/api",
       env: backendRuntimeEnv,
-      url: "http://localhost:4000/healthz",
+      url: "http://localhost:44000/healthz",
       timeout: 180_000,
       reuseExistingServer: !process.env["CI"],
     },
@@ -98,16 +98,17 @@ export default defineConfig({
       env: backendRuntimeEnv,
       wait: { stderr: /worker: starting job set=/ },
       stderr: "pipe",
+      stdout: "pipe",
       timeout: 180_000,
       reuseExistingServer: false,
     },
     {
-      command: "bun run dev",
+      command: "bun run dev -- --port=33000",
       env: {
         ...process.env,
         ...backendFeatureEnv,
       },
-      url: "http://localhost:3000",
+      url: "http://localhost:33000",
       timeout: 120_000,
       reuseExistingServer: !process.env["CI"],
     },

@@ -97,6 +97,14 @@ describe('AdminExams IELTS scope (AT-06/AT-09)', () => {
     expect(screen.queryByText('Digital SAT')).not.toBeInTheDocument();
   });
 
+  it('does not duplicate ACT Science inside the IELTS preset section', () => {
+    render(<AdminExams {...buildProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Create Exam' }));
+
+    expect(screen.getAllByText('ACT Science')).toHaveLength(1);
+    expect(screen.getByText('Select Preset')).toBeInTheDocument();
+  });
+
   it('maps ACT creation to the ACT provider input', () => {
     const onCreateExam = vi.fn();
     render(<AdminExams {...buildProps({ onCreateExam })} />);

@@ -347,6 +347,7 @@ export function StudentScience({
         answers,
         onAnswerChange,
         currentQuestionId,
+        showOnlyCurrentQuestion: true,
         onNavigate,
         flags,
         onToggleFlag,
@@ -370,4 +371,3 @@ export function StudentScience({
     />
   );
 }
-

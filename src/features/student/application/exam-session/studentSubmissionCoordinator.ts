@@ -4,6 +4,7 @@ import type { StudentExamStore } from './studentExamStoreFactory';
 export interface StudentSubmissionTransport {
   flushPending(): Promise<boolean>;
   submit(): Promise<boolean>;
+  submitAfterBarrier?: () => Promise<boolean>;
 }
 
 export interface StudentSubmissionCoordinatorDependencies {
@@ -49,5 +50,14 @@ export async function runStudentSubmissionCoordinator(
   }
 
   const submitted = await dependencies.transport.submit();
+  return submitted ? { kind: 'submitted' } : { kind: 'failed' };
+}
+
+export async function runStudentSubmissionAfterBarrier(
+  dependencies: StudentSubmissionCoordinatorDependencies,
+): Promise<StudentSubmissionCoordinatorResult> {
+  const submitted = await (
+    dependencies.transport.submitAfterBarrier?.() ?? dependencies.transport.submit()
+  );
   return submitted ? { kind: 'submitted' } : { kind: 'failed' };
 }

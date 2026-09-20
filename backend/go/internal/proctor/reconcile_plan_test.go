@@ -57,12 +57,14 @@ func TestPlanSectionAdvance(t *testing.T) {
 		wantComplete *time.Time
 	}{
 		{
-			name:       "inside the closing grace the section does not move",
-			runtime:    reconcileRuntime{activeSectionKey: ptr("reading-writing")},
-			sections:   []runtimeSection{rw, math},
-			autoSubmit: true,
-			asOf:       deadline.Add(10 * time.Second),
-			wantKinds:  nil,
+			name:         "after the five-second closing grace the section moves",
+			runtime:      reconcileRuntime{activeSectionKey: ptr("reading-writing")},
+			sections:     []runtimeSection{rw, math},
+			autoSubmit:   true,
+			asOf:         deadline.Add(6 * time.Second),
+			wantKinds:    []advanceStepKind{stepCompleteSection, stepStartSection},
+			wantStartAt:  ptrTime(deadline.Add(6 * time.Second)),
+			wantComplete: ptrTime(deadline),
 		},
 		{
 			name:       "before the deadline nothing happens",
@@ -98,14 +100,16 @@ func TestPlanSectionAdvance(t *testing.T) {
 			wantKinds:  nil,
 		},
 		{
-			// Gap 0 = the previous immediate advance.
+			// Gap 0 = the previous immediate advance. The next section clock
+			// starts when reconciliation completes, so the candidate receives
+			// the full authored duration instead of losing the closing grace.
 			name:         "gap 0 completes and starts in one plan",
 			runtime:      reconcileRuntime{activeSectionKey: ptr("reading-writing")},
 			sections:     []runtimeSection{rw, math},
 			autoSubmit:   true,
 			asOf:         deadline.Add(40 * time.Second),
 			wantKinds:    []advanceStepKind{stepCompleteSection, stepStartSection},
-			wantStartAt:  ptrTime(deadline),
+			wantStartAt:  ptrTime(deadline.Add(40 * time.Second)),
 			wantComplete: ptrTime(deadline),
 		},
 		{
@@ -136,7 +140,7 @@ func TestPlanSectionAdvance(t *testing.T) {
 			wantKinds:  nil,
 		},
 		{
-			name: "the gap end starts the next section at its authored instant",
+			name: "the gap end starts the next section with a full clock",
 			runtime: reconcileRuntime{
 				activeSectionKey: ptr("reading-writing"), waiting: true,
 			},
@@ -147,7 +151,7 @@ func TestPlanSectionAdvance(t *testing.T) {
 			autoSubmit:  true,
 			asOf:        deadline.Add(12 * time.Minute),
 			wantKinds:   []advanceStepKind{stepStartSection},
-			wantStartAt: ptrTime(deadline.Add(10 * time.Minute)),
+			wantStartAt: ptrTime(deadline.Add(12 * time.Minute)),
 		},
 		{
 			name:       "paused past the grace is flagged, never advanced",
@@ -221,16 +225,15 @@ func TestPlanSectionAdvance(t *testing.T) {
 	}
 }
 
-// A sweep that returns after an outage catches up through every expired section
-// and preserves the authored timeline: each section starts at its
-// predecessor's end plus the gap, never at "now".
+// A late sweep must not spend the next candidate's section time catching up
+// with the old authored timeline. It starts the next section at reconciliation
+// time and gives it its full authored duration.
 func TestPlanSectionAdvanceCatchesUpOnTheAuthoredTimeline(t *testing.T) {
 	deadline1 := planBase.Add(64 * time.Minute)
-	start2 := deadline1.Add(10 * time.Minute)
-	deadline2 := start2.Add(35 * time.Minute)
-	start3 := deadline2.Add(5 * time.Minute)
-	deadline3 := start3.Add(30 * time.Minute)
-	// The sweep returns long after the third section's own window too.
+	deadline2 := deadline1.Add(35 * time.Minute)
+	deadline3 := deadline2.Add(30 * time.Minute)
+	// The sweep returns after section 1's authored gap and after section 2's
+	// authored deadline. Section 2 must still receive a new full window.
 	asOf := deadline3.Add(4 * time.Minute)
 
 	sections := []runtimeSection{
@@ -243,11 +246,7 @@ func TestPlanSectionAdvanceCatchesUpOnTheAuthoredTimeline(t *testing.T) {
 		sections, true, asOf,
 	)
 
-	want := []advanceStepKind{
-		stepCompleteSection, stepStartSection,
-		stepCompleteSection, stepStartSection,
-		stepCompleteSection, stepCompleteRuntime,
-	}
+	want := []advanceStepKind{stepCompleteSection, stepStartSection}
 	if len(plan.steps) != len(want) {
 		t.Fatalf("steps = %v, want %d steps", plan.steps, len(want))
 	}
@@ -257,20 +256,8 @@ func TestPlanSectionAdvanceCatchesUpOnTheAuthoredTimeline(t *testing.T) {
 		}
 	}
 	starts := plan.steps
-	if !starts[1].startAt.Equal(start2) {
-		t.Fatalf("math must start at %v (section 1 end + gap), got %v", start2, starts[1].startAt)
-	}
-	if !starts[3].startAt.Equal(start3) {
-		t.Fatalf("science must start at %v (math end + gap), got %v", start3, starts[3].startAt)
-	}
-	if !starts[2].effectiveAt.Equal(deadline2) {
-		t.Fatalf("math must close at its own deadline %v, got %v", deadline2, starts[2].effectiveAt)
-	}
-	if !starts[4].effectiveAt.Equal(deadline3) {
-		t.Fatalf("science must close at its own deadline %v, got %v", deadline3, starts[4].effectiveAt)
-	}
-	if !starts[5].effectiveAt.Equal(asOf) {
-		t.Fatalf("runtime must end at the sweep instant %v, got %v", asOf, starts[5].effectiveAt)
+	if !starts[1].startAt.Equal(asOf) {
+		t.Fatalf("math must start at reconciliation time %v, got %v", asOf, starts[1].startAt)
 	}
 }
 

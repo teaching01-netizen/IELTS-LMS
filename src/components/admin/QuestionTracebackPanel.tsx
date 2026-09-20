@@ -41,8 +41,20 @@ function QuestionStatusBadge({ correctness }: { correctness: boolean | null }) {
   );
 }
 
-function displayPersistedAnswer(value: string): string {
-  return value.trim() === '' ? '—' : value;
+function displayPersistedAnswer(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '—';
+  }
+
+  if (typeof value === 'string') {
+    return value.trim() === '' ? '—' : value;
+  }
+
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function buildFallbackTracebackGroups(

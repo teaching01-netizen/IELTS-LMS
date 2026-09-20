@@ -9,7 +9,14 @@ import {
 import type { StudentAnswer } from '../providers/StudentRuntimeProvider';
 
 export function getStudentQuestionNavigationKey(question: StudentQuestionDescriptor): string {
-  return question.rootId?.includes('::group::') ? question.rootId : question.id;
+  if (question.rootId?.includes('::group::')) {
+    // A grouped scoring root is only unique inside its Passage/Part. Authoring
+    // imports can legitimately reuse block/question ids across passages; the
+    // group scope must therefore be part of the navigation identity or the
+    // later passage renders an empty footer rail.
+    return `${question.groupId}::${question.rootId}`;
+  }
+  return question.id;
 }
 
 export function getStudentNavigableQuestions(

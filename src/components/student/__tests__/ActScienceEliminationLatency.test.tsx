@@ -65,4 +65,81 @@ describe('ACT science elimination latency', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Eliminate option A' }));
     expect(screen.getByRole('button', { name: 'Restore option A' })).toBeInTheDocument();
   });
+
+  it('shows only the current question when ACT science uses single-question mode', () => {
+    const multiQuestionBlock = {
+      id: 'sci-block-2',
+      type: 'SINGLE_MCQ',
+      instruction: 'Choose the answer.',
+      stem: 'Block stem',
+      options: [],
+      questions: [
+        {
+          id: 'sci-q1',
+          stem: 'First ACT question',
+          options: [{ id: 'q1-a', text: 'A', isCorrect: true }],
+        },
+        {
+          id: 'sci-q2',
+          stem: 'Second ACT question',
+          options: [{ id: 'q2-a', text: 'A', isCorrect: true }],
+        },
+      ],
+    } as unknown as QuestionBlock;
+    const questionDescriptors = multiQuestionBlock.questions!.map((question) => ({
+      id: question.id,
+      blockId: multiQuestionBlock.id,
+      groupId: 'stim-2',
+      groupLabel: 'Stimulus 2',
+      isMulti: false,
+      correctCount: 1,
+      answerKey: question.id,
+      block: multiQuestionBlock,
+      question,
+    })) as unknown as StudentQuestionDescriptor[];
+
+    const { rerender } = render(
+      <StudentQuestionPanel
+        blocks={[multiQuestionBlock]}
+        allQuestions={questionDescriptors}
+        answers={stableAnswers}
+        onAnswerChange={noopAnswer}
+        currentQuestionId="sci-q1"
+        onNavigate={noopNav}
+        flags={stableFlags}
+        answerCompact={false}
+        highlightEnabled={false}
+        questionContainerRef={panelRef}
+        panelTestId="science-question-scroll"
+        getBlockStartQuestionNumber={getNum}
+        renderBlockInstruction={renderInstr}
+        showOnlyCurrentQuestion
+      />,
+    );
+
+    expect(screen.getByText('First ACT question')).toBeInTheDocument();
+    expect(screen.queryByText('Second ACT question')).not.toBeInTheDocument();
+
+    rerender(
+      <StudentQuestionPanel
+        blocks={[multiQuestionBlock]}
+        allQuestions={questionDescriptors}
+        answers={stableAnswers}
+        onAnswerChange={noopAnswer}
+        currentQuestionId="sci-q2"
+        onNavigate={noopNav}
+        flags={stableFlags}
+        answerCompact={false}
+        highlightEnabled={false}
+        questionContainerRef={panelRef}
+        panelTestId="science-question-scroll"
+        getBlockStartQuestionNumber={getNum}
+        renderBlockInstruction={renderInstr}
+        showOnlyCurrentQuestion
+      />,
+    );
+
+    expect(screen.queryByText('First ACT question')).not.toBeInTheDocument();
+    expect(screen.getByText('Second ACT question')).toBeInTheDocument();
+  });
 });

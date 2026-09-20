@@ -48,7 +48,15 @@ func (s *Service) PollView(ctx context.Context, q SnapshotQuerier, scheduleID st
 	if err != nil {
 		return PollView{}, false, err
 	}
-	view := PollView{Revision: snap.Revision, Status: snap.Status, ActiveSection: snap.ActiveSectionKey, PollAfterSecs: PollSteadySecs}
+	pollAfterSecs := PollSteadySecs
+	// Automatic section advances are not proctor commands, so they do not
+	// invalidate the API process-local cache. Enter the fast lane from the
+	// authoritative section deadline itself; otherwise a student can discover
+	// a correctly-timed transition only on the next 25-second steady poll.
+	if snap.SectionDeadlineAt != nil && !now.Before(snap.SectionDeadlineAt.Add(-PollFastLaneWindow)) {
+		pollAfterSecs = PollFastLaneSecs
+	}
+	view := PollView{Revision: snap.Revision, Status: snap.Status, ActiveSection: snap.ActiveSectionKey, PollAfterSecs: pollAfterSecs}
 	if s != nil && s.snapshots != nil && s.snapshots.InvalidatedWithin(scheduleID, PollFastLaneWindow, now) {
 		view.PollAfterSecs = PollFastLaneSecs
 	}

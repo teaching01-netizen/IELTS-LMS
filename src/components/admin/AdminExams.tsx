@@ -539,7 +539,6 @@ export function AdminExams({
   const presets: { id: ExamPreset, label: string, icon: LucideIcon, description: string }[] = [
     { id: 'Academic', label: 'Academic Full', icon: Layers, description: 'Standard 4-module academic exam' },
     { id: 'General Training', label: 'GT Full', icon: Layers, description: 'Standard 4-module general training' },
-    { id: 'ACT Science', label: 'ACT Science', icon: FlaskConical, description: 'One-section ACT Science practice' },
     { id: 'Listening', label: 'Listening Drill', icon: Headset, description: 'Section-only listening practice' },
     { id: 'Reading', label: 'Reading Drill', icon: Book, description: 'Section-only reading practice' },
     { id: 'Writing', label: 'Writing Drill', icon: Pen, description: 'Section-only writing practice' },

@@ -89,6 +89,7 @@ interface StudentAttemptActions {
   recordHeartbeat: (type: HeartbeatEventType, payload?: Record<string, unknown>) => Promise<void>;
   acknowledgeProctorWarning: (warningId: string) => Promise<void>;
   submitAttempt: () => Promise<boolean>;
+  submitAttemptAfterBarrier: () => Promise<boolean>;
   takeOverDurabilityLease: (reason?: string) => Promise<boolean>;
   setDeviceFingerprintHash: (hash: string) => Promise<void>;
   flushPending: () => Promise<boolean>;
@@ -1728,7 +1729,7 @@ export function StudentAttemptProvider({
     [syncAttemptState]
   );
 
-  const submitAttempt = useCallback(async (): Promise<boolean> => {
+  const submitAttemptInternal = useCallback(async (skipDurabilityFlush: boolean): Promise<boolean> => {
     const currentAttempt = attemptRef.current;
     const renderedIdentity = renderedAttemptIdentityRef.current;
     if (
@@ -1764,9 +1765,9 @@ export function StudentAttemptProvider({
     }
 
     try {
-      const flushed = await flushPending();
+      const flushed = skipDurabilityFlush ? true : await flushPending();
       if (!isCurrent()) return false;
-      if (!flushed) {
+      if (!skipDurabilityFlush && !flushed) {
         throw new Error("Not all attempt changes were durably saved.");
       }
       const ready = v2ReadyRef.current;
@@ -1962,6 +1963,12 @@ export function StudentAttemptProvider({
     syncAttemptState,
   ]);
 
+  const submitAttempt = useCallback(() => submitAttemptInternal(false), [submitAttemptInternal]);
+  const submitAttemptAfterBarrier = useCallback(
+    () => submitAttemptInternal(true),
+    [submitAttemptInternal]
+  );
+
   // Resume a pending final submission after reload or after the automatic
   // loop stopped for a permanent reason: durable pending intent must never
   // be abandoned just because the previous page lifetime ended.
@@ -2143,6 +2150,7 @@ export function StudentAttemptProvider({
         recordHeartbeat,
         acknowledgeProctorWarning,
         submitAttempt,
+        submitAttemptAfterBarrier,
         takeOverDurabilityLease,
         setDeviceFingerprintHash,
         flushPending,
@@ -2170,6 +2178,7 @@ export function StudentAttemptProvider({
       recordNetworkStatus,
       recordPreCheckResult,
       submitAttempt,
+      submitAttemptAfterBarrier,
       takeOverDurabilityLease,
       setDeviceFingerprintHash,
       flushHeartbeatEvents,

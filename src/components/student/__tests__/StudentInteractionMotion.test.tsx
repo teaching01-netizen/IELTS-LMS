@@ -130,7 +130,14 @@ describe('student interaction motion class contracts', () => {
       const jump = within(row).getByRole('button', { name: /jump to part 2/i });
 
       expect(jump).toHaveClass(pressRecipe);
-      expect(jump).toHaveClass('hover:bg-gray-50', 'active:bg-gray-100');
+      expect(jump).toHaveClass('hover:bg-gray-200', 'active:bg-gray-300');
+      expect(jump).toHaveClass(
+        'border',
+        'border-gray-400',
+        'bg-gray-100',
+        'text-gray-800',
+        'disabled:opacity-100',
+      );
       expect(jump).toHaveAttribute('title', 'Click to jump to Part 2');
     });
 
@@ -166,7 +173,7 @@ describe('student interaction motion class contracts', () => {
       const row = screen.getByTestId('student-footer-row');
       const counter = within(row).getByText('1/2');
       const jump = within(row).getByRole('button', { name: /jump to part 2/i });
-      const track = jump.querySelector('.bg-gray-50');
+      const track = jump.querySelector('.bg-gray-200');
 
       expect(counter.parentElement!.className).not.toMatch(scaleRecipePattern);
       expect(counter.parentElement).toHaveClass('bg-gray-50');

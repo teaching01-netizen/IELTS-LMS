@@ -123,7 +123,7 @@ test.describe("ACT Science workflow", () => {
 
       await studentPage.goto(`/student/${scheduleId}/${candidateId}`);
       await expect(
-        studentPage.getByRole("heading", { name: /Examination Complete!/i })
+        studentPage.getByRole("heading", { name: /ACT Science Complete!/i })
       ).toBeVisible({ timeout: 30_000 });
       await expect(
         studentPage.getByRole("alertdialog", { name: "Submitting your exam" })

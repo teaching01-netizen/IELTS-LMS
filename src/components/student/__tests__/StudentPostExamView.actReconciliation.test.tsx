@@ -26,10 +26,22 @@ describe("Phase 04 post-exam provider copy", () => {
   });
 
   it("renders ACT Science copy for provider act", () => {
-    render(<StudentPostExamView {...baseProps} provider="act" />);
+    const { container } = render(<StudentPostExamView {...baseProps} provider="act" />);
     expect(screen.getByRole("heading", { name: /act science complete/i })).toBeInTheDocument();
     expect(screen.getByText(/act science section/i)).toBeInTheDocument();
     expect(screen.queryByText(/ielts examination/i)).not.toBeInTheDocument();
+    expect(container.firstElementChild).toHaveClass("min-h-screen", "min-h-[100dvh]");
+    expect(screen.getByRole("main")).toHaveClass("w-full", "max-w-5xl");
+  });
+
+  it("tells ACT users they can close the tab without navigating or showing a browser-close button", () => {
+    const onExit = vi.fn();
+    render(<StudentPostExamView {...baseProps} onExit={onExit} provider="act" />);
+
+    expect(screen.getByText(/you may now close this tab/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /close this tab/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /exit exam platform/i })).not.toBeInTheDocument();
+    expect(onExit).not.toHaveBeenCalled();
   });
 
   it("renders SAT copy for provider sat without touching IELTS defaults", () => {

@@ -26,7 +26,10 @@ func TestLoadSnapshotCommittedRead(t *testing.T) {
 			AddRow("rt-1", "live", "rw", 4, "cohort_section_v3", false))
 	mock.ExpectQuery("FROM exam_session_runtime_sections WHERE").
 		WithArgs("rt-1", "rw").
-		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "actual_start_at", "planned_duration_minutes",
+			"extension_minutes", "accumulated_paused_seconds", "paused_at",
+		}).AddRow("live", nil, nil, nil, nil, nil))
 	snap, err := LoadSnapshot(context.Background(), db, "sched-1", time.Now().UTC())
 	if err != nil {
 		t.Fatalf("LoadSnapshot: %v", err)
@@ -81,7 +84,10 @@ func TestLoadSnapshotPausedSection(t *testing.T) {
 			AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false))
 	mock.ExpectQuery("FROM exam_session_runtime_sections WHERE").
 		WithArgs("rt-1", "rw").
-		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("paused"))
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "actual_start_at", "planned_duration_minutes",
+			"extension_minutes", "accumulated_paused_seconds", "paused_at",
+		}).AddRow("paused", nil, nil, nil, nil, nil))
 	snap, err := LoadSnapshot(context.Background(), db, "sched-1", time.Now().UTC())
 	if err != nil {
 		t.Fatalf("LoadSnapshot: %v", err)
@@ -113,7 +119,10 @@ func TestLoadSnapshotBetweenSectionsBlocksWrites(t *testing.T) {
 			AddRow("rt-1", "live", "rw", 12, "cohort_section_v3", true))
 	mock.ExpectQuery("FROM exam_session_runtime_sections WHERE").
 		WithArgs("rt-1", "rw").
-		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("completed"))
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "actual_start_at", "planned_duration_minutes",
+			"extension_minutes", "accumulated_paused_seconds", "paused_at",
+		}).AddRow("completed", nil, nil, nil, nil, nil))
 	snap, err := LoadSnapshot(context.Background(), db, "sched-1", time.Now().UTC())
 	if err != nil {
 		t.Fatalf("LoadSnapshot: %v", err)

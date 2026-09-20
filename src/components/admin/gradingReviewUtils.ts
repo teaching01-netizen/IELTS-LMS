@@ -1,4 +1,5 @@
-import type { ExamState, SentenceCompletionQuestion } from '../../types';
+import { ACT_SCIENCE_SKILL_CATEGORIES } from '../../types';
+import type { ActScienceSkillCategory, ExamState, SentenceCompletionQuestion } from '../../types';
 import type {
   ObjectiveManualOverride,
   ObjectiveQuestionResult,
@@ -8,6 +9,7 @@ import type {
 } from '../../types/grading';
 import {
   getQuestionNumberLabel,
+  getQuestionAnswer,
   getStudentQuestionsForModule,
 } from '../../features/exam-authoring/api/examAuthoringGateway';
 import type { StudentQuestionDescriptor } from '../../features/exam-authoring/api/examAuthoringGateway';
@@ -20,12 +22,14 @@ import {
   isStudentAnswerCorrect,
   resolveSentenceCompletionCorrectness,
 } from './gradingAnswerUtils';
+import type { AnswerDisplayOptions } from './gradingAnswerUtils';
 import type { StudentAnswerValue } from '../../types/answers';
 import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
 
 export type GradingExportSection =
   | 'reading'
   | 'listening'
+  | 'science'
   | 'reading_manual'
   | 'listening_manual'
   | 'writing';
@@ -34,6 +38,31 @@ export interface CsvColumn {
   key: string;
   label: string;
 }
+
+const ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS: Record<ActScienceSkillCategory, string> = {
+  interpretation_of_data: 'IOD',
+  scientific_investigation: 'SIN',
+  evaluating_scientific_arguments_and_models_with_evidence: 'ESA',
+};
+
+export const ACT_SCIENCE_CATEGORY_QUESTION_COUNT_COLUMNS: CsvColumn[] =
+  ACT_SCIENCE_SKILL_CATEGORIES.map((category) => ({
+    key: `scienceCategoryQuestionCount:${category.value}`,
+    label: `${category.label} (${ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS[category.value]})`,
+  }));
+
+export const ACT_SCIENCE_CATEGORY_CORRECT_COLUMNS: CsvColumn[] = ACT_SCIENCE_SKILL_CATEGORIES.map(
+  (category) => ({
+    key: `scienceCategory:${category.value}`,
+    label: `${ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS[category.value]} correct`,
+  }),
+);
+
+export const ACT_SCIENCE_CATEGORY_PERCENTAGE_COLUMNS: CsvColumn[] =
+  ACT_SCIENCE_SKILL_CATEGORIES.map((category) => ({
+    key: `scienceCategoryPercentage:${category.value}`,
+    label: `${ACT_SCIENCE_SKILL_CATEGORY_ABBREVIATIONS[category.value]} Percentage`,
+  }));
 
 export interface ExportSessionContext {
   sessionId: string;
@@ -60,6 +89,7 @@ export interface ObjectiveTracebackItem {
   numberLabel: string;
   questionId: string;
   prompt: string;
+  questionType?: string;
   studentAnswer: string;
   correctAnswer: string;
   correctness: boolean | null;
@@ -236,6 +266,11 @@ function toOptionalNumber(value: number | null | undefined): number | '' {
   return value === null || value === undefined ? '' : value;
 }
 
+function calculateCategoryPercentage(correctCount: number, questionCount: number): number {
+  if (questionCount <= 0) return 0;
+  return Number(((correctCount / questionCount) * 100).toFixed(2));
+}
+
 export function escapeCsvValue(value: unknown): string {
   const text = toPlainText(value);
   if (text === '') return '';
@@ -292,15 +327,82 @@ function buildQuestionResultMap(results: ObjectiveQuestionResult[] | undefined):
   return new Map((results ?? []).map((result) => [result.questionId, result] as const));
 }
 
+function hasPersistedAnswer(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim() !== '';
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasPersistedAnswer(entry));
+  }
+  return value !== null && value !== undefined;
+}
+
+/**
+ * Older/refactored grading payloads can retain the server-computed
+ * questionResults while returning an empty section answer map. Keep the
+ * canonical answer map authoritative, but recover missing slots from the
+ * persisted result so exports and review never hide a saved response.
+ */
+function mergePersistedResultAnswers(
+  descriptors: StudentQuestionDescriptor[],
+  answerMap: Record<string, StudentAnswerValue | undefined>,
+  results: Map<string, ObjectiveQuestionResult>,
+): Record<string, StudentAnswerValue | undefined> {
+  const merged: Record<string, StudentAnswerValue | undefined> = { ...answerMap };
+
+  for (const descriptor of descriptors) {
+    if (hasPersistedAnswer(getQuestionAnswer(descriptor, merged))) {
+      continue;
+    }
+
+    const persistedAnswer = results.get(descriptor.id)?.studentAnswer;
+    if (typeof persistedAnswer !== 'string' || persistedAnswer.trim() === '') {
+      continue;
+    }
+
+    if (descriptor.answerIndex === undefined) {
+      merged[descriptor.answerKey] = persistedAnswer;
+      continue;
+    }
+
+    const existingAnswer = merged[descriptor.answerKey];
+    const slots: string[] = Array.isArray(existingAnswer)
+      ? [...(existingAnswer as string[])]
+      : [];
+    slots[descriptor.answerIndex] = persistedAnswer;
+    merged[descriptor.answerKey] = slots;
+  }
+
+  return merged;
+}
+
 function getExportCorrectAnswerDisplay(
   descriptor: StudentQuestionDescriptor,
   questionResult: ObjectiveQuestionResult | undefined,
+  options: AnswerDisplayOptions = {},
 ): string {
   if (questionResult?.hasOverride && questionResult.correctAnswer.trim() !== '') {
-    return questionResult.correctAnswer;
+    return getCorrectAnswerDisplay(descriptor, {
+      ...options,
+      correctAnswerOverride: questionResult.correctAnswer,
+    });
   }
 
-  return getCorrectAnswerDisplay(descriptor);
+  return getCorrectAnswerDisplay(descriptor, options);
+}
+
+function getQuestionSkillCategory(
+  descriptor: StudentQuestionDescriptor,
+): ActScienceSkillCategory | undefined {
+  const question = descriptor.question;
+  if (!question || !('skillCategory' in question)) {
+    return undefined;
+  }
+
+  const skillCategory = question.skillCategory;
+  return ACT_SCIENCE_SKILL_CATEGORIES.some((category) => category.value === skillCategory)
+    ? skillCategory
+    : undefined;
 }
 
 function getGroupedScoringSlotKey(descriptor: StudentQuestionDescriptor): string | null {
@@ -498,16 +600,20 @@ function buildGroupedTracebackItem(
 export function buildQuestionTracebackGroups(
   examState: ExamState | null,
   sectionSubmission: SectionSubmission | null,
-  moduleType: 'reading' | 'listening',
+  moduleType: 'reading' | 'listening' | 'science',
 ): ObjectiveTracebackGroup[] {
   if (!examState || !sectionSubmission) {
     return [];
   }
 
   const descriptors = getStudentQuestionsForModule(examState, moduleType);
-  const answerMap = extractObjectiveAnswerMap(sectionSubmission.answers);
-  const correctnessByDescriptor = resolveSentenceCompletionCorrectness(descriptors, answerMap);
   const results = buildQuestionResultMap(sectionSubmission.autoGradingResults?.questionResults);
+  const answerMap = mergePersistedResultAnswers(
+    descriptors,
+    extractObjectiveAnswerMap(sectionSubmission.answers),
+    results,
+  );
+  const correctnessByDescriptor = resolveSentenceCompletionCorrectness(descriptors, answerMap);
   const groups = new Map<string, ObjectiveTracebackGroup>();
   const groupedSlotsByGroup = new Map<string, Map<string, StudentQuestionDescriptor[]>>();
 
@@ -558,7 +664,7 @@ export interface ObjectiveExportRowInput {
   submission: StudentSubmission;
   sectionSubmission: SectionSubmission;
   examState: ExamState | null;
-  moduleType: 'reading' | 'listening';
+  moduleType: 'reading' | 'listening' | 'science';
 }
 
 export interface WideObjectiveExportInput {
@@ -569,7 +675,7 @@ export interface WideObjectiveExportInput {
     sectionSubmission: SectionSubmission | null | undefined;
   }>;
   examState: ExamState | null;
-  moduleType: 'reading' | 'listening';
+  moduleType: 'reading' | 'listening' | 'science';
   mode?: ObjectiveWideExportMode;
 }
 
@@ -697,9 +803,10 @@ function calculateBandScore(rawScore: number, table: Record<number, number>): nu
 
 function getObjectiveBandTable(
   examState: ExamState | null,
-  moduleType: 'reading' | 'listening',
+  moduleType: 'reading' | 'listening' | 'science',
 ): Record<number, number> | null {
   if (!examState) return null;
+  if (moduleType === 'science') return null;
 
   if (moduleType === 'listening') {
     return examState.config.standards.bandScoreTables.listening
@@ -720,7 +827,7 @@ function getObjectiveBandTable(
 
 function deriveIeltsBandScore(
   examState: ExamState | null,
-  moduleType: 'reading' | 'listening',
+  moduleType: 'reading' | 'listening' | 'science',
   totalScore: number | null | undefined,
 ): number | '' {
   if (typeof totalScore !== 'number' || !Number.isFinite(totalScore)) {
@@ -743,6 +850,8 @@ export function buildWideObjectiveExport({
   mode = 'auto',
 }: WideObjectiveExportInput): WideObjectiveExport {
   const descriptors = examState ? getStudentQuestionsForModule(examState, moduleType) : [];
+  const answerDisplayOptions: AnswerDisplayOptions | undefined =
+    moduleType === 'science' ? { includeChoiceLabels: true } : undefined;
 
   type ExportSlot = {
     slotKey: string;
@@ -829,16 +938,36 @@ export function buildWideObjectiveExport({
   const rows = submissions.map((submission) => {
     const sectionSubmission = sectionBySubmissionId.get(submission.id) ?? null;
     const groups = buildQuestionTracebackGroups(examState, sectionSubmission, moduleType);
-    const answerMap = sectionSubmission ? extractObjectiveAnswerMap(sectionSubmission.answers) : {};
     const autoGradingResults = sectionSubmission?.autoGradingResults;
+    const scoredResults = buildQuestionResultMap(autoGradingResults?.questionResults);
+    const answerMap = sectionSubmission
+      ? mergePersistedResultAnswers(
+          descriptors,
+          extractObjectiveAnswerMap(sectionSubmission.answers),
+          scoredResults,
+        )
+      : {};
     const derivedTotals = deriveObjectiveTotalsFromTracebackGroups(groups);
     const derivedTotalScore = derivedTotals.totalScore ?? autoGradingResults?.totalScore ?? null;
     const derivedMaxScore = derivedTotals.maxScore ?? autoGradingResults?.maxScore ?? null;
     const derivedPercentage = derivedTotals.percentage ?? autoGradingResults?.percentage ?? null;
-    const scoredResults = buildQuestionResultMap(autoGradingResults?.questionResults);
     const tracebackItemsById = new Map(
       groups.flatMap((group) => group.items).map((item) => [item.questionId, item] as const),
     );
+    const scienceCategoryCorrectCounts: Partial<Record<ActScienceSkillCategory, number>> = {};
+    const scienceCategoryQuestionCounts: Partial<Record<ActScienceSkillCategory, number>> = {};
+    if (moduleType === 'science') {
+      for (const descriptor of descriptors) {
+        const skillCategory = getQuestionSkillCategory(descriptor);
+        if (!skillCategory) continue;
+        scienceCategoryQuestionCounts[skillCategory] =
+          (scienceCategoryQuestionCounts[skillCategory] ?? 0) + 1;
+        const tracebackItem = tracebackItemsById.get(descriptor.id);
+        if (tracebackItem?.correctness !== true) continue;
+        scienceCategoryCorrectCounts[skillCategory] =
+          (scienceCategoryCorrectCounts[skillCategory] ?? 0) + 1;
+      }
+    }
     const row: Record<string, unknown> = {
       examTitle: session.examTitle,
       sessionId: session.sessionId,
@@ -857,6 +986,33 @@ export function buildWideObjectiveExport({
       percentage: toOptionalNumber(derivedPercentage),
       correctCount: countCorrectAnswers(groups),
       ieltsBandScore: deriveIeltsBandScore(examState, moduleType, derivedTotalScore),
+      ...(moduleType === 'science'
+        ? Object.fromEntries(
+            ACT_SCIENCE_SKILL_CATEGORIES.map((category) => [
+              `scienceCategoryQuestionCount:${category.value}`,
+              scienceCategoryQuestionCounts[category.value] ?? 0,
+            ]),
+          )
+        : {}),
+      ...(moduleType === 'science'
+        ? Object.fromEntries(
+            ACT_SCIENCE_SKILL_CATEGORIES.map((category) => [
+              `scienceCategory:${category.value}`,
+              scienceCategoryCorrectCounts[category.value] ?? 0,
+            ]),
+          )
+        : {}),
+      ...(moduleType === 'science'
+        ? Object.fromEntries(
+            ACT_SCIENCE_SKILL_CATEGORIES.map((category) => [
+              `scienceCategoryPercentage:${category.value}`,
+              calculateCategoryPercentage(
+                scienceCategoryCorrectCounts[category.value] ?? 0,
+                scienceCategoryQuestionCounts[category.value] ?? 0,
+              ),
+            ]),
+          )
+        : {}),
     };
 
     for (const slot of exportSlots) {
@@ -865,10 +1021,15 @@ export function buildWideObjectiveExport({
         if (!descriptor) continue;
         const scoredResult = scoredResults.get(descriptor.id);
         const fallbackItem = tracebackItemsById.get(descriptor.id);
-        row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(descriptor, answerMap);
+        row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(
+          descriptor,
+          answerMap,
+          answerDisplayOptions,
+        );
         row[`rightAnswer:${descriptor.id}`] = getExportCorrectAnswerDisplay(
           descriptor,
           scoredResult,
+          answerDisplayOptions,
         );
         if (mode === 'auto') {
           row[`score:${descriptor.id}`] = toOptionalNumber(
@@ -883,10 +1044,15 @@ export function buildWideObjectiveExport({
       }
 
       for (const descriptor of slot.descriptors) {
-        row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(descriptor, answerMap);
+        row[`answer:${descriptor.id}`] = getStudentAnswerDisplay(
+          descriptor,
+          answerMap,
+          answerDisplayOptions,
+        );
         row[`rightAnswer:${descriptor.id}`] = getExportCorrectAnswerDisplay(
           descriptor,
           scoredResults.get(descriptor.id),
+          answerDisplayOptions,
         );
         if (mode === 'manual') {
           row[`manualCorrect:${descriptor.id}`] = '';
@@ -910,13 +1076,35 @@ export function buildWideObjectiveExport({
     return row;
   });
 
+  const baseColumns =
+    mode === 'auto' ? OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS : OBJECTIVE_WIDE_MANUAL_EXPORT_BASE_COLUMNS;
+  const moduleBaseColumns =
+    moduleType === 'science'
+      ? baseColumns.map((column) =>
+          column.key === 'ieltsCourse' ? { ...column, label: 'Course' } : column,
+        )
+      : baseColumns;
+  const summaryColumns =
+    mode === 'auto' && moduleType === 'science'
+      ? [...ACT_SCIENCE_CATEGORY_QUESTION_COUNT_COLUMNS, ...ACT_SCIENCE_CATEGORY_CORRECT_COLUMNS]
+      : [];
+  const percentageColumns =
+    mode === 'auto' && moduleType === 'science' ? ACT_SCIENCE_CATEGORY_PERCENTAGE_COLUMNS : [];
+  const exportBaseColumns = moduleBaseColumns.flatMap((column) =>
+    column.key === 'totalScore'
+      ? [column, ...summaryColumns]
+      : column.key === 'percentage'
+        ? [column, ...percentageColumns]
+        : [column],
+  );
+
   return {
     columns: [
-      ...(mode === 'auto'
-        ? OBJECTIVE_WIDE_EXPORT_BASE_COLUMNS
-        : OBJECTIVE_WIDE_MANUAL_EXPORT_BASE_COLUMNS),
+      ...exportBaseColumns,
       ...(mode === 'auto' ? [...answerColumns, ...rightAnswerColumns, ...scoreColumns] : manualQuestionColumns),
-      ...(mode === 'auto' ? [{ key: 'ieltsBandScore', label: 'IELTS Band Score' }] : []),
+      ...(mode === 'auto' && moduleType !== 'science'
+        ? [{ key: 'ieltsBandScore', label: 'IELTS Band Score' }]
+        : []),
     ],
     rows,
   };

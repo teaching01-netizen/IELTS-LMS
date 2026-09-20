@@ -93,10 +93,11 @@ describe('StudentMaterialWithQuestionPane', () => {
   });
 
   it('keeps the existing split presentation outside compact mode', () => {
-    renderPane('wide');
+    const { getByTestId } = renderPane('wide');
 
     expect(screen.getByTestId('material-content')).toBeVisible();
     expect(screen.getByTestId('question-content')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Show questions' })).not.toBeInTheDocument();
+    expect(getByTestId('student-material-workspace')).toHaveClass('min-h-0');
   });
 });

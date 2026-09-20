@@ -398,7 +398,7 @@ func gradingSectionsHandler(app *App) http.HandlerFunc {
 			}
 		}
 		rows, err := app.DB.QueryContext(r.Context(),
-			`SELECT id, section, grading_status, auto_grading_results FROM section_submissions WHERE submission_id = ?`,
+			`SELECT id, section, answers, grading_status, auto_grading_results FROM section_submissions WHERE submission_id = ?`,
 			submissionID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -408,10 +408,19 @@ func gradingSectionsHandler(app *App) http.HandlerFunc {
 		out := []map[string]any{}
 		for rows.Next() {
 			var id, section, status string
-			var auto sql.NullString
-			if err := rows.Scan(&id, &section, &status, &auto); err != nil {
+			var answers, auto sql.NullString
+			if err := rows.Scan(&id, &section, &answers, &status, &auto); err != nil {
 				httpx.WriteError(w, r, err)
 				return
+			}
+			var answersVal any
+			if answers.Valid && strings.TrimSpace(answers.String) != "" {
+				var v any
+				if json.Unmarshal([]byte(answers.String), &v) == nil {
+					answersVal = v
+				} else {
+					answersVal = answers.String
+				}
 			}
 			var autoVal any
 			if auto.Valid && strings.TrimSpace(auto.String) != "" {
@@ -424,6 +433,7 @@ func gradingSectionsHandler(app *App) http.HandlerFunc {
 			}
 			out = append(out, map[string]any{
 				"id": id, "section": section, "gradingStatus": status,
+				"answers":            answersVal,
 				"autoGradingResults": autoVal,
 			})
 		}

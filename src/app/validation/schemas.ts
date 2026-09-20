@@ -237,7 +237,7 @@ export const formSchemas = {
     wcode: z
       .string()
       .trim()
-      .min(1, 'Access code is required')
+      .min(1, 'Code is required')
       .transform((value) => (/^W\d{6}$/i.test(value) ? value.toUpperCase() : value)),
     email: commonSchemas.email,
     studentName: commonSchemas.nonEmptyString.min(2, 'Name must be at least 2 characters'),

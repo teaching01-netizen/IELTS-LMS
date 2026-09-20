@@ -34,11 +34,15 @@ func (s *Service) RepairCanonicalRows(ctx context.Context, batch int64) (int64, 
 		JOIN exam_entities e ON e.id = a.exam_id
 		WHERE a.submitted_at IS NOT NULL
 		  AND (e.provider_key = 'act' OR UPPER(COALESCE(e.exam_type, '')) = 'ACT')
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM student_submissions ss
-			JOIN section_submissions sec ON sec.submission_id = ss.id AND sec.section = 'science'
-			WHERE ss.attempt_id = a.id AND ss.provider_key = 'act'
+		  AND (
+			NOT EXISTS (
+				SELECT 1 FROM student_submissions ss
+				JOIN section_submissions sec ON sec.submission_id = ss.id AND sec.section = 'science'
+				WHERE ss.attempt_id = a.id AND ss.provider_key = 'act'
+			)
+			OR NOT EXISTS (
+				SELECT 1 FROM grading_sessions gs WHERE gs.schedule_id = a.schedule_id
+			)
 		  )
 		ORDER BY a.updated_at ASC, a.id ASC
 		LIMIT ?`, batch)
@@ -175,6 +179,9 @@ func (s *Service) projectRepairedAttempt(ctx context.Context, q tx.Tx, attemptID
 		sectionID, submissionID, answersPayload, autoResults, integrityStatus, submittedAt); err != nil {
 		return err
 	}
+	if err := ensureACTGradingSession(ctx, q, scheduleID); err != nil {
+		return err
+	}
 
 	merged := map[string]any{}
 	if strings.TrimSpace(finalRaw) != "" {
@@ -234,6 +241,72 @@ func (s *Service) projectRepairedAttempt(ctx context.Context, q tx.Tx, attemptID
 			(id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status)
 		VALUES (?, ?, ?, 'act', 'scored', ?, ?, ?)`,
 		uuid.NewString(), attemptID, submissionID, total, string(resultPayload), releaseStatus)
+	return err
+}
+
+// ensureACTGradingSession materializes the grading queue parent for an ACT
+// schedule in the same transaction as its canonical submission. The worker
+// repair path calls this for already-submitted rows, so older local attempts
+// become visible without requiring a destructive data reset.
+func ensureACTGradingSession(ctx context.Context, q tx.Tx, scheduleID string) error {
+	if _, err := q.ExecContext(ctx, `
+		INSERT INTO grading_sessions
+			(id, schedule_id, exam_id, exam_title, published_version_id, cohort_name,
+			 institution, start_time, end_time, status, assigned_teachers, created_by,
+			 updated_at)
+		SELECT s.id, s.id, s.exam_id, COALESCE(s.grading_display_name, e.title),
+			COALESCE(s.published_version_id, ''), s.cohort_name, s.institution,
+			s.start_time, s.end_time,
+			CASE s.status
+				WHEN 'live' THEN 'live'
+				WHEN 'completed' THEN 'completed'
+				WHEN 'cancelled' THEN 'cancelled'
+				ELSE 'scheduled'
+			END,
+			JSON_ARRAY(), COALESCE(s.created_by, 'worker'), UTC_TIMESTAMP(6)
+		FROM exam_schedules s
+		JOIN exam_entities e ON e.id = s.exam_id
+		WHERE s.id = ?
+		  AND (s.provider_key = 'act' OR e.provider_key = 'act' OR UPPER(COALESCE(e.exam_type, '')) = 'ACT')
+		ON DUPLICATE KEY UPDATE
+			exam_id = VALUES(exam_id), exam_title = VALUES(exam_title),
+			published_version_id = VALUES(published_version_id), cohort_name = VALUES(cohort_name),
+			institution = VALUES(institution), start_time = VALUES(start_time),
+			end_time = VALUES(end_time), status = VALUES(status), updated_at = UTC_TIMESTAMP(6)`, scheduleID); err != nil {
+		return err
+	}
+	_, err := q.ExecContext(ctx, `
+		UPDATE grading_sessions
+		SET total_students = (
+				SELECT COUNT(*) FROM student_submissions
+				WHERE schedule_id = ? AND provider_key = 'act'
+			),
+			submitted_count = (
+				SELECT COUNT(*) FROM student_submissions
+				WHERE schedule_id = ? AND provider_key = 'act'
+				  AND grading_status IN ('submitted', 'reopened')
+			),
+			pending_manual_reviews = (
+				SELECT COUNT(*) FROM student_submissions
+				WHERE schedule_id = ? AND provider_key = 'act'
+				  AND grading_status IN ('submitted', 'reopened')
+			),
+			in_progress_reviews = (
+				SELECT COUNT(*) FROM student_submissions
+				WHERE schedule_id = ? AND provider_key = 'act'
+				  AND grading_status = 'in_progress'
+			),
+			finalized_reviews = (
+				SELECT COUNT(*) FROM student_submissions
+				WHERE schedule_id = ? AND provider_key = 'act'
+				  AND grading_status IN ('grading_complete', 'ready_to_release', 'released')
+			),
+			overdue_reviews = (
+				SELECT COUNT(*) FROM student_submissions
+				WHERE schedule_id = ? AND provider_key = 'act' AND is_overdue
+			),
+			updated_at = UTC_TIMESTAMP(6)
+		WHERE schedule_id = ?`, scheduleID, scheduleID, scheduleID, scheduleID, scheduleID, scheduleID, scheduleID)
 	return err
 }
 

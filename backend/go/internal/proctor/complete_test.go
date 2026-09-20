@@ -18,6 +18,15 @@ type captureOutbox struct {
 	revisions []int64
 }
 
+type captureTerminalizer struct {
+	attemptIDs []string
+}
+
+func (c *captureTerminalizer) Terminalize(_ context.Context, cmd terminalization.SealCommand) (*terminalization.SealResult, error) {
+	c.attemptIDs = append(c.attemptIDs, cmd.AttemptID)
+	return &terminalization.SealResult{}, nil
+}
+
 func (c *captureOutbox) EnqueueInTx(ctx context.Context, q tx.Tx, aggregateKind, aggregateID string, revision int64, eventFamily string, payload json.RawMessage) error {
 	c.families = append(c.families, eventFamily)
 	c.payloads = append(c.payloads, string(payload))
@@ -122,5 +131,58 @@ func TestCompleteExamCustomReasonKeepsVocabularyPayload(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("CompleteExam must enqueue an auto-submit job")
+	}
+}
+
+func TestAutoSubmitACTAfterCompleteSealsWritableACTAttemptsSynchronously(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	seal := &captureTerminalizer{}
+	svc := NewService(tx.NewRunner(db), db, seal, nil, nil)
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
+
+	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts a")).
+		WithArgs("sched-act").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("attempt-act-1").AddRow("attempt-act-2"))
+	mock.ExpectCommit()
+
+	if err := svc.AutoSubmitACTAfterComplete(context.Background(), Actor{ID: "admin-1"}, "sched-act"); err != nil {
+		t.Fatalf("synchronous ACT auto-submit must succeed: %v", err)
+	}
+	if got := seal.attemptIDs; len(got) != 2 || got[0] != "attempt-act-1" || got[1] != "attempt-act-2" {
+		t.Fatalf("sealed attempts = %#v, want both ACT attempts", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAutoSubmitScheduleAfterCompleteSealsWritableIELTSAttemptsSynchronously(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	seal := &captureTerminalizer{}
+	svc := NewService(tx.NewRunner(db), db, seal, nil, nil)
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT a.id")).
+		WithArgs("sched-ielts").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("attempt-ielts-1"))
+	mock.ExpectCommit()
+
+	if err := svc.AutoSubmitScheduleAfterComplete(context.Background(), Actor{ID: "admin-1"}, "sched-ielts"); err != nil {
+		t.Fatalf("synchronous IELTS auto-submit must succeed: %v", err)
+	}
+	if got := seal.attemptIDs; len(got) != 1 || got[0] != "attempt-ielts-1" {
+		t.Fatalf("sealed attempts = %#v, want the IELTS attempt", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

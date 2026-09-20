@@ -72,6 +72,16 @@ export function createStudentRuntimePoll(input: StudentRuntimePollInput): Studen
         throw err;
       }
       const body = asRecord(res.json) ?? {};
+      if (!Object.prototype.hasOwnProperty.call(body, 'revision') ||
+          !Object.prototype.hasOwnProperty.call(body, 'pollAfterSecs')) {
+        const err = new Error('Runtime poll response is not a runtime view.') as StudentRuntimePollError;
+        // Treat a non-runtime 200 (for example an older endpoint or a test
+        // fallback payload) like an unavailable poll route. The route hook
+        // then falls back to the established live snapshot refresh instead
+        // of silently considering the poll successful at revision 0.
+        err.status = 404;
+        throw err;
+      }
       const revision = finiteNumber(body['revision'], sinceRevision);
       return {
         revision,

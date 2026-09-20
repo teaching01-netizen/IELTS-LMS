@@ -25,6 +25,16 @@ describe('student runtime poll (plan C1: replaces student WS)', () => {
     expect(view.notModified).toBe(true);
   });
 
+  it('rejects a non-runtime 200 response so the caller can use the snapshot fallback', async () => {
+    const fetchJson = vi.fn().mockResolvedValue({
+      status: 200,
+      json: { attempt: { id: 'attempt-1' }, attemptCredential: { attemptToken: 'token' } },
+    });
+    const poll = createStudentRuntimePoll({ scheduleId: 'sched-1', fetchJson });
+
+    await expect(poll.poll(0)).rejects.toMatchObject({ status: 404 });
+  });
+
   it('treats HTTP 410 STUDENT_WS_RETIRED as terminal (no retry storm)', async () => {
     const fetchJson = vi.fn().mockResolvedValue({
       status: 410,

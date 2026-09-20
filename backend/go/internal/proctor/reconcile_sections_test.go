@@ -15,7 +15,7 @@ import (
 // The section auto-advance path had no test before this file: ReconcileExpiredSections
 // was referenced only by its own definition and the worker. These cases pin the
 // authored-gap semantics (decision D3), the between-sections window (D1), the
-// overrun signal, and the 30-second closing grace.
+// overrun signal, and the five-second closing grace.
 
 var (
 	candidateQuery = regexp.QuoteMeta("SELECT r.schedule_id, COALESCE")
@@ -151,8 +151,8 @@ func TestReconcileExpiredSectionsStartsNextSectionWhenGapElapsed(t *testing.T) {
 
 	base := time.Date(2026, 9, 14, 9, 0, 0, 0, time.UTC)
 	endedAt := base.Add(64 * time.Minute)
-	startAt := endedAt.Add(10 * time.Minute)
 	asOf := endedAt.Add(12 * time.Minute)
+	startAt := asOf
 
 	expectCandidateScan(mock, asOf, "sched-1", true, 10)
 	expectScheduleTxOpen(mock, "sched-1", "rt-1", "live", "reading-writing", true, false, 7, []sectionSeed{
@@ -211,9 +211,10 @@ func TestReconcileExpiredSectionsCatchesUpAcrossSections(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT ma.attempt_id")).
 		WithArgs("sched-1", "reading-writing").
 		WillReturnRows(sqlmock.NewRows([]string{"attempt_id"}).AddRow("att-1"))
-	// Section 2 starts backdated at section 1's deadline.
+	// Section 2 starts at reconciliation time so its configured duration is
+	// not consumed by the closing-grace/worker handoff.
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtime_sections")).
-		WithArgs(deadline1, deadline1, "rt-1", "math").
+		WithArgs(asOf, asOf, "rt-1", "math").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtimes")).
 		WithArgs("math", "math", int64(35*60), "rt-1").
@@ -223,38 +224,18 @@ func TestReconcileExpiredSectionsCatchesUpAcrossSections(t *testing.T) {
 		WithArgs("rt-1", "math", "sched-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO session_audit_logs")).WillReturnResult(sqlmock.NewResult(0, 1))
-	// Section 2 is itself expired: complete it and end the runtime.
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtime_sections")).
-		WithArgs(deadline2, "time_expired", "rt-1", "math").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO session_audit_logs")).WillReturnResult(sqlmock.NewResult(0, 1))
 	expectRuntimeRevisionRead(mock, 8)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT ma.attempt_id")).
-		WithArgs("sched-1", "math").
-		WillReturnRows(sqlmock.NewRows([]string{"attempt_id"}).AddRow("att-1"))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtimes")).
-		WithArgs(asOf, "rt-1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	expectRuntimeRevisionRead(mock, 9)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules")).
-		WithArgs("sched-1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM student_attempts")).
-		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO session_audit_logs")).WillReturnResult(sqlmock.NewResult(0, 1))
-	expectRuntimeRevisionRead(mock, 9)
 	mock.ExpectCommit()
 
 	outcomes, err := svc.ReconcileExpiredSections(context.Background(), asOf, 10, "test")
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	if len(outcomes) != 1 || outcomes[0].RuntimeRevision != 9 {
-		t.Fatalf("expected two runtime revision bumps (7 -> 9), got %+v", outcomes)
+	if len(outcomes) != 1 || outcomes[0].RuntimeRevision != 8 {
+		t.Fatalf("expected one runtime revision bump (7 -> 8), got %+v", outcomes)
 	}
-	if !contains(outbx.families, outbox.FamilyAutoSubmitScheduleAttempts) {
-		t.Fatalf("schedule completion must enqueue auto-submit, got %v", outbx.families)
+	if !contains(outbx.families, outbox.FamilySectionAttemptsReconcile) {
+		t.Fatalf("finished section must enqueue module reconcile, got %v", outbx.families)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

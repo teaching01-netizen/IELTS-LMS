@@ -33,19 +33,30 @@ export function StudentSessionRoute() {
   } =
     useStudentSessionRouteData(scheduleId, studentId);
 
-  const navigateToStudentCheckIn = async () => {
-    try {
-      await logoutAll();
-    } catch {
-      // Continue to the student check-in flow even if the backend logout request fails.
-    }
-
+  const navigateToStudentCheckIn = () => {
     if (scheduleId) {
       navigate(`/student/${scheduleId}`);
-      return;
+    } else {
+      navigate('/');
     }
 
-    navigate('/');
+    void logoutAll().catch(() => {
+      // Route transition is already complete; auth cleanup is best-effort.
+    });
+  };
+
+  const handleCompletedExit = () => {
+    // ACT completion is the terminal student surface. Navigating back to the
+    // check-in route after logout would immediately reload this route without
+    // auth and show a misleading "Session expired" error. Keep the completed
+    // surface visible so the user can close the tab after exiting.
+    if (providerKey === 'act') {
+      void logoutAll().catch(() => {
+        // Completion is already settled; auth cleanup is best-effort.
+      });
+      return;
+    }
+    navigateToStudentCheckIn();
   };
 
   // Auth window stays provider-agnostic (excluded from the flicker assertion).
@@ -163,10 +174,10 @@ export function StudentSessionRoute() {
     );
   }
 
-  return (
-    <StudentAppWrapper
-      state={state}
-      onExit={navigateToStudentCheckIn}
+    return (
+      <StudentAppWrapper
+        state={state}
+        onExit={handleCompletedExit}
       scheduleId={scheduleId}
       attemptSnapshot={attemptSnapshot}
       onRuntimeRefresh={refreshRuntime}

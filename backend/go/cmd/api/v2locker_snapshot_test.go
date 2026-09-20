@@ -57,7 +57,10 @@ func TestSnapshotLockerRefreshOnce(t *testing.T) {
 			AddRow("rt-1", "paused", "rw", 3, "legacy_section_v1", false))
 	mock.ExpectQuery("FROM exam_session_runtime_sections WHERE").
 		WithArgs("rt-1", "rw").
-		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "actual_start_at", "planned_duration_minutes",
+			"extension_minutes", "accumulated_paused_seconds", "paused_at",
+		}).AddRow("live", nil, nil, nil, nil, nil))
 	if _, err := lk.gateFor(context.Background(), "sched-1"); err == nil {
 		t.Fatalf("paused snapshot must block at pre-gate")
 	}
@@ -69,7 +72,10 @@ func TestSnapshotLockerRefreshOnce(t *testing.T) {
 			AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false))
 	mock.ExpectQuery("FROM exam_session_runtime_sections WHERE").
 		WithArgs("rt-1", "rw").
-		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "actual_start_at", "planned_duration_minutes",
+			"extension_minutes", "accumulated_paused_seconds", "paused_at",
+		}).AddRow("live", nil, nil, nil, nil, nil))
 	gate, err := lk.gateFor(context.Background(), "sched-1")
 	if err != nil {
 		t.Fatalf("refreshed live snapshot must pass: %v", err)

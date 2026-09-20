@@ -40,7 +40,7 @@ function renderRoute(scheduleId: string) {
 }
 
 function submitForm(wcode = "W250334") {
-  fireEvent.change(screen.getByLabelText(/access code|wcode/i), {
+  fireEvent.change(screen.getByLabelText(/code|wcode/i), {
     target: { value: wcode },
   });
   fireEvent.change(screen.getByLabelText(/email/i), {
@@ -272,7 +272,7 @@ describe("StudentEntryRoute", () => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440099";
     renderRoute(scheduleId);
 
-    fireEvent.change(screen.getByLabelText(/access code|wcode/i), {
+    fireEvent.change(screen.getByLabelText(/code|wcode/i), {
       target: { value: "W250334" },
     });
     fireEvent.change(screen.getByLabelText(/email/i), {
@@ -543,7 +543,7 @@ describe("StudentEntryRoute", () => {
     expect(screen.queryByLabelText(/nickname/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/ielts course/i)).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/access code|wcode/i), {
+    fireEvent.change(screen.getByLabelText(/code|wcode/i), {
       target: { value: "W250334" },
     });
     fireEvent.change(screen.getByLabelText(/email/i), {
@@ -565,6 +565,57 @@ describe("StudentEntryRoute", () => {
 
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith(`/student/${scheduleId}/W250334`);
+    });
+  });
+
+  it("uses the neutral Course label for ACT schedules", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440141";
+    getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "act" });
+    studentEntryMock.mockResolvedValue({
+      user: {
+        id: "student-act-1",
+        email: "act@example.com",
+        displayName: "ACT Student",
+        role: "student",
+        state: "active",
+      },
+      csrfToken: "csrf-act-1",
+      expiresAt: "2026-01-01T12:00:00.000Z",
+    });
+
+    renderRoute(scheduleId);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Course")).toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText("IELTS Course")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/code|wcode/i), {
+      target: { value: "anything-at-all" },
+    });
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: "act@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/full name/i), {
+      target: { value: "ACT Student" },
+    });
+    fireEvent.change(screen.getByLabelText(/nickname/i), {
+      target: { value: "act-student" },
+    });
+    fireEvent.change(screen.getByLabelText("Course"), {
+      target: { value: "ACT" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(studentEntryMock).toHaveBeenCalledWith({
+        scheduleId,
+        wcode: "anything-at-all",
+        email: "act@example.com",
+        studentName: "ACT Student",
+        nickname: "act-student",
+        ieltsCourse: "ACT",
+      });
     });
   });
 
@@ -614,7 +665,7 @@ describe("StudentEntryRoute", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText(/access code|wcode/i)).toHaveValue("W222222");
+      expect(screen.getByLabelText(/code|wcode/i)).toHaveValue("W222222");
       expect(screen.getByLabelText(/email/i)).toHaveValue("");
       expect(screen.getByLabelText(/full name/i)).toHaveValue("");
     });

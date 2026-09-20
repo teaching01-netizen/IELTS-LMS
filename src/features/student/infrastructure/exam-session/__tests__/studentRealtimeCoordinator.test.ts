@@ -31,5 +31,7 @@ describe('student realtime coordinator', () => {
     coordinator.handleSocketDisconnected();
 
     expect(coordinator.getPollingPolicy('live')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+    expect(coordinator.getPollingPolicy('not_started')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
+    expect(coordinator.getPollingPolicy('completed')).toEqual({ intervalMs: 1500, maxIntervalMs: 3000 });
   });
 });

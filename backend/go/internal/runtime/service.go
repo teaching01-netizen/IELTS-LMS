@@ -17,7 +17,7 @@
 //	pause/resume/extend/sync bump control_epoch+1 so in-flight writers fence.
 //	Grace is server-side: server_now <= closing_grace_until is inclusive.
 //	sync_v2 re-projects deadline=actual_start+(planned+extension)*60+paused and
-//	 grace=+30s, only for protocol 2 non-terminal attempts.
+//	 grace=+5s, only for protocol 2 non-terminal attempts.
 //
 // Lock order everywhere: attempt -> runtime -> section.
 // Every mutating method locks schedule attempt rows BEFORE the runtime row
@@ -48,6 +48,13 @@ const (
 	StatusCompleted  = "completed"
 	StatusCancelled  = "cancelled"
 )
+
+// SectionClosingGrace is the bounded window after the authored section
+// deadline in which in-flight student writes may still arrive. The worker's
+// section reconciler and the V2 write projection both use this value so a
+// section cannot close before the write gate closes, or remain open for an
+// unexpectedly long time after the timer reaches zero.
+const SectionClosingGrace = 5 * time.Second
 
 // Section statuses.
 const (
@@ -535,7 +542,7 @@ func (s *Service) SyncV2Timing(ctx context.Context, scheduleID, runtimeID, secti
 }
 
 // SyncV2TimingInTx re-projects deadline=actual_start+(planned+extension)*60+paused,
-// grace=+30s, only for protocol 2 non-terminal attempts. control_epoch+1 fences
+// grace=+5s, only for protocol 2 non-terminal attempts. control_epoch+1 fences
 // in-flight V2 writers. lifecycle nil leaves delivery/phase untouched.
 func SyncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, sectionKey string, lifecycle *string) error {
 	lifecycleAssign := ""
@@ -549,18 +556,19 @@ func SyncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, secti
 	default:
 		lifecycleAssign = ""
 	}
-	stmt := "UPDATE student_attempts sa " +
-		"JOIN exam_session_runtime_sections rs ON rs.runtime_id = ? AND rs.section_key = ? " +
-		"SET " + lifecycleAssign +
-		" deadline_at = CASE WHEN rs.actual_start_at IS NULL THEN sa.deadline_at ELSE DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND) END," +
-		" closing_grace_until = CASE WHEN rs.actual_start_at IS NULL THEN sa.closing_grace_until ELSE DATE_ADD(DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND), INTERVAL 30 SECOND) END," +
-		" control_epoch = sa.control_epoch + 1," +
-		" revision = sa.revision + 1," +
-		" updated_at = UTC_TIMESTAMP(6) " +
-		"WHERE sa.schedule_id = ? " +
-		"AND sa.protocol_version = 2 " +
-		"AND sa.submitted_at IS NULL " +
-		"AND COALESCE(sa.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')"
+	graceSeconds := int(SectionClosingGrace / time.Second)
+	stmt := fmt.Sprintf("UPDATE student_attempts sa "+
+		"JOIN exam_session_runtime_sections rs ON rs.runtime_id = ? AND rs.section_key = ? "+
+		"SET "+lifecycleAssign+
+		" deadline_at = CASE WHEN rs.actual_start_at IS NULL THEN sa.deadline_at ELSE DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND) END,"+
+		" closing_grace_until = CASE WHEN rs.actual_start_at IS NULL THEN sa.closing_grace_until ELSE DATE_ADD(DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND), INTERVAL %d SECOND) END,"+
+		" control_epoch = sa.control_epoch + 1,"+
+		" revision = sa.revision + 1,"+
+		" updated_at = UTC_TIMESTAMP(6) "+
+		"WHERE sa.schedule_id = ? "+
+		"AND sa.protocol_version = 2 "+
+		"AND sa.submitted_at IS NULL "+
+		"AND COALESCE(sa.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')", graceSeconds)
 	_, err := q.ExecContext(ctx, stmt, runtimeID, sectionKey, scheduleID)
 	return err
 }

@@ -709,8 +709,8 @@ func studentEntryBucket(key string) httpx.RateLimitResult {
 }
 
 // isStudentEntryAccountAllowed gates entry on account state only: any ACTIVE
-// account may check in once the invite-code gate passes (direct entry needs
-// a live selected-student code; link entry verifies via ResolveEntry).
+// account may check in once the schedule/code gate passes. Link-backed entry
+// still verifies its link lifecycle and window through ResolveEntry.
 // Disabled / locked / pending_activation stay blocked; the role never
 // gates. The passwordless entry flow only ever mints a student-scoped
 // session (see studentEntryHandler), so allowing staff emails here grants
@@ -721,57 +721,35 @@ func isStudentEntryAccountAllowed(role, state string) bool {
 }
 
 // studentEntryNotFound is the 404-collapse envelope for student entry:
-// wrong invite code, unknown schedule, and unknown/expired/paused link all
-// render identically so probes cannot distinguish them (same message as
-// the proctor live-assignment miss).
+// unknown/closed schedules and unknown/expired/paused links render
+// identically so probes cannot distinguish them (same message as the
+// proctor live-assignment miss).
 func studentEntryNotFound() error {
 	return apperrors.New(apperrors.CodeNotFound, "Resource not found.")
 }
 
-// verifyDirectEntryCode gates direct (link-less) schedule entry behind a
-// live invite code, BEFORE any user/registration/attempt mint. The wcode
-// is verified through the existing accesslinks service: it must resolve
-// as a selected-student code on a LIVE access link for the schedule
-// (locked lifecycle + schedule-window + roster/identity gate inside
-// ResolveEntry, the same verification the link branch uses). Empty codes,
-// unknown codes, expired/paused/upcoming links, and identity mismatches
-// all collapse to 404 (see studentEntryNotFound). DB trouble fails closed
-// via MapDBError (entry is denied, never minted). No schema change and
-// no new service method: issuance reads run only through ResolveEntry
-// plus one active-link-ID lookup by schedule below.
-func verifyDirectEntryCode(ctx context.Context, app *App, scheduleID, wcode, studentName, email string) error {
+// verifyDirectEntry keeps the legacy direct schedule entry flow open. The
+// candidate code is an identifier for the attempt, not an invitation or
+// roster credential: every non-empty format is accepted. The schedule is
+// checked before user/registration/attempt minting so an unknown or closed
+// schedule cannot create a student account as a side effect.
+func verifyDirectEntry(ctx context.Context, app *App, scheduleID, wcode string) error {
 	scheduleID = strings.TrimSpace(scheduleID)
 	code := schedules.NormalizeAccessCode(wcode)
 	if code == "" || scheduleID == "" {
 		return studentEntryNotFound()
 	}
-	if app == nil || app.DB == nil || app.AccessLinks == nil {
+	if app == nil || app.DB == nil {
 		return apperrors.New(apperrors.CodeServiceUnavailable, "Entry service is unavailable.")
 	}
-	rows, err := app.DB.QueryContext(ctx, `SELECT id FROM assessment_access_links WHERE schedule_id = ? AND lifecycle_state = 'active'`, scheduleID)
-	if err != nil {
+	var status string
+	if err := app.DB.QueryRowContext(ctx, `SELECT status FROM exam_schedules WHERE id = ?`, scheduleID).Scan(&status); err != nil {
+		if err == sql.ErrNoRows {
+			return studentEntryNotFound()
+		}
 		return MapDBError(err)
 	}
-	defer rows.Close()
-	var linkIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return MapDBError(err)
-		}
-		linkIDs = append(linkIDs, id)
-	}
-	if err := rows.Err(); err != nil {
-		return MapDBError(err)
-	}
-	for _, linkID := range linkIDs {
-		resolved, err := app.AccessLinks.ResolveEntry(ctx, linkID, code, studentName, email)
-		if err != nil {
-			continue
-		}
-		if strings.TrimSpace(resolved.ScheduleID) != scheduleID {
-			continue
-		}
+	if status == "scheduled" || status == "live" {
 		return nil
 	}
 	return studentEntryNotFound()
@@ -797,7 +775,7 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			return
 		}
 		if (strings.TrimSpace(body.Wcode) == "" && strings.TrimSpace(body.AccessLinkID) == "") || strings.TrimSpace(body.Email) == "" || strings.TrimSpace(body.StudentName) == "" {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Access code, email and student name are required."))
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Code, email and student name are required."))
 			return
 		}
 		// Round 64 fail-fast: malformed email 400s here, before link
@@ -807,12 +785,9 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, verr)
 			return
 		}
-		// Direct schedule entry is closed-by-default: the Wcode must be a
-		// live selected-student invite code for the schedule (verified
-		// pre-mint below via verifyDirectEntryCode). Link-backed entry
-		// verifies via ResolveEntry above (the ONLY open-entry path).
-		// Retaining the direct route is required for the existing
-		// `/student/:scheduleId` check-in flow.
+		// Direct schedule entry keeps the existing `/student/:scheduleId`
+		// flow: the code is a free-form attempt identifier. Link-backed entry
+		// remains separately gated by the selected link's lifecycle/window.
 		scheduleID := strings.TrimSpace(body.ScheduleID)
 		linkID := strings.TrimSpace(body.AccessLinkID)
 		var linkMode string
@@ -862,17 +837,13 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 				return
 			}
 		}
-		// Invite-code gate (closed-by-default): direct (link-less) entry
-		// must present a live selected-student code for this schedule
-		// BEFORE the email user lookup/mint and BEFORE
-		// CreateRegistration. Empty/unknown/identity-mismatched codes
-		// 404-collapse, so zero rows are written (no user, no
-		// registration, no attempt). Link-backed entry was already
-		// verified above via ResolveEntry (the ONLY open-entry path:
-		// ModeOpen links admit without a per-student code, gated by
-		// link lifecycle/window).
+		// Direct entry only verifies that the schedule is open and the code is
+		// non-empty before minting. The code is intentionally not checked
+		// against a roster or access link; this restores the original
+		// copy-link-and-check-in flow. Link-backed entry was already verified
+		// above via ResolveEntry.
 		if linkID == "" {
-			if verr := verifyDirectEntryCode(r.Context(), app, scheduleID, body.Wcode, body.StudentName, body.Email); verr != nil {
+			if verr := verifyDirectEntry(r.Context(), app, scheduleID, body.Wcode); verr != nil {
 				httpx.WriteError(w, r, verr)
 				return
 			}
@@ -909,7 +880,7 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			if linkID == "" {
 				// Closed-by-default: empty codes on direct entry never
 				// mint. Unreachable in practice (the presence check
-				// 400s and verifyDirectEntryCode 404-collapses
+				// 400s and verifyDirectEntry 404-collapses
 				// first) — fail closed, never synthesize a key.
 				httpx.WriteError(w, r, studentEntryNotFound())
 				return

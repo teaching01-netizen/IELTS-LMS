@@ -473,6 +473,7 @@ type ScienceReport struct {
 type ScienceQuestion struct {
 	QuestionID    string `json:"questionId"`
 	DisplayOrder  int    `json:"displayOrder"`
+	SkillCategory string `json:"skillCategory,omitempty"`
 	Response      any    `json:"response"`
 	CorrectAnswer any    `json:"correctAnswer"`
 	IsCorrect     *bool  `json:"isCorrect"`
@@ -488,6 +489,7 @@ type ScienceDetail struct {
 	ScheduleID  string            `json:"scheduleId"`
 	StudentID   string            `json:"studentId"`
 	StudentName string            `json:"studentName"`
+	Course      string            `json:"course,omitempty"`
 	TotalScore  int               `json:"totalScore"`
 	MaxScore    int               `json:"maxScore"`
 	Percentage  float64           `json:"percentage"`
@@ -582,18 +584,22 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 	}
 	var (
 		scheduleID, studentID, studentName string
+		course                             sql.NullString
 		finalSub                           sql.NullString
+		sealedSub                          sql.NullString
 		submittedAt                        sql.NullTime
 		outcome, release                   sql.NullString
 	)
 	scope, scopeArgs := actResultScope(actor)
 	query := `
 		SELECT a.schedule_id, a.candidate_id, a.candidate_name,
-			COALESCE(ss.auto_grading_results, a.final_submission), a.submitted_at,
+			JSON_UNQUOTE(JSON_EXTRACT(reg.metadata, '$.ieltsCourse')),
+			COALESCE(ss.auto_grading_results, a.final_submission), a.final_submission, a.submitted_at,
 			ar.outcome_status, ar.release_status
 		FROM student_attempts a
 		JOIN exam_entities e ON e.id = a.exam_id
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
+		LEFT JOIN schedule_registrations reg ON reg.id = a.registration_id
 		LEFT JOIN student_submissions sub ON sub.attempt_id = a.id AND sub.provider_key = 'act'
 		LEFT JOIN section_submissions ss ON ss.submission_id = sub.id AND ss.section = 'science'
 		LEFT JOIN assessment_results ar
@@ -602,7 +608,7 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 		  AND a.submitted_at IS NOT NULL` + scope
 	args := append([]any{attemptID}, scopeArgs...)
 	err := s.db.QueryRowContext(ctx, query, args...).
-		Scan(&scheduleID, &studentID, &studentName, &finalSub, &submittedAt, &outcome, &release)
+		Scan(&scheduleID, &studentID, &studentName, &course, &finalSub, &sealedSub, &submittedAt, &outcome, &release)
 	if err == sql.ErrNoRows {
 		telemetry.IncCounter(telemetry.MACTResultTotal, "provider", "act", "section", SectionScience, "outcome", "not_found")
 		return nil, apperrors.New(apperrors.CodeNotFound, "ACT result not found.")
@@ -615,6 +621,10 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 	if finalSub.Valid && strings.TrimSpace(finalSub.String) != "" {
 		_ = json.Unmarshal([]byte(finalSub.String), &snap)
 	}
+	fallbackSnap := map[string]any{}
+	if sealedSub.Valid && strings.TrimSpace(sealedSub.String) != "" {
+		_ = json.Unmarshal([]byte(sealedSub.String), &fallbackSnap)
+	}
 	score, _ := snap["score"].(map[string]any)
 	if score == nil {
 		if _, ok := snap["totalScore"]; ok {
@@ -623,7 +633,7 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 	}
 	detail := &ScienceDetail{
 		AttemptID: attemptID, ScheduleID: scheduleID,
-		StudentID: studentID, StudentName: studentName,
+		StudentID: studentID, StudentName: studentName, Course: nullableString(course),
 		Outcome:   firstNonEmpty(nullableString(outcome), "scored"),
 		Release:   firstNonEmpty(nullableString(release), "ready_to_release"),
 		Questions: []ScienceQuestion{},
@@ -650,7 +660,7 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 		detail.SubmittedAt = &ts
 	}
 	if detail.Outcome == "scored" {
-		detail.Questions = buildScienceQuestions(snap)
+		detail.Questions = buildScienceQuestions(snap, fallbackSnap)
 	}
 	telemetry.IncCounter(telemetry.MACTResultTotal, "provider", "act", "section", SectionScience, "outcome", "detailed")
 	return detail, nil
@@ -667,18 +677,22 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 // own content so later authoring edits cannot move the replay. The
 // contentSnapshot alias exists only for pre-Phase-02 seals that embedded
 // the raw snapshot shape.
-func buildScienceQuestions(snap map[string]any) []ScienceQuestion {
+func buildScienceQuestions(snap map[string]any, fallback ...map[string]any) []ScienceQuestion {
+	fallbackSnap := map[string]any{}
+	if len(fallback) > 0 && fallback[0] != nil {
+		fallbackSnap = fallback[0]
+	}
+	categoryByID := scienceCategoryByQuestionID(scienceContentSnapshot(snap))
+	if len(categoryByID) == 0 {
+		categoryByID = scienceCategoryByQuestionID(scienceContentSnapshot(fallbackSnap))
+	}
 	if raw, ok := snap["questionResults"].([]any); ok {
-		return scienceQuestionsFromResults(raw)
+		return scienceQuestionsFromResults(raw, categoryByID)
 	}
 	out := []ScienceQuestion{}
-	content, _ := snap["content"].(map[string]any)
+	content := scienceContentSnapshot(snap)
 	if content == nil {
-		if raw, ok := snap["contentSnapshot"]; ok {
-			if encoded, err := json.Marshal(raw); err == nil {
-				_ = json.Unmarshal(encoded, &content)
-			}
-		}
+		content = scienceContentSnapshot(fallbackSnap)
 	}
 	var keyOrder []string
 	key := map[string]any{}
@@ -699,7 +713,7 @@ func buildScienceQuestions(snap map[string]any) []ScienceQuestion {
 		}
 		given, present := answers[questionID]
 		question := ScienceQuestion{
-			QuestionID: questionID, DisplayOrder: i + 1,
+			QuestionID: questionID, DisplayOrder: i + 1, SkillCategory: categoryByID[questionID],
 			Answered: isScienceAnswered(given, present),
 		}
 		if present {
@@ -726,24 +740,72 @@ func buildScienceQuestions(snap map[string]any) []ScienceQuestion {
 		}
 		out = append(out, ScienceQuestion{
 			QuestionID: questionID, DisplayOrder: len(out) + 1,
-			Response: given, Answered: isScienceAnswered(given, true),
+			SkillCategory: categoryByID[questionID],
+			Response:      given, Answered: isScienceAnswered(given, true),
 		})
 	}
 	return out
 }
 
-func scienceQuestionsFromResults(raw []any) []ScienceQuestion {
+func scienceContentSnapshot(snap map[string]any) map[string]any {
+	if snap == nil {
+		return nil
+	}
+	if content, ok := snap["content"].(map[string]any); ok {
+		return content
+	}
+	if raw, ok := snap["contentSnapshot"]; ok {
+		if encoded, err := json.Marshal(raw); err == nil {
+			var content map[string]any
+			if json.Unmarshal(encoded, &content) == nil {
+				return content
+			}
+		}
+	}
+	return nil
+}
+
+func scienceCategoryByQuestionID(content map[string]any) map[string]string {
+	if content == nil {
+		return nil
+	}
+	normalized := normalizeScienceContent(content)
+	raw, _ := normalized["questions"].([]any)
+	out := make(map[string]string, len(raw))
+	for _, item := range raw {
+		question, _ := item.(map[string]any)
+		if question == nil {
+			continue
+		}
+		id, _ := firstString(question, "questionId", "question_id", "id")
+		category, _ := question["skillCategory"].(string)
+		if id != "" && category != "" {
+			out[id] = category
+		}
+	}
+	return out
+}
+
+func scienceQuestionsFromResults(raw []any, categoryByID ...map[string]string) []ScienceQuestion {
 	out := make([]ScienceQuestion, 0, len(raw))
+	categoryLookup := map[string]string{}
+	if len(categoryByID) > 0 && categoryByID[0] != nil {
+		categoryLookup = categoryByID[0]
+	}
 	for index, item := range raw {
 		result, _ := item.(map[string]any)
 		if result == nil {
 			continue
 		}
 		id, _ := result["questionId"].(string)
+		skillCategory, _ := result["skillCategory"].(string)
+		if skillCategory == "" {
+			skillCategory = categoryLookup[id]
+		}
 		answer, present := result["studentAnswer"]
 		answerText, _ := answer.(string)
 		question := ScienceQuestion{
-			QuestionID: id, DisplayOrder: index + 1,
+			QuestionID: id, DisplayOrder: index + 1, SkillCategory: skillCategory,
 			Response: answerText, CorrectAnswer: result["correctAnswer"],
 			Answered: present && strings.TrimSpace(answerText) != "",
 		}

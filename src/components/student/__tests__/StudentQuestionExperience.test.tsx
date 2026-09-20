@@ -131,6 +131,7 @@ describe('student question experience', () => {
     expect(questionCopy).toHaveStyle({ userSelect: 'text' });
     expect(answerControl).not.toHaveAttribute('data-student-question-callout-protected');
     expect(answerControl.closest('[data-student-question-callout-protected="true"]')).toBeNull();
+    expect(answerControl).toHaveClass('text-gray-900', 'bg-white', 'placeholder:text-gray-500');
   });
 
   it('marks only non-active question blocks as safe offscreen render candidates', () => {
@@ -738,6 +739,36 @@ describe('student question experience', () => {
     const eliminate = screen.getByRole('button', { name: 'Eliminate option A' });
     expect(eliminate).toHaveClass('student-touch-target');
     expect(eliminate.className).toContain('shrink-0');
+  });
+
+  it('shows a visible cross mark and high-contrast X control for eliminated choices', () => {
+    const block: SingleMCQBlock = {
+      id: 'elim-visual-mcq',
+      type: 'SINGLE_MCQ',
+      instruction: 'Choose one answer.',
+      stem: 'Which option is correct?',
+      options: [
+        { id: 'elim-a', text: 'Alpha', isCorrect: true },
+        { id: 'elim-b', text: 'Beta', isCorrect: false },
+      ],
+    } as unknown as SingleMCQBlock;
+
+    render(
+      <QuestionRenderer
+        question={null}
+        block={block}
+        number={3}
+        answer=""
+        onChange={() => {}}
+        eliminatedOptionIds={['elim-a']}
+        onToggleOptionElimination={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByTestId('choice-elimination-mark')).toHaveLength(2);
+    const restore = screen.getByRole('button', { name: 'Restore option A' });
+    expect(restore).toHaveClass('bg-gray-800', 'text-white');
+    expect(restore.querySelector('svg')).toBeInTheDocument();
   });
 
   it('replaces the multi-select set when an option is unselected', () => {

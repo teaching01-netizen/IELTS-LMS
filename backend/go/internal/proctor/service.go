@@ -866,6 +866,93 @@ func (s *Service) AutoSubmitAfterComplete(ctx context.Context, actor Actor, sche
 	return err
 }
 
+// AutoSubmitACTAfterComplete is a provider-scoped compatibility helper that
+// drains writable ACT attempts synchronously after the cohort state commits.
+// HTTP completion paths use AutoSubmitScheduleAfterComplete so IELTS and ACT
+// both become visible as submitted without waiting for the worker hot cycle.
+func (s *Service) AutoSubmitACTAfterComplete(ctx context.Context, actor Actor, scheduleID string) error {
+	if s == nil || s.seal == nil {
+		return nil
+	}
+	var attemptIDs []string
+	if err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		rows, err := q.QueryContext(ctx, `
+			SELECT a.id
+			FROM student_attempts a
+			JOIN exam_schedules schedule ON schedule.id = a.schedule_id
+			JOIN exam_entities exam ON exam.id = a.exam_id
+			WHERE a.schedule_id = ?
+			  AND (schedule.provider_key = 'act' OR exam.provider_key = 'act' OR UPPER(COALESCE(exam.exam_type, '')) = 'ACT')
+			  AND a.submitted_at IS NULL
+			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			  AND COALESCE(a.proctor_status, 'active') <> 'terminated'
+			ORDER BY a.id ASC`, scheduleID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var attemptID string
+			if err := rows.Scan(&attemptID); err != nil {
+				return err
+			}
+			attemptIDs = append(attemptIDs, attemptID)
+		}
+		return rows.Err()
+	}); err != nil {
+		return err
+	}
+	for _, attemptID := range attemptIDs {
+		if err := s.AutoSubmitAfterComplete(ctx, actor, scheduleID, attemptID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AutoSubmitScheduleAfterComplete drains all writable attempts synchronously
+// after the cohort state has committed. The durable outbox remains the retry
+// path, but the browser can observe a completed result immediately for both
+// IELTS and ACT instead of waiting for the worker's next hot cycle.
+func (s *Service) AutoSubmitScheduleAfterComplete(ctx context.Context, actor Actor, scheduleID string) error {
+	if s == nil || s.seal == nil {
+		return nil
+	}
+	var attemptIDs []string
+	if err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		rows, err := q.QueryContext(ctx, `
+			SELECT a.id
+			FROM student_attempts a
+			JOIN exam_schedules schedule ON schedule.id = a.schedule_id
+			WHERE a.schedule_id = ?
+			  AND schedule.status = 'completed'
+			  AND a.submitted_at IS NULL
+			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			  AND COALESCE(a.proctor_status, 'active') <> 'terminated'
+			ORDER BY a.id ASC`, scheduleID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var attemptID string
+			if err := rows.Scan(&attemptID); err != nil {
+				return err
+			}
+			attemptIDs = append(attemptIDs, attemptID)
+		}
+		return rows.Err()
+	}); err != nil {
+		return err
+	}
+	for _, attemptID := range attemptIDs {
+		if err := s.AutoSubmitAfterComplete(ctx, actor, scheduleID, attemptID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RecordPresence upserts proctor presence (join/heartbeat/leave). The
 // presence row always belongs to the verified actor: a proctorID that
 // disagrees with the actor is a 403 so direct service callers cannot spoof

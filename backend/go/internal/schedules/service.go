@@ -950,12 +950,12 @@ func NormalizeAccessCode(raw string) string {
 	return trimmed
 }
 
-// ValidateWcode requires a non-empty access code. Any format is accepted
+// ValidateWcode requires a non-empty candidate code. Any format is accepted
 // (legacy W123456 codes are uppercased by NormalizeAccessCode; free-form
 // codes pass through trimmed).
 func ValidateWcode(wcode string) error {
 	if NormalizeAccessCode(wcode) == "" {
-		return validationError("Access code is required.")
+		return validationError("Code is required.")
 	}
 	return nil
 }

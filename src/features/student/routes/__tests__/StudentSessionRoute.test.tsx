@@ -132,6 +132,76 @@ describe('StudentSessionRoute', () => {
     expect(navigateMock).toHaveBeenCalledWith('/student/sched-1');
   });
 
+  it('navigates to check-in without waiting for a slow logout request', () => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue({
+      user: {
+        id: 'student-1',
+        email: 'student@example.com',
+        displayName: 'Student User',
+        role: 'student',
+        state: 'active',
+      },
+      csrfToken: 'csrf-student',
+      expiresAt: '2026-01-01T12:00:00.000Z',
+    });
+    vi.spyOn(authService, 'logoutAll').mockImplementation(() => new Promise(() => {}));
+
+    StudentAppWrapperMock.mockImplementation((props: any) => (
+      <button onClick={props.onExit}>Exit</button>
+    ));
+    useStudentSessionRouteDataMock.mockReturnValue({
+      attemptSnapshot: null,
+      error: null,
+      isLoading: false,
+      retry: vi.fn(),
+      runtimeSnapshot: null,
+      state: {},
+      refreshRuntime: vi.fn(),
+    });
+
+    renderRoute('/student/sched-1/alice');
+    fireEvent.click(screen.getByRole('button', { name: /exit/i }));
+
+    expect(navigateMock).toHaveBeenCalledWith('/student/sched-1');
+  });
+
+  it('keeps a completed ACT session on the completion screen after Exit', async () => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue({
+      user: {
+        id: 'student-1',
+        email: 'student@example.com',
+        displayName: 'Student User',
+        role: 'student',
+        state: 'active',
+      },
+      csrfToken: 'csrf-student',
+      expiresAt: '2026-01-01T12:00:00.000Z',
+    });
+    const logoutAllMock = vi.spyOn(authService, 'logoutAll').mockResolvedValue();
+
+    StudentAppWrapperMock.mockImplementation((props: any) => (
+      <button onClick={props.onExit}>Exit</button>
+    ));
+    useStudentSessionRouteDataMock.mockReturnValue({
+      attemptSnapshot: null,
+      error: null,
+      isLoading: false,
+      providerKey: 'act',
+      retry: vi.fn(),
+      runtimeSnapshot: null,
+      state: {},
+      refreshRuntime: vi.fn(),
+    });
+
+    renderRoute('/student/sched-1/alice');
+    fireEvent.click(screen.getByRole('button', { name: /exit/i }));
+
+    await waitFor(() => {
+      expect(logoutAllMock).toHaveBeenCalledTimes(1);
+    });
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
   it('renders the SAT skin (never the admin skeleton) while a SAT load is pending', async () => {
     // Auth window excluded from the flicker assertion: settle auth to
     // 'unauthenticated' so the route reads the provider-known-SAT branch.

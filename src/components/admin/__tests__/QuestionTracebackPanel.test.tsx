@@ -20,6 +20,40 @@ afterEach(() => {
 });
 
 describe('QuestionTracebackPanel', () => {
+  test('renders null persisted answers without crashing', () => {
+    render(
+      <QuestionTracebackPanel
+        section="reading"
+        examState={null}
+        sectionSubmission={{
+          id: 'sec-null-answer',
+          submissionId: 'sub-null-answer',
+          section: 'reading',
+          answers: { type: 'reading', answers: {} },
+          autoGradingResults: {
+            questionResults: [
+              {
+                questionId: 'q-null',
+                studentAnswer: null,
+                correctAnswer: null,
+                isCorrect: false,
+                awardedScore: 0,
+                maxScore: 1,
+              },
+            ],
+          },
+          gradingStatus: 'auto_graded',
+          submittedAt: '2026-01-01T00:00:00.000Z',
+        } as any}
+        examLoading={false}
+        examError={null}
+      />,
+    );
+
+    expect(screen.getAllByText('—')).toHaveLength(2);
+    expect(screen.getByText('Question schema unavailable')).toBeInTheDocument();
+  });
+
   test('lets a grader choose a persisted correctness override for an answer row', () => {
     const examState = createInitialExamState('Exam', 'Academic');
     examState.reading.passages = [

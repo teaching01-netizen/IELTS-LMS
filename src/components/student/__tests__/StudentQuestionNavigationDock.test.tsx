@@ -68,28 +68,42 @@ const questions = [
   descriptor('q3', block, (block as any).questions[2]),
 ];
 
+const diagramBlock = {
+  id: 'diagram-1',
+  type: 'DIAGRAM_LABELING',
+  instruction: 'Label the diagram.',
+  labels: [
+    { id: 'label-a', text: 'Label A', correctAnswer: 'A' },
+  ],
+} as unknown as QuestionBlock;
+
+const diagramQuestion = descriptor('diagram-1:label-a', diagramBlock, null);
+
 function renderPanel(overrides: Record<string, unknown> = {}) {
   const onNavigate = vi.fn();
+  const props = {
+    blocks: [block],
+    allQuestions: questions,
+    answers: { q1: 'T', q2: 'F' },
+    onAnswerChange: vi.fn(),
+    currentQuestionId: 'q1',
+    onNavigate,
+    flags: {},
+    onToggleFlag: vi.fn(),
+    answerCompact: false,
+    highlightEnabled: false,
+    questionContainerRef: React.createRef<HTMLDivElement>(),
+    panelTestId: 'question-panel-dock',
+    getBlockStartQuestionNumber: () => 1,
+    renderBlockInstruction: () => null,
+    ...overrides,
+  };
   const view = render(
     <StudentQuestionPanel
-      blocks={[block]}
-      allQuestions={questions}
-      answers={{ q1: 'T', q2: 'F' }}
-      onAnswerChange={vi.fn()}
-      currentQuestionId="q1"
-      onNavigate={onNavigate}
-      flags={{}}
-      onToggleFlag={vi.fn()}
-      answerCompact={false}
-      highlightEnabled={false}
-      questionContainerRef={React.createRef<HTMLDivElement>()}
-      panelTestId="question-panel-dock"
-      getBlockStartQuestionNumber={() => 1}
-      renderBlockInstruction={() => null}
-      {...overrides}
+      {...props}
     />,
   );
-  return { ...view, onNavigate };
+  return { ...view, onNavigate, props };
 }
 
 function renderFooter(overrides: Record<string, unknown> = {}) {
@@ -151,6 +165,46 @@ describe('one navigation authority', () => {
     fireEvent.scroll(screen.getByTestId('question-panel-dock'));
 
     expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it('scrolls the selected question inside the question pane', () => {
+    const view = renderPanel();
+    const pane = screen.getByTestId('question-panel-dock') as HTMLElement & {
+      scrollTo: ReturnType<typeof vi.fn>;
+    };
+    const target = document.getElementById('question-q3');
+    expect(target).not.toBeNull();
+
+    pane.scrollTop = 12;
+    pane.scrollTo = vi.fn();
+    vi.spyOn(pane, 'getBoundingClientRect').mockReturnValue({ top: 100 } as DOMRect);
+    vi.spyOn(target as HTMLElement, 'getBoundingClientRect').mockReturnValue({ top: 600 } as DOMRect);
+
+    view.rerender(<StudentQuestionPanel {...view.props} currentQuestionId="q3" />);
+
+    expect(pane.scrollTo).toHaveBeenCalledWith({ top: 496, behavior: 'auto' });
+  });
+
+  it('keeps a scroll anchor for IELTS question blocks without a questions array', () => {
+    render(
+      <StudentQuestionPanel
+        blocks={[diagramBlock]}
+        allQuestions={[diagramQuestion]}
+        answers={{}}
+        onAnswerChange={vi.fn()}
+        currentQuestionId={diagramQuestion.id}
+        onNavigate={vi.fn()}
+        flags={{}}
+        answerCompact={false}
+        highlightEnabled={false}
+        questionContainerRef={React.createRef<HTMLDivElement>()}
+        panelTestId="diagram-question-panel"
+        getBlockStartQuestionNumber={() => 1}
+        renderBlockInstruction={() => null}
+      />,
+    );
+
+    expect(document.getElementById(`question-${diagramQuestion.id}`)).not.toBeNull();
   });
 
   it('disables the ends of the exam instead of wrapping', () => {

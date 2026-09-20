@@ -108,7 +108,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const [examState, setExamState] = useState<ExamState | null>(null);
   const [examLoading, setExamLoading] = useState(false);
   const [examError, setExamError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<'listening' | 'reading' | 'writing' | 'speaking'>('reading');
+  const [activeSection, setActiveSection] = useState<'listening' | 'reading' | 'writing' | 'speaking' | 'science'>('reading');
   const [activeTask, setActiveTask] = useState<string>('task1');
   const [loading, setLoading] = useState(true);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -704,9 +704,22 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     });
   };
 
-  const getSectionSubmission = (section: 'listening' | 'reading' | 'writing' | 'speaking') => {
+  const getSectionSubmission = (section: 'listening' | 'reading' | 'writing' | 'speaking' | 'science') => {
     return sectionSubmissions.find(s => s.section === section);
   };
+
+  const hasScienceSection = sectionSubmissions.some((section) => section.section === 'science');
+  const reviewSections: Array<'listening' | 'reading' | 'writing' | 'speaking' | 'science'> = hasScienceSection
+    ? ['science']
+    : ['listening', 'reading', 'writing', 'speaking'];
+
+  useEffect(() => {
+    if (hasScienceSection && activeSection !== 'science') {
+      setActiveSection('science');
+    } else if (!hasScienceSection && activeSection === 'science') {
+      setActiveSection('reading');
+    }
+  }, [activeSection, hasScienceSection]);
 
   const getWritingTaskSubmission = (taskId: string) => {
     return writingSubmissions.find(w => w.taskId === taskId);
@@ -1332,7 +1345,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
           <div className="p-4 border-b border-gray-200 overflow-y-auto flex-1">
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Sections</h2>
             <div className="space-y-1">
-              {(['listening', 'reading', 'writing', 'speaking'] as const).map((section) => {
+              {reviewSections.map((section) => {
                 const sectionSub = getSectionSubmission(section);
                 return (
                   <button
@@ -1485,6 +1498,40 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 </div>
               )}
             </div>
+
+            {activeSection === 'science' && currentSectionSubmission && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <CheckSquare size={18} className="text-blue-700" />
+                  <h3 className="font-bold text-blue-950">ACT Science result</h3>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border border-blue-200 bg-white p-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Score</p>
+                    <p className="mt-1 text-2xl font-bold text-gray-900">
+                      {currentSectionSubmission.autoGradingResults?.totalScore ?? '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-blue-200 bg-white p-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Max score</p>
+                    <p className="mt-1 text-2xl font-bold text-gray-900">
+                      {currentSectionSubmission.autoGradingResults?.maxScore ?? '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-blue-200 bg-white p-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Percentage</p>
+                    <p className="mt-1 text-2xl font-bold text-gray-900">
+                      {typeof currentSectionSubmission.autoGradingResults?.percentage === 'number'
+                        ? `${currentSectionSubmission.autoGradingResults.percentage}%`
+                        : '—'}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-4 text-sm text-blue-900">
+                  This objective result was calculated by the ACT scoring service from the sealed submission.
+                </p>
+              </div>
+            )}
 
             {/* Writing Task with Annotation Canvas */}
             {activeSection === 'writing' && currentWritingTaskId && (

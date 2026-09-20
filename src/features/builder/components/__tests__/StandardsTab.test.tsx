@@ -100,7 +100,10 @@ describe('StandardsTab', () => {
   it('renders passage word count inputs with current config values', () => {
     setup();
 
-    expect(screen.getByLabelText('Optimal Min')).toHaveValue(700);
+    const optimalMin = screen.getByLabelText('Optimal Min');
+    expect(optimalMin).toHaveValue(700);
+    expect(optimalMin).toHaveClass('text-gray-900', 'bg-white');
+    expect(screen.getByText('Color Preview').parentElement).toHaveClass('text-gray-700');
     expect(screen.getByLabelText('Optimal Max')).toHaveValue(1000);
     expect(screen.getByLabelText('Warning Min')).toHaveValue(500);
     expect(screen.getByLabelText('Warning Max')).toHaveValue(1200);

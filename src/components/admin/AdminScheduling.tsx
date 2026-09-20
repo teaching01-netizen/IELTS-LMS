@@ -380,7 +380,7 @@ export function AdminScheduling({
                         gradingDisplayName: nextExam?.title || '',
                       }));
                     }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                     aria-label="Select exam"
                     required
                   >
@@ -394,7 +394,7 @@ export function AdminScheduling({
 
                 <div>
                   <p className="block text-sm font-semibold text-gray-700 mb-1">Exam Version</p>
-                  <div className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-sm text-gray-700">
+                  <div className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-sm text-gray-900">
                     {loadingVersion ? (
                       <>
                         <span className="sr-only">Loading version…</span>
@@ -415,7 +415,7 @@ export function AdminScheduling({
                   id="schedule-cohort"
                   value={draft.cohortName}
                   onChange={(e) => setDraft(prev => ({ ...prev, cohortName: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   aria-label="Select cohort"
                 >
                   <option>Elite 2025-A</option>
@@ -434,7 +434,7 @@ export function AdminScheduling({
                     type="text"
                     value={draft.proctorDisplayName}
                     onChange={(e) => setDraft(prev => ({ ...prev, proctorDisplayName: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                     aria-label="Proctor display name"
                     maxLength={255}
                     required
@@ -452,7 +452,7 @@ export function AdminScheduling({
                     type="text"
                     value={draft.gradingDisplayName}
                     onChange={(e) => setDraft(prev => ({ ...prev, gradingDisplayName: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                     aria-label="Grading display name"
                     maxLength={255}
                     required

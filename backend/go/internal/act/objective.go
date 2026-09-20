@@ -15,6 +15,7 @@ import (
 // exactly one computation.
 type scienceSpec struct {
 	ID             string
+	SkillCategory  string
 	Correct        any
 	Accepted       []string
 	ExpectedSet    map[string]bool
@@ -107,6 +108,7 @@ func computeScienceAutoGradingResults(config, content map[string]any, answers []
 		}
 		questionResults = append(questionResults, map[string]any{
 			"questionId":         spec.ID,
+			"skillCategory":      nullableStringValue(spec.SkillCategory),
 			"studentAnswer":      studentAnswer,
 			"correctAnswer":      scienceCorrectAnswerValue(spec.Correct),
 			"acceptedAnswers":    append([]string(nil), spec.Accepted...),
@@ -205,7 +207,12 @@ func buildScienceSpecs(content map[string]any, overrides map[string]map[string]a
 		if id == "" {
 			continue
 		}
-		spec := scienceSpec{ID: id, Rule: firstNonEmptyString(question, "scoringRule", "answerRule"), MaxScore: 1}
+		spec := scienceSpec{
+			ID:            id,
+			SkillCategory: firstNonEmptyString(question, "skillCategory", "skill_category"),
+			Rule:          firstNonEmptyString(question, "scoringRule", "answerRule"),
+			MaxScore:      1,
+		}
 		if spec.Rule == "" {
 			spec.Rule = "exact_match"
 		}

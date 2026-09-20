@@ -861,7 +861,10 @@ func Load() Config {
 		AutoSubmitBatchSize:   getenvInt("AUTO_SUBMIT_BATCH_SIZE", 50),
 		HeartbeatMinWriteSecs: getenvInt("HEARTBEAT_PRESENCE_MIN_WRITE_INTERVAL_SECS", 5),
 
-		WorkerFallbackIntervalSecs:       getenvInt("WORKER_FALLBACK_INTERVAL_SECS", resourceDefault(profile, 10, 60)),
+		// Runtime expiry reconciliation and its durable outbox handoff share
+		// this hot cycle. Two seconds bounds the visible section-transition and
+		// auto-submit delay without changing the authoritative database clock.
+		WorkerFallbackIntervalSecs:       getenvInt("WORKER_FALLBACK_INTERVAL_SECS", resourceDefault(profile, 2, 60)),
 		WorkerMaintenanceIntervalSecs:    getenvInt("WORKER_MAINTENANCE_INTERVAL_SECS", 300),
 		LiveUpdatePollIntervalMs:         getenvInt("LIVE_UPDATE_POLL_INTERVAL_MS", resourceDefault(profile, 250, 500)),
 		OutboxBatchSize:                  getenvInt("OUTBOX_BATCH_SIZE", 100),

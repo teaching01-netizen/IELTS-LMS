@@ -191,9 +191,9 @@ export function StudentFooter({
                   }}
                   aria-label={`Jump to Part ${partNumber}`}
                   title={`Click to jump to Part ${partNumber}`}
-                  className={`${pressClassName} min-h-6 min-w-6 flex items-center gap-1 md:gap-1.5 rounded-sm px-1 py-0.5 flex-shrink-0 cursor-pointer hover:bg-gray-50 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60`}
+                  className={`${pressClassName} min-h-6 min-w-6 flex items-center gap-1 md:gap-1.5 rounded-sm border border-gray-400 bg-gray-100 px-1.5 py-0.5 flex-shrink-0 cursor-pointer text-gray-800 hover:bg-gray-200 active:bg-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-100`}
                 >
-                  <div className="w-8 md:w-10 lg:w-12 h-1 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
+                  <div className="w-8 md:w-10 lg:w-12 h-1 bg-gray-200 rounded-full overflow-hidden border border-gray-300">
                     <div
                       className="h-full bg-blue-800 transition-[width] duration-300 ease-out"
                       style={{
@@ -201,7 +201,7 @@ export function StudentFooter({
                       }}
                     ></div>
                   </div>
-                  <div className="flex items-center gap-1 text-[length:var(--student-meta-font-size)] font-bold text-gray-500">
+                  <div className="flex items-center gap-1 text-[length:var(--student-meta-font-size)] font-bold text-gray-700">
                     <span>
                       {groupAnsweredSlots}/{groupTotalSlots}
                     </span>

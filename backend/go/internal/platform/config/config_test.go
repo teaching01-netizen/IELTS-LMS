@@ -24,7 +24,7 @@ func TestLoadDefaults(t *testing.T) {
 	if c.IdleGraceSecs != 60 || c.GradingSyncOnReadFallback || !c.PrometheusEnabled {
 		t.Fatalf("Rust runtime defaults changed: %+v", c)
 	}
-	if c.WorkerFallbackIntervalSecs != 10 || c.LiveUpdatePollIntervalMs != 250 || c.AutoSubmitBatchSize != 50 {
+	if c.WorkerFallbackIntervalSecs != 2 || c.LiveUpdatePollIntervalMs != 250 || c.AutoSubmitBatchSize != 50 {
 		t.Fatalf("Rust worker defaults changed: %+v", c)
 	}
 	if c.RateLimitBucketCap != 10000 || c.RateLimitMaxKeys != 10000 || c.RateLimitBurst != 0 || c.RateLimitExportPerUser != 3 || c.RateLimitExportPerUserWindowSecs != 300 {

@@ -19,6 +19,7 @@ export interface StudentQuestionBlockSectionProps {
   allQuestions: StudentQuestionDescriptor[];
   answers: Record<string, QuestionAnswer>;
   activeQuestionId: string | null;
+  showOnlyCurrentQuestion?: boolean | undefined;
   flags: Record<string, boolean>;
   onAnswerChange: (
     answerKey: string,
@@ -68,6 +69,7 @@ function areBlockPropsEqual(
     previous.blockQuestions !== next.blockQuestions ||
     previous.allQuestions !== next.allQuestions ||
     previous.activeQuestionId !== next.activeQuestionId ||
+    previous.showOnlyCurrentQuestion !== next.showOnlyCurrentQuestion ||
     previous.answerCompact !== next.answerCompact ||
     previous.stackFlag !== next.stackFlag ||
     previous.tabletMode !== next.tabletMode ||
@@ -109,6 +111,7 @@ export const StudentQuestionBlockSection = React.memo(
     allQuestions,
     answers,
     activeQuestionId,
+    showOnlyCurrentQuestion = false,
     flags,
     onAnswerChange,
     onToggleFlag,
@@ -128,6 +131,20 @@ export const StudentQuestionBlockSection = React.memo(
   }: StudentQuestionBlockSectionProps) {
     const singleBlockQuestion = blockQuestions.length === 1 ? blockQuestions[0] : undefined;
     const treeQuestions = blockQuestions.filter((question) => question.isSubAnswerTreeLeaf);
+    const visibleTreeQuestions =
+      showOnlyCurrentQuestion && activeQuestionId
+        ? treeQuestions.filter((question) => question.id === activeQuestionId)
+        : treeQuestions;
+    const visibleBlockQuestions =
+      showOnlyCurrentQuestion && activeQuestionId && 'questions' in block
+        ? block.questions.filter((question) =>
+            blockQuestions.some(
+              (entry) => entry.id === activeQuestionId && entry.question?.id === question.id,
+            ),
+          )
+        : 'questions' in block
+          ? block.questions
+          : [];
     const rootNumbers = Array.from(
       new Set(
         blockQuestions
@@ -168,9 +185,9 @@ export const StudentQuestionBlockSection = React.memo(
           {renderBlockInstruction(block.instruction, block.id)}
         </div>
         <div className={answerCompact ? 'space-y-5' : expandedQuestionGapClassName}>
-          {treeQuestions.length > 0 ? (
+          {visibleTreeQuestions.length > 0 ? (
             <SubAnswerTreeQuestionList
-              questions={treeQuestions}
+              questions={visibleTreeQuestions}
               answers={answers}
               flags={flags}
               onToggleFlag={onToggleFlag}
@@ -180,7 +197,7 @@ export const StudentQuestionBlockSection = React.memo(
               onAnswerChange={onAnswerChange}
             />
           ) : ('questions' in block) ? (
-            block.questions.map((question, questionIndex) => {
+            visibleBlockQuestions.map((question, questionIndex) => {
               const questionEntries = blockQuestions.filter((entry) => entry.question?.id === question.id);
               const firstEntry = questionEntries[0];
               const globalQuestionNumber =

@@ -905,6 +905,10 @@ export function useStudentSessionRouteData(
       },
       schedule: () => {},
     });
+    // The first tick is the route capability probe. Leaving this false here
+    // made the loop self-disable forever: the tick that would set the flag
+    // was gated on the flag already being true.
+    runtimePollProbedRef.current = true;
   }
 
   useAsyncPolling(

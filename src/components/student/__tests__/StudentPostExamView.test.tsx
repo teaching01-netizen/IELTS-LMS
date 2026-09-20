@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { StudentPostExamView } from '../StudentPostExamView';
 
@@ -25,8 +25,9 @@ describe('StudentPostExamView', () => {
     expect(screen.getByText('Alice Roe')).toBeInTheDocument();
     expect(screen.getByText('A-01')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /exit exam platform/i }));
-    expect(onExit).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/you may now close this tab/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /exit exam platform/i })).not.toBeInTheDocument();
+    expect(onExit).not.toHaveBeenCalled();
     expect(screen.getByTestId('final-overlay')).toBeInTheDocument();
   });
 

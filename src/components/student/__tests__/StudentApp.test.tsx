@@ -2959,7 +2959,8 @@ describe("StudentApp runtime-backed mode", () => {
     );
 
     // Both zero-timer renders share one auto-submit flight: a single V2 flush
-    // starts while the first is still in-flight, and the seeded answer survives.
+    // starts while the first is still in-flight, then the final runtime module
+    // is submitted once after that flush completes.
     await waitFor(() => {
       expect(engineFlush).toHaveBeenCalledTimes(1);
     });
@@ -2967,9 +2968,10 @@ describe("StudentApp runtime-backed mode", () => {
       resolveFlush?.();
       await Promise.resolve();
     });
-    expect(
-      (screen.getByLabelText("Answer for question 1") as HTMLInputElement).value
-    ).toBe("seeded answer");
+    await waitFor(() => {
+      expect(v2TransportMocks.transport.submit).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("IELTS Examination Complete!")).toBeInTheDocument();
+    });
     engineFlush.mockRestore();
   });
 

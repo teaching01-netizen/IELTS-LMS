@@ -212,6 +212,10 @@ export function StudentEntryRoute() {
   const isSatSchedule =
     scheduleAvailability.state === "ready" && scheduleAvailability.providerKey === "sat";
   const isSat = providerOverride === "sat" || isSatSchedule;
+  const courseLabel =
+    scheduleAvailability.state === "ready" && scheduleAvailability.providerKey === "act"
+      ? "Course"
+      : "IELTS Course";
   const availabilityGate =
     scheduleAvailability.state === "unavailable" ? scheduleAvailability : null;
 
@@ -350,7 +354,7 @@ export function StudentEntryRoute() {
     const newErrors: Partial<Record<keyof EntryFormData, string>> = {};
 
     if (!normalizedWcode) {
-      newErrors.wcode = "Access code is required";
+      newErrors.wcode = "Code is required";
     }
 
     if (!normalizedEmail || !validateEmail(normalizedEmail)) {
@@ -369,7 +373,7 @@ export function StudentEntryRoute() {
       }
 
       if (!normalizedIeltsCourse) {
-        newErrors.ieltsCourse = "IELTS Course is required";
+        newErrors.ieltsCourse = `${courseLabel} is required`;
       }
     }
 
@@ -625,14 +629,14 @@ export function StudentEntryRoute() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label htmlFor="wcode" className="block text-sm font-medium text-gray-700 mb-2">
-              Access code
+              Code
               <input
                 id="wcode"
                 type="text"
                 value={formData.wcode}
                 onChange={(e) => handleInputChange("wcode", e.target.value)}
-                placeholder="Enter your access code"
-                aria-label="Access code"
+                placeholder="Enter any code"
+                aria-label="Code"
                 disabled={isLoading || Boolean(queuedAdmission)}
                 className={`mt-2 w-full px-3 py-2 border rounded-md ${
                   errors.wcode ? "border-red-300" : "border-gray-300"
@@ -640,7 +644,7 @@ export function StudentEntryRoute() {
               />
             </label>
             {errors.wcode && <p className="mt-1 text-sm text-red-600">{errors.wcode}</p>}
-            <p className="mt-1 text-xs text-gray-500">Enter the access code provided to you.</p>
+            <p className="mt-1 text-xs text-gray-500">Enter any code for this exam.</p>
           </div>
 
           <div>
@@ -709,14 +713,14 @@ export function StudentEntryRoute() {
                   htmlFor="ieltsCourse"
                   className="block text-sm font-medium text-gray-700 mb-2"
                 >
-                  IELTS Course
+                  {courseLabel}
                   <input
                     id="ieltsCourse"
                     type="text"
                     value={formData.ieltsCourse}
                     onChange={(e) => handleInputChange("ieltsCourse", e.target.value)}
-                    placeholder="IELTS Course"
-                    aria-label="IELTS Course"
+                    placeholder={courseLabel}
+                    aria-label={courseLabel}
                     disabled={isLoading || Boolean(queuedAdmission)}
                     className={`mt-2 w-full px-3 py-2 border rounded-md ${
                       errors.ieltsCourse ? "border-red-300" : "border-gray-300"

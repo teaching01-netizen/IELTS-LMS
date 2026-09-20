@@ -81,6 +81,9 @@ export function createStudentRealtimeCoordinator(
       return 'invalidated';
     },
     getPollingPolicy(runtimeStatus) {
+      if (runtimeStatus === 'not_started' || runtimeStatus === 'completed') {
+        return { intervalMs: 1_500, maxIntervalMs: 3_000 };
+      }
       if (runtimeStatus === 'live') {
         return socketConnected
           ? { intervalMs: 20_000, maxIntervalMs: 30_000 }

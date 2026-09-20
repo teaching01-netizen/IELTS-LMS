@@ -3,6 +3,7 @@ import "./styles/exam.css";
 import {
   countAnsweredQuestions,
   countQuestionSlots,
+  getEnabledModules,
 } from "@student/application/studentExamContentFacade";
 import { Button } from "../ui/Button";
 import { AlertTriangle } from "lucide-react";
@@ -288,6 +289,10 @@ export function StudentApp({
 
     return latestWarning;
   }, [attemptState.attempt]);
+  const finalModule = useMemo(() => {
+    const enabledModules = getEnabledModules(examState.config);
+    return enabledModules[enabledModules.length - 1] ?? null;
+  }, [examState.config]);
 
   const verifiedTerminalState = useMemo(
     () =>
@@ -375,6 +380,7 @@ export function StudentApp({
         transport: {
           flushPending: attemptActions.flushPending,
           submit: attemptActions.submitAttempt,
+          submitAfterBarrier: attemptActions.submitAttemptAfterBarrier,
         },
       }),
     [attemptActions, commitWritingDraft, examSessionStore, reconcileLiveAnswerCacheNow]
@@ -391,11 +397,13 @@ export function StudentApp({
       attemptId: attemptState.attemptId,
       runtimeCompletionVerified,
       shouldRenderPostExam: shouldRenderPostExam && !runtimeSubmissionPending,
+      isFinalModule: (module) => module === finalModule,
       reconcileLiveAnswerCacheNow,
       commitWritingDraft,
       attemptActions: {
         flushPending: attemptActions.flushPending,
         submitAttempt: attemptActions.submitAttempt,
+        submitAttemptAfterBarrier: attemptActions.submitAttemptAfterBarrier,
       },
       runtimeActions: {
         transitionBlocking: runtimeActions.transitionBlocking,
@@ -889,6 +897,7 @@ export function StudentApp({
           effectivePhase={effectivePhase}
           autoSubmitEnabled={examState.config.progression.autoSubmit}
           config={examState.config}
+          isFinalModule={(module) => module === finalModule}
           flushAndSubmitCurrentModuleWithRetry={flushAndSubmitCurrentModuleWithRetry}
         />
       }

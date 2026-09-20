@@ -107,11 +107,11 @@ export async function studentCheckIn(
   await openStudentCheckIn(page, scheduleId);
 
   await page.waitForTimeout(250);
-  const wcodeField = page.getByLabel("Access code");
+  const wcodeField = page.getByLabel("Code");
   const emailField = page.getByLabel("Email");
   const nameField = page.getByLabel("Full Name");
   const nicknameField = page.getByLabel("Nickname");
-  const ieltsCourseField = page.getByLabel("IELTS Course");
+  const courseField = page.getByLabel("Course").or(page.getByLabel("IELTS Course"));
 
   // Prefer typing over a single `fill()` call to avoid hydration races in slower browsers.
   await wcodeField.click();
@@ -126,8 +126,8 @@ export async function studentCheckIn(
   await nicknameField.click();
   await nicknameField.fill("");
   await nicknameField.type(payload.fullName, { delay: 10 });
-  await ieltsCourseField.click();
-  await ieltsCourseField.fill("Academic IELTS");
+  await courseField.click();
+  await courseField.fill((await page.getByLabel("Course").count()) > 0 ? "ACT" : "Academic IELTS");
 
   await page.waitForTimeout(100);
   const continueButton = page.getByRole("button", { name: "Continue" });

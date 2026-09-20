@@ -1,5 +1,4 @@
 import React from 'react';
-import { Button } from '../ui/Button';
 
 /**
  * Phase 04 ACT reconciliation: provider-aware completion copy.
@@ -21,7 +20,6 @@ export function StudentPostExamView({
   isProctorTerminated,
   proctorNote,
   studentInfo,
-  onExit,
   finalSubmitOverlay,
   provider = "ielts",
 }: StudentPostExamViewProps) {
@@ -34,12 +32,12 @@ export function StudentPostExamView({
         ? "Congratulations! You have completed all modules of the SAT."
         : "Congratulations! You have completed all modules of the IELTS examination.";
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full bg-gray-50 p-4 font-sans text-gray-900">
+    <div className="flex min-h-screen min-h-[100dvh] w-full flex-col items-center justify-center bg-gray-50 p-4 font-sans text-gray-900">
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
-      <main id="main-content" role="main" className="flex flex-col items-center justify-center">
-        <div className="bg-white p-6 md:p-8 rounded-lg shadow-md max-w-2xl w-full text-center">
+      <main id="main-content" role="main" className="flex w-full max-w-5xl flex-col items-center justify-center">
+        <div className="w-full rounded-lg bg-white p-6 text-center shadow-md md:p-8">
           <h1 className="text-3xl font-bold mb-4">
             {isProctorTerminated ? 'Session terminated' : completionHeading}
           </h1>
@@ -51,9 +49,10 @@ export function StudentPostExamView({
               ) : null}
             </div>
           ) : (
-            <p className="text-gray-600 mb-8">
-              {completionBody}
-            </p>
+            <div className="mb-8 space-y-3 text-gray-600">
+              <p>{completionBody}</p>
+              <p>You may now close this tab.</p>
+            </div>
           )}
 
           {studentInfo.length > 0 ? (
@@ -72,7 +71,6 @@ export function StudentPostExamView({
               </div>
             </div>
           ) : null}
-          <Button onClick={onExit}>Exit Exam Platform</Button>
         </div>
       </main>
       {finalSubmitOverlay}

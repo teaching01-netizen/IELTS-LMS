@@ -34,6 +34,63 @@ func TestSealedContentHashDeterministic(t *testing.T) {
 	}
 }
 
+func TestScienceAutoGradingResultsCarrySkillCategories(t *testing.T) {
+	content := map[string]any{
+		"questions": []any{
+			map[string]any{
+				"questionId":    "q-iod",
+				"skillCategory": "interpretation_of_data",
+				"correctAnswer": "A",
+			},
+			map[string]any{
+				"questionId":    "q-sin",
+				"skillCategory": "scientific_investigation",
+				"correctAnswer": "B",
+			},
+		},
+	}
+
+	results, err := computeScienceAutoGradingResults(
+		map[string]any{},
+		content,
+		[]Answer{{QuestionID: "q-iod", Answer: "A"}},
+		time.Now().UTC(),
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	questionResults, ok := results["questionResults"].([]map[string]any)
+	if !ok || len(questionResults) != 2 {
+		t.Fatalf("unexpected question results: %#v", results["questionResults"])
+	}
+	if questionResults[0]["skillCategory"] != "interpretation_of_data" {
+		t.Fatalf("IOD category was not carried into the result: %#v", questionResults[0])
+	}
+	if questionResults[1]["skillCategory"] != "scientific_investigation" {
+		t.Fatalf("SIN category was not carried into the result: %#v", questionResults[1])
+	}
+}
+
+func TestBuildScienceQuestionsCarriesSkillCategory(t *testing.T) {
+	snap := map[string]any{
+		"questionResults": []any{
+			map[string]any{
+				"questionId":    "q-iod",
+				"studentAnswer": "A",
+				"isCorrect":     true,
+				"skillCategory": "interpretation_of_data",
+			},
+		},
+	}
+
+	questions := buildScienceQuestions(snap)
+	if len(questions) != 1 || questions[0].SkillCategory != "interpretation_of_data" {
+		t.Fatalf("expected ACT category in result detail, got %#v", questions)
+	}
+}
+
 func TestListScienceReportsUsesEffectiveProviderPredicate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -74,14 +131,14 @@ func TestGetScienceDetailReplaysKeyVerdicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	finalSubmission := `{"section":"science","score":{"totalScore":1,"maxScore":3,"percentage":33.3},"content":{"questions":[{"questionId":"q1","correctAnswer":"A"},{"questionId":"q2","correctAnswer":"B"},{"questionId":"q3","correctAnswer":"C"}]},"answers":{"q1":"a","q2":"zzz"}}`
+	finalSubmission := `{"section":"science","score":{"totalScore":1,"maxScore":3,"percentage":33.3},"content":{"questions":[{"questionId":"q1","skillCategory":"interpretation_of_data","correctAnswer":"A"},{"questionId":"q2","skillCategory":"scientific_investigation","correctAnswer":"B"},{"questionId":"q3","skillCategory":"evaluating_scientific_arguments_and_models_with_evidence","correctAnswer":"C"}]},"answers":{"q1":"a","q2":"zzz"}}`
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts a")).
 		WithArgs("attempt-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"schedule_id", "candidate_id", "candidate_name",
-			"final_submission", "submitted_at",
+			"course", "final_submission", "sealed_submission", "submitted_at",
 			"outcome_status", "release_status",
-		}).AddRow("schedule-1", "student-1", "Alice", finalSubmission, time.Now().UTC(), "scored", "ready_to_release"))
+		}).AddRow("schedule-1", "student-1", "Alice", "ACT Prep", finalSubmission, finalSubmission, time.Now().UTC(), "scored", "ready_to_release"))
 	platform := auth.NewActorContext("admin-1", auth.RoleAdmin)
 	detail, err := NewService(db, nil).GetScienceDetail(context.Background(), platform, "attempt-1")
 	if err != nil {
@@ -90,6 +147,9 @@ func TestGetScienceDetailReplaysKeyVerdicts(t *testing.T) {
 	if detail.TotalScore != 1 || detail.MaxScore != 3 || len(detail.Questions) != 3 {
 		t.Fatalf("unexpected ACT detail: %+v", detail)
 	}
+	if detail.Course != "ACT Prep" {
+		t.Fatalf("expected ACT course in result detail, got %q", detail.Course)
+	}
 	byID := map[string]ScienceQuestion{}
 	for _, question := range detail.Questions {
 		byID[question.QuestionID] = question
@@ -97,6 +157,9 @@ func TestGetScienceDetailReplaysKeyVerdicts(t *testing.T) {
 	// Case-insensitive science convention: "a" matches key "A".
 	if byID["q1"].IsCorrect == nil || !*byID["q1"].IsCorrect {
 		t.Fatalf("expected q1 correct, got %+v", byID["q1"])
+	}
+	if byID["q1"].SkillCategory != "interpretation_of_data" {
+		t.Fatalf("expected q1 ACT category, got %+v", byID["q1"])
 	}
 	if byID["q2"].IsCorrect == nil || *byID["q2"].IsCorrect {
 		t.Fatalf("expected q2 incorrect, got %+v", byID["q2"])

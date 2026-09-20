@@ -53,6 +53,139 @@ describe("useStudentSubmissionOrchestration", () => {
     expect(submitModule).toHaveBeenCalledTimes(1);
   });
 
+  it("finalizes the attempt immediately when the runtime deadline closes the final module", async () => {
+    const submitAttempt = vi.fn().mockResolvedValue(true);
+    const submitModule = vi.fn();
+
+    const { result } = renderHook(() =>
+      useStudentSubmissionOrchestration({
+        runtimeState: {
+          runtimeBacked: true,
+          runtimeStatus: "live",
+          currentModule: "science",
+        },
+        runtimeStateRef: {
+          current: {
+            phase: "exam",
+            currentModule: "science",
+          },
+        },
+        attemptId: "attempt-final-deadline",
+        runtimeCompletionVerified: false,
+        shouldRenderPostExam: false,
+        isFinalModule: () => true,
+        reconcileLiveAnswerCacheNow: vi.fn(),
+        commitWritingDraft: vi.fn(),
+        attemptActions: {
+          flushPending: vi.fn().mockResolvedValue(true),
+          submitAttempt,
+        },
+        runtimeActions: {
+          transitionBlocking: vi.fn(),
+          submitModule,
+        },
+      })
+    );
+
+    await act(async () => {
+      await result.current.flushAndSubmitCurrentModuleWithRetry("runtime:science");
+    });
+
+    expect(submitAttempt).toHaveBeenCalledTimes(1);
+    expect(submitModule).not.toHaveBeenCalled();
+  });
+
+  it("uses the application submission coordinator for a final runtime module", async () => {
+    const requestSubmit = vi.fn().mockResolvedValue({ kind: "submitted" as const });
+    const flushBarrier = vi.fn().mockResolvedValue({ kind: "ready" as const });
+    const submitModule = vi.fn();
+
+    const { result } = renderHook(() =>
+      useStudentSubmissionOrchestration({
+        runtimeState: {
+          runtimeBacked: true,
+          runtimeStatus: "live",
+          currentModule: "reading",
+        },
+        runtimeStateRef: {
+          current: {
+            phase: "exam",
+            currentModule: "reading",
+          },
+        },
+        attemptId: "attempt-final-coordinator",
+        runtimeCompletionVerified: false,
+        shouldRenderPostExam: false,
+        isFinalModule: () => true,
+        reconcileLiveAnswerCacheNow: vi.fn(),
+        commitWritingDraft: vi.fn(),
+        attemptActions: {
+          flushPending: vi.fn().mockResolvedValue(true),
+          submitAttempt: vi.fn(),
+        },
+        submissionCommands: {
+          flushBarrier,
+          requestSubmit,
+          submitAfterBarrier: requestSubmit,
+        },
+        runtimeActions: {
+          transitionBlocking: vi.fn(),
+          submitModule,
+        },
+      })
+    );
+
+    await act(async () => {
+      await result.current.flushAndSubmitCurrentModuleWithRetry("runtime:reading");
+    });
+
+    expect(flushBarrier).toHaveBeenCalledTimes(1);
+    expect(requestSubmit).toHaveBeenCalledTimes(1);
+    expect(submitModule).not.toHaveBeenCalled();
+  });
+
+  it("advances an intermediate runtime module instead of finalizing the attempt", async () => {
+    const submitAttempt = vi.fn().mockResolvedValue(true);
+    const submitModule = vi.fn();
+
+    const { result } = renderHook(() =>
+      useStudentSubmissionOrchestration({
+        runtimeState: {
+          runtimeBacked: true,
+          runtimeStatus: "live",
+          currentModule: "reading",
+        },
+        runtimeStateRef: {
+          current: {
+            phase: "exam",
+            currentModule: "reading",
+          },
+        },
+        attemptId: "attempt-intermediate-runtime",
+        runtimeCompletionVerified: false,
+        shouldRenderPostExam: false,
+        isFinalModule: () => false,
+        reconcileLiveAnswerCacheNow: vi.fn(),
+        commitWritingDraft: vi.fn(),
+        attemptActions: {
+          flushPending: vi.fn().mockResolvedValue(true),
+          submitAttempt,
+        },
+        runtimeActions: {
+          transitionBlocking: vi.fn(),
+          submitModule,
+        },
+      })
+    );
+
+    await act(async () => {
+      await result.current.flushAndSubmitCurrentModuleWithRetry("runtime:reading");
+    });
+
+    expect(submitModule).toHaveBeenCalledTimes(1);
+    expect(submitAttempt).not.toHaveBeenCalled();
+  });
+
   it("triggers runtime final-submit pipeline when runtime is completed", async () => {
     const submitAttempt = vi.fn().mockResolvedValue(true);
 

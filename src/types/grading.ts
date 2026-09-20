@@ -264,10 +264,11 @@ export interface StudentSubmission {
   
   // Section-level status badges
   sectionStatuses: {
-    listening: SectionGradingStatus;
-    reading: SectionGradingStatus;
-    writing: SectionGradingStatus;
-    speaking: SectionGradingStatus;
+    listening?: SectionGradingStatus;
+    reading?: SectionGradingStatus;
+    writing?: SectionGradingStatus;
+    speaking?: SectionGradingStatus;
+    science?: SectionGradingStatus;
   };
   
   // Metadata
@@ -281,7 +282,7 @@ export interface StudentSubmission {
 export interface SectionSubmission {
   id: string;
   submissionId: string;
-  section: 'listening' | 'reading' | 'writing' | 'speaking';
+  section: 'listening' | 'reading' | 'writing' | 'speaking' | 'science';
   
   // Immutable snapshot of student answers
   answers: SectionAnswers;
@@ -309,7 +310,13 @@ export type SectionAnswers =
   | ListeningAnswers
   | ReadingAnswers
   | WritingAnswers
-  | SpeakingAnswers;
+  | SpeakingAnswers
+  | ActScienceAnswers;
+
+export interface ActScienceAnswers {
+  type: 'science';
+  answers: Record<string, unknown>;
+}
 
 export interface ListeningAnswers {
   type: 'listening';
