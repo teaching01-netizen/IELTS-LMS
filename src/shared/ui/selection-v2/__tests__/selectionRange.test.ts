@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createTouchSelectionRange,
-  createTouchSelectionRangeWithin,
-  touchSelectionRects,
-} from '../touchSelectionRange';
+import { createSelectionRange, createSelectionRangeWithin } from '../engine/selectionRange';
+import { selectionRectsFrom } from '../engine/selectionGeometry';
 
 function build(html: string): HTMLElement {
   const host = document.createElement('div');
@@ -19,12 +16,12 @@ function textNodeOf(element: Element): Text {
   return node;
 }
 
-describe('createTouchSelectionRange', () => {
+describe('createSelectionRange', () => {
   it('spans exactly the two offsets in one text node', () => {
     const host = build('<p>hello world</p>');
     const node = textNodeOf(host.querySelector('p')!);
 
-    const range = createTouchSelectionRange({ node, offset: 0 }, { node, offset: 5 });
+    const range = createSelectionRange({ node, offset: 0 }, { node, offset: 5 });
 
     expect(range?.toString()).toBe('hello');
   });
@@ -33,7 +30,7 @@ describe('createTouchSelectionRange', () => {
     const host = build('<p>hello world</p>');
     const node = textNodeOf(host.querySelector('p')!);
 
-    const range = createTouchSelectionRange({ node, offset: 11 }, { node, offset: 6 });
+    const range = createSelectionRange({ node, offset: 11 }, { node, offset: 6 });
 
     expect(range?.toString()).toBe('world');
   });
@@ -42,7 +39,7 @@ describe('createTouchSelectionRange', () => {
     const host = build('<p>hello</p>');
     const node = textNodeOf(host.querySelector('p')!);
 
-    expect(createTouchSelectionRange({ node, offset: 2 }, { node, offset: 2 })).toBeNull();
+    expect(createSelectionRange({ node, offset: 2 }, { node, offset: 2 })).toBeNull();
   });
 
   it('spans two text nodes in the same block', () => {
@@ -52,20 +49,20 @@ describe('createTouchSelectionRange', () => {
     const second = textNodeOf(block.querySelector('em')!);
 
     // "alpha " from offset 3 is "ha ", then "bet" of the emphasized run.
-    const range = createTouchSelectionRange({ node: first, offset: 3 }, { node: second, offset: 3 });
+    const range = createSelectionRange({ node: first, offset: 3 }, { node: second, offset: 3 });
 
     expect(range?.toString()).toBe('ha bet');
   });
 });
 
-describe('createTouchSelectionRangeWithin', () => {
+describe('createSelectionRangeWithin', () => {
   it('clamps a gesture that runs past the boundary back into it', () => {
     const host = build('<p id="block">inside</p><p id="other">outside</p>');
     const block = host.querySelector('#block')!;
     const outside = textNodeOf(host.querySelector('#other')!);
     const inside = textNodeOf(block);
 
-    const range = createTouchSelectionRangeWithin(block, { node: inside, offset: 0 }, {
+    const range = createSelectionRangeWithin(block, { node: inside, offset: 0 }, {
       node: outside,
       offset: 3,
     });
@@ -79,7 +76,7 @@ describe('createTouchSelectionRangeWithin', () => {
     const outside = textNodeOf(host.querySelector('#other')!);
     const inside = textNodeOf(block);
 
-    const range = createTouchSelectionRangeWithin(block, { node: outside, offset: 2 }, {
+    const range = createSelectionRangeWithin(block, { node: outside, offset: 2 }, {
       node: inside,
       offset: 4,
     });
@@ -93,12 +90,12 @@ describe('createTouchSelectionRangeWithin', () => {
     const outside = textNodeOf(host.querySelector('#other')!);
 
     expect(
-      createTouchSelectionRangeWithin(block, { node: outside, offset: 0 }, { node: outside, offset: 3 }),
+      createSelectionRangeWithin(block, { node: outside, offset: 0 }, { node: outside, offset: 3 }),
     ).toBeNull();
   });
 });
 
-describe('touchSelectionRects', () => {
+describe('selectionRectsFrom', () => {
   const rect = (left: number, top: number, width: number, height: number) =>
     ({ left, top, width, height }) as DOMRect;
 
@@ -107,7 +104,7 @@ describe('touchSelectionRects', () => {
   }
 
   it('merges fragments that share a rendered line', () => {
-    const rects = touchSelectionRects(
+    const rects = selectionRectsFrom(
       rangeWith([rect(10, 100, 20, 18), rect(30, 100, 25, 18), rect(10, 120, 40, 18)]),
     );
 
@@ -118,13 +115,13 @@ describe('touchSelectionRects', () => {
   });
 
   it('drops zero-sized fragments, which paint nothing', () => {
-    expect(touchSelectionRects(rangeWith([rect(10, 100, 0, 0), rect(10, 100, 12, 18)]))).toEqual([
+    expect(selectionRectsFrom(rangeWith([rect(10, 100, 0, 0), rect(10, 100, 12, 18)]))).toEqual([
       { left: 10, top: 100, width: 12, height: 18 },
     ]);
   });
 
   it('returns an empty list for a missing range or a renderer with no measurement', () => {
-    expect(touchSelectionRects(null)).toEqual([]);
-    expect(touchSelectionRects({} as unknown as Range)).toEqual([]);
+    expect(selectionRectsFrom(null)).toEqual([]);
+    expect(selectionRectsFrom({} as unknown as Range)).toEqual([]);
   });
 });

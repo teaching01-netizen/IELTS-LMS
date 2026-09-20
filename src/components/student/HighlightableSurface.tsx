@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react';
 import type { RefObject } from 'react';
-import { StudentTouchSelectionOverlay } from '@shared/ui/touch-selection/StudentTouchSelectionOverlay';
-import type { TouchSelectionRect } from '@shared/ui/touch-selection/touchSelectionRange';
+import { SelectionOverlay, type SelectionOverlaySelection } from '@shared/ui/selection-v2/react/SelectionOverlay';
 
 interface HighlightableSurfaceProps {
   as: 'div' | 'p' | 'span';
@@ -12,8 +11,14 @@ interface HighlightableSurfaceProps {
   suppressTouchCallout?: boolean | undefined;
   highlightSelectionColor?: string | undefined;
   announce?: string | null | undefined;
-  /** Lines of an owned touch selection, when the session declared one. */
-  selectionRects?: readonly TouchSelectionRect[] | undefined;
+  /**
+   * The selection this surface owns, if the session declared one.
+   *
+   * Geometry and state only — this component never resolves a caret, measures a
+   * range, or decides what a selection means. It paints what the engine measured
+   * and reports the intents the engine asked for.
+   */
+  selection?: SelectionOverlaySelection | null | undefined;
 }
 
 export function HighlightableSurface({
@@ -25,7 +30,7 @@ export function HighlightableSurface({
   suppressTouchCallout = false,
   highlightSelectionColor,
   announce = null,
-  selectionRects = [],
+  selection = null,
 }: HighlightableSurfaceProps) {
   const Tag = as as any;
   // If this object identity changes on every render, React may re-apply innerHTML
@@ -35,10 +40,10 @@ export function HighlightableSurface({
   // Gesture policy is NOT declared here — neither `user-select` nor
   // `touch-action`. Both are owned by the stylesheet (index.css), which is the
   // only place that can also see whether a locked exam is active. A real student
-  // exam removes the platform's own selection under a coarse pointer and, while
-  // a highlight tool is armed, takes the drag itself (`touch-action: none`, keyed
-  // off the marker `useStudentTouchTextSelection` sets on this element). An
-  // inline `auto` here would outrank both rules and leave the two authorities
+  // exam removes the platform's own selection under a coarse pointer and, while a
+  // highlight tool is armed, takes the drag itself (`touch-action: none`, keyed
+  // off the marker `useStudentSelectionGesture` sets on this element). An inline
+  // `auto` here would outrank both rules and leave the two authorities
   // contradicting each other — which is precisely how the gesture got cancelled
   // by the browser's own panning on a real device.
   const surfaceStyle: React.CSSProperties = {
@@ -69,9 +74,15 @@ export function HighlightableSurface({
         {announce ?? ''}
       </span>
       {/* An owned selection has no browser selection behind it, so the surface
-          paints the lines itself — otherwise a student dragging across text
-          would see nothing at all until the mark appeared. */}
-      <StudentTouchSelectionOverlay rects={selectionRects} />
+          paints the lines itself — otherwise a student dragging across text would
+          see nothing at all until the mark appeared. The handles, the magnifier
+          and the contextual menu come with it. */}
+      {selection ? (
+        <SelectionOverlay
+          selection={selection}
+          loupe={containerRef ? { sourceRef: containerRef } : undefined}
+        />
+      ) : null}
       {hint ? (
         <div
           role="status"

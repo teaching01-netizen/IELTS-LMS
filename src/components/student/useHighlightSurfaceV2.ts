@@ -7,9 +7,13 @@ import {
 } from './highlightPalette';
 import { MAX_HIGHLIGHT_RANGES, captureSurfaceRange, type HighlightSelectionV2 } from './highlightV2Engine';
 import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
-import { browserCaretResolver, useStudentTouchTextSelection } from '@shared/ui/touch-selection/useStudentTouchTextSelection';
+import { browserCaretResolver } from '@shared/ui/selection-v2/engine/selectionPoint';
+import { nearestScrollableAncestor } from '@shared/ui/selection-v2/engine/selectionAutoScroll';
 import { useStudentTouchSelectionDiagnostics } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
-import type { TouchSelectionRect } from '@shared/ui/touch-selection/touchSelectionRange';
+import {
+  useStudentSelectionGesture,
+  type StudentSelectionGesture,
+} from '@shared/ui/selection-v2/react/useStudentSelectionGesture';
 import { usePersistedHighlightRangesV2 } from './highlightV2Persistence';
 import { useHighlightSelectionManager } from './highlightSelectionManager';
 import { useHighlightSelectionPort } from './highlightSelectionPort';
@@ -38,8 +42,8 @@ interface UseHighlightSurfaceV2Result {
   renderedHtml: string;
   hint: string | null;
   announce: string;
-  /** Lines of an owned touch selection, painted by the surface itself. */
-  selectionRects: readonly TouchSelectionRect[];
+  /** The owned touch selection, painted and controlled by the surface. */
+  selection: StudentSelectionGesture;
 }
 
 export function useHighlightSurfaceV2({
@@ -204,18 +208,26 @@ export function useHighlightSurfaceV2({
    * The whole surface is the boundary: unlike a SAT anchor, a highlight may span
    * blocks, so the only edge is the container the student is reading in.
    */
-  const touchSelection = useStudentTouchTextSelection({
+  const selection = useStudentSelectionGesture({
     enabled: enabled && examScope.ownedTouchSelection && toolMode !== 'off',
     activation: 'drag',
     rootRef: containerRef,
     diagnostics,
     resolveCaretAtPoint,
+    // An armed highlight colour has already decided what a selection means: the
+    // drag IS the command. Leaving the span selected after the mark is applied
+    // would ask the student a question they just answered.
+    clearOnSelect: true,
+    // Where the passage actually scrolls, measured at the drag rather than
+    // configured: the same surface is the page in one product and a
+    // fixed-height pane in another.
+    scrollContainer: nearestScrollableAncestor,
     onSelect: (range) => {
       const container = containerRef.current;
       if (!container) return;
-      const selection = captureSurfaceRange(container, range);
-      diagnostics?.record('captureSurfaceRange', { captureSucceeded: !!selection });
-      const applied = applySelection(selection);
+      const captured = captureSurfaceRange(container, range);
+      diagnostics?.record('captureSurfaceRange', { captureSucceeded: !!captured });
+      const applied = applySelection(captured);
       diagnostics?.record('applySelection', { selectionConsumed: applied });
     },
     boundaryFor: () => containerRef.current,
@@ -226,6 +238,6 @@ export function useHighlightSurfaceV2({
     renderedHtml,
     hint,
     announce,
-    selectionRects: touchSelection.rects,
+    selection,
   };
 }

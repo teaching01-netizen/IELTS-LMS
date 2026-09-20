@@ -917,7 +917,7 @@
      There is no property that keeps a selection and drops the menu; the menu is
      the platform's response to the selection existing. So under a coarse
      pointer the selection is removed here, and the exam supplies its own
-     (`useStudentTouchTextSelection`): a long press then a drag builds a range
+     (`useStudentSelectionGesture`): a long press then a drag builds a range
      the platform never learns about, and it paints its own selection and the
      student's own Highlight / Underline / Note toolbar.
 
@@ -970,7 +970,7 @@
      it — the used value is taken from the whole ancestor chain — so the prose
      needs no `*` rule of its own.
 
-     The marker is set by `useStudentTouchTextSelection` only when an armed tool
+     The marker is set by `useStudentSelectionGesture` only when an armed tool
      can select on a coarse pointer, and it is ALSO gated on the exam class here,
      so a marker left on a lobby or preview surface is inert. That gate is not
      cosmetic: those phases render the same surfaces, and taking their scroll
@@ -1471,8 +1471,9 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
    * therefore no lane to give up. There is no "does not fit at all" token on
    * purpose: the surface floats either way, and a placement with no comfortable
    * room is clamped inside the visible region rather than presented differently.
-   * Every value is mirrored as a fallback in satSelectionGeometry.ts, which the
-   * runtime prefers these over (jsdom reads none of them). */
+   * Every value has a compiled-in fallback in the shared rule
+   * (`SELECTION_MENU_BUDGET_DEFAULTS`, surfaced by satAnnotationBudgets.ts),
+   * used only where a token is missing or unreadable — jsdom reads none. */
   --sat-annotation-edge: 12px;
   --sat-annotation-native-ui-zone: 80px;
   --sat-annotation-gap: 12px;

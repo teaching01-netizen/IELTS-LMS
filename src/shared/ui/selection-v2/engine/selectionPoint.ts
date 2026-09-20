@@ -1,49 +1,59 @@
 /**
- * Where a finger is, expressed as a position in text.
+ * Where a finger is, expressed as a position in text — measured, never guessed.
  *
  * An exam on a touch device cannot use the platform's own text selection: the
  * moment a selection exists, iOS and Android paint their own Copy / Look Up /
  * Search / Share bar over the passage, and no amount of `contextmenu`
- * suppression or `-webkit-touch-callout` removes it. So touch highlighting is
- * built on positions we resolve ourselves, and this module is that half — a
+ * suppression or `-webkit-touch-callout` removes it. So touch selection is built
+ * on positions the engine resolves itself, and this module is that half — a
  * pointer coordinate turned into a text node and an offset, plus the ordering
- * and containment facts the gesture needs to decide what was selected.
+ * and containment facts every other part of the engine needs.
  *
  * Everything here is pure and total: a position that cannot be resolved returns
  * null rather than a plausible substitute, because a wrong offset silently
- * anchors an annotation over the wrong words.
+ * anchors a highlight over the wrong words — and on a locked exam surface there
+ * is no second, platform-drawn answer for the student to compare it against.
  */
 
-import { describeTouchSelectionNode, type TouchSelectionDiagnosticRecord } from './touchSelectionDiagnostics';
+import {
+  describeTouchSelectionNode,
+  type TouchSelectionDiagnosticRecord,
+  type TouchSelectionDiagnostics,
+} from '../../touch-selection/touchSelectionDiagnostics';
+import type { TextPoint } from '../domain/selectionTypes';
 
-/** An offset into one rendered text node. */
-export interface TextPoint {
-  node: Text;
-  offset: number;
-}
+export type { TextPoint } from '../domain/selectionTypes';
 
-/** A half-open run of characters inside one text node. */
-export interface WordSegment {
-  start: number;
-  end: number;
+/**
+ * The default coordinate resolver, spelled out so a host component can pass it
+ * without knowing which of the two platform hit tests its browser ships.
+ *
+ * The root is required rather than optional: an unbounded caret query is how a
+ * Safari answer from a toolbar's text becomes the anchor of the student's
+ * highlight.
+ */
+export function browserCaretResolver(
+  doc: Document = document,
+  diagnostics?: TouchSelectionDiagnostics,
+): (x: number, y: number, root: HTMLElement) => TextPoint | null {
+  return (x, y, root) => {
+    try {
+      return caretPositionAtPoint(doc, x, y, diagnostics?.record, root);
+    } catch (error) {
+      diagnostics?.record('caret-error', { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  };
 }
 
 /**
- * The slice of `Intl.Segmenter` a word lookup needs, narrowed so a test (and a
- * runtime without ICU data) can supply its own.
- */
-export interface WordSegmenter {
-  segment: (text: string) => Iterable<{ start: number; end: number; isWordLike?: boolean }>;
-}
-
-/**
- * Document order for two text positions: negative when `a` precedes `b`, positive
- * when it follows, zero when they are the same position or live in different
- * trees.
+ * Document order for two text positions: negative when `a` precedes `b`,
+ * positive when it follows, zero when they are the same position or live in
+ * different trees.
  *
  * `Node.compareDocumentPosition` rather than `Range.comparePoint`: the offset
- * within one node is the whole answer when the nodes match, and for two nodes the
- * bitmask says which comes first without materializing a Range.
+ * within one node is the whole answer when the nodes match, and for two nodes
+ * the bitmask says which comes first without materializing a Range.
  *
  * The DISCONNECTED flag is checked FIRST, and that ordering is the whole point.
  * A spec-compliant answer for two separate trees carries DISCONNECTED *plus* an
@@ -53,9 +63,7 @@ export interface WordSegmenter {
  * a span by accident.
  */
 export function compareTextPoints(a: TextPoint, b: TextPoint): number {
-  if (a.node === b.node) {
-    return a.offset - b.offset;
-  }
+  if (a.node === b.node) return a.offset - b.offset;
   const position = a.node.compareDocumentPosition(b.node);
   if (position & Node.DOCUMENT_POSITION_DISCONNECTED) return 0;
   if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
@@ -128,8 +136,8 @@ function edgeTextNode(boundary: Element, fromEnd: boolean): Text | null {
  *
  * `caretPositionFromPoint` is the standard; `caretRangeFromPoint` is WebKit's
  * (and Chrome's) older name. Both are consulted in that order, and a null from
- * the first is not the end of the search — a renderer can expose both and
- * answer only through one of them.
+ * the first is not the end of the search — a renderer can expose both and answer
+ * only through one of them.
  *
  * The two spellings answer at two levels of precision, and only the precise one
  * used to be accepted: a point between two glyphs, or in the whitespace at the
@@ -139,9 +147,12 @@ function edgeTextNode(boundary: Element, fromEnd: boolean): Text | null {
  * to nothing could not become a selection by any other route either. Geometry
  * resolves it instead, and the element the renderer named is where it looks.
  *
- * A renderer with neither hit test still gets one last chance through
- * `elementFromPoint`, which is layout geometry rather than a caret query and is
- * therefore a different capability, not a duplicate of the two above.
+ * `root` BOUNDS THE ANSWER. Safari will happily return selectable text from
+ * outside the touched surface — a toolbar label, a heading, another pane — and a
+ * caret there is not a hit in this passage: it would anchor the student's
+ * highlight to words they never touched. An answer outside the root is therefore
+ * treated as no answer, the remaining hit tests are still tried, and the final
+ * fallback measures the touched surface itself.
  *
  * ORDER MATTERS, and it is precise queries first, geometry last. An
  * element-level answer from one spelling is a HINT about where to measure, not
@@ -149,40 +160,48 @@ function edgeTextNode(boundary: Element, fromEnd: boolean): Text | null {
  * answer precisely through `caretRangeFromPoint` and coarsely through
  * `caretPositionFromPoint`, and geometry must not shadow that.
  */
-export function caretPositionAtPoint(doc: Document, x: number, y: number, trace?: TouchSelectionDiagnosticRecord): TextPoint | null {
+export function caretPositionAtPoint(
+  doc: Document,
+  x: number,
+  y: number,
+  trace?: TouchSelectionDiagnosticRecord,
+  root?: Element,
+): TextPoint | null {
   const capable = doc as Document & {
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
   };
 
   let measuredWithin: Element | null = null;
+  const inRoot = (node: Node | null): boolean => !root || (!!node && root.contains(node));
 
   if (typeof capable.caretPositionFromPoint === 'function') {
     const position = capable.caretPositionFromPoint(x, y);
-    trace?.('caretPositionFromPoint', { nodeType: position?.offsetNode.nodeType ?? null, node: describeTouchSelectionNode(position?.offsetNode ?? null), offset: position?.offset ?? null, x, y });
+    trace?.('caretPositionFromPoint', { nodeType: position?.offsetNode.nodeType ?? null, node: describeTouchSelectionNode(position?.offsetNode ?? null), offset: position?.offset ?? null, insideRoot: root ? inRoot(position?.offsetNode ?? null) : null, x, y });
     const point = textPointFrom(position?.offsetNode ?? null, position?.offset ?? 0);
-    if (point) return point;
-    measuredWithin = elementFor(position?.offsetNode ?? null);
+    if (point && inRoot(point.node)) return point;
+    measuredWithin = inRoot(position?.offsetNode ?? null) ? elementFor(position?.offsetNode ?? null) : null;
   } else if (trace) {
     trace('caretPositionFromPoint', { available: false });
   }
 
   if (typeof capable.caretRangeFromPoint === 'function') {
     const range = capable.caretRangeFromPoint(x, y);
-    trace?.('caretRangeFromPoint', { nodeType: range?.startContainer.nodeType ?? null, node: describeTouchSelectionNode(range?.startContainer ?? null), offset: range?.startOffset ?? null, x, y });
+    trace?.('caretRangeFromPoint', { nodeType: range?.startContainer.nodeType ?? null, node: describeTouchSelectionNode(range?.startContainer ?? null), offset: range?.startOffset ?? null, insideRoot: root ? inRoot(range?.startContainer ?? null) : null, x, y });
     if (range) {
       const point = textPointFrom(range.startContainer, range.startOffset);
-      if (point) return point;
-      measuredWithin = measuredWithin ?? elementFor(range.startContainer);
+      if (point && inRoot(point.node)) return point;
+      measuredWithin = measuredWithin ?? (inRoot(range.startContainer) ? elementFor(range.startContainer) : null);
     }
   } else if (trace) {
     trace('caretRangeFromPoint', { available: false });
   }
 
-  const element = measuredWithin ?? elementAtPoint(doc, x, y);
-  if (!measuredWithin) trace?.('elementFromPoint', { node: describeTouchSelectionNode(element) });
+  const hit = measuredWithin ?? elementAtPoint(doc, x, y);
+  if (!measuredWithin) trace?.('elementFromPoint', { node: describeTouchSelectionNode(hit), insideRoot: root ? inRoot(hit) : null });
+  const element = inRoot(hit) ? hit : root ?? null;
   const point = nearestTextPointIn(element, x, y);
-  trace?.('geometry', { resolved: !!point, node: describeTouchSelectionNode(point?.node ?? null), offset: point?.offset ?? null, x, y });
+  trace?.('geometry', { resolved: !!point, node: describeTouchSelectionNode(point?.node ?? null), offset: point?.offset ?? null, insideRoot: root ? inRoot(point?.node ?? null) : null, x, y });
   return point;
 }
 
@@ -311,8 +330,8 @@ function nearestRect(
  * Rects for a range, with zero-area and unmeasurable results dropped.
  *
  * A renderer that exposes no range measurement returns nothing here rather than
- * throwing, which is what keeps every caller's answer honest: no measurement,
- * no position.
+ * throwing, which is what keeps every caller's answer honest: no measurement, no
+ * position.
  */
 function measure(doc: Document, read: () => ArrayLike<MeasuredRect> | null): MeasuredRect[] {
   let list: ArrayLike<MeasuredRect> | null = null;
@@ -352,114 +371,4 @@ function textPointFrom(node: Node | null, offset: number): TextPoint | null {
   const length = text.data.length;
   if (length === 0) return null;
   return { node: text, offset: Math.max(0, Math.min(length, Math.trunc(offset))) };
-}
-
-/**
- * A word segmenter when the runtime has one, else null.
- *
- * ICU data is what makes this worth asking for: a script without spaces between
- * words (Thai, Chinese, Japanese) has no word boundaries for a regular
- * expression to find, and `Intl.Segmenter` is the only thing in the platform
- * that knows them. When it is absent the regex fallback still segments
- * space-separated scripts correctly, and reports the rest as one long run.
- *
- * The native segments are translated rather than passed through: `Intl.Segmenter`
- * reports `index` plus the matched `segment` string, so reading `start`/`end` off
- * it directly yields `undefined` and every word lookup silently finds nothing.
- */
-export function defaultWordSegmenter(): WordSegmenter | null {
-  const IntlWithSegmenter = Intl as typeof Intl & {
-    Segmenter?: new (
-      locales?: string,
-      options?: { granularity: string },
-    ) => {
-      segment: (text: string) => Iterable<{ index: number; segment: string; isWordLike?: boolean }>;
-    };
-  };
-  if (typeof IntlWithSegmenter.Segmenter !== 'function') return null;
-  try {
-    const native = new IntlWithSegmenter.Segmenter(undefined, { granularity: 'word' });
-    return {
-      *segment(text: string) {
-        for (const part of native.segment(text)) {
-          yield {
-            start: part.index,
-            end: part.index + part.segment.length,
-            isWordLike: part.isWordLike ?? false,
-          };
-        }
-      },
-    };
-  } catch {
-    return null;
-  }
-}
-
-const WORD_CHARACTER = /[\p{L}\p{N}_']/u;
-
-/**
- * The word a finger landed on, as offsets into its own text node.
- *
- * Three rules, in order:
- *
- *   1. A press inside a word takes that word.
- *   2. A press in a gap — the space after a word — takes the word it follows,
- *      which is what the platform's own selection does and what a student
- *      pressing beside a word means.
- *   3. A press in a gap BEFORE any word takes the word that follows. This is the
- *      leading-whitespace case, and rule 2 has already declined to claim it.
- *
- * A press that reaches no word at all — punctuation between runs, a run of
- * spaces — resolves to nothing rather than to a nearby guess, because selecting
- * the wrong word and selecting none are different mistakes and only one of them
- * can be seen by the student.
- */
-export function expandToWordAt(
-  point: TextPoint,
-  segmenter: WordSegmenter | null = defaultWordSegmenter(),
-): WordSegment | null {
-  const text = point.node.data;
-  if (text.length === 0) return null;
-  const offset = Math.max(0, Math.min(text.length, point.offset));
-  const segments = segmenter ? [...segmenter.segment(text)] : fallbackWordSegments(text);
-
-  for (const segment of segments) {
-    if (segment.isWordLike === false) continue;
-    if (segment.start <= offset && offset < segment.end) return { start: segment.start, end: segment.end };
-  }
-
-  // The nearest word that has already ended. Segments arrive in order, so the
-  // last one to qualify is the closest.
-  let preceding: WordSegment | null = null;
-  for (const segment of segments) {
-    if (segment.isWordLike === false) continue;
-    if (segment.end > offset) break;
-    preceding = { start: segment.start, end: segment.end };
-  }
-  if (preceding) return preceding;
-
-  for (const segment of segments) {
-    if (segment.isWordLike === false) continue;
-    if (segment.start === offset && segment.end > offset) return { start: segment.start, end: segment.end };
-  }
-  return null;
-}
-
-/**
- * Word runs found by unicode word characters, for runtimes without ICU
- * segmentation. Everything outside the `\\\\p{L}\\\\p{N}` classes is a boundary, so a
- * script that does not space its words comes back as one long run — honest, and
- * the reason `Intl.Segmenter` is preferred when it is there.
- */
-function fallbackWordSegments(text: string): Array<{ start: number; end: number; isWordLike: boolean }> {
-  const segments: Array<{ start: number; end: number; isWordLike: boolean }> = [];
-  let index = 0;
-  while (index < text.length) {
-    const isWord = WORD_CHARACTER.test(text[index]!);
-    let end = index;
-    while (end < text.length && WORD_CHARACTER.test(text[end]!) === isWord) end += 1;
-    segments.push({ start: index, end, isWordLike: isWord });
-    index = end;
-  }
-  return segments;
 }

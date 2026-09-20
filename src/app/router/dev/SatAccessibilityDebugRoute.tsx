@@ -64,6 +64,24 @@ const readingQuestion: DeliveredQuestion = {
   accessibility: { longDescription: null },
 };
 
+/**
+ * The same passage at the length of a real one.
+ *
+ * The default stimulus above is deliberately a few lines, because most of the
+ * accessibility suite measures surfaces around a short passage and its assertions
+ * are about those surfaces. A passage that is longer than its pane is what makes
+ * a student scroll, though, and the placement rule has a case that only a scroll
+ * can reach — so it is opt-in (`?long=1`), and nothing that does not ask for it
+ * changes shape. A real SAT passage is this long, which is also why the opt-in is
+ * the only way to see the whole-pane behaviour at all.
+ */
+const longStimulus = paragraph(
+  "stimulus",
+  "Several researchers examined how urban tree cover changes surface temperature during periods of extreme heat. Their results suggest that the relationship depends on both canopy density and the surrounding built environment. Follow-up measurements taken across four summers found that the cooling effect weakens as the proportion of paved surface rises, though the pattern varied between neighbourhoods. Sites with mature trees and irrigated ground stayed measurably cooler at midday, while sites dominated by asphalt and bare soil recorded little difference from unshaded ground. The authors caution that their sample covered a limited range of climates, and that local wind patterns may explain part of the variation they observed. They conclude that planting programmes should be planned alongside decisions about paving, drainage and shade, rather than treated as a single remedy for rising urban temperatures."
+);
+
+const longReadingQuestion: DeliveredQuestion = { ...readingQuestion, stimulus: longStimulus };
+
 const mathQuestion: DeliveredQuestion = {
   ...readingQuestion,
   examQuestionId: "debug-math-q1",
@@ -105,6 +123,8 @@ export function SatAccessibilityDebugRoute() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const math = params.get("mode") === "math";
   const spr = params.get("mode") === "spr";
+  /** A passage longer than its pane, for the cases that need a real scroll. */
+  const longPassage = params.get("long") === "1";
   const paused = params.get("paused") === "1";
   const initialTool =
     params.get("tool") === "calculator"
@@ -133,7 +153,7 @@ export function SatAccessibilityDebugRoute() {
     eliminatedOptionIds: [],
     annotations: { version: 2, annotations: [], legacyQuestionNote: "" },
   });
-  const question = math ? mathQuestion : spr ? sprQuestion : readingQuestion;
+  const question = math ? mathQuestion : spr ? sprQuestion : longPassage ? longReadingQuestion : readingQuestion;
   const navigationItems = [0, 1, 2].map((index) => ({
     id: `debug-${index}`,
     index,

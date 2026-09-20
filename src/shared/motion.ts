@@ -63,3 +63,32 @@ export const authoringMotion = {
     mass: 1,
   } satisfies Transition,
 } as const;
+
+/*
+ * Selection Engine v2's overlay: the one surface that must never lag a finger.
+ *
+ * Two moments, and neither invents a number — the grip releasing is small
+ * geometry (the `snap` spring a segmented control's thumb settles with) and the
+ * magnifier opening is the default UI spring. Nothing else about the overlay
+ * moves: the finger, the caret and the measured lines are written directly every
+ * frame, because a spring on the data would make the selection trail the finger
+ * it belongs to.
+ *
+ * The scales are magnitudes, not timings, so no component can invent its own
+ * entrance. They apply strictly INSIDE the boxes the engine measures: a handle's
+ * 44px target and the loupe's lens keep their exact measured geometry, so an
+ * animation can never move something a student is aiming at, or something a
+ * placement decision was computed from.
+ */
+export const selectionMotion = {
+  /** Grip appearing, and settling back after an adjustment. Small geometry. */
+  grip: authoringMotion.snap,
+  /** The magnifier opening: the default UI spring, quick and damped. */
+  loupe: authoringMotion.spring,
+  /** Grip's first painted frame, as a fraction of its settled size. */
+  gripEnterScale: 0.6,
+  /** Grip while an endpoint is dragged — the release springs back from this. */
+  gripHeldScale: 1.14,
+  /** The magnifier's first painted frame, as a fraction of its settled size. */
+  loupeEnterScale: 0.9,
+} as const;

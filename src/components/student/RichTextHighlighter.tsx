@@ -50,7 +50,7 @@ export function RichTextHighlighter({
     renderedHtml,
     hint,
     announce,
-    selectionRects,
+    selection,
   } = useHighlightSurfaceV2({
     enabled,
     surfaceId: highlightSurfaceId ?? defaultSurfaceId,
@@ -68,7 +68,7 @@ export function RichTextHighlighter({
       hint={hint}
       announce={announce}
       highlightSelectionColor={selectionTintColor}
-      selectionRects={selectionRects}
+      selection={selection}
     />
   );
 }

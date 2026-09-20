@@ -1,23 +1,40 @@
 import { describe, expect, it } from 'vitest';
-import { SAT_ANNOTATION_BUDGET_DEFAULTS } from './satAnnotationBudgets';
 import {
-  placeSatAnnotationSurface,
-  type AnnotationPlacement,
-} from './satSelectionGeometry';
-import type { SatAnchorGeometry } from './satSelectionAnchor';
+  placeSelectionMenu,
+  SELECTION_MENU_BUDGET_DEFAULTS,
+  type SelectionMenuAnchor,
+  type SelectionMenuBox,
+  type SelectionMenuPlacement,
+} from '../engine/selectionPlacement';
+
+/**
+ * The one placement rule, exercised from both ends it is used from: a product's
+ * measured selection (SAT's per-line geometry, with the native menu's lane
+ * reserved on touch) and a selection the exam owns (one box, no lane reserved).
+ * Both are the same function, so a case that holds for one holds for the other.
+ */
+
+/**
+ * An anchor whose box is also its only line, which is how a selection the exam
+ * owns is measured: one union box, no per-line rects.
+ */
+function ownAnchor(rect: SelectionMenuBox): SelectionMenuAnchor {
+  const line = { top: rect.top, bottom: rect.top + rect.height, left: rect.left, right: rect.left + rect.width };
+  return { ...line, firstLine: line, lastLine: line };
+}
 
 const bounds = { left: 0, top: 0, width: 800, height: 600 };
 const viewport = { left: 0, top: 0, width: 800, height: 600 };
-/** A measured floating surface: the size the engine has to place. */
+/** A measured floating surface: the size the rule has to place. */
 const size = { width: 288, height: 108 };
-const EDGE = SAT_ANNOTATION_BUDGET_DEFAULTS.edge;
-const GAP = SAT_ANNOTATION_BUDGET_DEFAULTS.gap;
-const NATIVE_ZONE = SAT_ANNOTATION_BUDGET_DEFAULTS.nativeUiZone;
+const EDGE = SELECTION_MENU_BUDGET_DEFAULTS.edge;
+const GAP = SELECTION_MENU_BUDGET_DEFAULTS.gap;
+const NATIVE_ZONE = SELECTION_MENU_BUDGET_DEFAULTS.nativeUiZone;
 
 /**
- * An anchor box with its per-line rects. Only the engine's inputs matter here —
- * no DOM, because placement is a pure decision. The measurement that produces
- * these numbers is covered in satSelectionAnchor.test.ts.
+ * An anchor box with its per-line rects. Only the rule's inputs matter here — no
+ * DOM, because placement is a pure decision. The measurement that produces these
+ * numbers is covered where it lives (`satSelectionAnchor.test.ts`).
  */
 function geometry(input: {
   top: number;
@@ -26,7 +43,7 @@ function geometry(input: {
   right?: number;
   firstLine?: { top: number; bottom: number; left: number; right: number };
   lastLine?: { top: number; bottom: number; left: number; right: number };
-}): SatAnchorGeometry {
+}): SelectionMenuAnchor {
   const left = input.left ?? 200;
   const right = input.right ?? 600;
   const flat = { top: input.top, bottom: input.bottom, left, right };
@@ -35,25 +52,23 @@ function geometry(input: {
     right,
     top: input.top,
     bottom: input.bottom,
-    width: right - left,
-    height: input.bottom - input.top,
     firstLine: input.firstLine ?? flat,
     lastLine: input.lastLine ?? flat,
   };
 }
 
 function place(
-  anchor: SatAnchorGeometry,
+  anchor: SelectionMenuAnchor,
   options: {
-    previous?: AnnotationPlacement | null;
+    previous?: SelectionMenuPlacement | null;
     touch?: boolean;
     bounds?: typeof bounds;
     viewport?: typeof viewport;
     size?: typeof size;
-    budgets?: Partial<typeof SAT_ANNOTATION_BUDGET_DEFAULTS>;
+    budgets?: Partial<typeof SELECTION_MENU_BUDGET_DEFAULTS>;
   } = {},
-): AnnotationPlacement {
-  return placeSatAnnotationSurface({
+): SelectionMenuPlacement {
+  return placeSelectionMenu({
     anchor,
     bounds: options.bounds ?? bounds,
     viewport: options.viewport ?? viewport,
@@ -64,15 +79,15 @@ function place(
   });
 }
 
-/** A placement of the given shape, as the engine would have returned it. */
-function placement(input: Partial<AnnotationPlacement> & Pick<AnnotationPlacement, 'mode'>): AnnotationPlacement {
+/** A placement of the given shape, as the rule would have returned it. */
+function placement(input: Partial<SelectionMenuPlacement> & Pick<SelectionMenuPlacement, 'mode'>): SelectionMenuPlacement {
   return {
     left: 256, top: 180, width: size.width, maxHeight: 400, side: null, arrowX: 144, animated: false, clamped: false,
     ...input,
   };
 }
 
-describe('satSelectionGeometry: where the surface goes', () => {
+describe('placeSelectionMenu: where the menu goes', () => {
   it('prefers the space above the selection and flips below when there is none', () => {
     const above = place(geometry({ top: 300, bottom: 320 }));
     expect(above.mode).toBe('floating');
@@ -88,7 +103,7 @@ describe('satSelectionGeometry: where the surface goes', () => {
     expect(below.clamped).toBe(false);
   });
 
-  it('refuses to squeeze the surface into a gap it only technically fits', () => {
+  it('refuses to squeeze the menu into a gap it only technically fits', () => {
     // 130px of room above, 132 required: the comfortable answer is the other
     // side, not a cramped toolbar.
     const cramped = place(geometry({ top: 142, bottom: 162 }));
@@ -96,7 +111,7 @@ describe('satSelectionGeometry: where the surface goes', () => {
 
     // The same geometry without the comfort buffer *would* have fitted.
     const bare = place(geometry({ top: 142, bottom: 162 }), {
-      budgets: { ...SAT_ANNOTATION_BUDGET_DEFAULTS, comfort: 0, comfortFine: 0 },
+      budgets: { ...SELECTION_MENU_BUDGET_DEFAULTS, comfort: 0, comfortFine: 0 },
     });
     expect(bare.side).toBe('above');
   });
@@ -217,7 +232,7 @@ describe('satSelectionGeometry: where the surface goes', () => {
     // a full-screen selection, no room at all, a viewport the size of a stamp —
     // the answer is a floating surface (pinned if it must be) or nothing at all
     // while the source is off screen.
-    const cases: Array<[SatAnchorGeometry, typeof bounds]> = [
+    const cases: Array<[SelectionMenuAnchor, typeof bounds]> = [
       [geometry({ top: 300, bottom: 320 }), bounds],
       [geometry({ top: EDGE, bottom: viewport.height - EDGE }), viewport],
       [geometry({ top: 60, bottom: 80 }), { left: 0, top: 0, width: 300, height: 110 }],
@@ -240,21 +255,21 @@ describe('satSelectionGeometry: where the surface goes', () => {
     expect(place(geometry({ top: 700, bottom: 720 })).mode).toBe('hidden');
   });
 
-  it('clamps the surface inside the body and turns the caret toward its source', () => {
+  it('clamps the menu inside the body and turns the caret toward its source', () => {
     const left = place(geometry({ top: 300, bottom: 320, left: 0, right: 40 }));
     expect(left.left).toBe(EDGE);
     expect(left.width).toBe(size.width);
     // The caret has moved inside the rounded corner rather than staying centred.
-    expect(left.arrowX).toBe(SAT_ANNOTATION_BUDGET_DEFAULTS.caretInset);
-    // The edge it was clamped against is a horizontal one: the surface is still
+    expect(left.arrowX).toBe(SELECTION_MENU_BUDGET_DEFAULTS.caretInset);
+    // The edge it was clamped against is a horizontal one: the menu is still
     // against its line, so the caret is still drawn.
     expect(left.clamped).toBe(false);
 
     const right = place(geometry({ top: 300, bottom: 320, left: 760, right: 800 }));
     expect(right.left + right.width).toBeLessThanOrEqual(bounds.width - EDGE);
-    expect(right.arrowX).toBe(size.width - SAT_ANNOTATION_BUDGET_DEFAULTS.caretInset);
-    // Still pointing at the source: the caret moved inside the surface instead of
-    // the surface centring itself and hanging off the edge.
+    expect(right.arrowX).toBe(size.width - SELECTION_MENU_BUDGET_DEFAULTS.caretInset);
+    // Still pointing at the source: the caret moved inside the menu instead of
+    // the menu centring itself and hanging off the edge.
     expect(right.left).not.toBe(780 - size.width / 2);
     expect(right.left + right.arrowX).toBeGreaterThan(right.left + size.width / 2);
   });
@@ -305,7 +320,7 @@ describe('satSelectionGeometry: where the surface goes', () => {
     });
     expect(nudged.animated).toBe(false);
 
-    // Nothing to settle from: a surface coming back from hidden is placed, never
+    // Nothing to settle from: a menu coming back from hidden is placed, never
     // animated from coordinates that no longer describe anything.
     const fromHidden = place(geometry({ top: 300, bottom: 320 }), {
       previous: placement({ mode: 'hidden', side: null, arrowX: 0 }),
@@ -314,13 +329,46 @@ describe('satSelectionGeometry: where the surface goes', () => {
     expect(fromHidden.animated).toBe(false);
   });
 
-  it('stops settling once the surface is already in motion', () => {
-    // The previous placement was itself a settle, so the surface is being dragged
+  it('stops settling once the menu is already in motion', () => {
+    // The previous placement was itself a settle, so the menu is being dragged
     // or auto-scrolled right now: reapplying the transition every frame would
     // make it trail the student's finger for the whole gesture.
     const moving = placement({ mode: 'floating', side: 'above', left: 212, animated: true });
     const next = place(geometry({ top: 300, bottom: 320 }), { previous: moving });
     expect(next.left).toBe(256);
     expect(next.animated).toBe(false);
+  });
+});
+
+describe('placeSelectionMenu: a selection the exam owns', () => {
+  const owned = { left: 100, top: 400, width: 120, height: 20 };
+  const small = { width: 240, height: 48 };
+  const wide = { left: 0, top: 0, width: 400, height: 800 };
+
+  it('hangs the menu above the selection, centred on it, from one measured box', () => {
+    const result = placeSelectionMenu({
+      anchor: ownAnchor(owned),
+      bounds: wide,
+      viewport: wide,
+      size: small,
+    });
+
+    expect(result.side).toBe('above');
+    expect(result.top).toBe(400 - GAP - small.height);
+    expect(result.left).toBe(100 + 60 - small.width / 2);
+    expect(result.width).toBe(small.width);
+    expect(result.clamped).toBe(false);
+  });
+
+  it('never asks for more width than the visible region has', () => {
+    const result = placeSelectionMenu({
+      anchor: ownAnchor({ left: 10, top: 400, width: 40, height: 20 }),
+      bounds: wide,
+      viewport: { left: 0, top: 0, width: 200, height: 800 },
+      size: small,
+    });
+
+    expect(result.width).toBe(200 - EDGE * 2);
+    expect(result.left).toBe(EDGE);
   });
 });

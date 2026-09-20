@@ -47,8 +47,8 @@ const PROFILES = [
 const SURFACE_MIN_WIDTH = 280;
 const SURFACE_MAX_WIDTH = 340;
 
-async function openHarness(page: Page): Promise<void> {
-  await page.goto('/__dev/sat-accessibility');
+async function openHarness(page: Page, query = ''): Promise<void> {
+  await page.goto(`/__dev/sat-accessibility${query}`);
   await expect(page.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 15_000 });
 }
 
@@ -115,20 +115,45 @@ interface PlacementGeometry {
   firstLine: Box | null;
   lastLine: Box | null;
   visible: { left: number; top: number; right: number; bottom: number };
+  /** What the browser's own selection holds — the app retires it on capture. */
+  nativeSelection: string;
 }
 
-/** Everything the invariants need, read once from the live page. */
-async function readPlacement(page: Page): Promise<PlacementGeometry> {
-  return page.evaluate((selector) => {
+/**
+ * Everything the invariants need, read once from the live page.
+ *
+ * The lines of the selection are measured from the ANCHORED PHRASE, not from
+ * `window.getSelection()`. The app captures the anchor and then retires the
+ * browser's own selection — deliberately, because leaving it live is what lets
+ * the platform paint its Copy / Look Up / Share bar over the passage (see
+ * `SatAnnotatedContent`) — so a living selection is not something this suite can
+ * measure any more. The phrase is the span the app anchored, so its rendered
+ * lines ARE the anchored lines; `nativeSelection` reports the retirement so the
+ * contract is asserted rather than assumed.
+ */
+async function readPlacement(page: Page, phrase: string): Promise<PlacementGeometry> {
+  return page.evaluate(({ selector, text }) => {
     const box = (rect: DOMRect) => ({
       left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height,
     });
     const surface = document.querySelector(selector);
     if (!surface) throw new Error('the selection surface is not in the document');
-    const selection = window.getSelection();
-    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-    const lines = range
-      ? Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0)
+    const region = document.querySelector('[data-sat-annotation-region]');
+    const anchored = (() => {
+      if (!region) return null;
+      const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
+      let node: Node | null = walker.nextNode();
+      while (node && !(node.nodeValue ?? '').includes(text)) node = walker.nextNode();
+      if (!node) return null;
+      const textNode = node as Text;
+      const start = textNode.data.indexOf(text);
+      const range = document.createRange();
+      range.setStart(textNode, start);
+      range.setEnd(textNode, start + text.length);
+      return range;
+    })();
+    const lines = anchored
+      ? Array.from(anchored.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0)
       : [];
     const caret = document.querySelector('[data-sat-annotation-caret]');
     const viewport = window.visualViewport;
@@ -142,14 +167,40 @@ async function readPlacement(page: Page): Promise<PlacementGeometry> {
       visible: viewport
         ? { left: viewport.offsetLeft, top: viewport.offsetTop, right: viewport.offsetLeft + viewport.width, bottom: viewport.offsetTop + viewport.height }
         : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight },
+      nativeSelection: window.getSelection()?.toString() ?? '',
     };
-  }, SURFACE_SELECTOR);
+  }, { selector: SURFACE_SELECTOR, text: phrase });
 }
 
 /**
  * The invariants every placement must hold, whatever the device. Deliberately
  * one function so a new profile cannot quietly opt out of one of them.
  */
+/**
+ * Whether the anchored span now sits entirely above the visible region.
+ *
+ * Measured without the surface, because the surface is gone in the state this is
+ * asked about — that is the point of asking. The anchored phrase is the span the
+ * app anchored, so its rendered lines are the span the rule is deciding about.
+ */
+function anchoredSpanIsAboveVisibleRegion(page: Page, phrase: string): Promise<boolean> {
+  return page.locator('[data-sat-annotation-region="stimulus"]').evaluate((root, text) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node: Node | null = walker.nextNode();
+    while (node && !(node.nodeValue ?? '').includes(text)) node = walker.nextNode();
+    if (!node) return false;
+    const textNode = node as Text;
+    const start = textNode.data.indexOf(text);
+    const range = document.createRange();
+    range.setStart(textNode, start);
+    range.setEnd(textNode, start + text.length);
+    const line = range.getClientRects()[0];
+    if (!line) return false;
+    const viewport = window.visualViewport;
+    return line.bottom < (viewport ? viewport.offsetTop : 0);
+  }, phrase);
+}
+
 function expectContained(geometry: PlacementGeometry): void {
   const { surface, visible } = geometry;
   // A pixel of tolerance: sub-pixel layout rounds differently across engines.
@@ -175,7 +226,11 @@ test.describe('annotation surface placement', () => {
       await selectStimulusText(page, PHRASE);
       await expect(page.locator(SURFACE_SELECTOR)).toBeVisible();
 
-      const geometry = await readPlacement(page);
+      const geometry = await readPlacement(page, PHRASE);
+      // The app captures the anchor and retires the browser's own selection, so
+      // no native Copy / Look Up bar can be painted over the passage. This suite
+      // therefore measures the anchored phrase, and asserts the retirement.
+      expect(geometry.nativeSelection).toBe('');
       expectContained(geometry);
       expectDoesNotCoverSelection(geometry);
 
@@ -244,7 +299,7 @@ test.describe('annotation surface placement', () => {
     const toolbar = page.locator(SURFACE_SELECTOR);
     await expect(toolbar).toBeVisible();
 
-    const geometry = await readPlacement(page);
+    const geometry = await readPlacement(page, 'Several');
     expectContained(geometry);
     expect(geometry.surface.bottom).toBeGreaterThan(geometry.surface.top);
     expect(
@@ -322,7 +377,7 @@ test.describe('annotation surface placement', () => {
     // placed for the geometry it now has, not for the one it had.
     await page.setViewportSize({ width: 1180, height: 820 });
     await expect(page.locator(SURFACE_SELECTOR)).toBeVisible();
-    const geometry = await readPlacement(page);
+    const geometry = await readPlacement(page, PHRASE);
     expectContained(geometry);
     expectDoesNotCoverSelection(geometry);
     expect(geometry.caret, 'the surface comes back with its caret, not as a bare box').not.toBeNull();
@@ -369,17 +424,114 @@ test.describe('annotation surface placement', () => {
 
     // The same selection that floated a moment ago now has nowhere to sit beside
     // the words: the toolbar is pinned inside what is left of the viewport.
+    //
+    // CONTAINMENT IS A CLAIM ABOUT WHERE IT RESTS, and this move is animated on
+    // purpose (a viewport change is a big move, and the design settles those).
+    // Mid-flight the box's bottom is below the new edge — `top` is still
+    // travelling while the height bound has already snapped — measured at frame
+    // 2 as bottom 395 against a 300px region, reaching its place at frame 9.
+    // Asserting the transient would forbid the settle; asserting the settle is
+    // the promise the student experiences.
     await expect(page.locator(SURFACE_SELECTOR)).toBeVisible();
-    const geometry = await readPlacement(page);
+    await expect
+      .poll(async () => (await readPlacement(page, PHRASE)).surface.bottom, {
+        message: 'the toolbar settles inside what the student can see',
+        timeout: 3_000,
+      })
+      .toBeLessThanOrEqual(301);
+    const geometry = await readPlacement(page, PHRASE);
     expectContained(geometry);
     // Above the keyboard's edge, not merely inside the page — the difference
     // between a control the student can reach and one hidden under glass.
-    expect(geometry.surface.bottom).toBeLessThanOrEqual(301);
-
-    // And when the keyboard leaves even less than that, the selection itself is
+    expect(geometry.surface.bottom).toBeLessThanOrEqual(301);    // And when the keyboard leaves even less than that, the selection itself is
     // off the visible region: a contextual surface with no visible source hides
     // rather than pinning itself to a screen its words are no longer on.
+    //
+    // This is the rule a student meets by scrolling the passage away from the
+    // words they chose: `placeSelectionMenu` returns the hidden mode when the
+    // anchored box stops intersecting the visible region. (The passage here is
+    // shorter than a real one, so the visible region is what moves; the owned-touch
+    // suite drives the same rule from a real scroll, with the selection's handles
+    // travelling off the screen with its words.)
+    const toolbar = page.locator(SURFACE_SELECTOR);
     expect(await shrinkVisibleRegion(240)).toBe(true);
-    await expect(page.locator(SURFACE_SELECTOR)).toBeHidden();
+    await expect(toolbar).toBeHidden();
+    // Hidden, NOT unmounted: the surface is still in the document, which is why
+    // the tool the student armed, the anchored span and everything the exam holds
+    // about the selection survive the trip. A surface torn down here would have to
+    // re-anchor from scratch, and a lost anchor is how a student ends up
+    // annotating a word they did not choose.
+    expect(
+      await page.locator('[data-selection-action-menu]').evaluate((element) => getComputedStyle(element).visibility),
+      'a hidden surface stays mounted',
+    ).toBe('hidden');
+
+    // The room comes back, and so do the tools — placed again for the geometry
+    // they now have, on the SAME words.
+    expect(await shrinkVisibleRegion(844)).toBe(true);
+    await expect(toolbar).toBeVisible();
+    const restored = await readPlacement(page, PHRASE);
+    expectContained(restored);
+    expect(restored.caret, 'the surface comes back with its caret, not as a bare box').not.toBeNull();
+    await toolbar.getByRole('button', { name: 'Highlight Yellow' }).click();
+    await expect(page.locator('[data-sat-highlight="true"]')).toHaveText(PHRASE);
+  });
+
+  /**
+   * The other way a selection leaves the screen, and the way a student actually
+   * meets it: they scroll the passage away from the words they chose.
+   *
+   * Same decision as the case above — this is the same rule reached through the
+   * passage's own scroll, with the visible region left alone, so the two cases
+   * pin the rule from both ends rather than testing two implementations of it.
+   * `placeSelectionMenu` returns the hidden mode when the anchored box stops
+   * intersecting the visible region, and the hidden mode is a MOUNTED surface
+   * that claims no interaction, not an unmounted one. That is the whole of the
+   * checklist line: the tools go quiet while their source is off screen, nothing
+   * is thrown away, and they come back on the same words.
+   *
+   * The opt-in long passage is what a real SAT passage is; the default harness
+   * one is a few lines, and a pane that cannot scroll cannot test this.
+   */
+  test('hides while its anchor is scrolled out of the visible region, and acts on the same span when it returns', async ({ page }) => {
+    // Long enough that the passage is genuinely longer than its pane, and tall
+    // enough to leave the tools a comfortable lane above the selection — so the
+    // surface the student meets is the ordinary floating one with a caret, not
+    // the pinned fallback.
+    await page.setViewportSize({ width: 390, height: 620 });
+    await openHarness(page, '?long=1');
+    const phrase = PHRASE;
+    await selectStimulusText(page, phrase);
+    const toolbar = page.locator(SURFACE_SELECTOR);
+    await expect(toolbar).toBeVisible();
+
+    const scroller = page.locator('[data-sat-passage-scroll]');
+    const range = await scroller.evaluate((element) => element.scrollHeight - element.clientHeight);
+    expect(range, 'the passage must be scrollable for this case to mean anything').toBeGreaterThan(0);
+
+    await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    // The premise, measured rather than assumed: the anchored span is off the
+    // visible region, entirely above its top edge.
+    await expect
+      .poll(() => anchoredSpanIsAboveVisibleRegion(page, phrase), { message: 'the words left the visible region' })
+      .toBe(true);
+    await expect(toolbar).toBeHidden();
+    // Hidden, NOT gone: the surface is still in the document, holding the tool the
+    // student armed, so nothing has to be rebuilt when the words come back.
+    expect(
+      await page.locator('[data-selection-action-menu]').evaluate((element) => getComputedStyle(element).visibility),
+      'a hidden surface stays mounted',
+    ).toBe('hidden');
+
+    await scroller.evaluate((element) => { element.scrollTop = 0; });
+    await expect(toolbar).toBeVisible();
+    const geometry = await readPlacement(page, phrase);
+    expectContained(geometry);
+    expect(geometry.caret, 'the surface returns with its caret, not as a bare box').not.toBeNull();
+
+    // And it is the same span the student chose: the tool still acts on those
+    // words, so the anchor survived the trip rather than being re-derived.
+    await toolbar.getByRole('button', { name: 'Highlight Yellow' }).click();
+    await expect(page.locator('[data-sat-highlight="true"]')).toHaveText(phrase);
   });
 });

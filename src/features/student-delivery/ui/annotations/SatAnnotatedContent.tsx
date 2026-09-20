@@ -14,13 +14,12 @@ import {
   isSatSelectionInsideAnnotationUi,
   satAnnotationBlockForPoint,
 } from './satTextSelection';
-import { StudentTouchSelectionOverlay } from '@shared/ui/touch-selection/StudentTouchSelectionOverlay';
 import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
 import { useStudentTouchSelectionDiagnostics } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
-import {
-  browserCaretResolver,
-  useStudentTouchTextSelection,
-} from '@shared/ui/touch-selection/useStudentTouchTextSelection';
+import { browserCaretResolver } from '@shared/ui/selection-v2/engine/selectionPoint';
+import { nearestScrollableAncestor } from '@shared/ui/selection-v2/engine/selectionAutoScroll';
+import { useStudentSelectionGesture } from '@shared/ui/selection-v2/react/useStudentSelectionGesture';
+import { SelectionOverlay } from '@shared/ui/selection-v2/react/SelectionOverlay';
 import { isSatDragRelease, markSatPointerDown, markSatSelectionGestureEnded } from './satSelectionDragGuard';
 
 export const SAT_ANNOTATION_LIMIT = 200;
@@ -53,9 +52,14 @@ export const SAT_ANNOTATION_LIMIT = 200;
  * menu is already on screen before any handler of ours runs — which is exactly
  * what an iPad showed, with the exam's own toolbar beside it. Exam prose is
  * therefore `user-select: none` under a coarse pointer (see index.css) and the
- * selection comes from the exam instead: `useStudentTouchTextSelection` builds a
+ * selection comes from the exam instead: `useStudentSelectionGesture` builds a
  * range the platform never learns about, and it feeds the same
  * `captureSatTextRange` core the desktop selection does.
+ *
+ * Unlike the browser's selection, the exam's does NOT disappear when the finger
+ * lifts. It stays painted with its handles while the shell's toolbar is up, so
+ * the span the student is deciding about remains visible under the decision, and
+ * a tap on that toolbar — anything outside the selection — is what dismisses it.
  */
 export function SatAnnotatedContent({ content, annotations, region, enabled, enlarge, onLimitReached }: {
   content: StructuredContent;
@@ -216,7 +220,7 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
    * the word under the finger; a drag past the same tolerance now claims the
    * text instead of abandoning it.
    */
-  const touchSelection = useStudentTouchTextSelection({
+  const touchSelection = useStudentSelectionGesture({
     enabled: enabled && view.annotationModeEnabled && examScope.ownedTouchSelection,
     activation: 'drag',
     rootRef: root,
@@ -224,6 +228,13 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
     resolveCaretAtPoint,
     onSelect: reportOwnedRange,
     boundaryFor: satAnnotationBlockForPoint,
+    // Dragging a handle to the edge of the prose workspace scrolls it, measured
+    // from the pane that actually scrolls at that moment.
+    scrollContainer: nearestScrollableAncestor,
+    // The selection is the student's, and the shell's toolbar is how they act on
+    // it. A tap on that toolbar is outside the selection, so it dismisses it —
+    // the same gesture that applies an annotation is the one that retires the
+    // span, with no second dismissal path to keep in step.
   });
 
   const contentKey = JSON.stringify(content);
@@ -417,9 +428,10 @@ export function SatAnnotatedContent({ content, annotations, region, enabled, enl
         ) : null}
       </div>
 
-      {touchSelection.rects.length > 0 ? (
-        <StudentTouchSelectionOverlay rects={touchSelection.rects} />
-      ) : null}
+      {/* The owned selection: lines, handles, magnifier. It stays painted after
+          the finger lifts, so the span the student is deciding about remains
+          visible under the shell's toolbar instead of vanishing at release. */}
+      <SelectionOverlay selection={touchSelection} loupe={{ sourceRef: root }} />
 
       {limitNotice ? (
         <p role="alert" data-testid={"sat-annotation-limit-" + region} className="mb-2 rounded-[8px] border border-[var(--sat-danger)] bg-[var(--sat-surface)] px-3 py-2 text-[13px] font-medium text-[var(--sat-danger)]">

@@ -3,14 +3,13 @@ import {
   caretPositionAtPoint,
   clampTextPointTo,
   compareTextPoints,
-  expandToWordAt,
   firstTextPointIn,
   lastTextPointIn,
   nearestTextPointIn,
   textPointIsWithin,
   type TextPoint,
-  type WordSegmenter,
-} from '../touchSelectionPoint';
+} from '../engine/selectionPoint';
+import { expandToWordAt, type WordSegmenter } from '../domain/selectionSegmenter';
 
 function build(html: string): HTMLElement {
   const host = document.createElement('div');
@@ -201,6 +200,57 @@ describe('caretPositionAtPoint', () => {
     const doc = fakeDocument({ caretRangeFromPoint: () => range });
 
     expect(caretPositionAtPoint(doc, 10, 20)).toEqual({ node: text, offset: 2 });
+  });
+
+  it.each(['position', 'range'])('rejects an outside text caret from the %s API and measures the touched surface', (api) => {
+    const outside = textNodeOf(build('<span>unrelated text</span>'));
+    const range = document.createRange();
+    range.setStart(outside, 0);
+    range.collapse(true);
+    const doc = fakeDocument({
+      ...(api === 'position' ? { caretPositionFromPoint: () => ({ offsetNode: outside, offset: 0 }) } : { caretRangeFromPoint: () => range }),
+      elementFromPoint: () => host.querySelector('p'),
+    });
+    const trace = vi.fn();
+    const restore = installFakeLayout([{ node: text, x0: 100, y0: 50, charWidth: 10, charHeight: 20 }]);
+    try {
+      expect(caretPositionAtPoint(doc, 137, 60, trace, host)).toEqual({ node: text, offset: 4 });
+      expect(trace).toHaveBeenCalledWith(api === 'position' ? 'caretPositionFromPoint' : 'caretRangeFromPoint', expect.objectContaining({ insideRoot: false }));
+      expect(trace).toHaveBeenCalledWith('geometry', expect.objectContaining({ resolved: true, insideRoot: true }));
+    } finally { restore(); }
+  });
+
+  it('tries the legacy API before geometry when the standard API returns outside text', () => {
+    const outside = textNodeOf(build('<span>unrelated text</span>'));
+    const range = document.createRange();
+    range.setStart(text, 2);
+    range.collapse(true);
+    const doc = fakeDocument({
+      caretPositionFromPoint: () => ({ offsetNode: outside, offset: 0 }),
+      caretRangeFromPoint: () => range,
+    });
+    expect(caretPositionAtPoint(doc, 137, 60, undefined, host)).toEqual({ node: text, offset: 2 });
+  });
+
+  it('keeps geometry inside the surface when both the native hint and hit element are outside', () => {
+    const outside = build('<span>unrelated text</span>');
+    const doc = fakeDocument({
+      caretPositionFromPoint: () => ({ offsetNode: outside, offset: 0 }),
+      elementFromPoint: () => outside,
+    });
+    const restore = installFakeLayout([
+      { node: text, x0: 100, y0: 50, charWidth: 10, charHeight: 20 },
+      { node: textNodeOf(outside), x0: 100, y0: 50, charWidth: 10, charHeight: 20 },
+    ]);
+    try {
+      expect(caretPositionAtPoint(doc, 137, 60, undefined, host)).toEqual({ node: text, offset: 4 });
+    } finally { restore(); }
+  });
+
+  it('returns null if the surface cannot be measured instead of accepting outside text', () => {
+    const outside = textNodeOf(build('<span>unrelated text</span>'));
+    const doc = fakeDocument({ caretPositionFromPoint: () => ({ offsetNode: outside, offset: 0 }) });
+    expect(caretPositionAtPoint(doc, 137, 60, undefined, host)).toBeNull();
   });
 
   it('falls through when caretPositionFromPoint lands on an element rather than text', () => {

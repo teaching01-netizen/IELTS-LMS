@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { StudentTouchSelectionDiagnosticsProvider, useStudentTouchSelectionDiagnostics } from '../StudentTouchSelectionDiagnostics';
-import { useStudentTouchTextSelection } from '../useStudentTouchTextSelection';
+import { useStudentSelectionGesture } from '../../selection-v2/react/useStudentSelectionGesture';
 import { StudentExamInteractionScopeProvider } from '../StudentExamInteractionScope';
 import { FormattedText } from '../../../../components/student/FormattedText';
 
@@ -50,7 +50,7 @@ const coarse = () => true;
 function DelayedRoot({ visible }: { visible: boolean }) {
   const root = useRef<HTMLDivElement>(null);
   const diagnostics = useStudentTouchSelectionDiagnostics(root, { surface: 'delayed test root', enabled: true, ownedTouchSelection: true, toolModeOrAnnotationMode: 'highlight' });
-  useStudentTouchTextSelection({ enabled: true, activation: 'drag', rootRef: root, diagnostics, resolveCaretAtPoint: () => null, onSelect: () => {}, isCoarsePointer: coarse });
+  useStudentSelectionGesture({ enabled: true, activation: 'drag', rootRef: root, diagnostics, resolveCaretAtPoint: () => null, onSelect: () => {}, isCoarsePointer: coarse });
   return visible ? <div ref={root}>Late root</div> : null;
 }
 
