@@ -38,6 +38,11 @@ export const SAT_COPY = {
     increaseTextSize: "Increase text size",
     decreaseZoom: "Decrease screen zoom",
     increaseZoom: "Increase screen zoom",
+    // The on-demand half of auto-fit. Named for what the student gets — a view
+    // that stops scrolling — rather than for the mechanism, and never for a
+    // direction: the exam may be showing 75% already, and "zoom out" would then
+    // be a lie about what pressing it does.
+    fitToScreen: "Fit to screen",
   },
   // One concept, one destination: the student's notes for this question. Notes
   // anchored to selected passage text and the freeform note about the question

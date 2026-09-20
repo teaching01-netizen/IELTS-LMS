@@ -51,6 +51,13 @@ export interface SatExamTopBarProps {
   onToggleReading: () => void;
   onCloseReading: () => void;
   onReadingPreferencesChange: (preferences: SatReadingPreferences) => void;
+  /**
+   * Measures the panes again and lands on a zoom where the question fits.
+   * Optional only so this bar can render with no exam behind it (harnesses,
+   * tests): wherever a shell renders it, the shell supplies the measurement —
+   * staff preview included, since preview lays out the same panes.
+   */
+  onFitToScreen?: (() => void) | undefined;
 }
 
 export function SatExamTopBar(props: SatExamTopBarProps) {
@@ -213,6 +220,7 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
               triggerRef={readingButtonRef}
               onChange={props.onReadingPreferencesChange}
               onClose={props.onCloseReading}
+              onFitToScreen={props.onFitToScreen}
             />
           </div>
           {props.calculatorAvailable ? (

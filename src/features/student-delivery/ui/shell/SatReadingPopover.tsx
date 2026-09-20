@@ -21,6 +21,12 @@ export interface SatReadingPopoverProps {
   triggerRef: RefObject<HTMLButtonElement | null>;
   onChange: (preferences: SatReadingPreferences) => void;
   onClose: () => void;
+  /**
+   * "Fit to screen": the same measurement the exam runs when it opens, on
+   * demand. Optional only so the panel can render with no exam behind it;
+   * wherever a shell renders it, it measures that shell's real panes.
+   */
+  onFitToScreen?: (() => void) | undefined;
 }
 
 /**
@@ -32,7 +38,7 @@ export interface SatReadingPopoverProps {
  * via SatPopoverShell: focus-in on every open, focus-back on every close.
  */
 export function SatReadingPopover(props: SatReadingPopoverProps) {
-  const { open, disabled, preferences, triggerRef, onChange, onClose } = props;
+  const { open, disabled, preferences, triggerRef, onChange, onClose, onFitToScreen } = props;
   const scaleIndex = SAT_READING_TEXT_SCALES.indexOf(preferences.textScale);
   const canDecrease = scaleIndex > 0 && !disabled;
   const canIncrease = scaleIndex < SAT_READING_TEXT_SCALES.length - 1 && !disabled;
@@ -136,6 +142,21 @@ export function SatReadingPopover(props: SatReadingPopoverProps) {
               onClick={() => update({ examZoom: clampSatExamZoom(examZoom + SAT_EXAM_ZOOM_STEP) })}
               className="sat-touch-target rounded px-3 focus-visible:outline focus-visible:outline-2">+</button>
           </div>
+          {/* The on-demand half of auto-fit: the same measurement the exam runs
+              when it opens, for a student who has since zoomed or turned the
+              display sideways. Measured, not guessed — the exam reports the
+              largest zoom at which the question stops scrolling. */}
+          {onFitToScreen ? (
+            <button
+              type="button"
+              disabled={disabled}
+              data-sat-fit-to-screen="true"
+              onClick={onFitToScreen}
+              className="sat-touch-target sat-pressable sat-state-transition mt-2 w-full rounded-[9px] border border-[var(--sat-divider)] bg-[var(--sat-surface)] px-3 sat-type-control-secondary font-semibold text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed disabled:text-[var(--sat-disabled-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+            >
+              {SAT_COPY.displaySettings.fitToScreen}
+            </button>
+          ) : null}
         </section>
         <section aria-label={SAT_COPY.displaySettings.contrast}>
           <h3 className="text-sm font-semibold">{SAT_COPY.displaySettings.contrast}</h3>

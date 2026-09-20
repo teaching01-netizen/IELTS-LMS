@@ -18,6 +18,8 @@ import { SatShortcutsModal } from './help/SatShortcutsModal';
 import { useSatShortcuts } from '../hooks/useSatShortcuts';
 import type { SatToolActionBinding } from '../domain/satToolActions';
 import { SatMoreMenu } from './shell/SatMoreMenu';
+import { useSatExamFitZoom } from '../hooks/useSatExamFitZoom';
+import { resolveSatExamZoom } from '../domain/satExamFit';
 import { SatLineReader } from './reading/SatLineReader';
 import { SatContrastContext } from './reading/SatContrastContext';
 import { useSatMediaQuery } from './useSatMediaQuery';
@@ -98,6 +100,23 @@ export interface SatExamShellProps {
   onZoomIn?: (() => void) | undefined;
   onZoomOut?: (() => void) | undefined;
   onZoomReset?: (() => void) | undefined;
+  /**
+   * Auto-fit the screen zoom when the exam opens (real delivery opts in).
+   * The fit runs once per attempt, only when that attempt has neither decided
+   * nor a zoom of its own, and writes a smaller zoom only when a pane would
+   * otherwise have to scroll.
+   */
+  autoFitScreenZoom?: boolean | undefined;
+  /**
+   * True once this attempt has had its automatic zoom decision.
+   *
+   * It arrives as a prop because the attempt outlives this shell: a module
+   * boundary unmounts and remounts the exam inside one attempt, and a decision
+   * already made must not be made again.
+   */
+  screenZoomDecided?: boolean | undefined;
+  /** Reports that decision, so the attempt can remember it across a remount. */
+  onScreenZoomDecided?: (() => void) | undefined;
   onOpenBreakConfirm?: (() => void) | undefined;
   breakAvailable?: boolean | undefined;
   onReadingPreferencesChange: (preferences: SatReadingPreferences) => void;
@@ -150,6 +169,39 @@ export function SatExamShell(props: SatExamShellProps) {
   }), [questionKey, props.blocked, props.calculatorAvailable, props.moduleIdentity, props.referenceAvailable, notesAvailable]);
   const interaction = useSatInteractionController(interactionCtx);
   const touchAnnotations = useSatMediaQuery('(pointer: coarse)');
+  // The compact layout stacks the panes and keeps its own scale, so it is the
+  // one place the fit is never allowed to shrink the exam.
+  const compactLayout = useSatMediaQuery('(max-width: 767px)');
+  const contentRef = useRef<HTMLDivElement>(null);
+  /*
+   * Auto-fit (once per attempt, before paint).
+   *
+   * The fit measures the panes this shell renders, so it lives here and reports
+   * its decision through the same preference the Display control writes.
+   */
+  const fit = useSatExamFitZoom({
+    enabled: props.autoFitScreenZoom === true,
+    // Both halves of "this attempt has already answered the zoom question": the
+    // decision it made (which is what covers an attempt whose first module
+    // needed no shrink, and therefore stored nothing), and a zoom it holds —
+    // the student's own, or an earlier fit's.
+    zoomDecided: props.screenZoomDecided === true,
+    storedZoom: props.readingPreferences.examZoom ?? null,
+    compact: compactLayout,
+    blocked: props.blocked,
+    contentRef,
+    onDecide: (zoom) => {
+      if (zoom !== null) {
+        props.onReadingPreferencesChange({ ...props.readingPreferences, examZoom: zoom });
+      }
+      props.onScreenZoomDecided?.();
+    },
+  });
+  // Which zoom is showing, and why: one rule, in the domain (resolveSatExamZoom).
+  const screenZoom = resolveSatExamZoom({
+    probing: fit.zoom,
+    stored: props.readingPreferences.examZoom ?? null,
+  });
   const activeOverlay: "directions" | "navigator" | "notes" | "reading" | "more" | null =
     interaction.state.surface.kind === 'reading-settings' ? 'reading'
     : interaction.state.surface.kind === 'question-notes' ? 'notes'
@@ -429,6 +481,7 @@ export function SatExamShell(props: SatExamShellProps) {
         onToggleReading={() => toggleOverlay("reading")}
         onCloseReading={closeOverlay}
         onReadingPreferencesChange={props.onReadingPreferencesChange}
+        onFitToScreen={fit.fitNow}
       />
       {/* Bluebook More utility center (Phase 1): fixed-position dropdown
           pinned under the top-right More trigger (fixed right/top offsets
@@ -508,10 +561,20 @@ export function SatExamShell(props: SatExamShellProps) {
             onFlush={props.onFlushAnnotations}
             onClose={surface.closeNotes}
           >
+            {/* The content box is `zoom`-scaled and deliberately NOT resized:
+                percentage lengths are exempt from `zoom`, so width/height stay
+                the full pane region and only what is laid out inside shrinks.
+                That is what makes zooming out reveal more of the question
+                instead of drawing a smaller exam with bands of empty paper at
+                the pane's edge — so do not "compensate" it with
+                calc(100% / zoom): it is already unscaled, and the larger box
+                would be clipped by the shell. */}
             <div
+              ref={contentRef}
               className="h-full min-w-0"
-              data-sat-content-zoom={props.readingPreferences.examZoom ?? 1}
-              style={{ zoom: props.readingPreferences.examZoom ?? 1, width: '100%', height: '100%' }}>
+              data-sat-content-zoom={screenZoom}
+              data-sat-fit-probing={fit.probing ? "true" : "false"}
+              style={{ zoom: screenZoom, width: '100%', height: '100%' }}>
               {props.children}
             </div>
           </SatNotesSurfaceHost>

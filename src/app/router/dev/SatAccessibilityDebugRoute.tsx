@@ -82,6 +82,22 @@ const longStimulus = paragraph(
 
 const longReadingQuestion: DeliveredQuestion = { ...readingQuestion, stimulus: longStimulus };
 
+/**
+ * A passage no pane can hold, for the cases that need a pane in overflow
+ * whatever the viewport is (`?long=2`).
+ *
+ * Auto-fit is verified by walking it down to a smaller zoom and checking that
+ * the scrolling stops, so the harness needs an input that scrolls first —
+ * the realistic passage above fits a 1920x1080 pane at 100% and would prove
+ * nothing there.
+ */
+const oversizedStimulus = paragraph(
+  "stimulus",
+  [longStimulus.nodes[0]!.text, longStimulus.nodes[0]!.text, longStimulus.nodes[0]!.text].join(" ")
+);
+
+const oversizedReadingQuestion: DeliveredQuestion = { ...readingQuestion, stimulus: oversizedStimulus };
+
 const mathQuestion: DeliveredQuestion = {
   ...readingQuestion,
   examQuestionId: "debug-math-q1",
@@ -125,6 +141,16 @@ export function SatAccessibilityDebugRoute() {
   const spr = params.get("mode") === "spr";
   /** A passage longer than its pane, for the cases that need a real scroll. */
   const longPassage = params.get("long") === "1";
+  /** A passage longer than any pane, for the cases that need overflow itself. */
+  const oversizedPassage = params.get("long") === "2";
+  /**
+   * Auto-fit, as real delivery runs it (once, when the exam opens).
+   *
+   * Opt-in here because the harness is also how the resting 100% view is
+   * exercised: `?long=1&autoFit=1` is the pair that shows the fit doing
+   * something, and `?long=1` alone is the same page without it.
+   */
+  const autoFit = params.get("autoFit") === "1";
   const paused = params.get("paused") === "1";
   const initialTool =
     params.get("tool") === "calculator"
@@ -138,6 +164,8 @@ export function SatAccessibilityDebugRoute() {
   }));
   const [questionIndex, setQuestionIndex] = useState(0);
   const [eliminationMode, setEliminationMode] = useState(false);
+  /** The attempt-scoped half of the fit's rule, held where delivery holds it. */
+  const [screenZoomDecided, setScreenZoomDecided] = useState(false);
   const reading = useSatReadingPreferences("debug-schedule", "debug-attempt");
   const examViewport = useStudentExamViewport(true);
   useStudentExamPageLock(true);
@@ -153,7 +181,15 @@ export function SatAccessibilityDebugRoute() {
     eliminatedOptionIds: [],
     annotations: { version: 2, annotations: [], legacyQuestionNote: "" },
   });
-  const question = math ? mathQuestion : spr ? sprQuestion : longPassage ? longReadingQuestion : readingQuestion;
+  const question = math
+    ? mathQuestion
+    : spr
+      ? sprQuestion
+      : oversizedPassage
+        ? oversizedReadingQuestion
+        : longPassage
+          ? longReadingQuestion
+          : readingQuestion;
   const navigationItems = [0, 1, 2].map((index) => ({
     id: `debug-${index}`,
     index,
@@ -190,6 +226,9 @@ export function SatAccessibilityDebugRoute() {
         questionNote={response.annotations.legacyQuestionNote}
         readingPreferences={reading.preferences}
         onReadingPreferencesChange={reading.setPreferences}
+        autoFitScreenZoom={autoFit}
+        screenZoomDecided={screenZoomDecided}
+        onScreenZoomDecided={() => setScreenZoomDecided(true)}
         onSelectQuestion={setQuestionIndex}
         onToggleCalculator={() =>
           setActiveTools((current) => ({ ...current, calculator: !current.calculator }))
