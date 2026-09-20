@@ -168,7 +168,7 @@ describe('satInteractionReducer transition contracts', () => {
   });
 
   it('arms the mode without touching the surface or inventing a selection', () => {
-    let state = satInteractionReducer(
+    const state = satInteractionReducer(
       createSatInteractionState(),
       { type: 'QUESTION_NOTES_OPENED', returnFocus: { type: 'topbar', control: 'notes' } },
       rwCtx(),

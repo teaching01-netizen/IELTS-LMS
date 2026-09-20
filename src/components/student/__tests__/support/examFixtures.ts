@@ -489,7 +489,7 @@ export function makeActStimulus(options?: {
     stem: `According to Study ${i % 2 === 0 ? "1" : "2"}, which prediction holds?`,
     options: [
       { id: `act-opt-${i}-a`, text: "Dissolved oxygen decreases linearly.", isCorrect: true },
-      { id: `act-opt-${i}-b`, text: options?.withChoiceImages ? undefined ?? "Salinity stays constant." : "Salinity stays constant.", imageUrl: options?.withChoiceImages ? BROKEN_MEDIA.stimulusImage : undefined, isCorrect: false },
+      { id: `act-opt-${i}-b`, text: "Salinity stays constant.", imageUrl: options?.withChoiceImages ? BROKEN_MEDIA.stimulusImage : undefined, isCorrect: false },
       { id: `act-opt-${i}-c`, text: "Temperature reverses the trend.", isCorrect: false },
     ],
     skillCategory: (i % 2 === 0 ? "interpretation_of_data" : "scientific_investigation") as
