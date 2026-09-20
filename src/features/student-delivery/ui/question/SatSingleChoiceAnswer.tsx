@@ -93,7 +93,11 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
                 Option {letter} is eliminated.
               </span>
             ) : null}
-            {props.eliminationMode ? (
+            {/* Audit finding 3: the selected choice offers no cross-out control.
+                Elimination must never be expressible on the answer the student
+                picked — the domain mutation refuses it, and the UI does not
+                offer a control whose only possible effect is a contradiction. */}
+            {props.eliminationMode && !selected ? (
               <button
                 type="button"
                 onClick={() => props.onToggleElimination(option.id)}

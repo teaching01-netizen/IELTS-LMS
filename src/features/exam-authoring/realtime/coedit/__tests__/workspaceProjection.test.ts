@@ -14,7 +14,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { plainContentFromText } from "../../../editor/richContent";
+import {
+  emptyWorkspaceContent,
+  isWorkspaceRichContent,
+} from "../../../ui/authoringWorkspaceModel";
 import { encodeStateVectorBase64 } from "../stateVector";
+import { PromptCoeditProvider } from "../provider";
 import { parseWorkspaceSeedFrame } from "../workspaceSeed";
 import {
   SatAuthoringWorkspaceProvider,
@@ -152,6 +157,14 @@ function openRoom(
   return { provider, transport };
 }
 
+/** Every workspace path a seed frame on this transport was addressed to. */
+function seededPaths(transport: FakeTransport): string[] {
+  return transport.stateless.flatMap((payload) => {
+    const parsed = parseWorkspaceSeedFrame(payload);
+    return parsed ? [parsed.path] : [];
+  });
+}
+
 /** Fails the test on a missing root instead of yielding undefined. */
 function valueOf(snapshot: WorkspaceCoeditSnapshot, root: string): string {
   const value = snapshot.values[root];
@@ -285,6 +298,39 @@ describe("SAT workspace snapshot", () => {
 
     expect(projected).toEqual([ROOT_B, ROOT_B]);
     expect(valueOf(snapshots.at(-1)!, ROOT_B)).toContain("Prompt from Mira");
+  });
+
+  it("projects a rich root the room already holds before this tab ever touched it", () => {
+    // The exam already has content: a previous session seeded the question and
+    // the room replays it at initial sync. This tab has NOT asked its document
+    // for the root (no editor is mounted while the field waits to hydrate), so
+    // Yjs materializes the incoming root as a bare placeholder type rather than
+    // an XmlFragment. Skipping it left the field "never requested" forever: the
+    // seed proposal saw a populated fragment and bailed out without a word.
+    const { provider, transport } = openRoom();
+    const snapshots: WorkspaceCoeditSnapshot[] = [];
+    provider.subscribe((next) => snapshots.push(next));
+
+    const room = new Y.Doc();
+    const peer = new SatAuthoringWorkspaceProvider({
+      documentName: DOCUMENT_NAME,
+      serviceUrl: "ws://127.0.0.1:0",
+      token: { token: "session-token", expiresAt: Math.floor(Date.now() / 1000) + 3600 },
+      self: { actorId: "actor-2", displayName: "Mira" },
+      readOnly: false,
+      refreshToken: async () => ({ token: "session-token", expiresAt: Math.floor(Date.now() / 1000) + 3600 }),
+    });
+    rooms.push(peer);
+    peer.setRichField(PROMPT_FIELD, plainContentFromText("Held by the room"));
+    Y.applyUpdate(room, Y.encodeStateAsUpdate(peer.ydoc));
+    Y.applyUpdate(provider.ydoc, Y.encodeStateAsUpdate(room), "remote");
+    room.destroy();
+
+    expect(isWorkspaceRichContent(snapshots.at(-1)!.values[ROOT_B])).toBe(true);
+    expect(textWithin(snapshots.at(-1)!.values[ROOT_B])).toContain("Held by the room");
+    // A root the room holds is never re-proposed.
+    expect(provider.seedRichField(PROMPT_FIELD, plainContentFromText("Local copy"))).toBe(false);
+    expect(seededPaths(transport)).toEqual([]);
   });
 
   it("projects rich roots and scalar fields with the shipped conversion by default", () => {
@@ -582,5 +628,234 @@ describe("authoring save Retry", () => {
     provider.retry();
 
     expect(framesOn(transport)).toEqual([]);
+  });
+});
+
+/**
+ * Root ALLOCATED is not root INITIALIZED.
+ *
+ * A shared rich root exists from the moment anything asks the document for it:
+ * a field binding, an editor mounting its Collaboration plugin, a recovery
+ * export. Projecting such a root published an empty document for a question
+ * nobody had seeded, and that empty value then replaced the HTTP question the
+ * author was looking at — the "sidebar has content but the editor is blank"
+ * state. These tests pin both halves of the rule: a root nobody has written to
+ * is not content, and an author-made blank IS.
+ */
+describe("SAT workspace rich-root initialization", () => {
+  it("does not project a rich root that was only allocated", () => {
+    const { provider } = openRoom();
+    // What opening a field binding does: resolve the fragment by name, which
+    // ALLOCATES it in the shared document without writing anything.
+    provider.fieldBinding(PROMPT_FIELD);
+    const fragment = provider.ydoc.getXmlFragment(ROOT_B);
+    expect(fragment.length).toBe(0);
+
+    const snapshots: WorkspaceCoeditSnapshot[] = [];
+    provider.subscribe((next) => snapshots.push(next));
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]!.values[ROOT_B]).toBeUndefined();
+
+    // A later unrelated change re-reads every root; the allocated one stays out.
+    provider.setValue("ui/selectedQuestionId", "q-1");
+    expect(snapshots.at(-1)!.values["ui/selectedQuestionId"]).toBe("q-1");
+    expect(snapshots.at(-1)!.values[ROOT_B]).toBeUndefined();
+    expect(Object.keys(snapshots.at(-1)!.values)).not.toContain(ROOT_A);
+  });
+
+  it("still proposes the seed for a bound-but-empty root, then projects the accepted seed", () => {
+    const { provider, transport } = openRoom();
+    provider.fieldBinding(PROMPT_FIELD);
+    provider.ydoc.getXmlFragment(ROOT_B);
+    const snapshots: WorkspaceCoeditSnapshot[] = [];
+    provider.subscribe((next) => snapshots.push(next));
+
+    // A binding is not content, so it cannot block the question's own seed.
+    expect(provider.seedRichField(PROMPT_FIELD, plainContentFromText("From the HTTP question"))).toBe(
+      true,
+    );
+    expect(
+      transport.stateless.some((payload) => payload.includes("From the HTTP question")),
+    ).toBe(true);
+
+    // The accepted seed arrives as an ordinary Yjs update from the service.
+    provider.setRichField(PROMPT_FIELD, plainContentFromText("From the HTTP question"));
+    expect(textWithin(snapshots.at(-1)!.values[ROOT_B])).toContain("From the HTTP question");
+  });
+
+  it("treats an author-made blank field as initialized, authoritative content", () => {
+    const { provider } = openRoom();
+    const snapshots: WorkspaceCoeditSnapshot[] = [];
+    provider.subscribe((next) => snapshots.push(next));
+
+    // Empty structured content is still a DOCUMENT: the contract writes the
+    // document's own paragraph, so the root is non-zero-length and initialized.
+    provider.setRichField(PROMPT_FIELD, emptyWorkspaceContent());
+    expect(provider.ydoc.getXmlFragment(ROOT_B).length).toBeGreaterThan(0);
+
+    const projected = snapshots.at(-1)!.values[ROOT_B];
+    expect(isWorkspaceRichContent(projected)).toBe(true);
+    // No visible text, and still the field's truth: an author who cleared the
+    // prompt must not be shown the pre-clear HTTP content again.
+    expect(textWithin(projected)).toBe("");
+  });
+});
+
+/**
+ * The seed DELIVERY ledger.
+ *
+ * A proposal the room refuses is one failure; a proposal that never reached the
+ * room is a completely different one, and they used to look identical from the
+ * editor: both are just "the root is not there yet". These tests pin the second
+ * half, including the two ways a frame could previously disappear in silence —
+ * evicted from the off-line queue, or refused by the shared validator.
+ */
+describe("SAT workspace seed delivery", () => {
+  it("puts a proposal on the wire and says so", () => {
+    const { provider, transport } = openRoom();
+
+    const accepted = provider.seedRichField(PROMPT_FIELD, plainContentFromText("Prompt"));
+
+    expect(accepted).toBe(true);
+    expect(seededPaths(transport)).toEqual([PROMPT_FIELD]);
+    expect(provider.snapshot().seedDeliveries?.[PROMPT_FIELD]).toEqual({
+      delivery: "relayed",
+      detail: null,
+    });
+  });
+
+  it("holds a proposal while the transport is down and relays it when it returns", () => {
+    const { provider, transport } = openRoom(undefined, { connect: false });
+
+    provider.seedRichField(PROMPT_FIELD, plainContentFromText("Prompt"));
+
+    // Nothing on the wire, and the wait is NAMED rather than implied.
+    expect(seededPaths(transport)).toEqual([]);
+    expect(provider.snapshot().seedDeliveries?.[PROMPT_FIELD]).toEqual({
+      delivery: "queued",
+      detail: "waiting for the collaboration socket",
+    });
+
+    transport.status("connected");
+
+    expect(seededPaths(transport)).toEqual([PROMPT_FIELD]);
+    expect(provider.snapshot().seedDeliveries?.[PROMPT_FIELD]).toEqual({
+      delivery: "relayed",
+      detail: null,
+    });
+  });
+
+  it("flushes a queued proposal on initial sync, with no status frame needed", () => {
+    // The connectivity fact is derived from sync as well as from the status
+    // callback. When only `onStatus` could establish it, a client whose status
+    // callback never reported `connected` held every proposal forever, and the
+    // editor waited on a root nobody had asked for.
+    const { provider, transport } = openRoom(undefined, { connect: false });
+    provider.seedRichField(PROMPT_FIELD, plainContentFromText("Prompt"));
+
+    transport.sync();
+
+    expect(seededPaths(transport)).toEqual([PROMPT_FIELD]);
+    expect(provider.snapshot().seedDeliveries?.[PROMPT_FIELD]?.delivery).toBe("relayed");
+    expect(provider.snapshot().connectionPhase).toBe("connected");
+  });
+
+  it("never evicts a proposal to make room for a command", () => {
+    const { provider, transport } = openRoom(undefined, { connect: false });
+    provider.seedRichField(PROMPT_FIELD, plainContentFromText("Prompt"));
+
+    // Overflow the off-line queue with signals a later state subsumes.
+    for (
+      let index = 0;
+      index < PromptCoeditProvider.MAX_PENDING_STATELESS_FRAMES + 5;
+      index += 1
+    ) {
+      provider.publishCommand("question.deleted", { questionId: `q-${index}` });
+    }
+
+    expect(provider.snapshot().seedDeliveries?.[PROMPT_FIELD]?.delivery).toBe("queued");
+
+    transport.status("connected");
+
+    // The proposal survived the queue pressure: a dropped seed is an editor
+    // that can never initialize, which no later command can make up for.
+    expect(seededPaths(transport)).toContain(PROMPT_FIELD);
+  });
+
+  it("records a proposal the shared validator refuses instead of dropping it", () => {
+    const { provider, transport } = openRoom();
+
+    const accepted = provider.seedRichField("question/q-1/unknown", plainContentFromText("Prompt"));
+
+    expect(accepted).toBe(false);
+    expect(seededPaths(transport)).toEqual([]);
+    const recorded = provider.snapshot().seedDeliveries?.["question/q-1/unknown"];
+    expect(recorded?.delivery).toBe("invalid-frame");
+    // The specific rule is the useful part: it is what the waiting field
+    // reports, and it is the only trace this failure has.
+    expect(recorded?.detail).toContain("question/q-1/unknown");
+  });
+});
+
+/**
+ * The seed RESULT channel.
+ *
+ * A proposal whose outcome never reaches the browser is indistinguishable from
+ * one still in flight, so the editor that bound to the root waits forever. The
+ * provider records the outcome per workspace path and publishes it with the
+ * snapshot, which is what lets a field stop waiting and offer recovery.
+ */
+describe("SAT workspace seed results", () => {
+  const result = (overrides: Record<string, unknown>) => ({
+    type: "coedit.seed_result",
+    documentName: DOCUMENT_NAME,
+    seedId: `seed-${"a".repeat(32)}`,
+    root: "rich",
+    path: "question/q-1/rationale",
+    outcome: "rejected",
+    retryable: false,
+    ...overrides,
+  });
+
+  it("records a non-applied outcome against the path it was proposed for", () => {
+    const { provider, transport } = openRoom();
+    expect(provider.snapshot().seedFailures).toBeUndefined();
+
+    transport.deliver(result({}));
+
+    expect(provider.snapshot().seedFailures).toEqual({
+      "question/q-1/rationale": { outcome: "rejected", retryable: false },
+    });
+  });
+
+  it("keeps a retryable failure flagged so the editor can offer a retry", () => {
+    const { provider, transport } = openRoom();
+    transport.deliver(result({ outcome: "failed", retryable: true }));
+
+    expect(provider.snapshot().seedFailures?.["question/q-1/rationale"]).toEqual({
+      outcome: "failed",
+      retryable: true,
+    });
+  });
+
+  it("clears the report once the room says the seed applied", () => {
+    const { provider, transport } = openRoom();
+    transport.deliver(result({ outcome: "failed", retryable: true }));
+    expect(provider.snapshot().seedFailures).toBeDefined();
+
+    transport.deliver(result({ outcome: "applied", retryable: false }));
+
+    // The common case must not accumulate: an applied seed is not a failure,
+    // and "the room holds this root" is already visible in the document.
+    expect(provider.snapshot().seedFailures).toBeUndefined();
+  });
+
+  it("ignores a result addressed to another room or naming another root", () => {
+    const { provider, transport } = openRoom();
+    transport.deliver(result({ documentName: "coedit:v2:00000000-0000-4000-8000-000000000000" }));
+    transport.deliver(result({ path: "not/a/workspace/path" }));
+    transport.deliver(result({ outcome: "not_an_outcome" }));
+
+    expect(provider.snapshot().seedFailures).toBeUndefined();
   });
 });

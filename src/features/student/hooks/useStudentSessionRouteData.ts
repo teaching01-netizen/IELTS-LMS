@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAsyncPolling } from '@shared/hooks/useAsyncPolling';
-import { useLiveUpdates, type LiveUpdateEvent } from '@shared/hooks/useLiveUpdates';
+import {
+  DEFAULT_MAX_CONNECT_ATTEMPTS_WITHOUT_OPEN,
+  useLiveUpdates,
+  type LiveUpdateEvent,
+} from '@shared/hooks/useLiveUpdates';
 import { useAuthSession } from '../../auth/api/authSession';
 import {
   studentSessionFacade,
@@ -21,6 +25,7 @@ import {
 import { createStudentSessionBootstrap } from '../application/exam-session/studentSessionBootstrap';
 import { createStudentRuntimePoll } from '../infrastructure/exam-session/studentRuntimePoll';
 import { createStudentRuntimePollLoop } from '../infrastructure/exam-session/studentRuntimePollLoop';
+import { resolveStudentRealtimeTransport } from '../infrastructure/exam-session/studentRealtimeRollout';
 import {
   createStudentRealtimeCoordinator,
   type StudentRealtimeCoordinator,
@@ -123,6 +128,14 @@ export function useStudentSessionRouteData(
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadTransitionRollout = useMemo(buildDefaultAnswerInvariantRollout, []);
+  // Phase 3 rollout: the socket is the primary student channel only when the
+  // deployment says so (VITE_STUDENT_REALTIME=websocket). The default is the
+  // poll-only posture this route shipped with, so the switch is also the
+  // client-side rollback. Server-side rollback stays STUDENT_WS=gone.
+  const studentRealtimeTransport = useMemo(
+    () => resolveStudentRealtimeTransport(import.meta.env['VITE_STUDENT_REALTIME']),
+    [],
+  );
   const candidateId = useMemo(() => normalizeCandidateId(studentId), [studentId]);
   const staticVersionIdRef = useRef<string | null>(null);
   const refreshEpochRef = useRef(0);
@@ -142,7 +155,15 @@ export function useStudentSessionRouteData(
   const highestSeenAttemptRevisionRef = useRef(0);
   const appliedFreshnessRef = useRef<LiveSnapshotFreshness | null>(null);
   const runtimeSnapshotRef = useRef<ExamSessionRuntime | null>(null);
+  const attemptSnapshotRef = useRef<StudentAttempt | null>(null);
   const realtimeCoordinatorRef = useRef<StudentRealtimeCoordinator | null>(null);
+  // Realtime rollout telemetry (Phase 3): whether THIS mount ever opened the
+  // socket (so a disconnect can be told apart from "never connected"), the
+  // runtime revision held at connect time (the gap a reconnect snapshot
+  // closes), and whether the poll fallback has already been reported.
+  const wsConnectedRef = useRef(false);
+  const connectBaselineRevisionRef = useRef<number | null>(null);
+  const pollFallbackReportedRef = useRef(false);
   const scheduleRef = useRef<ExamSchedule | null>(null);
   const debouncedRefreshTimerRef = useRef<number | null>(null);
   const initialLoadKeyRef = useRef<string | null>(null);
@@ -182,6 +203,10 @@ export function useStudentSessionRouteData(
   useEffect(() => {
     runtimeSnapshotRef.current = runtimeSnapshot;
   }, [runtimeSnapshot]);
+
+  useEffect(() => {
+    attemptSnapshotRef.current = attemptSnapshot;
+  }, [attemptSnapshot]);
 
   useEffect(() => {
     scheduleRef.current = schedule;
@@ -570,29 +595,71 @@ export function useStudentSessionRouteData(
     }, 500);
   }, [isLoading, refreshBackendSessionSnapshot]);
 
+  // Phase 5: control-plane refreshes do not wait out the debounce window.
+  // The 500ms coalescer exists for high-frequency bursts (a roster sweep or a
+  // class of students saving at once); a runtime transition is one frame that
+  // every waiting student must act on immediately. Sharing one timer also
+  // means a queued burst is dropped in favour of the newer control frame
+  // rather than delaying it behind the burst's own timer.
+  const refreshOnRuntimeTransition = useCallback(() => {
+    if (isLoading) {
+      return;
+    }
+    if (debouncedRefreshTimerRef.current !== null) {
+      window.clearTimeout(debouncedRefreshTimerRef.current);
+      debouncedRefreshTimerRef.current = null;
+    }
+    refreshBackendSessionSnapshot().catch(() => {});
+  }, [isLoading, refreshBackendSessionSnapshot]);
+
   const handleLiveUpdate = useCallback(
     (event: LiveUpdateEvent) => {
       if (!scheduleId) {
         return;
       }
 
+      // Phase 4/5: the frame is a wake-up, never the state. It names the
+      // revision that moved; the refresh (or a newer runtime_snapshot) is what
+      // commits, and the revision guards decide whether it may. A
+      // schedule_runtime frame is a control-plane transition (start, pause,
+      // resume, extend, section advance) and refreshes immediately; attempt
+      // frames are per-student bursts and keep the coalescer.
       if (event.kind === 'schedule_runtime') {
         if (event.id !== scheduleId) {
           return;
         }
-      } else if (event.kind === 'attempt') {
+        // Commit -> frame: the latency the rollout is judged on (<500ms p95 on
+        // a healthy connection). Measured at receipt, before the refresh, so it
+        // reports transport, not the REST round-trip that follows it.
+        const committedAtMs = event.createdAt ? Date.parse(event.createdAt) : Number.NaN;
+        if (Number.isFinite(committedAtMs)) {
+          emitStudentObservabilityMetric(
+            'runtime_event_to_client_ms',
+            withStudentObservabilityDimensions({
+              scheduleId,
+              attemptId: attemptSnapshot?.id ?? null,
+              latencyMs: Math.max(0, Date.now() - committedAtMs),
+              realtimeTransport: studentRealtimeTransport,
+              reason: event.event,
+            }),
+          );
+        }
+        realtimeCoordinatorRef.current?.handleEvent(event);
+        refreshOnRuntimeTransition();
+        return;
+      }
+
+      if (event.kind === 'attempt') {
         if (!attemptSnapshot?.id || event.id !== attemptSnapshot.id) {
           return;
         }
         setSatAttemptUpdateToken((value) => value + 1);
-      } else {
+        realtimeCoordinatorRef.current?.handleEvent(event);
+        scheduleDebouncedRefresh();
         return;
       }
-
-      realtimeCoordinatorRef.current?.handleEvent(event);
-      scheduleDebouncedRefresh();
     },
-    [attemptSnapshot?.id, scheduleDebouncedRefresh, scheduleId],
+    [attemptSnapshot?.id, refreshOnRuntimeTransition, scheduleDebouncedRefresh, scheduleId],
   );
 
   const handleRuntimeSnapshot = useCallback(
@@ -606,6 +673,25 @@ export function useStudentSessionRouteData(
       }
 
       const runtimeRecord = asRecord(payload.runtime) ?? {};
+      // The server sends a runtime_snapshot on connect when its revision is
+      // ahead of the one the client reported. That difference is exactly what
+      // the client missed while it was away — the one number that says whether
+      // the reconnect path is closing real gaps or nothing at all.
+      const snapshotRevision = parseFiniteNumber(runtimeRecord['revision']);
+      const baselineRevision = connectBaselineRevisionRef.current;
+      if (baselineRevision !== null && snapshotRevision !== null && snapshotRevision > baselineRevision) {
+        emitStudentObservabilityMetric(
+          'runtime_revision_gap_on_reconnect',
+          withStudentObservabilityDimensions({
+            scheduleId: scheduleId ?? null,
+            attemptId: attemptSnapshot?.id ?? null,
+            revisionGap: snapshotRevision - baselineRevision,
+            realtimeTransport: studentRealtimeTransport,
+            reason: 'socket_snapshot',
+          }),
+        );
+        connectBaselineRevisionRef.current = null;
+      }
       const realtimeResult = realtimeCoordinatorRef.current?.handleRuntimeSnapshot({
         runtime: payload.runtime,
         revision: parseFiniteNumber(runtimeRecord['revision']),
@@ -645,9 +731,13 @@ export function useStudentSessionRouteData(
     [scheduleId],
   );
 
-  // Plan C1: students never open live sockets (server 410s them). The
-  // versioned runtime poll below is the sole student live channel; the
-  // role gate keeps this hook disconnected without a network round-trip.
+  // Phase 3: the socket is the primary student channel when the rollout says
+  // so, and it rides the SAME infrastructure staff use (bus -> hub ->
+  // /api/v1/ws/live). The versioned runtime poll below stays the recovery
+  // path: it is what corrects state when the socket never opens, drops, or
+  // falls behind. `lastSeenRuntimeRevision` is sent on every (re)connect so a
+  // reconnect gap is closed by the server's own snapshot rather than by
+  // trusting whatever the client happened to hold.
   useLiveUpdates({
     role: 'student',
     ...(scheduleId ? { scheduleId } : {}),
@@ -655,18 +745,61 @@ export function useStudentSessionRouteData(
     ...(Number.isInteger(runtimeSnapshot?.revision)
       ? { lastSeenRuntimeRevision: runtimeSnapshot?.revision as number }
       : {}),
-    enabled: false,
+    enabled: studentRealtimeTransport === 'websocket',
+    // STUDENT_WS=gone is a server-side rollback the browser cannot observe
+    // (the 410 never reaches script): spend a bounded budget, then let the
+    // poll own the session instead of reconnecting forever.
+    maxConnectAttemptsWithoutOpen: DEFAULT_MAX_CONNECT_ATTEMPTS_WITHOUT_OPEN,
     debounceMs: 500,
     onConnected: () => {
       setLiveSocketConnected(true);
+      wsConnectedRef.current = true;
+      pollFallbackReportedRef.current = false;
+      connectBaselineRevisionRef.current = runtimeSnapshotRef.current?.revision ?? null;
+      emitStudentObservabilityMetric(
+        'student_ws_connect_success',
+        withStudentObservabilityDimensions({
+          scheduleId: scheduleId ?? null,
+          attemptId: attemptSnapshot?.id ?? null,
+          realtimeTransport: studentRealtimeTransport,
+          reason: 'connected',
+        }),
+      );
       realtimeCoordinatorRef.current?.handleSocketConnected();
       if (state && !isLoading) {
         scheduleDebouncedRefresh();
       }
     },
     onDisconnected: () => {
+      const hadOpened = wsConnectedRef.current;
+      wsConnectedRef.current = false;
       setLiveSocketConnected(false);
+      if (hadOpened) {
+        // Only a drop after a healthy open: a mount that never connected is
+        // the retired/misconfigured case, reported separately by
+        // onConnectExhausted.
+        emitStudentObservabilityMetric(
+          'student_ws_disconnect_after_open',
+          withStudentObservabilityDimensions({
+            scheduleId: scheduleId ?? null,
+            attemptId: attemptSnapshot?.id ?? null,
+            realtimeTransport: studentRealtimeTransport,
+            reason: 'after_open',
+          }),
+        );
+      }
       realtimeCoordinatorRef.current?.handleSocketDisconnected();
+    },
+    onConnectExhausted: () => {
+      emitStudentObservabilityMetric(
+        'student_ws_connect_exhausted',
+        withStudentObservabilityDimensions({
+          scheduleId: scheduleId ?? null,
+          attemptId: attemptSnapshot?.id ?? null,
+          realtimeTransport: studentRealtimeTransport,
+          reason: 'connect_budget',
+        }),
+      );
     },
     onRuntimeSnapshot: handleRuntimeSnapshot,
     onEvent: handleLiveUpdate,
@@ -862,23 +995,39 @@ export function useStudentSessionRouteData(
     loadStudentDataRef.current('load').catch(() => {});
   }, [authStatus, candidateId, scheduleId]);
 
-  // Plan C1: the runtime poll loop is the student live channel (sockets
-  // retired). pollAfterSecs from the server drives cadence adaptively:
-  // 2s fast-lane within 60s of a control command, 25s steady. A revision
-  // change triggers exactly one debounced refresh; 304 = steady, no work.
-  // liveSocketConnected stays false (no socket); the coordinator's
-  // disconnected policy is the fallback before the first poll lands.
-  const pollingPolicy = realtimeCoordinator?.getPollingPolicy(runtimeSnapshot?.status ?? null) ?? {
+  // The runtime poll loop is the student RECOVERY channel: pollAfterSecs from
+  // the server drives cadence adaptively (2s fast-lane within 60s of a control
+  // command, 25s steady). A revision change triggers exactly one debounced
+  // refresh; 304 = steady, no work. The coordinator's policy depends on
+  // whether the socket is connected, so a healthy socket polls lazily and a
+  // missing one polls tightly.
+  const pollingPolicy = realtimeCoordinator?.getPollingPolicy(runtimeSnapshot?.status ?? null, {
+    attemptPhase: attemptSnapshot?.phase ?? null,
+  }) ?? {
     intervalMs: 15_000,
     maxIntervalMs: 25_000,
   };
   const runtimePollRevisionRef = useRef<number>(0);
   const runtimePollLoopRef = useRef<ReturnType<typeof createStudentRuntimePollLoop> | null>(null);
+  // The loop is created once, on the first render, so the refresh it fires on a
+  // revision change must not be a closure captured then: that render still has
+  // isLoading === true, and the captured callback would early-return forever.
+  // The ref carries whatever the current render's callback is.
+  const refreshOnRuntimeTransitionRef = useRef(refreshOnRuntimeTransition);
+  useEffect(() => {
+    refreshOnRuntimeTransitionRef.current = refreshOnRuntimeTransition;
+  }, [refreshOnRuntimeTransition]);
   // Runtime-poll interop: the loop only starts once the initial snapshot has
-  // loaded AND the backend serves the versioned poll route. refreshTick
-  // probes the route (one 404 максимум per session); a 404 disables the
-  // loop for the session so older backends keep today's refresh cadence.
-  const runtimePollProbedRef = useRef(false);
+  // loaded AND the backend serves the versioned poll route. The route is
+  // treated as AVAILABLE until a poll proves otherwise (one 404 per session),
+  // so older backends keep today's refresh cadence after a single failed poll.
+  //
+  // This flag used to start false and be set true only INSIDE the tick branch
+  // it gates, which made the tick branch unreachable: the versioned
+  // ?sinceRevision= poll never ran, the server's adaptive pollAfterSecs was
+  // never consumed, and student liveness silently degraded to the plain
+  // snapshot refresh (the fallback branch) at the coordinator's cadence. A
+  // probe you only finish by succeeding is not a probe.
   const runtimePollAvailableRef = useRef(true);
   if (scheduleId && !runtimePollLoopRef.current) {
     const pollClient = createStudentRuntimePoll({
@@ -900,27 +1049,34 @@ export function useStudentSessionRouteData(
     runtimePollLoopRef.current = createStudentRuntimePollLoop({
       poll: (since) => pollClient.poll(since),
       sinceRevision: 0,
+      // A revision the loop has not seen is cohort state moving (a control
+      // command or a section advance): refresh immediately rather than through
+      // the burst coalescer. The loop advances its own cursor first, so the
+      // next poll reports notModified and this cannot become a refresh loop.
       onRevision: () => {
-        scheduleDebouncedRefresh();
+        refreshOnRuntimeTransitionRef.current();
       },
-      schedule: () => {},
+      // Phase 6: the loop owns the delay; the coordinator owns how tight the
+      // transport may be (socket connected (20-30s) vs not (1.5-3s)). The
+      // server's pollAfterSecs is clamped between those bounds, so the two
+      // policies cannot disagree about who decides when the next poll runs.
+      cadence: () => {
+        const policy = realtimeCoordinatorRef.current?.getPollingPolicy(
+          runtimeSnapshotRef.current?.status ?? null,
+          { attemptPhase: attemptSnapshotRef.current?.phase ?? null },
+        );
+        return policy
+          ? { floorMs: policy.intervalMs, ceilingMs: policy.maxIntervalMs }
+          : { floorMs: 15_000, ceilingMs: 25_000 };
+      },
     });
-    // The first tick is the route capability probe. Leaving this false here
-    // made the loop self-disable forever: the tick that would set the flag
-    // was gated on the flag already being true.
-    runtimePollProbedRef.current = true;
   }
 
   useAsyncPolling(
     async () => {
       try {
         const loop = runtimePollLoopRef.current;
-        if (
-          loop &&
-          !loop.stopped() &&
-          runtimePollAvailableRef.current &&
-          runtimePollProbedRef.current
-        ) {
+        if (loop && !loop.stopped() && runtimePollAvailableRef.current) {
           let view;
           try {
             view = await loop.tick();
@@ -931,6 +1087,22 @@ export function useStudentSessionRouteData(
             // interop, one probe 404 per session).
             if ((pollError as { status?: number })?.status === 404) {
               runtimePollAvailableRef.current = false;
+              if (
+                studentRealtimeTransport === 'websocket' &&
+                !wsConnectedRef.current &&
+                !pollFallbackReportedRef.current
+              ) {
+                pollFallbackReportedRef.current = true;
+                emitStudentObservabilityMetric(
+                  'poll_fallback_activation',
+                  withStudentObservabilityDimensions({
+                    scheduleId: scheduleId ?? null,
+                    attemptId: attemptSnapshot?.id ?? null,
+                    realtimeTransport: studentRealtimeTransport,
+                    reason: 'socket_unavailable',
+                  }),
+                );
+              }
               try {
                 await refreshBackendSessionSnapshot();
               } catch {
@@ -941,14 +1113,35 @@ export function useStudentSessionRouteData(
             throw pollError;
           }
           runtimePollRevisionRef.current = view.revision;
-          runtimePollProbedRef.current = true;
-          // A runtime revision change means cohort state moved: refresh
-          // the snapshot (debounced). 304/same-revision = steady, no
-          // work. The full live fetch still carries attempt freshness,
-          // so attempt updates are never gated on the runtime revision.
-          if (!view.notModified) {
-            await refreshBackendSessionSnapshot();
+          // The poll answering while the socket is down IS the fallback firing.
+          // Emitted once per outage: the reconnect resets the flag, so a cohort
+          // that keeps flapping is visible as repeated activations rather than
+          // one continuous state.
+          if (
+            studentRealtimeTransport === 'websocket' &&
+            !wsConnectedRef.current &&
+            !pollFallbackReportedRef.current
+          ) {
+            pollFallbackReportedRef.current = true;
+            emitStudentObservabilityMetric(
+              'poll_fallback_activation',
+              withStudentObservabilityDimensions({
+                scheduleId: scheduleId ?? null,
+                attemptId: attemptSnapshot?.id ?? null,
+                realtimeTransport: studentRealtimeTransport,
+                reason: 'socket_unavailable',
+              }),
+            );
           }
+          // A runtime revision change means cohort state moved, and the loop's
+          // onRevision callback already refreshed on it — immediately, not
+          // through the burst coalescer. Refreshing here too would spend a
+          // second full live fetch on every single revision bump, which is the
+          // poll-budget the fast-lane is trying to protect. 304/same-revision
+          // means steady state: no work at all. The live fetch triggered by
+          // onRevision still carries attempt freshness, so attempt updates are
+          // never gated on the runtime revision.
+          //
           // Adaptive cadence is owned by the loop (pollAfterSecs); the
           // outer useAsyncPolling stays as the scheduling shell.
           void runtimePollRevisionRef;
@@ -963,6 +1156,10 @@ export function useStudentSessionRouteData(
       enabled: Boolean(scheduleId && state && !error && !isLoading),
       intervalMs: pollingPolicy.intervalMs,
       maxIntervalMs: pollingPolicy.maxIntervalMs,
+      // Phase 6: after each run the timer asks the loop for the next delay
+      // instead of applying a second, independent cadence of its own.
+      resolveIntervalMs: () =>
+        runtimePollLoopRef.current?.nextDelayMs() ?? pollingPolicy.intervalMs,
     },
   );
 

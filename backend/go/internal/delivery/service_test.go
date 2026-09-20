@@ -232,6 +232,9 @@ func deliverySaveWorkableTx(mock sqlmock.Sqlmock, startedAt time.Time) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnError(sql.ErrNoRows)
+	// SAT-006: the legacy gate owns the authoritative in-tx time read.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(startedAt))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions WHERE id = ? AND module_id = ?")).
 		WithArgs("eq-1", "mod-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("eq-1"))
@@ -503,6 +506,7 @@ func TestDeliveryReconcileLegacyExpiryFinalizes(t *testing.T) {
 		WithArgs("mod-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "display_order", "adaptive_role", "exam_version_id"}).
 			AddRow("sec-1", "reading", 1, "lower_branch", "pv-1"))
+	deliveryUnscopedAttemptLink(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_sections WHERE exam_version_id = ? AND display_order > ?")).
 		WithArgs("pv-1", 1).
 		WillReturnError(sql.ErrNoRows)

@@ -170,9 +170,15 @@ func (a *App) RowFirst() bool {
 // pre-gate, zero SQL on fresh+live TTL hits; exactly one sync refresh +
 // retry on stale, then today's 422/409); off = v2Locker (today's
 // runtime + section FOR UPDATE path). Never nil.
+// RuntimeLockerFor selects the V2 write gate. Both implementations read the
+// runtime + active section on the caller's transaction, so both are
+// authoritative for the write that commits there; RUNTIME_SNAPSHOT only chooses
+// whether those reads take the runtime/section row locks (v2Locker, off) or not
+// (snapshotLocker, on). The RuntimeSnapshots cache serves student polls and is
+// deliberately not part of this decision.
 func (a *App) RuntimeLockerFor() attempts.RuntimeLocker {
-	if a != nil && a.Config.RuntimeSnapshotEnabled && a.DB != nil && a.RuntimeSnapshots != nil {
-		return snapshotLocker{db: a.DB, cache: a.RuntimeSnapshots}
+	if a != nil && a.Config.RuntimeSnapshotEnabled && a.DB != nil {
+		return snapshotLocker{}
 	}
 	return v2Locker{}
 }

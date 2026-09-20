@@ -17,6 +17,11 @@ export interface SatDirectionsScreenProps {
   // Phase 4: true once auto-entry has tried for this module and did not open it.
   // The manual start button is recovery from that state, never the required path.
   entryRecoverable?: boolean | undefined;
+  // True while the automatic path owns this module (a base module, or a branch
+  // module whose Module 1 timed out). False means nothing will ever start it for
+  // the student — a branch module waiting for a click — so the button must work.
+  // Absent reads as true: the automatic path owns entry unless told otherwise.
+  autoStartPending?: boolean | undefined;
   error: string | null;
   onStart: () => void;
   onExit: () => void | Promise<void>;
@@ -39,8 +44,14 @@ export function SatDirectionsScreen(props: SatDirectionsScreenProps) {
   });
   // Phase 4: automatic entry owns the primary path, so this button is recovery
   // only — actionable once an attempt has settled without opening the module.
-  const canStart = moduleEnterable && Boolean(props.entryRecoverable);
-  const autoEntryHandling = moduleEnterable && !props.entryRecoverable;
+  // Module-advance fix: recovery-only is only honest while something is going
+  // to try. A module no automatic path owns (a branch module whose predecessor
+  // was submitted early) has the button as its ONLY way in, so it must not be
+  // disabled waiting for an attempt that will never come.
+  const autoStartPending = props.autoStartPending !== false;
+  const canStart =
+    moduleEnterable && (Boolean(props.entryRecoverable) || !autoStartPending);
+  const autoEntryHandling = moduleEnterable && autoStartPending && !props.entryRecoverable;
   const showStarting = props.isStarting || autoEntryHandling;
   const showStartHint = !canStart && !props.isStarting && !showStarting;
   // Tertiary "Leave exam" path (Phase 6b): leaving mid-directions is a

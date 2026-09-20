@@ -12,6 +12,7 @@ const link: AssessmentAccessLink = {
   versionNumber: 5,
   scheduleId: "schedule-1",
   name: "Saturday Class",
+  enabledSections: null,
   audienceType: "cohort",
   audienceLabel: "Saturday",
   accessMode: "student_code",
@@ -43,6 +44,41 @@ describe("AccessLinkRow", () => {
     expect(screen.getByText("Saturday Class")).toBeInTheDocument();
     expect(screen.getByText("Live")).toBeInTheDocument();
     expect(screen.getByText(/10 joined/)).toBeInTheDocument();
+  });
+
+  it("badges a narrowed link so it is not shared with the wrong class", () => {
+    const { rerender } = render(
+      <AccessLinkRow
+        link={{ ...link, enabledSections: ["reading-writing"] }}
+        selected={false}
+        isStaleRelease={false}
+        onSelect={vi.fn()}
+        menuItems={[]}
+      />,
+    );
+    expect(screen.getByText("Verbal only")).toBeInTheDocument();
+
+    rerender(
+      <AccessLinkRow
+        link={{ ...link, enabledSections: ["math"] }}
+        selected={false}
+        isStaleRelease={false}
+        onSelect={vi.fn()}
+        menuItems={[]}
+      />,
+    );
+    expect(screen.getByText("Math only")).toBeInTheDocument();
+
+    rerender(
+      <AccessLinkRow
+        link={{ ...link, enabledSections: null }}
+        selected={false}
+        isStaleRelease={false}
+        onSelect={vi.fn()}
+        menuItems={[]}
+      />,
+    );
+    expect(screen.queryByText(/only/)).not.toBeInTheDocument();
   });
 
   it("selects the row and exposes overflow actions without nesting buttons", () => {

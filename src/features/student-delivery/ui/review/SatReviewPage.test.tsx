@@ -50,13 +50,16 @@ describe("SatReviewPage submit safety", () => {
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 
-  it("explains a saving block inline instead of a bare disabled", () => {
+  it("stays silent while answers are still saving", () => {
     renderReview({
       readinessInput: { isSubmitting: false, failure: null, failureKind: null, pendingCount: 2 },
     });
     const button = screen.getByRole("button", { name: SAT_COPY.submit.submitModule });
-    expect(button).toHaveAttribute("aria-describedby");
-    expect(screen.getByText(/Waiting for 2 answers to save/)).toBeInTheDocument();
+    // Pending saves are not a decision the student can make, so nothing is
+    // said about them: no reason text and no advisory aria-disabled.
+    expect(button).not.toHaveAttribute("aria-describedby");
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
     expect(button).not.toBeDisabled();
   });
 

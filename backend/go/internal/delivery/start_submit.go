@@ -80,7 +80,10 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 		if err != nil {
 			return err
 		}
-		gate, err := s.moduleTimingGateTx(ctx, t, scheduleID, module.moduleID, now)
+		// SAT-006: the gate reads the authoritative DB time after the runtime
+		// and section rows are locked; that instant — not the pre-tx wall
+		// clock — judges both the cohort deadline and the personal window.
+		gate, gateNow, err := s.moduleTimingGateTx(ctx, t, scheduleID, module.moduleID)
 		if err != nil {
 			return err
 		}
@@ -95,12 +98,12 @@ func (s *Service) StartModule(ctx context.Context, bearerScheduleID, bearerAttem
 		if module.state != "not_started" {
 			return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module cannot be started in its current state.")
 		}
-		if gate.usesPersonalDeadline() && module.availableAt != nil && now.Before(*module.availableAt) {
+		if gate.usesPersonalDeadline() && module.availableAt != nil && gateNow.Before(*module.availableAt) {
 			return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module is not available until the scheduled break ends.")
 		}
 		res, err := t.ExecContext(ctx,
 			"UPDATE assessment_module_attempts SET state = 'active', available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'",
-			now, now, module.id)
+			gateNow, gateNow, module.id)
 		if err != nil {
 			return err
 		}
@@ -182,12 +185,14 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 		if active.state != "active" && active.state != "review" {
 			return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module is not active.")
 		}
-		gate, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID, now)
+		// SAT-006: deadline authority is the in-tx DB instant the gate returns,
+		// read after the runtime/module locks were acquired.
+		gate, gateNow, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID)
 		if err != nil {
 			return err
 		}
 		if gate.usesPersonalDeadline() {
-			if err := ensureSaveModuleAdmitted(active, now); err != nil {
+			if err := ensureSaveModuleAdmitted(active, gateNow); err != nil {
 				return err
 			}
 		}
@@ -364,6 +369,11 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
+	scope, err := s.linkSectionScope(ctx, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	sections = deliverySectionsForScope(sections, scope)
 	if err := s.ensureBaseModuleAttempt(ctx, attemptID, sections); err != nil {
 		return nil, err
 	}
@@ -383,7 +393,7 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
-	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, now)
+	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, providerKey, now)
 	if err != nil {
 		return nil, err
 	}
@@ -401,9 +411,10 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 		DeviceFingerprintHash: control.deviceFingerprintHash,
 		Sections:              sections,
 		Attempt: AttemptSnapshot{
-			ID:             attemptID,
-			ModuleAttempts: moduleAttempts,
-			Responses:      responses,
+			ID:                   attemptID,
+			ModuleAttempts:       moduleAttempts,
+			Responses:            responses,
+			ProvisionalSubmitted: control.deliveryStatus == "submitted" && control.submittedAt == nil,
 		},
 		Result: result,
 	}, nil
@@ -707,10 +718,26 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 		}
 		return scanNextModuleRowTx(ctx, t, selectedModuleID)
 	}
+	// Student Access scope: a narrowed run must not advance into a section it
+	// never scheduled. Without this, a verbal-only student would be handed the
+	// Math base module the moment Reading & Writing finished, and the exam
+	// would never end. Scope is nil when the schedule has no link or the link
+	// is unscoped, leaving the previous query untouched.
+	scope, err := attemptSectionScopeTx(ctx, t, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	nextSectionQuery := "SELECT id FROM assessment_sections WHERE exam_version_id = ? AND display_order > ?"
+	nextSectionArgs := []any{versionID, sectionOrder}
+	if keys := examdomain.SectionScopeKeys(scope); len(keys) > 0 {
+		nextSectionQuery += " AND section_key IN (" + sqlPlaceholders(len(keys)) + ")"
+		for _, key := range keys {
+			nextSectionArgs = append(nextSectionArgs, key)
+		}
+	}
+	nextSectionQuery += " ORDER BY display_order LIMIT 1"
 	var nextSectionID sql.NullString
-	if err := t.QueryRowContext(ctx,
-		"SELECT id FROM assessment_sections WHERE exam_version_id = ? AND display_order > ? ORDER BY display_order LIMIT 1",
-		versionID, sectionOrder).Scan(&nextSectionID); err != nil {
+	if err := t.QueryRowContext(ctx, nextSectionQuery, nextSectionArgs...).Scan(&nextSectionID); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}

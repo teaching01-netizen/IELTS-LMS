@@ -21,6 +21,8 @@ import {
 import { authoringEffects } from "../api/authoringQueryEffects";
 import { useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
 import { AuthoringLifecycleSurface } from "./AuthoringLifecycleSurface";
+import { useDraftOpenOnEntry } from "./useDraftOpenOnEntry";
+import { SatAuthoringLoadingSurface } from "./SatAuthoringStateSurfaces";
 import { combineSaveStatus } from "./spine/coeditSaveTruth";
 import {
   authorForActor,
@@ -133,6 +135,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     setDraft,
     clearDocument,
     adoptServerDocumentIfPermitted,
+    acknowledgeRecoveredDraftKey,
     draftRevisionRef,
     draftRef,
     draftProtectedRef,
@@ -201,6 +204,21 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   // a real shell or the lifecycle surface; no status code is inspected here.
   const shellState = shellLifecycle.state;
   const shell = shellState.kind === "ready" ? shellState.shell : undefined;
+  // An author who ARRIVED here by choosing this exam in the Exam Library asked
+  // to edit it, so a NO_DRAFT answer opens the draft for them instead of
+  // stopping at the wall. The gesture is in-memory and one-shot
+  // (`authoringEntryIntent`), which is what keeps every READ — a reload, a
+  // restored session, a new tab — from creating anything: only a click can arm
+  // it, and only once. Every other arrival (a preview exit, a pasted URL, a
+  // refresh) still gets the explicit CTA.
+  const draftOnEntry = useDraftOpenOnEntry({
+    examId,
+    state: shellState,
+    canOpenDraft,
+    isOpening: ensureDraft.isPending,
+    isFailed: Boolean(ensureDraft.error),
+    openDraft: ensureDraft.mutate,
+  });
   // Which module and question the author is on (plus the queue's filter and row
   // multi-selection) is one owner. It also owns the two rules that used to be
   // effects here: the deep-link adoption and the "selection must still exist in
@@ -265,6 +283,18 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   const selectedQuestionIssues = draft
     ? validateSatQuestion(draft.metadata.sectionKey, draft)
     : [];
+  // A draft may only render while the CURRENT shell owns its placement.
+  //
+  // A shell replacement (a newly opened draft version, a workbook import, the
+  // sample exam) changes every placement id, and the selection effect adopts the
+  // new shell's question one commit later. Without this fence that commit
+  // renders the new sidebar beside the previous shell's question — the visible
+  // form of "the editor is showing a question this draft no longer has".
+  const renderableDraft =
+    draft !== null &&
+    allQuestions.some((question) => question.examQuestionId === selectedExamQuestionId)
+      ? draft
+      : null;
   const totalAuthored = allQuestions.length;
   const totalErrors = allQuestions.reduce(
     (sum, question) => sum + (question.readiness.status === "error" ? 1 : 0),
@@ -338,6 +368,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     applySavedRevision: updateSummaryCache,
     holdRecoveredDraft: deviceRecovery.hold,
     recoveredQuestionDraftKeyRef,
+    acknowledgeRecoveredDraftKey,
   });
   const {
     mode: persistenceMode,
@@ -392,6 +423,46 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     setImportOpen: setWorkbookImportOpen,
   });
 
+  // The server's copy of the open question. ONE projection, read by both rules
+  // that need it: the seed the editors, the room and the three-way compare are
+  // authored against, and the document a refetch may install. The projection
+  // itself is the draft owner's (`serverQuestionDocument`), so the two can no
+  // longer disagree about what the server holds.
+  const serverDocument = useMemo(
+    () => serverQuestionDocument(questionQuery.data),
+    [questionQuery.data]
+  );
+  const baseQuestion = serverDocument.revision;
+  // Reading and writing the open question against the exam room: seeding,
+  // remote projection onto the draft, and the local write path. The hook owns
+  // the "who wrote this value" bookkeeping so no call site re-invents it — and
+  // it owns the AUTHORITY HANDOFF: `hydration` says whether the room has been
+  // given this question yet, which is what the bridge below and every writer
+  // wait for. Declared before the bridge because the bridge must not hand a
+  // field to an editor from a room that does not hold the question.
+  const {
+    sharedQuestionScalar,
+    // The whole-question `hydration` summary is deliberately NOT read here: an
+    // editor's readiness is answered per field below, because gating every
+    // editor on the whole question is what left one missing root pulsing the
+    // prompt and all four choices forever.
+    fieldHydration,
+    retryFieldInitialization,
+    questionFieldsPending,
+    publishScalar: publishWorkspaceScalar,
+    handleLocalRichChange,
+  } = useWorkspaceProjectionWrites({
+    workspaceCollaboration,
+    workspaceQuestionPath,
+    selectedExamQuestionId,
+    baseQuestionExamQuestionId: questionQuery.data?.examQuestionId ?? null,
+    baseQuestion,
+    isPretest: questionQuery.data?.isPretest,
+    draft,
+    draftRef,
+    setDraft,
+  });
+
   // Which capabilities are live, whether the open question is dirty for the
   // transport, and WHICH writer owns a field are the collaboration bridge's
   // business; the workspace only threads them into the mount and the panels.
@@ -409,6 +480,8 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     workspaceCollaboration,
     selectedExamQuestionId,
     workspaceQuestionPath,
+    fieldHydration,
+    onRetryInitialization: retryFieldInitialization,
     hasPendingChanges: persistence.hasPendingChanges,
   });
 
@@ -440,6 +513,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     coeditUiActive,
     selectedExamQuestionId,
     autosaveStatus: persistence.status,
+    questionFieldsPending,
   });
 
   // The question command surface: create, import, duplicate, delete, reorder,
@@ -539,35 +613,6 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
     },
   });
 
-  // The server's copy of the open question. ONE projection, read by both rules
-  // that need it: the seed the editors, the room and the three-way compare are
-  // authored against, and the document a refetch may install. The projection
-  // itself is the draft owner's (`serverQuestionDocument`), so the two can no
-  // longer disagree about what the server holds.
-  const serverDocument = useMemo(
-    () => serverQuestionDocument(questionQuery.data),
-    [questionQuery.data]
-  );
-  const baseQuestion = serverDocument.revision;
-  // Reading and writing the open question against the exam room: seeding,
-  // remote projection onto the draft, and the local write path. The hook owns
-  // the "who wrote this value" bookkeeping so no call site re-invents it.
-  const {
-    sharedQuestionScalar,
-    publishScalar: publishWorkspaceScalar,
-    handleLocalRichChange,
-  } = useWorkspaceProjectionWrites({
-    workspaceCollaboration,
-    workspaceQuestionPath,
-    selectedExamQuestionId,
-    baseQuestionExamQuestionId: questionQuery.data?.examQuestionId ?? null,
-    baseQuestion,
-    isPretest: questionQuery.data?.isPretest,
-    draft,
-    draftRef,
-    setDraft,
-  });
-
   const { divergence, isDirty: isQuestionDiverged, dispatch: dispatchDivergence } =
     useQuestionDivergence(selectedExamQuestionId, {
       base: baseQuestion,
@@ -610,6 +655,9 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   // the only survivor — which is what turns "review the newer version" into
   // "recovered unsaved changes from this device" a reload later. The clean case
   // keeps its refetch-replace: that IS the intended freshness path (Phase 04).
+  // Every outcome in which the rule declines is a deliberate state — held
+  // recovery, protected work, stale data — and each one renders a surface; the
+  // one state that renders nothing here is the rule answering "adopted".
   useEffect(() => {
     adoptServerDocumentIfPermitted({
       server: serverDocument,
@@ -880,10 +928,16 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
   // shell we render the lifecycle surface, which is the ONLY place that decides
   // what NO_DRAFT vs EXAM_NOT_FOUND vs a real failure looks like. The explicit,
   // role-gated "Open draft" CTA (POST) lives there and runs once per click;
-  // observers never see it and never trigger it. The ensure mutation installs
-  // the shell in cache so this component re-renders with data, and never
-  // auto-loops on failure.
+  // observers never see it and never trigger it. The one other way that command
+  // runs is `draftOnEntry` above, from an explicit navigation gesture: while it
+  // is opening we show progress, because telling an author who just asked to
+  // edit that they have no draft is an answer they did not ask for. The ensure
+  // mutation installs the shell in cache so this component re-renders with
+  // data, and never auto-loops on failure.
   if (!shell) {
+    if (draftOnEntry.opening) {
+      return <SatAuthoringLoadingSurface label="Opening SAT workspace…" />;
+    }
     return (
       <AuthoringLifecycleSurface
         state={shellState}
@@ -1143,7 +1197,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
             </>
           }
         >
-          {draft ? (
+          {renderableDraft ? (
               <motion.div
                 key={selectedExamQuestionId}
                 initial={reduceMotion ? false : { opacity: 0.96 }}
@@ -1151,7 +1205,7 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
                 transition={spineMotion.question}
               >
                 <SpineQuestionView
-                  question={draft}
+                  question={renderableDraft}
                   focusField={focusField}
                   onOpenSettings={openInspector}
                   isMutating={rowMutationBusy}
@@ -1196,8 +1250,24 @@ export function AuthoringWorkspace({ examId, examTitle }: AuthoringWorkspaceProp
               error={questionQuery.error}
               onRetry={() => void questionQuery.refetch()}
             />
-          ) : selectedExamQuestionId ? (
+          ) : selectedExamQuestionId && questionQuery.isPending ? (
+            // The skeleton means ONLY "the request has not answered": a 200 that
+            // the adoption rule declined is a named state above (held recovery,
+            // protected work, stale data) and must never be re-rendered as
+            // loading — that was the state machine hole that stranded a
+            // successful question behind an indefinite skeleton.
             <EditorSkeleton />
+          ) : selectedExamQuestionId ? (
+            // Fail-safe for the impossible remainder — the query answered, but
+            // no rule above rendered it. A successful request can never be an
+            // indefinite skeleton, so this surfaces as an explicit retryable
+            // error instead.
+            <QuestionLoadError
+              error={new Error(
+                "The question loaded successfully but could not be opened. Try again, or reopen it from the question list."
+              )}
+              onRetry={() => void questionQuery.refetch()}
+            />
           ) : (
             <EmptyEditor
               moduleTitle={selectedModule?.title ?? null}

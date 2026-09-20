@@ -61,6 +61,8 @@ func TestReconcileCompleterFailureEmitsAndRetries(t *testing.T) {
 	mock.ExpectQuery("FROM assessment_modules m JOIN assessment_sections s ON").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "display_order", "adaptive_role", "exam_version_id"}).
 			AddRow("sec-1", "rw", 1, "terminal", "v-1"))
+	// Scope read: no Student Access link, so no section is filtered out.
+	deliveryUnscopedAttemptLink(mock)
 	// Non-base path looks up the next section by display order; empty
 	// set means no follow-up (assessment complete -> arms completion).
 	mock.ExpectQuery("FROM assessment_sections WHERE exam_version_id").

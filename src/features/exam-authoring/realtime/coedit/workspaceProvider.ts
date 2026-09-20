@@ -23,7 +23,12 @@ import type {
 } from "./contracts";
 import { FIELD_SET_WORKSPACE } from "./documentIdentity";
 import { collaborationExtensions } from "./editorBinding";
-import { PromptCoeditProvider, type CoeditChangeReason, type PromptCoeditSnapshot } from "./provider";
+import {
+  PromptCoeditProvider,
+  type CoeditChangeReason,
+  type CoeditSeedDeliveryState,
+  type PromptCoeditSnapshot,
+} from "./provider";
 import {
   createSatWorkspaceCommand,
   type SatWorkspaceCommand,
@@ -32,6 +37,7 @@ import {
 import {
   createWorkspaceSeedFrame,
   type WorkspaceSeedFrame,
+  type WorkspaceSeedOutcome,
   type WorkspaceSeedRoot,
 } from "./workspaceSeed";
 
@@ -64,6 +70,22 @@ export interface WorkspaceCoeditSnapshot {
   issue: CoeditLifecycleIssue;
   issueMessage: string | null;
   published: boolean;
+  /**
+   * Seed outcomes the room reported, keyed by workspace path. Absent while
+   * every proposal is outstanding or applied.
+   *
+   * A field whose seed was refused can never become hydrated, so this is the
+   * fact that lets its editor stop waiting and offer recovery instead.
+   */
+  seedFailures?: Record<string, { outcome: WorkspaceSeedOutcome; retryable: boolean }>;
+  /**
+   * How far each seed proposal got on its way to the room, by workspace path.
+   *
+   * The arbitration half (`seedFailures`) says what the room decided; this half
+   * says whether the proposal ever reached it. Without both, "this field never
+   * initialized" has no cause an author or an engineer can act on.
+   */
+  seedDeliveries?: Record<string, CoeditSeedDeliveryState>;
 }
 
 export interface WorkspaceFieldBinding extends RichComposerCollaboration {
@@ -95,6 +117,52 @@ export interface WorkspaceProviderDeps {
 }
 
 const RICH_ROOT_PREFIX = "rich:";
+
+/**
+ * Whether a shared rich root has ever been written to.
+ *
+ * A root is ALLOCATED the moment anything asks the document for it — a field
+ * binding, a recovery export, a projection pass — and an allocated root is not
+ * an initialized one. Projecting the two as if they were the same published an
+ * empty document for a question nobody had seeded yet, and that empty value
+ * then replaced the HTTP question the author was looking at (the "sidebar has
+ * content but the editor is blank" state).
+ *
+ * The shipped structured-content contract always writes at least the
+ * document's own paragraph, so a root its owner has initialized is never
+ * zero-length: an empty paragraph is a real, author-made blank and stays
+ * authoritative. `root allocated ≠ root initialized`.
+ */
+export function isInitializedRichRoot(shared: unknown): boolean {
+  return shared instanceof Y.XmlFragment && shared.length > 0;
+}
+
+/**
+ * The typed fragment behind one `rich:` entry of `ydoc.share`, or null when the
+ * entry is not a rich root at all.
+ *
+ * A root that arrives from the room BEFORE anything in this tab asked the
+ * document for it — which is every root of every question this tab has not
+ * opened an editor on yet — is materialized by Yjs as a bare placeholder
+ * `AbstractType`, not an `XmlFragment`. `Doc.get` upgrades that placeholder in
+ * place on the first typed access and keeps its content. Reading the share map
+ * with a plain `instanceof` skipped exactly those roots, so a question the room
+ * already held was never projected, never counted as hydrated, and its seed
+ * proposal bailed out on a populated fragment without recording anything: the
+ * field sat on "the shared copy was never requested" until some unrelated
+ * change made the room re-publish.
+ */
+function materializeRichRoot(ydoc: Y.Doc, name: string, shared: unknown): Y.XmlFragment | null {
+  if (shared instanceof Y.XmlFragment) return shared;
+  // Only a placeholder may be upgraded. A root defined with another concrete
+  // type under a `rich:` name is a foreign shape and stays out of the projection.
+  if (!(shared instanceof Y.AbstractType) || shared.constructor !== Y.AbstractType) return null;
+  try {
+    return ydoc.getXmlFragment(name);
+  } catch {
+    return null;
+  }
+}
 
 /** The shipped projection: a shared fragment read back as structured content. */
 function projectRichFragmentFromDocument(ydoc: Y.Doc, rootName: string): unknown {
@@ -264,6 +332,8 @@ export class SatAuthoringWorkspaceProvider {
       issue: coreSnapshot.issue,
       issueMessage: coreSnapshot.issueMessage,
       published: coreSnapshot.published,
+      ...(coreSnapshot.seedFailures ? { seedFailures: coreSnapshot.seedFailures } : {}),
+      ...(coreSnapshot.seedDeliveries ? { seedDeliveries: coreSnapshot.seedDeliveries } : {}),
     };
   }
 
@@ -393,10 +463,16 @@ export class SatAuthoringWorkspaceProvider {
     let frame: WorkspaceSeedFrame;
     try {
       frame = createWorkspaceSeedFrame({ documentName: this.documentName, ...input });
-    } catch {
+    } catch (error) {
       // A proposal the shared validator refuses (unsupported path, malformed or
       // oversized value) is not sent: the service would ignore it, and a local
       // fallback here would resurrect the double-seed this path removes.
+      //
+      // It is also not SILENT any more. This catch used to be the only place a
+      // seed could disappear with nothing written anywhere, which made a field
+      // that can never initialize indistinguishable from one still loading.
+      const detail = error instanceof Error ? error.message : "the shared validator refused it";
+      this.core.recordSeedDelivery(input.path, "invalid-frame", detail);
       return false;
     }
     return this.core.sendWorkspaceSeed(frame);
@@ -511,9 +587,25 @@ export class SatAuthoringWorkspaceProvider {
     // details. Project them into the snapshot so an optional/collapsed editor
     // still reflects a collaborator's update immediately. The editor binding
     // remains the writer; this is read-only UI projection.
-    for (const [name, shared] of this.ydoc.share) {
-      if (!name.startsWith(RICH_ROOT_PREFIX) || !(shared instanceof Y.XmlFragment)) continue;
+    for (const [name, entry] of this.ydoc.share) {
+      if (!name.startsWith(RICH_ROOT_PREFIX)) continue;
+      // A root synced from the room that this tab never touched is only a
+      // placeholder until it is asked for as a fragment; asking is what makes
+      // it readable here (see `materializeRichRoot`). Upgrading replaces the
+      // map entry for the SAME key, which is safe mid-iteration.
+      const shared = materializeRichRoot(this.ydoc, name, entry);
+      if (!shared) continue;
+      // Observe first, so a root that is empty now becomes dirty the moment its
+      // seed (or a collaborator) puts content in it.
       this.observeRichRoot(name, shared);
+      if (!isInitializedRichRoot(shared)) {
+        // Never initialized: not content, so it is absent from the projection.
+        // Any cached projection for this name is dropped too, so a stale value
+        // from a previous life of the root cannot outlive its content.
+        this.richProjections.delete(name);
+        this.richDirty.delete(name);
+        continue;
+      }
       if (!this.richDirty.has(name) && this.richProjections.has(name)) {
         this.values.set(name, this.richProjections.get(name));
         continue;

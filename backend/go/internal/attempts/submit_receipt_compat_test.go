@@ -57,7 +57,7 @@ func TestSubmitWithoutExpectedRevisionWritesReceipt(t *testing.T) {
 	mock.ExpectCommit()
 
 	cmd := SubmitCommand{AttemptID: "att-1", LeaseEpoch: 3, SubmissionID: "sub-live"}
-	_, err = svc.Submit(context.Background(), bearer, cmd, qr, rl, ProviderIELTS, fakeSealer{})
+	_, err = svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderIELTS), fakeSealer{})
 	if err != nil {
 		t.Fatalf("submit without expected revision must succeed, got %v", err)
 	}

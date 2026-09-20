@@ -202,8 +202,65 @@ func NewService(runner *tx.Runner, outbx OutboxEnqueuer) *Service {
 	return &Service{tx: runner, outbx: outbx}
 }
 
+// scheduleStatusScheduled is the only exam_schedules status a runtime may be
+// opened from. (The runtime's own Status* constants above are a different
+// vocabulary: a schedule is scheduled/live/completed/cancelled.)
+const scheduleStatusScheduled = "scheduled"
+
+// StartSchedule is the exam_schedules row Start locked before anything else,
+// exactly as the planner receives it.
+//
+// Its published version is the ONLY version a runtime may be planned from.
+// Reading it under the row lock, inside the transaction that flips the schedule
+// live, is what turns "runtime plan describes the schedule's version" from a
+// race a concurrent editor can lose for the whole cohort into an invariant:
+// Start used to plan from a pre-transaction read, so a version switch that
+// committed between that read and the live UPDATE left students loading V2
+// content under a section/timing topology derived from V1.
+type StartSchedule struct {
+	ID                     string
+	ExamID                 string
+	ProviderKey            string
+	PublishedVersionID     string
+	Status                 string
+	Revision               int64
+	PlannedDurationMinutes int
+}
+
+// StartPlanner derives the cohort clock plan and timing model from the locked
+// schedule row, reading through the SAME transaction handle Start writes with.
+// It is injected so plan derivation stays owned by the schedules package while
+// Start keeps ownership of the transaction boundary and the lock order.
+type StartPlanner func(ctx context.Context, q tx.Tx, sch StartSchedule) (plan []PlanEntry, timingModel string, err error)
+
+// LockScheduleRow acquires the schedule row FIRST and returns what it holds.
+//
+// Global lock order for every path that touches cohort state:
+//
+//	schedule -> registration -> attempt -> runtime -> section -> exam entity
+//
+// Check-in (CreateScheduleAttempt) and every schedule edit already lock the
+// schedule first. A runtime command that locked attempts/runtime first and
+// wrote the schedule LAST closed a cycle with check-in — B holds the schedule
+// and waits for the runtime, A holds the runtime (and gap locks on the attempts
+// index, which also block B's attempt INSERT) and waits for the schedule. InnoDB
+// breaks that by failing one of the two user actions, most likely exactly when
+// a cohort is checking in and the proctor presses Start.
+func LockScheduleRow(ctx context.Context, q tx.Tx, scheduleID string) (*StartSchedule, error) {
+	const sel = "SELECT id, exam_id, provider_key, published_version_id, status, revision, planned_duration_minutes FROM exam_schedules WHERE id = ? FOR UPDATE"
+	var sch StartSchedule
+	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&sch.ID, &sch.ExamID, &sch.ProviderKey, &sch.PublishedVersionID, &sch.Status, &sch.Revision, &sch.PlannedDurationMinutes); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Schedule not found.", HTTPStatus: 404}
+		}
+		return nil, err
+	}
+	return &sch, nil
+}
+
 // lockAttemptsFirst acquires schedule attempt rows BEFORE any runtime lock.
-// Lock order: attempt -> runtime -> section.
+// Lock order: (schedule ->) attempt -> runtime -> section; the schedule row,
+// when a command writes it, is taken before this (see LockScheduleRow).
 func lockAttemptsFirst(ctx context.Context, q tx.Tx, scheduleID string) error {
 	const sel = "SELECT id FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE"
 	rows, err := q.QueryContext(ctx, sel, scheduleID)
@@ -238,22 +295,34 @@ func lockRuntime(ctx context.Context, q tx.Tx, scheduleID string) (*RuntimeRow, 
 	return &r, nil
 }
 
-// Start creates a live runtime with section rows (attempt locks first). It
-// is idempotent for a live runtime: when the schedule already owns a
-// live/paused runtime the existing id is returned; any other existing row
-// (or a raced concurrent INSERT on UNIQUE schedule_id) is a stable 409.
-func (s *Service) Start(ctx context.Context, scheduleID, examID string, plan []PlanEntry, timingModel, actorID string) (string, error) {
-	if timingModel == "" {
-		timingModel = TimingModelLegacy
+// Start creates a live runtime with section rows. It is idempotent for a live
+// runtime: when the schedule already owns a live/paused runtime the existing id
+// is returned; any other existing row (or a raced concurrent INSERT on UNIQUE
+// schedule_id) is a stable 409.
+//
+// Lock order: the schedule row first (LockScheduleRow), then attempts, then the
+// runtime row. The plan is derived INSIDE the transaction, by the injected
+// planner, from the locked row's published version, and the schedule's live
+// transition is a compare-and-set on the exact (status, published_version_id,
+// revision) that plan was built from. The row lock already serializes Start
+// against schedule edits; the CAS is the belt to that suspender — it fails
+// closed if any future writer bypasses the lock.
+func (s *Service) Start(ctx context.Context, scheduleID, actorID string, planner StartPlanner) (string, error) {
+	if planner == nil {
+		return "", fmt.Errorf("runtime.Start: a StartPlanner is required")
 	}
 	runtimeID := uuid.NewString()
 	existingID := ""
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		sch, err := LockScheduleRow(ctx, q, scheduleID)
+		if err != nil {
+			return err
+		}
 		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
 			return err
 		}
 		var id, status string
-		err := q.QueryRowContext(ctx, "SELECT id, status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE", scheduleID).Scan(&id, &status)
+		err = q.QueryRowContext(ctx, "SELECT id, status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE", scheduleID).Scan(&id, &status)
 		switch {
 		case err == nil:
 			if status == StatusLive || status == StatusPaused {
@@ -264,6 +333,19 @@ func (s *Service) Start(ctx context.Context, scheduleID, examID string, plan []P
 		case err != sql.ErrNoRows:
 			return err
 		}
+		// No runtime yet: only a scheduled session may open one. Without this
+		// gate a completed or cancelled schedule that reached here was quietly
+		// resurrected as live.
+		if sch.Status != scheduleStatusScheduled {
+			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Schedule is not scheduled; refresh before starting.", HTTPStatus: 409}
+		}
+		plan, timingModel, err := planner(ctx, q, *sch)
+		if err != nil {
+			return err
+		}
+		if timingModel == "" {
+			timingModel = TimingModelLegacy
+		}
 		var firstKey *string
 		var firstSecs int64
 		if len(plan) > 0 {
@@ -271,7 +353,7 @@ func (s *Service) Start(ctx context.Context, scheduleID, examID string, plan []P
 			firstSecs = int64(plan[0].DurationMinutes) * 60
 		}
 		var providerKey string
-		if err := q.QueryRowContext(ctx, "SELECT provider_key FROM exam_entities WHERE id = ? FOR UPDATE", examID).Scan(&providerKey); err != nil {
+		if err := q.QueryRowContext(ctx, "SELECT provider_key FROM exam_entities WHERE id = ? FOR UPDATE", sch.ExamID).Scan(&providerKey); err != nil {
 			if err == sql.ErrNoRows {
 				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Exam not found.", HTTPStatus: 404}
 			}
@@ -279,7 +361,7 @@ func (s *Service) Start(ctx context.Context, scheduleID, examID string, plan []P
 		}
 		planJSON, _ := json.Marshal(plan)
 		const ins = "INSERT INTO exam_session_runtimes (id, schedule_id, exam_id, provider_key, status, plan_snapshot, timing_model, actual_start_at, actual_end_at, active_section_key, current_section_key, current_section_remaining_seconds, waiting_for_next_section, is_overrun, total_paused_seconds, created_at, updated_at, revision) VALUES (?, ?, ?, ?, 'live', ?, ?, UTC_TIMESTAMP(6), NULL, ?, ?, ?, false, false, 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 1)"
-		if _, err := q.ExecContext(ctx, ins, runtimeID, scheduleID, examID, providerKey, string(planJSON), timingModel, firstKey, firstKey, firstSecs); err != nil {
+		if _, err := q.ExecContext(ctx, ins, runtimeID, scheduleID, sch.ExamID, providerKey, string(planJSON), timingModel, firstKey, firstKey, firstSecs); err != nil {
 			if isDupKey(err) {
 				return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Runtime already exists for this schedule.", HTTPStatus: 409}
 			}
@@ -301,9 +383,20 @@ func (s *Service) Start(ctx context.Context, scheduleID, examID string, plan []P
 				return err
 			}
 		}
-		const schedLive = "UPDATE exam_schedules SET status = 'live', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
-		if _, err := q.ExecContext(ctx, schedLive, scheduleID); err != nil {
+		// The version/revision fence: the schedule goes live only as the exact
+		// row the plan was derived from. Zero rows means something changed it
+		// underneath us, and the whole Start (runtime, sections, event) rolls
+		// back rather than binding a runtime to a version the schedule no longer
+		// names.
+		const schedLive = "UPDATE exam_schedules SET status = 'live', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ? AND status = '" + scheduleStatusScheduled + "' AND published_version_id = ? AND revision = ?"
+		res, err := q.ExecContext(ctx, schedLive, scheduleID, sch.PublishedVersionID, sch.Revision)
+		if err != nil {
 			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n != 1 {
+			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Schedule changed while starting; refresh before retrying.", HTTPStatus: 409}
 		}
 		if len(plan) > 0 {
 			if err := SyncV2TimingInTx(ctx, q, scheduleID, runtimeID, plan[0].SectionKey, strptr("running")); err != nil {
@@ -502,12 +595,17 @@ func (s *Service) Extend(ctx context.Context, scheduleID string, fence RevisionF
 	return nil
 }
 
-// Complete finishes the runtime and every section (attempt locks first).
+// Complete finishes the runtime and every section. Lock order: schedule row
+// first — CompleteInTx writes it last, and check-in holds it while waiting for
+// the runtime — then attempts, then the runtime row.
 func (s *Service) Complete(ctx context.Context, scheduleID, completionReason, actorID string) error {
 	if completionReason == "" {
 		completionReason = "proctor_complete"
 	}
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if _, err := LockScheduleRow(ctx, q, scheduleID); err != nil {
+			return err
+		}
 		if err := lockAttemptsFirst(ctx, q, scheduleID); err != nil {
 			return err
 		}
@@ -545,6 +643,26 @@ func (s *Service) SyncV2Timing(ctx context.Context, scheduleID, runtimeID, secti
 // grace=+5s, only for protocol 2 non-terminal attempts. control_epoch+1 fences
 // in-flight V2 writers. lifecycle nil leaves delivery/phase untouched.
 func SyncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, sectionKey string, lifecycle *string) error {
+	return syncV2TimingInTx(ctx, q, scheduleID, runtimeID, sectionKey, "", lifecycle)
+}
+
+// SyncV2TimingForAttemptInTx is the single-attempt form of SyncV2TimingInTx,
+// for a candidate admitted after Start: the new attempt receives the active
+// section's projected deadline without re-fencing anyone else. Check-in used
+// the schedule-wide form, so every late arrival bumped control_epoch on every
+// other candidate's attempt and their next save was refused as
+// CONTROL_EPOCH_STALE (or their unsent drafts were parked as "needs re-check")
+// for a clock that had not changed.
+func SyncV2TimingForAttemptInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, sectionKey, attemptID string, lifecycle *string) error {
+	if strings.TrimSpace(attemptID) == "" {
+		return fmt.Errorf("runtime.SyncV2TimingForAttemptInTx: attemptID is required")
+	}
+	return syncV2TimingInTx(ctx, q, scheduleID, runtimeID, sectionKey, attemptID, lifecycle)
+}
+
+// syncV2TimingInTx is the shared statement; an empty attemptID means the
+// whole schedule.
+func syncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, sectionKey, attemptID string, lifecycle *string) error {
 	lifecycleAssign := ""
 	switch s := strval(lifecycle); s {
 	case "paused":
@@ -569,7 +687,12 @@ func SyncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, secti
 		"AND sa.protocol_version = 2 "+
 		"AND sa.submitted_at IS NULL "+
 		"AND COALESCE(sa.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')", graceSeconds)
-	_, err := q.ExecContext(ctx, stmt, runtimeID, sectionKey, scheduleID)
+	args := []any{runtimeID, sectionKey, scheduleID}
+	if attemptID != "" {
+		stmt += " AND sa.id = ?"
+		args = append(args, attemptID)
+	}
+	_, err := q.ExecContext(ctx, stmt, args...)
 	return err
 }
 

@@ -19,7 +19,9 @@ describe('FormattedText paragraph structure', () => {
       const copy = container.firstElementChild as HTMLElement;
       expect(copy).toHaveAttribute('data-student-question-callout-protected', 'true');
       if (highlightEnabled) {
-        expect(copy.style.userSelect).toBe('text');
+        // Selectable by stylesheet, not by an inline declaration this component
+        // would have to keep in sync with the exam's own rules (index.css).
+        expect(copy.style.userSelect).toBe('');
       }
     },
   );

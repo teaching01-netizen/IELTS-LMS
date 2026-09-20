@@ -27,6 +27,7 @@ import (
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/proctor"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
@@ -204,6 +205,11 @@ type AttemptSnapshot struct {
 	ID             string             `json:"id"`
 	ModuleAttempts []ModuleAttempt    `json:"moduleAttempts"`
 	Responses      []ResponseSnapshot `json:"responses"`
+	// ProvisionalSubmitted is true while the SAT attempt holds the V2
+	// provisional terminal claim (delivery_status='submitted', submitted_at
+	// still NULL) without a scoring result yet. The client uses it to skip
+	// response resubmission and drive straight to result completion (SAT-001).
+	ProvisionalSubmitted bool `json:"provisionalSubmitted"`
 }
 
 // TimingSnapshot is the cohort/legacy timing projection.
@@ -308,6 +314,14 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
+	// Student Access scope: a narrowed link must not ship the sections it
+	// dropped to the browser, and the seeded first module must belong to the
+	// first section the run actually includes.
+	scope, err := s.linkSectionScope(ctx, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	sections = deliverySectionsForScope(sections, scope)
 	if err := s.ensureBaseModuleAttempt(ctx, attemptID, sections); err != nil {
 		return nil, err
 	}
@@ -327,7 +341,7 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	if err != nil {
 		return nil, err
 	}
-	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, now)
+	timing, runtimeStatus, err := s.loadTiming(ctx, scheduleID, providerKey, now)
 	if err != nil {
 		return nil, err
 	}
@@ -346,9 +360,10 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 		DeviceFingerprintHash: control.deviceFingerprintHash,
 		Sections:              sections,
 		Attempt: AttemptSnapshot{
-			ID:             attemptID,
-			ModuleAttempts: moduleAttempts,
-			Responses:      responses,
+			ID:                   attemptID,
+			ModuleAttempts:       moduleAttempts,
+			Responses:            responses,
+			ProvisionalSubmitted: control.deliveryStatus == "submitted" && control.submittedAt == nil,
 		},
 		Result: result,
 	}, nil
@@ -567,7 +582,72 @@ func (s *Service) EnsureBaseModuleAttemptForSchedule(ctx context.Context, attemp
 	if err != nil {
 		return err
 	}
-	return s.ensureBaseModuleAttempt(ctx, attemptID, sections)
+	scope, err := s.linkSectionScope(ctx, scheduleID)
+	if err != nil {
+		return err
+	}
+	return s.ensureBaseModuleAttempt(ctx, attemptID, deliverySectionsForScope(sections, scope))
+}
+
+// linkSectionScope resolves the Student Access link's section scope for a
+// schedule: nil means every section (no link at all — every admin-created
+// schedule — or an unscoped link). One indexed get on
+// assessment_access_links_schedule_unique.
+func (s *Service) linkSectionScope(ctx context.Context, scheduleID string) (map[string]bool, error) {
+	if strings.TrimSpace(scheduleID) == "" {
+		return nil, nil
+	}
+	var raw sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		"SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ?", scheduleID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return examdomain.ParseStoredSectionScope(raw.String), nil
+}
+
+// deliverySectionsForScope narrows a loaded version tree to the sections the
+// run includes. The returned slice is a fresh copy: the version cache's tree is
+// shared across schedules and must never be mutated in place.
+func deliverySectionsForScope(sections []DeliverySection, scope map[string]bool) []DeliverySection {
+	if scope == nil {
+		return sections
+	}
+	filtered := make([]DeliverySection, 0, len(sections))
+	for _, section := range sections {
+		if examdomain.AllowsSection(scope, section.SectionKey) {
+			filtered = append(filtered, section)
+		}
+	}
+	return filtered
+}
+
+// attemptSectionScopeTx resolves the section scope of the Student Access link
+// backing the attempt's schedule, inside the caller's transaction (read-only; no
+// lock, so it never joins a lock-order cycle). Nil means "no narrowing".
+func attemptSectionScopeTx(ctx context.Context, t tx.Tx, attemptID string) (map[string]bool, error) {
+	var raw sql.NullString
+	err := t.QueryRowContext(ctx,
+		"SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a ON a.schedule_id = l.schedule_id WHERE a.id = ?",
+		attemptID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return examdomain.ParseStoredSectionScope(raw.String), nil
+}
+
+// sqlPlaceholders renders "?, ?, ?" for n bound arguments.
+func sqlPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 func (s *Service) ensureBaseModuleAttempt(ctx context.Context, attemptID string, sections []DeliverySection) error {
@@ -716,7 +796,10 @@ func (s *Service) loadResponsesLegacy(ctx context.Context, attemptID string) ([]
 // loadResponsesV2 reads V2 canonical payloads for the attempt and projects
 // each to the legacy ResponseSnapshot shape: the response is the canonical
 // "answer" field (assessscore.V2ResponseToScorerInput), MarkedForReview
-// comes from the same envelope. ModuleAttemptID is the resolved module
+// comes from the same envelope, eliminatedOptions projects to [] when
+// missing/null, and the wrapped sat_annotations element unwraps to the legacy
+// per-question envelope ({} when missing/null). ModuleAttemptID is the
+// resolved module
 // ATTEMPT id (ma.id via v.module_id); when no module attempt exists yet it
 // falls back to the raw v.module_id (a module id, not an attempt id) so
 // hydrate/save paths can still key the question — callers must treat it as
@@ -759,6 +842,11 @@ func (s *Service) loadResponsesV2(ctx context.Context, attemptID string) ([]Resp
 			ExamQuestionID:  examID,
 			Revision:        int(serverRev),
 		}
+		// Candidate-facing metadata defaults: missing/null optional metadata
+		// projects to the canonical []/{} shapes, so V2 and legacy snapshots
+		// merge into one aggregate shape (Phase 1 acceptance contract).
+		r.EliminatedOptions = assessscore.V2EliminatedOptions(canonical.String)
+		r.Annotations = assessscore.V2AnnotationsEnvelope(canonical.String)
 		if canonical.Valid && canonical.String != "" {
 			if input, ok := assessscore.V2ResponseToScorerInput(canonical.String); ok {
 				r.Response = json.RawMessage(input)
@@ -821,10 +909,28 @@ func (s *Service) loadAttemptControl(ctx context.Context, attemptID string, boun
 // probe inside LoadSessionRuntimeBySchedule (same row, twice, on the 2k-herd
 // hot path). One probe row now: NoRows -> legacy fallback, else hydrate in
 // the same call (runtime + sections legs, skipping the duplicate).
-func (s *Service) loadTiming(ctx context.Context, scheduleID string, now time.Time) (TimingSnapshot, string, error) {
+//
+// Round 146: the NoRows branch is provider-aware. A SAT schedule with no
+// runtime row has NOT started, but this branch used to project the legacy
+// attempt clock ("live"), which opened the student entry gate before the
+// proctor pressed Start and turned the waiting room into a 409
+// RUNTIME_NOT_LIVE storm (the client re-fired /modules/start every
+// SAT_ENTRY_RETRY_WINDOW_MS). providerKey is already resolved by Bootstrap,
+// so this costs no extra query. The pre-start shape comes from
+// proctor.NotStartedRuntimeForProvider — the same projection the proctor
+// dashboard serves — so the two APIs cannot disagree about "not started"
+// (pinned by TestTimingContractPreStartAgreesWithProctorProjection).
+//
+// Non-SAT providers keep the legacy attempt clock: a legacy run has no cohort
+// runtime to wait for.
+func (s *Service) loadTiming(ctx context.Context, scheduleID, providerKey string, now time.Time) (TimingSnapshot, string, error) {
 	var status string
 	err := s.db.QueryRowContext(ctx, "SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&status)
 	if err == sql.ErrNoRows {
+		if examruntime.IsPreStartCohort(providerKey) {
+			runtime := proctor.NotStartedRuntimeForProvider(scheduleID, "", providerKey, now)
+			return timingFromRuntime(runtime), runtime.Status, nil
+		}
 		return TimingSnapshot{Authority: "legacy_attempt", TimingModel: examruntime.TimingModelLegacy, StageStatus: "live", ServerNow: now}, "live", nil
 	}
 	if err != nil {
@@ -1010,12 +1116,15 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 				return err
 			}
 		} else {
-			gate, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID, now)
+			// SAT-006: the gate owns the authoritative in-tx time; the legacy
+			// personal-deadline check uses that same instant, not the pre-tx
+			// wall clock this request captured before waiting for its locks.
+			gate, gateNow, err := s.moduleTimingGateTx(ctx, t, scheduleID, active.moduleID)
 			if err != nil {
 				return err
 			}
 			if gate == timingGateLegacy {
-				if err := ensureSaveModuleAdmitted(active, now); err != nil {
+				if err := ensureSaveModuleAdmitted(active, gateNow); err != nil {
 					return err
 				}
 			}
@@ -1155,6 +1264,12 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 // mirroring the Rust with_details reason. Plain Rust Conflict without a
 // reason (the terminal-attempt guard) uses CodeAssessmentConflict bare.
 func assessmentConflict(reason, msg string) *apperrors.Error {
+	// Every structured SAT conflict is counted at its single construction
+	// point, labeled by the stable reason. This is the release signal for the
+	// waiting-room storm this work fixed: RUNTIME_NOT_LIVE from waiting
+	// students must sit at zero, and if it reappears the reason label says
+	// which read/write contract diverged.
+	telemetry.IncCounter(telemetry.MAssessmentConflict, "reason", reason)
 	err := apperrors.New(apperrors.CodeAssessmentConflict, msg)
 	err.Details = map[string]any{"reason": reason}
 	return err
@@ -1378,45 +1493,61 @@ const (
 	timingGateCohortSection
 )
 
+// dbTimeTx reads the authoritative database instant inside the transaction.
+// Deadline authority must be the time at which the transaction holds its
+// locks, never a wall-clock sample taken before lock acquisition (SAT-006).
+func dbTimeTx(ctx context.Context, t tx.Tx) (time.Time, error) {
+	var now time.Time
+	if err := t.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&now); err != nil {
+		return time.Time{}, err
+	}
+	return now.UTC(), nil
+}
+
 // moduleTimingGateTx mirrors ensure_module_matches_runtime_stage_tx: unknown
 // timing model => legacy; cohort models enforce stage identity + live/paused
-// gates + deadline.
-func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, moduleID string, now time.Time) (timingGate, error) {
+// gates + deadline. It owns the authoritative time: the returned instant is
+// read from the DB after the runtime/section rows are locked, so a request
+// that waited past the deadline is judged by the moment it can mutate, not a
+// timestamp captured before it entered the transaction (SAT-006).
+func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, moduleID string) (timingGate, time.Time, error) {
 	var timingModel sql.NullString
 	var activeStage sql.NullString
 	if err := t.QueryRowContext(ctx,
 		"SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE",
 		scheduleID).Scan(&timingModel, &activeStage); err != nil {
 		if err == sql.ErrNoRows {
-			return timingGateLegacy, nil
+			now, nerr := dbTimeTx(ctx, t)
+			return timingGateLegacy, now, nerr
 		}
-		return timingGate(0), err
+		return timingGate(0), time.Time{}, err
 	}
 	switch timingModel.String {
 	case examruntime.TimingModelCohortStage:
 	case examruntime.TimingModelCohortSection:
 	default:
-		return timingGateLegacy, nil
+		now, nerr := dbTimeTx(ctx, t)
+		return timingGateLegacy, now, nerr
 	}
 	var sectionKey, adaptiveRole string
 	if err := t.QueryRowContext(ctx,
 		"SELECT s.section_key, m.adaptive_role FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?",
 		moduleID).Scan(&sectionKey, &adaptiveRole); err != nil {
 		if err == sql.ErrNoRows {
-			return timingGate(0), apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+			return timingGate(0), time.Time{}, apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
 		}
-		return timingGate(0), err
+		return timingGate(0), time.Time{}, err
 	}
 	expected := sectionKey
 	if timingModel.String == examruntime.TimingModelCohortStage {
 		suffix, err := saveStageSuffix(adaptiveRole)
 		if err != nil {
-			return timingGate(0), err
+			return timingGate(0), time.Time{}, err
 		}
 		expected = sectionKey + ":" + suffix
 	}
 	if !activeStage.Valid || activeStage.String != expected {
-		return timingGate(0), assessmentConflict("SECTION_NOT_ACTIVE", "SAT section `"+expected+"` is not active for this cohort.")
+		return timingGate(0), time.Time{}, assessmentConflict("SECTION_NOT_ACTIVE", "SAT section `"+expected+"` is not active for this cohort.")
 	}
 	var status string
 	var actualStart, pausedAt sql.NullTime
@@ -1425,27 +1556,31 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 		"SELECT rs.status, rs.actual_start_at, rs.paused_at, rs.planned_duration_minutes, rs.extension_minutes, rs.accumulated_paused_seconds FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r ON r.id = rs.runtime_id WHERE r.schedule_id = ? AND rs.section_key = ? FOR UPDATE",
 		scheduleID, expected).Scan(&status, &actualStart, &pausedAt, &plannedMinutes, &extensionMinutes, &pausedSeconds); err != nil {
 		if err == sql.ErrNoRows {
-			return timingGate(0), assessmentConflict("SECTION_CLOCK_MISSING", "The authoritative SAT section clock is missing.")
+			return timingGate(0), time.Time{}, assessmentConflict("SECTION_CLOCK_MISSING", "The authoritative SAT section clock is missing.")
 		}
-		return timingGate(0), err
+		return timingGate(0), time.Time{}, err
 	}
 	if pausedAt.Valid {
-		return timingGate(0), assessmentConflict("RUNTIME_PAUSED", "The SAT cohort clock is paused.")
+		return timingGate(0), time.Time{}, assessmentConflict("RUNTIME_PAUSED", "The SAT cohort clock is paused.")
 	}
 	if status != "live" {
-		return timingGate(0), assessmentConflict("RUNTIME_NOT_LIVE", "The SAT section is not live.")
+		return timingGate(0), time.Time{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT section is not live.")
 	}
 	if !actualStart.Valid {
-		return timingGate(0), assessmentConflict("RUNTIME_NOT_LIVE", "The SAT section clock has not started.")
+		return timingGate(0), time.Time{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT section clock has not started.")
+	}
+	now, err := dbTimeTx(ctx, t)
+	if err != nil {
+		return timingGate(0), time.Time{}, err
 	}
 	deadline := saveStageDeadline(actualStart.Time.UTC(), pausedInt(plannedMinutes), pausedInt(extensionMinutes), pausedInt(pausedSeconds))
 	if !now.Before(deadline) {
-		return timingGate(0), assessmentConflict("DEADLINE_EXPIRED", "The SAT section clock has expired.")
+		return timingGate(0), time.Time{}, assessmentConflict("DEADLINE_EXPIRED", "The SAT section clock has expired.")
 	}
 	if timingModel.String == examruntime.TimingModelCohortStage {
-		return timingGateCohortStage, nil
+		return timingGateCohortStage, now, nil
 	}
-	return timingGateCohortSection, nil
+	return timingGateCohortSection, now, nil
 }
 
 func saveStageSuffix(adaptiveRole string) (string, error) {

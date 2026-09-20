@@ -40,6 +40,14 @@ export interface CoeditRecoveryAndPresenceInput {
   coeditUiActive: boolean;
   selectedExamQuestionId: string | null;
   autosaveStatus: QuestionSaveStatus;
+  /**
+   * The open question still has collaborative roots initializing or failed.
+   *
+   * Room durability is not editor readiness: a committed room can still be
+   * showing an author a field that never initialized. The header must not say
+   * Saved for a question the author cannot work in yet.
+   */
+  questionFieldsPending: boolean;
 }
 
 /** What the recovery surface can offer, already decided. */
@@ -116,6 +124,7 @@ export function useCoeditRecoveryAndPresence(
     coeditUiActive,
     selectedExamQuestionId,
     autosaveStatus,
+    questionFieldsPending,
   } = input;
 
   const coeditSession = coedit.session;
@@ -213,6 +222,7 @@ export function useCoeditRecoveryAndPresence(
             lifecyclePhase: room.lifecyclePhase,
             readOnly: room.workspaceSnapshot.readOnly,
             pendingSince: room.pendingSince ?? null,
+            questionPending: questionFieldsPending,
             now: coeditSaveClock,
           })
     : coeditUiActive

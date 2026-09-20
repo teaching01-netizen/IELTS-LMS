@@ -18,12 +18,14 @@ package accesslinks
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
@@ -113,6 +115,61 @@ func ParseLifecycleState(value string) (LifecycleState, error) {
 	return "", badRequest("Unknown access-link lifecycle state.")
 }
 
+// Section keys a Student Link can be scoped to. The vocabulary and the stored
+// JSON shape are owned by internal/exams (exams.NormalizeSectionScope) so the
+// runtime seam and the delivery gates read the same definition.
+const (
+	SectionReadingWriting = examdomain.LinkSectionReadingWriting
+	SectionMath           = examdomain.LinkSectionMath
+)
+
+// NormalizeEnabledSections validates and canonicalizes a link's section scope.
+// nil/empty means "all sections" (stored NULL) — which is what every link
+// created before this feature gets, so nothing about them changes. Unknown or
+// blank keys fail closed: silently dropping a typo would scope the link to a
+// different sitting than the operator picked.
+func NormalizeEnabledSections(sections []string) ([]string, error) {
+	normalized, err := examdomain.NormalizeSectionScope(sections)
+	if err != nil {
+		return nil, badRequest(err.Error())
+	}
+	return normalized, nil
+}
+
+// equalSections reports whether two normalized scopes describe the same
+// selection (nil/empty and an explicit all-sections list are NOT equal: the
+// stored shape differs and the seam treats the explicit list as a real
+// narrowing request to be intersected).
+func equalSections(a, b []string) bool {
+	return examdomain.EqualSectionScopes(a, b)
+}
+
+// parseEnabledSections decodes the stored JSON scope. A NULL/absent column, an
+// empty array, or a malformed value all mean "all sections": a corrupted scope
+// must not strand a run with no sections at all, and every fail-open path here
+// matches pre-migration behaviour.
+func parseEnabledSections(raw sql.NullString) []string {
+	keys := examdomain.SectionScopeKeys(examdomain.ParseStoredSectionScope(raw.String))
+	if len(keys) == 0 {
+		return nil
+	}
+	return keys
+}
+
+// enabledSectionsJSON renders a scope for storage: NULL for "all sections",
+// otherwise the canonical JSON array.
+func enabledSectionsJSON(sections []string) any {
+	normalized, err := NormalizeEnabledSections(sections)
+	if err != nil || len(normalized) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(normalized)
+	if err != nil {
+		return nil
+	}
+	return string(payload)
+}
+
 // Status is the derived link status (lifecycle first, then time window).
 type Status string
 
@@ -149,14 +206,17 @@ type Overview struct {
 
 // AccessLink mirrors AssessmentAccessLink.
 type AccessLink struct {
-	ID                   string           `json:"id"`
-	ExamID               string           `json:"examId"`
-	ExamTitle            string           `json:"examTitle"`
-	ProviderKey          string           `json:"providerKey"`
-	PublishedVersionID   string           `json:"publishedVersionId"`
-	VersionNumber        int32            `json:"versionNumber"`
-	ScheduleID           string           `json:"scheduleId"`
-	Name                 string           `json:"name"`
+	ID                 string `json:"id"`
+	ExamID             string `json:"examId"`
+	ExamTitle          string `json:"examTitle"`
+	ProviderKey        string `json:"providerKey"`
+	PublishedVersionID string `json:"publishedVersionId"`
+	VersionNumber      int32  `json:"versionNumber"`
+	ScheduleID         string `json:"scheduleId"`
+	Name               string `json:"name"`
+	// EnabledSections is the link's section scope; nil/null means every
+	// section the published version enables (today's behaviour).
+	EnabledSections      []string         `json:"enabledSections"`
 	AudienceType         AudienceType     `json:"audienceType"`
 	AudienceLabel        *string          `json:"audienceLabel"`
 	AccessMode           Mode             `json:"accessMode"`
@@ -181,6 +241,7 @@ type PublicAccessLink struct {
 	ProviderKey      string           `json:"providerKey"`
 	VersionNumber    int32            `json:"versionNumber"`
 	Name             string           `json:"name"`
+	EnabledSections  []string         `json:"enabledSections"`
 	AudienceType     AudienceType     `json:"audienceType"`
 	AudienceLabel    *string          `json:"audienceLabel"`
 	AccessMode       Mode             `json:"accessMode"`
@@ -208,20 +269,25 @@ type Member struct {
 type CreateRequest struct {
 	PublishedVersionID *string
 	Name               string
-	AudienceType       AudienceType
-	AudienceLabel      *string
-	AccessMode         Mode
-	AvailabilityType   AvailabilityType
-	OpensAt            *time.Time
-	ClosesAt           *time.Time
-	SelectedStudents   []MemberInput
+	// EnabledSections nil = all sections.
+	EnabledSections  []string
+	AudienceType     AudienceType
+	AudienceLabel    *string
+	AccessMode       Mode
+	AvailabilityType AvailabilityType
+	OpensAt          *time.Time
+	ClosesAt         *time.Time
+	SelectedStudents []MemberInput
 }
 
 // UpdateRequest mirrors UpdateAssessmentAccessLinkRequest (revision fenced;
 // nil SelectedStudents keeps the existing roster).
 type UpdateRequest struct {
-	Revision         int32
-	Name             string
+	Revision int32
+	Name     string
+	// EnabledSections is a pointer so "omitted" (keep the current scope) is
+	// distinct from "cleared" (all sections), mirroring SelectedStudents.
+	EnabledSections  *[]string
 	AudienceType     AudienceType
 	AudienceLabel    *string
 	AccessMode       Mode
@@ -281,6 +347,9 @@ type ResolvedEntry struct {
 	ProviderKey  string       `json:"providerKey"`
 	AccessMode   Mode         `json:"accessMode"`
 	AudienceType AudienceType `json:"audienceType"`
+	// EnabledSections lets the entry card state the scope before the student
+	// commits to the sitting; nil means all sections.
+	EnabledSections []string `json:"enabledSections"`
 }
 
 // Service wires access-link transitions explicitly.
@@ -317,7 +386,7 @@ func unavailable(msg string) *apperrors.Error {
 // flag. Column order is load-bearing for scanAccessLink.
 func linkSelectSQL() string {
 	return "SELECT l.id, l.exam_id, e.title AS exam_title, e.provider_key," +
-		" l.published_version_id, v.version_number, l.schedule_id, l.name," +
+		" l.published_version_id, v.version_number, l.schedule_id, l.name, l.enabled_sections," +
 		" l.audience_type, l.audience_label, l.access_mode, l.availability_type," +
 		" l.opens_at, l.closes_at, l.lifecycle_state, l.revision, l.created_at, l.updated_at," +
 		" (SELECT COUNT(*) FROM assessment_access_link_members m WHERE m.link_id = l.id) AS selected_student_count," +
@@ -337,13 +406,13 @@ func scanAccessLink(row interface {
 }) (AccessLink, error) {
 	var l AccessLink
 	var audience, mode, availability, lifecycle string
-	var label sql.NullString
+	var label, enabledSections sql.NullString
 	var opensAt, closesAt sql.NullTime
 	var selected, registered, started, submitted int64
 	var isCurrent, hasParticipation sql.NullInt64
 	if err := row.Scan(
 		&l.ID, &l.ExamID, &l.ExamTitle, &l.ProviderKey,
-		&l.PublishedVersionID, &l.VersionNumber, &l.ScheduleID, &l.Name,
+		&l.PublishedVersionID, &l.VersionNumber, &l.ScheduleID, &l.Name, &enabledSections,
 		&audience, &label, &mode, &availability,
 		&opensAt, &closesAt, &lifecycle, &l.Revision, &l.CreatedAt, &l.UpdatedAt,
 		&selected, &registered, &started, &submitted,
@@ -371,6 +440,7 @@ func scanAccessLink(row interface {
 	l.AccessMode = accessMode
 	l.AvailabilityType = availabilityType
 	l.LifecycleState = lifecycleState
+	l.EnabledSections = parseEnabledSections(enabledSections)
 	if label.Valid {
 		v := label.String
 		l.AudienceLabel = &v
@@ -647,6 +717,13 @@ type linkLock struct {
 	scheduleID string
 	lifecycle  LifecycleState
 	revision   int32
+	// enabledSections is the stored scope (nil = all sections).
+	enabledSections []string
+	// hasParticipation reports whether any student joined or started the
+	// backing schedule. It is read under the same FOR UPDATE lock as the
+	// revision so the "sections may only change until the first student
+	// participates" gate cannot race a concurrent registration.
+	hasParticipation bool
 }
 
 // lockLinkTx mirrors lock_link_tx(): SELECT ... FOR UPDATE serializes link
@@ -654,9 +731,14 @@ type linkLock struct {
 func lockLinkTx(ctx context.Context, q tx.Tx, linkID string) (linkLock, error) {
 	var lock linkLock
 	var lifecycle string
+	var enabledSections sql.NullString
+	var hasParticipation sql.NullInt64
 	err := q.QueryRowContext(ctx,
-		"SELECT schedule_id, lifecycle_state, revision FROM assessment_access_links WHERE id = ? FOR UPDATE",
-		linkID).Scan(&lock.scheduleID, &lifecycle, &lock.revision)
+		"SELECT schedule_id, lifecycle_state, revision, enabled_sections,"+
+			" (EXISTS(SELECT 1 FROM schedule_registrations r WHERE r.schedule_id = assessment_access_links.schedule_id LIMIT 1)"+
+			" OR EXISTS(SELECT 1 FROM student_attempts a WHERE a.schedule_id = assessment_access_links.schedule_id LIMIT 1)) AS has_participation"+
+			" FROM assessment_access_links WHERE id = ? FOR UPDATE",
+		linkID).Scan(&lock.scheduleID, &lifecycle, &lock.revision, &enabledSections, &hasParticipation)
 	if err == sql.ErrNoRows {
 		return lock, notFound("Access link was not found.")
 	}
@@ -668,6 +750,8 @@ func lockLinkTx(ctx context.Context, q tx.Tx, linkID string) (linkLock, error) {
 		return lock, err
 	}
 	lock.lifecycle = state
+	lock.enabledSections = parseEnabledSections(enabledSections)
+	lock.hasParticipation = hasParticipation.Valid && hasParticipation.Int64 != 0
 	return lock, nil
 }
 
@@ -728,10 +812,10 @@ func insertBackingScheduleTx(ctx context.Context, q tx.Tx, scheduleID, examID st
 	return err
 }
 
-func insertLinkTx(ctx context.Context, q tx.Tx, linkID, examID, versionID, scheduleID, name string, audience AudienceType, label *string, mode Mode, availability AvailabilityType, opensAt, closesAt *time.Time, createdBy string) error {
+func insertLinkTx(ctx context.Context, q tx.Tx, linkID, examID, versionID, scheduleID, name string, enabledSections []string, audience AudienceType, label *string, mode Mode, availability AvailabilityType, opensAt, closesAt *time.Time, createdBy string) error {
 	_, err := q.ExecContext(ctx,
-		"INSERT INTO assessment_access_links (id, exam_id, published_version_id, schedule_id, name, audience_type, audience_label, access_mode, availability_type, opens_at, closes_at, lifecycle_state, created_by, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 0)",
-		linkID, examID, versionID, scheduleID, name, string(audience), nullableStr(label),
+		"INSERT INTO assessment_access_links (id, exam_id, published_version_id, schedule_id, name, enabled_sections, audience_type, audience_label, access_mode, availability_type, opens_at, closes_at, lifecycle_state, created_by, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 0)",
+		linkID, examID, versionID, scheduleID, name, enabledSectionsJSON(enabledSections), string(audience), nullableStr(label),
 		string(mode), string(availability), nullableTime(opensAt), nullableTime(closesAt), createdBy)
 	return err
 }
@@ -801,7 +885,8 @@ func (s *Service) PublicLink(ctx context.Context, linkID string) (PublicAccessLi
 	}
 	return PublicAccessLink{
 		ID: link.ID, ExamTitle: link.ExamTitle, ProviderKey: link.ProviderKey,
-		VersionNumber: link.VersionNumber, Name: link.Name, AudienceType: link.AudienceType,
+		VersionNumber: link.VersionNumber, Name: link.Name, EnabledSections: link.EnabledSections,
+		AudienceType:  link.AudienceType,
 		AudienceLabel: link.AudienceLabel, AccessMode: link.AccessMode,
 		AvailabilityType: link.AvailabilityType, OpensAt: link.OpensAt, ClosesAt: link.ClosesAt,
 		Status: link.Status,
@@ -840,6 +925,10 @@ func (s *Service) Create(ctx context.Context, examID, createdBy string, req Crea
 	if err != nil {
 		return zero, err
 	}
+	enabledSections, err := NormalizeEnabledSections(req.EnabledSections)
+	if err != nil {
+		return zero, err
+	}
 	cohort := name
 	if label != nil {
 		cohort = *label
@@ -854,7 +943,7 @@ func (s *Service) Create(ctx context.Context, examID, createdBy string, req Crea
 		if err := insertBackingScheduleTx(ctx, q, scheduleID, examID, pin, cohort, start, end, createdBy); err != nil {
 			return err
 		}
-		if err := insertLinkTx(ctx, q, linkID, examID, pin.versionID, scheduleID, name, req.AudienceType, label, req.AccessMode, req.AvailabilityType, req.OpensAt, req.ClosesAt, createdBy); err != nil {
+		if err := insertLinkTx(ctx, q, linkID, examID, pin.versionID, scheduleID, name, enabledSections, req.AudienceType, label, req.AccessMode, req.AvailabilityType, req.OpensAt, req.ClosesAt, createdBy); err != nil {
 			return err
 		}
 		return replaceMembersTx(ctx, q, linkID, members)
@@ -880,6 +969,25 @@ func (s *Service) Update(ctx context.Context, linkID string, req UpdateRequest) 
 		}
 		if current.lifecycle == LifecycleRevoked {
 			return conflict("Revoked Student Links are immutable. Duplicate it to create a new link.")
+		}
+		// Section scope may only change until the first student participates:
+		// runtime sections freeze at proctor start, so a scope edit after a
+		// student joined either does nothing to that run or — before the
+		// proctor starts — silently changes the sitting a registered student
+		// was told to expect. The participation read rode this same FOR
+		// UPDATE lock, so a registration cannot slip in between.
+		enabledSections := current.enabledSections
+		if req.EnabledSections != nil {
+			requested, err := NormalizeEnabledSections(*req.EnabledSections)
+			if err != nil {
+				return err
+			}
+			if !equalSections(requested, current.enabledSections) {
+				if current.hasParticipation {
+					return conflict("Sections cannot change after a student has joined this Student Link. Duplicate it to create a new link.")
+				}
+				enabledSections = requested
+			}
 		}
 		var memberInputs []MemberInput
 		if req.SelectedStudents == nil {
@@ -931,8 +1039,8 @@ func (s *Service) Update(ctx context.Context, linkID string, req UpdateRequest) 
 			return conflict("Student Link changed while you were editing it.")
 		}
 		res2, err := q.ExecContext(ctx,
-			"UPDATE assessment_access_links SET name = ?, audience_type = ?, audience_label = ?, access_mode = ?, availability_type = ?, opens_at = ?, closes_at = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND revision = ?",
-			name, string(req.AudienceType), nullableStr(label), string(req.AccessMode),
+			"UPDATE assessment_access_links SET name = ?, enabled_sections = ?, audience_type = ?, audience_label = ?, access_mode = ?, availability_type = ?, opens_at = ?, closes_at = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP(6) WHERE id = ? AND revision = ?",
+			name, enabledSectionsJSON(enabledSections), string(req.AudienceType), nullableStr(label), string(req.AccessMode),
 			string(req.AvailabilityType), nullableTime(req.OpensAt), nullableTime(req.ClosesAt),
 			linkID, req.Revision)
 		if err != nil {
@@ -1004,20 +1112,21 @@ func (s *Service) Duplicate(ctx context.Context, linkID, createdBy string, req D
 	newScheduleID := uuid.NewString()
 	err = s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		var source struct {
-			examID       string
-			versionID    string
-			name         string
-			audience     string
-			label        sql.NullString
-			mode         string
-			availability string
-			opensAt      sql.NullTime
-			closesAt     sql.NullTime
-			revision     int32
+			examID          string
+			versionID       string
+			name            string
+			enabledSections sql.NullString
+			audience        string
+			label           sql.NullString
+			mode            string
+			availability    string
+			opensAt         sql.NullTime
+			closesAt        sql.NullTime
+			revision        int32
 		}
 		err := q.QueryRowContext(ctx,
-			"SELECT exam_id, published_version_id, name, audience_type, audience_label, access_mode, availability_type, opens_at, closes_at, revision FROM assessment_access_links WHERE id = ? FOR UPDATE",
-			linkID).Scan(&source.examID, &source.versionID, &source.name, &source.audience,
+			"SELECT exam_id, published_version_id, name, enabled_sections, audience_type, audience_label, access_mode, availability_type, opens_at, closes_at, revision FROM assessment_access_links WHERE id = ? FOR UPDATE",
+			linkID).Scan(&source.examID, &source.versionID, &source.name, &source.enabledSections, &source.audience,
 			&source.label, &source.mode, &source.availability, &source.opensAt, &source.closesAt, &source.revision)
 		if err == sql.ErrNoRows {
 			return notFound("Access link was not found.")
@@ -1111,7 +1220,7 @@ func (s *Service) Duplicate(ctx context.Context, linkID, createdBy string, req D
 		if err := insertBackingScheduleTx(ctx, q, newScheduleID, source.examID, pin, cohort, start, end, createdBy); err != nil {
 			return err
 		}
-		if err := insertLinkTx(ctx, q, newLinkID, source.examID, pin.versionID, newScheduleID, normalizedName, audienceType, label, accessMode, availability, opensAt, closesAt, createdBy); err != nil {
+		if err := insertLinkTx(ctx, q, newLinkID, source.examID, pin.versionID, newScheduleID, normalizedName, parseEnabledSections(source.enabledSections), audienceType, label, accessMode, availability, opensAt, closesAt, createdBy); err != nil {
 			return err
 		}
 		return replaceMembersTx(ctx, q, newLinkID, normalizedMembers)
@@ -1193,8 +1302,9 @@ func (s *Service) ResolveEntry(ctx context.Context, linkID, studentCode, student
 		// latest committed state, not the unlocked Get above.
 		var lifecycle, availability string
 		var opensAt, closesAt sql.NullTime
+		var enabledSections sql.NullString
 		var scheduleID, providerKey, accessMode, audienceType string
-		if err := q.QueryRowContext(ctx, "SELECT l.schedule_id, e.provider_key, l.access_mode, l.audience_type, l.lifecycle_state, l.availability_type, l.opens_at, l.closes_at FROM assessment_access_links l JOIN exam_entities e ON e.id = l.exam_id WHERE l.id = ? FOR UPDATE", linkID).Scan(&scheduleID, &providerKey, &accessMode, &audienceType, &lifecycle, &availability, &opensAt, &closesAt); err != nil {
+		if err := q.QueryRowContext(ctx, "SELECT l.schedule_id, e.provider_key, l.access_mode, l.audience_type, l.lifecycle_state, l.availability_type, l.opens_at, l.closes_at, l.enabled_sections FROM assessment_access_links l JOIN exam_entities e ON e.id = l.exam_id WHERE l.id = ? FOR UPDATE", linkID).Scan(&scheduleID, &providerKey, &accessMode, &audienceType, &lifecycle, &availability, &opensAt, &closesAt, &enabledSections); err != nil {
 			if err == sql.ErrNoRows {
 				return notFound("Access link was not found.")
 			}
@@ -1266,7 +1376,7 @@ func (s *Service) ResolveEntry(ctx context.Context, linkID, studentCode, student
 				return err
 			}
 		}
-		gated = ResolvedEntry{ScheduleID: scheduleID, ProviderKey: providerKey, AccessMode: mode, AudienceType: audience}
+		gated = ResolvedEntry{ScheduleID: scheduleID, ProviderKey: providerKey, AccessMode: mode, AudienceType: audience, EnabledSections: parseEnabledSections(enabledSections)}
 		return nil
 	})
 	if err != nil {

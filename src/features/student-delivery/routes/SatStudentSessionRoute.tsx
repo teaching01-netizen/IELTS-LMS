@@ -45,6 +45,7 @@ import {
   SatLeaseConflictNotice,
   SatSubmissionOverlay,
 } from "../ui/feedback/SatControlFeedback";
+import { SatIntegrityWarning } from "../ui/feedback/SatIntegrityWarning";
 
 export interface SatStudentSessionRouteProps {
   scheduleId: string;
@@ -323,6 +324,7 @@ export function SatStudentSessionRoute({
         isStarting={exam.isStarting}
         stageReady={exam.pendingStageReady}
         entryRecoverable={exam.autoEntryRecoverable}
+        autoStartPending={exam.entryAutoStartPending}
         error={error}
         onStart={() => void commands.startPendingModule()}
         onExit={onExit}
@@ -447,6 +449,12 @@ export function SatStudentSessionRoute({
         ) : null}
         {error ? <SatControlBanner tone="error">{error}</SatControlBanner> : null}
         {exam.blocked ? <SatBlockingOverlay note={data.proctorNote} /> : null}
+        {/* Integrity hold: acknowledges only — the review surface, module
+            attempt, answers and timer stay exactly as they were. */}
+        <SatIntegrityWarning
+          open={exam.pendingTabSwitchWarning !== null}
+          onContinue={exam.acknowledgeTabSwitchWarning}
+        />
         <SatReviewPage
           sectionLabel={activeSectionLabel}
           moduleTitle={studentModuleTitle(exam.stateModule)}
@@ -529,6 +537,12 @@ export function SatStudentSessionRoute({
         <SatControlBanner tone="warning">Time almost up — answers save automatically.</SatControlBanner>
       ) : null}
       {exam.isSubmitting ? <SatSubmissionOverlay autoSubmitted={exam.autoSubmitted} /> : null}
+      {/* Integrity hold sits above every tool and dialog (blocking layer): a
+          student cannot dismiss it and keep working behind it. */}
+      <SatIntegrityWarning
+        open={exam.pendingTabSwitchWarning !== null}
+        onContinue={exam.acknowledgeTabSwitchWarning}
+      />
       <SatExamShell
         moduleIdentity={exam.stateModule.id}
         sectionLabel={activeSectionLabel}

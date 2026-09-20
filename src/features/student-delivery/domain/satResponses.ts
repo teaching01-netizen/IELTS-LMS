@@ -502,3 +502,62 @@ export function responseForQuestion(
 export function isSatResponseAnswered(response: SatQuestionResponseDraft | undefined): boolean {
   return Boolean(response?.answer.trim());
 }
+
+/**
+ * The one authored mutation vocabulary for a response draft. Both the in-memory
+ * runner state and the durable payload must be produced by
+ * `applySatResponseDraftChange` — deriving them separately is what let the
+ * screen and the saved record disagree about the same tap (audit finding 3:
+ * the persisted draft kept `answer` inside `eliminatedOptionIds`).
+ */
+export type SatResponseDraftChange =
+  | { kind: 'setAnswer'; answer: string }
+  | { kind: 'setReviewFlag'; markedForReview: boolean }
+  | { kind: 'toggleEliminatedOption'; optionId: string }
+  | { kind: 'setAnnotations'; annotations: SatQuestionAnnotations };
+
+/**
+ * Enforce the cross-layer invariant: a selected choice is never also crossed
+ * out. Applied on every mutation AND when drafts arrive from an older client,
+ * the durable outbox, or a server snapshot, so a contradictory record left by
+ * an earlier build heals on read instead of resurrecting on reload.
+ */
+export function normalizeSatResponseDraft(
+  response: SatQuestionResponseDraft,
+): SatQuestionResponseDraft {
+  if (response.answer === '' || !response.eliminatedOptionIds.includes(response.answer)) {
+    return response;
+  }
+  return {
+    ...response,
+    eliminatedOptionIds: response.eliminatedOptionIds.filter(
+      (optionId) => optionId !== response.answer,
+    ),
+  };
+}
+
+/**
+ * Apply one change and return the next draft. Selecting a choice lifts its
+ * elimination; crossing out the selected choice is refused outright, so
+ * `answer in eliminatedOptionIds` cannot be expressed by any action sequence.
+ */
+export function applySatResponseDraftChange(
+  response: SatQuestionResponseDraft,
+  change: SatResponseDraftChange,
+): SatQuestionResponseDraft {
+  switch (change.kind) {
+    case 'setAnswer':
+      return normalizeSatResponseDraft({ ...response, answer: change.answer });
+    case 'setReviewFlag':
+      return normalizeSatResponseDraft({ ...response, markedForReview: change.markedForReview });
+    case 'toggleEliminatedOption': {
+      if (change.optionId === response.answer) return response;
+      const eliminated = response.eliminatedOptionIds.includes(change.optionId)
+        ? response.eliminatedOptionIds.filter((optionId) => optionId !== change.optionId)
+        : [...response.eliminatedOptionIds, change.optionId];
+      return normalizeSatResponseDraft({ ...response, eliminatedOptionIds: eliminated });
+    }
+    case 'setAnnotations':
+      return normalizeSatResponseDraft({ ...response, annotations: change.annotations });
+  }
+}

@@ -131,6 +131,19 @@ const (
 	ProviderACT   Provider = "act"
 )
 
+// known reports whether p names a terminalization branch the platform
+// implements. The submit path trusts the resolver for the DECISION, not for the
+// vocabulary: an empty or unrecognised provider would take the direct-seal
+// branch and write a terminal fact that no scorer or materializer owns.
+func (p Provider) known() bool {
+	switch p {
+	case ProviderIELTS, ProviderSAT, ProviderACT:
+		return true
+	default:
+		return false
+	}
+}
+
 // SubmitCommand is the common submission preamble input (plan 28).
 //
 // Idempotency identity (Phase 02 AT02-08): SubmissionID is the client-minted

@@ -52,6 +52,18 @@ describe('StudentSessionRoute', () => {
     vi.restoreAllMocks();
   });
 
+  it.each(['', '?touchSelectionDebug=1'])('only exposes diagnostics when the session URL opts in: %s', async (query) => {
+    vi.spyOn(authService, 'getSession').mockResolvedValue(null);
+    StudentAppWrapperMock.mockReturnValue(<div>IELTS exam</div>);
+    useStudentSessionRouteDataMock.mockReturnValue({
+      attemptSnapshot: null, error: null, isLoading: false, providerKey: 'ielts',
+      retry: vi.fn(), runtimeSnapshot: null, state: {}, refreshRuntime: vi.fn(),
+    });
+    renderRoute(`/student/sched-1/alice${query}`);
+    await screen.findByText('IELTS exam');
+    expect(screen.queryByRole('region', { name: 'Touch selection diagnostics' }) !== null).toBe(query !== '');
+  });
+
   it('routes missing state back to student check-in instead of /admin', async () => {
     vi.spyOn(authService, 'getSession').mockResolvedValue(null);
     vi.spyOn(authService, 'logoutAll').mockResolvedValue();

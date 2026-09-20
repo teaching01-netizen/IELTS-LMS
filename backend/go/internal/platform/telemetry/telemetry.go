@@ -141,7 +141,15 @@ const (
 	MShedExam               = "shed_exam_requests_total"
 	MQueryTimeout           = "query_budget_exhausted_total"
 
-	MSessionCacheHit   = "session_cache_hit_total"
+	MSessionCacheHit = "session_cache_hit_total"
+	// MAssessmentConflict counts structured SAT delivery conflicts by their
+	// stable reason code (RUNTIME_NOT_LIVE, DEADLINE_EXPIRED,
+	// SECTION_NOT_ACTIVE, ...). Exam-day reading: a waiting room that spams a
+	// control flow produces this series, so a read/write state contract that
+	// diverges again is visible as a metric instead of only in logs. Label is
+	// the reason vocabulary only — never ids, never messages.
+	MAssessmentConflict = "assessment_conflict_total"
+
 	MSessionCacheMiss  = "session_cache_miss_total"
 	MSnapshotCacheHit  = "runtime_snapshot_hit_total"
 	MSnapshotCacheMiss = "runtime_snapshot_miss_total"

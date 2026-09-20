@@ -471,7 +471,9 @@ func (s *Service) GetRuntime(ctx context.Context, scheduleID string) (Runtime, e
 // ApplyRuntimeCommand applies start/pause/resume/complete with revision
 // fencing (mirrors apply_runtime_command; stale expected revision is a 409
 // "Runtime changed; refresh before retrying."). Lock order everywhere:
-// schedule attempt rows -> runtime row -> section rows.
+// schedule row (when the command writes it: start/complete) -> schedule
+// attempt rows -> runtime row -> section rows. Check-in takes the schedule row
+// first too, so the two can only ever queue behind each other, never cycle.
 func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cmd RuntimeCommand) (Runtime, error) {
 	normalized, err := ValidateRuntimeCommandAction(cmd.Action)
 	if err != nil {
@@ -483,8 +485,9 @@ func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cm
 		cmd.ActorID = "system"
 	}
 
-	sch, err := s.Get(ctx, scheduleID)
-	if err != nil {
+	// Existence gate only: nothing below plans from this read. Start derives
+	// its plan from the schedule row it locks inside its own transaction.
+	if _, err := s.Get(ctx, scheduleID); err != nil {
 		return Runtime{}, err
 	}
 	fence := examruntime.RevisionFence{
@@ -493,11 +496,7 @@ func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cm
 	}
 	switch cmd.Action {
 	case CommandStart:
-		plan, timingModel, err := s.runtimePlan(ctx, sch)
-		if err != nil {
-			return Runtime{}, err
-		}
-		if _, err := s.runtime.Start(ctx, scheduleID, sch.ExamID, plan, timingModel, cmd.ActorID); err != nil {
+		if _, err := s.runtime.Start(ctx, scheduleID, cmd.ActorID, s.startPlanner()); err != nil {
 			return Runtime{}, err
 		}
 	case CommandPause:
@@ -516,13 +515,45 @@ func (s *Service) ApplyRuntimeCommand(ctx context.Context, scheduleID string, cm
 	return s.GetRuntime(ctx, scheduleID)
 }
 
-// runtimePlan derives the persisted cohort clock plan from the pinned
-// published version. Disabled config sections are omitted so a proctor start
-// cannot create clocks for a section the author turned off.
-func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.PlanEntry, string, error) {
+// startPlanner derives the cohort clock plan INSIDE runtime.Start's
+// transaction, from the schedule row Start locked, through Start's own tx
+// handle. Planning from any other read — the pre-transaction Get this command
+// used to plan from — let a concurrent version switch commit between the read
+// and the live transition, so the runtime's section/timing topology described
+// one version while the schedule (and every attempt minted after it) named
+// another.
+func (s *Service) startPlanner() examruntime.StartPlanner {
+	return func(ctx context.Context, q tx.Tx, sch examruntime.StartSchedule) ([]examruntime.PlanEntry, string, error) {
+		return runtimePlanIn(ctx, q, Schedule{
+			ID:                     sch.ID,
+			ProviderKey:            sch.ProviderKey,
+			PublishedVersionID:     sch.PublishedVersionID,
+			PlannedDurationMinutes: sch.PlannedDurationMinutes,
+		})
+	}
+}
+
+// planQuerier is the read surface plan derivation needs. Both *sql.DB and
+// tx.Tx satisfy it, so the same derivation can run inside a caller's
+// transaction (Start) or against the pool.
+type planQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// runtimePlanIn derives the persisted cohort clock plan from the pinned
+// published version, reading through q. Disabled config sections are omitted
+// so a proctor start cannot create clocks for a section the author turned off.
+//
+// The plan is then intersected with the backing Student Access link's section
+// scope (when the schedule has one): a link may only NARROW the run, never
+// re-enable a section the version disabled. Intersecting rather than replacing
+// is what keeps the two levels of section on/off composable — the link toggle
+// and config_snapshot.sections[key].enabled are ANDed, not merged.
+func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examruntime.PlanEntry, string, error) {
 	var configRaw sql.NullString
 	var examType string
-	if err := s.db.QueryRowContext(ctx, "SELECT CAST(v.config_snapshot AS CHAR), e.exam_type FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.id = ?", sch.PublishedVersionID).Scan(&configRaw, &examType); err != nil {
+	if err := q.QueryRowContext(ctx, "SELECT CAST(v.config_snapshot AS CHAR), e.exam_type FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.id = ?", sch.PublishedVersionID).Scan(&configRaw, &examType); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, "", notFoundError("Published exam version not found.")
 		}
@@ -531,8 +562,12 @@ func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.
 	// Legacy ACT rows carry provider_key='ielts' with exam_type='ACT'; the
 	// effective provider heals that mismatch so science survives planning.
 	effectiveProvider := examdomain.EffectiveProviderKey(sch.ProviderKey, examType)
+	linkSections, err := linkEnabledSections(ctx, q, sch.ID)
+	if err != nil {
+		return nil, "", err
+	}
 	enabled := configuredRuntimeSections(configRaw.String)
-	rows, err := s.db.QueryContext(ctx, "SELECT section_key, title, display_order, duration_seconds, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id", sch.PublishedVersionID)
+	rows, err := q.QueryContext(ctx, "SELECT section_key, title, display_order, duration_seconds, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id", sch.PublishedVersionID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -544,7 +579,7 @@ func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.
 		if err := rows.Scan(&key, &label, &order, &durationSeconds, &gapSeconds); err != nil {
 			return nil, "", err
 		}
-		if !examdomain.ValidSectionKey(effectiveProvider, key) || (enabled != nil && !enabled[key]) {
+		if !examdomain.ValidSectionKey(effectiveProvider, key) || (enabled != nil && !enabled[key]) || !linkAllowsSection(linkSections, key) {
 			continue
 		}
 		plan = append(plan, examruntime.PlanEntry{
@@ -558,17 +593,62 @@ func (s *Service) runtimePlan(ctx context.Context, sch Schedule) ([]examruntime.
 	if err := rows.Err(); err != nil {
 		return nil, "", err
 	}
+	// The fallbacks are filtered too: an unusable config must not silently
+	// hand a narrowed link back its dropped section.
 	if len(plan) == 0 {
-		plan = configuredRuntimePlan(configRaw.String, effectiveProvider)
+		plan = filterPlanBySections(configuredRuntimePlan(configRaw.String, effectiveProvider), linkSections)
 	}
 	if len(plan) == 0 {
-		plan = fallbackRuntimePlan(effectiveProvider, sch.PlannedDurationMinutes)
+		plan = filterPlanBySections(fallbackRuntimePlan(effectiveProvider, sch.PlannedDurationMinutes), linkSections)
 	}
 	timingModel := examruntime.TimingModelLegacy
 	if strings.EqualFold(sch.ProviderKey, examdomain.ProviderSAT) {
 		timingModel = examruntime.TimingModelCohortSection
 	}
 	return plan, timingModel, nil
+}
+
+// linkEnabledSections reads the section scope of the Student Access link
+// backing the schedule (assessment_access_links_schedule_unique makes this a
+// single indexed get). A schedule with no link — every admin-created schedule —
+// returns nil, meaning "no narrowing". The stored shape, its fail-open read,
+// and the section vocabulary are owned by internal/exams.
+func linkEnabledSections(ctx context.Context, q planQuerier, scheduleID string) (map[string]bool, error) {
+	if strings.TrimSpace(scheduleID) == "" {
+		return nil, nil
+	}
+	var raw sql.NullString
+	err := q.QueryRowContext(ctx,
+		"SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ?", scheduleID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return examdomain.ParseStoredSectionScope(raw.String), nil
+}
+
+// linkAllowsSection reports whether a link scope admits a section.
+func linkAllowsSection(allowed map[string]bool, sectionKey string) bool {
+	return examdomain.AllowsSection(allowed, sectionKey)
+}
+
+// filterPlanBySections narrows an already-built plan to a link scope, keeping
+// the plan's own order. Section order is left untouched: gaps are harmless
+// (every consumer orders by section_order) and renumbering would rewrite the
+// authored display order of a plan that was not narrowed at all.
+func filterPlanBySections(plan []examruntime.PlanEntry, allowed map[string]bool) []examruntime.PlanEntry {
+	if allowed == nil {
+		return plan
+	}
+	filtered := make([]examruntime.PlanEntry, 0, len(plan))
+	for _, entry := range plan {
+		if allowed[entry.SectionKey] {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func configuredRuntimePlan(raw, providerKey string) []examruntime.PlanEntry {
@@ -908,7 +988,10 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 		// A runtime may have started before this candidate checked in. Project
 		// the active section's deadline onto the new V2 attempt immediately so
 		// its first response is governed by the same server clock as existing
-		// candidates.
+		// candidates. Scoped to THIS attempt: the other candidates' clocks did
+		// not change, and re-projecting them bumped their control_epoch, so a
+		// late arrival made every writing student's next save
+		// CONTROL_EPOCH_STALE.
 		var runtimeID, activeSection string
 		runtimeErr := q.QueryRowContext(ctx, "SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE", scheduleID).Scan(&runtimeID, &activeSection)
 		if runtimeErr != nil && runtimeErr != sql.ErrNoRows {
@@ -916,7 +999,7 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 		}
 		if runtimeErr == nil && strings.TrimSpace(activeSection) != "" {
 			running := "running"
-			if err := examruntime.SyncV2TimingInTx(ctx, q, scheduleID, runtimeID, activeSection, &running); err != nil {
+			if err := examruntime.SyncV2TimingForAttemptInTx(ctx, q, scheduleID, runtimeID, activeSection, attemptID, &running); err != nil {
 				return err
 			}
 		}

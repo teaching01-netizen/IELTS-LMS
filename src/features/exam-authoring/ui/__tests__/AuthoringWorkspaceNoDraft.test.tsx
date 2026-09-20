@@ -1,8 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../../shared/api-client/errors";
+import {
+  consumeAuthoringDraftOnEntry,
+  requestAuthoringDraftOnEntry,
+} from "../../application/authoringEntryIntent";
 
 const harness = vi.hoisted(() => ({
   shellResult: { data: null as unknown, isLoading: false, error: null as unknown, refetch: vi.fn() },
@@ -100,19 +104,30 @@ function setupLifecycle(
   (harness.useEnsureDraft as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => harness.ensureState);
 }
 
-function renderWorkspace() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
+function workspaceTree(client: QueryClient) {
+  return (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
         <AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+}
+
+function renderWorkspace() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  return render(workspaceTree(client));
+}
+
+function renderWorkspaceWithClient() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const view = render(workspaceTree(client));
+  return { rerender: () => view.rerender(workspaceTree(client)) };
 }
 
 describe("AuthoringWorkspace shell lifecycle surfaces", () => {
   beforeEach(() => { setupLifecycle(NO_DRAFT, "builder"); });
+  afterEach(() => { consumeAuthoringDraftOnEntry("exam-1"); });
 
   it("renders NO_DRAFT as a distinct state with an Open draft CTA for editors", async () => {
     renderWorkspace();
@@ -189,6 +204,69 @@ describe("AuthoringWorkspace shell lifecycle surfaces", () => {
     renderWorkspace();
     expect(await screen.findByRole("heading", { name: "You cannot author this exam" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /open draft/i })).not.toBeInTheDocument();
+  });
+
+  it("opens the draft for an author who arrived by choosing this exam (the library gesture)", async () => {
+    requestAuthoringDraftOnEntry("exam-1");
+    const workspace = renderWorkspaceWithClient();
+
+    expect(harness.ensureState.mutate).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Opening SAT workspace…")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "No editable draft" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open draft" })).not.toBeInTheDocument();
+
+    // The command is in flight: the progress must survive the commit in which
+    // the gesture is spent, or a background refetch would flash the wall over
+    // an open that is still running.
+    harness.ensureState.isPending = true;
+    workspace.rerender();
+    expect(screen.getByText("Opening SAT workspace…")).toBeInTheDocument();
+    expect(harness.ensureState.mutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the draft at most once per arrival and does not loop when it settles", async () => {
+    requestAuthoringDraftOnEntry("exam-1");
+    const workspace = renderWorkspaceWithClient();
+    expect(harness.ensureState.mutate).toHaveBeenCalledTimes(1);
+
+    harness.ensureState.isPending = true;
+    workspace.rerender();
+    harness.ensureState.isPending = false;
+    workspace.rerender();
+
+    // The command settled with no draft in hand, so the gesture is spent and
+    // the lifecycle surface — CTA included — is the answer again. What must not
+    // happen is a second POST.
+    expect(await screen.findByRole("heading", { name: "No editable draft" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open draft" })).toBeInTheDocument();
+    expect(harness.ensureState.mutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("never opens a draft on a plain arrival (refresh, deep link, release page)", async () => {
+    renderWorkspace();
+    expect(await screen.findByRole("heading", { name: "No editable draft" })).toBeInTheDocument();
+    expect(harness.ensureState.mutate).not.toHaveBeenCalled();
+  });
+
+  it("never opens for a role the gesture cannot act for", async () => {
+    setupLifecycle(NO_DRAFT, "proctor");
+    requestAuthoringDraftOnEntry("exam-1");
+    renderWorkspace();
+    expect(await screen.findByRole("heading", { name: "No editable draft" })).toBeInTheDocument();
+    expect(harness.ensureState.mutate).not.toHaveBeenCalled();
+  });
+
+  it("shows the classified open failure instead of a permanent spinner, and does not loop", async () => {
+    requestAuthoringDraftOnEntry("exam-1");
+    harness.ensureState.error = new ApiError({ code: "VERSION_CONFLICT", message: "draft changed", status: 409 });
+    const workspace = renderWorkspaceWithClient();
+
+    expect(await screen.findByText(/draft changed while opening/i)).toBeInTheDocument();
+    expect(screen.queryByText("Opening SAT workspace…")).not.toBeInTheDocument();
+    expect(harness.ensureState.mutate).toHaveBeenCalledTimes(1);
+
+    workspace.rerender();
+    expect(harness.ensureState.mutate).toHaveBeenCalledTimes(1);
   });
 
   it("keeps an unexpected failure recoverable with a retry action", async () => {

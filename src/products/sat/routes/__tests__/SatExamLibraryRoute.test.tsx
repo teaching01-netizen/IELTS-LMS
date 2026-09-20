@@ -1,8 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatExamLibraryRoute } from '../SatExamLibraryRoute';
+import {
+  consumeAuthoringDraftOnEntry,
+  peekAuthoringDraftOnEntry,
+} from '../../../../features/exam-authoring/application/authoringEntryIntent';
 
 const useExamListQueryMock = vi.hoisted(() => vi.fn());
 const createProviderExamMock = vi.hoisted(() => vi.fn());
@@ -35,6 +39,20 @@ describe('SatExamLibraryRoute', () => {
     vi.clearAllMocks();
     useExamListQueryMock.mockReturnValue({ data: { entities: [ieltsExam, satExam], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     invalidateExamListMock.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => { consumeAuthoringDraftOnEntry('sat-1'); });
+
+  it('arms the edit gesture when a row is opened, and only then', () => {
+    // A published exam has no editable draft, so the row click is the gesture
+    // that lets its workspace continue from the published version. Rendering
+    // the library must never arm it: a render is not a click.
+    renderRoute();
+    expect(peekAuthoringDraftOnEntry('sat-1')).toBe(false);
+
+    fireEvent.click(screen.getByText('SAT Practice 06').closest('button') as HTMLElement);
+
+    expect(peekAuthoringDraftOnEntry('sat-1')).toBe(true);
   });
 
   it('requests the SAT provider boundary and never renders an IELTS exam', () => {

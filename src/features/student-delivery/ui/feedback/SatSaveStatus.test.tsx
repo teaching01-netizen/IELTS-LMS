@@ -3,36 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { SAT_COPY } from "../../domain/satCopy";
 import { SatSaveStatus } from "./SatSaveStatus";
 
-describe("SatSaveStatus", () => {
-  it("renders nothing when idle", () => {
-    const { container } = render(<SatSaveStatus state="idle" />);
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it("announces saving through a single polite status region", () => {
-    render(<SatSaveStatus state="saving" />);
-    const status = screen.getByTestId("sat-save-status");
-    expect(status).toHaveAttribute("role", "status");
-    expect(status).toHaveTextContent(SAT_COPY.saveStatus.saving);
-  });
-
-  it("uses one canonical offline wording with no action", () => {
-    render(<SatSaveStatus state="offline" onRetrySave={vi.fn()} />);
-    const status = screen.getByTestId("sat-save-status");
-    expect(status).toHaveAttribute("role", "status");
-    // Canonical copy only — the legacy duplicate wording must not appear.
-    expect(status).toHaveTextContent(SAT_COPY.saveStatus.offline);
-    expect(status).not.toHaveTextContent("Response kept on this device");
-    expect(status).not.toHaveTextContent("changes are kept");
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
-  });
-
-  it("offers retry-now while retrying", () => {
-    const onRetrySave = vi.fn();
-    render(<SatSaveStatus state="retrying" onRetrySave={onRetrySave} />);
-    expect(screen.getByTestId("sat-save-status")).toHaveTextContent(SAT_COPY.saveStatus.retrying);
-    screen.getByRole("button", { name: SAT_COPY.saveStatus.retryNow }).click();
-    expect(onRetrySave).toHaveBeenCalledOnce();
+describe("SatSaveStatus (failure-only surface)", () => {
+  it("stays silent through every healthy state", () => {
+    for (const state of ["idle", "saving", "offline", "retrying"] as const) {
+      const { container, unmount } = render(<SatSaveStatus state={state} onRetrySave={vi.fn()} />);
+      expect(container, state).toBeEmptyDOMElement();
+      unmount();
+    }
   });
 
   it("reserves assertive alert for failed-with-action and prefers server detail", () => {
@@ -43,6 +20,11 @@ describe("SatSaveStatus", () => {
     expect(alert).toHaveTextContent("Gateway timeout");
     screen.getByRole("button", { name: SAT_COPY.saveStatus.retry }).click();
     expect(onRetrySave).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to the canonical failure sentence with no server detail", () => {
+    render(<SatSaveStatus state="failed" />);
+    expect(screen.getByTestId("sat-save-status")).toHaveTextContent(SAT_COPY.saveStatus.failed);
   });
 
   it("merges the lease conflict into the superseded banner with take-over inline", () => {

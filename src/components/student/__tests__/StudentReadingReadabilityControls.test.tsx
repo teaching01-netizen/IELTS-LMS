@@ -242,7 +242,9 @@ describe('StudentReading passage readability controls', () => {
     const passagePane = container.querySelector('.student-reading-passage-pane');
     expect(passagePane).not.toBeNull();
     expect(passagePane).toHaveAttribute('data-student-highlightable', 'true');
-    expect(passagePane).toHaveStyle({ userSelect: 'text' });
+    // The pane is selectable by stylesheet default; it deliberately carries no
+    // inline `user-select`, which would outrank the exam's own rule (index.css).
+    expect((passagePane as HTMLElement).style.userSelect).toBe('');
     expect(passagePane?.getAttribute('style') ?? '').not.toContain(
       'student-exam-footer-clearance',
     );

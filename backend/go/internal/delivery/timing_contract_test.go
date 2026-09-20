@@ -43,16 +43,120 @@ func TestTimingContractPreservesCohortClock(t *testing.T) {
 		}
 	}
 }
-func TestTimingContractWithoutRuntimeUsesLegacy(t *testing.T) {
+
+// TestTimingContractSATWithoutRuntimeIsNotStartedCohort is the pre-start
+// contract for a SAT schedule whose exam_session_runtimes row does not exist
+// yet (the proctor has not pressed Start).
+//
+// This used to project the legacy attempt clock — authority legacy_attempt,
+// status "live" — which opened the student entry gate while the exam was
+// still waiting, so the client POSTed /modules/start and got 409
+// RUNTIME_NOT_LIVE on every retry window (the waiting-room 409 storm).
+// "No runtime row" for a cohort-timed provider must mean not_started.
+func TestTimingContractSATWithoutRuntimeIsNotStartedCohort(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 	mock.ExpectQuery("SELECT status FROM exam_session_runtimes").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
-	timing, status, err := deliverySvc(db).loadTiming(context.Background(), "schedule", time.Now())
-	if err != nil || status != "live" || timing.Authority != "legacy_attempt" || timing.TimingModel != "legacy_section_v1" {
-		t.Fatalf("unexpected legacy: %+v %s %v", timing, status, err)
+	now := time.Now().UTC()
+	timing, status, err := deliverySvc(db).loadTiming(context.Background(), "schedule", "sat", now)
+	if err != nil {
+		t.Fatalf("loadTiming failed: %v", err)
+	}
+	if status != "not_started" {
+		t.Fatalf("pre-start SAT status = %q, want not_started", status)
+	}
+	if timing.Authority != "cohort_runtime" {
+		t.Fatalf("pre-start SAT authority = %q, want cohort_runtime", timing.Authority)
+	}
+	if timing.TimingModel != "cohort_section_v3" {
+		t.Fatalf("pre-start SAT timing model = %q, want cohort_section_v3", timing.TimingModel)
+	}
+	if timing.StageStatus != "not_started" {
+		t.Fatalf("pre-start SAT stage status = %q, want not_started", timing.StageStatus)
+	}
+	if timing.StageKey != nil {
+		t.Fatalf("pre-start SAT stage key = %v, want nil", *timing.StageKey)
+	}
+	if timing.DeadlineAt != nil {
+		t.Fatalf("pre-start SAT deadline = %v, want nil", *timing.DeadlineAt)
+	}
+	if timing.RemainingSeconds != 0 {
+		t.Fatalf("pre-start SAT remaining = %d, want 0", timing.RemainingSeconds)
+	}
+	if !timing.ServerNow.Equal(now) {
+		t.Fatalf("pre-start SAT serverNow = %v, want %v", timing.ServerNow, now)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTimingContractLegacyWithoutRuntimePreservesLegacyBehavior pins the
+// non-cohort providers: no runtime row still means the legacy per-module
+// clock is live (ACT/IELTS attempts have no cohort runtime to wait for).
+func TestTimingContractLegacyWithoutRuntimePreservesLegacyBehavior(t *testing.T) {
+	for _, provider := range []string{"act", "ielts"} {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mock.ExpectQuery("SELECT status FROM exam_session_runtimes").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
+		timing, status, err := deliverySvc(db).loadTiming(context.Background(), "schedule", provider, time.Now())
+		if err != nil || status != "live" || timing.Authority != "legacy_attempt" || timing.TimingModel != "legacy_section_v1" || timing.StageStatus != "live" {
+			t.Fatalf("unexpected legacy projection for %s: %+v %s %v", provider, timing, status, err)
+		}
+		if timing.StageKey != nil || timing.DeadlineAt != nil {
+			t.Fatalf("legacy projection for %s must carry no cohort clock: %+v", provider, timing)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+		db.Close()
+	}
+}
+
+// TestTimingContractPreStartAgreesWithProctorProjection is the drift guard:
+// the student bootstrap (delivery.loadTiming) and the proctor dashboard
+// (proctor.LoadSessionRuntimeBySchedule) must describe the same not-yet-started
+// SAT schedule identically. They did not before round 146 — the dashboard said
+// not_started while the bootstrap said live — which is what let the client
+// auto-enter. Both now read proctor.NotStartedRuntimeForProvider.
+func TestTimingContractPreStartAgreesWithProctorProjection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Student bootstrap probe: no runtime row.
+	mock.ExpectQuery("SELECT status FROM exam_session_runtimes").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
+	// Proctor detail path: schedule link, then the same absent runtime row.
+	mock.ExpectQuery("SELECT id, exam_id, provider_key").WithArgs("schedule").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key"}).AddRow("schedule", "exam-1", "sat"))
+	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
+
+	ctx := context.Background()
+	timing, runtimeStatus, err := deliverySvc(db).loadTiming(ctx, "schedule", "sat", time.Now())
+	if err != nil {
+		t.Fatalf("loadTiming failed: %v", err)
+	}
+	runtime, err := proctor.LoadSessionRuntimeBySchedule(ctx, db, "schedule")
+	if err != nil {
+		t.Fatalf("proctor projection failed: %v", err)
+	}
+	proctored := timingFromRuntime(runtime)
+	if runtimeStatus != runtime.Status {
+		t.Fatalf("student status %q != proctor status %q", runtimeStatus, runtime.Status)
+	}
+	if timing.Authority != proctored.Authority || timing.TimingModel != proctored.TimingModel ||
+		timing.StageStatus != proctored.StageStatus || timing.RemainingSeconds != proctored.RemainingSeconds {
+		t.Fatalf("student projection %+v disagrees with proctor projection %+v", timing, proctored)
+	}
+	if runtime.TimingModel != "cohort_section_v3" || runtime.Status != "not_started" {
+		t.Fatalf("proctor pre-start runtime = %+v", runtime)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

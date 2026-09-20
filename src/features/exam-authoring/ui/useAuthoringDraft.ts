@@ -45,6 +45,29 @@ export interface AuthoringServerAdoption {
 }
 
 /**
+ * Why the adoption rule did or did not install the server document.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * The rule used to answer with a bare boolean, so a `200` that was never
+ * installed was indistinguishable from one the rule had not seen yet — and the
+ * workspace fell through to the loading skeleton, which then meant two things:
+ * "the question is on its way" and "the question arrived and was dropped". The
+ * second state is not loading, and a caller can only refuse to render it as one
+ * if the rule names WHY it did not install.
+ */
+export type ServerAdoptionState =
+  | "adopted"
+  /** The query has no revision yet (genuinely still loading, or empty). */
+  | "no-document"
+  /** The revision belongs to another question: stale data, never installed. */
+  | "stale-selection"
+  /** A recovered device draft the author has not answered for is being held. */
+  | "recovered-local-copy"
+  /** The open draft holds unsaved local work a refetch must not replace. */
+  | "protected-local-copy";
+
+/**
  * The open question's draft: the document every editor, validator, diff and
  * save path reads, plus the two rules that govern it.
  *
@@ -111,9 +134,18 @@ export interface AuthoringDraft {
    * Install the server document if, and only if, nothing forbids it: the
    * revision belongs to the question the author is on, it is not the recovered
    * device draft they were offered, and no unsaved local work is protected.
-   * Returns whether it installed, so a caller can report the fact.
+   * Returns WHICH outcome held, so a caller can distinguish "still loading"
+   * from "a 200 that was dropped" and never render the latter as a skeleton.
    */
-  adoptServerDocumentIfPermitted: (input: AuthoringServerAdoption) => boolean;
+  adoptServerDocumentIfPermitted: (input: AuthoringServerAdoption) => ServerAdoptionState;
+  /**
+   * Record that the open question's recovered device draft has been resolved —
+   * held for the author by the recovery owner — so the adoption rule stops
+   * treating the server document as a threat to it. The held copy itself is
+   * untouched: adopting the server revision as the editor's base document does
+   * not destroy work a separate owner is presenting.
+   */
+  acknowledgeRecoveredDraftKey: (draftKey: string) => void;
   /**
    * The open draft's revision number, for reads that happen outside React (the
    * conflict resolver captures it when the sheet opens). Read at resolution
@@ -158,20 +190,30 @@ export function useAuthoringDraft(): AuthoringDraft {
   }, []);
 
   const adoptServerDocumentIfPermitted = useCallback(
-    ({ server, selectedExamQuestionId, draftKey }: AuthoringServerAdoption): boolean => {
-      if (!server.revision) return false;
+    ({ server, selectedExamQuestionId, draftKey }: AuthoringServerAdoption): ServerAdoptionState => {
+      if (!server.revision) return "no-document";
       // Stale data: the query key is the selection, but the payload names its
       // own question, and that name is the authority.
-      if (server.examQuestionId !== selectedExamQuestionId) return false;
+      if (server.examQuestionId !== selectedExamQuestionId) return "stale-selection";
       // A recovered device draft is the local work the author was offered. The
       // server must not replace it before they answer.
-      if (recoveredQuestionDraftKeyRef.current === draftKey) return false;
-      if (draftProtectedRef.current) return false;
+      if (recoveredQuestionDraftKeyRef.current === draftKey) return "recovered-local-copy";
+      // Unsaved local work is protected only while there IS a local document:
+      // protection guards the workspace draft, so an empty document has nothing
+      // for it to protect, and a guard that fires anyway would leave a 200 the
+      // workspace can neither render nor explain.
+      if (draftRef.current !== null && draftProtectedRef.current) return "protected-local-copy";
       adoptServerDocument(server.revision);
-      return true;
+      return "adopted";
     },
-    [adoptServerDocument]
+    [adoptServerDocument, draftRef]
   );
+
+  const acknowledgeRecoveredDraftKey = useCallback((draftKey: string) => {
+    if (recoveredQuestionDraftKeyRef.current === draftKey) {
+      recoveredQuestionDraftKeyRef.current = null;
+    }
+  }, []);
 
   return {
     draft,
@@ -179,6 +221,7 @@ export function useAuthoringDraft(): AuthoringDraft {
     adoptServerDocument,
     clearDocument,
     adoptServerDocumentIfPermitted,
+    acknowledgeRecoveredDraftKey,
     draftRevisionRef,
     draftRef,
     draftProtectedRef,

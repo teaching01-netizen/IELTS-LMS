@@ -6,6 +6,7 @@ import { SatPageError } from '../ui/SatPage';
 import { useAuthSession } from '../../../features/auth/authSession';
 import { invalidateExamList, useExamListQuery } from '../../../features/exam-authoring/api/examQueries';
 import { examAuthoringFacade } from '../../../features/exam-authoring/api/examAuthoringFacade';
+import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/api/authoringEntryIntent';
 import type { ExamEntity } from '../../../types/domain';
 import { SatConfirmDialog, SatFormDialog, isSatCreationDirty } from '../ui/ConfirmDialog';
 import {
@@ -147,7 +148,19 @@ export function SatExamLibraryRoute() {
           {exams.map((exam, rowIndex) => {
             const status = statusLabel(exam);
             return (
-              <SatListRow key={exam.id} index={Math.min(rowIndex, 5)} onOpen={() => navigate('/sat/exams/' + exam.id)}>
+              <SatListRow
+                key={exam.id}
+                index={Math.min(rowIndex, 5)}
+                // Opening a row IS the author saying "work on this exam". A
+                // published exam has no editable draft (publishing seals it),
+                // so that gesture is what lets the workspace continue from the
+                // published version instead of stopping at "No editable draft".
+                // The shell READ stays a read: nothing here fires on a reload.
+                onOpen={() => {
+                  requestAuthoringDraftOnEntry(exam.id);
+                  navigate('/sat/exams/' + exam.id);
+                }}
+              >
                 <span className="flex w-full items-center gap-3 py-3">
                   <span className="min-w-0 flex-1">
                     {/* Density ladder: Library titles at 14px; Sessions/Results names at 13px + score. */}

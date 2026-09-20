@@ -864,6 +864,134 @@
     user-select: text;
   }
 
+  /* A highlightable surface is SELECTABLE BY DEFAULT, and the exam-scoped rules
+     below are the only thing that turns that off.
+
+     This declaration used to live as an inline style on each surface
+     (`HighlightableSurface`, `StudentReading`, `StudentScience`), which made the
+     exam's coarse-pointer rule lose to it on the container element itself: two
+     authorities saying opposite things, and the one that could not be
+     overridden was the one that did not know a student exam was running.
+
+     Selection policy belongs to the stylesheet. It is the only place that can
+     also see whether this is a locked exam, and the only place a reviewer looks
+     to answer "can the student select this?". The default here keeps every
+     non-exam surface — authoring, previews, the way text behaves everywhere
+     else in the product — exactly as it was. */
+  [data-student-highlightable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* Long-press callout suppression for exam CONTENT, scoped to an active
+     student exam — `useStudentExamPageLock` puts `student-exam-active` on
+     html/body for exactly the exam phases, so authoring and staff preview keep
+     their native callouts.
+
+     Selection stays `text` on purpose: Highlights & Notes and the SAT
+     annotations are built on the browser's own selection, so this removes the
+     OS action bar (Copy / Look Up / Search / Share) without removing the
+     student's ability to select. Notice this says nothing about `user-select:
+     none` — that would delete the feature it is meant to protect.
+
+     `.sat-exam-prose` is the SAT passage/question prose wrapper and is a
+     deliberate boundary: the answer controls are rendered OUTSIDE it, so they
+     keep their native behaviour. */
+  .student-exam-active .sat-exam-prose,
+  .student-exam-active .sat-exam-prose *,
+  .student-exam-active [data-student-highlightable="true"],
+  .student-exam-active [data-student-highlightable="true"] * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* ON A TOUCH DEVICE THE SELECTION ITSELF IS THE LEAK.
+
+     The rule above keeps the platform's long-press callout off the passage
+     while leaving text selectable. An iPad showed that is not enough: Apple's
+     Copy / Find / Look Up bar is attached to the SELECTION, not to the callout,
+     so it appeared over the passage anyway — with the exam's own Highlights
+     toolbar beside it, two menus fighting over one gesture.
+
+     There is no property that keeps a selection and drops the menu; the menu is
+     the platform's response to the selection existing. So under a coarse
+     pointer the selection is removed here, and the exam supplies its own
+     (`useStudentTouchTextSelection`): a long press then a drag builds a range
+     the platform never learns about, and it paints its own selection and the
+     student's own Highlight / Underline / Note toolbar.
+
+     Both content surfaces are named here, and both must stay paired with a
+     gesture that replaces what this removes: SAT prose, and IELTS's highlightable
+     passages and transcripts. A selector listed without a gesture behind it
+     deletes a feature instead of protecting it.
+
+     The SAT boundary holds because the answer controls are rendered as a
+     SIBLING of `.sat-exam-prose`, never its descendant (see `SatQuestionBody`
+     and `SatQuestionWorkspace`), so answer fields, the note editor, and the
+     calculator keep every native behavior. Nothing here is `selectstart`,
+     `touchstart`, or a document-wide `user-select: none`.
+
+     Scoped to `pointer: coarse` (the PRIMARY input) rather than `any-pointer`,
+     so a touchscreen laptop with a mouse keeps the desktop behavior. An iPad
+     reports `coarse` even with a trackpad attached, which is why the owned
+     gesture handles mouse drags there too — the JS and this query agree.
+
+     `html.student-exam-active` rather than `.student-exam-active`, which is not
+     decoration: the class is put on `html` AND `body` by `useStudentExamPageLock`,
+     so `html.` matches while adding specificity. Without it this rule TIES with
+     the translation guard's rule over the same attribute — the guard pins its
+     class to `html` for the whole session — and a tie is decided by file order.
+     Losing that tie would put the platform's own selection, and its Copy / Look
+     Up bar, back on an iPad mid-exam. Now nothing scoped to these surfaces is
+     more specific, so the removal holds wherever in the sheet a rule lands. */
+  @media (pointer: coarse) {
+    html.student-exam-active .sat-exam-prose,
+    html.student-exam-active .sat-exam-prose *,
+    html.student-exam-active [data-student-highlightable="true"],
+    html.student-exam-active [data-student-highlightable="true"] * {
+      -webkit-user-select: none;
+      user-select: none;
+    }
+  }
+
+  /* THE OTHER HALF OF THAT OWNERSHIP: the browser must be told not to PAN, and
+     told before the finger lands.
+
+     `user-select: none` above stops the platform MAKING a selection. It does not
+     stop it from reading the first pixels of a drag as a scroll: when it does,
+     it takes the touch back with `pointercancel`, and the selection the exam had
+     just built is discarded. With the platform's own selection suppressed too,
+     that left a student on an iPad with nothing selecting at all — and no jsdom
+     test can catch it, because jsdom never runs a real scrolling gesture.
+
+     `touch-action: none` is the only declaration that settles ownership in
+     advance. It applies to touches that begin on this element or anywhere inside
+     it — the used value is taken from the whole ancestor chain — so the prose
+     needs no `*` rule of its own.
+
+     The marker is set by `useStudentTouchTextSelection` only when an armed tool
+     can select on a coarse pointer, and it is ALSO gated on the exam class here,
+     so a marker left on a lobby or preview surface is inert. That gate is not
+     cosmetic: those phases render the same surfaces, and taking their scroll
+     away would be a real regression. `html.student-exam-active` rather than
+     `.student-exam-active` for the same reason as the rule above — it outranks
+     `.student-reading-passage-pane { touch-action: auto }` (0,2,1 against
+     0,1,0) instead of tying with it and being decided by file order. */
+  @media (pointer: coarse) {
+    html.student-exam-active [data-student-owned-touch-selection="true"] {
+      touch-action: none;
+    }
+  }
+
+  /* Exam content is not a drag source: dragging an image or a link would carry
+     what the student is reading out of the exam. This is element dragging, not
+     text selection — a text drag inside the passage still behaves natively. */
+  .student-exam-active img,
+  .student-exam-active a {
+    -webkit-user-drag: none;
+  }
+
   .student-stimulus-content p {
     margin-top: var(--student-reading-paragraph-spacing, 1rem);
     margin-bottom: var(--student-reading-paragraph-spacing, 1rem);
@@ -1260,7 +1388,10 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-background: #ffffff;
   --sat-surface: #ffffff;
   --sat-surface-subtle: #f2f2f7;
-  --sat-viewer-backdrop: rgba(242, 242, 247, 0.72);
+  /* Full-screen figure veil: the same paper the figure sits on, laid over the
+   * exam. It hides the question behind (with the blur) without dimming the
+   * screen to gray, so escalating a figure never repaints the page. */
+  --sat-viewer-backdrop: rgba(255, 255, 255, 0.88);
   --sat-surface-hover: #e9e9ee;
   --sat-text: #1d1d1f;
   --sat-text-secondary: #515154;
@@ -2626,6 +2757,11 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   --sat-staff-motion-dialog-max: 200ms;
   --sat-staff-stagger-step: 60ms;
   --sat-staff-stagger-cap: 5;
+  /* Press geometry: one scale per surface size. Controls (<=44px) take the
+   * base scale; large surfaces (>=72px) take the row scale. Geometry never
+   * inverts between appearances. */
+  --sat-staff-press-scale: 0.97;
+  --sat-staff-press-scale-row: 0.99;
   --sat-staff-shimmer-duration: 1.35s;
   --sat-staff-shimmer-sweep: rgba(120, 120, 128, 0.14);
   --sat-staff-skeleton-pulse-duration: 1.6s;
@@ -2690,6 +2826,11 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 .sat-menu-item:disabled {
   opacity: 0.4;
   pointer-events: none;
+}
+/* Pressed item: the same instant acknowledgement the row gives, so a menu
+ * choose never feels like the click was dropped while the popup closes. */
+.sat-menu-item:active:not(:disabled) {
+  background: var(--sat-staff-fill-active, rgba(0, 0, 0, 0.065));
 }
 
 /* The shared radio wrapper supplies a default circle indicator. The authoring
@@ -2820,22 +2961,22 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
  * fades without translating; banners fade so content never jumps.
  * Motion tokens: 160ms state / 140ms banner, ease [0.22,1,0.36,1]. */
 .sat-product .sat-row-enter {
-  animation: sat-row-enter 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(min(var(--sat-row-index, 0), 5) * 60ms);
+  animation: sat-row-enter var(--sat-staff-motion-row) cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(min(var(--sat-row-index, 0), var(--sat-staff-stagger-cap, 5)) * var(--sat-staff-stagger-step, 60ms));
 }
 @keyframes sat-row-enter {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .sat-product .sat-route-enter {
-  animation: sat-route-enter 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sat-route-enter var(--sat-staff-motion-row) cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes sat-route-enter {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 .sat-product .sat-banner-enter {
-  animation: sat-route-enter 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sat-route-enter var(--sat-staff-motion-banner) cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 /* F-A12 route fade gate (shell-lane hook): .sat-route-fade opts route chrome
  * out of the enter animation entirely (animation: none); reduced-motion
@@ -2888,13 +3029,81 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
 /* List rows: tactile hover + press, never lift (no translate — transform is
  * press-scale only). Chevron nudges on row hover. */
 .sat-product .sat-list-row {
-  transition: background-color 160ms cubic-bezier(0.22, 1, 0.36, 1), transform 100ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color var(--sat-staff-motion-row) var(--sat-staff-ease), transform var(--sat-staff-motion-press) var(--sat-staff-ease-press);
+  touch-action: manipulation;
 }
 .sat-product .sat-list-row:hover {
   background-color: rgba(120, 120, 128, 0.06);
 }
 .sat-product .sat-list-row:active:not(:disabled) {
+  transition-duration: 0ms;
   transform: scale(0.99);
+}
+/* A selected row keeps its accent tint while hovered: the shared hover fill
+ * above would otherwise win over the row's own tint utility and read as a
+ * deselection under the pointer. */
+.sat-product .sat-list-row[aria-current="true"]:hover {
+  background-color: var(--sat-staff-accent-tint, rgba(0, 113, 227, 0.08));
+}
+
+/* Press vocabulary (opt-in): .sat-press for controls, .sat-press-row for large
+ * surfaces (>=72px). The surface answers the pointer in the same frame
+ * (0ms press-in) and settles over --sat-staff-motion-press on release; the
+ * optional fill classes reuse the existing hover/active fill families so no
+ * hue is introduced. Never applied globally — a bare button:active rule would
+ * restyle every page in the product. */
+.sat-product .sat-press {
+  --sat-staff-press-scale: 0.97;
+}
+.sat-product .sat-press-row {
+  --sat-staff-press-scale: var(--sat-staff-press-scale-row, 0.99);
+  touch-action: manipulation;
+}
+.sat-product :is(.sat-press, .sat-press-row) {
+  transition:
+    transform var(--sat-staff-motion-press) var(--sat-staff-ease-press),
+    background-color var(--sat-staff-motion-hover) var(--sat-staff-ease),
+    border-color var(--sat-staff-motion-hover) var(--sat-staff-ease),
+    box-shadow var(--sat-staff-motion-state) var(--sat-staff-ease),
+    opacity var(--sat-staff-motion-hover) var(--sat-staff-ease);
+}
+.sat-product :is(.sat-press, .sat-press-row):active:not(:disabled):not([aria-disabled="true"]) {
+  transition-duration: 0ms;
+  transform: scale(var(--sat-staff-press-scale, 0.97));
+}
+.sat-product .sat-press-fill:active:not(:disabled):not([aria-disabled="true"]) {
+  background-color: var(--sat-staff-fill-active, rgba(0, 0, 0, 0.065));
+}
+.sat-product .sat-press-fill-accent:active:not(:disabled):not([aria-disabled="true"]) {
+  background-color: var(--sat-staff-accent-active, #0067c9);
+}
+
+/* Detail tab panel: opacity-only fade so a tab change is legible without
+ * translating the panel under the pointer (and without animating height).
+ * Reuses the route-fade keyframes; keyed remount is what retriggers it. */
+.sat-product .sat-panel-enter {
+  animation: sat-route-enter var(--sat-staff-motion-banner) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Sliding selection thumbs (segmented/filter pills, detail tabs). The thumb is
+ * one shared element that glides between peers; the label above it stays the
+ * state carrier, so a reduced-motion swap loses nothing. */
+.sat-product .sat-selection-thumb {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--sat-staff-accent, #0071e3);
+  pointer-events: none;
+}
+.sat-product .sat-tab-indicator {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--sat-staff-accent, #0071e3);
+  pointer-events: none;
 }
 .sat-product .sat-row-chevron {
   transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), color 160ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -2952,11 +3161,20 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   .sat-product .sat-skeleton-shimmer::after,
   .sat-product .sat-list-row,
   .sat-product .sat-row-chevron,
-  .sat-product .sat-menu-trigger-chevron {
+  .sat-product .sat-menu-trigger-chevron,
+  .sat-product .sat-press,
+  .sat-product .sat-press-row {
     transition: none !important;
     animation: none !important;
   }
-  .sat-product .sat-list-row:active:not(:disabled) {
+  .authoring-icon-button {
+    transition: none !important;
+  }
+  .authoring-icon-button:active:not(:disabled) {
+    transform: none !important;
+  }
+  .sat-product .sat-list-row:active:not(:disabled),
+  .sat-product :is(.sat-press, .sat-press-row):active:not(:disabled) {
     transform: none !important;
   }
 }
@@ -3153,12 +3371,23 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
   color: var(--color-gray-500);
   transition:
     background-color var(--authoring-motion-fast) var(--authoring-ease-standard),
-    color var(--authoring-motion-fast) var(--authoring-ease-standard);
+    color var(--authoring-motion-fast) var(--authoring-ease-standard),
+    transform var(--sat-staff-motion-press, 100ms) var(--sat-staff-ease-press, cubic-bezier(0.4, 0, 0.2, 1));
+  touch-action: manipulation;
 }
 
 .authoring-icon-button:hover:not(:disabled) {
   background: var(--color-au-fill);
   color: var(--color-gray-900);
+}
+
+/* Icon buttons are pressed controls too: instant compression + fill, matching
+ * .authoring-button's scale. Kept inside the authoring family so the round
+ * icon grammar stays one thing across sheets, toolbars and import surfaces. */
+.authoring-icon-button:active:not(:disabled) {
+  transition-duration: 0ms;
+  transform: scale(0.94);
+  background: var(--sat-staff-fill-active, rgba(0, 0, 0, 0.065));
 }
 
 .authoring-icon-button:disabled {
@@ -4323,7 +4552,7 @@ math-field.sat-block-mathfield::part(virtual-keyboard-toggle) {
     --sat-background: #111113;
     --sat-surface: #1c1c1e;
     --sat-surface-subtle: #2c2c2e;
-    --sat-viewer-backdrop: rgba(28, 28, 30, 0.78);
+    --sat-viewer-backdrop: rgba(28, 28, 30, 0.88);
     --sat-surface-hover: #3a3a3c;
     --sat-canvas: #111113;
     --sat-label: #f5f5f7;

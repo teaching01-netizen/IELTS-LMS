@@ -13,6 +13,12 @@
  *   interpolation), not pixels.
  */
 
+import {
+  EXAM_VISIBILITY_WARNING_ACKNOWLEDGE,
+  EXAM_VISIBILITY_WARNING_MESSAGE,
+  EXAM_VISIBILITY_WARNING_TITLE,
+} from "@student/api/examVisibilityIntegrity";
+
 export const SAT_COPY = {
   displaySettings: {
     title: "Display",
@@ -165,6 +171,15 @@ export const SAT_COPY = {
     completeSubtitle: "All responses submitted.",
     practiceScoreReady: "Your unofficial practice score is ready.",
     backToDashboard: "Back to dashboard",
+    // A Student Link may admit only one section. That sitting has a section
+    // score (200\u2013800) and deliberately NO total \u2014 the 400\u20131600 scale is
+    // defined over both sections \u2014 so the completion screen names the section
+    // instead of leaving the score area blank.
+    sectionScoreHeading: "Section score",
+    sectionScoreOnlyNote:
+      "This link covered one section, so there is no total score. This is your unofficial practice result for that section.",
+    sectionLabelReadingWriting: "Reading and Writing",
+    sectionLabelMath: "Math",
   },
   timer: {
     hidden: "Timer hidden",
@@ -172,25 +187,17 @@ export const SAT_COPY = {
     hideTimer: "Hide timer",
     showTimer: "Show timer",
   },
+  // Failure-only save copy. Healthy saving is never narrated: there is no
+  // "Saving…"/"Saved"/offline string because the exam no longer shows them.
+  // What remains is what asks the student to do something.
   saveStatus: {
-    saving: "Saving" + "\u2026",
-    // Wave C R-16b: reassurance clause appended; retrying branch unchanged.
-    offline: "Offline \u2014 answers kept on this device. Keep working; saving resumes automatically.",
-    retrying: "Reconnecting \u2014 retrying save" + "\u2026",
     failed: "Save failed.",
     superseded: "Opened in another session \u2014 answers here are paused.",
     takeOver: "Take over",
     retryNow: "Retry now",
     retry: "Retry",
-    // Persistent footer indicator (Phase 6f): lives next to the hand, never
-    // a transient overlay. Short nouns — the banner carries the sentence.
-    saved: "All answers saved",
-    savingShort: "Saving answers",
-    offlineShort: "Offline \u2014 kept on this device",
-    failedShort: "Save needs attention",
   },
   submitReadiness: {
-    waitingForSaves: "Waiting for answers to save" + "\u2026",
     offlineBlocked: "You are offline. Answers are kept on this device.",
     errorBlocked: "Saving needs attention before you can submit.",
   },
@@ -238,6 +245,18 @@ export const SAT_COPY = {
   blocking: {
     pausedTitle: "Your timer is paused",
     pausedBody: "Paused by the proctor \u2014 answers safe.",
+  },
+  // Exam-screen integrity (one shared rule across IELTS, ACT, and SAT). The SAT
+  // surfaces reference the same canonical strings the IELTS warning uses: one
+  // delivery rule must not produce two different sentences for the student.
+  // The browser only establishes that the exam document became hidden, so the
+  // copy names that fact and never claims to know what the student opened.
+  integrity: {
+    visibilityTitle: EXAM_VISIBILITY_WARNING_TITLE,
+    visibilityBody: EXAM_VISIBILITY_WARNING_MESSAGE,
+    visibilityContinue: EXAM_VISIBILITY_WARNING_ACKNOWLEDGE,
+    // Spoken name for the hold itself; the visible copy is the body above.
+    visibilityHoldLabel: "Exam screen integrity warning",
   },
   // Bluebook tool-parity vocabulary (Phase 0 reservation). Values are
   // user-visible strings, never HTML. Components must reference these keys.
@@ -407,12 +426,6 @@ export function satSubmitConfirmTitle(moduleTitle: string): string {
 
 export function satSubmitConfirmSummary(unanswered: number, flagged: number): string {
   return unanswered + " unanswered \u00B7 " + flagged + " flagged";
-}
-
-export function satWaitingForSavesLabel(pendingCount: number): string {
-  return pendingCount === 1
-    ? "Waiting for 1 answer to save" + "\u2026"
-    : "Waiting for " + pendingCount + " answers to save" + "\u2026";
 }
 
 export function satLastQuestionLabel(questionNumber: number, questionCount: number): string {

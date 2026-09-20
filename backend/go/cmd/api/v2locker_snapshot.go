@@ -2,25 +2,17 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"example.com/ielts-proctoring/internal/attempts"
-	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/runtime"
 )
 
-// errSnapshotLockerDown fails closed when the snapshot path has no store:
-// callers surface today's 503 envelope, never an open gate.
-func errSnapshotLockerDown() error {
-	return apperrors.New(apperrors.CodeServiceUnavailable, "Runtime snapshot service is unavailable.")
-}
-
 // snapshotRuntimeGate maps a B2 runtime Snapshot to the attempts.RuntimeGate
 // the write path consumes. Missing active section means "no section scoping"
-// ("*"), matching today's v2Locker open-gate branch. Now is stamped by the
-// caller (in-tx dbNow) so server time stays authoritative.
+// ("*"), matching v2Locker's open-gate branch. Now is stamped by the caller
+// (in-tx dbNow) so server time stays authoritative.
 func snapshotRuntimeGate(snap runtime.Snapshot, now time.Time) attempts.RuntimeGate {
 	gate := attempts.RuntimeGate{
 		Status:                snap.Status,
@@ -37,66 +29,41 @@ func snapshotRuntimeGate(snap runtime.Snapshot, now time.Time) attempts.RuntimeG
 	return gate
 }
 
-// snapshotLocker is the plan-B2 lock-free RuntimeLocker for V2 writes.
-// Gate decision comes from a ~1s-TTL committed-read snapshot (no FOR
-// UPDATE); the in-tx attempts.ensureWritable re-check stays authoritative,
-// so a ~1s-stale accept can never slip a write past pause/complete.
-// Mismatch/stale-snapshot errors trigger exactly one synchronous refresh +
-// retry inside gateFor, then today's 422/409 codes surface.
-type snapshotLocker struct {
-	db    *sql.DB
-	cache *runtime.SnapshotCache
-}
+// snapshotLocker is the lock-free RuntimeLocker for V2 writes (RUNTIME_SNAPSHOT).
+// It reads the runtime + active-section state ON THE CALLER'S TRANSACTION — the
+// transaction that commits the write — without taking the runtime/section FOR
+// UPDATE locks. That is the whole difference from v2Locker: same authority, no
+// lock queueing behind runtime control commands on the hot path.
+//
+// The snapshot cache is deliberately NOT consulted here. A cached view is up to
+// SnapshotTTL stale, and any decision that ACCEPTS a write from stale state is a
+// correctness bug however narrow the window. (Audit finding 3: this file used to
+// claim the in-tx ensureWritable re-check made the cached pre-gate safe. It did
+// not — the gate it passed on WAS the cached one, and ensureWritable did not read
+// the section flags at all, so with this locker a write could land against a
+// paused or not-yet-started section, and with the flag off a computed
+// SectionPaused had no consumer.) The cache still serves student runtime POLLS
+// (runtime.Service.PollView), where ~1s staleness costs nothing.
+type snapshotLocker struct{}
 
 var _ attempts.RuntimeLocker = snapshotLocker{}
 
-// gateFor loads (or refreshes) the snapshot, enforces the pre-gate once,
-// and on failure refreshes exactly once before returning the verdict.
-// The returned gate carries a zero Now: Lock stamps authoritative in-tx
-// time via dbNow after the snapshot decision.
-func (l snapshotLocker) gateFor(ctx context.Context, scheduleID string) (attempts.RuntimeGate, error) {
-	if l.db == nil || l.cache == nil {
-		return attempts.RuntimeGate{}, errSnapshotLockerDown()
-	}
-	now := time.Now().UTC()
-	snap, err := l.cache.Get(scheduleID, now, func() (runtime.Snapshot, error) {
-		return runtime.LoadSnapshot(ctx, l.db, scheduleID, now)
-	})
+// Lock implements attempts.RuntimeLocker. No FOR UPDATE is needed, and the read
+// is still authoritative for the write that commits here: the caller already
+// holds this attempt's row lock, the write path runs READ COMMITTED, and every
+// writer of runtime/section status (runtime.Service commands; the proctor pause
+// path goes through them) locks the schedule's attempt rows before the runtime
+// row (runtime.lockAttemptsFirst). A conflicting transition therefore either
+// committed before this read (this read sees it) or is still blocked on the
+// attempt row this transaction holds (it commits after this write).
+func (snapshotLocker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.RuntimeGate, error) {
+	snap, err := runtime.LoadSnapshot(ctx, q, scheduleID, time.Now().UTC())
 	if err != nil {
 		return attempts.RuntimeGate{}, err
 	}
-	if err := snap.CheckWritable(); err != nil {
-		// One synchronous refresh + retry (plan B2.1): the cached view
-		// may predate a pause/complete by up to one TTL.
-		l.cache.Invalidate(scheduleID)
-		fresh, ferr := l.cache.Get(scheduleID, time.Now().UTC(), func() (runtime.Snapshot, error) {
-			return runtime.LoadSnapshot(ctx, l.db, scheduleID, time.Now().UTC())
-		})
-		if ferr != nil {
-			return attempts.RuntimeGate{}, ferr
-		}
-		if ferr := fresh.CheckWritable(); ferr != nil {
-			return attempts.RuntimeGate{}, ferr
-		}
-		return snapshotRuntimeGate(fresh, time.Time{}), nil
-	}
-	return snapshotRuntimeGate(snap, time.Time{}), nil
-}
-
-// Lock implements attempts.RuntimeLocker: snapshot pre-gate (zero SQL when
-// the TTL view is fresh and writable) + authoritative in-tx server time.
-// The attempt row + idempotency + ensureWritable checks inside saveInTx and
-// submitInTx remain the correctness fence; this gate only avoids taking the
-// runtime + section FOR UPDATE locks on the hot path.
-func (l snapshotLocker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.RuntimeGate, error) {
-	gate, err := l.gateFor(ctx, scheduleID)
+	now, err := dbNow(ctx, q)
 	if err != nil {
 		return attempts.RuntimeGate{}, err
 	}
-	now, terr := dbNow(ctx, q)
-	if terr != nil {
-		return attempts.RuntimeGate{}, terr
-	}
-	gate.Now = now
-	return gate, nil
+	return snapshotRuntimeGate(snap, now), nil
 }

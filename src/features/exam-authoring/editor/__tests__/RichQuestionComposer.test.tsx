@@ -317,6 +317,80 @@ describe("SAT rich question composer capabilities", () => {
     expect(screen.queryByRole("toolbar", { name: "Formatting tools" })).not.toBeInTheDocument();
   });
 
+  it("offers a retry instead of pulsing forever when a field cannot initialize", () => {
+    const onRetryInitialization = vi.fn();
+    const collaboration: RichComposerCollaboration = {
+      extensions: [],
+      ready: false,
+      initializationFailed: true,
+      onRetryInitialization,
+    };
+    const { container } = render(
+      <RichQuestionComposer
+        value={plainContentFromText("Question prompt")}
+        onChange={vi.fn()}
+        label="Question prompt"
+        collaboration={collaboration}
+      />
+    );
+
+    // Still not editable — but no longer indistinguishable from loading. A
+    // field whose root will never arrive must be a state the author can leave.
+    expect(container.querySelector('[data-coedit-error="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-coedit-pending="true"]')).not.toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Question prompt" })).not.toBeInTheDocument();
+
+    const retry = container.querySelector('[data-coedit-retry="true"]');
+    expect(retry).not.toBeNull();
+    fireEvent.click(retry as HTMLElement);
+    expect(onRetryInitialization).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the actual reason when the client knows one", () => {
+    // "Could not start" is not actionable; the client already holds the fact
+    // (never requested, rejected before it was sent, refused by the room), and
+    // it is the only trace a proposal that never left the browser has.
+    const collaboration: RichComposerCollaboration = {
+      extensions: [],
+      ready: false,
+      initializationFailed: true,
+      initializationReason: "The shared copy of this field was never requested.",
+      onRetryInitialization: vi.fn(),
+    };
+    const { container } = render(
+      <RichQuestionComposer
+        value={plainContentFromText("Question prompt")}
+        onChange={vi.fn()}
+        label="Question prompt"
+        collaboration={collaboration}
+      />
+    );
+
+    expect(container.querySelector("[data-coedit-error-message]")?.textContent).toContain(
+      "never requested"
+    );
+  });
+
+  it("still shows the plain loading surface while a field is merely waiting", () => {
+    const collaboration: RichComposerCollaboration = {
+      extensions: [],
+      ready: false,
+      initializationFailed: false,
+    };
+    const { container } = render(
+      <RichQuestionComposer
+        value={plainContentFromText("Question prompt")}
+        onChange={vi.fn()}
+        label="Question prompt"
+        collaboration={collaboration}
+      />
+    );
+
+    expect(container.querySelector('[data-coedit-pending="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-coedit-error="true"]')).toBeNull();
+    expect(container.querySelector('[data-coedit-retry="true"]')).toBeNull();
+  });
+
   it("never seeds collaborative content from props, even after a value change", async () => {
     const collaboration: RichComposerCollaboration = { extensions: [], ready: true };
     const { rerender } = render(

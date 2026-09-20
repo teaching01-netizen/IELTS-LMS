@@ -65,6 +65,33 @@ describe("SatDirectionsScreen gate (Phase 6b)", () => {
     expect(screen.queryByText(/opens automatically/)).not.toBeInTheDocument();
   });
 
+  // Module-advance fix: "recovery only" is honest only while something is going
+  // to try. A module no automatic path owns — a branch module whose Module 1 was
+  // submitted early — has the button as its ONLY way in, so it must be enabled,
+  // and the screen must not promise an automatic open that will never come.
+  it("offers a working start when no automatic path owns the module", () => {
+    renderScreen({ autoStartPending: false });
+
+    expect(screen.getByRole("button", { name: /Begin module/ })).toBeEnabled();
+    expect(screen.queryByText(/opens automatically/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the start button recovery-only while the automatic path owns the module", () => {
+    renderScreen({ autoStartPending: true });
+
+    expect(screen.getByRole("button", { name: /Begin module/ })).toBeDisabled();
+    expect(screen.getByText(/opens automatically/)).toBeInTheDocument();
+  });
+
+  it("starts the module the student opens when no automatic path owns it", () => {
+    const onStart = vi.fn();
+    renderScreen({ autoStartPending: false, onStart });
+
+    fireEvent.click(screen.getByRole("button", { name: /Begin module/ }));
+
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
   it("confirms Leave exam with saved-state language and focus round-trip", async () => {
     renderScreen();
     const leave = screen.getByRole("button", { name: "Leave exam" });

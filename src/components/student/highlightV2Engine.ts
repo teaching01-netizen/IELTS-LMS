@@ -155,14 +155,46 @@ function rebuildRangeFromAnchorFocus(selection: Selection): Range | null {
   return range;
 }
 
-export function captureSurfaceSelection(
+/**
+ * The selection for a span of surface text, where the span arrives as a `Range`.
+ *
+ * This is the core, and it takes a range rather than a `Selection` because a
+ * span now arrives two ways. On a mouse the browser makes the selection and
+ * `captureSurfaceSelection` passes its range through; on a touch device exam
+ * prose is not selectable at all (the platform paints its Copy / Look Up / Share
+ * bar off the selection itself), so the exam makes the range instead — see
+ * `@shared/ui/touch-selection`. Neither path is privileged: a highlight is a
+ * character span, and it does not matter who measured it.
+ */
+export function captureSurfaceRange(
   container: HTMLElement,
-  selection: Selection,
+  range: Range,
   options?: CaptureSelectionOptions,
 ): HighlightSelectionV2 | null {
   const disallowedSelectionSelector =
     options?.disallowedSelectionSelector ?? DEFAULT_DISALLOWED_SELECTION_SELECTOR;
 
+  const resolved = resolveSurfaceRange(container, range, {
+    disallowedSelectionSelector,
+  });
+  if (!resolved) {
+    return null;
+  }
+
+  return normalizeRangeToSurfaceSelection(container, resolved.range);
+}
+
+/**
+ * The same, for a browser selection: the adapter for everything the platform's
+ * own selection can be and an owned range cannot. Only the ambiguity repair is
+ * Selection-specific — it needs the anchor and focus the platform kept, which a
+ * forward range has already thrown away.
+ */
+export function captureSurfaceSelection(
+  container: HTMLElement,
+  selection: Selection,
+  options?: CaptureSelectionOptions,
+): HighlightSelectionV2 | null {
   if (selection.rangeCount === 0) {
     return null;
   }
@@ -181,14 +213,7 @@ export function captureSurfaceSelection(
     }
   }
 
-  const resolved = resolveSurfaceRange(container, range, {
-    disallowedSelectionSelector,
-  });
-  if (!resolved) {
-    return null;
-  }
-
-  return normalizeRangeToSurfaceSelection(container, resolved.range);
+  return captureSurfaceRange(container, range, options);
 }
 
 function normalizeHighlightRanges(ranges: HighlightRangeV2[]): HighlightRangeV2[] {

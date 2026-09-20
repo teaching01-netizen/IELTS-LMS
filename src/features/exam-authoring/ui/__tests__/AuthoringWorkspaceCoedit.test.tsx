@@ -21,8 +21,11 @@ import type {
   QuestionRevision,
   StructuredContent,
 } from "../../contracts/assessment";
-import { plainContentFromText } from "../../editor/richContent";
+import { prosemirrorJSONToYXmlFragment } from "y-prosemirror";
+import { documentFromStructuredContent, plainContentFromText } from "../../editor/richContent";
+import { getRichTextSchema } from "../../editor/schema/richTextSchema";
 import { encodeStateVectorBase64 } from "../../realtime/coedit/stateVector";
+import { questionWorkspaceScalar } from "../authoringWorkspaceModel";
 
 const DOCUMENT_NAME = "coedit:v1:2f1b6c1e-6a0a-4a5b-9f0e-9d3a2f4c5b6d";
 const WORKSPACE_DOCUMENT_NAME = "coedit:v2:9c2f5a44-1f6e-4c31-8b0d-77e0c2b41a53";
@@ -1243,7 +1246,15 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       // MySQL, and this tab's work has not reached it.
       await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/You are offline/));
       expect(screen.queryByText("Preview landed")).not.toBeInTheDocument();
-      expect(screen.getByRole("textbox", { name: "Question prompt" })).toBeInTheDocument();
+      // The author keeps their surface. This fixture's room never receives the
+      // question's seed (the fake service records proposals, it does not
+      // arbitrate them), so the room does not hold the question yet and the
+      // prompt is correctly the pending collaboration surface rather than an
+      // editor bound to an empty document.
+      expect(
+        harness.transports[0]!.document.getMap("workspace").has("question/eq-1/scalar"),
+      ).toBe(false);
+      expect(document.querySelector('[data-coedit-pending="true"]')).not.toBeNull();
     });
 
     it("does not leave when the room refused the latest changes", async () => {
@@ -1264,6 +1275,166 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       fireEvent.click(screen.getByRole("button", { name: "Open the full SAT preview" }));
       await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
       expect(screen.queryByText("Preview landed")).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The held-recovery contradiction.
+   *
+   * The room owns the editor, so a recovered device draft is HELD beside the
+   * editor rather than adopted — and there was a time when taking custody also
+   * armed the recovery key, which made the adoption rule refuse the server
+   * question forever. The author saw a loading skeleton where both the editor
+   * and the recovery banner should be, and the only writer that could clear the
+   * key was the author's own answer to a banner that never got to render.
+   */
+  describe("recovery held while the room owns the editor", () => {
+    it("hydrates the server editor AND keeps the recovery banner, never a skeleton", async () => {
+      // The real order on a reload: the room opens before the question query
+      // answers, and the durable autosave finds unsaved work in between.
+      harness.details["eq-1"] = undefined as unknown as AssessmentQuestionDetail;
+      const view = render(treeWithWorkspaceRoom());
+      await waitFor(() => expect(harness.transports).toHaveLength(1), { timeout: 5_000 });
+      const transport = harness.transports[0]!;
+      await act(async () => {
+        transport.status("connected");
+        transport.sync();
+      });
+
+      // A device-local draft for THIS question comes back (as the durable
+      // autosave would). The room owns the editor, so the recovery owner must
+      // take custody of it — and taking custody must NOT arm the adoption
+      // guard against the server document that is about to arrive.
+      const calls = (harness.useQuestionAutosave as { mock: { calls: unknown[][] } }).mock.calls;
+      const options = calls[calls.length - 1]![0] as {
+        onRecover: (revision: QuestionRevision) => void;
+      };
+      await act(async () => {
+        options.onRecover(makeDraft("rev-1", "Typed while offline"));
+      });
+      const recovery = await screen.findByTestId("device-draft-recovery-surface");
+      expect(recovery).toHaveTextContent(
+        "Unsaved changes from this device are available. Add them to the shared draft when ready.",
+      );
+
+      // The question query answers…
+      harness.details["eq-1"] = {
+        examQuestionId: "eq-1",
+        moduleId: "mod-1",
+        moduleKey: "rw-m1",
+        sectionKey: "reading-writing",
+        displayOrder: 0,
+        isPretest: false,
+        question: makeDraft("rev-1", "First prompt"),
+      };
+      await act(async () => {
+        view.rerender(treeWithWorkspaceRoom());
+      });
+
+      // …and the canonical server draft becomes the editor's base document,
+      // with the held copy still offered beside it. The old behavior stranded
+      // BOTH behind the skeleton: the armed key refused the server document and
+      // nothing else could clear it.
+      await waitFor(() => expect(promptText(currentDraft().prompt)).toContain("First prompt"));
+      expect(screen.queryByTestId("editor-skeleton")).not.toBeInTheDocument();
+      expect(screen.getByTestId("device-draft-recovery-surface")).toBeInTheDocument();
+      // Nothing about this state is a failure of the question read.
+      expect(screen.queryByRole("alert", { name: "Question could not be loaded" })).toBeNull();
+    });
+  });
+
+  /**
+   * One unresolved root must not freeze the whole question.
+   *
+   * The screenshot this pins: HTTP 200, the room connected, the header saying
+   * Saved, and every rich editor on the question a grey pulse. One root of the
+   * question had not been seeded, and readiness was answered for the question
+   * AS A WHOLE — so the prompt and all four choices waited on a decision that
+   * had nothing to do with them, with no state the author could leave.
+   */
+  describe("field-scoped collaboration readiness", () => {
+    /** Writes one workspace rich root the way the provider's own seed does. */
+    function writeRoomRoot(
+      transport: FakeTransport,
+      fieldPath: string,
+      content: StructuredContent,
+    ): void {
+      prosemirrorJSONToYXmlFragment(
+        getRichTextSchema(),
+        documentFromStructuredContent(content),
+        transport.document.getXmlFragment(`rich:${fieldPath}`),
+      );
+    }
+
+    it("renders the fields the room holds while one root is still unseeded", async () => {
+      const { transport } = await renderWithWorkspaceRoom();
+      const question = currentDraft();
+
+      // The room owns the question except the LAST choice's root: exactly the
+      // shape the screenshot was taken in.
+      await act(async () => {
+        transport.document.transact(() => {
+          transport.document
+            .getMap("workspace")
+            .set("question/eq-1/scalar", JSON.stringify(questionWorkspaceScalar(question, false)));
+        });
+        writeRoomRoot(transport, "question/eq-1/prompt", question.prompt);
+        const options = question.answer.kind === "single_choice" ? question.answer.options : [];
+        for (const option of options.slice(0, -1)) {
+          writeRoomRoot(transport, `question/eq-1/choice/${option.id}`, option.content);
+        }
+      });
+
+      // The prompt — the field this question is actually about — is editable.
+      // Before the fix this was the pending surface, because the question as a
+      // whole was not hydrated.
+      const prompt = await screen.findByRole("textbox", { name: "Question prompt" });
+      expect(prompt).toBeInTheDocument();
+
+      // The field waiting for its root did not write itself into the room: a
+      // pending composer must not bind an editor to the fragment, because
+      // y-tiptap initializes an empty root from the editor's own document and
+      // the room's emptiness would then replace the HTTP content.
+      expect(transport.document.getXmlFragment("rich:question/eq-1/choice/D").length).toBe(0);
+
+      // Exactly ONE field is still waiting: the choice whose root is missing.
+      // Not five, and not "everything, until the last root lands".
+      await waitFor(() =>
+        expect(document.querySelectorAll('[data-coedit-pending="true"]')).toHaveLength(1),
+      );
+
+      // The header does not claim the question is Saved while a field the
+      // author is looking at has not initialized: room durability and editor
+      // readiness are two different facts.
+      expect(saveStatusText()).toContain("Saving");
+    });
+
+    it("tells the author WHY a field's shared copy was refused", async () => {
+      const { transport } = await renderWithWorkspaceRoom();
+
+      // The room's own verdict, delivered the way the service sends it.
+      await act(async () => {
+        transport.stateless({
+          type: "coedit.seed_result",
+          documentName: WORKSPACE_DOCUMENT_NAME,
+          seedId: `seed-${"c".repeat(32)}`,
+          root: "rich",
+          path: "question/eq-1/prompt",
+          outcome: "rejected",
+          retryable: false,
+        });
+      });
+
+      // For the field it is about, and naming the decision — not a generic
+      // "live editing could not start", which explains nothing to anyone.
+      await waitFor(() =>
+        expect(document.querySelector('[data-coedit-error="true"]')).not.toBeNull()
+      );
+      await waitFor(() =>
+        expect(document.querySelector("[data-coedit-error-message]")?.textContent).toContain(
+          "refused"
+        )
+      );
     });
   });
 });

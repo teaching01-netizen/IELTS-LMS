@@ -25,23 +25,29 @@ import (
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/attempts"
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
-// Terminal states for assessment_module_attempts accepted at completion.
+// Section keys owned by the SAT provider. The terminal-state vocabulary and the
+// rule that consumes it live in attempts (the package below this one, which also
+// gates the provisional submit on them): every check in this file that asks
+// "may this attempt be finished?" calls attempts.SATModuleTerminal.
 const (
-	ModuleSubmitted = "submitted"
-	ModuleLocked    = "locked"
+	SectionReadingWriting = attempts.SATSectionReadingWriting
+	SectionMath           = attempts.SATSectionMath
 )
 
-// Section keys owned by the SAT provider.
-const (
-	SectionReadingWriting = "reading-writing"
-	SectionMath           = "math"
-)
+// maxSubmissionIDLen is the scoring-boundary submission-id limit:
+// student_submissions.id and assessment_results.submission_id are VARCHAR(36),
+// and CompleteAssessment rejects anything longer. The V2 receipt path validates
+// against attempts.MaxSubmissionIDLen (64), so a receipt id can legally exceed
+// this and must not be carried across the scoring boundary unreduced.
+const maxSubmissionIDLen = 36
 
 // PolicyConfig carries the scoring policy row for one exam version.
 type PolicyConfig struct {
@@ -226,7 +232,7 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 	if strings.TrimSpace(req.AttemptID) == "" || strings.TrimSpace(req.ScheduleID) == "" {
 		return nil, apperrors.New(apperrors.CodeBadRequest, "Attempt and schedule ids are required.")
 	}
-	if strings.TrimSpace(req.SubmissionID) == "" || len(req.SubmissionID) > 36 {
+	if strings.TrimSpace(req.SubmissionID) == "" || len(req.SubmissionID) > maxSubmissionIDLen {
 		return nil, apperrors.New(apperrors.CodeBadRequest, "submissionId must contain between one and 36 characters.")
 	}
 	// Outcome is captured inside the closure and emitted once after the
@@ -289,9 +295,12 @@ func (s *Service) CompleteAssessment(ctx context.Context, req CompleteRequest) (
 
 // ReconcileProvisional is the SAT watchdog: provider SAT AND delivery
 // submitted AND phase post-exam AND submitted_at NULL AND final_submission
-// NULL AND no V2 receipt AND all modules terminal => lock, re-check, score,
-// complete, terminalize. It never fabricates a score: attempts with no
-// modules, a missing scoring policy, or a raced terminal state are skipped.
+// NULL AND no assessment result AND all modules terminal => lock, re-check,
+// score, complete, terminalize. A V2 provisional receipt is an idempotency
+// anchor, not an exclusion: the receipt's submission id is reused so the
+// scoring path stays replay-safe when the student's completion request never
+// arrived (SAT-001). It never fabricates a score: attempts with no modules,
+// a missing scoring policy, or a raced terminal state are skipped.
 func (s *Service) ReconcileProvisional(ctx context.Context) (int64, error) {
 	return s.ReconcileProvisionalBatch(ctx, 250)
 }
@@ -301,35 +310,38 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 	if batchSize < 1 {
 		batchSize = 250
 	}
-	type candidate struct{ attemptID, scheduleID string }
+	type candidate struct{ attemptID, scheduleID, receiptSubmissionID string }
 	var cands []candidate
 	// Candidate scan runs outside a transaction (read-only sweep); every
-	// candidate is re-locked and re-checked inside its own transaction.
+	// candidate is re-locked and re-checked inside its own transaction. The
+	// attempt_submissions_v2 attempt_id is the PK, so the LEFT JOIN yields at
+	// most one receipt row per attempt.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT a.id, a.schedule_id
+		SELECT a.id, a.schedule_id, COALESCE(r.submission_id, '')
 		FROM student_attempts a
 		JOIN exam_entities e ON e.id = a.exam_id
+		LEFT JOIN attempt_submissions_v2 r ON r.attempt_id = a.id
 		WHERE e.provider_key = 'sat'
 		  AND a.delivery_status = 'submitted'
 		  AND a.phase = 'post-exam'
 		  AND a.submitted_at IS NULL
 		  AND a.final_submission IS NULL
 		  AND COALESCE(a.proctor_status, 'active') <> 'terminated'
-		  AND NOT EXISTS (SELECT 1 FROM attempt_submissions_v2 r WHERE r.attempt_id = a.id)
 		  AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id)
+		  AND NOT EXISTS (SELECT 1 FROM assessment_results ar WHERE ar.attempt_id = a.id AND ar.provider_key = 'sat')
 		  AND EXISTS (SELECT 1 FROM assessment_module_attempts ma WHERE ma.attempt_id = a.id)
 		  AND NOT EXISTS (
 			SELECT 1 FROM assessment_module_attempts ma
-			WHERE ma.attempt_id = a.id AND ma.state NOT IN ('submitted', 'locked')
+			WHERE ma.attempt_id = a.id AND ma.state NOT IN (?, ?)
 		  )
 		ORDER BY a.updated_at ASC
-		LIMIT ?`, batchSize)
+		LIMIT ?`, attempts.SATModuleSubmitted, attempts.SATModuleLocked, batchSize)
 	if err != nil {
 		return 0, err
 	}
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.attemptID, &c.scheduleID); err != nil {
+		if err := rows.Scan(&c.attemptID, &c.scheduleID, &c.receiptSubmissionID); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -342,7 +354,7 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 
 	var repaired int64
 	for _, c := range cands {
-		done, err := s.repairOne(ctx, c.attemptID, c.scheduleID)
+		done, err := s.repairOne(ctx, c.attemptID, c.scheduleID, c.receiptSubmissionID)
 		if err != nil {
 			// A raced terminal state or a concurrently completed attempt is
 			// benign; anything else aborts loudly via the returned error
@@ -363,7 +375,7 @@ func (s *Service) ReconcileProvisionalBatch(ctx context.Context, batchSize int64
 	return repaired, nil
 }
 
-func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (bool, error) {
+func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID, receiptSubmissionID string) (bool, error) {
 	var done bool
 	var outcome string
 	err := s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
@@ -396,6 +408,38 @@ func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (
 		} else if existingID != "" {
 			return nil // Raced with the student completion path; it owns the seal.
 		}
+		// SAT-001: a V2 provisional receipt proves the terminal claim committed
+		// without the scoring continuation. Reuse its submission id as the
+		// scoring identity so a watchdog retry replays idempotently instead of
+		// minting a fresh identity each pass.
+		receiptID, err := lockedProvisionalReceiptTx(ctx, t, attempt.ID)
+		if err != nil {
+			return err
+		}
+		if receiptID == "" {
+			receiptID = receiptSubmissionID
+		}
+		if len(receiptID) > maxSubmissionIDLen {
+			// The V2 receipt accepts submission ids up to 64 chars
+			// (attempts.MaxSubmissionIDLen) while the scoring boundary
+			// persists them into VARCHAR(36) columns and CompleteAssessment
+			// rejects anything longer. Reusing such an id would fail the very
+			// first INSERT on every pass — the orphaned attempt this repair
+			// exists to resolve would never repair. Fall back to the delivery
+			// reconcile anchor (submission_id = attempt_id).
+			receiptID = attempt.ID
+		}
+		// An existing result means another owner already finished the
+		// continuation; never score a second time.
+		var existingResultID sql.NullString
+		if err := t.QueryRowContext(ctx,
+			"SELECT id FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE",
+			attempt.ID).Scan(&existingResultID); err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if existingResultID.Valid {
+			return nil
+		}
 		// Never fake a score: without terminal modules or a scoring policy
 		// there is nothing to persist, so leave the attempt provisional.
 		mods, err := loadModules(ctx, t, attempt.ID)
@@ -405,17 +449,18 @@ func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (
 		if len(mods) == 0 {
 			return nil
 		}
-		for _, m := range mods {
-			if m.State != ModuleSubmitted && m.State != ModuleLocked {
-				return nil
-			}
+		if !moduleStatesAcceptable(mods) {
+			return nil
 		}
 		if _, err := loadPolicy(ctx, t, attempt.PublishedVerID); err != nil {
 			return nil
 		}
-		submissionID := uuid.NewString()
-		if len(submissionID) > 36 {
-			submissionID = submissionID[:36]
+		submissionID := receiptID
+		if submissionID == "" {
+			submissionID = uuid.NewString()
+			if len(submissionID) > 36 {
+				submissionID = submissionID[:36]
+			}
 		}
 		_, err = s.scoreAndPersist(ctx, t, attempt, submissionID, "system", "", uuid.NewString(), now)
 		if err != nil {
@@ -460,6 +505,14 @@ func (s *Service) OldestProvisionalAgeSeconds(ctx context.Context) (int64, error
 // student_submissions + assessment_results(scored/ready_to_release) +
 // section rows, then seals sat_complete. Callers hold the attempt lock.
 func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptCore, submissionID, actorKind, actorID, requestID string, now time.Time) (*AssessmentResult, error) {
+	// "Declared" is the Student Access link's section scope, or the full SAT
+	// pair when the link is unscoped — the same set the submit gate and the
+	// delivery gates use, so a run cannot be admitted by one boundary and
+	// refused by another. Read first: every refusal below is scoped to it.
+	required, err := loadRunSectionsTx(ctx, t, attempt.ID)
+	if err != nil {
+		return nil, err
+	}
 	mods, err := loadModules(ctx, t, attempt.ID)
 	if err != nil {
 		return nil, err
@@ -467,10 +520,8 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 	if len(mods) == 0 {
 		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "The SAT attempt has no module submissions.", HTTPStatus: 409}
 	}
-	for _, m := range mods {
-		if m.State != ModuleSubmitted && m.State != ModuleLocked {
-			return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "All SAT modules must be submitted before finalization.", HTTPStatus: 409}
-		}
+	if !moduleStatesAcceptable(mods) {
+		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "All SAT modules must be submitted before finalization.", HTTPStatus: 409}
 	}
 	policy, err := loadPolicy(ctx, t, attempt.PublishedVerID)
 	if err != nil {
@@ -508,7 +559,30 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 		})
 	}
 
+	// Audit finding 5 (second half): totalScore tolerates a nil section, so a
+	// partial topology — a section whose adaptive route was never recorded —
+	// would otherwise persist a plausible-looking SAT total. A score may only be
+	// minted from exactly one terminal route per section the RUN declared;
+	// anything else fails closed instead of becoming a legitimate-looking
+	// result.
+	//
+	for _, sectionKey := range required {
+		a, ok := aggs[sectionKey]
+		if !ok {
+			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has no submitted %s modules.", sectionKey), HTTPStatus: 400}
+		}
+		if a.route == nil {
+			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has no completed adaptive route for %s.", sectionKey), HTTPStatus: 400}
+		}
+	}
+	for sectionKey := range aggs {
+		if !containsSection(required, sectionKey) {
+			return nil, &apperrors.Error{Code: apperrors.CodeInvalidAssessment, Message: fmt.Sprintf("The SAT attempt has modules outside its %s sections.", strings.Join(required, " and ")), HTTPStatus: 400}
+		}
+	}
+
 	var sections []SectionResult
+
 	for sectionKey, a := range aggs {
 		maxRaw := a.target
 		if maxRaw < 1 {
@@ -546,10 +620,25 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 	for i := range sections {
 		scaledBy[sections[i].SectionKey] = sections[i].ScaledScore
 	}
-	total := totalScore(scaledBy[SectionReadingWriting], scaledBy[SectionMath])
+	// A one-section sitting has no composite total: the 400–1600 scale is
+	// defined over Reading & Writing + Math, so a lone section score must not
+	// be published as — or mistaken for — an SAT total. totalScore stays NULL
+	// and the section score (200–800) carries the result.
+	var total *int
+	if len(required) > 1 {
+		composite := totalScore(scaledBy[SectionReadingWriting], scaledBy[SectionMath])
+		total = &composite
+	}
 	scorePayload := map[string]any{
 		"providerKey": "sat", "scoreKind": "practice",
 		"totalScore": total, "sections": sections,
+	}
+
+	// Audit finding 4: derive the real active exam time before the insert so the
+	// result metadata represents reality instead of a hardcoded zero.
+	timeSpentSeconds, err := loadTimeSpentSeconds(ctx, t, attempt.ID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Global submission ownership: a submission id belongs to exactly one attempt.
@@ -560,15 +649,21 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "submissionId is already bound to another attempt.", HTTPStatus: 409, Details: map[string]any{"code": "SUBMISSION_ID_MISUSE"}}
 	case err == sql.ErrNoRows:
 		candidate, name, email, cohort := attemptCandidate(ctx, t, attempt.ID)
-		sectionStatuses, _ := json.Marshal(map[string]string{SectionReadingWriting: "auto_graded", SectionMath: "auto_graded"})
+		// Section statuses mirror the sections this run actually took; a
+		// narrowed run must not claim an auto-graded section it never ran.
+		statuses := make(map[string]string, len(required))
+		for _, sectionKey := range required {
+			statuses[sectionKey] = "auto_graded"
+		}
+		sectionStatuses, _ := json.Marshal(statuses)
 		if _, err := t.ExecContext(ctx, `
 			INSERT INTO student_submissions
 				(id, attempt_id, schedule_id, exam_id, published_version_id, provider_key,
 				 student_id, student_name, student_email, cohort_name,
 				 submitted_at, time_spent_seconds, grading_status, section_statuses)
-			VALUES (?, ?, ?, ?, ?, 'sat', ?, ?, ?, ?, ?, 0, 'submitted', ?)`,
+			VALUES (?, ?, ?, ?, ?, 'sat', ?, ?, ?, ?, ?, ?, 'submitted', ?)`,
 			submissionID, attempt.ID, attempt.ScheduleID, attempt.ExamID, attempt.PublishedVerID,
-			candidate, name, email, cohort, now, string(sectionStatuses)); err != nil {
+			candidate, name, email, cohort, now, timeSpentSeconds, string(sectionStatuses)); err != nil {
 			// The missing-row SELECT locks nothing, so a concurrent INSERT
 			// of the same id (or the UNIQUE attempt_id twin) surfaces as
 			// a duplicate key: converge same-attempt twins to the winner's
@@ -637,7 +732,7 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 		INSERT INTO assessment_results
 			(id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status)
 		VALUES (?, ?, ?, 'sat', 'scored', ?, ?, 'ready_to_release')`,
-		resultID, attempt.ID, submissionID, total, string(payloadJSON)); err != nil {
+		resultID, attempt.ID, submissionID, nullableIntPtr(total), string(payloadJSON)); err != nil {
 		return nil, err
 	}
 	for _, sec := range sections {
@@ -662,7 +757,7 @@ func (s *Service) scoreAndPersist(ctx context.Context, t tx.Tx, attempt attemptC
 	}
 	return &AssessmentResult{
 		ID: resultID, SubmissionID: submissionID, AttemptID: attempt.ID,
-		ProviderKey: "sat", OutcomeStatus: "scored", TotalScore: &total,
+		ProviderKey: "sat", OutcomeStatus: "scored", TotalScore: total,
 		ScoreKind:    "practice",
 		ScorePayload: scorePayload, ReleaseStatus: "ready_to_release", Sections: sections,
 	}, nil
@@ -697,6 +792,21 @@ func rejectIfTerminated(ctx context.Context, t tx.Tx, a attemptCore) error {
 	return nil
 }
 
+// lockedProvisionalReceiptTx loads the attempt's V2 provisional receipt
+// submission id under the attempt lock. Empty when no receipt exists.
+func lockedProvisionalReceiptTx(ctx context.Context, t tx.Tx, attemptID string) (string, error) {
+	var id sql.NullString
+	err := t.QueryRowContext(ctx,
+		"SELECT submission_id FROM attempt_submissions_v2 WHERE attempt_id = ? FOR UPDATE", attemptID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return id.String, nil
+}
+
 func lockedSubmissionID(ctx context.Context, t tx.Tx, attemptID string) (string, error) {
 	var id sql.NullString
 	err := t.QueryRowContext(ctx,
@@ -708,6 +818,20 @@ func lockedSubmissionID(ctx context.Context, t tx.Tx, attemptID string) (string,
 		return "", err
 	}
 	return id.String, nil
+}
+
+// moduleStatesAcceptable reports whether every loaded module row is in a state
+// the completion path accepts as done. The rule is owned by attempts
+// (SATModuleTerminal, which the provisional submit gate also uses); this is only
+// the loop over already-loaded rows, shared by the finalizer and the watchdog so
+// the check cannot drift between them.
+func moduleStatesAcceptable(mods []moduleRow) bool {
+	for _, m := range mods {
+		if !attempts.SATModuleTerminal(m.State) {
+			return false
+		}
+	}
+	return true
 }
 
 func loadModules(ctx context.Context, t tx.Tx, attemptID string) ([]moduleRow, error) {
@@ -733,6 +857,71 @@ func loadModules(ctx context.Context, t tx.Tx, attemptID string) ([]moduleRow, e
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// loadRunSectionsTx resolves the section set this run declared: the backing
+// Student Access link's scope when it narrows the run, otherwise the full SAT
+// pair. One indexed-ish join read, no lock, so it can run beside the attempt
+// row lock the scorers already hold. This is the same source
+// (assessment_access_links.enabled_sections) the runtime plan seam and the
+// submit gate read.
+func loadRunSectionsTx(ctx context.Context, t tx.Tx, attemptID string) ([]string, error) {
+	var raw sql.NullString
+	err := t.QueryRowContext(ctx,
+		"SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a ON a.schedule_id = l.schedule_id WHERE a.id = ?",
+		attemptID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return attempts.SATModuleRequiredSections, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	sections := examdomain.SectionScopeKeys(examdomain.ParseStoredSectionScope(raw.String))
+	if len(sections) == 0 {
+		return attempts.SATModuleRequiredSections, nil
+	}
+	return sections, nil
+}
+
+// containsSection reports whether a section key is part of a declared set.
+func containsSection(sections []string, sectionKey string) bool {
+	for _, section := range sections {
+		if section == sectionKey {
+			return true
+		}
+	}
+	return false
+}
+
+// nullableIntPtr renders an optional integer for a nullable column.
+func nullableIntPtr(value *int) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+// loadTimeSpentSeconds derives the attempt's active exam time from the
+// authoritative module timing: each module that actually ran contributes its
+// wall time from start to submit (still-paused modules stop at paused_at),
+// minus the pause time the runtime accumulated for it. Clamped at zero per
+// module so a clock anomaly can never subtract from another module's time.
+//
+// Audit finding 4: this value used to be a hardcoded 0, so every completed SAT
+// silently claimed the student spent no time at all.
+func loadTimeSpentSeconds(ctx context.Context, t tx.Tx, attemptID string) (int64, error) {
+	var seconds sql.NullInt64
+	err := t.QueryRowContext(ctx, `
+		SELECT SUM(GREATEST(TIMESTAMPDIFF(SECOND, started_at, COALESCE(submitted_at, paused_at, UTC_TIMESTAMP(6))) - accumulated_paused_seconds, 0))
+		FROM assessment_module_attempts
+		WHERE attempt_id = ? AND started_at IS NOT NULL`, attemptID).Scan(&seconds)
+	if err != nil {
+		return 0, err
+	}
+	if !seconds.Valid || seconds.Int64 < 0 {
+		return 0, nil
+	}
+	return seconds.Int64, nil
 }
 
 func loadPolicy(ctx context.Context, t tx.Tx, versionID string) (PolicyConfig, error) {

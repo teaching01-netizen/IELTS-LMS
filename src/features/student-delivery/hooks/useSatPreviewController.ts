@@ -7,6 +7,7 @@ import type {
 } from "../../exam-authoring/api/assessmentContracts";
 import { resolveSatExamToolPolicy, toSatToolCapabilities } from "../domain/satToolPolicy";
 import {
+  applySatResponseDraftChange,
   emptySatQuestionResponse,
   responseForQuestion,
   type SatQuestionResponseDraft,
@@ -279,22 +280,26 @@ export function useSatPreviewController(examId: string) {
       showQuestions: () => setView("questions"),
       showBreak: () => setView("break"),
       continueFromReview,
+      // The preview shares the student mutator so the authoring surface cannot
+      // show a state the real exam cannot produce (audit finding 3).
       setAnswer: (answer: string) =>
-        question && setResponse(question.examQuestionId, (current) => ({ ...current, answer })),
+        question &&
+        setResponse(question.examQuestionId, (current) =>
+          applySatResponseDraftChange(current, { kind: "setAnswer", answer }),
+        ),
       toggleReview: () =>
         question &&
-        setResponse(question.examQuestionId, (current) => ({
-          ...current,
-          markedForReview: !current.markedForReview,
-        })),
+        setResponse(question.examQuestionId, (current) =>
+          applySatResponseDraftChange(current, {
+            kind: "setReviewFlag",
+            markedForReview: !current.markedForReview,
+          }),
+        ),
       toggleEliminatedOption: (optionId: string) =>
         question &&
-        setResponse(question.examQuestionId, (current) => ({
-          ...current,
-          eliminatedOptionIds: current.eliminatedOptionIds.includes(optionId)
-            ? current.eliminatedOptionIds.filter((candidate) => candidate !== optionId)
-            : [...current.eliminatedOptionIds, optionId],
-        })),
+        setResponse(question.examQuestionId, (current) =>
+          applySatResponseDraftChange(current, { kind: "toggleEliminatedOption", optionId }),
+        ),
       setNote: (note: string) =>
         question &&
         setResponse(question.examQuestionId, (current) => ({

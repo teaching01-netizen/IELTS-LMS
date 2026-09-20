@@ -777,7 +777,7 @@ func TestDurabilityContractSubmitFinalCommandsEnvelopeGate(t *testing.T) {
 
 	bad := ResponseCommand{WriteID: "w-1", QuestionID: "q-1", ClientVersion: 0, Response: ResponsePayload{Answer: "A"}}
 	cmd := SubmitCommand{AttemptID: "att-1", LeaseEpoch: 3, SubmissionID: "sub-9", FinalCommands: []ResponseCommand{bad}}
-	_, err = svc.Submit(context.Background(), bearer, cmd, qr, rl, ProviderIELTS, nil)
+	_, err = svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderIELTS), nil)
 	e := durabilityErr(t, err)
 	if e.Code != apperrors.CodeBadRequest {
 		t.Fatalf("malformed FinalCommands must 400 at the envelope, got %v", err)
@@ -826,7 +826,7 @@ func TestDurabilityContractSubmitFinalCommandsControlSubstitution(t *testing.T) 
 
 	cmd := SubmitCommand{AttemptID: "att-1", LeaseEpoch: 3, ExpectedControlEpoch: 0, SubmissionID: "sub-9",
 		FinalCommands: []ResponseCommand{{WriteID: "w-1", QuestionID: "q-1", ClientVersion: 1, Response: ResponsePayload{Answer: "A"}}}}
-	_, err = svc.Submit(context.Background(), bearer, cmd, qr, rl, ProviderIELTS, nil)
+	_, err = svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderIELTS), nil)
 	e := durabilityErr(t, err)
 	if e.Code != apperrors.CodeControlEpochStale {
 		t.Fatalf("substituted-control submit must fence CONTROL_EPOCH_STALE in-tx, got %v", err)

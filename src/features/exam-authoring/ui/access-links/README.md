@@ -34,5 +34,36 @@ Staff UI for sharing a published SAT exam with students. Route: `SatAccessRoute`
 
 ## Keyboard
 
-- `/` focuses search (outside inputs/dialogs); `ArrowUp/Down` moves selection;
-  detail tabs support `ArrowLeft/Right`; menus keep Radix typeahead/Escape.
+- `/` focuses search (outside inputs/dialogs); `ArrowUp/Down` moves selection and
+  scrolls the selected row into view; detail tabs implement the ARIA tab pattern
+  (roving tabindex, `ArrowLeft/Right`, `Home/End`, focus follows selection);
+  `Escape` in the detail pane returns focus to the selected row; menus keep Radix
+  typeahead/Escape.
+
+## Press and feedback (interaction contract)
+
+- **One press vocabulary.** Controls carry `sat-press` (0.97) and large surfaces
+  `sat-press-row` (0.99) from `index.css`; press-in is 0ms (same-frame answer) and
+  the release settles over `--sat-staff-motion-press` / `--sat-staff-ease-press`.
+  Optional fills: `sat-press-fill` (neutral) and `sat-press-fill-accent`. Never add
+  a bare `button:active` rule — press is opt-in per control. Rows also carry
+  `sat-list-row` (shared hover fill, press scale, reduced-motion reset).
+- **Acknowledgement is local.** A copy confirms at its own control (check +
+  `Copied`, ~1.6s via `useTransientValue`); a lifecycle write shows a per-row
+  pending label plus the shared spinner inside the row's existing 40px trigger box,
+  then settles in place. Nothing may change size or push neighbours when pending
+  starts or ends.
+- **Pending is derived, never fabricated.** `pendingWrite` reads the mutation's
+  `isPending`/`variables`; the row keeps the server's real status until the write
+  is confirmed. Optimistic *status* is forbidden here (staff would believe student
+  entry is closed when it is not). Pending/confirmation state never reaches the
+  room or the query cache.
+- **`useNotificationStore` has no renderer in this app.** `showToast(...)` writes
+  are still made (a future host may consume them) but they are NOT the success
+  channel: if you add feedback, put it at the control or in the page's own
+  `role="status"` region.
+- **No entrance motion on poll refresh.** Row entrance (`sat-row-enter`) is
+  mount-only; the 30–35s overview/activity polls update numbers in place.
+- Selection, filter, and tab changes use the shared thumbs (`sat-selection-thumb`,
+  `sat-tab-indicator`, `layoutId` springs) and the opacity-only `sat-panel-enter`
+  panel reveal; reduced motion collapses all of it to instant state changes.

@@ -80,6 +80,11 @@ func expectCandidateScan(mock sqlmock.Sqlmock, asOf time.Time, scheduleID string
 func expectScheduleTxOpen(mock sqlmock.Sqlmock, scheduleID, runtimeID, status, activeKey string, waiting, overrun bool, revision int64, seeds []sectionSeed) {
 	mock.ExpectBegin()
 	mock.ExpectExec(setTimeZone).WillReturnResult(sqlmock.NewResult(0, 0))
+	// Schedule row first (global lock order: schedule -> attempts -> runtime).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id = ? FOR UPDATE")).
+		WithArgs(scheduleID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "published_version_id", "status", "revision", "planned_duration_minutes"}).
+			AddRow(scheduleID, "exam-1", "sat", "ver-1", "live", 3, 64))
 	mock.ExpectQuery(attemptsLock).
 		WithArgs(scheduleID).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))

@@ -1,5 +1,9 @@
 import type { SatQuestionAnnotations, SatQuestionResponseDraft } from '../domain/satResponses';
-import { emptySatQuestionResponse } from '../domain/satResponses';
+import {
+  applySatResponseDraftChange,
+  emptySatQuestionResponse,
+  normalizeSatResponseDraft,
+} from '../domain/satResponses';
 import type { SatActiveTool, SatToolCapabilities, SatToolId } from '../domain/satTools';
 import { EMPTY_SAT_ACTIVE_TOOLS, emptySatToolCapabilities, satActiveToolsFromLegacy, satActiveToolsToLegacy, toggleSatActiveTool, type SatActiveTools } from '../domain/satTools';
 
@@ -40,6 +44,10 @@ export type SatRunnerAction =
   | { type: 'moduleStarted'; sectionKey: SatSectionKey; moduleKey: string; questionIds: string[]; startedAt: string; endsAt: string; toolCapabilities?: SatToolCapabilities }
   | { type: 'setAnswer'; questionId: string; value: string }
   | { type: 'hydrateResponse'; response: SatQuestionResponseDraft; revision: number }
+  // Audit finding 3: the controller computes the next draft with the domain
+  // mutator and replaces the whole draft, so the dispatched state and the
+  // persisted payload are the same object instead of two derivations.
+  | { type: 'replaceResponse'; response: SatQuestionResponseDraft }
   | { type: 'responseSaved'; questionId: string; revision: number }
   | { type: 'setReviewFlag'; questionId: string; flagged: boolean }
   | { type: 'toggleEliminatedOption'; questionId: string; optionId: string }
@@ -80,16 +88,25 @@ function workingState(
     case 'setAnswer':
       // Bluebook parity (Phase 6): selecting an eliminated choice restores
       // it first — selected and eliminated must never contradict. The
-      // elimination is lifted, the answer is set; both persist per question.
-      return updateResponse(state, action.questionId, (response) => ({
-        ...response,
-        answer: action.value,
-        eliminatedOptionIds: response.eliminatedOptionIds.filter((optionId) => optionId !== action.value),
-      }));
+      // elimination is lifted, the answer is set. Kept as a second line of
+      // defense behind `applySatResponseDraftChange` so a direct dispatch
+      // cannot re-create the contradiction the audit found.
+      return updateResponse(state, action.questionId, (response) =>
+        applySatResponseDraftChange(response, { kind: 'setAnswer', answer: action.value }),
+      );
+    case 'replaceResponse':
+      return updateResponse(state, action.response.questionId, () =>
+        normalizeSatResponseDraft(action.response),
+      );
     case 'hydrateResponse':
       return {
         ...state,
-        responses: { ...state.responses, [action.response.questionId]: action.response },
+        // A snapshot from an older build or a pre-fix durable record may
+        // violate the invariant; heal it on read rather than resurrecting it.
+        responses: {
+          ...state.responses,
+          [action.response.questionId]: normalizeSatResponseDraft(action.response),
+        },
         responseRevisions: {
           ...state.responseRevisions,
           [action.response.questionId]: action.revision,
@@ -111,13 +128,12 @@ function workingState(
         annotations: action.annotations,
       }));
     case 'toggleEliminatedOption':
-      return updateResponse(state, action.questionId, (response) => {
-        const current = response.eliminatedOptionIds;
-        const eliminatedOptionIds = current.includes(action.optionId)
-          ? current.filter((optionId) => optionId !== action.optionId)
-          : [...current, action.optionId];
-        return { ...response, eliminatedOptionIds };
-      });
+      return updateResponse(state, action.questionId, (response) =>
+        applySatResponseDraftChange(response, {
+          kind: 'toggleEliminatedOption',
+          optionId: action.optionId,
+        }),
+      );
     case 'toggleTool': {
       // Bluebook coexistence (Phase 9): toggling one tool never closes the
       // other. Legacy activeTool is derived from the NEW flags for compat
@@ -245,7 +261,11 @@ export function satRunnerReducer(state: SatRunnerState, action: SatRunnerAction)
         assessmentId: state.assessmentId,
       };
     case 'submit':
-      if (state.phase !== 'review') return state;
+      // SAT-002: begin-finalization is legal from the question screen as well
+      // as Review. A timeout on the last module must move the runner to
+      // `submitting` whether or not the student ever opened Review; gating on
+      // Review stranded the state machine on a failed finalization.
+      if (state.phase !== 'review' && state.phase !== 'module') return state;
       return {
         phase: 'submitting',
         scheduleId: state.scheduleId,

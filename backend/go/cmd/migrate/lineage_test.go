@@ -52,11 +52,14 @@ func migDir(t *testing.T) string {
 // bumped 60->61. SAT authoring workspaces landed 0062 (exam-level co-edit
 // rooms), co-edit capacity landed 0063 (state_vector width), and lifecycle /
 // epoch metadata landed 0064 — count/max bumped 61->64; 0062 shipped without
-// bumping the pin, which this update also repairs.
+// bumping the pin, which this update also repairs. The SAT section-clock repair
+// landed 0065 (candidate section duration backfill) — count/max bumped 64->65.
+// The SAT Student Access section toggles landed 0066 (link enabled_sections
+// scope) — count/max bumped 65->66.
 // Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 64
-	pinnedMigrationMax   = 64
+	pinnedMigrationFiles = 66
+	pinnedMigrationMax   = 66
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

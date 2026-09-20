@@ -137,6 +137,91 @@ function mathData(): AssessmentDeliveryBootstrap {
   };
 }
 
+/**
+ * The pending module the way the controller resolves it: the first not_started
+ * attempt in the payload, looked up across every section. (The old
+ * "sections[0].modules[0]" shortcut cannot express Module 2, which is the second
+ * module of the section the student is already in.)
+ */
+function pendingModuleOf(
+  data: AssessmentDeliveryBootstrap,
+): AssessmentDeliveryBootstrap["sections"][number]["modules"][number] | null {
+  const pending = data.attempt.moduleAttempts.find(
+    (attempt) => attempt.state === "not_started",
+  );
+  if (!pending) return null;
+  for (const section of data.sections) {
+    const module = section.modules.find(
+      (candidate) => candidate.id === pending.moduleId,
+    );
+    if (module) return module;
+  }
+  return null;
+}
+
+/**
+ * A reading-writing section with its adaptive Module 2 waiting to be opened.
+ * `timedOut` says whether the finished Module 1 ended on its own clock (the
+ * hand-off) or with time to spare (the student opens Module 2).
+ */
+function branchPendingData(timedOut: boolean): AssessmentDeliveryBootstrap {
+  const data = mathData();
+  const section = data.sections[0] as unknown as {
+    id: string;
+    sectionKey: string;
+    title: string;
+    displayOrder: number;
+    modules: Array<Record<string, unknown>>;
+  };
+  const baseModule = { ...section.modules[0], id: "rw-m1", moduleKey: "rw-m1" };
+  const branchModule = {
+    ...section.modules[0],
+    id: "rw-m2-higher",
+    moduleKey: "rw-m2-higher",
+    title: "Reading and Writing Module 2",
+    displayOrder: 1,
+    adaptiveRole: "higher_branch",
+  };
+  const module1 = data.attempt.moduleAttempts[0];
+  return {
+    ...data,
+    sections: [
+      {
+        ...section,
+        id: "sec-rw",
+        sectionKey: "reading-writing",
+        title: "Reading and Writing",
+        displayOrder: 0,
+        modules: [baseModule, branchModule],
+      },
+    ] as unknown as AssessmentDeliveryBootstrap["sections"],
+    timing: {
+      ...data.timing,
+      stageKey: "reading-writing",
+      stageStatus: "live",
+      waitingForNextSection: false,
+      nextSectionStartAt: null,
+    },
+    attempt: {
+      ...data.attempt,
+      moduleAttempts: [
+        {
+          ...module1,
+          id: "ma-rw-1",
+          moduleId: "rw-m1",
+          state: "submitted",
+          startedAt: data.serverNow,
+          completionReason: "student_submit",
+          deadlineAt: new Date(
+            Date.parse(data.serverNow) + (timedOut ? -5_000 : 600_000),
+          ).toISOString(),
+        },
+        { ...module1, id: "ma-rw-2", moduleId: "rw-m2-higher", revision: 3 },
+      ],
+    } as unknown as AssessmentDeliveryBootstrap["attempt"],
+  };
+}
+
 function baseCommands() {
   return {
     startPendingModule: vi.fn(),
@@ -199,6 +284,9 @@ interface EntryOptions {
   phase?: "directions" | "break";
   isStarting?: boolean;
   autoEntryRecoverable?: boolean;
+  /** False when nothing will auto-start the pending module (a branch module
+   * waiting for the student); absent reads as true like the screen does. */
+  entryAutoStartPending?: boolean;
 }
 
 function seed(
@@ -210,7 +298,7 @@ function seed(
   entry: EntryOptions = {},
 ) {
   const state = { ...directionsState(), phase: entry.phase ?? "directions" };
-  const module = data ? (data.sections[0]?.modules[0] ?? null) : null;
+  const module = data ? pendingModuleOf(data) : null;
   controllerMock.current = {
     state,
     data,
@@ -220,6 +308,7 @@ function seed(
     isSubmitting: false,
     isStarting: entry.isStarting ?? false,
     autoEntryRecoverable: entry.autoEntryRecoverable ?? false,
+    entryAutoStartPending: entry.entryAutoStartPending ?? true,
     pendingModule: module,
     pendingBreakSeconds: pending.breakSeconds,
     pendingSectionWaitSeconds: pending.waitSeconds,
@@ -311,5 +400,45 @@ describe("SatStudentSessionRoute between-sections window", () => {
 
     expect(screen.getByText("Starting your next section")).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveTextContent("0:00");
+  });
+});
+
+// Module-advance wiring: the decision's `autoStartPending` has to reach the
+// screen, because that is what decides whether the Start button is recovery-only
+// or the student's only way into Module 2.
+describe("SatStudentSessionRoute module advance", () => {
+  beforeEach(() => {
+    cleanup();
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    matchMediaMock();
+  });
+
+  it("offers a working Start on Module 2 when no automatic path owns it", () => {
+    renderRoute(
+      branchPendingData(false),
+      { breakSeconds: 0, waitSeconds: 0 },
+      { entryAutoStartPending: false },
+    );
+
+    expect(
+      screen.getByRole("button", { name: /Begin module \u2014 Module 2/ }),
+    ).toBeEnabled();
+    expect(screen.queryByText(/opens automatically/)).not.toBeInTheDocument();
+  });
+
+  it("shows Module 2 opening by itself while the timeout hand-off owns it", () => {
+    renderRoute(
+      branchPendingData(true),
+      { breakSeconds: 0, waitSeconds: 0 },
+      { entryAutoStartPending: true },
+    );
+
+    expect(
+      screen.getByRole("button", { name: /Begin module \u2014 Module 2/ }),
+    ).toBeDisabled();
+    expect(screen.getByText(/opens automatically/)).toBeInTheDocument();
   });
 });

@@ -18,7 +18,11 @@ import (
 // SAT takes the provisional two-phase path (no seal, submitted_at stays
 // NULL); every other provider seals submitted/student_submit first and only
 // then records the digest (plan 28-32).
-func (s *Service) Submit(ctx context.Context, bearer string, cmd SubmitCommand, qr QuestionResolver, rl RuntimeLocker, provider Provider, sealer Sealer) (SubmitResult, error) {
+//
+// The provider is NOT a parameter: it is resolved by pr inside the transaction
+// that locks the attempt (see submitInTx), so the branch a submit takes is
+// decided under the same row lock that fences every other terminal decision.
+func (s *Service) Submit(ctx context.Context, bearer string, cmd SubmitCommand, qr QuestionResolver, rl RuntimeLocker, pr ProviderResolver, sealer Sealer) (SubmitResult, error) {
 	if err := ValidateAttemptID(cmd.AttemptID); err != nil {
 		return SubmitResult{}, err
 	}
@@ -56,7 +60,7 @@ func (s *Service) Submit(ctx context.Context, bearer string, cmd SubmitCommand, 
 	// retried submit an outcome-only replay, never a double seal. The
 	// absorbed count labels retried_accepted (same E3 slice as saves).
 	retried, rerr := s.tx.WithTxRCRetryCounted(ctx, 3, func(ctx context.Context, q tx.Tx) error {
-		res, err := s.submitInTx(ctx, q, claims, cmd, qr, rl, provider, sealer)
+		res, err := s.submitInTx(ctx, q, claims, cmd, qr, rl, pr, sealer)
 		if err != nil {
 			return err
 		}
@@ -88,13 +92,21 @@ func (s *Service) Submit(ctx context.Context, bearer string, cmd SubmitCommand, 
 	return out, nil
 }
 
+// ProviderResolver resolves the attempt's provider identity on the caller's
+// transaction, after the attempt row lock, and is the single authority for
+// which terminalization branch a submit takes. Defined here (implemented at
+// the composition root) so the decision cannot be made before the lock.
+type ProviderResolver interface {
+	ResolveProvider(ctx context.Context, q tx.Tx, attemptID string) (Provider, error)
+}
+
 // Sealer is the terminalization boundary (plan 34). Implemented by the
 // terminalization package; defined here to avoid an import cycle.
 type Sealer interface {
 	SealSubmitted(ctx context.Context, q tx.Tx, attemptID, scheduleID, submissionID, digest, provider string, actorID string, effectiveAt time.Time) error
 }
 
-func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptClaims, cmd SubmitCommand, qr QuestionResolver, rl RuntimeLocker, provider Provider, sealer Sealer) (SubmitResult, error) {
+func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptClaims, cmd SubmitCommand, qr QuestionResolver, rl RuntimeLocker, pr ProviderResolver, sealer Sealer) (SubmitResult, error) {
 	attempt, err := lockAttempt(ctx, q, cmd.AttemptID)
 	if err != nil {
 		return SubmitResult{}, err
@@ -104,6 +116,22 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 	}
 	if claims.ScheduleID != attempt.ScheduleID || claims.UserID != attempt.UserID || claims.AttemptID != cmd.AttemptID {
 		return SubmitResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Attempt credential mismatch.", HTTPStatus: 401}
+	}
+	// Single authoritative provider decision: taken on this transaction, after
+	// the attempt row lock, with no caller-supplied provider and no default. It
+	// selects the whole terminalization branch below (SAT parks a provisional
+	// receipt and scores later; every other provider seals directly), so
+	// deciding it anywhere else would let a wrong branch originate outside the
+	// lock that fences it. A missing resolver fails closed.
+	if pr == nil {
+		return SubmitResult{}, fmt.Errorf("provider resolver is required")
+	}
+	provider, err := pr.ResolveProvider(ctx, q, cmd.AttemptID)
+	if err != nil {
+		return SubmitResult{}, err
+	}
+	if !provider.known() {
+		return SubmitResult{}, apperrors.New(apperrors.CodeUnsupportedProvider, "The exam provider identity is unknown; refusing to submit.")
 	}
 	if err := s.validateTokenSession(ctx, q, claims); err != nil {
 		return SubmitResult{}, err
@@ -191,6 +219,11 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 		return SubmitResult{}, err
 	}
 	if provider == ProviderSAT {
+		// Lifecycle invariant: the provisional claim is legal only when the SAT
+		// module topology is already complete (see sat_modules.go).
+		if err := ensureSATModuleTopologyTx(ctx, q, cmd.AttemptID); err != nil {
+			return SubmitResult{}, err
+		}
 		// Provisional claim: NEVER sets submitted_at/final_submission.
 		res, err := q.ExecContext(ctx, `UPDATE student_attempts SET delivery_status='submitted', phase='post-exam', response_revision=?, final_response_digest=?, revision=revision+1, control_epoch=control_epoch+1, updated_at=CURRENT_TIMESTAMP(6) WHERE id=? AND submitted_at IS NULL AND final_submission IS NULL AND COALESCE(delivery_status,'running') NOT IN ('terminated','locked','cancelled')`, attempt.ResponseRevision, digest, cmd.AttemptID)
 		if err != nil {
@@ -286,7 +319,11 @@ func submitRequestShape(cmd SubmitCommand) any {
 	return map[string]any{"submissionId": cmd.SubmissionID, "attemptId": cmd.AttemptID, "leaseEpoch": cmd.LeaseEpoch, "finalCommands": finals, "expectedAttemptRevision": exp}
 }
 
-// ComputeDigestInTx reads the projection hashes for the final digest.
+// ComputeDigestInTx reads the projection hashes for the final digest. An
+// attempt with no stored responses is NOT an error: the empty set hashes as
+// canonical JSON "[]", which keeps a fully unanswered attempt terminalizable
+// (see FinalDigest). Rejecting it here would strand every retry, since a retry
+// cannot invent a response.
 func ComputeDigestInTx(ctx context.Context, q tx.Tx, attemptID string) (string, error) {
 	rows, err := q.QueryContext(ctx, `SELECT question_id, response_hash FROM attempt_responses_v2 WHERE attempt_id=?`, attemptID)
 	if err != nil {
@@ -303,9 +340,6 @@ func ComputeDigestInTx(ctx context.Context, q tx.Tx, attemptID string) (string, 
 	}
 	if err := rows.Err(); err != nil {
 		return "", err
-	}
-	if len(m) == 0 {
-		return "", &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "No responses to submit.", HTTPStatus: 400}
 	}
 	return FinalDigest(m)
 }

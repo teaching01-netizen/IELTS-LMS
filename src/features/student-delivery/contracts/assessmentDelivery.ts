@@ -50,6 +50,13 @@ export interface AssessmentAttemptSnapshot {
   id: string;
   moduleAttempts: AssessmentModuleAttemptSnapshot[];
   responses: AssessmentResponseSnapshot[];
+  /**
+   * V2 provisional terminal claim already committed server-side
+   * (delivery_status='submitted', submitted_at still NULL) while the scoring
+   * result is absent. Recovery uses this to skip response resubmission and
+   * drive straight to result completion (SAT-001). Absent on older payloads.
+   */
+  provisionalSubmitted?: boolean;
 }
 
 export interface AssessmentTimingSnapshot {

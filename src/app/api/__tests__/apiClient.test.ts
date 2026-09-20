@@ -42,6 +42,65 @@ describe('apiClient', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
+  // The Go backend writes the flat apperrors.Envelope — {code, message,
+  // details, requestId} at the root, no `error`/`metadata` wrapper. Parsing
+  // only the legacy nested shape turned EVERY backend code into UNKNOWN and
+  // dropped `details`, so the durability engine could not recognise a 409
+  // CONTROL_EPOCH_STALE (or LEASE_FENCED, VERSION_COLLISION, …) and fell into
+  // its generic retry loop — re-sending a stale control epoch forever during
+  // a live exam. The body below is the one captured from that incident.
+  it('reads code, details and requestId from the flat Go error envelope', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          code: 'CONTROL_EPOCH_STALE',
+          message: 'Command crossed a pause/resume control boundary.',
+          details: { currentControlEpoch: 3, requestControlEpoch: 2 },
+          requestId: '70d5763b-f55e-4cb6-895e-be25d117adab',
+        }),
+        { status: 409, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const failure = await apiClient
+      .post('/v2/student/attempts/attempt-1/responses:batch', {}, { retries: 0 })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ApiError);
+    const apiError = failure as ApiError;
+    expect(apiError.status).toBe(409);
+    expect(apiError.code).toBe('CONTROL_EPOCH_STALE');
+    expect(apiError.backendCode).toBe('CONTROL_EPOCH_STALE');
+    expect(apiError.message).toBe('Command crossed a pause/resume control boundary.');
+    expect(apiError.details).toEqual({ currentControlEpoch: 3, requestControlEpoch: 2 });
+    expect(apiError.requestId).toBe('70d5763b-f55e-4cb6-895e-be25d117adab');
+    expect(apiError.conflict).toBe('stale-control');
+  });
+
+  it('still reads the legacy nested envelope', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          success: false,
+          error: { code: 'LEASE_FENCED', message: 'Writer lease is stale.', details: { reason: 'TAKEN_OVER' } },
+          metadata: { requestId: 'req-legacy' },
+        }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const failure = await apiClient
+      .post('/v2/student/attempts/attempt-1/responses:batch', {}, { retries: 0 })
+      .catch((error: unknown) => error);
+
+    const apiError = failure as ApiError;
+    expect(apiError.code).toBe('LEASE_FENCED');
+    expect(apiError.details).toEqual({ reason: 'TAKEN_OVER' });
+    expect(apiError.requestId).toBe('req-legacy');
+  });
+
   it('does not warn for a status the caller declared expected, and still throws it', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fetchMock = vi.fn(async () =>

@@ -3,7 +3,6 @@ import { useAuthoritativeDeadlineClock } from "@shared/hooks/useAuthoritativeDea
 import { emitStudentObservabilityMetric } from "../../../utils/studentObservability";
 import {
   isCohortTimingModel,
-  isSectionKeyedCohortModel,
   type ExamSessionRuntime,
 } from "../../../types/domain";
 import type {
@@ -13,14 +12,20 @@ import type {
   AssessmentTimingSnapshot,
 } from "../contracts/assessmentDelivery";
 import type { StudentAttempt } from "../../../types/studentAttempt";
-import { normalizeSatAnnotations, responseForQuestion, type SatQuestionAnnotations } from "../domain/satResponses";
+import {
+  applySatResponseDraftChange,
+  normalizeSatAnnotations,
+  responseForQuestion,
+  type SatQuestionAnnotations,
+  type SatQuestionResponseDraft,
+  type SatResponseDraftChange,
+} from "../domain/satResponses";
 import {
   breakRemainingSeconds,
   mergeAuthoritativeTiming,
   personalModuleRemainingSeconds as personalModuleCountdown,
-  timingForAttempt,
 } from "../domain/satTiming";
-import { resolveSatExamToolPolicy, toSatToolCapabilities } from "../domain/satToolPolicy";
+import { resolveSatExamToolPolicy } from "../domain/satToolPolicy";
 import {
   configureSatDeliveryAttempt,
   satDeliveryGateway,
@@ -33,6 +38,32 @@ import {
 } from "../infrastructure/satCalculatorWorkspace";
 import { clearSatReadingPreferences } from "../infrastructure/satReadingPreferencesStore";
 import { createSatRunnerState, satRunnerReducer } from "../application/satRunnerReducer";
+// SAT-005/007: commit-to-phase routing and submit-conflict policy live in
+// application/ (pure); the hook only wires them to state and the gateway.
+import {
+  decideSatCommitRoute,
+  startModuleRouteAction,
+  type SatCommitHint,
+} from "../application/satCommitRouting";
+import { createSatFinalizationGate } from "../application/satFinalizationGate";
+// Clock + cadence policy (pure): display allotment vs expiry authority, stage
+// readiness, break/wait countdowns, and the recovery-poll cadence.
+import {
+  satBreakCountdownSeconds,
+  satClockOffsetMs,
+  satCountdown,
+  satExpectedStageKey,
+  satPersonalClockRunning,
+  satSectionWaitSeconds,
+  satSharedClockRunning,
+  satStageReady,
+} from "../application/satTimingPolicy";
+import { satPollDelayMs } from "../application/satPollCadence";
+import {
+  isSectionClosingRejection,
+  isStaleConflictRejection,
+  isWriterSupersededRejection,
+} from "../application/satSubmitConflicts";
 import type { SatToolId } from "../domain/satTools";
 import {
   findActiveAttempt,
@@ -43,7 +74,11 @@ import {
   moduleForAttempt,
   sectionForModule,
 } from "../application/satRuntimeSelectors";
-import { deriveSatEntryDecision, type SatEntryOutcome } from "../application/satEntry";
+import {
+  deriveSatEntryDecision,
+  previousModuleTimedOut as previousModuleEndedByClock,
+  type SatEntryOutcome,
+} from "../application/satEntry";
 import { seedMatchesIdentity, type SatBootstrapSeed } from "../bootstrap/satBootstrapSeed";
 import {
   isEquivalentBootstrap,
@@ -52,17 +87,6 @@ import {
 import { useSatIntegrityControl } from "./useSatIntegrityControl";
 import { useSatModuleEntry } from "./useSatModuleEntry";
 import { useSatResponsePersistence } from "./useSatResponsePersistence";
-
-/**
- * Phase 4: a conflict from the module-submit gate means the server's view of
- * the authoritative clock has moved past ours (DEADLINE_EXPIRED /
- * RUNTIME_NOT_LIVE / SECTION_NOT_ACTIVE / already finalized by the reconciler).
- * The module is finalized server-side and the recovery poll routes the student
- * onwards, so this must never read as "your submission failed".
- */
-function isSectionClosingRejection(error: unknown): boolean {
-  return hasBackendStatusCode(error, 409);
-}
 
 /**
  * Break-end pull window (Phase 3): at most one forced refresh per runtime
@@ -117,8 +141,13 @@ export function useSatExamController({
   const [isStarting, setIsStarting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const timeoutSubmissionKeyRef = useRef<string | null>(null);
-  const finalizationInFlightRef = useRef<Promise<AssessmentResult | null> | null>(null);
-  const finalizationRecoveryKeyRef = useRef<string | null>(null);
+  // SAT-002: one owner for "which revision may finalize, and is one already
+  // running" — the claim / single-flight / release rules live in
+  // application/satFinalizationGate.ts so both drivers (the module-submit
+  // commit path and the recovery effect) apply them identically.
+  const finalizationGateRef = useRef(
+    createSatFinalizationGate<AssessmentResult | null>()
+  );
   const identityGenerationRef = useRef(0);
   const identityKey = `${scheduleId}:${attemptId}:${candidateId}`;
   const previousIdentityKeyRef = useRef<string | null>(null);
@@ -143,6 +172,12 @@ export function useSatExamController({
   const pollReconcileKeyRef = useRef<string | null>(null);
   const safetyReconcileKeyRef = useRef<string | null>(null);
   const reconcileGuardKeyRef = useRef<string | null>(null);
+  // SAT-005: module-response hydration for a startModule commit. Stored in a
+  // ref because hydrateModuleResponses changes with visibleDrafts/state and
+  // must not destabilize the commit layer's identity (bootstrap/poll deps).
+  const hydrateModuleResponsesRef = useRef<
+    ((payload: AssessmentDeliveryBootstrap, module: AssessmentDeliveryModule) => void) | null
+  >(null);
 
   useEffect(() => {
     setData(null);
@@ -154,6 +189,10 @@ export function useSatExamController({
     setAnswersRecorded(false);
     timeoutSubmissionKeyRef.current = null;
     dataRef.current = null;
+    // A rotated identity must not inherit the previous attempt's finalization
+    // claim (the revision key already scopes by attempt, this keeps the
+    // in-flight slot clean too).
+    finalizationGateRef.current.reset();
     dispatch({ type: "recover", state: createSatRunnerState(scheduleId, candidateId) });
     // Phase 04: clear the commit-layer dedupe refs on identity rotation so a
     // new identity never inherits the previous identity's skip/reconciler keys.
@@ -191,76 +230,25 @@ export function useSatExamController({
   persistenceRef.current = persistence;
   const hydrateBootstrap = persistence.hydrateBootstrap;
 
-  // Phase 04: pure route decision for the atomic commit path. Computes at
-  // most one phase action from (preState, payload, hint); post-await callers
-  // must pass the payload argument (never read back data state after await).
-  // Poll uses the existing finalized-module predicate shape (:899-909 area).
-  type CommitHint =
-    | { kind: "bootstrap" }
-    | { kind: "poll" }
-    | { kind: "startModule"; moduleId: string }
-    | { kind: "submitModule" }
-    | { kind: "terminal" };
-  function decideCommitRouteAction(
-    preState: typeof state,
-    payload: AssessmentDeliveryBootstrap,
-    hint: CommitHint,
-  ) {
-    switch (hint.kind) {
-      case "bootstrap":
-        return preState.phase === "loading"
-          ? ({ type: "bootstrapLoaded", assessmentId: payload.versionId } as const)
-          : null;
-      case "poll": {
-        if (payload.result && preState.phase !== "complete") {
-          return {
-            type: "recover",
-            state: {
-              phase: "complete",
-              scheduleId,
-              candidateId,
-              assessmentId: payload.versionId,
-              resultId: payload.result.id,
-            },
-          } as const;
-        }
-        if (
-          (preState.phase === "module" || preState.phase === "review") &&
-          "moduleKey" in preState
-        ) {
-          const currentModule = payload.sections
-            .flatMap((section) => section.modules)
-            .find((candidate) => candidate.moduleKey === preState.moduleKey);
-          const attempt = currentModule
-            ? findAttemptForModule(payload, currentModule.id)
-            : undefined;
-          if (attempt && matchesFinalModuleState(attempt.state)) {
-            const nextAttempt = findPendingAttempt(payload);
-            const nextModule = moduleForAttempt(payload, nextAttempt);
-            if (nextModule && nextModule.moduleKey !== preState.moduleKey) {
-              return { type: "showDirections" } as const;
-            }
-          }
-        }
-        return null;
-      }
-      default:
-        return null;
-    }
-  }
+  // Identity the pure route table needs for a result-carrying payload;
+  // memoized so the commit layer's identity does not churn with renders.
+  const commitIdentity = useMemo(
+    () => ({ scheduleId, candidateId }),
+    [candidateId, scheduleId]
+  );
 
   // Phase 04 commit layer (C1 atomic data+phase rule): the single entry
-  // point every post-await payload funnels through. acceptPayloadAndRoute
-  // keeps the legacy applyPayload signature (boolean; 304 stays null at the
-  // refresh layer) and runs setData + the at-most-one phase dispatch in the
-  // same synchronous tick so React 18+ batches them into one render. The
-  // hint selects the route decision; startModule/submitModule/terminal hints
-  // commit data here and dispatch via their existing call-site logic in the
-  // same tick (see startPendingModule/submitModule below).
+  // point every post-await payload funnels through. It returns whether the
+  // payload was accepted (boolean; 304 stays null at the refresh layer) and
+  // runs setData + the at-most-one phase dispatch in the same synchronous
+  // tick so React 18+ batches them into one render. The hint selects the
+  // route decision; startModule/submitModule hints commit data here and
+  // dispatch via their existing call-site logic in the same tick (see
+  // startPendingModule/submitModule below).
   const acceptPayloadAndRoute = useCallback(
     (
       payload: AssessmentDeliveryBootstrap,
-      hint: CommitHint = { kind: "poll" },
+      hint: SatCommitHint = { kind: "poll" },
     ): boolean => {
       if (
         identityGenerationRef.current !== renderIdentityGeneration ||
@@ -280,7 +268,23 @@ export function useSatExamController({
       // Clock-only drift past tolerance is accepted as a no-clock-touch
       // patch (serverNow updated in place, snapshotReceivedAt preserved) so
       // serverClockOffsetMs stays stable; anything else commits normally.
-      if (current && isEquivalentBootstrap(current, payload)) return false;
+      if (current && isEquivalentBootstrap(current, payload)) {
+        // SAT-005: an unchanged projection still needs the route decision for
+        // mutation responses — a poll may have committed the server's advance
+        // first, and skipping the decision would strand the runner. Data
+        // writes stay skipped; only the phase action and hydration run.
+        if (hint.kind === "startModule" || hint.kind === "submitModule") {
+          const action = decideSatCommitRoute(stateRef.current, current, hint, commitIdentity);
+          if (action) dispatch(action);
+          if (hint.kind === "startModule" && action?.type === "routeToModule") {
+            const activeModule = moduleForAttempt(current, findActiveAttempt(current));
+            if (activeModule) hydrateModuleResponsesRef.current?.(current, activeModule);
+          }
+          hydrateBootstrap(current);
+          return true;
+        }
+        return false;
+      }
       if (
         current &&
         current.versionId === payload.versionId &&
@@ -319,19 +323,24 @@ export function useSatExamController({
       setSnapshotReceivedAt(Date.now());
       setResult(payload.result);
       setError(null);
-      hydrateBootstrap(payload);
-      const action = decideCommitRouteAction(preState, merged, hint);
+      hydrateBootstrap(merged);
+      const action = decideSatCommitRoute(preState, merged, hint, commitIdentity);
       if (action) dispatch(action);
+      if (hint.kind === "startModule" && action?.type === "routeToModule") {
+        const activeModule = moduleForAttempt(merged, findActiveAttempt(merged));
+        if (activeModule) hydrateModuleResponsesRef.current?.(merged, activeModule);
+      }
       return true;
     },
-    [attemptId, candidateId, hydrateBootstrap, renderIdentityGeneration, scheduleId]
+    [
+      attemptId,
+      commitIdentity,
+      hydrateBootstrap,
+      renderIdentityGeneration,
+      scheduleId,
+    ]
   );
 
-  const applyPayload = useCallback(
-    (payload: AssessmentDeliveryBootstrap): boolean =>
-      acceptPayloadAndRoute(payload, { kind: "poll" }),
-    [acceptPayloadAndRoute]
-  );
   // Phase 04 test seam (no prod callers): exposes the atomic commit path so
   // convergence tests can drive poll-hint commits deterministically without
   // waiting on the wall-clock poll loop.
@@ -342,15 +351,30 @@ export function useSatExamController({
   );
 
   const refresh = useCallback(
-    async (surfaceError = false, ifNoneMatch?: string | null) => {
+    async (
+      surfaceError = false,
+      ifNoneMatch?: string | null,
+      /**
+       * Transport-outcome probe. `refresh` resolves for a failed fetch (every
+       * other caller, including `void refresh(...)`, depends on that), so the
+       * recovery loop cannot infer success from the resolution: poll failures
+       * have to be reported out of band or the backoff never engages.
+       */
+      onTransportOutcome?: (ok: boolean) => void,
+    ) => {
       try {
         const payload = await satDeliveryGateway.bootstrap(scheduleId, attemptId, ifNoneMatch ?? null);
+        onTransportOutcome?.(true);
         // Phase 04: poll-hint commit — 304, stale, and equivalent payloads
         // all surface as null (no-change), exactly like the 304 path below.
         return acceptPayloadAndRoute(payload, { kind: "poll" }) ? payload : null;
       } catch (loadError) {
         // A 304 (not modified) is not a failure: no new payload, no error.
-        if (hasBackendStatusCode(loadError, 304)) return null;
+        if (hasBackendStatusCode(loadError, 304)) {
+          onTransportOutcome?.(true);
+          return null;
+        }
+        onTransportOutcome?.(false);
         if (surfaceError && identityGenerationRef.current === renderIdentityGeneration) {
           setError(
             loadError instanceof Error ? loadError.message : "Unable to load the SAT attempt."
@@ -449,7 +473,7 @@ export function useSatExamController({
   }, []);
 
   // Recovery polling: recurring interval (not one-shot), backs off while
-  // erroring (2s → 4s → 8s … capped at the live 20s cadence) with jitter,
+  // erroring (2s → 4s → 8s … → 16s, the satPollCadence window) with jitter,
   // suspends while the browser reports offline (reconnect is event-driven,
   // not poll-driven), and skips work the server already answered via ETag.
   // The offline listener is always cleaned up — a one-shot addEventListener
@@ -468,13 +492,16 @@ export function useSatExamController({
     let stopped = false;
     let timer = 0;
     let onOnline: (() => void) | null = null;
+    // A failed poll doubles the window; a successful one (including a 304
+    // no-change) resets it. Without this signal the backoff is dead code, since
+    // refresh() resolves for a failed fetch.
+    const recordTransportOutcome = (ok: boolean) => {
+      pollFailuresRef.current = ok ? 0 : pollFailuresRef.current + 1;
+    };
     const schedule = () => {
       if (stopped) return;
-      const baseMs = liveSocketConnected ? 20_000 : 2_000;
       const failures = pollFailuresRef.current;
-      const backoffMs = Math.min(baseMs * 2 ** Math.min(failures, 3), 20_000);
-      // Full-jitter: spread the cohort reconnect herd across the window.
-      const intervalMs = backoffMs / 2 + Math.random() * (backoffMs / 2);
+      const intervalMs = satPollDelayMs({ liveSocketConnected, failures, random: Math.random() });
       timer = window.setTimeout(tick, intervalMs);
     };
     const tick = () => {
@@ -487,17 +514,16 @@ export function useSatExamController({
         // refresh; reschedule the cadence after reconnect.
         onOnline = () => {
           pollFailuresRef.current = 0;
-          void refresh(false).then(
-            () => { pollFailuresRef.current = 0; },
-            () => { pollFailuresRef.current += 1; },
-          ).finally(schedule);
+          void refresh(false, null, recordTransportOutcome).finally(schedule);
         };
-        window.addEventListener("online", onOnline);
+        // One-shot: exactly one reconnect per outage. A handler that stays
+        // registered after firing would make every later reconnect poll once
+        // per past outage and schedule a timer per handler (doubling the loop).
+        window.addEventListener("online", onOnline, { once: true });
         return;
       }
-      void refresh(false, pollEtagRef.current).then(
+      void refresh(false, pollEtagRef.current, recordTransportOutcome).then(
         (payload) => {
-          pollFailuresRef.current = 0;
           // Phase 04 dead-store note (documented, not fixed): the typed
           // AssessmentDeliveryBootstrap payload carries no `etag` field, so
           // this read is always undefined and pollEtagRef stays null. The
@@ -506,7 +532,9 @@ export function useSatExamController({
           const etag = (payload as { etag?: unknown } | null)?.etag;
           if (typeof etag === "string" && etag) pollEtagRef.current = etag;
         },
-        () => { pollFailuresRef.current += 1; },
+        // Safety net for an unexpected throw; transport failures arrive through
+        // recordTransportOutcome, which owns the backoff counter.
+        () => { recordTransportOutcome(false); },
       ).finally(() => { if (!stopped) schedule(); });
     };
     schedule();
@@ -517,8 +545,7 @@ export function useSatExamController({
     };
     // Phase 04: stable across phase transitions — [liveSocketConnected,
     // refresh] (+ identity generation via the refresh closure). Backoff /
-    // jitter / offline semantics unchanged.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // jitter / offline semantics live in application/satPollCadence.ts.
   }, [liveSocketConnected, refresh]);
 
   useEffect(() => {
@@ -531,7 +558,9 @@ export function useSatExamController({
     void refresh(false);
   }, [attemptUpdateToken, refresh]);
 
-  useSatIntegrityControl({
+  // Integrity is active only while the student may actually answer: waiting on
+  // directions, a break, or a completed attempt is not a tab switch.
+  const satIntegrity = useSatIntegrityControl({
     scheduleId,
     attemptId,
     expectedDeviceFingerprintHash: data?.deviceFingerprintHash ?? null,
@@ -579,21 +608,14 @@ export function useSatExamController({
     [persistence.visibleDrafts, state]
   );
 
+  hydrateModuleResponsesRef.current = hydrateModuleResponses;
+
   const startModuleFrom = useCallback(
     (payload: AssessmentDeliveryBootstrap, module: AssessmentDeliveryModule) => {
-      const section = sectionForModule(payload, module.id);
-      const attempt = findAttemptForModule(payload, module.id);
-      if (!section || !attempt?.startedAt) return;
-      const timing = timingForAttempt(payload, attempt);
-      dispatch({
-        type: "routeToModule",
-        sectionKey: section.sectionKey === "math" ? "math" : "reading-writing",
-        moduleKey: module.moduleKey,
-        questionIds: module.questions.map((question) => question.examQuestionId),
-        startedAt: timing.startedAt,
-        endsAt: timing.endsAt,
-        toolCapabilities: toSatToolCapabilities(resolveSatExamToolPolicy(section.sectionKey === "math" ? "math" : "reading-writing", module.toolPolicy)),
-      });
+      // SAT-005: the same pure action the unified commit layer dispatches.
+      const action = startModuleRouteAction(payload, module);
+      if (!action) return;
+      dispatch(action);
       hydrateModuleResponses(payload, module);
     },
     [hydrateModuleResponses]
@@ -683,7 +705,10 @@ export function useSatExamController({
     deadlineAt: effectiveTiming?.deadlineAt ?? null,
     serverNow: effectiveTiming?.serverNow ?? null,
     fallbackSeconds: effectiveTiming?.remainingSeconds ?? 0,
-    running: data?.scheduleRuntimeStatus === "live" && effectiveTiming?.stageStatus === "live",
+    running: satSharedClockRunning({
+      runtimeStatus: data?.scheduleRuntimeStatus,
+      stageStatus: effectiveTiming?.stageStatus,
+    }),
   });
 
   const pendingModule = useMemo(() => (data ? findCurrentModule(data) : null), [data]);
@@ -691,7 +716,6 @@ export function useSatExamController({
     () => (data && pendingModule ? findAttemptForModule(data, pendingModule.id) : undefined),
     [data, pendingModule]
   );
-  const cohortRuntimeTiming = isCohortTimingModel(effectiveTiming?.timingModel);
   // Authored between-sections window (cohort models). The server's runtime
   // flag is the single gate — the window is open only while the active section
   // is complete and the next is not yet live — and nextSectionStartAt is its
@@ -708,39 +732,56 @@ export function useSatExamController({
     running: Boolean(nextSectionStartAt) && data?.scheduleRuntimeStatus === "live",
   });
   const pendingBreakSeconds = data
-    ? cohortRuntimeTiming
-      ? nextSectionStartAt
-        ? nextSectionStartSeconds
-        : 0
-      : breakRemainingSeconds(data, pendingAttempt, snapshotReceivedAt, now)
+    ? satBreakCountdownSeconds({
+        timingModel: effectiveTiming?.timingModel,
+        nextSectionStartAt,
+        nextSectionStartSeconds,
+        legacyBreakSeconds: breakRemainingSeconds(
+          data,
+          pendingAttempt,
+          snapshotReceivedAt,
+          now,
+        ),
+      })
     : 0;
   const pendingSection = data && pendingModule ? sectionForModule(data, pendingModule.id) : null;
-  const pendingExpectedStageKey =
-    pendingSection && pendingModule
-      ? isSectionKeyedCohortModel(effectiveTiming?.timingModel)
-        ? pendingSection.sectionKey
-        : `${pendingSection.sectionKey}:${pendingModule.adaptiveRole === "base" ? "m1" : "m2"}`
-      : null;
-  const pendingStageReady =
-    !cohortRuntimeTiming ||
-    (effectiveTiming?.stageKey === pendingExpectedStageKey &&
-      effectiveTiming?.stageStatus === "live" &&
-      data?.scheduleRuntimeStatus === "live");
+  const pendingExpectedStageKey = satExpectedStageKey({
+    timingModel: effectiveTiming?.timingModel,
+    sectionKey: pendingSection?.sectionKey ?? null,
+    adaptiveRole: pendingModule?.adaptiveRole ?? null,
+  });
+  const pendingStageReady = satStageReady({
+    timingModel: effectiveTiming?.timingModel,
+    stageKey: effectiveTiming?.stageKey ?? null,
+    stageStatus: effectiveTiming?.stageStatus ?? null,
+    runtimeStatus: data?.scheduleRuntimeStatus,
+    expectedStageKey: pendingExpectedStageKey,
+  });
   // Waiting for the scheduled end of the current section (the student finished
   // their module early while the shared clock is still running). Once the
   // server names the next section's start this window is over and the break
   // countdown above takes over.
   const pendingSectionWaitSeconds =
-    data &&
-    pendingSection &&
-    effectiveTiming &&
-    isSectionKeyedCohortModel(effectiveTiming.timingModel) &&
-    data.scheduleRuntimeStatus === "live" &&
-    !waitingForNextSection &&
-    effectiveTiming.stageKey &&
-    effectiveTiming.stageKey !== pendingSection.sectionKey
-      ? authoritativeRemainingSeconds
+    data && effectiveTiming
+      ? satSectionWaitSeconds({
+          timingModel: effectiveTiming.timingModel,
+          stageKey: effectiveTiming.stageKey,
+          sectionKey: pendingSection?.sectionKey ?? null,
+          runtimeStatus: data.scheduleRuntimeStatus,
+          waitingForNextSection,          authoritativeSeconds: authoritativeRemainingSeconds,
+        })
       : 0;
+
+  // Module-advance fix: a branch module (Module 2) is opened by the automatic
+  // path only when the module before it in the same section ended because its
+  // own clock ran out — the timeout hand-off the runbook describes. Read from
+  // the payload rather than from local submit state so a reload or an offline
+  // reconnect reaches the same verdict (see application/satEntry.ts on why
+  // `completionReason` cannot answer this).
+  const previousModuleTimedOut = useMemo(
+    () => (data && pendingModule ? previousModuleEndedByClock(data, pendingModule) : false),
+    [data, pendingModule],
+  );
 
   /**
    * Starts the pending module and reports what actually happened:
@@ -759,26 +800,30 @@ export function useSatExamController({
       const payload = await satDeliveryGateway.startModule(scheduleId, attemptId, {
         moduleId: pendingModule.id,
       });
-      // Phase 04 atomic start: commit data first (stale/equivalent losers
-      // still route locally — startModule responses carry the started
-      // attempt even at equal runtimeRevision).
       if (identityGenerationRef.current !== generation) return "noop";
       if (payload.scheduleId !== scheduleId || payload.attempt.id !== attemptId) return "noop";
-      const current = dataRef.current;
-      const timing = mergeAuthoritativeTiming(current?.timing ?? null, payload.timing);
-      const merged = timing === payload.timing ? payload : { ...payload, timing };
-      dataRef.current = merged;
-      setData(merged);
-      setSnapshotReceivedAt(Date.now());
-      setResult(payload.result);
-      setError(null);
-      hydrateBootstrap(payload);
-      const activeAttempt = findActiveAttempt(merged);
-      const activeModule = moduleForAttempt(merged, activeAttempt);
+      // SAT-005: one monotonic commit path. The startModule hint commits the
+      // data and dispatches the routeToModule action atomically; a stale or
+      // otherwise rejected payload reports "noop" and stays retryable.
+      if (!acceptPayloadAndRoute(payload, { kind: "startModule", moduleId: pendingModule.id })) {
+        return "noop";
+      }
+      const committed = dataRef.current;
+      const activeModule = committed
+        ? moduleForAttempt(committed, findActiveAttempt(committed))
+        : null;
       // A resolved call that did not open a module is not a completed entry:
       // report it retryable instead of burning the entry attempt.
       if (!activeModule) return "noop";
-      startModuleFrom(merged, activeModule);
+      // Module-advance fix (observability): this bug was invisible in
+      // telemetry — a student stranded before Module 2 looked exactly like one
+      // mid-module. One event per confirmed open makes "Module 1 timed out,
+      // Module 2 never opened" a queryable funnel step.
+      emitStudentObservabilityMetric("sat_module_advance", {
+        reason: previousModuleTimedOut ? "timeout" : "student",
+        sectionKey: pendingSection?.sectionKey ?? null,
+        adaptiveRole: pendingModule.adaptiveRole,
+      });
       return "opened";
     } catch (startError) {
       if (identityGenerationRef.current === generation) {
@@ -786,7 +831,16 @@ export function useSatExamController({
         // section this module belongs to (SECTION_NOT_ACTIVE / RUNTIME_NOT_LIVE
         // at a transition). The attempt stays retryable, so say nothing and let
         // the next one land — a transition race is never a student error.
-        if (!isSectionClosingRejection(startError)) {
+        //
+        // SAT-007: entry must also tell writer supersession apart. A stale
+        // control epoch or a durable-state disagreement is not a transition
+        // either — the entry loop retries it — while losing the writer slot
+        // needs the ownership instruction, not a silent retry forever.
+        if (isWriterSupersededRejection(startError)) {
+          setError(
+            "This attempt is now active in another window. Your saved answers are safe — continue there, or use Take over to resume here."
+          );
+        } else if (!isSectionClosingRejection(startError) && !isStaleConflictRejection(startError)) {
           setError(
             startError instanceof Error ? startError.message : "The SAT module could not be started."
           );
@@ -796,7 +850,16 @@ export function useSatExamController({
     } finally {
       if (identityGenerationRef.current === generation) setIsStarting(false);
     }
-  }, [attemptId, data, hydrateBootstrap, isStarting, pendingModule, scheduleId, startModuleFrom]);
+  }, [
+    acceptPayloadAndRoute,
+    attemptId,
+    data,
+    isStarting,
+    pendingModule,
+    pendingSection,
+    previousModuleTimedOut,
+    scheduleId,
+  ]);
 
   // Phase 3 (client-forced break end): once the authoritative break has run
   // out, pull the advanced projection ourselves instead of waiting out the
@@ -837,6 +900,7 @@ export function useSatExamController({
     breakSeconds: pendingBreakSeconds,
     sectionWaitSeconds: pendingSectionWaitSeconds,
     phase: state.phase,
+    previousModuleTimedOut,
   });
 
   // Phase 4: the entry surface is what the student sees when the break
@@ -851,16 +915,22 @@ export function useSatExamController({
   });
 
   const finalizeAssessment = useCallback(
-    (generation: number, assessmentId: string): Promise<AssessmentResult | null> => {
-      const existing = finalizationInFlightRef.current;
-      if (existing) return existing;
-
-      const operation = (async () => {
+    (generation: number, assessmentId: string): Promise<AssessmentResult | null> =>
+      finalizationGateRef.current.begin(async () => {
         emitStudentObservabilityMetric('sat_finalize_attempt', { scheduleId, attemptId });
-        await persistenceRef.current.flush();
-        if (identityGenerationRef.current !== generation) return null;
-        await persistenceRef.current.submit();
-        if (identityGenerationRef.current !== generation) return null;
+        // SAT-001: a committed V2 provisional claim (bootstrap reports
+        // provisionalSubmitted) makes response resubmission impossible by
+        // design — the durability engine treats the attempt as terminal and
+        // refuses — while the scoring result is still missing. Skip the
+        // resubmission phase and go straight to the idempotent completion
+        // call instead of failing finalization forever.
+        const provisional = dataRef.current?.attempt.provisionalSubmitted === true;
+        if (!provisional) {
+          await persistenceRef.current.flush();
+          if (identityGenerationRef.current !== generation) return null;
+          await persistenceRef.current.submit();
+          if (identityGenerationRef.current !== generation) return null;
+        }
         if (identityGenerationRef.current === generation) setAnswersRecorded(true);
         const finalResult = await satDeliveryGateway.submitAssessment(scheduleId, attemptId, {
           submissionId: attemptId,
@@ -878,22 +948,7 @@ export function useSatExamController({
           },
         });
         return finalResult;
-      })();
-      finalizationInFlightRef.current = operation;
-      void operation.then(
-        () => {
-          if (finalizationInFlightRef.current === operation) {
-            finalizationInFlightRef.current = null;
-          }
-        },
-        () => {
-          if (finalizationInFlightRef.current === operation) {
-            finalizationInFlightRef.current = null;
-          }
-        }
-      );
-      return operation;
-    },
+      }),
     [attemptId, scheduleId]
   );
 
@@ -901,7 +956,12 @@ export function useSatExamController({
     if (
       !data ||
       data.result ||
-      state.phase !== "directions" ||
+      // SAT-002: eligibility is derived from authoritative data (all modules
+      // terminal, no pending attempt, no result) — never from the UI phase.
+      // Only genuinely terminal runner phases are excluded; a timeout on the
+      // last module must finalize even though it fired from `module`.
+      state.phase === "complete" ||
+      state.phase === "loading" ||
       data.proctorStatus === "terminated" ||
       data.scheduleRuntimeStatus === "cancelled" ||
       findPendingAttempt(data) ||
@@ -912,20 +972,22 @@ export function useSatExamController({
     ) {
       return;
     }
-    const recoveryKey = `${attemptId}:${data.versionId}:${data.attempt.moduleAttempts
-      .map(
-        (moduleAttempt) => `${moduleAttempt.id}:${moduleAttempt.state}:${moduleAttempt.revision}`
-      )
-      .join(",")}`;
-    if (finalizationRecoveryKeyRef.current === recoveryKey) return;
-    finalizationRecoveryKeyRef.current = recoveryKey;
+    const recoveryKey = finalizationGateRef.current.revisionKey(attemptId, data);
+    if (!finalizationGateRef.current.claim(recoveryKey)) return;
+    // SAT-002: make the terminal transition visible even when this effect is
+    // what discovered it (module/review still mounted). `submit` is legal
+    // from both phases, so a failed finalization lands on the retry panel
+    // instead of stranding the module UI.
+    if (state.phase === "module" || state.phase === "review") {
+      dispatch({ type: "submit" });
+    }
     const generation = identityGenerationRef.current;
     void finalizeAssessment(generation, data.versionId).catch((finalizationError: unknown) => {
       if (identityGenerationRef.current !== generation) return;
-      // Exam-day re-audit defect 2: release the dedupe key so a manual
-      // retry (or a later data change) can re-attempt finalization instead
-      // of being suppressed forever by the consumed key.
-      finalizationRecoveryKeyRef.current = null;
+      // Exam-day re-audit defect 2: release the claim so a manual retry (or a
+      // later data change) can re-attempt finalization instead of being
+      // suppressed forever by the consumed key.
+      finalizationGateRef.current.release(recoveryKey);
       setError(
         finalizationError instanceof Error
           ? finalizationError.message
@@ -942,60 +1004,70 @@ export function useSatExamController({
       const submittedModuleAttemptId = data ? findAttemptForModule(data, moduleId)?.id : undefined;
       setIsSubmitting(true);
       setError(null);
+      // SAT-007 slice 2: a control-epoch or durability conflict means our local
+      // view is stale, not that the request is illegal. Refresh the authoritative
+      // epoch/revision and send exactly ONE more attempt before treating it as a
+      // real failure. Section closures and writer supersession are deliberately
+      // excluded: the module is genuinely gone, or another window owns the
+      // attempt and retrying here cannot help.
+      const submitModuleRequest = async () => {
+        try {
+          return await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
+        } catch (conflict) {
+          if (!isStaleConflictRejection(conflict)) throw conflict;
+          await refresh(false);
+          return await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
+        }
+      };
       try {
         await persistence.flush();
         if (!isCurrent()) return;
-        const next = await satDeliveryGateway.submitModule(scheduleId, attemptId, { moduleId });
-        // Phase 04 atomic submit: data + the post-submit route decision
-        // commit in the same tick (decision computed from the `next`
-        // payload argument, never from data state after await). Stale-
-        // identity payloads still drop silently.
+        // SAT-004: module submission is a boundary too. flush() only proves
+        // the queue drained — a blocked draft can be visible outside the
+        // queue — so refuse to finalize the module while any visible answer
+        // is unsettled. The shared barrier is the same one the terminal
+        // submit uses.
+        await persistence.assertBoundarySettled?.();
+        if (!isCurrent()) return;
+        const next = await submitModuleRequest();
         if (!isCurrent()) return;
         if (next.scheduleId !== scheduleId || next.attempt.id !== attemptId) return;
-        {
-          const current = dataRef.current;
-          const timing = mergeAuthoritativeTiming(current?.timing ?? null, next.timing);
-          const merged = timing === next.timing ? next : { ...next, timing };
-          const nextAttempt = findPendingAttempt(merged);
-          const nextModule = moduleForAttempt(merged, nextAttempt);
-          const submitAction = !nextModule
-            ? ({ type: "submit" } as const)
-            : (() => {
-                const committed = dataRef.current;
-                const currentSection = committed
-                  ? sectionForModule(committed, moduleId)
-                  : null;
-                const nextSection = sectionForModule(merged, nextModule.id);
-                return currentSection && nextSection && nextSection.id !== currentSection.id
-                  ? ({
-                      type: "startBreak",
-                      nextSectionKey:
-                        nextSection.sectionKey === "math" ? "math" : "reading-writing",
-                      resumeAt: nextAttempt?.availableAt ?? merged.serverNow,
-                    } as const)
-                  : ({ type: "showDirections" } as const);
-              })();
-          dataRef.current = merged;
-          setData(merged);
-          setSnapshotReceivedAt(Date.now());
-          setResult(merged.result);
-          setError(null);
-          hydrateBootstrap(merged);
-          dispatch(submitAction);
-          if (submittedModuleAttemptId) {
-            clearCalculatorWorkspace(
-              calculatorWorkspaceKey(scheduleId, attemptId, submittedModuleAttemptId)
+        // SAT-005: the submitModule hint commits data AND dispatches the
+        // post-submit route action (submit / break / directions) in one
+        // monotonic commit — mutation responses no longer have a privileged
+        // bypass around the stale-revision guard. A rejected payload reports
+        // false; the newer committed state (or the poll/recovery safety nets)
+        // owns the route from there.
+        if (!acceptPayloadAndRoute(next, { kind: "submitModule", moduleId })) return;
+        if (submittedModuleAttemptId) {
+          clearCalculatorWorkspace(
+            calculatorWorkspaceKey(scheduleId, attemptId, submittedModuleAttemptId)
+          );
+        }
+        const committed = dataRef.current;
+        const nextAttempt = committed ? findPendingAttempt(committed) : undefined;
+        const nextModule = committed ? moduleForAttempt(committed, nextAttempt) : null;
+        if (!nextModule) {
+          // SAT-002: claim the finalization identity for this revision before
+          // the data-driven recovery effect can see the same terminal
+          // projection — one completion attempt, one error to report. The
+          // effect clears it on failure so retries (manual or from a later
+          // revision) still work.
+          if (committed) {
+            finalizationGateRef.current.claim(
+              finalizationGateRef.current.revisionKey(attemptId, committed)
             );
           }
-          if (!nextModule) {
-            const finalResult = await finalizeAssessment(generation, merged.versionId);
-            if (!finalResult || !isCurrent()) return;
-            clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
-            clearSatReadingPreferences(scheduleId, attemptId);
-            return;
-          }
+          const finalResult = await finalizeAssessment(
+            generation,
+            committed?.versionId ?? next.versionId
+          );
+          if (!finalResult || !isCurrent()) return;
+          clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
+          clearSatReadingPreferences(scheduleId, attemptId);
           return;
         }
+        return;
       } catch (submitError) {
         if (!isCurrent()) return;
         const refreshed = await refresh(false);
@@ -1030,6 +1102,16 @@ export function useSatExamController({
             return;
           }
         }
+        // SAT-007: writer supersession is not a section transition. The
+        // attempt is live somewhere else; the correct instruction is to
+        // continue there (or take the attempt over), never to wait for a
+        // module close that will not arrive on this client.
+        if (isWriterSupersededRejection(submitError)) {
+          setError(
+            "This attempt is now active in another window. Your saved answers are safe — continue there, or use Take over to resume here."
+          );
+          return;
+        }
         // Phase 4: the server's clock has moved past ours — the section clock
         // closed underneath the submit, the runtime paused, or the reconciler
         // already finalized this module. Not a student error and not a
@@ -1042,15 +1124,24 @@ export function useSatExamController({
           );
           return;
         }
+        // The retry already refetched once. Say what is actually true — the
+        // module is NOT closed and the last answers were not lost — instead of
+        // the backend's raw code, which reads like an exam error to a student.
+        if (isStaleConflictRejection(submitError)) {
+          setError(
+            "This device and the server disagreed about the latest revision, so the module was not submitted. Your answers are saved — submit the module again."
+          );
+          return;
+        }
         setError(submitError instanceof Error ? submitError.message : "Module submission failed.");
       } finally {
         if (isCurrent()) setIsSubmitting(false);
       }
     },
     [
+      acceptPayloadAndRoute,
       attemptId,
       data,
-      hydrateBootstrap,
       isSubmitting,
       persistence,
       refresh,
@@ -1059,20 +1150,22 @@ export function useSatExamController({
     ]
   );
 
-  // All modules are finalized but no result exists (recovery effect fired
-  // from directions): the finalize call failed and polling alone cannot
-  // create a result. Exam-day re-audit defect 2 exposes the same retry here.
-  const recoveryNeedsRetry =
-    state.phase === "directions" &&
-    !isSubmitting &&
-    Boolean(error) &&
+  // All modules are finalized but no result exists: the finalize call failed
+  // and polling alone cannot create a result. Eligibility is derived from
+  // authoritative data, never from the UI phase (SAT-002), so a timeout that
+  // fired from the question screen is retryable exactly like a Review submit.
+  const finalizationRequired =
     Boolean(data) &&
     !data?.result &&
+    data?.proctorStatus !== "terminated" &&
+    data?.scheduleRuntimeStatus !== "cancelled" &&
     !findPendingAttempt(data as AssessmentDeliveryBootstrap) &&
     (data as AssessmentDeliveryBootstrap).attempt.moduleAttempts.length > 0 &&
     (data as AssessmentDeliveryBootstrap).attempt.moduleAttempts.every((moduleAttempt) =>
       matchesFinalModuleState(moduleAttempt.state),
     );
+  const recoveryNeedsRetry =
+    finalizationRequired && !isSubmitting && Boolean(error);
   // Exam-day P1: manual recovery for a failed finalization. Idempotent —
   // finalizeAssessment singleflights in memory and the server replays the
   // stable submissionId=attemptId instead of scoring twice. Valid while the
@@ -1170,30 +1263,60 @@ export function useSatExamController({
   // deadlines advance together (same skew correction). cohortRunning mirrors
   // the authoritative clock's `running` gate: a paused cohort stage freezes
   // both clocks (defect 9), never just the section one.
-  const serverClockOffsetMs = data?.timing.serverNow
-    ? Date.parse(data.timing.serverNow) - snapshotReceivedAt
-    : 0;
-  const cohortStageRunning = !isCohortTimingModel(effectiveTiming?.timingModel)
-    ? true
-    : data?.scheduleRuntimeStatus === "live" && effectiveTiming?.stageStatus === "live";
+  //
+  //
+  // One accepted timing snapshot = one correction, and the correction is
+  // (serverNow - the instant THAT serverNow was received). Pairing one
+  // snapshot's serverNow with another snapshot's receipt instant invents skew
+  // out of the delta between two reads, so the pair follows whichever leg won
+  // the merge above: the runtime snapshot stamps its own receipt here, and the
+  // bootstrap leg's stamp is snapshotReceivedAt (set exactly when this
+  // controller accepted the payload carrying its serverNow).
+  const runtimeServerNow = runtimeTiming?.serverNow ?? null;
+  const runtimeTimingReceiptRef = useRef<{ serverNow: string | null; receivedAt: number }>({
+    serverNow: null,
+    receivedAt: 0,
+  });
+  if (runtimeServerNow !== null && runtimeServerNow !== runtimeTimingReceiptRef.current.serverNow) {
+    runtimeTimingReceiptRef.current = { serverNow: runtimeServerNow, receivedAt: Date.now() };
+  }
+  const effectiveTimingReceivedAt =
+    runtimeServerNow !== null && effectiveTiming?.serverNow === runtimeServerNow
+      ? runtimeTimingReceiptRef.current.receivedAt || snapshotReceivedAt
+      : snapshotReceivedAt;
+  const serverClockOffsetMs = satClockOffsetMs(
+    effectiveTiming?.serverNow ?? null,
+    effectiveTimingReceivedAt,
+  );
+  const cohortStageRunning = satPersonalClockRunning({
+    timingModel: effectiveTiming?.timingModel,
+    runtimeStatus: data?.scheduleRuntimeStatus,
+    stageStatus: effectiveTiming?.stageStatus,
+  });
+  // Null (never 0) when this frame carries no module attempt: a missing row is
+  // "no module identity yet", and a 0 would both display 0:00 for a module that
+  // has not hydrated and arm the expiry on it. The countdown rule reads an
+  // absent personal clock as "use the section clock alone".
   const personalModuleRemainingSeconds = stateModuleAttempt
     ? personalModuleCountdown(stateModuleAttempt, snapshotReceivedAt, now, serverClockOffsetMs, cohortStageRunning)
-    : 0;
-  // D2: min(personal, section) is the STUDENT-FACING allotment only. The
-  // server's section clock is the sole expiry authority — a module past its
-  // personal clock is not force-closed while its section is live, so this
-  // minimum never has to agree with a server-side deadline.
-  // A section-keyed cohort model publishes one clock for the whole section, so
-  // the student's allotment is min(their module, the section) — but only while
-  // the published stage is the section they are actually in. A stage-keyed
-  // cohort model already publishes the running module's own clock.
-  const remainingSeconds = effectiveTiming && isSectionKeyedCohortModel(effectiveTiming.timingModel)
-    ? stateSection && effectiveTiming.stageKey === stateSection.sectionKey
-      ? Math.min(personalModuleRemainingSeconds, authoritativeRemainingSeconds)
-      : 0
-    : isCohortTimingModel(effectiveTiming?.timingModel)
-      ? authoritativeRemainingSeconds
-      : personalModuleRemainingSeconds;
+    : null;
+  // Clock contract: the student reads the MODULE's own allotment, capped by the
+  // shared section clock (min of the two). A candidate sits Module 1 plus
+  // exactly one Module 2, so the section length is M1 + one branch and the two
+  // anchors meet in a normal run; the section clock is what stops a late
+  // arrival or a stalled device from outliving the section. Expiry is the same
+  // pair, and the server backstop closes on it too
+  // (delivery.reconcileCohortSectionExpiredTx). The legacy model has no shared
+  // clock, so its personal clock is both. SAT-003 policy lives in
+  // application/satTimingPolicy.ts: display is what the student reads, expiry is
+  // the only clock allowed to close the module.
+  const { displaySeconds: remainingSeconds, expirySeconds: expiryRemainingSeconds } = satCountdown({
+    timingModel: effectiveTiming?.timingModel,
+    stageKey: effectiveTiming?.stageKey ?? null,
+    sectionKey: stateSection?.sectionKey ?? null,
+    personalSeconds: personalModuleRemainingSeconds,
+    authoritativeSeconds: authoritativeRemainingSeconds,
+  });
 
   const saveContext = useCallback(
     (interactionType: "typing" | "discrete") => {
@@ -1222,13 +1345,17 @@ export function useSatExamController({
     ) {
       return;
     }
-    // Phase 04 skew guard: a skew frame that looks like 0 (missing attempt
-    // resolves through the personal-countdown fallback) must neither submit
+    // Phase 04 skew guard: a skew frame that looks like 0 (a missing attempt
+    // resolves through the section-clock fallback) must neither submit
     // nor consume timeoutSubmissionKeyRef — submit fires only from a
     // resolved frame. Key stays moduleId:attemptId-scoped, exactly once.
     if (!data || !findAttemptForModule(data, stateModule.id)) return;
     const key = `${stateModule.id}:${stateModuleAttempt.id}`;
-    if (remainingSeconds > 0) {
+    // SAT-003: expiry is judged on the authoritative clock only. A null
+    // expiry means this frame has no authority for the module yet (mismatched
+    // cohort stage) — keep the timeout inert rather than trusting the
+    // student-facing allotment.
+    if (expiryRemainingSeconds === null || expiryRemainingSeconds > 0) {
       if (timeoutSubmissionKeyRef.current !== key) timeoutSubmissionKeyRef.current = null;
       return;
     }
@@ -1236,7 +1363,7 @@ export function useSatExamController({
     timeoutSubmissionKeyRef.current = key;
     setAutoSubmitted(true);
     void submitModule(stateModule.id);
-  }, [data, remainingSeconds, state.phase, stateModule, stateModuleAttempt, submitModule]);
+  }, [data, expiryRemainingSeconds, state.phase, stateModule, stateModuleAttempt, submitModule]);
 
   // Phase 04 commit-first / reconciler-second: the poll commit dispatches
   // showDirections synchronously when it carries the finalized predicate;
@@ -1266,57 +1393,72 @@ export function useSatExamController({
     [state]
   );
 
+  // Audit finding 3: every response mutation runs through the domain mutator,
+  // and the reducer receives EXACTLY the object that is handed to persistence.
+  // Deriving the persisted draft separately let `answer` stay inside
+  // `eliminatedOptionIds` on the wire while the screen showed it restored.
+  const commitResponseChange = useCallback(
+    (
+      questionId: string,
+      change: SatResponseDraftChange,
+      interactionType: "typing" | "discrete"
+    ): SatQuestionResponseDraft | null => {
+      const current = currentResponse(questionId);
+      if (!current) return null;
+      const next = applySatResponseDraftChange(current, change);
+      dispatch({ type: "replaceResponse", response: next });
+      persistence.save(next, saveContext(interactionType));
+      return next;
+    },
+    [currentResponse, persistence, saveContext]
+  );
+
   const setAnswer = useCallback(
     (questionId: string, answer: string) => {
-      const current = currentResponse(questionId);
-      if (!current) return;
-      const next = { ...current, answer };
       const question = stateModule?.questions.find(
         (candidate) => candidate.examQuestionId === questionId
       );
       const interactionType =
         question?.questionType === "student_produced_response" ? "typing" : "discrete";
-      dispatch({ type: "setAnswer", questionId, value: answer });
-      persistence.save(next, saveContext(interactionType));
+      commitResponseChange(questionId, { kind: "setAnswer", answer }, interactionType);
     },
-    [currentResponse, persistence, saveContext, stateModule]
+    [commitResponseChange, stateModule]
   );
 
   const toggleReview = useCallback(
     (questionId: string) => {
       const current = currentResponse(questionId);
       if (!current) return;
-      const next = { ...current, markedForReview: !current.markedForReview };
-      dispatch({ type: "setReviewFlag", questionId, flagged: next.markedForReview });
-      persistence.save(next, saveContext("discrete"));
+      commitResponseChange(
+        questionId,
+        { kind: "setReviewFlag", markedForReview: !current.markedForReview },
+        "discrete"
+      );
     },
-    [currentResponse, persistence, saveContext]
+    [commitResponseChange, currentResponse]
   );
 
   const toggleEliminatedOption = useCallback(
     (questionId: string, optionId: string) => {
-      const current = currentResponse(questionId);
-      if (!current) return;
-      const eliminatedOptionIds = current.eliminatedOptionIds.includes(optionId)
-        ? current.eliminatedOptionIds.filter((candidate) => candidate !== optionId)
-        : [...current.eliminatedOptionIds, optionId];
-      const next = { ...current, eliminatedOptionIds };
-      dispatch({ type: "toggleEliminatedOption", questionId, optionId });
-      persistence.save(next, saveContext("discrete"));
+      commitResponseChange(questionId, { kind: "toggleEliminatedOption", optionId }, "discrete");
     },
-    [currentResponse, persistence, saveContext]
+    [commitResponseChange]
   );
 
   const setAnnotationNote = useCallback(
     (questionId: string, note: string) => {
       const current = currentResponse(questionId);
       if (!current) return;
-      const annotations = { ...current.annotations, legacyQuestionNote: note.slice(0, 2_000) };
-      const next = { ...current, annotations };
-      dispatch({ type: "setAnnotations", questionId, annotations });
-      persistence.save(next, saveContext("typing"));
+      commitResponseChange(
+        questionId,
+        {
+          kind: "setAnnotations",
+          annotations: { ...current.annotations, legacyQuestionNote: note.slice(0, 2_000) },
+        },
+        "typing"
+      );
     },
-    [currentResponse, persistence, saveContext]
+    [commitResponseChange, currentResponse]
   );
 
   const setAnnotations = useCallback((questionId: string, annotations: SatQuestionAnnotations) => {
@@ -1358,6 +1500,10 @@ export function useSatExamController({
     pendingSectionWaitSeconds,
     pendingStageReady,
     autoEntryRecoverable: entrySurface.recoverable,
+    // True while the automatic entry path owns the pending module; the
+    // directions screen keeps its Start button recovery-only only then, so a
+    // branch module nobody will auto-start keeps a working button.
+    entryAutoStartPending: entryDecision.autoStartPending,
     effectiveTiming,
     stateModule,
     stateModuleAttempt,
@@ -1367,6 +1513,10 @@ export function useSatExamController({
     warning,
     autoSubmitted,
     answersRecorded,
+    // Exam-screen integrity hold: present once the student returns from a
+    // visibility excursion, cleared only by acknowledging it.
+    pendingTabSwitchWarning: satIntegrity.pendingTabSwitchWarning,
+    acknowledgeTabSwitchWarning: satIntegrity.acknowledgeTabSwitchWarning,
     showAlmostUp: remainingSeconds <= 60 && remainingSeconds > 0 && (state.phase === "module" || state.phase === "review"),
     persistence,
     /** Phase 04 test seam: atomic poll-hint commit (see commitForTest). */

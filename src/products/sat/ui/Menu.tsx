@@ -72,11 +72,14 @@ type SatMenuProps = {
 const MENU_ELEVATION =
   'var(--sat-staff-shadow-menu, 0 0 0 0.5px rgba(0, 0, 0, 0.055), 0 2px 8px rgba(0, 0, 0, 0.055), 0 14px 44px rgba(0, 0, 0, 0.14))';
 
+// Both triggers carry the shared press vocabulary: a menu trigger that does
+// not move under the pointer reads as a dead control, especially the compact
+// icon-only form used by every list row.
 const COMPACT_TRIGGER_CLASS =
-  'flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
+  'sat-press sat-press-fill flex h-10 w-10 items-center justify-center rounded-[var(--sat-staff-radius-control,10px)] text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
 
 const WORKSPACE_TRIGGER_CLASS =
-  'flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-input,12px)] px-3 text-left transition-colors hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]';
+  'sat-press sat-press-fill flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-input,12px)] px-3 text-left hover:bg-[var(--sat-staff-fill,rgba(120,120,128,0.08))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent,#0071e3)]';
 
 function supportsNativeMenu(): boolean {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function';

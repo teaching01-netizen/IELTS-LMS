@@ -46,7 +46,10 @@ vi.mock("../useSatResponsePersistence", () => ({
   useSatResponsePersistence: () => persistenceMock,
 }));
 vi.mock("../useSatIntegrityControl", () => ({
-  useSatIntegrityControl: () => undefined,
+  useSatIntegrityControl: () => ({
+    pendingTabSwitchWarning: null,
+    acknowledgeTabSwitchWarning: () => undefined,
+  }),
 }));
 
 function deferred<T>() {

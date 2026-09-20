@@ -30,6 +30,7 @@ function liveLink(overrides: Partial<PublicStudentAccessLink> = {}): PublicStude
     providerKey: 'sat',
     versionNumber: 4,
     name: 'Saturday Class',
+    enabledSections: null,
     audienceType: 'anyone',
     audienceLabel: null,
     accessMode: 'open',
@@ -290,5 +291,21 @@ describe('StudentAccessLinkEntryRoute', () => {
     expect(screen.getByRole('heading', { name: "This exam isn’t open yet" })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Continue/i })).not.toBeInTheDocument();
     expect(mocks.studentEntry).not.toHaveBeenCalled();
+  });
+
+  it('states a narrowed section scope on the entry card before the student commits', () => {
+    mocks.link = liveLink({ enabledSections: ['reading-writing'] });
+    renderRoute();
+
+    expect(
+      screen.getByText(/You'll take Reading & Writing only\. The exam ends after that section\./),
+    ).toBeInTheDocument();
+  });
+
+  it('says nothing about sections for an unscoped link', () => {
+    mocks.link = liveLink({ enabledSections: null });
+    renderRoute();
+
+    expect(screen.queryByText(/The exam ends after that section/)).not.toBeInTheDocument();
   });
 });

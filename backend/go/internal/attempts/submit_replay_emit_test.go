@@ -48,7 +48,7 @@ func TestSubmitReplayEmitsOnce(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"submission_id", "request_hash", "final_response_digest", "receipt_json", "submitted_at"}).
 			AddRow("sub-1", reqHash, "digest-1", `{}`, now))
 	mock.ExpectCommit()
-	res, err := svc.Submit(context.Background(), bearer, cmd, qr, rl, ProviderIELTS, nil)
+	res, err := svc.Submit(context.Background(), bearer, cmd, qr, rl, providerStub(ProviderIELTS), nil)
 	if err != nil {
 		t.Fatalf("replay submit: %v", err)
 	}

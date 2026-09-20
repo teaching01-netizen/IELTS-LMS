@@ -1,6 +1,10 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { createSatReadingPreferences } from "../domain/satReadingPreferences";
+import {
+  SAT_EXAM_ZOOM_MAX,
+  SAT_EXAM_ZOOM_MIN,
+  createSatReadingPreferences,
+} from "../domain/satReadingPreferences";
 import { createSatTextAnnotation, emptySatAnnotations } from "../domain/satResponses";
 import { SatExamShell, type SatExamShellProps } from "./SatExamShell";
 import { useSatNotesSurface } from "./annotations/SatNotesSurfaceContext";
@@ -253,16 +257,14 @@ describe("SatExamShell", () => {
     expect(screen.getByRole('button', { name: /^Highlights & Notes/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: /^Notes/ })).toBeDisabled();
   });
-  it("shows SAT timer/tools with a quiet persistent save token (Phase 6f)", () => {
+  it("shows SAT timer/tools with no save chrome anywhere in the shell", () => {
     render(<SatExamShell {...props()} />);
     expect(screen.getByText("34:58")).toBeInTheDocument();
     expect(screen.getByText("Ada Candidate")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Calculator" })).toBeInTheDocument();
-    // Phase 6f: status lives next to the hand as a quiet token (not a
-    // transient overlay, not a loud badge) — Saved at idle, no live region.
-    const indicator = screen.getByTestId("sat-footer-save-indicator");
-    expect(indicator).toHaveAttribute("data-sat-save-state", "idle");
-    expect(indicator).toHaveTextContent("All answers saved");
+    // Healthy persistence is invisible: no footer token and no banner.
+    expect(screen.queryByTestId("sat-footer-save-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sat-save-status")).not.toBeInTheDocument();
   });
 
   it("opens Display settings and emits presentation-only preference changes", () => {
@@ -278,6 +280,72 @@ describe("SatExamShell", () => {
       lineSpacing: "standard",
       splitRatio: 0.5,
     });
+  });
+
+  it("draws real minus glyphs in Display, never the raw escape text", () => {
+    render(<SatExamShell {...props()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    const dialog = screen.getByRole("dialog", { name: "Display" });
+    expect(within(dialog).getByRole("button", { name: "Decrease text size" }).textContent).toBe(
+      "A\u2212"
+    );
+    expect(within(dialog).getByRole("button", { name: "Decrease screen zoom" }).textContent).toBe(
+      "\u2212"
+    );
+    expect(dialog.textContent).not.toContain("\\u2212");
+  });
+
+  it("steps screen zoom below 100% and stops at the 50% floor and 200% ceiling", () => {
+    const onReadingPreferencesChange = vi.fn();
+    render(<SatExamShell {...props({ onReadingPreferencesChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    const zoomSection = within(screen.getByRole("dialog", { name: "Display" })).getByRole(
+      "region",
+      { name: "Screen zoom" }
+    );
+    expect(within(zoomSection).getByText("100%")).toBeInTheDocument();
+    fireEvent.click(within(zoomSection).getByRole("button", { name: "Decrease screen zoom" }));
+    expect(onReadingPreferencesChange).toHaveBeenCalledWith(
+      expect.objectContaining({ examZoom: 0.75 })
+    );
+  });
+
+  it("disables screen zoom decrease at 50% and increase at 200%", () => {
+    const { rerender } = render(
+      <SatExamShell
+        {...props({
+          readingPreferences: { ...createSatReadingPreferences(), examZoom: SAT_EXAM_ZOOM_MIN },
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    let zoomSection = within(screen.getByRole("dialog", { name: "Display" })).getByRole(
+      "region",
+      { name: "Screen zoom" }
+    );
+    expect(within(zoomSection).getByText("50%")).toBeInTheDocument();
+    expect(within(zoomSection).getByRole("button", { name: "Decrease screen zoom" })).toBeDisabled();
+    expect(
+      within(zoomSection).getByRole("button", { name: "Increase screen zoom" })
+    ).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close display settings" }));
+    rerender(
+      <SatExamShell
+        {...props({
+          readingPreferences: { ...createSatReadingPreferences(), examZoom: SAT_EXAM_ZOOM_MAX },
+        })}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+    zoomSection = within(screen.getByRole("dialog", { name: "Display" })).getByRole("region", {
+      name: "Screen zoom",
+    });
+    expect(within(zoomSection).getByText("200%")).toBeInTheDocument();
+    expect(within(zoomSection).getByRole("button", { name: "Increase screen zoom" })).toBeDisabled();
+    expect(
+      within(zoomSection).getByRole("button", { name: "Decrease screen zoom" })
+    ).toBeEnabled();
   });
 
   it("does not render calculator controls when the module policy excludes them", () => {
@@ -316,14 +384,22 @@ describe("SatExamShell", () => {
     expect(screen.queryByText("34:58")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show timer" })).toBeInTheDocument();
   });
-  it("announces routine saving once through a single polite status region", () => {
+  it("never announces routine saving", () => {
     render(<SatExamShell {...props({ saveState: "saving" })} />);
     const statuses = screen.getAllByRole("status");
-    // Exactly one save-status region (the timer announcer is the only other
-    // status, and it stays empty outside threshold crossings).
+    // No save-status region at all: the timer announcer is the only status,
+    // and it stays empty outside threshold crossings.
     const saveStatuses = statuses.filter((node) => node.hasAttribute("data-sat-save-state"));
-    expect(saveStatuses).toHaveLength(1);
-    expect(saveStatuses[0]).toHaveTextContent("Saving…");
+    expect(saveStatuses).toHaveLength(0);
+  });
+
+  it("surfaces a genuine save failure with its recovery action", () => {
+    const onRetrySave = vi.fn();
+    render(<SatExamShell {...props({ saveState: "failed", onRetrySave })} />);
+    const banner = screen.getByTestId("sat-save-status");
+    expect(banner).toHaveAttribute("role", "alert");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetrySave).toHaveBeenCalledOnce();
   });
 
   it("auto-reveals a hidden timer once at the 5-minute threshold and lets it hide again", () => {

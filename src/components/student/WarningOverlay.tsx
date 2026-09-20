@@ -7,6 +7,12 @@ interface WarningOverlayProps {
   isOpen: boolean;
   severity: 'medium' | 'high' | 'critical';
   message: string;
+  /**
+   * Overrides the severity-derived heading. Integrity warnings name the rule
+   * the student has to follow ("Stay on the exam screen") instead of a generic
+   * severity label, because the student cannot act on "ATTENTION".
+   */
+  title?: string;
   onAcknowledge: () => void;
   appearance?: 'default' | 'blackout';
   actionButton?: {
@@ -20,6 +26,7 @@ export function WarningOverlay({
   isOpen,
   severity,
   message,
+  title,
   onAcknowledge,
   appearance = 'default',
   actionButton,
@@ -152,7 +159,7 @@ export function WarningOverlay({
           <div className="mb-6">{config.icon}</div>
           
           <h2 id="warning-overlay-title" className={`text-2xl md:text-3xl font-bold mb-5 tracking-tight ${config.text}`}>
-            {config.title}
+            {title ?? config.title}
           </h2>
           
           <div className="bg-white/70 rounded-lg p-6 mb-8 border border-black/5">

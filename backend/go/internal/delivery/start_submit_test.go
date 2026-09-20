@@ -82,6 +82,10 @@ func deliveryLegacyGate(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnError(sql.ErrNoRows)
+	// SAT-006: the legacy gate reads the authoritative in-tx DB time after
+	// the module lock (no runtime row to lock).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 }
 
 func deliveryMaxRevision(mock sqlmock.Sqlmock, rev int64) {
@@ -96,10 +100,27 @@ func deliveryBusInsert(mock sqlmock.Sqlmock, kind, target, name string, rev int6
 		WillReturnResult(sqlmock.NewResult(1, 1))
 }
 
+// deliveryUnscopedLink stages the Student Access scope read as "no link" — the
+// schedule-scoped read used by Bootstrap/assembleBootstrap.
+func deliveryUnscopedLink(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ?")).
+		WithArgs("sched-1").
+		WillReturnError(sql.ErrNoRows)
+}
+
+// deliveryUnscopedAttemptLink stages the attempt-scoped scope read as "no
+// link" — the read nextModuleTx uses to skip sections a narrowed link dropped.
+func deliveryUnscopedAttemptLink(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT l.enabled_sections FROM assessment_access_links l JOIN student_attempts a")).
+		WithArgs("att-1").
+		WillReturnError(sql.ErrNoRows)
+}
+
 func deliveryBootstrapLoads(mock sqlmock.Sqlmock, at time.Time) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_sections WHERE exam_version_id")).
 		WithArgs("pv-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "instructions"}))
+	deliveryUnscopedLink(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_module_attempts WHERE attempt_id = ?")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("ma-1"))

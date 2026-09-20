@@ -9,6 +9,12 @@ export interface PublicStudentAccessLink {
   providerKey: string;
   versionNumber: number;
   name: string;
+  /**
+   * The sections this link admits, or null for every section the published
+   * version enables. A scoped link ends the exam after its last section, so the
+   * entry card has to say so before the student commits.
+   */
+  enabledSections: readonly string[] | null;
   audienceType: StudentAudienceType;
   audienceLabel: string | null;
   accessMode: StudentAccessMode;

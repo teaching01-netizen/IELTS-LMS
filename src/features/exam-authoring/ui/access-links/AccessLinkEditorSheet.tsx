@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, Link2, LockKeyhole, Users, X } from "lucide-react";
-import type {
-  AccessLinkAudienceType,
-  AccessLinkAvailabilityType,
-  AccessLinkMemberInput,
-  AccessLinkMode,
-  AssessmentAccessLink,
-  CreateAssessmentAccessLinkRequest,
-  UpdateAssessmentAccessLinkRequest,
+import {
+  ACCESS_LINK_SECTION_KEYS,
+  ACCESS_LINK_SECTION_LABELS,
+  accessLinkSectionRequest,
+  accessLinkSectionsChanged,
+  selectedAccessLinkSections,
+  type AccessLinkAudienceType,
+  type AccessLinkAvailabilityType,
+  type AccessLinkMemberInput,
+  type AccessLinkMode,
+  type AccessLinkSectionKey,
+  type AssessmentAccessLink,
+  type CreateAssessmentAccessLinkRequest,
+  type UpdateAssessmentAccessLinkRequest,
 } from "../../contracts/accessLinks";
 import { copyText, localDateTimeToIso, parseAccessLinkMembers, serializeAccessLinkMembers, toLocalDateTimeInput } from "./accessLinkUi";
 import { describeRosterResult, rosterTemplate, validateRosterSource } from "./rosterValidation";
@@ -18,6 +24,11 @@ import { useSatAuthoringCollaboration } from "../../realtime/coedit";
 interface AccessLinkEditorSheetProps {
   open: boolean;
   link: AssessmentAccessLink | null;
+  /**
+   * The exam's provider, for a NEW link (an existing link carries its own
+   * providerKey). The section toggles are SAT-only.
+   */
+  providerKey?: string | null;
   members: readonly AccessLinkMemberInput[];
   isSaving: boolean;
   onClose: () => void;
@@ -50,11 +61,15 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   const [availabilityType, setAvailabilityType] = useState<AccessLinkAvailabilityType>("anytime");
   const [opensAt, setOpensAt] = useState(defaults.opensAt);
   const [closesAt, setClosesAt] = useState(defaults.closesAt);
+  // Both sections by default: a new link is unscoped (stored NULL), which is
+  // what every link created before this feature holds.
+  const [sections, setSections] = useState<AccessLinkSectionKey[]>([...ACCESS_LINK_SECTION_KEYS]);
   const [membersSource, setMembersSource] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [audienceError, setAudienceError] = useState<string | null>(null);
   const [windowError, setWindowError] = useState<string | null>(null);
+  const [sectionsError, setSectionsError] = useState<string | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
@@ -74,6 +89,11 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       collaboration.status !== "disabled" &&
       (collaboration.workspaceSnapshot.readOnly || collaboration.lifecyclePhase !== "active"),
   );
+  // Section scope is SAT-only, and it freezes at the first student: runtime
+  // sections are built at proctor start, so a later edit either does nothing to
+  // that run or silently changes the sitting a registered student expected.
+  const isSat = (props.link?.providerKey ?? props.providerKey) === "sat";
+  const sectionsLocked = Boolean(props.link?.hasParticipation);
 
   const updateShared = (patch: Record<string, unknown>) => {
     if (!props.link || readOnly) return;
@@ -96,6 +116,18 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     if (value["availabilityType"] === "scheduled" || value["availabilityType"] === "anytime") setAvailabilityType(value["availabilityType"]);
     if (typeof value["opensAt"] === "string" || value["opensAt"] === null) setOpensAt(value["opensAt"] ? toLocalDateTimeInput(value["opensAt"] as string) : defaults.opensAt);
     if (typeof value["closesAt"] === "string" || value["closesAt"] === null) setClosesAt(value["closesAt"] ? toLocalDateTimeInput(value["closesAt"] as string) : defaults.closesAt);
+    // A malformed scope from another tab (or an older client) must hydrate
+    // safely: anything that is not a string array falls back to "both".
+    const sharedSections = value["enabledSections"];
+    if (sharedSections === null || Array.isArray(sharedSections)) {
+      setSections(
+        selectedAccessLinkSections(
+          Array.isArray(sharedSections)
+            ? sharedSections.filter((entry): entry is string => typeof entry === "string")
+            : null,
+        ),
+      );
+    }
     if (typeof value["membersSource"] === "string") setMembersSource(value["membersSource"]);
   }, [defaults.closesAt, defaults.opensAt, props.link, props.open, selfId, sharedLink, sharedLinkSignature]);
 
@@ -113,6 +145,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     const nextAvailabilityType = link?.availabilityType ?? "anytime";
     const nextOpensAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.opensAt) : defaults.opensAt;
     const nextClosesAt = link?.availabilityType === "scheduled" ? toLocalDateTimeInput(link.closesAt) : defaults.closesAt;
+    const nextSections = selectedAccessLinkSections(link?.enabledSections);
     const nextMembersSource = serializeAccessLinkMembers(props.members);
     setName(nextName);
     setAudienceType(nextAudienceType);
@@ -121,11 +154,13 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     setAvailabilityType(nextAvailabilityType);
     setOpensAt(nextOpensAt);
     setClosesAt(nextClosesAt);
+    setSections(nextSections);
     setMembersSource(nextMembersSource);
     setError(null);
     setNameError(null);
     setAudienceError(null);
     setWindowError(null);
+    setSectionsError(null);
     setRosterError(null);
     initialSnapshotRef.current = editorSnapshot(
       nextName,
@@ -135,6 +170,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       nextAvailabilityType,
       nextOpensAt,
       nextClosesAt,
+      nextSections,
       nextMembersSource,
     );
     hydratingRef.current = true;
@@ -156,6 +192,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
         availabilityType,
         opensAt,
         closesAt,
+        sections,
         membersSource,
       ) !== initialSnapshotRef.current,
     );
@@ -169,6 +206,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     name,
     opensAt,
     props.open,
+    sections,
   ]);
 
   const validateName = (value: string): string | null => {
@@ -186,6 +224,20 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     if (!scheduledOpensAt || !scheduledClosesAt) return "Choose both an opening and closing time.";
     if (new Date(scheduledClosesAt) <= new Date(scheduledOpensAt)) return "Closing time must be after opening time.";
     return null;
+  };
+  const validateSections = (selection: readonly AccessLinkSectionKey[]): string | null => {
+    if (!isSat) return null;
+    if (selection.length === 0) return "A Student Link needs at least one section.";
+    return null;
+  };
+  const toggleSection = (key: AccessLinkSectionKey) => {
+    if (sectionsLocked) return;
+    const next = sections.includes(key)
+      ? sections.filter((entry) => entry !== key)
+      : ACCESS_LINK_SECTION_KEYS.filter((entry) => entry === key || sections.includes(entry));
+    setSections(next);
+    updateShared({ enabledSections: accessLinkSectionRequest(next) ?? [] });
+    setSectionsError(validateSections(next));
   };
   const rosterResult = validateRosterSource(membersSource);
   const rosterSummary = audienceType === "selected_students" ? describeRosterResult(rosterResult) : "";
@@ -213,6 +265,12 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     return {
       revision: props.link.revision,
       name: name.trim(),
+      // Sent only when the scope actually changes: an omitted field keeps the
+      // stored scope, so an untouched editor can never clear (or fail to clear)
+      // a scope the link already has.
+      ...(accessLinkSectionsChanged(props.link.enabledSections, sections)
+        ? { enabledSections: accessLinkSectionRequest(sections) ?? [] }
+        : {}),
       audienceType,
       ...(audienceLabel.trim() ? { audienceLabel: audienceLabel.trim() } : { audienceLabel: null }),
       accessMode: audienceType === "selected_students" ? "student_code" : accessMode,
@@ -238,11 +296,13 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       const nextNameError = validateName(name);
       const nextAudienceError = validateAudienceLabel(audienceType, audienceLabel);
       const nextWindowError = validateWindow(availabilityType, opensAt, closesAt);
+      const nextSectionsError = validateSections(sections);
       const nextRosterError = audienceType === "selected_students" ? validateRoster(membersSource) : null;
-      if (nextNameError || nextAudienceError || nextWindowError || nextRosterError) {
+      if (nextNameError || nextAudienceError || nextWindowError || nextSectionsError || nextRosterError) {
         setNameError(nextNameError);
         setAudienceError(nextAudienceError);
         setWindowError(nextWindowError);
+        setSectionsError(nextSectionsError);
         setRosterError(nextRosterError);
         return;
       }
@@ -258,6 +318,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
             availabilityType,
             opensAt,
             closesAt,
+            sections,
             membersSource,
           );
           setIsDirty(false);
@@ -281,8 +342,10 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     opensAt,
     props,
     readOnly,
+    sections,
     selfId,
     validateRoster,
+    validateSections,
   ]);
 
   const submit = async () => {
@@ -291,12 +354,14 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     const nextNameError = validateName(name);
     const nextAudienceError = validateAudienceLabel(audienceType, audienceLabel);
     const nextWindowError = validateWindow(availabilityType, opensAt, closesAt);
+    const nextSectionsError = validateSections(sections);
     const nextRosterError = audienceType === "selected_students" ? validateRoster(membersSource) : null;
     setNameError(nextNameError);
     setAudienceError(nextAudienceError);
     setWindowError(nextWindowError);
+    setSectionsError(nextSectionsError);
     setRosterError(nextRosterError);
-    if (nextNameError ?? nextAudienceError ?? nextWindowError ?? nextRosterError) return;
+    if (nextNameError ?? nextAudienceError ?? nextWindowError ?? nextSectionsError ?? nextRosterError) return;
     const normalizedName = name.trim();
     let selectedStudents: AccessLinkMemberInput[] = [];
     if (audienceType === "selected_students") {
@@ -306,6 +371,13 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     const scheduledClosesAt = availabilityType === "scheduled" ? localDateTimeToIso(closesAt) : null;
     const shared = {
       name: normalizedName,
+      // Create always states the scope ([] = all sections, the stored NULL
+      // shape); update states it only when it changed.
+      ...(props.link
+        ? accessLinkSectionsChanged(props.link.enabledSections, sections)
+          ? { enabledSections: accessLinkSectionRequest(sections) ?? [] }
+          : {}
+        : { enabledSections: accessLinkSectionRequest(sections) ?? [] }),
       audienceType,
       ...(audienceLabel.trim() ? { audienceLabel: audienceLabel.trim() } : { audienceLabel: null }),
       accessMode: audienceType === "selected_students" ? "student_code" as const : accessMode,
@@ -388,7 +460,8 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                     <Segment active={accessMode === "open"} disabled={audienceType === "selected_students"} onClick={() => { setAccessMode("open"); updateShared({ accessMode: "open" }); }}>Name + email only</Segment>
                   </div>
                 </Field>
-                {audienceType === "selected_students" ? <Field label="Selected students" description="One student per line: code, name, email. Name and email are optional; code is required." error={rosterError} errorId="access-link-roster-error"><div className="mb-2 flex flex-wrap items-center gap-2"><button type="button" onClick={() => { const next = membersSource ? `${membersSource.trimEnd()}\nW123456, Jane Doe, jane@example.com` : rosterTemplate(); setMembersSource(next); updateShared({ membersSource: next }); setRosterError(null); }} className="flex min-h-9 items-center rounded-lg bg-au-fill px-3 text-[11px] font-semibold text-slate-600 hover:bg-au-fill-strong">Insert template</button><button type="button" onClick={() => { void copyRosterFormat(); }} className="flex min-h-9 items-center rounded-lg px-3 text-[11px] font-semibold text-slate-500 hover:bg-au-fill">Copy format</button><span role="status" aria-live="polite" className="text-[11px] font-medium text-slate-500">{rosterSummary}</span></div><textarea aria-label="Selected students" value={membersSource} onChange={(event) => { setMembersSource(event.target.value); updateShared({ membersSource: event.target.value }); if (rosterError) setRosterError(validateRoster(event.target.value)); }} onBlur={() => setRosterError(validateRoster(membersSource))} aria-invalid={rosterError ? true : undefined} aria-describedby={rosterError ? "access-link-roster-error access-link-roster-hint" : "access-link-roster-hint"} spellCheck={false} className="min-h-36 w-full resize-y rounded-xl border border-au-separator bg-au-surface px-3 py-2.5 font-mono text-[12px] leading-5 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10" placeholder={'W123456, Jane Doe, jane@example.com\nW123457, John Doe, john@example.com'} /><p id="access-link-roster-hint" className="mt-1.5 text-[11px] leading-4 text-slate-500">Codes must be unique. Email is optional but must look like name@example.com.</p>{rosterRowErrors.length ? <ul className="mt-2 space-y-1" aria-label="Roster issues">{rosterRowErrors.map((issue) => <li key={issue.row} className="text-[11px] font-medium text-au-danger-text">Row {issue.row}: {issue.message.replace(/^Row \d+[:\s]*/, "")}</li>)}{rosterResult.errors.length > rosterRowErrors.length ? <li className="text-[11px] text-slate-500">+{rosterResult.errors.length - rosterRowErrors.length} more — fix these first, then review the rest.</li> : null}</ul> : null}</Field> : null}
+                {isSat ? <Field label="Sections" description={sectionsLocked ? "Sections are fixed once a student has joined this Student Link. Duplicate it to change the scope." : "Choose which sections students take through this link. The exam ends after the last one."} error={sectionsError} errorId="access-link-sections-error"><div className="grid grid-cols-2 gap-2">{ACCESS_LINK_SECTION_KEYS.map((key) => <SectionToggle key={key} label={ACCESS_LINK_SECTION_LABELS[key]} active={sections.includes(key)} locked={sectionsLocked} onToggle={() => toggleSection(key)} />)}</div><p className="mt-2 text-[11px] leading-4 text-slate-500">{sectionsSummary(sections, sectionsLocked)}</p></Field> : null}
+                {audienceType === "selected_students" ? <Field label="Selected students" description="One student per line: code, name, email. Name and email are optional; code is required." error={rosterError} errorId="access-link-roster-error"><div className="mb-2 flex flex-wrap items-center gap-2"><button type="button" onClick={() => { const next = membersSource ? `${membersSource.trimEnd()}\nW123456, Jane Doe, jane@example.com` : rosterTemplate(); setMembersSource(next); updateShared({ membersSource: next }); setRosterError(null); }} className="sat-press sat-press-fill flex min-h-9 items-center rounded-lg bg-au-fill px-3 text-[11px] font-semibold text-slate-600 hover:bg-au-fill-strong">Insert template</button><button type="button" onClick={() => { void copyRosterFormat(); }} className="sat-press sat-press-fill flex min-h-9 items-center rounded-lg px-3 text-[11px] font-semibold text-slate-500 hover:bg-au-fill">Copy format</button><span role="status" aria-live="polite" className="text-[11px] font-medium text-slate-500">{rosterSummary}</span></div><textarea aria-label="Selected students" value={membersSource} onChange={(event) => { setMembersSource(event.target.value); updateShared({ membersSource: event.target.value }); if (rosterError) setRosterError(validateRoster(event.target.value)); }} onBlur={() => setRosterError(validateRoster(membersSource))} aria-invalid={rosterError ? true : undefined} aria-describedby={rosterError ? "access-link-roster-error access-link-roster-hint" : "access-link-roster-hint"} spellCheck={false} className="min-h-36 w-full resize-y rounded-xl border border-au-separator bg-au-surface px-3 py-2.5 font-mono text-[12px] leading-5 outline-none focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10" placeholder={'W123456, Jane Doe, jane@example.com\nW123457, John Doe, john@example.com'} /><p id="access-link-roster-hint" className="mt-1.5 text-[11px] leading-4 text-slate-500">Codes must be unique. Email is optional but must look like name@example.com.</p>{rosterRowErrors.length ? <ul className="mt-2 space-y-1" aria-label="Roster issues">{rosterRowErrors.map((issue) => <li key={issue.row} className="text-[11px] font-medium text-au-danger-text">Row {issue.row}: {issue.message.replace(/^Row \d+[:\s]*/, "")}</li>)}{rosterResult.errors.length > rosterRowErrors.length ? <li className="text-[11px] text-slate-500">+{rosterResult.errors.length - rosterRowErrors.length} more — fix these first, then review the rest.</li> : null}</ul> : null}</Field> : null}
                 <Field label="When can students enter?">
                   <div className="grid grid-cols-2 gap-2">
                     <Choice active={availabilityType === "scheduled"} onClick={() => { setAvailabilityType("scheduled"); updateShared({ availabilityType: "scheduled" }); }} icon={<Clock3 size={15} aria-hidden="true"/>} title="Scheduled" subtitle="Set a window" />
@@ -400,7 +473,9 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
             </fieldset>
             <footer className="border-t border-au-separator px-5 py-4 authoring-glass">
               {error ? <p role="alert" className="mb-3 rounded-xl bg-au-danger-tint px-3 py-2 text-[11px] font-medium text-au-danger-text">{error}</p> : null}
-              <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="min-h-11 rounded-xl px-4 text-sm font-semibold text-slate-600 hover:bg-au-fill">Cancel</button><button type="button" onClick={() => void submit()} disabled={props.isSaving || readOnly} className="min-h-11 rounded-xl bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover disabled:opacity-45">{props.isSaving ? "Saving…" : readOnly ? "View only" : props.link ? "Save Changes" : "Create Link"}</button></div>
+              <div className="flex justify-end gap-2"><button type="button" onClick={requestClose} disabled={props.isSaving} className="sat-press sat-press-fill min-h-11 rounded-xl px-4 text-sm font-semibold text-slate-600 hover:bg-au-fill">Cancel</button>{/* The primary action keeps its own box while pending (min-w covers the
+                  longest label and the spinner) and stays enabled so the press is never
+                  cancelled by focus loss; the handler and aria-disabled own the guard. */}<button type="button" onClick={() => { if (props.isSaving) return; void submit(); }} disabled={readOnly} aria-busy={props.isSaving || undefined} aria-disabled={readOnly ? true : undefined} className="sat-press sat-press-fill-accent flex min-h-11 min-w-[8.5rem] items-center justify-center gap-2 rounded-xl bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover disabled:opacity-45">{props.isSaving ? <span aria-hidden="true" className="sat-spinner block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white/40 border-t-white" /> : null}{props.isSaving ? "Saving…" : readOnly ? "View only" : props.link ? "Save Changes" : "Create Link"}</button></div>
             </footer>
       </SheetContent>
       <AuthoringConfirmDialog
@@ -428,6 +503,7 @@ function editorSnapshot(
   availabilityType: AccessLinkAvailabilityType,
   opensAt: string,
   closesAt: string,
+  sections: readonly AccessLinkSectionKey[],
   membersSource: string,
 ): string {
   return JSON.stringify([
@@ -438,11 +514,34 @@ function editorSnapshot(
     availabilityType,
     opensAt,
     closesAt,
+    accessLinkSectionRequest(sections),
     membersSource,
   ]);
 }
 
 const inputClass = "h-11 w-full rounded-xl border border-au-separator bg-au-surface px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-au-accent/35 focus:ring-4 focus:ring-au-accent/10";
 function Field({ label, description, error, errorId, children }: { label: string; description?: string; error?: string | null; errorId?: string; children: React.ReactNode }) { return <section><div className="mb-2"><h3 className="text-[12px] font-semibold text-slate-800">{label}</h3>{description ? <p className="mt-0.5 text-[11px] leading-4 text-slate-500">{description}</p> : null}</div>{children}{error ? <p id={errorId} role="alert" className="mt-1.5 text-[11px] font-medium text-au-danger-text">{error}</p> : null}</section>; }
-function Choice({ active, onClick, icon, title, subtitle }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string }) { return <button type="button" aria-pressed={active} onClick={onClick} className={`min-h-[68px] rounded-xl border p-2.5 text-left transition ${active ? "border-au-accent/35 bg-au-accent-tint text-au-accent" : "border-au-separator bg-au-surface text-slate-600 hover:bg-au-fill"}`}><span className="flex items-center gap-1.5 text-[11px] font-semibold"><span aria-hidden="true">{icon}</span>{title}</span><span className="mt-1 block text-[10px] font-medium text-slate-500">{subtitle}</span></button>; }
-function Segment({ active, disabled, onClick, children }: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" disabled={disabled} aria-pressed={active} onClick={onClick} className={`flex min-h-11 flex-1 items-center justify-center rounded-lg px-2 text-[11px] font-semibold transition ${active ? "bg-au-surface text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"} disabled:opacity-35`}>{children}</button>; }
+function Choice({ active, onClick, icon, title, subtitle }: { active: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string }) { return <button type="button" aria-pressed={active} onClick={onClick} className={`sat-press sat-press-fill min-h-[68px] rounded-xl border p-2.5 text-left ${active ? "border-au-accent/35 bg-au-accent-tint text-au-accent" : "border-au-separator bg-au-surface text-slate-600 hover:bg-au-fill"}`}><span className="flex items-center gap-1.5 text-[11px] font-semibold"><span aria-hidden="true">{icon}</span>{title}</span><span className="mt-1 block text-[10px] font-medium text-slate-500">{subtitle}</span></button>; }
+/**
+ * One section toggle. A locked toggle stays visible (so the scope is legible)
+ * but disabled, mirroring how a revoked link's editor is presented.
+ */
+function SectionToggle({ label, active, locked, onToggle }: { label: string; active: boolean; locked: boolean; onToggle: () => void }) {
+  return <button type="button" aria-pressed={active} disabled={locked} onClick={onToggle} className={`sat-press sat-press-fill flex min-h-11 items-center justify-between rounded-xl border px-3 text-left text-[12px] font-semibold ${active ? "border-au-accent/35 bg-au-accent-tint text-au-accent" : "border-au-separator bg-au-surface text-slate-600 hover:bg-au-fill"} disabled:opacity-45`}><span>{label}</span><span aria-hidden="true">{active ? "On" : "Off"}</span></button>;
+}
+
+/** The one-line consequence of the current selection, including the score rule. */
+function sectionsSummary(selection: readonly AccessLinkSectionKey[], locked: boolean): string {
+  if (selection.length === 0) return "Pick at least one section before saving.";
+  const both = ACCESS_LINK_SECTION_KEYS.every((key) => selection.includes(key));
+  const base = both
+    ? "Students take both sections and receive a total score."
+    : `Students take ${sectionLabels(selection)} only, and the exam ends after that section. A one-section sitting reports its 200–800 section score with no total.`;
+  return locked ? `${base} The scope is locked now.` : base;
+}
+
+function sectionLabels(selection: readonly AccessLinkSectionKey[]): string {
+  return ACCESS_LINK_SECTION_KEYS.filter((key) => selection.includes(key)).map((key) => ACCESS_LINK_SECTION_LABELS[key]).join(" and ");
+}
+
+function Segment({ active, disabled, onClick, children }: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) { return <button type="button" disabled={disabled} aria-pressed={active} onClick={onClick} className={`sat-press sat-press-fill flex min-h-11 flex-1 items-center justify-center rounded-lg px-2 text-[11px] font-semibold ${active ? "bg-au-surface text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-800"} disabled:opacity-35`}>{children}</button>; }

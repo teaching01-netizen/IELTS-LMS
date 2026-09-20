@@ -61,22 +61,34 @@ function ProviderColorOverrideHarness() {
   );
 }
 
-describe('RichTextHighlighter user-select', () => {
-  it('sets userSelect:text when enabled=true', () => {
+describe('RichTextHighlighter user-select ownership', () => {
+  // The passage stays selectable, but NOT because this component says so: the
+  // declaration lives in the stylesheet, which is the only place that can also
+  // turn selection off for a locked exam on a touch device (index.css). An
+  // inline `user-select` here would outrank that rule on this element and leave
+  // the two contradicting each other. See StudentQuestionCalloutCss.test.ts for
+  // the stylesheet half.
+  it.each([true, false])('declares no inline user-select when enabled=%s', (enabled) => {
     const { container } = render(
       <RichTextHighlighter
         content="<p>Hello world</p>"
         contentType="html"
-        enabled
+        enabled={enabled}
       />,
     );
 
     const wrapper = container.firstElementChild as HTMLElement;
     expect(wrapper).not.toBeNull();
-    expect(wrapper.style.userSelect).toBe('text');
+    expect(wrapper.style.userSelect).toBe('');
+    expect(wrapper.style.getPropertyValue('-webkit-user-select')).toBe('');
   });
 
-  it('sets userSelect:text even when enabled=false so passage text remains selectable', () => {
+  it('declares no inline touch-action, so the stylesheet decides who owns the drag', () => {
+    // Pannable by default is what `auto` already means, and the default is the
+    // stylesheet's to keep: an inline value would outrank the exam-scoped rule
+    // that takes the drag for the app while a highlight tool is armed
+    // (`touch-action: none`, see index.css), which is exactly how a real browser
+    // came to steal the gesture and cancel the selection mid-drag.
     const { container } = render(
       <RichTextHighlighter
         content="<p>Hello world</p>"
@@ -87,21 +99,9 @@ describe('RichTextHighlighter user-select', () => {
 
     const wrapper = container.firstElementChild as HTMLElement;
     expect(wrapper).not.toBeNull();
-    expect(wrapper.style.userSelect).toBe('text');
-  });
-
-  it('sets touchAction:auto when enabled=false so touch text selection works in passage pane', () => {
-    const { container } = render(
-      <RichTextHighlighter
-        content="<p>Hello world</p>"
-        contentType="html"
-        enabled={false}
-      />,
-    );
-
-    const wrapper = container.firstElementChild as HTMLElement;
-    expect(wrapper).not.toBeNull();
-    expect(wrapper.style.touchAction).toBe('auto');
+    // Read off the attribute rather than `style.touchAction`: jsdom does not
+    // model that property, so it reports `undefined` for an unset declaration.
+    expect(wrapper.getAttribute('style') ?? '').not.toContain('touch-action');
   });
 
   it('keeps the same wrapper node across rerenders when enabled=false', () => {

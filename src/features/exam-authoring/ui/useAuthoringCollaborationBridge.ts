@@ -10,6 +10,7 @@ import type {
   UsePromptCoeditingResult,
   WorkspaceFieldBinding,
 } from "../realtime/coedit";
+import type { WorkspaceFieldHydration } from "./useWorkspaceProjectionWrites";
 
 /**
  * Placeholder binding used while a room is being opened: it renders the
@@ -38,7 +39,8 @@ const PENDING_PROMPT_COLLABORATION: RichComposerCollaboration = Object.freeze({
  *   - whether the open question counts as dirty for the realtime transport;
  *   - WHICH writer owns a field right now: the binding the composer receives,
  *     including the loading placeholder that keeps a soon-to-be-roomed prompt
- *     out of the legacy editor;
+ *     out of the legacy editor AND out of a room that has not been handed the
+ *     question yet;
  *   - the per-field binding lookup the spine calls for the open question.
  *
  * Not a place for transport, and not a place for the session or the presence
@@ -56,6 +58,23 @@ export interface AuthoringCollaborationBridgeInput {
   selectedExamQuestionId: string | null;
   /** `question/<examQuestionId>` for the open question, when one is selected. */
   workspaceQuestionPath: string | null;
+  /**
+   * Readiness of ONE editor's root, named relative to the open question.
+   *
+   * A connected room is not the same thing as a room holding a field, and this
+   * is the distinction the blank-editor bug hid in: the seed is a proposal the
+   * service arbitrates, so there is a real window in which the room has synced
+   * and the roots do not exist yet. A binding that claimed readiness inside that
+   * window mounted an editable, EMPTY collaborative editor over the question the
+   * author was looking at — the room's emptiness replacing HTTP content.
+   *
+   * Asked PER FIELD: gating every editor on the whole question meant one
+   * un-seeded optional root (a rationale nobody had written) held the prompt and
+   * all four choices in a pulse forever.
+   */
+  fieldHydration: (fieldPath: string) => WorkspaceFieldHydration;
+  /** Re-proposes the seeds for fields still waiting after a bounded failure. */
+  onRetryInitialization: () => void;
   /** The persistence owner's answer: does the open question have unsaved work? */
   hasPendingChanges: boolean;
 }
@@ -80,6 +99,8 @@ export function useAuthoringCollaborationBridge({
   workspaceCollaboration,
   selectedExamQuestionId,
   workspaceQuestionPath,
+  fieldHydration,
+  onRetryInitialization,
   hasPendingChanges,
 }: AuthoringCollaborationBridgeInput): AuthoringCollaborationBridge {
   const realtimeFlags = useMemo(
@@ -113,18 +134,41 @@ export function useAuthoringCollaborationBridge({
   // Y.Doc (the room seeds from the stored projection). A placeholder binding
   // keeps the composer on its non-editable loading surface until the real one
   // arrives; it carries no save truth and claims no ownership.
+  // One rule for "may this room's field be handed to an editor yet": the room
+  // must hold the question's canonical roots. A read-only binding is left as it
+  // is — a viewer cannot seed, so withholding its binding would only replace a
+  // real (if empty) room document with a permanent loading surface.
+  const hydrateBinding = useCallback(
+    (fieldPath: string, binding: WorkspaceFieldBinding): WorkspaceFieldBinding => {
+      if (binding.readOnly) return binding;
+      const hydration = fieldHydration(fieldPath);
+      if (hydration.state === "hydrated") return binding;
+      // A field the room refused to seed can never become ready by waiting, so
+      // it reports the failure and carries the retry the composer offers.
+      return {
+        ...binding,
+        ready: false,
+        initializationFailed: hydration.state === "failed",
+        // Carried even while the field is merely pending: a copy that was
+        // rejected before it was sent is worth saying immediately.
+        initializationReason: hydration.reason ?? undefined,
+        onRetryInitialization,
+      };
+    },
+    [fieldHydration, onRetryInitialization],
+  );
   const workspacePromptBinding = useMemo(() => {
     if (!workspaceCollaboration || !selectedExamQuestionId) return null;
     const binding = workspaceCollaboration.fieldBinding(
       `question/${selectedExamQuestionId}/prompt`
     );
     return (
-      binding ??
+      (binding ? hydrateBinding("prompt", binding) : null) ??
       (workspaceCollaboration.status === "preparing" || workspaceCollaboration.status === "error"
         ? PENDING_PROMPT_COLLABORATION
         : null)
     );
-  }, [selectedExamQuestionId, workspaceCollaboration]);
+  }, [hydrateBinding, selectedExamQuestionId, workspaceCollaboration]);
   const coeditBinding = workspaceUiActive
     ? null
     : (coedit.collaboration ??
@@ -143,9 +187,12 @@ export function useAuthoringCollaborationBridge({
   const workspaceFieldCollaboration = useCallback(
     (fieldPath: string) => {
       if (!workspaceCollaboration || !workspaceQuestionPath) return null;
-      return workspaceCollaboration.fieldBinding(`${workspaceQuestionPath}/${fieldPath}`);
+      const binding = workspaceCollaboration.fieldBinding(
+        `${workspaceQuestionPath}/${fieldPath}`
+      );
+      return binding ? hydrateBinding(fieldPath, binding) : null;
     },
-    [workspaceCollaboration, workspaceQuestionPath]
+    [hydrateBinding, workspaceCollaboration, workspaceQuestionPath]
   );
 
   return {

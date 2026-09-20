@@ -5,7 +5,11 @@ import {
   getStudentHighlightClassName,
   type StudentHighlightColor,
 } from './highlightPalette';
-import { MAX_HIGHLIGHT_RANGES } from './highlightV2Engine';
+import { MAX_HIGHLIGHT_RANGES, captureSurfaceRange, type HighlightSelectionV2 } from './highlightV2Engine';
+import { useStudentExamInteractionScope } from '@shared/ui/touch-selection/StudentExamInteractionScope';
+import { browserCaretResolver, useStudentTouchTextSelection } from '@shared/ui/touch-selection/useStudentTouchTextSelection';
+import { useStudentTouchSelectionDiagnostics } from '@shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
+import type { TouchSelectionRect } from '@shared/ui/touch-selection/touchSelectionRange';
 import { usePersistedHighlightRangesV2 } from './highlightV2Persistence';
 import { useHighlightSelectionManager } from './highlightSelectionManager';
 import { useHighlightSelectionPort } from './highlightSelectionPort';
@@ -34,6 +38,8 @@ interface UseHighlightSurfaceV2Result {
   renderedHtml: string;
   hint: string | null;
   announce: string;
+  /** Lines of an owned touch selection, painted by the surface itself. */
+  selectionRects: readonly TouchSelectionRect[];
 }
 
 export function useHighlightSurfaceV2({
@@ -49,6 +55,15 @@ export function useHighlightSurfaceV2({
   const instanceIdRef = useRef(`surface:${surfaceInstanceId}`);
   const manager = useHighlightSelectionManager();
   const selectionPort = useHighlightSelectionPort();
+  // WHO owns the selection gesture, which is not the same question as what to do
+  // with it (that is `toolMode`, below). Reading it from the session's declared
+  // scope rather than inferring it keeps authoring and preview on the platform's
+  // own selection without this hook having to recognize them.
+  const examScope = useStudentExamInteractionScope();
+  const diagnostics = useStudentTouchSelectionDiagnostics(containerRef, {
+    surface: `IELTS ${surfaceId}`, enabled: enabled && examScope.ownedTouchSelection && toolMode !== 'off',
+    ownedTouchSelection: examScope.ownedTouchSelection, toolModeOrAnnotationMode: toolMode,
+  });
   const activeSurfaceId = manager?.activeSurfaceId ?? null;
   const ownsGlobalSelection = !manager || activeSurfaceId === null || activeSurfaceId === instanceIdRef.current;
   const canonicalText = useMemo(() => extractCanonicalTextFromHtml(baseHtml), [baseHtml]);
@@ -69,33 +84,49 @@ export function useHighlightSurfaceV2({
     [baseHtml, ranges, resolvedClassForColor],
   );
 
-  const processCompletedSelection = useCallback(() => {
+  /**
+   * Apply a captured span, whoever captured it.
+   *
+   * The span is a span, so the browser's selection and the exam's owned touch
+   * range run the same command path — including the limit, the hint, and the
+   * screen-reader announcement, which a second implementation would drift from.
+   */
+  const applySelection = useCallback((selection: HighlightSelectionV2 | null) => {
     if (!enabled || toolMode === 'off' || !ownsGlobalSelection) return false;
     const container = containerRef.current;
-    if (!container) return false;
+    if (!container || !selection) return false;
 
-    const snapshot = selectionPort.readSelection(container);
-    if (!snapshot.selection) return false;
     manager?.claimSurface(instanceIdRef.current);
     setHint(null);
     if (toolMode === 'erase') {
-      setRanges(eraseHighlight(ranges, snapshot.selection));
+      setRanges(eraseHighlight(ranges, selection));
+      diagnostics?.record('mutation:erase', { mutationApplied: true });
       setAnnounce('Highlight erased.');
     } else {
-      const next = createHighlight(ranges, snapshot.selection, resolvedHighlightColor, MAX_HIGHLIGHT_RANGES);
+      const next = createHighlight(ranges, selection, resolvedHighlightColor, MAX_HIGHLIGHT_RANGES);
       if (next.limitReached) {
+        diagnostics?.record('mutation:limit', { mutationApplied: false });
         setHint('You reached the highlight limit for this text section.');
         setAnnounce('Highlight limit reached for this text section.');
         manager?.releaseSurface(instanceIdRef.current);
         return true;
       }
       setRanges(next.ranges);
+      diagnostics?.record('mutation:highlight', { mutationApplied: true });
       setAnnounce(`Highlighted with ${resolvedHighlightColor}.`);
     }
     selectionPort.clearSelection();
     manager?.releaseSurface(instanceIdRef.current);
     return true;
-  }, [enabled, manager, ownsGlobalSelection, ranges, resolvedHighlightColor, selectionPort, setRanges, toolMode]);
+  }, [diagnostics, enabled, manager, ownsGlobalSelection, ranges, resolvedHighlightColor, selectionPort, setRanges, toolMode]);
+
+  const processCompletedSelection = useCallback(() => {
+    if (!enabled || toolMode === 'off' || !ownsGlobalSelection) return false;
+    const container = containerRef.current;
+    if (!container) return false;
+
+    return applySelection(selectionPort.readSelection(container).selection);
+  }, [applySelection, enabled, ownsGlobalSelection, selectionPort, toolMode]);
 
   // S1-C9: Alt+H applies the highlight tool to the OS text selection inside
   // this surface (keyboard path for users who cannot drag-select). The
@@ -150,10 +181,51 @@ export function useHighlightSurfaceV2({
     manager?.releaseSurface(instanceIdRef.current);
   }, [manager]);
 
+  // Built once: a capability probe over `document`, not per-render state.
+  const resolveCaretAtPoint = useMemo(() => browserCaretResolver(document, diagnostics), [diagnostics]);
+
+  /**
+   * The owned gesture, for the sessions that declare one.
+   *
+   * Two gates, and they answer different questions. The session's scope says WHO
+   * owns the selection gesture — never inferred here, so authoring and preview
+   * keep the platform's own. The tool says WHETHER there is anything to do with
+   * one. Both must hold before the exam takes a drag, and the second gate is not
+   * bookkeeping: on these surfaces the platform's selection is suppressed, so a
+   * claimed drag cannot fall back to it. Claiming with the tool off would freeze
+   * the passage a student is only trying to scroll and then discard the span,
+   * which is the worst of both.
+   *
+   * `activation: 'drag'` because a tool the student armed is already a statement
+   * of intent. Making them also hold still for 350 ms was the trap: the prose is
+   * unselectable, and a gesture that cancelled itself on the first 8 pixels of
+   * travel left no way to select text at all.
+   *
+   * The whole surface is the boundary: unlike a SAT anchor, a highlight may span
+   * blocks, so the only edge is the container the student is reading in.
+   */
+  const touchSelection = useStudentTouchTextSelection({
+    enabled: enabled && examScope.ownedTouchSelection && toolMode !== 'off',
+    activation: 'drag',
+    rootRef: containerRef,
+    diagnostics,
+    resolveCaretAtPoint,
+    onSelect: (range) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const selection = captureSurfaceRange(container, range);
+      diagnostics?.record('captureSurfaceRange', { captureSucceeded: !!selection });
+      const applied = applySelection(selection);
+      diagnostics?.record('applySelection', { selectionConsumed: applied });
+    },
+    boundaryFor: () => containerRef.current,
+  });
+
   return {
     containerRef,
     renderedHtml,
     hint,
     announce,
+    selectionRects: touchSelection.rects,
   };
 }

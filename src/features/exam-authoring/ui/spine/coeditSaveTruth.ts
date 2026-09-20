@@ -57,6 +57,16 @@ export function coeditDisplayStatusFor(input: {
   readOnly: boolean;
   pendingSince: number | null;
   autosaveStatus?: QuestionSaveStatus;
+  /**
+   * The open question still has rich roots initializing or failed.
+   *
+   * Room durability and editor readiness are two different facts. A room can
+   * have committed everything it holds while a field the author is looking at
+   * never initialized — an editor that has been pulsing for minutes beside a
+   * header that says Saved is the exact contradiction this caps. A saved claim
+   * must not imply an editor the author can use.
+   */
+  questionPending?: boolean;
   now?: number;
 }): CoeditSaveDisplayStatus {
   const now = input.now ?? Date.now();
@@ -81,6 +91,11 @@ export function coeditDisplayStatusFor(input: {
   // Initial co-edit setup has no durable acknowledgement yet. Keeping this at
   // Saving avoids a false Saved flash while the room is establishing itself.
   if (coeditName === "idle" || input.saveState === null) return "saving";
+  // The room is durable, but the question is not ready to work in. Saving is
+  // the honest status: there is nothing left for the author to do but wait, and
+  // a Saved claim here would be about a different question than the one on
+  // screen.
+  if (input.questionPending) return stillSaving ? "still_saving" : "saving";
   return "saved";
 }
 

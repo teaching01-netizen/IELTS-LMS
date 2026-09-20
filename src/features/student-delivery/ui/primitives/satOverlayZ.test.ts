@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { SAT_OVERLAY_Z, satOverlayZClass, satSingleModalHolds } from "./satOverlayZ";
 
 describe("satOverlayZ contract", () => {
-  it("orders blocking above submission above alerts above tools above save dock", () => {
+  it("orders blocking above submission above alerts above tools", () => {
     expect(SAT_OVERLAY_Z.blockingVeil).toBeGreaterThan(SAT_OVERLAY_Z.submissionVeil);
     expect(SAT_OVERLAY_Z.submissionVeil).toBeGreaterThan(SAT_OVERLAY_Z.leaseNotice);
     expect(SAT_OVERLAY_Z.leaseNotice).toBeGreaterThan(SAT_OVERLAY_Z.routeAlert);
     expect(SAT_OVERLAY_Z.routeAlert).toBeGreaterThan(SAT_OVERLAY_Z.toolSheet);
-    expect(SAT_OVERLAY_Z.toolSheet).toBeGreaterThan(SAT_OVERLAY_Z.saveStatusDock);
-    expect(SAT_OVERLAY_Z.saveStatusDock).toBeGreaterThan(SAT_OVERLAY_Z.savingHint);
+    // No routine save layers remain: only the failure/superseded alert does.
+    expect(SAT_OVERLAY_Z.routeAlert).toBeGreaterThan(SAT_OVERLAY_Z.moreMenu);
   });
 
   it("keeps the save alert above tools so failures stay visible", () => {

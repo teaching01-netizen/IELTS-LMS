@@ -486,9 +486,19 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
         return;
       }
 
-      // Highlightable reading/listening text keeps the native context menu so
-      // students can select text without turning it into a security event.
+      // Highlightable reading/listening text is blocked like the rest of the
+      // exam, and like the protected question copy above it is blocked SILENTLY:
+      // a long-press on a passage is how the student selects the text they are
+      // about to highlight, so charging it as a violation would flag ordinary
+      // exam behavior. The menu is not what selection needs — the surface keeps
+      // `user-select: text`, so highlighting is untouched and only the
+      // platform's Copy / Look Up / Search / Share menu goes away. Handing that
+      // menu back to the browser here is what let a long-press on the reading
+      // pane expose it mid-exam, which blocking `contextmenu` alone cannot fix.
       if (isWithinHighlightableContainer(event.target)) {
+        if (runtimeStateRef.current.phase === 'exam') {
+          event.preventDefault();
+        }
         return;
       }
 

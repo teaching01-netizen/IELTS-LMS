@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { ADMIN_STORAGE_STATE_PATH } from "./support/backendE2e";
 import { executeUpdate, queryDb } from "./support/db";
 
@@ -62,8 +63,14 @@ async function finishCurrentSatSection(
   page: Page,
   scheduleId: string,
   attemptId: string,
-  candidateId: string
+  candidateId: string,
+  options: { answerQuestions?: boolean } = {}
 ): Promise<SatBootstrapSummary> {
+  // Audit finding 1: answerQuestions=false drives the SAME journey a student
+  // who answered nothing takes — start and submit every module with an empty
+  // response set — so the terminal V2 submit has to accept it rather than
+  // 400ing into a finalization loop that no retry can repair.
+  const answerQuestions = options.answerQuestions ?? true;
   // Resolve the live section + base module in the browser, then answer in
   // Node-resolved key order via the real V2 transport inside the browser.
   // The DB key plan is serializable and crosses the evaluate boundary as an
@@ -94,10 +101,12 @@ async function finishCurrentSatSection(
   );
   // Exam-day P0 guard: known-correct answers resolved from the sealed key
   // the backend scores against (the delivered bootstrap redacts the key).
-  const answerPlan = await correctAnswerPlan(live.baseModuleId);
-  if (answerPlan.length < 1) throw new Error(`No answerable base questions for ${live.sectionKey}`);
+  const answerPlan = answerQuestions ? await correctAnswerPlan(live.baseModuleId) : [];
+  if (answerQuestions && answerPlan.length < 1) {
+    throw new Error(`No answerable base questions for ${live.sectionKey}`);
+  }
   return page.evaluate(
-    async ({ scheduleId, attemptId, candidateId, baseModuleId, answerPlan }) => {
+    async ({ scheduleId, attemptId, candidateId, baseModuleId, answerPlan, answerQuestions: shouldAnswer }) => {
       const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
       delivery.configureAssessmentDeliveryAttempt(scheduleId, attemptId, candidateId);
       let snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, attemptId);
@@ -140,36 +149,39 @@ async function finishCurrentSatSection(
       // Answer every keyed base question correctly through the real V2
       // durability transport (same path the student UI uses), so module
       // scoring + adaptive routing + result review must reflect V2-saved
-      // answers instead of empty legacy rows.
-      const durable = await import("/src/features/student/infrastructure/responseDurabilityTransport.ts");
-      const engineMod = await import("/src/shared/durability/DurableResponseEngine.ts");
-      const transport = durable.createResponseDurabilityV2Transport(scheduleId, undefined);
-      const engine = new engineMod.DurableResponseEngine({
-        scheduleId,
-        attemptId,
-        leaseEpoch: 1,
-        controlEpoch: 1,
-        drainDebounceMs: 0,
-        transport,
-      });
-      await engine.recover();
+      // answers instead of empty legacy rows. Skipped entirely in the
+      // unanswered leg: the student types nothing, so nothing is ever saved.
       let answeredCount = 0;
-      for (const plan of answerPlan as Array<{ examQuestionId: string; correctAnswer: string }>) {
-        if (!base.questions.some((question) => question.examQuestionId === plan.examQuestionId)) continue;
-        await engine.acceptResponse(plan.examQuestionId, {
-          answer: plan.correctAnswer,
-          markedForReview: false,
-          eliminatedOptions: [],
-          annotations: [],
+      if (shouldAnswer) {
+        const durable = await import("/src/features/student/infrastructure/responseDurabilityTransport.ts");
+        const engineMod = await import("/src/shared/durability/DurableResponseEngine.ts");
+        const transport = durable.createResponseDurabilityV2Transport(scheduleId, undefined);
+        const engine = new engineMod.DurableResponseEngine({
+          scheduleId,
+          attemptId,
+          leaseEpoch: 1,
+          controlEpoch: 1,
+          drainDebounceMs: 0,
+          transport,
         });
-        answeredCount += 1;
+        await engine.recover();
+        for (const plan of answerPlan as Array<{ examQuestionId: string; correctAnswer: string }>) {
+          if (!base.questions.some((question) => question.examQuestionId === plan.examQuestionId)) continue;
+          await engine.acceptResponse(plan.examQuestionId, {
+            answer: plan.correctAnswer,
+            markedForReview: false,
+            eliminatedOptions: [],
+            annotations: [],
+          });
+          answeredCount += 1;
+        }
+        await engine.flush();
+        if (engine.getPendingCount() > 0) {
+          throw new Error(engine.getLastError() ?? "V2 answers were not durably saved");
+        }
+        engine.destroy();
+        if (answeredCount < 1) throw new Error(`No answerable base questions for ${section.sectionKey}`);
       }
-      await engine.flush();
-      if (engine.getPendingCount() > 0) {
-        throw new Error(engine.getLastError() ?? "V2 answers were not durably saved");
-      }
-      engine.destroy();
-      if (answeredCount < 1) throw new Error(`No answerable base questions for ${section.sectionKey}`);
       await submitModule(base.id);
 
       const selectedBranchAttempt = snapshot.attempt.moduleAttempts.find((attempt) => {
@@ -191,7 +203,7 @@ async function finishCurrentSatSection(
         branchRole: branchModule?.adaptiveRole ?? null,
       };
     },
-    { scheduleId, attemptId, candidateId, baseModuleId: live.baseModuleId, answerPlan },
+    { scheduleId, attemptId, candidateId, baseModuleId: live.baseModuleId, answerPlan, answerQuestions },
   );
 }
 
@@ -263,135 +275,173 @@ async function readSatRuntime(page: Page, scheduleId: string): Promise<SatRuntim
   return payload.data ?? payload;
 }
 
+type SatAttemptHarness = {
+  studentContext: BrowserContext;
+  studentPage: Page;
+  examId: string;
+  scheduleId: string;
+  candidateId: string;
+  attemptId: string;
+  examTitle: string;
+  linkName: string;
+  studentName: string;
+};
+
+/**
+ * Shared journey setup: author, publish, link, join, and proctor-start a real
+ * SAT so the exam is live with the first module auto-opened. Extracted so the
+ * answered journey and the audit-finding-1 unanswered journey run against
+ * identical conditions instead of two drifting fixtures.
+ */
+async function startSatAttempt(
+  page: Page,
+  browser: { newContext: () => Promise<BrowserContext> },
+  options: { titlePrefix?: string; linkPrefix?: string; studentPrefix?: string } = {}
+): Promise<SatAttemptHarness> {
+  const stamp = Date.now().toString(36);
+  const examTitle = `${options.titlePrefix ?? "SAT Product Smoke"} ${stamp}`;
+  const linkName = `${options.linkPrefix ?? "SAT Open Link"} ${stamp}`;
+  const studentName = `${options.studentPrefix ?? "SAT Smoke Student"} ${stamp}`;
+  const studentEmail = `sat-smoke-${stamp}@example.com`;
+
+  await page.goto("/sat/exams");
+  await expect(page.getByRole("heading", { name: "Exam Library" })).toBeVisible();
+  await expect(page.getByText("Digital SAT").first()).toBeVisible();
+  await expect(page.getByText("IELTS", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "New SAT" }).first().click();
+  await page.getByLabel("SAT exam name").fill(examTitle);
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page).toHaveURL(/\/sat\/exams\/[0-9a-f-]+$/i, { timeout: 30_000 });
+  const examId = page.url().match(/\/sat\/exams\/([^/?#]+)/)?.[1];
+  if (!examId) throw new Error("SAT exam id was not present after creation");
+
+  await expect(page.getByRole("heading", { name: examTitle })).toBeVisible();
+  await page.getByRole("button", { name: "More authoring actions" }).click();
+  await page.getByRole("menuitem", { name: /Load sample exam/ }).click();
+  await expect(page.getByRole("dialog", { name: "Load sample SAT" })).toBeVisible();
+  await page.getByRole("button", { name: "Load 147 questions" }).click();
+  await expect(page.getByText("147 of 147 questions authored")).toBeVisible({ timeout: 90_000 });
+
+  await page.getByRole("button", { name: "Release" }).click();
+  await expect(page).toHaveURL(`/sat/exams/${examId}/release`);
+  await expect(page.getByText("Ready to publish")).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "Publish" }).click();
+  const publishDialog = page.getByRole("dialog");
+  await expect(publishDialog).toBeVisible();
+  await publishDialog.getByRole("button", { name: "Publish" }).click();
+
+  await expect(page).toHaveURL(`/sat/exams/${examId}/access`, { timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Student Access", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "New Link" }).click();
+  await page.getByLabel("Student Link name").fill(linkName);
+  await page.getByRole("button", { name: /Name \+ email only/i }).click();
+  await page.getByRole("button", { name: /Anytime/i }).click();
+  await page.getByRole("button", { name: "Create Link" }).click();
+  await expect(page.getByText(linkName).first()).toBeVisible({ timeout: 20_000 });
+  const joinHref = await page.getByRole("link", { name: "Open student page" }).getAttribute("href");
+  if (!joinHref) throw new Error("Student join URL was not created");
+
+  const studentContext = await browser.newContext();
+  const studentPage = await studentContext.newPage();
+  await studentPage.goto(joinHref);
+  await expect(studentPage.getByRole("heading", { name: linkName })).toBeVisible();
+  await expect(studentPage.getByText(`${examTitle} · Version 1`)).toBeVisible();
+  await studentPage.getByLabel("Full name").fill(studentName);
+  await studentPage.getByLabel("Email").fill(studentEmail);
+  await studentPage.getByRole("button", { name: /Continue/i }).click();
+  await expect(studentPage).toHaveURL(/\/student\/[0-9a-f-]+\/[^/]+$/i, { timeout: 30_000 });
+  const studentPath = new URL(studentPage.url()).pathname.split("/").filter(Boolean);
+  const scheduleId = studentPath[1];
+  const candidateId = decodeURIComponent(studentPath[2] ?? "");
+  if (!scheduleId || !candidateId)
+    throw new Error("Student handoff did not include schedule and candidate ids");
+
+  await page.goto("/sat/sessions");
+  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
+  const sessionRow = page
+    .locator("button")
+    .filter({ hasText: examTitle })
+    .filter({ hasText: linkName })
+    .first();
+  await expect(sessionRow).toBeVisible({ timeout: 30_000 });
+  await sessionRow.click();
+  await expect(page).toHaveURL(`/sat/sessions/${scheduleId}`);
+  await expect(page.getByText(studentName).first()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "Start" }).click();
+  await expect(page.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
+
+  // Phase 5 entry assertion: the proctor's Start is the ONLY action taken
+  // against the exam. The student page is refreshed (never clicked) and the
+  // module must be OPEN by itself — a body-text match would be satisfied by
+  // the directions screen too, so it could not tell a working auto-entry from
+  // a stalled one.
+  await studentPage.reload();
+  await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
+  // The directions entry control must not have been the way in.
+  await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+  const attemptId = await studentPage.evaluate(
+    async ({ scheduleId, candidateId }) => {
+      const response = await fetch(
+        `/api/v1/student/sessions/${scheduleId}/live?candidateId=${encodeURIComponent(candidateId)}`
+      );
+      const payload = await response.json();
+      return payload?.data?.attempt?.id ?? payload?.attempt?.id ?? null;
+    },
+    { scheduleId, candidateId }
+  );
+  if (!attemptId) throw new Error("SAT student attempt did not materialize after proctor start");
+
+  // Server-observable proof of the auto-entry itself: the entry module is NOT
+  // not_started, i.e. the client opened it without a student action. Nothing
+  // else starts the first module (finishCurrentSatSection runs later), so a
+  // not_started state here means auto-entry did not fire.
+  const entryModuleState = await studentPage.evaluate(
+    async ({ scheduleId, attemptId: id, candidateId: student }) => {
+      const delivery = await import("/src/features/student-delivery/api/assessmentDeliveryApi.ts");
+      delivery.configureAssessmentDeliveryAttempt(scheduleId, id, student);
+      const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, id);
+      const section =
+        snapshot.sections.find((item) => item.sectionKey === snapshot.timing.stageKey) ??
+        snapshot.sections[0];
+      const entry =
+        section?.modules.find((module) => module.adaptiveRole === "base") ?? section?.modules[0];
+      return snapshot.attempt.moduleAttempts.find((item) => item.moduleId === entry?.id)?.state ?? null;
+    },
+    { scheduleId, attemptId, candidateId }
+  );
+  expect(entryModuleState).not.toBe("not_started");
+
+  return {
+    studentContext,
+    studentPage,
+    examId,
+    scheduleId,
+    candidateId,
+    attemptId,
+    examTitle,
+    linkName,
+    studentName,
+  };
+}
+
 test.describe("Digital SAT product workspace", () => {
   test("creates, publishes, joins, proctors, submits, and surfaces a SAT result without IELTS leakage", async ({
     page,
     browser,
   }) => {
     test.setTimeout(180_000);
-    const stamp = Date.now().toString(36);
-    const examTitle = `SAT Product Smoke ${stamp}`;
-    const linkName = `SAT Open Link ${stamp}`;
-    const studentName = `SAT Smoke Student ${stamp}`;
-    const studentEmail = `sat-smoke-${stamp}@example.com`;
-
-    await page.goto("/sat/exams");
-    await expect(page.getByRole("heading", { name: "Exam Library" })).toBeVisible();
-    await expect(page.getByText("Digital SAT").first()).toBeVisible();
-    await expect(page.getByText("IELTS", { exact: true })).toHaveCount(0);
-
-    await page.getByRole("button", { name: "New SAT" }).first().click();
-    await page.getByLabel("SAT exam name").fill(examTitle);
-    await page.getByRole("button", { name: "Create" }).click();
-    await expect(page).toHaveURL(/\/sat\/exams\/[0-9a-f-]+$/i, { timeout: 30_000 });
-    const examId = page.url().match(/\/sat\/exams\/([^/?#]+)/)?.[1];
-    if (!examId) throw new Error("SAT exam id was not present after creation");
-
-    await expect(page.getByRole("heading", { name: examTitle })).toBeVisible();
-    await page.getByRole("button", { name: "More authoring actions" }).click();
-    await page.getByRole("menuitem", { name: /Load sample exam/ }).click();
-    await expect(page.getByRole("dialog", { name: "Load sample SAT" })).toBeVisible();
-    await page.getByRole("button", { name: "Load 147 questions" }).click();
-    await expect(page.getByText("147 of 147 questions authored")).toBeVisible({ timeout: 90_000 });
-
-    await page.getByRole("button", { name: "Release" }).click();
-    await expect(page).toHaveURL(`/sat/exams/${examId}/release`);
-    await expect(page.getByText("Ready to publish")).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("button", { name: "Publish" }).click();
-    const publishDialog = page.getByRole("dialog");
-    await expect(publishDialog).toBeVisible();
-    await publishDialog.getByRole("button", { name: "Publish" }).click();
-
-    await expect(page).toHaveURL(`/sat/exams/${examId}/access`, { timeout: 30_000 });
-    await expect(page.getByRole("heading", { name: "Student Access", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "New Link" }).click();
-    await page.getByLabel("Student Link name").fill(linkName);
-    await page.getByRole("button", { name: /Name \+ email only/i }).click();
-    await page.getByRole("button", { name: /Anytime/i }).click();
-    await page.getByRole("button", { name: "Create Link" }).click();
-    await expect(page.getByText(linkName).first()).toBeVisible({ timeout: 20_000 });
-    const joinHref = await page
-      .getByRole("link", { name: "Open student page" })
-      .getAttribute("href");
-    if (!joinHref) throw new Error("Student join URL was not created");
-
-    const studentContext = await browser.newContext();
-    const studentPage = await studentContext.newPage();
+    const harness = await startSatAttempt(page, browser);
+    const {
+      studentPage,
+      studentContext,
+      scheduleId,
+      candidateId,
+      attemptId,
+      studentName,
+      examTitle,
+    } = harness;
     try {
-      await studentPage.goto(joinHref);
-      await expect(studentPage.getByRole("heading", { name: linkName })).toBeVisible();
-      await expect(studentPage.getByText(`${examTitle} · Version 1`)).toBeVisible();
-      await studentPage.getByLabel("Full name").fill(studentName);
-      await studentPage.getByLabel("Email").fill(studentEmail);
-      await studentPage.getByRole("button", { name: /Continue/i }).click();
-      await expect(studentPage).toHaveURL(/\/student\/[0-9a-f-]+\/[^/]+$/i, { timeout: 30_000 });
-      const studentPath = new URL(studentPage.url()).pathname.split("/").filter(Boolean);
-      const scheduleId = studentPath[1];
-      const candidateId = decodeURIComponent(studentPath[2] ?? "");
-      if (!scheduleId || !candidateId)
-        throw new Error("Student handoff did not include schedule and candidate ids");
-
-      await page.goto("/sat/sessions");
-      await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
-      const sessionRow = page
-        .locator("button")
-        .filter({ hasText: examTitle })
-        .filter({ hasText: linkName })
-        .first();
-      await expect(sessionRow).toBeVisible({ timeout: 30_000 });
-      await sessionRow.click();
-      await expect(page).toHaveURL(`/sat/sessions/${scheduleId}`);
-      await expect(page.getByText(studentName).first()).toBeVisible({ timeout: 30_000 });
-      await page.getByRole("button", { name: "Start" }).click();
-      await expect(page.getByText("Session started.")).toBeVisible({ timeout: 20_000 });
-
-      // Phase 5 entry assertion: the proctor's Start is the ONLY action taken
-      // against the exam. The student page is refreshed (never clicked) and the
-      // module must be OPEN by itself — the previous check accepted any body
-      // text matching /SAT|Reading|Module/, which the directions screen
-      // satisfies too, so it stayed green whether or not entry ever happened
-      // and could not tell a working auto-entry from a stalled one.
-      await studentPage.reload();
-      await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
-      // The directions entry control must not have been the way in.
-      await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
-      const attemptId = await studentPage.evaluate(
-        async ({ scheduleId, candidateId }) => {
-          const response = await fetch(
-            `/api/v1/student/sessions/${scheduleId}/live?candidateId=${encodeURIComponent(candidateId)}`
-          );
-          const payload = await response.json();
-          return payload?.data?.attempt?.id ?? payload?.attempt?.id ?? null;
-        },
-        { scheduleId, candidateId }
-      );
-      if (!attemptId)
-        throw new Error("SAT student attempt did not materialize after proctor start");
-
-      // Server-observable proof of the auto-entry itself: the entry module is
-      // NOT not_started, i.e. the client opened it without a student action.
-      // Nothing else in this test starts the first module (finishCurrentSatSection
-      // runs below), so a not_started state here means auto-entry did not fire.
-      const entryModuleState = await studentPage.evaluate(
-        async ({ scheduleId, attemptId: id, candidateId: student }) => {
-          const delivery = await import(
-            "/src/features/student-delivery/api/assessmentDeliveryApi.ts"
-          );
-          delivery.configureAssessmentDeliveryAttempt(scheduleId, id, student);
-          const snapshot = await delivery.assessmentDeliveryApi.bootstrap(scheduleId, id);
-          const section =
-            snapshot.sections.find((item) => item.sectionKey === snapshot.timing.stageKey) ??
-            snapshot.sections[0];
-          const entry =
-            section?.modules.find((module) => module.adaptiveRole === "base") ?? section?.modules[0];
-          return (
-            snapshot.attempt.moduleAttempts.find((item) => item.moduleId === entry?.id)?.state ?? null
-          );
-        },
-        { scheduleId, attemptId, candidateId }
-      );
-      expect(entryModuleState).not.toBe("not_started");
-
       const reading = await finishCurrentSatSection(
         studentPage,
         scheduleId,
@@ -507,6 +557,98 @@ test.describe("Digital SAT product workspace", () => {
       await expect(page.getByText(examTitle)).toHaveCount(0);
       await page.goto("/admin/results");
       await expect(page.getByText(studentName)).toHaveCount(0);
+    } finally {
+      await studentContext.close();
+    }
+  });
+
+  // Audit finding 1 (release blocker): a student who answers NOTHING may submit
+  // every module — the product allows unanswered questions — but the terminal
+  // V2 submit used to reject the empty response set with a bare 400, so the
+  // attempt could never reach a result and every retry failed the same way.
+  // This leg is the whole point of the fix: zero responses in, real result out.
+  test("finalizes a SAT attempt the student left completely unanswered", async ({
+    page,
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    const harness = await startSatAttempt(page, browser, {
+      titlePrefix: "SAT Unanswered",
+      linkPrefix: "SAT Unanswered Link",
+      studentPrefix: "SAT Unanswered Student",
+    });
+    const { studentPage, studentContext, scheduleId, candidateId, attemptId, studentName, examTitle } =
+      harness;
+    try {
+      for (const sectionKey of ["reading-writing", "math"] as const) {
+        const finished = await finishCurrentSatSection(
+          studentPage,
+          scheduleId,
+          attemptId,
+          candidateId,
+          { answerQuestions: false }
+        );
+        expect(finished.sectionKey).toBe(sectionKey);
+        // The journey is only meaningful if the student truly answered nothing.
+        expect(finished.answeredCount).toBe(0);
+      }
+
+      // The app's OWN finalization must produce the result — this test never
+      // calls the completion endpoint directly, because the broken path was
+      // exactly persistence.submit() 400ing before completion was ever reached.
+      // Zero raw is a legitimate score, not a transport failure: the practice
+      // table's floor is 200 per section, so both sections at zero = 400.
+      await expect
+        .poll(
+          async () => {
+            const rows = await queryDb<{ total_score: number | null }>(
+              "SELECT total_score FROM assessment_results WHERE attempt_id = ?",
+              [attemptId]
+            );
+            return rows[0]?.total_score ?? null;
+          },
+          {
+            timeout: 90_000,
+            message: "an unanswered SAT attempt must still reach a scored result",
+          }
+        )
+        .toBe(400);
+
+      // The provisional terminal claim committed with the EMPTY-set digest —
+      // proof the V2 submit accepted zero responses instead of refusing them.
+      const receipts = await queryDb<{ final_response_digest: string }>(
+        "SELECT final_response_digest FROM attempt_submissions_v2 WHERE attempt_id = ?",
+        [attemptId]
+      );
+      expect(receipts.length).toBe(1);
+      const emptySetDigest = createHash("sha256").update("[]").digest("hex");
+      expect(receipts[0]?.final_response_digest).toBe(emptySetDigest);
+
+      // And the student sees the completed exam, with no finalization-error
+      // copy and no retry affordance left behind.
+      await studentPage.reload();
+      await expect(studentPage.getByRole("heading", { name: "SAT Complete" })).toBeVisible({
+        timeout: 45_000,
+      });
+      await expect(studentPage.getByText("400", { exact: true })).toBeVisible();
+      await expect(studentPage.getByText(/finalizing|could not be finalized/i)).toHaveCount(0);
+      await expect(studentPage.getByRole("button", { name: /Retry|Try again/i })).toHaveCount(0);
+
+      // The result is complete downstream too: the answered journey's product
+      // assertions apply verbatim, so a zero-answer attempt is a first-class
+      // result rather than a shell that merely stopped erroring.
+      await page.goto("/sat/results");
+      await expect(page.getByRole("heading", { name: "Results" })).toBeVisible();
+      await page.getByLabel("Search SAT results").fill(studentName);
+      const resultRow = page
+        .locator("button")
+        .filter({ hasText: studentName })
+        .filter({ hasText: examTitle })
+        .first();
+      await expect(resultRow).toBeVisible({ timeout: 30_000 });
+      await resultRow.click();
+      await expect(page.getByText("Reading & Writing")).toBeVisible();
+      await expect(page.getByText("Math")).toBeVisible();
     } finally {
       await studentContext.close();
     }

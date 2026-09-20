@@ -804,6 +804,13 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 		if err := s.authorizeWrite(ctx, q, actor, scheduleID); err != nil {
 			return err
 		}
+		// Schedule row FIRST: CompleteInTx writes it last, and student check-in
+		// holds it while waiting for the runtime row locked below. Taking the
+		// runtime first closed a lock cycle with check-in (global order:
+		// schedule -> registration -> attempt -> runtime -> section).
+		if _, err := examruntime.LockScheduleRow(ctx, q, scheduleID); err != nil {
+			return err
+		}
 		if err := lockScheduleScope(ctx, q, scheduleID); err != nil {
 			return err
 		}

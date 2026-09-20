@@ -24,6 +24,12 @@ func TestDockerEntrypointKeepsActivityDrivenWorkerless(t *testing.T) {
 	}
 	coedit := strings.Index(script, "/usr/local/bin/bun run /app/services/authoring-coedit/src/main.ts &")
 	if coedit < 0 {
+		// The co-edit runtime moved to the Node/tsx runner because its
+		// Hocuspocus Node adapter rejects Bun. Keep the topology guard
+		// compatible with both supported image generations.
+		coedit = strings.Index(script, "/usr/local/bin/node /app/node_modules/tsx/dist/cli.mjs /app/services/authoring-coedit/src/main.ts &")
+	}
+	if coedit < 0 {
 		t.Fatal("Dockerfile entrypoint must start embedded SAT co-editing")
 	}
 	worker := strings.Index(script[activity:], "/app/worker &")

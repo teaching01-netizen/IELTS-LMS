@@ -1568,7 +1568,11 @@ describe("StudentApp runtime-backed mode", () => {
     });
 
     expect(screen.queryByText(/Examination Complete!/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Tab switched/i)).toBeInTheDocument();
+    // The hold always renders the canonical exam-screen integrity copy (the
+    // browser cannot report more than "the exam document became hidden"), so a
+    // stored description never becomes the student-facing sentence.
+    expect(screen.getByText(/You left the exam screen/i)).toBeInTheDocument();
+    expect(screen.getByText(/Stay on the exam screen/i)).toBeInTheDocument();
 
     vi.useRealTimers();
   });
@@ -1854,13 +1858,11 @@ describe("StudentApp runtime-backed mode", () => {
     expect(screen.queryByText(/Examination Complete!/i)).not.toBeInTheDocument();
   });
 
-  it("shows a blocking tab-switch warning overlay when tab switching is detected", async () => {
-    vi.useFakeTimers();
-    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
-
+  function createTabSwitchExamFixture({ showWarnings }: { showWarnings: boolean }) {
     const config = createDefaultConfig("Academic", "Academic");
     config.security.detectSecondaryScreen = false;
     config.security.tabSwitchRule = "warn";
+    config.progression.showWarnings = showWarnings;
 
     const examState: ExamState = {
       ...state,
@@ -1983,6 +1985,41 @@ describe("StudentApp runtime-backed mode", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
 
+    return { examState, runtimeSnapshot, attemptSnapshot };
+  }
+
+  /**
+   * Drives real Page Visibility transitions. The exam rule is an excursion
+   * (`visible -> hidden -> visible`), so a test can never prove a tab switch by
+   * hiding the document alone.
+   */
+  function mockDocumentVisibility() {
+    let visibility: DocumentVisibilityState = "visible";
+    const visibilitySpy = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockImplementation(() => visibility);
+    const hiddenSpy = vi
+      .spyOn(document, "hidden", "get")
+      .mockImplementation(() => visibility === "hidden");
+    return {
+      transition(next: DocumentVisibilityState) {
+        visibility = next;
+        document.dispatchEvent(new Event("visibilitychange"));
+      },
+      restore() {
+        hiddenSpy.mockRestore();
+        visibilitySpy.mockRestore();
+      },
+    };
+  }
+
+  it("shows a blocking tab-switch warning overlay when tab switching is detected", async () => {
+    vi.useFakeTimers();
+    const visibility = mockDocumentVisibility();
+    const { examState, runtimeSnapshot, attemptSnapshot } = createTabSwitchExamFixture({
+      showWarnings: true,
+    });
+
     render(
       <StudentAppWrapper
         state={examState}
@@ -1995,22 +2032,67 @@ describe("StudentApp runtime-backed mode", () => {
 
     act(() => {
       window.dispatchEvent(new Event("blur"));
-      document.dispatchEvent(new Event("visibilitychange"));
+      visibility.transition("hidden");
     });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(900);
     });
 
-    expect(screen.getByText(/Tab switching detected/i)).toBeInTheDocument();
+    // Nothing is shown while the student is away.
+    expect(screen.queryByText(/Stay on the exam screen/i)).not.toBeInTheDocument();
 
     act(() => {
-      fireEvent.click(screen.getByRole("button", { name: /I Understand/i }));
+      visibility.transition("visible");
     });
 
-    expect(screen.queryByText(/Tab switching detected/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Stay on the exam screen/i)).toBeInTheDocument();
+    expect(screen.getByText(/You left the exam screen/i)).toBeInTheDocument();
 
-    hiddenSpy.mockRestore();
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: /Continue exam/i }));
+    });
+
+    expect(screen.queryByText(/Stay on the exam screen/i)).not.toBeInTheDocument();
+    // Acknowledging the hold resumes the exam; it never tears it down.
+    expect(screen.getByLabelText("Answer for question 1")).toBeInTheDocument();
+
+    visibility.restore();
+    vi.useRealTimers();
+  });
+
+  it("shows the integrity warning even when general exam warnings are disabled", async () => {
+    vi.useFakeTimers();
+    const visibility = mockDocumentVisibility();
+    // `progression.showWarnings` is a general messaging preference and must not
+    // be able to suppress a security hold.
+    const { examState, runtimeSnapshot, attemptSnapshot } = createTabSwitchExamFixture({
+      showWarnings: false,
+    });
+
+    render(
+      <StudentAppWrapper
+        state={examState}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={runtimeSnapshot}
+      />
+    );
+
+    act(() => {
+      visibility.transition("hidden");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(900);
+    });
+    act(() => {
+      visibility.transition("visible");
+    });
+
+    expect(screen.getByText(/Stay on the exam screen/i)).toBeInTheDocument();
+
+    visibility.restore();
     vi.useRealTimers();
   });
 

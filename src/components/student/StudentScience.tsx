@@ -142,12 +142,13 @@ const ScienceStimulusPane = React.memo(function ScienceStimulusPane({
       } ${isTabletMode ? 'w-[var(--science-pane-width)] min-w-[48px] border-r border-gray-200' : 'lg:w-[var(--science-pane-width)] lg:min-w-[300px]'}`}
       data-student-highlightable="true"
       data-student-zoom-scroll
+      // `user-select` is deliberately absent: the stylesheet owns it, so the
+      // exam's coarse-pointer rule can remove the platform's own selection here
+      // without an inline declaration outranking it (index.css).
       style={{
         ...(contentZoomStyle ?? {}),
         fontSize: 'var(--student-passage-font-size)',
         lineHeight: 'var(--student-passage-line-height)',
-        userSelect: 'text',
-        WebkitUserSelect: 'text',
       }}
     >
       <h2

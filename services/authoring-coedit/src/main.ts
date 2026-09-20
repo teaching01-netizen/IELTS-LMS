@@ -41,8 +41,12 @@ import { documentFromStructuredContent } from "./richTextSchema.js";
 import { parseSatWorkspaceCommand } from "../../../src/features/exam-authoring/realtime/coedit/workspaceCommands.js";
 import { parseCoeditStoreRequest } from "../../../src/features/exam-authoring/realtime/coedit/storeRequest.js";
 import {
+  createWorkspaceSeedResultFrame,
+  parseRefusedWorkspaceSeedIdentity,
   parseWorkspaceSeedFrame,
   type WorkspaceSeedFrame,
+  type WorkspaceSeedIdentity,
+  type WorkspaceSeedOutcome,
 } from "../../../src/features/exam-authoring/realtime/coedit/workspaceSeed.js";
 
 /**
@@ -584,9 +588,31 @@ export class CoeditService {
               stage: "store",
               reason: "other",
             });
+            // A refusal the browser must be able to stop waiting on: the root
+            // will never appear, so the field is told now instead of pulsing.
+            this.sendSeedResult(documentName, connection, seed, "rejected", false);
             return;
           }
           await this.applyWorkspaceSeed(documentName, document, connection, seed);
+          return;
+        }
+        // A frame that presents itself as a seed but cannot be applied is not
+        // dropped in silence any more. This is the one path where a proposal
+        // vanished with nothing written anywhere: the browser had already built
+        // it and believed it was in flight, and the handler below reads it as
+        // "not a command, ignore". When the frame's identity survived, the
+        // proposer is told, because the field waiting on that root has no other
+        // way to learn why it will never arrive.
+        const refusedSeed = parseRefusedWorkspaceSeedIdentity(payload, { documentName });
+        if (refusedSeed) {
+          metrics.incCounter("authoring_coedit_seed_total", { outcome: "rejected" });
+          log("warn", "co-edit workspace seed refused by validation", {
+            event: "seed",
+            outcome: "rejected",
+            stage: "validate",
+            reason: "other",
+          });
+          this.sendSeedResult(documentName, connection, refusedSeed, "failed", false);
           return;
         }
         if (connection.readOnly || this.lifecycle.isReadOnly(documentName)) return;
@@ -747,6 +773,45 @@ export class CoeditService {
     );
   }
 
+  /**
+   * Tells the PROPOSER what happened to its seed.
+   *
+   * Sent to the connection that proposed rather than broadcast: it is that
+   * editor's wait being resolved, and a peer's conflict is not another peer's
+   * news. Never throws — this runs inside a stateless hook, and a rejection
+   * there reaches the process instead of the browser.
+   */
+  private sendSeedResult(
+    documentName: string,
+    connection: Connection<CoeditConnectionContext>,
+    seed: WorkspaceSeedIdentity,
+    outcome: WorkspaceSeedOutcome,
+    retryable: boolean,
+  ): void {
+    try {
+      const frame = createWorkspaceSeedResultFrame({
+        documentName,
+        seedId: seed.seedId,
+        root: seed.root,
+        path: seed.path,
+        outcome,
+        retryable,
+      });
+      connection.send(
+        new OutgoingMessage(connection.messageAddress)
+          .writeStateless(JSON.stringify(frame))
+          .toUint8Array(),
+      );
+    } catch (error) {
+      log("warn", "co-edit seed result could not be sent", {
+        event: "seed",
+        outcome: "rejected",
+        stage: "notify",
+        reason: error instanceof Error ? error.message : "other",
+      });
+    }
+  }
+
   /** Applies one authenticated seed proposal while holding the field lock. */
   private async applyWorkspaceSeed(
     documentName: string,
@@ -767,12 +832,16 @@ export class CoeditService {
         // second author nor a conflict, and re-applying it could only re-derive
         // the state the store already holds.
         metrics.incCounter("authoring_coedit_seed_total", { outcome: "duplicate" });
+        this.sendSeedResult(documentName, connection, seed, "applied", false);
         return;
       }
       if (seed.root === "scalar") {
         const root = document.getMap<unknown>(FIELD_SET_WORKSPACE);
         if (root.has(seed.path)) {
           metrics.incCounter("authoring_coedit_seed_total", { outcome: "conflict" });
+          // The room already holds this root, and it is the newer truth: the
+          // proposer adopts it rather than waiting for its own proposal.
+          this.sendSeedResult(documentName, connection, seed, "conflict", false);
           return;
         }
         document.transact(() => {
@@ -782,6 +851,7 @@ export class CoeditService {
         const fragment = document.getXmlFragment(`${RICH_ROOT_PREFIX}${seed.path}`);
         if (fragment.length > 0) {
           metrics.incCounter("authoring_coedit_seed_total", { outcome: "conflict" });
+          this.sendSeedResult(documentName, connection, seed, "conflict", false);
           return;
         }
         prosemirrorJSONToYXmlFragment(
@@ -809,6 +879,7 @@ export class CoeditService {
         stage: "store",
         mode: connection.context.mode,
       });
+      this.sendSeedResult(documentName, connection, seed, "applied", false);
     }).catch((error) => {
       metrics.incCounter("authoring_coedit_seed_total", { outcome: "rejected" });
       log("warn", "co-edit workspace seed failed", {
@@ -817,6 +888,15 @@ export class CoeditService {
         stage: "store",
         reason: error instanceof Error ? error.message : "other",
       });
+      // Reported, not silently swallowed: the field's editor can only stop
+      // waiting if it learns the proposal did not become content.
+      this.sendSeedResult(
+        documentName,
+        connection,
+        seed,
+        "failed",
+        error instanceof GoRequestError && error.retryable,
+      );
       // Deliberately NOT rethrown. This runs inside the `onStateless` hook, and
       // Hocuspocus does not catch a rejected stateless hook: the rejection
       // reached the process, took the whole service down, and every browser

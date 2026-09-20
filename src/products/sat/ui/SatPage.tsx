@@ -80,7 +80,7 @@ export function SatSearchField({
           type="button"
           onClick={() => onChange('')}
           aria-label={clearLabel}
-          className="sat-search-clear absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full text-[var(--sat-staff-text-tertiary,#6e6e73)] transition-colors hover:bg-[var(--sat-staff-skeleton-bar-soft,rgba(0,0,0,0.05))] hover:text-[var(--sat-staff-text-secondary,#515154)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+          className="sat-search-clear sat-press sat-press-fill absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full text-[var(--sat-staff-text-tertiary,#6e6e73)] hover:bg-[var(--sat-staff-skeleton-bar-soft,rgba(0,0,0,0.05))] hover:text-[var(--sat-staff-text-secondary,#515154)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
         >
           <X size={13} aria-hidden="true" />
         </button>
@@ -112,7 +112,7 @@ export function SatPrimaryButton({
       aria-label={ariaLabel}
       aria-busy={pending || undefined}
       disabled={isDisabled}
-      className="flex h-11 min-h-11 shrink-0 items-center gap-1.5 rounded-[var(--sat-staff-radius-input,12px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[12px] font-semibold text-white shadow-[var(--sat-staff-accent-glow-sm,0_1px_2px_rgba(0,113,227,0.35))] transition hover:bg-[var(--sat-staff-accent-hover,#0077ed)] hover:shadow-[var(--sat-staff-accent-glow-md,0_4px_14px_rgba(0,113,227,0.35))] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] active:scale-[0.97] active:bg-[var(--sat-staff-accent-active,#0067c9)] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+      className="sat-press sat-press-fill-accent flex h-11 min-h-11 shrink-0 items-center gap-1.5 rounded-[var(--sat-staff-radius-input,12px)] bg-[var(--sat-staff-accent,#0071e3)] px-4 text-[12px] font-semibold text-white shadow-[var(--sat-staff-accent-glow-sm,0_1px_2px_rgba(0,113,227,0.35))] hover:bg-[var(--sat-staff-accent-hover,#0077ed)] hover:shadow-[var(--sat-staff-accent-glow-md,0_4px_14px_rgba(0,113,227,0.35))] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--sat-staff-accent-ring-button,rgba(0,113,227,0.25))] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
     >
       {pending ? (
         <span aria-hidden="true" className="sat-spinner block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white/40 border-t-white" />
@@ -260,6 +260,12 @@ export type SatStat = {
  * total <= 0 keeps the region silent for empty data so the empty-state
  * owns the announcement. Optional scopeLabel overrides itemLabel for the
  * unit word (backward compatible: absent scopeLabel keeps itemLabel path).
+ *
+ * Press contract: SatPrimaryButton carries the shared `sat-press`
+ * vocabulary (instant press-in, 100ms release, accent pressed fill) so the
+ * one primary action grammar is identical on every staff surface.
+ * SatSearchField's clear control keeps its pinned 28px target (F-A6) and
+ * presses without changing size.
  */
 export function SatResultCount({ total, visible, itemLabel, scopeLabel }: { total: number; visible: number; itemLabel: string; scopeLabel?: string }) {
   if (total <= 0) return null;

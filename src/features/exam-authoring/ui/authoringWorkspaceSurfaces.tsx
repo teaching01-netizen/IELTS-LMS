@@ -190,6 +190,7 @@ export function QuestionLoadError({
 export function EditorSkeleton() {
   return (
     <div
+      data-testid="editor-skeleton"
       className="mx-auto my-5 w-[calc(100%-2rem)] max-w-[940px] animate-pulse space-y-6 px-6 pb-24 pt-8 sm:my-7 sm:px-10"
       role="status"
       aria-label="Loading question"

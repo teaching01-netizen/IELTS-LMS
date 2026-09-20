@@ -40,11 +40,23 @@ vi.mock("../useSatResponsePersistence", () => ({
   useSatResponsePersistence: () => persistenceMock,
 }));
 vi.mock("../useSatIntegrityControl", () => ({
-  useSatIntegrityControl: () => undefined,
+  useSatIntegrityControl: () => ({
+    pendingTabSwitchWarning: null,
+    acknowledgeTabSwitchWarning: () => undefined,
+  }),
 }));
 
 function cohortBootstrap(): AssessmentDeliveryBootstrap {
-  const serverNow = new Date("2026-09-10T08:00:00.000Z").toISOString();
+  return cohortBootstrapAt(new Date("2026-09-10T08:00:00.000Z").toISOString());
+}
+
+/** The same live cohort frame with an explicit server-now stamp, so a fake
+ * server can hold an independent clock through a device jump. */
+function cohortBootstrapAt(serverNow: string): AssessmentDeliveryBootstrap {
+  return { ...cohortBootstrapBody(serverNow) };
+}
+
+function cohortBootstrapBody(serverNow: string): AssessmentDeliveryBootstrap {
   return {
     scheduleId: "schedule",
     examId: "exam",
@@ -183,7 +195,11 @@ describe("SAT cohort module clock", () => {
     gatewayMocks.submitAssessment.mockReset();
   });
 
-  it("ticks the personal countdown between bootstraps (60 -> 50 after 10s)", async () => {
+  // Module clock contract: the student reads the module's own allotment (60s),
+  // capped by the shared section clock (120s) — min of the two, so the section
+  // clock still bounds a late arrival or a stalled device. It advances locally
+  // from the deadlines between bootstraps.
+  it("ticks the module countdown between bootstraps (60 -> 50 after 10s)", async () => {
     gatewayMocks.bootstrap.mockResolvedValue(cohortBootstrap());
     const hook = renderHook(() =>
       useSatExamController({
@@ -204,6 +220,150 @@ describe("SAT cohort module clock", () => {
     // No new bootstrap: the countdown must still advance from the deadline.
     expect(gatewayMocks.bootstrap.mock.calls.length).toBe(bootstrapCalls);
     expect(hook.result.current.remainingSeconds).toBe(50);
+    vi.useRealTimers();
+  });
+
+  // Module clock contract: the student reads the module's own allotment, so the
+  // module closes when that allotment ends — while the section clock still has
+  // time on it. The section clock only caps (a module never outlives its
+  // section); it is not the clock the module counts down.
+  it("expires a cohort-section module at its own allotment, capped by the section", async () => {
+    gatewayMocks.bootstrap.mockResolvedValue(cohortBootstrap());
+    // Keep the submission pending so the test observes only the call.
+    gatewayMocks.submitModule.mockImplementation(() => new Promise(() => {}));
+    const hook = renderHook(() =>
+      useSatExamController({
+        scheduleId: "schedule",
+        attemptId: "attempt-a",
+        candidateId: "candidate",
+        liveSocketConnected: true,
+      }),
+    );
+    await act(async () => {
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    expect(hook.result.current.state.phase).toBe("module");
+    // The module's 60s allotment, not the section's 120s.
+    expect(hook.result.current.remainingSeconds).toBe(60);
+
+    // +59s: still inside the module allotment, so nothing closes.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(59_000);
+    });
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
+    expect(hook.result.current.remainingSeconds).toBe(1);
+
+    // +1s: the module allotment is gone and the module closes, even though the
+    // section clock still reads 60s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(gatewayMocks.submitModule).toHaveBeenCalledTimes(1);
+    hook.unmount();
+    vi.useRealTimers();
+  });
+
+  // Device-sleep recovery: the browser clock is only a display oscillator, so
+  // after the device resumes the countdown must be recomputed from the server
+  // deadline plus a freshly paired (serverNow, receivedAt) observation — never
+  // from ticks accumulated while asleep, and never by re-pairing the new
+  // serverNow with the OLD receipt instant (that manufactures skew equal to
+  // the sleep gap and double-counts it).
+  it("recomputes the countdown from the deadline after a 30s device sleep", async () => {
+    const T0 = Date.parse("2026-09-10T08:00:00.000Z");
+    let serverNowMs = T0;
+    gatewayMocks.bootstrap.mockImplementation(() =>
+      Promise.resolve(cohortBootstrapAt(new Date(serverNowMs).toISOString())),
+    );
+    const hook = renderHook(
+      ({ token }: { token: number }) =>
+        useSatExamController({
+          scheduleId: "schedule",
+          attemptId: "attempt-a",
+          candidateId: "candidate",
+          liveSocketConnected: true,
+          attemptUpdateToken: token,
+        }),
+      { initialProps: { token: 0 } },
+    );
+    await act(async () => {
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    expect(hook.result.current.remainingSeconds).toBe(60);
+
+    // The device sleeps 30s: no ticks fire and the device clock does not move;
+    // server time advances the same 30s (device clock was in sync).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    serverNowMs += 30_000;
+
+    // Wake token: one authoritative refresh with a fresh serverNow stamp.
+    await act(async () => {
+      hook.rerender({ token: 1 });
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    // Module deadline (T0+60) minus server truth (T0+30): 30. NOT 60 (stale
+    // frame) and NOT 0 (the sleep gap counted twice by a stale receipt
+    // pairing). The section clock still has 90s, so the module clock governs.
+    expect(hook.result.current.remainingSeconds).toBe(30);
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
+    hook.unmount();
+    vi.useRealTimers();
+  });
+
+  // Manual device-clock change: a student's clock jumping 4 minutes ahead must
+  // not expire their exam. The next server sync re-pairs (serverNow, receivedAt)
+  // into a NEGATIVE offset that cancels the jump, and the countdown continues
+  // from server truth as if nothing happened.
+  it("cancels a manual +4min device clock change at the next server sync", async () => {
+    const T0 = Date.parse("2026-09-10T08:00:00.000Z");
+    let serverNowMs = T0;
+    gatewayMocks.bootstrap.mockImplementation(() =>
+      Promise.resolve(cohortBootstrapAt(new Date(serverNowMs).toISOString())),
+    );
+    const hook = renderHook(
+      ({ token }: { token: number }) =>
+        useSatExamController({
+          scheduleId: "schedule",
+          attemptId: "attempt-a",
+          candidateId: "candidate",
+          liveSocketConnected: true,
+          attemptUpdateToken: token,
+        }),
+      { initialProps: { token: 0 } },
+    );
+    await act(async () => {
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    serverNowMs += 10_000;
+    expect(hook.result.current.remainingSeconds).toBe(50);
+
+    // The student's device clock jumps +4 minutes; the SERVER clock does not.
+    vi.setSystemTime(new Date(Date.now() + 240_000));
+    // Sync immediately (no local tick in between, so no premature expiry path
+    // is exercised): the refresh carries serverNow = T0+10 while the receipt is
+    // the jumped device instant.
+    await act(async () => {
+      hook.rerender({ token: 1 });
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    // Corrected offset = (T0+10) - (T0+250) = -240s; after the next display
+    // tick (the shared 1s oscillator, whose fake timer clock still sits at
+    // T+10s so a full second must elapse to cross a tick boundary) the
+    // adjusted device now lands back on server truth — 11s genuinely consumed
+    // of the module's 60s, so 49s remain and nothing expired. The +4min jump
+    // was cancelled, not inherited: without the re-pairing the display would
+    // read the module allotment as ~0 and close the module.
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(hook.result.current.remainingSeconds).toBe(49);
+    expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
+    hook.unmount();
     vi.useRealTimers();
   });
 

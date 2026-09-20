@@ -1,8 +1,6 @@
 import { useId } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ListChecks } from "lucide-react";
 import { SAT_COPY, satLastQuestionLabel } from "../../domain/satCopy";
-import type { SatSaveBannerState } from "../feedback/SatSaveStatus";
-import { SatFooterSaveIndicator } from "./SatFooterSaveIndicator";
 
 export interface SatExamFooterProps {
   candidateName: string;
@@ -12,9 +10,6 @@ export interface SatExamFooterProps {
   navigatorButtonId: string;
   navigatorPanelId: string;
   blocked: boolean;
-  /** Mirrors the SatSaveStatus banner object — same truth, short noun. */
-  saveState?: SatSaveBannerState | undefined;
-  onRetrySave?: (() => void) | undefined;
   onPrevious: () => void;
   onNext: () => void;
   onOpenNavigator: () => void;
@@ -48,9 +43,6 @@ export function SatExamFooter(props: SatExamFooterProps) {
           <p className="min-w-0 truncate sat-type-control-secondary font-semibold text-[var(--sat-text)]">
             {props.candidateName}
           </p>
-          {props.saveState !== undefined ? (
-            <SatFooterSaveIndicator state={props.saveState} onRetrySave={props.onRetrySave} />
-          ) : null}
         </div>
 
         <button

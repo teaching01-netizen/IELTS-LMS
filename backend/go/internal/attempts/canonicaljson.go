@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"sort"
 )
 
@@ -112,10 +111,14 @@ func HashResponse(payload any) (string, error) {
 
 // FinalDigest computes the submit digest over sorted question/hash pairs
 // (plan 19.6): sha256 of canonical JSON of [[questionID, hash]...] sorted.
+//
+// The empty set is a legal input and hashes as canonical JSON "[]".
+// Unanswered questions are permitted by the product, so an attempt that never
+// recorded a response must still be terminalizable; refusing the empty set
+// here (bare 400) left such attempts permanently unfinishable on every retry
+// because retrying cannot create a response. The digest stays deterministic
+// and content-addressed, and no synthetic placeholder rows are manufactured.
 func FinalDigest(questionHashes map[string]string) (string, error) {
-	if len(questionHashes) == 0 {
-		return "", fmt.Errorf("empty response set")
-	}
 	ids := make([]string, 0, len(questionHashes))
 	for id := range questionHashes {
 		ids = append(ids, id)

@@ -8,29 +8,10 @@ import (
 // strptr is defined in service.go (test package shares it); snapshotAlias
 // keeps this file's intent explicit without redeclaration.
 
-// B2 RED: snapshot gate allows writes while runtime is live.
-func TestSnapshotGateAllowsLiveWrite(t *testing.T) {
-	snap := Snapshot{Status: StatusLive, ActiveSectionKey: strptr("rw"), SectionLive: true, SectionStarted: true, Revision: 3}
-	if err := snap.CheckWritable(); err != nil {
-		t.Fatalf("live snapshot must allow writes: %v", err)
-	}
-}
-
-// B2 RED: snapshot gate blocks writes while paused/completed with today's
-// 422/409-shaped errors (never a lost write, never a silent accept).
-func TestSnapshotGateBlocksPaused(t *testing.T) {
-	snap := Snapshot{Status: StatusPaused, ActiveSectionKey: strptr("rw"), Revision: 3}
-	if err := snap.CheckWritable(); err == nil {
-		t.Fatalf("paused snapshot must block writes")
-	}
-}
-
-func TestSnapshotGateBlocksCompleted(t *testing.T) {
-	snap := Snapshot{Status: StatusCompleted, Revision: 3}
-	if err := snap.CheckWritable(); err == nil {
-		t.Fatalf("completed snapshot must block writes")
-	}
-}
+// The snapshot no longer decides writability: it is a ~1s-stale view for student
+// polls, and the V2 write gate reads current runtime + section state on the
+// writing transaction (cmd/api/v2locker_snapshot.go, v2Locker). There is no
+// Snapshot verdict left to trust, so this file only pins the cache contract.
 
 // B2 RED: cache serves within TTL with zero loader calls; expiry reloads.
 func TestSnapshotCacheTTL(t *testing.T) {
@@ -73,6 +54,34 @@ func TestSnapshotCacheInvalidate(t *testing.T) {
 	s, err := c.Get("sched-1", time.Now().UTC(), load)
 	if err != nil || s.Revision != 2 {
 		t.Fatalf("invalidated entry must reload: %+v %v", s, err)
+	}
+}
+
+// SectionLiveness is the single owner of status -> liveness for BOTH gate modes
+// (v2Locker and runtime.LoadSnapshot), so this table is the contract they share:
+// only 'live' is writable, and an unopened ('locked') section is not "started".
+func TestSectionLivenessTable(t *testing.T) {
+	cases := []struct {
+		status  string
+		started bool
+		live    bool
+		paused  bool
+	}{{SectionLive, true, true, false},
+		{SectionPaused, true, false, true},
+		{SectionLocked, false, false, false},
+		{SectionCompleted, true, false, false},
+		{"", true, false, false},
+		{"unrecognised", true, false, false},
+	}
+	for _, tc := range cases {
+		started, live, paused := SectionLiveness(tc.status)
+		if started != tc.started || live != tc.live || paused != tc.paused {
+			t.Fatalf("SectionLiveness(%q) = started=%v live=%v paused=%v, want %v/%v/%v",
+				tc.status, started, live, paused, tc.started, tc.live, tc.paused)
+		}
+		if live && (paused || !started) {
+			t.Fatalf("SectionLiveness(%q) is internally inconsistent", tc.status)
+		}
 	}
 }
 

@@ -5,7 +5,12 @@ import { breakRemainingSeconds, formatSatTime, mergeAuthoritativeTiming, snapsho
 import { resolveAuthoritativeRemainingSeconds } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { resolveSatToolCapabilities, toggleSatActiveTool } from './satTools';
 import type { AssessmentDeliveryBootstrap, AssessmentDeliveryModule, AssessmentModuleAttemptSnapshot, AssessmentTimingSnapshot } from '../contracts/assessmentDelivery';
-import { deriveSatEntryDecision, type SatEntryDecisionInput } from '../application/satEntry';
+import {
+  deriveSatEntryDecision,
+  moduleAttemptEndedByOwnClock,
+  previousModuleTimedOut,
+  type SatEntryDecisionInput,
+} from '../application/satEntry';
 
 describe('SAT delivery domain', () => {
   it('normalizes module tool policy without opening a tool', () => {
@@ -211,7 +216,7 @@ describe('SAT delivery domain', () => {
         breakSeconds: 0, sectionWaitSeconds: 0, phase: 'directions', ...overrides,
       });
 
-    expect(entry()).toMatchObject({ shouldStart: true, reason: 'initial-entry' });
+    expect(entry()).toMatchObject({ shouldStart: true, reason: 'initial-entry', autoStartPending: true });
     // Section 0 only opens from the directions screen.
     expect(entry({ phase: 'break' })).toMatchObject({
       shouldStart: false, reason: 'initial-entry-not-on-directions',
@@ -220,20 +225,54 @@ describe('SAT delivery domain', () => {
     expect(entry({ data: { ...data, scheduleRuntimeStatus: 'scheduled' } })).toMatchObject({
       shouldStart: false, reason: 'runtime-not-live',
     });
+    // not_started is the value the server actually projects before the proctor
+    // presses Start (a SAT schedule has no exam_session_runtimes row yet), so
+    // this is the case that decides whether a waiting student POSTs
+    // /modules/start and eats a 409 RUNTIME_NOT_LIVE per retry window.
+    expect(entry({
+      data: {
+        ...data,
+        scheduleRuntimeStatus: 'not_started',
+        timing: {
+          authority: 'cohort_runtime', timingModel: 'cohort_section_v3',
+          stageKey: null, stageStatus: 'not_started', serverNow: data.serverNow,
+          deadlineAt: null, remainingSeconds: 0,
+        },
+      },
+    })).toMatchObject({ shouldStart: false, reason: 'runtime-not-live' });
     // idle/connecting are legal attempt statuses but not a live exam: automatic
     // entry and the manual button now share this one verdict.
     expect(entry({ data: { ...data, proctorStatus: 'idle' } })).toMatchObject({
       shouldStart: false, reason: 'proctor-blocked',
     });
+    // Module 2 inside the first section. Nothing owns it unless Module 1's own
+    // clock ran out, and then the hand-off opens it automatically — the branch
+    // used to be vetoed outright, which left the student on a directions screen
+    // whose button stays recovery-only while nothing ever tries.
     expect(entry({ module: { ...module, adaptiveRole: 'higher_branch' } })).toMatchObject({
-      shouldStart: false, reason: 'not-base-module',
+      shouldStart: false, reason: 'awaiting-student', autoStartPending: false,
     });
     expect(entry({
+      module: { ...module, adaptiveRole: 'higher_branch' },
+      previousModuleTimedOut: true,
+    })).toMatchObject({
+      shouldStart: true, reason: 'next-module-entry', autoStartPending: true,
+    });
+    // The hand-off needs a module to enter: an already-started row is not it.
+    expect(entry({
+      module: { ...module, adaptiveRole: 'higher_branch' },
+      previousModuleTimedOut: true,
       data: {
         ...data,
         attempt: { ...data.attempt, moduleAttempts: [{ ...pendingAttempt, startedAt: '2026-08-30T03:00:00Z', state: 'active' }] },
       },
     })).toMatchObject({ shouldStart: false, reason: 'already-started' });
+    expect(entry({
+      data: {
+        ...data,
+        attempt: { ...data.attempt, moduleAttempts: [{ ...pendingAttempt, startedAt: '2026-08-30T03:00:00Z', state: 'active' }] },
+      },
+    })).toMatchObject({ shouldStart: false, reason: 'already-started', autoStartPending: true });
     // The branch is the section, not the phase: a later section reached from
     // the directions screen is the next-section rule.
     expect(entry({ sectionDisplayOrder: 1 })).toMatchObject({
@@ -278,7 +317,13 @@ describe('SAT delivery domain', () => {
       shouldStart: false, reason: 'proctor-blocked',
     });
     expect(entry({ module: { ...module, adaptiveRole: 'higher_branch' } })).toMatchObject({
-      shouldStart: false, reason: 'not-base-module',
+      shouldStart: false, reason: 'awaiting-student', autoStartPending: false,
+    });
+    expect(entry({
+      module: { ...module, adaptiveRole: 'higher_branch' },
+      previousModuleTimedOut: true,
+    })).toMatchObject({
+      shouldStart: true, reason: 'next-module-entry', autoStartPending: true,
     });
     expect(entry({ sectionDisplayOrder: null })).toMatchObject({
       shouldStart: false, reason: 'unknown-section',
@@ -289,6 +334,54 @@ describe('SAT delivery domain', () => {
         attempt: { ...data.attempt, moduleAttempts: [{ ...pendingAttempt, startedAt: '2026-08-30T04:00:00Z', state: 'active' }] },
       },
     })).toMatchObject({ shouldStart: false, reason: 'already-started' });
+  });
+
+  // Module-advance fix: "Module 1 ended on its own clock" is read from the
+  // payload rather than from local submit state, so the live session, a poll
+  // that discovers a server-side finalization, an offline reconnect, and a
+  // reload all reach the same verdict. `completionReason` cannot answer it:
+  // the client's own expiry submit is recorded as `student_submit`.
+  it('derives the Module 2 hand-off from the finished module\'s own clock', () => {
+    const baseModule = { id: 'rw-m1', adaptiveRole: 'base' } as AssessmentDeliveryModule;
+    const branchModule = { id: 'rw-m2-lower', adaptiveRole: 'lower_branch' } as AssessmentDeliveryModule;
+    const startedAt = '2026-09-19T09:00:00Z';
+    const deadlineAt = '2026-09-19T09:32:00Z';
+    const attempt = (
+      moduleId: string,
+      state: string,
+      deadline: string | null,
+    ): AssessmentModuleAttemptSnapshot => ({
+      id: `ma-${moduleId}`, moduleId, state, allocatedSeconds: 1_920,
+      availableAt: startedAt, startedAt, pausedAt: null, accumulatedPausedSeconds: 0,
+      extensionSeconds: 0, deadlineAt: deadline, remainingSeconds: 0,
+      completionReason: null, rawCorrect: null, operationalQuestionCount: null,
+      toolState: {}, revision: 3,
+    });
+    const payloadAt = (serverNow: string, state: string, deadline: string | null) => ({
+      serverNow,
+      sections: [{
+        id: 'sec-rw', sectionKey: 'reading-writing', displayOrder: 0,
+        modules: [baseModule, branchModule],
+      }],
+      attempt: { moduleAttempts: [attempt(baseModule.id, state, deadline)] },
+    } as unknown as AssessmentDeliveryBootstrap);
+
+    expect(previousModuleTimedOut(payloadAt('2026-09-19T09:32:05Z', 'submitted', deadlineAt), branchModule)).toBe(true);
+    // Submitted with time to spare: the finished module's own deadline is still
+    // ahead, so the student owns the Module 2 entry.
+    expect(previousModuleTimedOut(payloadAt('2026-09-19T09:20:00Z', 'submitted', deadlineAt), branchModule)).toBe(false);
+    // A module that never started, or carries no deadline, proves nothing.
+    expect(previousModuleTimedOut(payloadAt('2026-09-19T09:40:00Z', 'not_started', deadlineAt), branchModule)).toBe(false);
+    expect(previousModuleTimedOut(payloadAt('2026-09-19T09:40:00Z', 'submitted', null), branchModule)).toBe(false);
+    // A section the payload does not describe cannot hand off either.
+    expect(previousModuleTimedOut(payloadAt('2026-09-19T09:40:00Z', 'submitted', deadlineAt), {
+      id: 'math-m2-lower', adaptiveRole: 'lower_branch',
+    } as AssessmentDeliveryModule)).toBe(false);
+    expect(moduleAttemptEndedByOwnClock(attempt(baseModule.id, 'locked', deadlineAt), '2026-09-19T09:32:30Z')).toBe(true);
+    expect(moduleAttemptEndedByOwnClock(attempt(baseModule.id, 'submitted', null), '2026-09-19T09:40:00Z')).toBe(false);
+    // The tolerance covers the ceil-based countdown and the submit round trip.
+    expect(moduleAttemptEndedByOwnClock(attempt(baseModule.id, 'submitted', deadlineAt), '2026-09-19T09:31:59.500Z')).toBe(true);
+    expect(moduleAttemptEndedByOwnClock(attempt(baseModule.id, 'submitted', deadlineAt), '2026-09-19T09:31:58.000Z')).toBe(false);
   });
 
 });
