@@ -266,7 +266,7 @@ export async function startLobbyIfPresent(page: Page) {
         if (await waiting.isVisible().catch(() => false)) return "waiting";
         return "pending";
       },
-      { timeout: 30_000 },
+      { timeout: 30_000 }
     )
     .toMatch(/waiting|exam/);
   if (!(await waiting.isVisible().catch(() => false))) return;
