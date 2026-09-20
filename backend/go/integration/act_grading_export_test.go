@@ -56,12 +56,14 @@ func TestACTTerminalizationProjectionOverrideExport(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO exam_schedules (
-			id, exam_id, organization_id, exam_title, published_version_id,
+			id, exam_id, provider_key, organization_id, exam_title,
+			proctor_display_name, grading_display_name, published_version_id,
 			cohort_name, institution, start_time, end_time, planned_duration_minutes,
 			delivery_mode, status, created_by
-		) VALUES (?, ?, ?, ?, ?, 'ACT integration', 'Codex', ?, ?, 40,
+		) VALUES (?, ?, 'act', ?, ?, ?, ?, ?, 'ACT integration', 'Codex', ?, ?, 40,
 			'proctor_start', 'scheduled', ?)`,
-		ids.scheduleID, ids.examID, ids.organizationID, "ACT integration flow", ids.versionID,
+		ids.scheduleID, ids.examID, ids.organizationID, "ACT integration flow",
+		"ACT integration flow", "ACT integration flow", ids.versionID,
 		now.Add(-time.Minute), now.Add(time.Hour), ids.ownerID); err != nil {
 		t.Fatalf("insert schedule: %v", err)
 	}
@@ -77,7 +79,7 @@ func TestACTTerminalizationProjectionOverrideExport(t *testing.T) {
 			1, 'running', 1, 1, 0)`,
 		ids.attemptID, ids.scheduleID, ids.attemptID, ids.organizationID, ids.examID,
 		ids.versionID, "ACT integration flow", "candidate-1", "Integration Candidate",
-		"candidate@example.test", `{"${ids.questionID}":"A"}`); err != nil {
+		"candidate@example.test", mustJSONBytes(map[string]string{ids.questionID: "A"})); err != nil {
 		t.Fatalf("insert ACT attempt: %v", err)
 	}
 

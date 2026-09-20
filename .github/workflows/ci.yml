@@ -347,6 +347,10 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Apply migrations for E2E
+        working-directory: backend/go
+        run: go run ./cmd/migrate
+
       - name: Run E2E Tests
         run: bunx playwright test
 
@@ -426,9 +430,23 @@ jobs:
       - name: Run Performance Tests
         run: bun run test:performance
 
+      - name: Start preview server for Lighthouse
+        run: |
+          bun run preview -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/lighthouse-preview.log" 2>&1 &
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/lighthouse-preview.log"
+          exit 1
+
       - name: Lighthouse CI
         uses: treosh/lighthouse-ci-action@v10
         with:
+          urls: |
+            http://127.0.0.1:4173/
           uploadArtifacts: true
           temporaryPublicStorage: true
 
