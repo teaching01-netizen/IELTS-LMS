@@ -8,7 +8,11 @@ dotenv.config({ path: path.resolve(".env"), override: false });
 dotenv.config({ path: path.resolve("backend/.env"), override: false });
 dotenv.config({ path: path.resolve("backend/.env.example"), override: false });
 
-const backendApiUrl = process.env["VITE_BACKEND_API_URL"] ?? "http://localhost:4000";
+const backendApiUrl = (process.env["VITE_BACKEND_API_URL"] ?? "http://localhost:4000").replace(
+  /\/$/,
+  ""
+);
+const frontendBaseUrl = process.env["PLAYWRIGHT_BASE_URL"] ?? "http://localhost:33000";
 const backendCookieEnv = {
   COOKIE_SECURE: process.env["COOKIE_SECURE"] ?? "false",
   SESSION_COOKIE_NAME: process.env["SESSION_COOKIE_NAME"] ?? "session",
@@ -49,7 +53,7 @@ export default defineConfig({
   reporter: "html",
   globalSetup: "./e2e/global-setup.ts",
   use: {
-    baseURL: "http://localhost:33000",
+    baseURL: frontendBaseUrl,
     trace: "on-first-retry",
   },
   projects: [
@@ -89,7 +93,7 @@ export default defineConfig({
     {
       command: "cd backend/go && exec go run ./cmd/api",
       env: backendRuntimeEnv,
-      url: "http://localhost:44000/healthz",
+      url: `${backendApiUrl}/healthz`,
       timeout: 180_000,
       reuseExistingServer: !process.env["CI"],
     },
