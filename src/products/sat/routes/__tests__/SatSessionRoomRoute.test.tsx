@@ -25,10 +25,25 @@ const schedule = {
 const runtime = {
   id: 'runtime-1', scheduleId: 'sched-1', examId: 'sat-1', providerKey: 'sat', examTitle: 'Practice Test 06', cohortName: 'Morning',
   deliveryMode: 'proctor_start', status: 'live', timingModel: 'cohort_section_v3', actualStartAt: '2026-08-30T02:00:00Z', actualEndAt: null,
-  activeSectionKey: 'reading', currentSectionKey: 'reading', currentSectionRemainingSeconds: 1603, waitingForNextSection: false, isOverrun: false,
-  totalPausedSeconds: 0, sections: [{ sectionKey: 'reading', label: 'Reading & Writing · Module 1', order: 1, plannedDurationMinutes: 32,
-    gapAfterMinutes: 0, status: 'live', availableAt: null, actualStartAt: '2026-08-30T02:00:00Z', actualEndAt: null, pausedAt: null,
-    accumulatedPausedSeconds: 0, extensionMinutes: 0 }], createdAt: '2026-08-30T02:00:00Z', updatedAt: '2026-08-30T02:05:00Z',
+  activeSectionKey: 'reading-writing', currentSectionKey: 'reading-writing', currentSectionRemainingSeconds: 1603, waitingForNextSection: false, isOverrun: false,
+  totalPausedSeconds: 0, sections: [{ sectionKey: 'reading-writing', label: 'Reading & Writing', order: 0, plannedDurationMinutes: 64,
+    gapAfterMinutes: 10, status: 'live', availableAt: null, actualStartAt: '2026-08-30T02:00:00Z', actualEndAt: null, pausedAt: null,
+    accumulatedPausedSeconds: 0, extensionMinutes: 0 }], serverNow: '2026-08-30T02:05:00Z',
+  // Authored run sheet (proctor detail reads carry it): section one is live in
+  // the runtime above, section two is still ahead.
+  examPlan: [
+    { sectionKey: 'reading-writing', label: 'Reading & Writing', order: 0, durationMinutes: 64, gapAfterMinutes: 10, modules: [
+      { moduleKey: 'rw-m1', title: 'Module 1', adaptiveRole: 'base', durationMinutes: 32 },
+      { moduleKey: 'rw-m2-lower', title: 'Module 2 — Lower', adaptiveRole: 'lower_branch', durationMinutes: 32 },
+      { moduleKey: 'rw-m2-higher', title: 'Module 2 — Higher', adaptiveRole: 'higher_branch', durationMinutes: 32 },
+    ] },
+    { sectionKey: 'math', label: 'Math', order: 1, durationMinutes: 70, gapAfterMinutes: 0, modules: [
+      { moduleKey: 'math-m1', title: 'Module 1', adaptiveRole: 'base', durationMinutes: 35 },
+      { moduleKey: 'math-m2-lower', title: 'Module 2 — Lower', adaptiveRole: 'lower_branch', durationMinutes: 35 },
+      { moduleKey: 'math-m2-higher', title: 'Module 2 — Higher', adaptiveRole: 'higher_branch', durationMinutes: 35 },
+    ] },
+  ],
+  createdAt: '2026-08-30T02:00:00Z', updatedAt: '2026-08-30T02:05:00Z',
 };
 const student = {
   id: 'attempt-1', studentId: 'W2501', name: 'Ananda S.', email: 'a@example.com', scheduleId: 'sched-1', status: 'active',
@@ -49,9 +64,19 @@ describe('SatSessionRoomRoute', () => {
   it('opens the controller explicitly in the SAT provider boundary', () => {
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     expect(controllerMock).toHaveBeenCalledWith({ providerKey: 'sat', initialScheduleId: 'sched-1' });
-    expect(screen.getAllByText('Reading & Writing · Module 1')).toHaveLength(2);
+    // The runtime section label is what the room shows as the current stage.
+    expect(screen.getAllByText('Reading & Writing')).toHaveLength(2);
     expect(screen.getByText('Server-authoritative session clock')).toBeInTheDocument();
     expect(screen.getAllByText('Ananda S.')).toHaveLength(2);
+    // Staff run sheet: every stage with its Thailand-time window, anchored to
+    // the proctor's start.
+    expect(screen.getByText('Run sheet')).toBeInTheDocument();
+    expect(screen.getByText(/Thailand time · ICT \(UTC\+7\)/)).toBeInTheDocument();
+    expect(screen.getByText('Section 1 · Reading & Writing')).toBeInTheDocument();
+    expect(screen.getByText('Section 2 · Math')).toBeInTheDocument();
+    expect(screen.getByText('Break · 10 min')).toBeInTheDocument();
+    expect(screen.getByText('09:00–09:32')).toBeInTheDocument();
+    expect(screen.getByText(/Anchored to the proctor's start at 09:00/)).toBeInTheDocument();
   });
 
   it('keeps per-action pending isolated: one student action never freezes session controls', async () => {
@@ -255,7 +280,7 @@ describe('SatSessionRoomRoute', () => {
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Add 5 minutes' }));
-    expect(screen.getByRole('alertdialog')).toHaveTextContent('Add 5 minutes to Reading & Writing · Module 1?');
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Add 5 minutes to Reading & Writing?');
     fireEvent.click(screen.getByRole('button', { name: 'Add 5 Minutes' }));
     expect(await screen.findByText('Added 5 minutes to the current stage.')).toBeInTheDocument();
     expect(document.querySelector('.sat-banner-enter')).toBeInTheDocument();

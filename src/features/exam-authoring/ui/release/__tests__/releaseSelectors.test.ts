@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type {
   AssessmentAuthoringShell,
@@ -26,6 +28,31 @@ import {
   toUserFacingPublishError,
   toUserFacingReleaseError,
 } from "../releaseSelectors";
+
+// Owner-computed parity vectors: the numbers the Go clock rule
+// (backend/go/internal/exams/section_time.go) actually produces, checked in by
+// backend/go/internal/exams/parity_vectors_test.go. That Go test fails the
+// moment this file stops matching the owner, so the expectations below are
+// never frozen literals.
+type ParityVector = {
+  name: string;
+  breakAfterSeconds: number;
+  modules: Array<{ adaptiveRole: string; durationSeconds: number }>;
+  candidateSeconds: number;
+  candidateSecondsWithBreak: number;
+};
+
+const parityVectors = (
+  JSON.parse(
+    readFileSync(
+      resolve(
+        __dirname,
+        "../../../../../../backend/go/internal/exams/testdata/candidate_section_length_vectors.json",
+      ),
+      "utf8",
+    ),
+  ) as { vectors: ParityVector[] }
+).vectors;
 
 const shell = {
   versionId: "version-1",
@@ -271,6 +298,33 @@ describe("candidate duration", () => {
       candidateSecondsForSection({ breakAfterSeconds: 0, modules: [] }),
     ).toBe(0);
   });
+
+  // Parity pin with the Go owner (backend/go/internal/exams/section_time.go:
+  // CandidateSectionSeconds = base + the longer branch, behind the Go guard)
+  // against the same checked-in artifact its own test writes.
+  //
+  // The failure directions, precisely: a drift in this selector fails here; an
+  // owner drift fails the Go artifact test immediately, and reaches this test
+  // only once the artifact is regenerated (the selector then still returns the
+  // previous total). Frozen `want:` literals would be weaker still — an owner
+  // change would leave them green in every sequence.
+  it("has owner-computed vectors to check", () => {
+    expect(parityVectors.length).toBeGreaterThan(0);
+  });
+  it.each(parityVectors)(
+    "matches the Go owner: $name",
+    ({ modules, breakAfterSeconds, candidateSecondsWithBreak }) => {
+      expect(
+        candidateSecondsForSection({
+          breakAfterSeconds,
+          modules: modules.map(({ adaptiveRole, durationSeconds }) => ({
+            adaptiveRole,
+            durationSeconds,
+          })),
+        }),
+      ).toBe(candidateSecondsWithBreak);
+    },
+  );
 });
 
 describe("operationalCountForSection", () => {

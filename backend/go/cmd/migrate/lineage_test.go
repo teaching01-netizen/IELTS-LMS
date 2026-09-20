@@ -55,11 +55,13 @@ func migDir(t *testing.T) string {
 // bumping the pin, which this update also repairs. The SAT section-clock repair
 // landed 0065 (candidate section duration backfill) — count/max bumped 64->65.
 // The SAT Student Access section toggles landed 0066 (link enabled_sections
-// scope) — count/max bumped 65->66.
+// scope) — count/max bumped 65->66. The SAT runtime section-clock repair landed
+// 0067 (candidate duration for not-yet-started sections) — count/max bumped
+// 66->67.
 // Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 66
-	pinnedMigrationMax   = 66
+	pinnedMigrationFiles = 67
+	pinnedMigrationMax   = 67
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

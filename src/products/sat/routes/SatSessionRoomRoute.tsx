@@ -12,6 +12,7 @@ import type { ExamSessionRuntime } from '../../../types/domain';
 import { SatConfirmDialog } from '../ui/ConfirmDialog';
 import { SatMenu, type SatMenuItem } from '../ui/Menu';
 import { SatEyebrow, SatSearchField, type SatStatusTone, SatStatusPill } from '../ui/SatPage';
+import { SatRunSheet } from '../ui/SatRunSheet';
 import '../ui/sat-session-room.css';
 
 const WARN_MESSAGE = 'Please return your attention to the exam.';
@@ -217,6 +218,17 @@ export function SatSessionRoomRoute() {
                   <p className={'sat-room__clock' + (sessionLive ? '' : ' sat-room__clock--idle')} aria-label={sessionLive ? 'Time remaining in this stage' : 'Session not started'}>{sessionLive ? formatRemaining(stageRemainingSeconds) : '—:—'}</p>
                 </div>
               </div>
+
+              {/* The cohort's planned run, in Thailand time: every section,
+                  module and break, with the status the runtime has reached.
+                  Session-level, so it renders with or without a student
+                  selected. */}
+              <SatRunSheet
+                plan={runtime.examPlan ?? null}
+                runtime={runtime}
+                scheduledStartAt={schedule.startTime}
+                now={runtime.serverNow ?? null}
+              />
 
               {openAlerts > 0 && selectedStudent ? (
                 <button type="button" onClick={() => setAttentionFilter('needs')} className="sat-banner-enter mt-4 flex w-full items-center gap-2 rounded-2xl border border-amber-700/15 bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3.5 py-2.5 text-left text-[11px] font-medium text-amber-800 hover:bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">

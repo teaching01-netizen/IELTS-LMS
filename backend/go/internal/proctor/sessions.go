@@ -38,7 +38,10 @@
 //     rebuilds the section plan from the published version + config
 //     snapshot; that plan loader has no Go equivalent and duplicating it
 //     here would fork scheduling internals. Empty arrays keep the wire
-//     shape (the TS mappers tolerate sections: []).
+//     shape (the TS mappers tolerate sections: []). The detail read adds
+//     the authored examPlan back (loadExamPlan) for the staff run sheet,
+//     so a not-started session still shows the planned section/module
+//     windows even though its runtime sections array is empty.
 //   - auto_stop runtime completion is not re-evaluated on read (that is a
 //     scheduling write path with no Go equivalent in this package).
 package proctor
@@ -50,6 +53,7 @@ import (
 	"strings"
 	"time"
 
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
@@ -127,6 +131,27 @@ type SessionRuntimeSection struct {
 	ProjectedEndAt           *time.Time `json:"projectedEndAt"`
 }
 
+// SessionPlanModule is one authored module inside a section plan.
+type SessionPlanModule struct {
+	ModuleKey       string `json:"moduleKey"`
+	Title           string `json:"title"`
+	AdaptiveRole    string `json:"adaptiveRole"`
+	DurationMinutes int    `json:"durationMinutes"`
+}
+
+// SessionPlanSection is one authored section of the published version a
+// schedule runs, carrying the candidate-facing length (Module 1 + the longer
+// adaptive branch) and its modules. The staff run sheet renders it; the live
+// clocks still come from SessionRuntimeSection, so the two can be compared.
+type SessionPlanSection struct {
+	SectionKey      string              `json:"sectionKey"`
+	Label           string              `json:"label"`
+	Order           int                 `json:"order"`
+	DurationMinutes int                 `json:"durationMinutes"`
+	GapAfterMinutes int                 `json:"gapAfterMinutes"`
+	Modules         []SessionPlanModule `json:"modules"`
+}
+
 // SessionRuntime mirrors Rust ExamSessionRuntime (camelCase): the full
 // hydrated projection with sections and computed clocks.
 type SessionRuntime struct {
@@ -155,6 +180,11 @@ type SessionRuntime struct {
 	UpdatedAt             time.Time               `json:"updatedAt"`
 	Revision              int64                   `json:"revision"`
 	Sections              []SessionRuntimeSection `json:"sections"`
+	// ExamPlan is the authored run sheet of the schedule's published version:
+	// every section with its modules and their lengths. Present only on the
+	// proctor session detail read (loadExamPlan); summary and student reads
+	// leave it null, so the student hot paths keep their single sections leg.
+	ExamPlan []SessionPlanSection `json:"examPlan"`
 }
 
 // StudentSessionSummary mirrors Rust StudentSessionSummary (camelCase).
@@ -717,6 +747,119 @@ func loadRuntimeSections(ctx context.Context, q sessionQuerier, runtimeID string
 		return nil, err
 	}
 	return sections, nil
+}
+
+// planMinutes converts authored seconds to whole minutes (ceil), with zero
+// staying zero: an authored zero-length break is the documented "advance
+// immediately" case, and a zero here must never become an invented minute.
+func planMinutes(seconds int) int {
+	if seconds <= 0 {
+		return 0
+	}
+	return (seconds + 59) / 60
+}
+
+// loadExamPlan reads the authored run sheet of one published version: its
+// sections in display order, each with its modules and the candidate-facing
+// length.
+//
+// The section length is derived exactly like the runtime clock
+// (exams.AdaptiveRoleSeconds: Module 1 plus the LONGER adaptive branch, with
+// the guard owned there), so the staff projection agrees with what the student
+// sits instead of repeating the stored duration_seconds overstatement 0065
+// repaired — a section that still sums both branches is visible here as the
+// derived value, not as the stale one. A section with no adaptive roles
+// (IELTS/ACT) or with an incomplete adaptive shape keeps its authored length.
+//
+// Detail-read only: the roster poll and every student bootstrap must not pay for
+// this second sections leg.
+func loadExamPlan(ctx context.Context, q sessionQuerier, versionID string) ([]SessionPlanSection, error) {
+	if strings.TrimSpace(versionID) == "" {
+		return nil, nil
+	}
+	type sectionRow struct {
+		id       string
+		authored int
+		section  SessionPlanSection
+	}
+	rows, err := q.QueryContext(ctx,
+		"SELECT id, section_key, title, display_order, duration_seconds, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id",
+		versionID)
+	if err != nil {
+		return nil, err
+	}
+	ordered := []sectionRow{}
+	index := map[string]int{}
+	for rows.Next() {
+		var row sectionRow
+		var breakSeconds int
+		if err := rows.Scan(&row.id, &row.section.SectionKey, &row.section.Label, &row.section.Order, &row.authored, &breakSeconds); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		row.section.DurationMinutes = planMinutes(row.authored)
+		row.section.GapAfterMinutes = planMinutes(breakSeconds)
+		row.section.Modules = []SessionPlanModule{}
+		index[row.id] = len(ordered)
+		ordered = append(ordered, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	roles := map[string]*examdomain.AdaptiveRoleSeconds{}
+	moduleRows, err := q.QueryContext(ctx, `
+		SELECT m.section_id, m.module_key, m.title, m.adaptive_role, m.duration_seconds
+		FROM assessment_modules m
+		JOIN assessment_sections s ON s.id = m.section_id
+		WHERE s.exam_version_id = ?
+		ORDER BY s.display_order, m.display_order, m.id`, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer moduleRows.Close()
+	for moduleRows.Next() {
+		var sectionID string
+		var module SessionPlanModule
+		var role string
+		var seconds int
+		if err := moduleRows.Scan(&sectionID, &module.ModuleKey, &module.Title, &role, &seconds); err != nil {
+			return nil, err
+		}
+		idx, ok := index[sectionID]
+		if !ok {
+			continue
+		}
+		module.AdaptiveRole = role
+		module.DurationMinutes = planMinutes(seconds)
+		ordered[idx].section.Modules = append(ordered[idx].section.Modules, module)
+		clock := roles[sectionID]
+		if clock == nil {
+			clock = &examdomain.AdaptiveRoleSeconds{}
+			roles[sectionID] = clock
+		}
+		clock.AddModule(role, seconds)
+	}
+	if err := moduleRows.Err(); err != nil {
+		return nil, err
+	}
+
+	plan := make([]SessionPlanSection, 0, len(ordered))
+	for i := range ordered {
+		row := &ordered[i]
+		// exams owns the guard (a base plus at least one branch) and the
+		// arithmetic (base + the LONGER branch): a section with an incomplete
+		// adaptive shape keeps its authored length.
+		if clock := roles[row.id]; clock != nil {
+			if seconds, ok := clock.CandidateSeconds(); ok {
+				row.section.DurationMinutes = planMinutes(seconds)
+			}
+		}
+		plan = append(plan, row.section)
+	}
+	return plan, nil
 }
 
 // LoadSessionRuntimeBySchedule returns the same hydrated runtime projection
@@ -1460,6 +1603,14 @@ func (s *Service) GetSessionDetail(ctx context.Context, actor Actor, scheduleID 
 	if err != nil {
 		return ProctorSessionDetail{}, err
 	}
+	// Staff run sheet: the authored section/module windows of the version this
+	// schedule runs, attached to the detail runtime only (the summary and
+	// student reads keep ExamPlan null).
+	plan, err := loadExamPlan(ctx, q, schedule.PublishedVersionID)
+	if err != nil {
+		return ProctorSessionDetail{}, err
+	}
+	runtime.ExamPlan = plan
 	// Degraded stays false here: the service signature carries no live-mode
 	// flag (the Rust handler owns state.live_mode_enabled and passes it
 	// into the service). The HTTP handler overwrites DegradedLiveMode from

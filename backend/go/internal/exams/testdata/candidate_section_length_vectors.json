@@ -1,0 +1,49 @@
+{
+  "owner": "internal/exams/section_time.go (CandidateSectionSeconds + AdaptiveRoleSeconds)",
+  "regenerate": "cd backend/go && UPDATE_PARITY_VECTORS=1 go test ./internal/exams -run TestCandidateSectionLengthParityVectors -count=1",
+  "vectors": [
+    {
+      "name": "equal branches",
+      "breakAfterSeconds": 600,
+      "modules": [
+        { "adaptiveRole": "base", "durationSeconds": 1920 },
+        { "adaptiveRole": "lower_branch", "durationSeconds": 1920 },
+        { "adaptiveRole": "higher_branch", "durationSeconds": 1920 }
+      ],
+      "candidateSeconds": 3840,
+      "candidateSecondsWithBreak": 4440
+    },
+    {
+      "name": "higher branch longer",
+      "breakAfterSeconds": 300,
+      "modules": [
+        { "adaptiveRole": "base", "durationSeconds": 2100 },
+        { "adaptiveRole": "lower_branch", "durationSeconds": 1800 },
+        { "adaptiveRole": "higher_branch", "durationSeconds": 2400 }
+      ],
+      "candidateSeconds": 4500,
+      "candidateSecondsWithBreak": 4800
+    },
+    {
+      "name": "lower branch longer",
+      "breakAfterSeconds": 0,
+      "modules": [
+        { "adaptiveRole": "base", "durationSeconds": 2100 },
+        { "adaptiveRole": "lower_branch", "durationSeconds": 2700 },
+        { "adaptiveRole": "higher_branch", "durationSeconds": 2400 }
+      ],
+      "candidateSeconds": 4800,
+      "candidateSecondsWithBreak": 4800
+    },
+    {
+      "name": "single branch",
+      "breakAfterSeconds": 0,
+      "modules": [
+        { "adaptiveRole": "base", "durationSeconds": 1920 },
+        { "adaptiveRole": "lower_branch", "durationSeconds": 1920 }
+      ],
+      "candidateSeconds": 3840,
+      "candidateSecondsWithBreak": 3840
+    }
+  ]
+}
