@@ -10,8 +10,13 @@
 .selection-v2 {
   --selection-fill: rgba(0, 122, 255, 0.22);
   --selection-accent: rgb(0, 122, 255);
-  --selection-material-edge: rgba(255, 255, 255, 0.6);
+  /* A hairline that reads on a page, not a highlight: the lens sits on white
+     prose, where a translucent WHITE edge is no edge at all. */
+  --selection-material-edge: rgba(15, 23, 42, 0.16);
   --selection-material-shadow: rgba(15, 23, 42, 0.28);
+  /* Softer than the chrome's: the lens is an instrument held over the words, not
+     a card resting on them. */
+  --selection-loupe-shadow: rgba(15, 23, 42, 0.2);
   --selection-target: 44px;
 }
 
@@ -130,19 +135,45 @@
   overflow: hidden;
   border-radius: 9999px;
   border: 1px solid var(--selection-material-edge);
+  /* The document's own backdrop, written inline when it is known; white is the
+     answer for prose on a page, where no ancestor declares one. */
   background-color: #fff;
   box-shadow:
-    0 12px 32px var(--selection-material-shadow),
-    0 2px 6px var(--selection-material-shadow);
+    0 8px 24px var(--selection-loupe-shadow),
+    0 1px 4px var(--selection-loupe-shadow);
   /* Grew out of the finger: the frame scales about its own centre. */
   transform-origin: 50% 50%;
 }
 
+/* The picture. Its width is the document's own width, written inline, and its
+   transform is the one thing that changes while the finger moves — so nothing
+   here may influence layout: no padding, no border, no `contain`, nothing that
+   would make this second layout of the prose disagree with the first. */
 .selection-v2-loupe-content {
   position: absolute;
   top: 0;
   left: 0;
   transform-origin: 0 0;
+}
+
+/* The index: the exact column under the finger, at the centre of the lens. Two
+   pixels, unscaled (it is in the frame, not in the picture), and lifted off the
+   prose with a white ring so it reads over any ink it crosses. */
+.selection-v2-loupe-marker {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 22px;
+  /* Centred on that column, both ways. `top`/`left` position the mark's own
+     corner at the middle of the lens, so without the vertical half-shift the tick
+     hangs BELOW the point it is indexing — a column mark that points at the next
+     line down is worse than no mark at all. */
+  transform: translate(-1px, -50%);
+  border-radius: 1px;
+  background-color: var(--selection-accent);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
+  pointer-events: none;
 }
 
 /* -------------------------------------------------------- floating layer --- */

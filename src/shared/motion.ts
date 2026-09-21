@@ -67,12 +67,16 @@ export const authoringMotion = {
 /*
  * Selection Engine v2's overlay: the one surface that must never lag a finger.
  *
- * Two moments, and neither invents a number — the grip releasing is small
- * geometry (the `snap` spring a segmented control's thumb settles with) and the
- * magnifier opening is the default UI spring. Nothing else about the overlay
- * moves: the finger, the caret and the measured lines are written directly every
- * frame, because a spring on the data would make the selection trail the finger
- * it belongs to.
+ * Two moments, and neither invents a number beyond its own token. The grip
+ * releasing is small geometry (the `snap` spring a segmented control's thumb
+ * settles with). The magnifier opening is a TWEEN, not a spring: the shared
+ * springs settle in ~0.25-0.35s, which is right for something arriving and
+ * staying, and wrong for a lens that has to be usable while the finger is already
+ * moving — at 120ms it is simply there, which is what a precision instrument
+ * should feel like, and it is inside the ~100-150ms budget the interaction
+ * language allows an entrance. Nothing else about the overlay moves: the finger,
+ * the caret and the measured lines are written directly every frame, because a
+ * spring on the data would make the selection trail the finger it belongs to.
  *
  * The scales are magnitudes, not timings, so no component can invent its own
  * entrance. They apply strictly INSIDE the boxes the engine measures: a handle's
@@ -83,12 +87,12 @@ export const authoringMotion = {
 export const selectionMotion = {
   /** Grip appearing, and settling back after an adjustment. Small geometry. */
   grip: authoringMotion.snap,
-  /** The magnifier opening: the default UI spring, quick and damped. */
-  loupe: authoringMotion.spring,
+  /** The magnifier opening: a short tween, never a spring. */
+  loupe: { duration: 0.12, ease: AUTHORING_EASE },
   /** Grip's first painted frame, as a fraction of its settled size. */
   gripEnterScale: 0.6,
   /** Grip while an endpoint is dragged — the release springs back from this. */
   gripHeldScale: 1.14,
   /** The magnifier's first painted frame, as a fraction of its settled size. */
-  loupeEnterScale: 0.9,
+  loupeEnterScale: 0.94,
 } as const;

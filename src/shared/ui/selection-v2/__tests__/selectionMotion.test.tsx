@@ -12,7 +12,9 @@ import { resolveGripMotion, resolveLoupeMotion } from '../react/useSelectionMoti
  * 1. ONE VOCABULARY. The numbers are the shared springs in `@shared/motion`, not
  *    values invented per component; a test asserts the identity rather than a
  *    copy of the numbers, so a component that starts carrying its own spring
- *    fails here instead of drifting quietly.
+ *    fails here instead of drifting quietly. The magnifier is the one moment that
+ *    is deliberately NOT a spring: a transient lens on a 120ms tween, which the
+ *    second test below pins as a duration rather than a feel.
  * 2. THE MEASURED BOXES NEVER MOVE. Whatever animates does so strictly inside the
  *    handle's 44px target and the loupe's lens: those two boxes are where the
  *    engine's measurements and a student's aim live, so they carry exact inline
@@ -27,7 +29,17 @@ import { resolveGripMotion, resolveLoupeMotion } from '../react/useSelectionMoti
 describe('the overlay motion policy', () => {
   it('takes its springs from the shared vocabulary instead of inventing them', () => {
     expect(selectionMotion.grip).toBe(authoringMotion.snap);
-    expect(selectionMotion.loupe).toBe(authoringMotion.spring);
+  });
+
+  it('opens the magnifier on a tween inside the entrance budget, never a spring', () => {
+    // A spring's settle time is whatever its stiffness says (~280ms for the
+    // default UI spring); the lens is dismissed as "modal arriving" at that
+    // length, so it is a duration, and the duration is bounded.
+    expect(selectionMotion.loupe).toMatchObject({ ease: [0.22, 1, 0.36, 1] });
+    expect(selectionMotion.loupe).not.toHaveProperty('type');
+    const duration = (selectionMotion.loupe as { duration: number }).duration;
+    expect(duration).toBeGreaterThan(0);
+    expect(duration).toBeLessThanOrEqual(0.15);
   });
 
   it('starts a grip small and fades it in, then springs back from a held endpoint', () => {
@@ -50,8 +62,11 @@ describe('the overlay motion policy', () => {
       initial: { scale: selectionMotion.loupeEnterScale, opacity: 0 },
       animate: { scale: 1, opacity: 1 },
       'data-selection-motion': 'full',
-      transition: { type: 'spring', stiffness: 480, damping: 44 },
+      transition: { duration: 0.12 },
     });
+    // A presence, not a pop: the target is what it settles at and it gives up no
+    // more than a few percent of its size to get there.
+    expect(selectionMotion.loupeEnterScale).toBeGreaterThan(0.9);
   });
 
   it('resolves reduced motion into the targets, so nothing starts half-size or hidden', () => {

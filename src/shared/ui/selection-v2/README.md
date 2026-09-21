@@ -34,7 +34,11 @@ react/                      the browser-facing adapter and the presentation
   SelectionFloatingLayer.tsx      the top layer the overlay hangs in, popover first
   SelectionHighlight.tsx          the painted lines (and why they never animate)
   SelectionHandle.tsx             a 44px target around a 12px grip, either edge
-  SelectionLoupe.tsx              the magnifier, cloned prose rather than a screenshot
+  SelectionLoupe.tsx              the magnifier's wiring: when the picture is built,
+                                  measured and painted
+  loupePicture.ts                 the picture itself — cloned prose rather than a
+                                  screenshot, mirrored, sanitised, and mapped into
+                                  the lens (pure functions, no React)
   SelectionActionMenu.tsx         toolbar grammar only (role, rows, keyboard, dismissal)
   useSelectionMotion.ts           which motion token drives which moment
 
@@ -75,6 +79,22 @@ performing them, `selectionGeometry` returns numbers instead of rendering, and
 the session takes pointers and returns effects. That is what makes the interaction
 grammar testable without a browser — and what keeps a change to "when" separate
 from a change to "how".
+
+**The magnifier is a camera, so a page coordinate has to be a lens coordinate.**
+`react/loupePicture.ts` lays its copy of the prose out at the SOURCE'S width and in
+the SOURCE'S type, which is what makes the two layouts one coordinate system — a
+copy left to wrap itself into the lens's own column renders a correct-looking,
+completely empty disc. Sizing is only half of it: the picture's ORIGIN has to be
+measured too, because the copy's first block carries a top margin that collapses
+out of the copy and cannot collapse out of the layer it lands in, which displaces
+the whole picture by that margin. A lens with the right box in the wrong place is
+the same defect wearing a better disguise — the prose in it looks perfect and the
+column the tick indexes belongs to a different character. Both halves are asserted
+in `e2e/student-owned-touch-selection.spec.ts` (the picture's box against the
+passage's, and the finger's document coordinate against the centre of the lens),
+and a new failure mode belongs there rather than in a screenshot. The mapping
+itself is one function, `pictureTranslation`, which is why it can be read — and
+argued with — without a component around it.
 
 ## Deliberately left in `touch-selection/`
 
